@@ -1,0 +1,49 @@
+{
+  "name": "exsto",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@10.33.2+sha512.a90faf6feeab71ad6c6e57f94e0fe1a12f5dcc22cd754db40ae9593eb6a3e0b6b12e3540218bb37ae083404b1f2ce6db2a4121e979829b4aff94b99f49da1cf8",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "pg": "^8.11.0",
+    "zod": "^4.4.3"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "test:unit": "vitest run tests/invariants/hlc.test.ts tests/invariants/worker-backoff.test.ts",
+    "test:invariants": "vitest run tests/invariants",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "dev": "pnpm build && pnpm --filter @exsto/legal-demo dev",
+    "dev:web": "pnpm --filter @exsto/legal-demo dev",
+    "dev:mcp": "pnpm --filter @exsto/mcp-server start",
+    "dev:worker": "pnpm --filter @exsto/worker-runtime start",
+    "migrate": "supabase db push && pnpm migrate:vertical",
+    "migrate:core": "supabase db push",
+    "migrate:vertical": "node --env-file=.env.local scripts/migrate-vertical.mjs",
+    "db:reset": "supabase db reset && pnpm migrate:vertical",
+    "seed": "tsx --env-file=.env.local scripts/seed.ts",
+    "stamp": "node --env-file=.env.local scripts/stamp-version.mjs",
+    "upgrade": "node --env-file=.env.local scripts/upgrade-foundation.mjs",
+    "seed:demo": "tsx --env-file=.env.local verticals/legal/demo/seed.ts",
+    "preflight": "tsx --env-file=.env.local verticals/legal/demo/preflight.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.6.7",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "@vitest/coverage-v8": "^3.0.0",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

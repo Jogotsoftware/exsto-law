@@ -1,0 +1,23 @@
+# Supabase CLI configuration.
+# `supabase start` / `supabase db reset` read this to spin a local Postgres,
+# apply every migration in supabase/migrations in order, and run the seed in
+# supabase/seed. `supabase db push` applies pending migrations to the linked
+# remote project. This file is what makes a fresh clone reproducible:
+#   supabase link --project-ref <your-project-ref>
+#   pnpm migrate        # supabase db push
+#   pnpm seed           # apply supabase/seed to DATABASE_URL (remote)
+# or, fully local:
+#   supabase start      # applies migrations + seed automatically
+project_id = "exsto"
+
+[db]
+# Match the substrate's production Postgres major version.
+major_version = 17
+
+[db.seed]
+# Customer-agnostic substrate seed: dev tenant, system actors, system-defined
+# entity/attribute/relationship/action/event/judgment/outcome kinds. The second
+# file runs the post-migration catch-up sync that records the final-applied
+# migration into public.schema_migration (invariant 12); it must run last.
+enabled = true
+sql_paths = ["./seed/0001_initial_data.sql", "./seed/0002_record_migration_history.sql"]

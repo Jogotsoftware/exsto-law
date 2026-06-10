@@ -1,0 +1,15 @@
+# Root netlify.toml — Netlify picks this up automatically when the site is
+# connected to the repo root. Builds the workspace, then the Next.js app at
+# apps/legal-demo, and publishes the resulting .next directory. The Next.js
+# plugin handles serverless function wiring for the /api/* routes.
+
+[build]
+  command = "corepack enable && pnpm install --frozen-lockfile && pnpm build && pnpm --filter @exsto/legal-demo exec next build"
+  publish = "apps/legal-demo/.next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NPM_FLAGS = "--version"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

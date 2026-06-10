@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/substrate" },
+    { "path": "./packages/primitives" },
+    { "path": "./verticals/legal" },
+    { "path": "./packages/mcp-tools" },
+    { "path": "./apps/mcp-server" },
+    { "path": "./apps/rest-api" },
+    { "path": "./workers/runtime" }
+  ]
+}

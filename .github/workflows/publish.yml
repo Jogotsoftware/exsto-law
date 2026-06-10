@@ -1,0 +1,53 @@
+# Publish the substrate packages (@exsto/shared, substrate, primitives, mcp-tools)
+# to GitHub Packages. WIRED but secondary: the active clone-upgrade path is the
+# git-playbook sync of foundation-owned paths (ADR 0043), because clones carry the
+# substrate SOURCE (workspace packages), not a dependency on a published artifact.
+# Registry publishing becomes useful only for a clone that externalizes the
+# substrate as an external dependency.
+#
+# PREREQUISITE (why this is manual, not tag-triggered): GitHub Packages requires
+# the package scope to match the repository owner. These packages are `@exsto/*`
+# but the org is `Jogotsoftware`, so publishing requires EITHER an `exsto` GitHub
+# org OR renaming the scope to `@jogotsoftware/*` across the monorepo. Until that is
+# resolved this workflow will fail at the publish step — which is why it is
+# `workflow_dispatch` (run deliberately), not automatic. pnpm replaces the
+# `workspace:*` interdeps with the real version on publish.
+name: Publish substrate packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Pack only, do not publish (validate wiring without the scope prerequisite)'
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          registry-url: 'https://npm.pkg.github.com'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Pack (always) / Publish (if not dry-run)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for pkg in shared substrate primitives mcp-tools; do
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "DRY RUN: packing @exsto/$pkg"
+              pnpm --filter "@exsto/$pkg" pack
+            else
+              echo "Publishing @exsto/$pkg"
+              pnpm --filter "@exsto/$pkg" publish --no-git-checks
+            fi
+          done

@@ -1,0 +1,13 @@
+-- Seed (post-migration): record the final-applied migration into queryable history.
+--
+-- Invariant 12 requires every applied migration to appear in public.schema_migration,
+-- not only in the platform's private supabase_migrations ledger. Each migration ends
+-- with `SELECT public.sync_migration_history()`, but that in-body call cannot record
+-- the migration *running it* — the platform inserts that migration's ledger row only
+-- after the body commits, so the most-recent migration is always one step behind.
+--
+-- The seed runs AFTER all migrations are applied and present in the ledger
+-- (`supabase start` / `supabase db reset` run migrations then seed; `pnpm seed` runs
+-- after `supabase db push`), so this catch-up sync records the tail migration. It is
+-- idempotent: it inserts only versions not already present and returns the count.
+SELECT public.sync_migration_history();

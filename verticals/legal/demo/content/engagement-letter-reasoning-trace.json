@@ -1,0 +1,131 @@
+{
+  "prompt_id": "drafting-prompt@v1",
+  "model_identity": "claude-sonnet-4-6",
+  "evidence": [
+    {
+      "source": "questionnaire",
+      "field": "fee_structure = flat_fee",
+      "value": "flat fee structure with US$3,800 total",
+      "used_in": "Section 3 (Fees and Costs)",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "fee_amount = 3800",
+      "value": "US$3,800 flat fee",
+      "used_in": "Section 3 (Fees and Costs); first sentence",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "scope_notes",
+      "value": "Articles + OA + engagement letter + one round of revisions; excludes trademark, securities, employment, lease review",
+      "used_in": "Section 1 (Scope of Representation), Section 1 exclusion list, and Section 7.2 cross-reference",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "company_name = Pine Hollow Roasters",
+      "used_in": "Subject line, Section 1, and throughout",
+      "confidence": 1.0
+    },
+    {
+      "source": "transcript",
+      "field": "Two members, joint engagement — Marcus and Priya both signing",
+      "used_in": "Section 2 (Joint Representation) — explains the implications of joint representation, including the no-confidences-between-clients rule and the withdrawal trigger on a material conflict",
+      "confidence": 0.95
+    },
+    {
+      "source": "transcript",
+      "field": "Registered agent service — Pacheco Law as RA, included at no charge for the first year",
+      "used_in": "Section 1, bullet: 'Service as the Company's registered agent in North Carolina for a period of twelve (12) months from the Effective Date, included at no additional charge'",
+      "confidence": 0.85
+    },
+    {
+      "source": "transcript",
+      "field": "Specific follow-up items — Marcus's roaster appraisal and recipe inventory; Sarah's spousal consent",
+      "used_in": "Section 4 (Client Responsibilities) — third bullet itemizes these as the client deliverables that gate the Engagement",
+      "confidence": 0.95
+    },
+    {
+      "source": "transcript",
+      "field": "Timeline — 48-hour first-draft turnaround, 30-minute review call, revise, sign, file articles, ~2 weeks total",
+      "used_in": "Section closing paragraph (last paragraph before sign-off) — referenced as the expected delivery cadence",
+      "confidence": 0.9
+    },
+    {
+      "source": "transcript",
+      "field": "Items outside scope — trademark, securities (no outside investors contemplated), employment, lease",
+      "used_in": "Section 1 exclusion list",
+      "confidence": 1.0
+    }
+  ],
+  "alternatives_considered": [
+    {
+      "decision_point": "Joint representation vs separate engagement letters",
+      "alternatives": [
+        "joint representation of both Members",
+        "separate engagement letters for each Member"
+      ],
+      "selected": "joint representation",
+      "rationale": "Members' interests are aligned at formation; the Firm has handled the consultation as joint. Joint representation is standard practice for small-business formations where the founders are aligned. Section 2 discloses the implications so consent is informed."
+    },
+    {
+      "decision_point": "Fee payment timing",
+      "alternatives": [
+        "100% upon execution",
+        "100% upon delivery of executed OA",
+        "50% upon execution + 50% upon filing",
+        "milestones tied to deliverables"
+      ],
+      "selected": "50/50 execution + filing",
+      "rationale": "Standard practice for flat-fee formation engagements; aligns Firm's incentive with the Members' (Firm gets paid in full when the Company is actually formed). Reasonable cash flow for the Firm without requiring the Members to front the full amount before any work."
+    },
+    {
+      "decision_point": "Registered agent inclusion period",
+      "alternatives": [
+        "not included; charged separately",
+        "first 12 months included",
+        "first 24 months included",
+        "indefinite as long as flat fee is paid"
+      ],
+      "selected": "first 12 months included",
+      "rationale": "Standard inclusion period for solo firms acting as RA. Twelve months gives the Members time to evaluate whether to retain Pacheco Law as ongoing RA or switch to a commercial RA service after formation."
+    },
+    {
+      "decision_point": "Disputes about the Engagement — which forum",
+      "alternatives": [
+        "state court only",
+        "NC State Bar Fee Dispute Resolution for fees + court for everything else",
+        "NC State Bar Fee Dispute for fees + Buncombe County mediation for other matters",
+        "binding arbitration for everything"
+      ],
+      "selected": "Bar Fee Dispute Resolution for fees + Buncombe County mediation for non-fee disputes (Section 8)",
+      "rationale": "The Bar's fee dispute program is the appropriate forum for fee disputes and is referenced in the NC Rules of Professional Conduct. For non-fee disputes, non-binding mediation is consistent with the mediation-first preference Marcus and Priya expressed in their own OA's dispute clause."
+    }
+  ],
+  "conclusion": "Engagement letter for the joint representation of Marcus Holloway and Priya Iyer in the formation of Pine Hollow Roasters, LLC. Flat fee of US$3,800 covering Articles filing, operating agreement, IP assignment, spousal consent, twelve months of registered-agent service, and one round of revisions. Standard joint-representation disclosure and conflict procedure. Scope exclusions explicit and itemized. Four flagged ambiguities — all confirmation items, none are substantive drafting issues.",
+  "confidence": 0.91,
+  "ambiguities": [
+    {
+      "topic": "Registered-agent inclusion period",
+      "explanation": "Draft includes twelve months at no extra charge as a courtesy. Consultation did not specify the exact period. Confirm with Juan Carlos whether twelve months is the right inclusion period or whether the firm wants to bundle a different duration.",
+      "needs_input_from": "attorney"
+    },
+    {
+      "topic": "Hourly rate for out-of-scope work",
+      "explanation": "Section 3 references an hourly rate of US$285. The draft used the rate referenced during consultation. Confirm the current rate before sending.",
+      "needs_input_from": "attorney"
+    },
+    {
+      "topic": "Separate joint-representation acknowledgment",
+      "explanation": "Section 2 of this letter contains the joint-representation disclosure. Some firms prefer a separate written acknowledgment signed by each Member, in addition to the engagement letter. Whether to add that as a separate document is an attorney judgment call.",
+      "needs_input_from": "attorney"
+    },
+    {
+      "topic": "Fee payment timing",
+      "explanation": "Section 3 sets 50% on execution + 50% on filing. The intake did not address payment timing. Confirm with Marcus and Priya before the letter goes out.",
+      "needs_input_from": "client"
+    }
+  ]
+}

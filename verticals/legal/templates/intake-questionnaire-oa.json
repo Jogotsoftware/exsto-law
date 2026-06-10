@@ -1,0 +1,140 @@
+{
+  "id": "intake-questionnaire-oa",
+  "version": 1,
+  "title": "North Carolina LLC operating agreement intake",
+  "description": "Pre-consultation intake for a North Carolina limited liability company operating agreement. The attorney reviews these answers before the consultation and the drafting agent uses them to assemble a first draft.",
+  "jurisdiction": "NC",
+  "sections": [
+    {
+      "id": "company",
+      "title": "About the company",
+      "fields": [
+        { "id": "company_name", "label": "Proposed LLC name", "type": "text", "required": true },
+        {
+          "id": "company_purpose",
+          "label": "Purpose of the LLC (one sentence)",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "id": "registered_agent_name",
+          "label": "Registered agent name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "registered_agent_address",
+          "label": "Registered agent address in NC",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "id": "principal_office_address",
+          "label": "Principal office address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "id": "expected_formation_date",
+          "label": "Expected formation date",
+          "type": "date",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "members",
+      "title": "Members and ownership",
+      "fields": [
+        {
+          "id": "members",
+          "label": "Members",
+          "type": "members_repeater",
+          "required": true,
+          "minItems": 1,
+          "memberFields": [
+            { "id": "name", "label": "Full legal name", "type": "text", "required": true },
+            { "id": "address", "label": "Address", "type": "textarea", "required": true },
+            {
+              "id": "capital_contribution",
+              "label": "Capital contribution (USD)",
+              "type": "number",
+              "required": true
+            },
+            {
+              "id": "ownership_percentage",
+              "label": "Ownership percentage",
+              "type": "number",
+              "required": true
+            },
+            {
+              "id": "is_manager",
+              "label": "Will also act as manager?",
+              "type": "boolean",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "management_structure",
+          "label": "Management structure",
+          "type": "select",
+          "required": true,
+          "options": ["member_managed", "manager_managed"]
+        }
+      ]
+    },
+    {
+      "id": "operations",
+      "title": "Operations and finances",
+      "fields": [
+        {
+          "id": "fiscal_year_end",
+          "label": "Fiscal year end (MM-DD)",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "distribution_policy",
+          "label": "Distribution policy",
+          "type": "textarea",
+          "required": true,
+          "help": "How profits and losses are allocated and when distributions are made."
+        },
+        {
+          "id": "transfer_restrictions",
+          "label": "Transfer restrictions",
+          "type": "textarea",
+          "required": false,
+          "help": "Any restrictions on transferring membership interests (right of first refusal, etc.)."
+        },
+        {
+          "id": "dissolution_triggers",
+          "label": "Dissolution triggers",
+          "type": "textarea",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "engagement",
+      "title": "Engagement terms",
+      "fields": [
+        {
+          "id": "fee_structure",
+          "label": "Fee structure",
+          "type": "select",
+          "required": true,
+          "options": ["flat_fee", "hourly", "hybrid"]
+        },
+        { "id": "fee_amount", "label": "Fee amount (USD)", "type": "number", "required": true },
+        {
+          "id": "scope_notes",
+          "label": "Scope notes (anything outside standard OA work?)",
+          "type": "textarea",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

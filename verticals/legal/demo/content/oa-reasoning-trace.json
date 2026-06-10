@@ -1,0 +1,236 @@
+{
+  "prompt_id": "drafting-prompt@v1",
+  "model_identity": "claude-sonnet-4-6",
+  "evidence": [
+    {
+      "source": "questionnaire",
+      "field": "company_name",
+      "value": "Pine Hollow Roasters",
+      "used_in": "Article 1.2 (Name) and throughout the document",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "principal_office_address",
+      "value": "213 Riverside Drive, Asheville, NC 28801",
+      "used_in": "Article 1.3 (Principal Office)",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "registered_agent_name",
+      "value": "Pacheco Law Firm, PLLC",
+      "used_in": "Article 1.4 (Registered Agent and Registered Office)",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "company_purpose",
+      "value": "Specialty coffee roasting, retail sale of coffee and prepared beverages, and wholesale distribution of roasted coffee to restaurants and cafés in North Carolina and adjoining states.",
+      "used_in": "Article 1.5 (Purpose)",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "members",
+      "value": "Marcus Holloway (55%, US$127,000 = US$85,000 cash + US$42,000 roaster); Priya Iyer (45%, US$103,000 cash)",
+      "used_in": "Article 2.1, Article 2.2, and Schedule A",
+      "confidence": 1.0
+    },
+    {
+      "source": "transcript",
+      "field": "Probat UG-22 appraisal — Marcus had it appraised in March 2026 at US$42,000; original purchase US$55,000 in 2022; current resale comparables US$38,000–US$45,000",
+      "used_in": "Article 2.2 (specifically the parenthetical citing the March 14, 2026 written appraisal) and Exhibit A reference",
+      "confidence": 0.95
+    },
+    {
+      "source": "transcript",
+      "field": "No mandatory capital calls — both Members were explicit. Member-loan mechanism at prime + 2% as the workaround if cash is needed.",
+      "used_in": "Article 2.3 (No Mandatory Additional Capital Contributions) and Article 2.4 (Member Loans)",
+      "confidence": 0.97
+    },
+    {
+      "source": "transcript",
+      "field": "Tax election — Members agreed default partnership treatment now; revisit S-corp at end of year one per CPA's advice; majority consent to change election",
+      "used_in": "Article 1.7 (Tax Classification) and Article 3.3(g) (Member Approval Required for tax-classification changes)",
+      "confidence": 0.95
+    },
+    {
+      "source": "transcript",
+      "field": "Section 704(c) traditional method for the contributed roaster — Marcus agreed to bear the tax on the built-in gain when the asset is sold",
+      "used_in": "Article 2.6 (Section 704(c) Allocations)",
+      "confidence": 0.9
+    },
+    {
+      "source": "questionnaire",
+      "field": "management_structure = manager_managed",
+      "used_in": "Article 3.1 (Manager-Managed), naming Marcus Holloway as initial Manager",
+      "confidence": 1.0
+    },
+    {
+      "source": "transcript",
+      "field": "Manager's working capital reserve must be communicated to Members at least 7 days before each quarterly distribution; 5-day objection window",
+      "used_in": "Article 3.4 (Working Capital Reserve Notice)",
+      "confidence": 0.95
+    },
+    {
+      "source": "questionnaire",
+      "field": "distribution_policy — quarterly proportional after reserve; distributions drawing reserve below 60 days require unanimous consent",
+      "used_in": "Article 4.2 (Distributions of Cash)",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "fiscal_year_end = 12-31",
+      "used_in": "Article 4.4 (Fiscal Year)",
+      "confidence": 1.0
+    },
+    {
+      "source": "questionnaire",
+      "field": "transfer_restrictions — ROFR for Company then non-transferring Member; permitted transfers to immediate family or wholly-owned entities",
+      "used_in": "Article 5.2 (Right of First Refusal) and Article 5.3 (Permitted Transfers)",
+      "confidence": 1.0
+    },
+    {
+      "source": "transcript",
+      "field": "Death/disability buy-out via averaged appraisals — Company pays first appraisal, estate pays optional second, buy-out price is the average. Disability defined as 180 consecutive days, certified by two physicians.",
+      "used_in": "Article 5.4 (Buy-Out Upon Death or Permanent Disability)",
+      "confidence": 0.95
+    },
+    {
+      "source": "transcript",
+      "field": "Admission of new Members requires unanimous Member consent",
+      "used_in": "Article 5.5 (Admission of New Members) and Article 11.3 (Amendment)",
+      "confidence": 1.0
+    },
+    {
+      "source": "transcript",
+      "field": "IP assignment — Marcus contributes pre-existing roast recipes (four house blends + seven single-origin profiles, captured in his notebook) to the Company at formation, no extra consideration",
+      "used_in": "Article 7.1 (Assignment of Pre-Formation Coffee Roasting IP) and Exhibits B and B-1",
+      "confidence": 0.97
+    },
+    {
+      "source": "transcript",
+      "field": "Non-compete — 2 years post-departure (voluntary or buy-out); 25-mile radius of principal office; coffee roasting and wholesale distribution only; carve-out for employment by an unrelated retail employer",
+      "used_in": "Article 8.1 (Non-Competition)",
+      "confidence": 0.97
+    },
+    {
+      "source": "transcript",
+      "field": "Customer non-solicit — 12 months post-departure, applies to wholesale customers from the trailing 12 months",
+      "used_in": "Article 8.2 (Customer Non-Solicitation)",
+      "confidence": 0.95
+    },
+    {
+      "source": "transcript",
+      "field": "Dispute resolution — 30-day negotiation, then mediation through Buncombe County Mediation Center within 60 days, then AAA arbitration; injunctive-relief carve-out",
+      "used_in": "Article 9 (Dispute Resolution)",
+      "confidence": 0.97
+    },
+    {
+      "source": "transcript",
+      "field": "Spousal consent — Marcus is married (Sarah, 11 years); Priya is not. NC equitable distribution; consent acknowledges OA controls interest but doesn't waive equitable distribution.",
+      "used_in": "Article 11.4 (Spousal Consent) and Exhibit C reference",
+      "confidence": 0.9
+    }
+  ],
+  "alternatives_considered": [
+    {
+      "decision_point": "Member-managed vs Manager-managed structure",
+      "alternatives": [
+        "member_managed (default under NC LLC Act § 57D-3-20)",
+        "manager_managed with Marcus as sole Manager",
+        "manager_managed with both Members as Managers"
+      ],
+      "selected": "manager_managed with Marcus as sole Manager",
+      "rationale": "Questionnaire specified manager_managed and Marcus as the only Member who marked is_manager=true. The transcript reinforced this: Marcus runs the roaster day-to-day and Priya runs front-of-house — operationally this is a single-Manager structure."
+    },
+    {
+      "decision_point": "How to handle capital needs after formation",
+      "alternatives": [
+        "mandatory capital calls with dilution for non-contributors",
+        "voluntary capital calls with no dilution",
+        "Member loan mechanism only — no equity-changing capital calls"
+      ],
+      "selected": "Member loan mechanism only (Article 2.4) plus an explicit prohibition on mandatory contributions (Article 2.3)",
+      "rationale": "Both Members rejected mandatory capital calls during the consultation, with Priya specifically citing limited liquidity beyond her initial contribution. Member loans at prime + 2% gives the Company a path to additional cash without disturbing the 55/45 split."
+    },
+    {
+      "decision_point": "Tax election timing and authority",
+      "alternatives": [
+        "bind partnership treatment in the OA permanently",
+        "leave silent (default partnership) with no change mechanism",
+        "leave silent with majority-consent authority to elect S-corp later"
+      ],
+      "selected": "leave silent with majority-consent authority (Article 1.7 + Article 3.3(g))",
+      "rationale": "CPA recommended revisiting S-corp at end of year one. Permanently binding partnership treatment removes a future option the Members may need. Requiring an OA amendment to change election would force unanimous consent under Article 11.3, which is more friction than warranted; majority consent in Article 3.3 is the right level for a tax-election change."
+    },
+    {
+      "decision_point": "Death/disability buy-out pricing — formula vs appraisal",
+      "alternatives": [
+        "trailing-12-months revenue multiple (e.g. 0.6x to 1.0x)",
+        "trailing EBITDA multiple",
+        "single appraisal at Company's expense",
+        "averaged two-appraisal approach"
+      ],
+      "selected": "averaged two-appraisal approach (Article 5.4)",
+      "rationale": "Priya specifically requested appraisal with a cost cap, and the averaging mechanism — Company pays first appraisal, estate optionally pays second, price is the average — bounds the dispute while giving each side a check on the other's appraiser. Revenue multiple would have been simpler but less defensible against an estate that disagrees with the valuation."
+    },
+    {
+      "decision_point": "Non-compete duration and geography",
+      "alternatives": [
+        "1 year, 10-mile radius",
+        "2 years, 25-mile radius",
+        "3 years, 50-mile radius (Western NC)",
+        "no non-compete (rely on customer non-solicit only)"
+      ],
+      "selected": "2 years, 25-mile radius (Article 8.1)",
+      "rationale": "Both Members agreed during consultation. NC courts will enforce non-competes for reasonableness in scope, duration, and geography. 25 miles covers Asheville plus a meaningful portion of Buncombe County without overreaching into Hendersonville or Brevard markets. Two years is enough to protect the Company while a departing Member rebuilds, but not so long that a court would consider it punitive."
+    },
+    {
+      "decision_point": "Dispute resolution venue and finality",
+      "alternatives": [
+        "NC state court for all disputes",
+        "binding arbitration only",
+        "step-up: negotiation → mediation → arbitration",
+        "step-up with injunctive-relief carve-out for urgent matters"
+      ],
+      "selected": "step-up with injunctive-relief carve-out (Article 9)",
+      "rationale": "Both Members preferred to avoid court for ordinary disputes (mediation first) but acknowledged that some matters — e.g., trademark infringement or a Member walking off with the customer list during a falling-out — need immediate injunctive relief. The carve-out in Article 9.4 lets either side bypass mediation/arbitration only for irreparable-harm scenarios; everything else goes through the step-up."
+    }
+  ],
+  "conclusion": "First-draft NC LLC operating agreement for Pine Hollow Roasters, LLC, a manager-managed two-member roastery in Asheville. Resolves all questionnaire fields with high confidence and incorporates substantive transcript additions (no-mandatory-capital-calls + Member loan mechanism, 704(c) traditional-method allocations for the contributed roaster, IP assignment for Marcus's pre-existing recipes, 2-year/25-mile non-compete, averaged-appraisal death-and-disability buyout, step-up dispute resolution with injunctive carve-out, spousal consent for Marcus). Six clearly flagged ambiguities for attorney review before signing — none are drafting errors, all are items that need attachments, confirmation, or a follow-up communication.",
+  "confidence": 0.88,
+  "ambiguities": [
+    {
+      "topic": "Exhibit A (Probat roaster appraisal)",
+      "explanation": "Marcus committed to send the written appraisal during the consultation; it has not yet been provided. The OA references it; needs to be received before signing.",
+      "needs_input_from": "client"
+    },
+    {
+      "topic": "Exhibit B-1 (recipe inventory)",
+      "explanation": "Marcus committed to send the inventory of four house blends and seven single-origin profiles within two weeks. Article 7.1 and Exhibit B reference this inventory; needs to be received before signing.",
+      "needs_input_from": "client"
+    },
+    {
+      "topic": "Life insurance funding for the death/disability buy-out",
+      "explanation": "Section 5.4 establishes the buy-out mechanism but does not require funding through life insurance. Members and attorney agreed to revisit with insurance broker within six months. Worth a cover-memo flag.",
+      "needs_input_from": "attorney"
+    },
+    {
+      "topic": "Spousal consent for Sarah Holloway (Exhibit C)",
+      "explanation": "Section 11.4 contemplates the spousal consent; the form needs to be prepared and Sarah needs to sign. Standard NC form is short; the Firm has used it previously.",
+      "needs_input_from": "attorney"
+    },
+    {
+      "topic": "Trademark scope clarification in engagement letter",
+      "explanation": "Section 7.2 commits the Members to evaluate trademark protection within twelve months. The engagement letter excludes trademark filing from this engagement. Cover memo should remind Marcus and Priya that trademark work is a separate engagement when they're ready.",
+      "needs_input_from": "attorney"
+    },
+    {
+      "topic": "EIN and bank account",
+      "explanation": "Not an OA issue, but Marcus should be prompted in the cover memo to apply for the Company's EIN and open the bank account within thirty days of formation. Easy to forget after the OA is signed.",
+      "needs_input_from": "attorney"
+    }
+  ]
+}

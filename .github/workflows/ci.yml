@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main, core-substrate]
+  pull_request:
+    branches: [main, core-substrate]
+
+jobs:
+  # Fast, no-DB checks: typecheck, lint, format, build, unit tests.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Format check
+        run: pnpm format:check
+      - name: Build
+        run: pnpm build
+      - name: Unit tests (no DB)
+        run: pnpm test:unit
+
+  # The substrate's safety net: the DB-gated invariant suite MUST run for real.
+  # Spins a local Supabase stack (provides anon/authenticated/service_role roles),
+  # applies all migrations + seed via config.toml, then runs the invariant tests
+  # against it. Because SUBSTRATE_TEST_DATABASE_URL is set, the tests do NOT skip;
+  # if the DB is unreachable they fail (no false-green).
+  invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build (tests import built dist)
+        run: pnpm build
+      - name: Start Supabase (applies CORE migrations + seed)
+        run: supabase start
+      - name: Apply VERTICAL migrations (core-then-vertical order, ADR 0043)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: node scripts/migrate-vertical.mjs
+      - name: Run invariant suite (fails if it cannot reach the DB)
+        env:
+          SUBSTRATE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        # Invoke vitest directly: `pnpm test:invariants -- <flags>` injects a `--`
+        # that vitest treats as a filter separator, so --reporter/--outputFile were
+        # dropped and no JSON was written (the assert step then failed). Passing the
+        # flags straight to vitest writes vitest-invariants.json as intended.
+        run: pnpm exec vitest run tests/invariants --reporter=json --outputFile=vitest-invariants.json
+      - name: Assert invariant tests actually executed (no false-green)
+        run: |
+          node -e "const r=require('./vitest-invariants.json');const passed=r.numPassedTests||0;const skipped=r.numPendingTests||0;console.log('invariant tests passed:',passed,'skipped:',skipped);if(passed<20){console.error('Expected >=20 invariant tests to run; only '+passed+' did — DB-gated tests likely skipped.');process.exit(1);}"
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop || true

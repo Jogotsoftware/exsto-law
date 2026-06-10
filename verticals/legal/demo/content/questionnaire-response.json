@@ -1,0 +1,32 @@
+{
+  "company_name": "Pine Hollow Roasters",
+  "company_purpose": "Specialty coffee roasting, retail sale of coffee and prepared beverages, and wholesale distribution of roasted coffee to restaurants and cafés in North Carolina and adjoining states.",
+  "registered_agent_name": "Pacheco Law Firm, PLLC",
+  "registered_agent_address": "418 Patton Avenue, Suite 210, Asheville, NC 28801",
+  "principal_office_address": "213 Riverside Drive, Asheville, NC 28801",
+  "expected_formation_date": "2026-06-15",
+  "members": [
+    {
+      "name": "Marcus Holloway",
+      "address": "62 Vermont Avenue, Asheville, NC 28806",
+      "capital_contribution": 127000,
+      "ownership_percentage": 55,
+      "is_manager": true
+    },
+    {
+      "name": "Priya Iyer",
+      "address": "1144 Brevard Road, Apt 4B, Asheville, NC 28806",
+      "capital_contribution": 103000,
+      "ownership_percentage": 45,
+      "is_manager": false
+    }
+  ],
+  "management_structure": "manager_managed",
+  "fiscal_year_end": "12-31",
+  "distribution_policy": "Quarterly distributions of net profits in proportion to ownership percentages, after the Manager establishes and retains a reasonable working capital reserve. Distributions that would draw the reserve below sixty (60) days of operating expenses require unanimous Member consent.",
+  "transfer_restrictions": "Right of first refusal in favor of the Company first and then the non-transferring Member. Transfers to immediate family or wholly-owned entities of a Member are permitted without consent. All other transfers require consent of Members holding a majority of membership interests.",
+  "dissolution_triggers": "Unanimous written consent of all Members; entry of a judicial dissolution decree; sale of substantially all the assets of the Company; or such other events as the Members may agree upon in writing.",
+  "fee_structure": "flat_fee",
+  "fee_amount": 3800,
+  "scope_notes": "Includes preparation and filing of Articles of Organization; preparation of operating agreement; preparation of engagement letter; one round of revisions to the operating agreement after Marcus and Priya review. Excludes trademark filing for the 'Pine Hollow Roasters' name, securities-law advice (no outside investors contemplated at formation), employment or independent-contractor agreements, and commercial lease review for the Riverside Drive space — those are separate engagements if desired."
+}
