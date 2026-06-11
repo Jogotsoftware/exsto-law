@@ -124,7 +124,7 @@ export async function runDraftGeneration(
     fullTrace: result.reasoningTrace,
   })
 
-  return submitAction(agentCtx, {
+  const generated = await submitAction(agentCtx, {
     actionKindName: 'draft.generate',
     intentKind: 'enforcement',
     reasoningTraceId,
@@ -138,6 +138,27 @@ export async function runDraftGeneration(
       confidence: clampConfidence(result.reasoningTrace.confidence),
     },
   })
+
+  // Attorney email on async completion (WP6, REQ-NOTIFY-01).
+  const { queueNotification } = await import('./notifications.js')
+  const genEffects = (generated.effects[0] ?? {}) as { documentVersionId?: string }
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+  await queueNotification(agentCtx, {
+    routeKindName: 'attorney_draft_completed',
+    variables: {
+      matter_entity_id: input.matterEntityId,
+      matter_number: m.matterNumber,
+      document_kind: input.documentKind,
+      document_kind_label: input.documentKind.replace(/_/g, ' '),
+      confidence: clampConfidence(result.reasoningTrace.confidence),
+      review_url:
+        baseUrl && genEffects.documentVersionId
+          ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
+          : null,
+    },
+  })
+
+  return generated
 }
 
 interface AssembleArgs {

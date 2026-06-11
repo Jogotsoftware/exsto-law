@@ -24,3 +24,15 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
     documentKind: p.document_kind as 'operating_agreement' | 'engagement_letter',
   })
 })
+
+// Delivers one queued notification through its route's channel driver
+// (REQ-NOTIFY-01..03); failures retry with backoff, then dead-letter.
+registerWorkerHandler('legal.notify', async (ctx, payload) => {
+  const { deliverNotification } = await import('../api/notifications.js')
+  const p = payload as { route: string; to: string | null; variables: Record<string, unknown> }
+  await deliverNotification(ctx, {
+    routeKindName: p.route,
+    to: p.to ?? undefined,
+    variables: p.variables ?? {},
+  })
+})
