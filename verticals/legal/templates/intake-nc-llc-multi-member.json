@@ -1,0 +1,64 @@
+{
+  "id": "nc-llc-multi-member-v1",
+  "version": 1,
+  "title": "North Carolina multi-member LLC intake",
+  "description": "Short pre-consultation intake for a multi-member North Carolina LLC formation. Juan Carlos reviews these answers before your consultation and drafts your documents after it.",
+  "jurisdiction": "NC",
+  "sections": [
+    {
+      "id": "company",
+      "title": "About the business",
+      "fields": [
+        { "id": "company_name", "label": "Proposed LLC name", "type": "text", "required": true },
+        {
+          "id": "business_description",
+          "label": "What will the business do?",
+          "type": "textarea",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "members",
+      "title": "Members",
+      "fields": [
+        {
+          "id": "member_count",
+          "label": "How many members (owners) will the LLC have?",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "members",
+          "label": "Members",
+          "type": "repeater",
+          "required": true,
+          "minItems": 2,
+          "memberFields": [
+            { "id": "member_name", "label": "Full name", "type": "text", "required": true },
+            { "id": "member_email", "label": "Email", "type": "text", "required": true },
+            { "id": "member_phone", "label": "Phone", "type": "text" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "timeline",
+      "title": "Timeline",
+      "fields": [
+        {
+          "id": "anticipated_timeline",
+          "label": "When do you want the LLC formed?",
+          "type": "select",
+          "required": true,
+          "options": ["As soon as possible", "Within 30 days", "1–3 months", "Just exploring"]
+        },
+        {
+          "id": "anything_else",
+          "label": "Anything else the attorney should know?",
+          "type": "textarea"
+        }
+      ]
+    }
+  ]
+}

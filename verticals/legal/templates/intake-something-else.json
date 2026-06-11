@@ -1,0 +1,28 @@
+{
+  "id": "something-else-v1",
+  "version": 1,
+  "title": "Tell us about your matter",
+  "description": "Describe what you need help with. Juan Carlos reviews this before your consultation.",
+  "jurisdiction": "NC",
+  "sections": [
+    {
+      "id": "matter",
+      "title": "Your matter",
+      "fields": [
+        {
+          "id": "matter_description",
+          "label": "Tell us about your matter",
+          "type": "textarea",
+          "required": true,
+          "help": "A few sentences is plenty — what's going on, and what outcome are you hoping for?"
+        },
+        {
+          "id": "anticipated_timeline",
+          "label": "How urgent is this?",
+          "type": "select",
+          "options": ["Urgent — days matter", "This month", "No rush"]
+        }
+      ]
+    }
+  ]
+}

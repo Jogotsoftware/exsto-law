@@ -15,6 +15,7 @@ export default defineConfig({
       '@exsto/worker-runtime': fileURLToPath(
         new URL('./workers/runtime/dist/index.js', import.meta.url),
       ),
+      '@exsto/legal': fileURLToPath(new URL('./verticals/legal/dist/index.js', import.meta.url)),
     },
   },
   test: {

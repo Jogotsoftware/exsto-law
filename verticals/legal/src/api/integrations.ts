@@ -1,5 +1,10 @@
-import { withSuperuser } from '@exsto/shared'
 import type { ActionContext } from '@exsto/substrate'
+import {
+  listConnections,
+  saveConnection,
+  loadConnection,
+  disconnect as disconnectProvider,
+} from '../adapters/connectionStore.js'
 
 export type IntegrationProvider = 'granola' | 'perplexity' | 'anthropic' | 'openai'
 
@@ -8,6 +13,8 @@ export interface IntegrationStatus {
   authKind: 'api_key' | 'oauth' | 'coming_soon'
   connected: boolean
   comingSoon?: boolean
+  // 'error' state surfaces prominently in Settings (broken sync ≠ disconnected).
+  health: 'connected' | 'error' | 'disconnected'
   lastFour: string | null
   connectedAt: string | null
   lastVerifiedAt: string | null
@@ -29,70 +36,51 @@ const STATIC_INTEGRATIONS: Array<{
   { provider: 'docusign', authKind: 'coming_soon', comingSoon: true },
 ]
 
-// Bypass RLS for credential reads/writes — these are tenant-scoped via
-// explicit tenantId arguments. We can't expose api_key contents through the
-// MCP read path so the action layer never sets app.tenant_id for them.
+// Connection metadata lives in legal_integration_connection; secret material in
+// Vault (REQ-SEC-01). The 'google' provider row backs the google_calendar card.
 export async function listIntegrationStatuses(ctx: ActionContext): Promise<IntegrationStatus[]> {
-  return withSuperuser(async (client) => {
-    const credsRes = await client.query<{
-      provider: string
-      auth_kind: string
-      last_four: string | null
-      connected_at: Date
-      last_verified_at: Date | null
-      last_verify_error: string | null
-    }>(
-      `SELECT provider, auth_kind, last_four, connected_at, last_verified_at, last_verify_error
-       FROM integration_credential WHERE tenant_id = $1`,
-      [ctx.tenantId],
-    )
-    const credMap = new Map(credsRes.rows.map((r) => [r.provider, r]))
+  const conns = await listConnections(ctx.tenantId)
+  const byProvider = new Map(conns.map((c) => [c.provider, c]))
 
-    const googleRes = await client.query<{ account_email: string; updated_at: Date }>(
-      `SELECT account_email, updated_at FROM google_oauth WHERE tenant_id = $1`,
-      [ctx.tenantId],
-    )
-    const google = googleRes.rows[0] ?? null
-
-    return STATIC_INTEGRATIONS.map(({ provider, authKind, comingSoon }) => {
-      if (provider === 'google_calendar') {
-        return {
-          provider,
-          authKind,
-          comingSoon: false,
-          connected: !!google,
-          lastFour: null,
-          connectedAt: google?.updated_at?.toISOString() ?? null,
-          lastVerifiedAt: google?.updated_at?.toISOString() ?? null,
-          lastVerifyError: null,
-          accountEmail: google?.account_email ?? null,
-        }
-      }
-      if (comingSoon) {
-        return {
-          provider,
-          authKind,
-          comingSoon: true,
-          connected: false,
-          lastFour: null,
-          connectedAt: null,
-          lastVerifiedAt: null,
-          lastVerifyError: null,
-        }
-      }
-      const c = credMap.get(provider)
+  return STATIC_INTEGRATIONS.map(({ provider, authKind, comingSoon }) => {
+    if (comingSoon) {
       return {
         provider,
         authKind,
-        comingSoon: false,
-        connected: !!c,
-        lastFour: c?.last_four ?? null,
-        connectedAt: c?.connected_at?.toISOString() ?? null,
-        lastVerifiedAt: c?.last_verified_at?.toISOString() ?? null,
-        lastVerifyError: c?.last_verify_error ?? null,
+        comingSoon: true,
+        connected: false,
+        health: 'disconnected' as const,
+        lastFour: null,
+        connectedAt: null,
+        lastVerifiedAt: null,
+        lastVerifyError: null,
       }
-    })
+    }
+    const c = byProvider.get(provider === 'google_calendar' ? 'google' : provider)
+    const health = c?.status ?? 'disconnected'
+    return {
+      provider,
+      authKind,
+      comingSoon: false,
+      connected: health === 'connected',
+      health,
+      lastFour: typeof c?.detail?.last_four === 'string' ? (c.detail.last_four as string) : null,
+      connectedAt: c?.connectedAt?.toISOString() ?? null,
+      lastVerifiedAt: c?.updatedAt?.toISOString() ?? null,
+      lastVerifyError: c?.lastError ?? null,
+      accountEmail: provider === 'google_calendar' ? (c?.accountEmail ?? null) : undefined,
+    }
   })
+}
+
+// Read a stored API key for server-side use (drafting, ingestion). Env var
+// takes precedence so local dev works without a connected integration.
+export async function loadApiKey(
+  tenantId: string,
+  provider: IntegrationProvider,
+): Promise<string | null> {
+  const conn = await loadConnection<{ api_key: string }>(tenantId, provider)
+  return conn?.secret.api_key ?? null
 }
 
 // Ping the provider with the supplied key. Returns null on success or an
@@ -182,22 +170,12 @@ export async function connectIntegration(
   const verifyError = await verifyKey(input.provider, input.apiKey)
   if (verifyError) return { ok: false, error: verifyError }
 
-  const lastFour = input.apiKey.slice(-4)
-  await withSuperuser(async (client) => {
-    await client.query(
-      `INSERT INTO integration_credential (
-         tenant_id, provider, auth_kind, credential, last_four,
-         connected_at, last_verified_at, last_verify_error
-       ) VALUES ($1, $2, 'api_key', $3::jsonb, $4, now(), now(), NULL)
-       ON CONFLICT (tenant_id, provider) DO UPDATE SET
-         credential = EXCLUDED.credential,
-         last_four = EXCLUDED.last_four,
-         connected_at = now(),
-         last_verified_at = now(),
-         last_verify_error = NULL`,
-      [ctx.tenantId, input.provider, JSON.stringify({ api_key: input.apiKey }), lastFour],
-    )
-  })
+  await saveConnection(
+    ctx.tenantId,
+    input.provider,
+    { api_key: input.apiKey },
+    { detail: { last_four: input.apiKey.slice(-4) } },
+  )
   const statuses = await listIntegrationStatuses(ctx)
   const status = statuses.find((s) => s.provider === input.provider)
   return { ok: true, status }
@@ -207,10 +185,5 @@ export async function disconnectIntegration(
   ctx: ActionContext,
   provider: IntegrationProvider,
 ): Promise<void> {
-  await withSuperuser(async (client) => {
-    await client.query(
-      `DELETE FROM integration_credential WHERE tenant_id = $1 AND provider = $2`,
-      [ctx.tenantId, provider],
-    )
-  })
+  await disconnectProvider(ctx.tenantId, provider)
 }
