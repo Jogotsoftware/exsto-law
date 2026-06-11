@@ -19,7 +19,7 @@
 //   DATABASE_URL=<owner url> node scripts/upgrade-foundation.mjs \
 //     [--to <ref>] [--foundation <git-url>] [--force-major]
 import pg from 'pg'
-import { execSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -45,6 +45,11 @@ const FOUNDATION_PATHS = [
   'CLAUDE.md',
   'ARCHITECTURE.md',
   '.claude/skills',
+  // The invariant suite is foundation-owned: new foundation guarantees must
+  // reach clones (the v1.0.1 handler-registration tests didn't — drill gap).
+  // vitest.config.ts stays CLONE-owned: clones extend it (e.g. an @exsto/<vertical>
+  // alias), so it must not be clobbered.
+  'tests/invariants',
 ]
 
 function arg(flag, def) {
@@ -195,6 +200,21 @@ async function main() {
   // 4. sync foundation-owned paths (clone-owned paths untouched)
   log(`syncing foundation paths from ${showRef} …`)
   sh(`git checkout ${showRef} -- ${FOUNDATION_PATHS.join(' ')}`)
+
+  // 4.5 re-exec under the TARGET version's tooling: the sync may have replaced
+  // THIS script (and migrate-vertical), so the remainder of the upgrade must
+  // run the fixed code — otherwise tooling fixes never apply to the upgrade
+  // that delivers them (chicken-and-egg found in the v1.0.1 drill). Steps 1-4
+  // re-run idempotently in the child; the env flag stops recursion.
+  if (!process.env.EXSTO_UPGRADE_STAGE2) {
+    log('re-executing under the synced (target-version) tooling …')
+    const child = spawnSync(
+      process.execPath,
+      [fileURLToPath(import.meta.url), ...process.argv.slice(2)],
+      { stdio: 'inherit', env: { ...process.env, EXSTO_UPGRADE_STAGE2: '1' } },
+    )
+    process.exit(child.status ?? 1)
+  }
 
   // 5. install + build
   log('installing + building …')
