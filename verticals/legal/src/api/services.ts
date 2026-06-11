@@ -7,6 +7,7 @@ import {
 } from '@exsto/substrate'
 import { loadIntakeForm } from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
+import { queueNotification } from './notifications.js'
 
 export interface ServiceField {
   id: string
@@ -247,8 +248,9 @@ export async function submitBooking(
     },
   })
 
+  let booked: ActionResult
   try {
-    return await submitAction(ctx, {
+    booked = await submitAction(ctx, {
       actionKindName: 'booking.create',
       intentKind: 'enforcement',
       payload: {
@@ -265,6 +267,52 @@ export async function submitBooking(
     if (msg.includes('SLOT_TAKEN')) throw new Error(SLOT_TAKEN_MESSAGE)
     throw err
   }
+
+  // Notifications (WP6, REQ-NOTIFY-01..03) — queued so the booking response
+  // never waits on the Gmail API; failures retry in the worker.
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+  const firstName = input.clientFullName.split(/\s+/)[0]
+  const commonVars = {
+    matter_entity_id: matterEntityId,
+    matter_number: matterNumber,
+    client_full_name: input.clientFullName,
+    client_first_name: firstName,
+    client_email: input.clientEmail,
+    client_phone: input.clientPhone ?? null,
+    service_key: input.serviceKey,
+    service_label: serviceDisplayName,
+    scheduled_at: input.scheduledAtIso,
+    scheduled_at_label: new Date(input.scheduledAtIso).toLocaleString('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }),
+    matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
+  }
+  await queueNotification(ctx, {
+    routeKindName: 'prospect_intake_confirmation',
+    to: input.clientEmail,
+    variables: commonVars,
+  })
+  await queueNotification(ctx, {
+    routeKindName: 'prospect_booking_confirmation',
+    to: input.clientEmail,
+    variables: commonVars,
+  })
+  if ((service?.route ?? 'manual') === 'manual') {
+    // Manual-workflow matters may lack auto-generation visibility — the
+    // attorney email is their safety net (REQ-NOTIFY-02).
+    await queueNotification(ctx, {
+      routeKindName: 'attorney_manual_matter',
+      variables: commonVars,
+    })
+  }
+
+  return booked
 }
 
 function summarizeIntake(responses: Record<string, unknown>): string {
