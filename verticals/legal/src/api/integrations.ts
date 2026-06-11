@@ -6,6 +6,7 @@ import {
   disconnect as disconnectProvider,
 } from '../adapters/connectionStore.js'
 import { verifyAnthropicKey } from '../adapters/claude.js'
+import { verifyPerplexityKey } from '../adapters/perplexity.js'
 
 export type IntegrationProvider = 'granola' | 'perplexity' | 'anthropic' | 'openai'
 
@@ -100,17 +101,9 @@ async function verifyKey(provider: IntegrationProvider, apiKey: string): Promise
       return null
     }
     if (provider === 'perplexity') {
-      const r = await fetch('https://api.perplexity.ai/chat/completions', {
-        method: 'POST',
-        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: 'sonar',
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 8,
-        }),
-      })
-      if (!r.ok) return `Perplexity returned ${r.status}: ${await safeBody(r)}`
-      return null
+      // The perplexity adapter owns all Perplexity API traffic (vertical rule),
+      // mirroring the Anthropic refactor.
+      return await verifyPerplexityKey(apiKey)
     }
     if (provider === 'granola') {
       // Granola's public API is in beta; best-effort check against their

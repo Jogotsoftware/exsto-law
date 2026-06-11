@@ -15,6 +15,12 @@ export default defineConfig({
       '@exsto/worker-runtime': fileURLToPath(
         new URL('./workers/runtime/dist/index.js', import.meta.url),
       ),
+      '@exsto/mcp-tools': pkg('mcp-tools'),
+      // More-specific subpath must precede '@exsto/legal' so Vite's prefix match
+      // doesn't rewrite '@exsto/legal/mcp' to '<legal>/dist/index.js/mcp'.
+      '@exsto/legal/mcp': fileURLToPath(
+        new URL('./verticals/legal/dist/mcp/index.js', import.meta.url),
+      ),
       '@exsto/legal': fileURLToPath(new URL('./verticals/legal/dist/index.js', import.meta.url)),
     },
   },

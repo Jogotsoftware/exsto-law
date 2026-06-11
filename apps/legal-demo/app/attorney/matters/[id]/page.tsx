@@ -501,6 +501,9 @@ function ResearchPanel({ matterEntityId }: { matterEntityId: string }) {
       setEntries(r.research)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      // Exit the loading state on failure so the spinner doesn't hang forever;
+      // the error banner is the surface, and a later ask() retries the load.
+      setEntries((prev) => prev ?? [])
     }
   }, [matterEntityId])
 
@@ -509,7 +512,11 @@ function ResearchPanel({ matterEntityId }: { matterEntityId: string }) {
   }, [load])
 
   async function ask() {
-    if (!question.trim()) return
+    // Guard re-entry: the textarea stays focused/enabled during the request, so
+    // a second cmd/ctrl-Enter while in flight would otherwise double-submit (two
+    // billable calls + two timeline events) since `question` isn't cleared until
+    // after the await.
+    if (busy || !question.trim()) return
     setBusy(true)
     setError(null)
     try {
@@ -569,6 +576,15 @@ function ResearchPanel({ matterEntityId }: { matterEntityId: string }) {
   )
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 function ResearchCard({ entry }: { entry: ResearchEntry }) {
   return (
     <div
@@ -586,9 +602,16 @@ function ResearchCard({ entry }: { entry: ResearchEntry }) {
           <ol style={{ margin: '0.25rem 0 0', paddingLeft: '1.2rem' }}>
             {entry.citations.map((c, i) => (
               <li key={i}>
-                <a href={c} target="_blank" rel="noreferrer">
-                  {c}
-                </a>
+                {/* Citations come from the model — only link http(s) URLs so a
+                    javascript:/data: URL can't execute on click; otherwise show
+                    the raw text. */}
+                {isHttpUrl(c) ? (
+                  <a href={c} target="_blank" rel="noreferrer">
+                    {c}
+                  </a>
+                ) : (
+                  <span className="text-muted">{c}</span>
+                )}
               </li>
             ))}
           </ol>
