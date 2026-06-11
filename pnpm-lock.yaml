@@ -197,6 +197,9 @@ importers:
       '@exsto/mcp-tools':
         specifier: workspace:*
         version: link:../../packages/mcp-tools
+      '@exsto/primitives':
+        specifier: workspace:*
+        version: link:../../packages/primitives
       '@exsto/shared':
         specifier: workspace:*
         version: link:../../packages/shared

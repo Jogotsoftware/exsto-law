@@ -97,7 +97,8 @@ export async function projectGranolaCall(
 
 // The worker-side projection: payload comes from the webhook (raw body already
 // in raw_event_log). If the payload lacks transcript content, fetch it via the
-// Granola API (REQ-CALL-02).
+// Granola API (REQ-CALL-02). On auto-route (single-member) matters, a matched
+// transcript triggers the async drafting jobs (OA + engagement letter).
 export async function runGranolaProjection(
   ctx: ActionContext,
   jobPayload: { raw_event_log_id?: string | null; payload: Record<string, unknown> },
@@ -112,10 +113,36 @@ export async function runGranolaProjection(
     }
     data = await fetchGranolaCall(ctx.tenantId, callId)
   }
-  await projectGranolaCall(ctx, data, {
+  const result = await projectGranolaCall(ctx, data, {
     source: 'granola',
     rawEventLogId: jobPayload.raw_event_log_id ?? null,
   })
+
+  const effects = (result.effects[0] ?? {}) as { matched?: boolean; deduplicated?: boolean }
+  if (effects.matched && !effects.deduplicated) {
+    const matterId = await matchMatterForCall(ctx, data)
+    if (matterId) await enqueueAutoDrafts(ctx, matterId)
+  }
+}
+
+// Single-member (auto-route) matters get their drafts queued the moment the
+// transcript lands (REQ-DRAFT-01/05). Manual-route matters get nothing here —
+// the attorney email is their path (WP6).
+async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: string): Promise<void> {
+  const route = await withActionContext(ctx, async (client) => {
+    const res = await client.query<{ route: string | null }>(
+      `SELECT e.metadata->>'workflow_route' AS route FROM entity e
+       WHERE e.tenant_id = $1 AND e.id = $2`,
+      [ctx.tenantId, matterEntityId],
+    )
+    return res.rows[0]?.route ?? null
+  })
+  if (route !== 'auto') return
+
+  const { requestDraft } = await import('./generateDraft.js')
+  for (const documentKind of ['operating_agreement', 'engagement_letter'] as const) {
+    await requestDraft(ctx, { matterEntityId, documentKind })
+  }
 }
 
 export interface WebhookResult {

@@ -1,6 +1,7 @@
 // Importing the handlers module registers all legal action handlers with the
 // substrate's action handler registry. Consumers (MCP server, workers) import
 // this package once at startup to wire the vertical.
+import '@exsto/primitives' // registers the generic primitive handlers (event.record, raw_event.ingest, ...)
 import './handlers/index.js'
 
 export * from './api/index.js'

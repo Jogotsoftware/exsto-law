@@ -6,7 +6,7 @@ import {
   type ActionResult,
 } from '@exsto/substrate'
 
-const SAGE_AGENT_ACTOR_ID = '00000000-0000-0000-0000-000000000003'
+const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
 
 export interface CachedReasoningTrace {
   evidence: unknown[]
@@ -41,7 +41,7 @@ export async function cacheDraft(
   })
 
   return submitAction(ctx, {
-    actionKindName: 'legal.draft.generate',
+    actionKindName: 'draft.generate',
     intentKind: 'enforcement',
     reasoningTraceId: traceId,
     payload: {
@@ -72,7 +72,7 @@ async function persistReasoningTrace(ctx: ActionContext, args: PersistArgs): Pro
       [
         id,
         ctx.tenantId,
-        SAGE_AGENT_ACTOR_ID,
+        CLAUDE_AGENT_ACTOR_ID,
         args.prompt,
         JSON.stringify(args.trace.evidence),
         JSON.stringify(args.trace.alternatives_considered),
