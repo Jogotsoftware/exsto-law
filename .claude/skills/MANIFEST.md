@@ -19,6 +19,7 @@ Hand-written, grounded in real migrations/primitives/tools, shipped in every clo
 | [exsto-ai-operation](exsto-ai-operation/SKILL.md) | AI actions record a linked reasoning trace and write only through the action layer; honest confidence + autonomy tier. |
 | [exsto-bootstrap-tenant](exsto-bootstrap-tenant/SKILL.md) | Correct, idempotent order to create a tenant (tenant → actor → kinds) so no half-formed tenants. |
 | [exsto-external-api](exsto-external-api/SKILL.md) | Consume external services: raw_event_log first, worker-run idempotent projection, verified signatures, server-side tenant resolution, secrets in Vault. Grounded in the exsto-law Granola/Google reference implementations. |
+| [exsto-public-surface](exsto-public-surface/SKILL.md) | Secure a clone's unauthenticated edges (public MCP/REST routes, booking/intake forms, shared-link pages, OAuth callbacks): default-deny tool allowlist, rate-limit public writes, validate post-auth redirects same-origin, sign OAuth state, redact secrets. Grounded in three real holes found + fixed in the legal clone. |
 
 ## Meta / lifecycle skills
 
