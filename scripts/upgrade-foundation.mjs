@@ -99,28 +99,29 @@ async function recordUpgrade(url, fromV, toV, commit) {
   // stamp bump as deployment infra (the hard rules permit direct DB access here).
   const { submitAction } = await import(pathToUrl(join(ROOT, 'packages/substrate/dist/index.js')))
   await import(pathToUrl(join(ROOT, 'packages/primitives/dist/index.js'))) // register handlers
+  // Since v1.0.1 the config.change HANDLER inserts the configuration_change row
+  // itself — the payload must speak its contract (target_table/change_kind/
+  // before/after/reason). The script's old direct INSERT is gone: it would
+  // duplicate the row, and the old payload shape left the handler's NOT NULL
+  // target_table unset (found by the first real-world upgrade drill — the
+  // pre-v1.0.1 silent no-op had been masking the mismatch).
   const res = await submitAction(
     { tenantId: TENANT_ZERO, actorId: SYSTEM_ACTOR },
     {
       actionKindName: 'config.change',
       intentKind: 'automatic_sync',
-      payload: { change: 'foundation_upgrade', from: fromV, to: toV, commit },
+      payload: {
+        target_table: 'system_capability_registry',
+        change_kind: 'update',
+        before_value: { version: fromV },
+        after_value: { version: toV, commit },
+        change_reason: 'foundation upgrade',
+      },
     },
   )
   const client = new pg.Client({ connectionString: url })
   await client.connect()
   try {
-    // change_kind is constrained to create/update/deprecate; an upgrade is an
-    // 'update'. The "foundation upgrade" semantic lives in change_reason + values.
-    await client.query(
-      `INSERT INTO configuration_change
-         (tenant_id, action_id, target_table, change_kind, before_value, after_value, change_reason, authoring_actor_id)
-       VALUES ($1, $2, 'system_capability_registry', 'update',
-               jsonb_build_object('version', $3::text),
-               jsonb_build_object('version', $4::text, 'commit', $5::text),
-               'foundation upgrade', $6)`,
-      [TENANT_ZERO, res.actionId, fromV, toV, commit, SYSTEM_ACTOR],
-    )
     await client.query(
       `UPDATE system_capability_registry SET
          snapshot = jsonb_set(snapshot, '{foundation}', jsonb_build_object(
@@ -162,9 +163,18 @@ async function main() {
   }
   const fetchRef = ref.replace(/^foundation\//, '')
   sh(`git fetch foundation ${fetchRef} --tags`)
-  const targetRaw = sh(`git show ${ref}:VERSION`)
+  // Tags fetch into the plain tag namespace (refs/tags/<name>), not under the
+  // remote prefix — resolve `--to foundation/v1.x.y` to the tag when the
+  // remote-prefixed ref doesn't exist (v1.0.1 upgrade drill finding).
+  let showRef = ref
+  try {
+    sh(`git rev-parse --verify --quiet "${showRef}^{commit}"`)
+  } catch {
+    showRef = fetchRef
+  }
+  const targetRaw = sh(`git show ${showRef}:VERSION`)
   const target = parseSemver(targetRaw)
-  log(`target foundation version: ${target.raw} (${ref})`)
+  log(`target foundation version: ${target.raw} (${showRef})`)
 
   // 3. semver gate
   const c = cmpSemver(target, current)
@@ -183,8 +193,8 @@ async function main() {
   }
 
   // 4. sync foundation-owned paths (clone-owned paths untouched)
-  log(`syncing foundation paths from ${ref} …`)
-  sh(`git checkout ${ref} -- ${FOUNDATION_PATHS.join(' ')}`)
+  log(`syncing foundation paths from ${showRef} …`)
+  sh(`git checkout ${showRef} -- ${FOUNDATION_PATHS.join(' ')}`)
 
   // 5. install + build
   log('installing + building …')
@@ -193,7 +203,10 @@ async function main() {
 
   // 6. apply CORE then VERTICAL migrations
   log('applying core migrations (supabase db push) …')
-  sh('npx -y supabase@2 db push', { stdio: 'inherit' })
+  // --db-url: the script already requires DATABASE_URL; a bare `db push` needs a
+  // linked project + CLI auth, which a freshly cloned platform may not have
+  // (v1.0.1 upgrade drill finding — the upgrade must be hands-free).
+  sh(`npx -y supabase@2 db push --db-url "${url}"`, { stdio: 'inherit' })
   // db push records each migration in the CLI ledger AFTER running its SQL, so the
   // final migration's own sync_migration_history() runs before that record exists —
   // public.schema_migration would miss it (invariant 12). Run the catch-up sync, the
@@ -212,8 +225,8 @@ async function main() {
     env: { ...process.env, SUBSTRATE_TEST_DATABASE_URL: url },
   })
 
-  // 8. record the upgrade
-  const commit = sh(`git rev-parse ${ref}`)
+  // 8. record the upgrade ("^" must be quoted: it is cmd.exe's escape char)
+  const commit = sh(`git rev-parse "${showRef}^{commit}"`)
   await recordUpgrade(url, current.raw, target.raw, commit)
   log(
     `UPGRADE OK: ${current.raw} -> ${target.raw} (commit ${commit.slice(0, 8)}), recorded as a configuration_change.`,
