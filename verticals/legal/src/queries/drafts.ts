@@ -35,18 +35,19 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
       `SELECT
          dv.id AS version_id,
          dv.document_entity_id,
-         r.source_entity_id AS matter_entity_id,
+         r.target_entity_id AS matter_entity_id,
          e_matter.name AS matter_number,
-         coalesce(dv.metadata->>'document_kind', 'operating_agreement') AS document_kind,
+         coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
          dv.version_number,
          dv.status,
          to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at
        FROM document_version dv
-       JOIN relationship r ON r.target_entity_id = dv.document_entity_id
+       JOIN entity e_doc ON e_doc.id = dv.document_entity_id
+       JOIN relationship r ON r.source_entity_id = dv.document_entity_id
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-       JOIN entity e_matter ON e_matter.id = r.source_entity_id
+       JOIN entity e_matter ON e_matter.id = r.target_entity_id
        WHERE dv.tenant_id = $1
-         AND rkd.kind_name = 'matter_has_document'
+         AND rkd.kind_name = 'draft_of'
          AND dv.status = 'pending_review'
        ORDER BY dv.recorded_at DESC`,
       [ctx.tenantId],
@@ -85,9 +86,9 @@ export async function getDraftVersion(
       `SELECT
          dv.id AS version_id,
          dv.document_entity_id,
-         r.source_entity_id AS matter_entity_id,
+         r.target_entity_id AS matter_entity_id,
          e_matter.name AS matter_number,
-         coalesce(dv.metadata->>'document_kind', 'operating_agreement') AS document_kind,
+         coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
          dv.version_number,
          dv.status,
          to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at,
@@ -96,12 +97,13 @@ export async function getDraftVersion(
          dv.metadata->>'model_identity' AS model_identity
        FROM document_version dv
        JOIN content_blob cb ON cb.id = dv.content_blob_id
-       JOIN relationship r ON r.target_entity_id = dv.document_entity_id
+       JOIN entity e_doc ON e_doc.id = dv.document_entity_id
+       JOIN relationship r ON r.source_entity_id = dv.document_entity_id
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-       JOIN entity e_matter ON e_matter.id = r.source_entity_id
+       JOIN entity e_matter ON e_matter.id = r.target_entity_id
        WHERE dv.tenant_id = $1
          AND dv.id = $2
-         AND rkd.kind_name = 'matter_has_document'
+         AND rkd.kind_name = 'draft_of'
        LIMIT 1`,
       [ctx.tenantId, documentVersionId],
     )

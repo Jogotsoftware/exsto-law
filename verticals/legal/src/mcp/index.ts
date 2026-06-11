@@ -25,5 +25,6 @@ import './tools/contactTools.js'
 import './tools/partnerTools.js'
 import './tools/contactLookup.js'
 import './tools/settingsTools.js'
+import './tools/matterHistory.js'
 // Note: ./tools/sendDraftLinkEmail.js exists but was never wired into the registry
 // upstream; left unregistered to preserve the prior tool surface exactly.

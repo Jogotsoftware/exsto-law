@@ -94,3 +94,38 @@ build directive's autonomy protocol. Each entry: what, why, where it lands.
 - **Attorney auth:** Supabase Auth Google SSO (REQ-AUTH-01); provider enablement is
   a dashboard step for the founder OR PAT-based config (offered; pending). Code path
   built regardless; public-intake actor handles the anonymous portal.
+
+## WP3 (PR #4)
+
+13. **Strict transcript matching only.** Attendee email + ±90-minute window of the
+    booked slot; no looser time-only fallback — attaching a transcript to the wrong
+    matter is worse than unmatched in a legal product. Unmatched = review queue.
+14. **Granola API shape is beta.** Adapter normalizes defensively, base URL is env-
+    overridable; webhook payloads embedding the transcript skip the API fetch.
+    Live receipts blocked-by-credentials (no Granola key on the wedge Netlify env).
+
+## WP4 (PR #5)
+
+15. **FOUNDATION FINDING — silent no-op on unregistered action handlers.**
+    `submitAction` records the action row and returns zero effects when no handler
+    is registered for the kind. The vertical now imports `@exsto/primitives` at its
+    entrypoint so the generic handlers are always registered. Foundation-upgrade
+    request: a missing handler should hard-fail (or require explicit opt-in to
+    effect-less actions).
+16. **Wedge actor-id defect fixed.** cacheDraft/generateDraft used agent actor
+    `…0000-000000000003` (nonexistent); the seeded Claude agent is
+    `…0001-000000000004`. Worker AI actions submit as the agent actor.
+17. **Confidence-based tier escalation deferred.** exsto-ai-operation suggests
+    `approve` tier under 0.7 confidence; Phase 0 records drafting_confidence and
+    keeps the kind's default tier (drafts always require human review anyway).
+
+## WP5 (PR #6)
+
+18. **Compat fields on matter queries.** Existing screens read practiceArea/summary;
+    queries return them as aliases of the vocabulary fields until WP8's UI pass.
+19. **Per-section provenance badges scoped to what the trace provides.** The review
+    sidebar renders the trace's evidence (intake fields, transcript excerpts), its
+    ambiguities, and confidence; section-anchored badge mapping needs the model to
+    emit section anchors — kept for the prompt-library iteration in Phase 1.
+20. **intake.submit linked to matter history via matter.open's back-reference**
+    (`intake_action_id`) since intake actions predate the matter id.

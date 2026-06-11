@@ -82,10 +82,34 @@ interface SendDraftLinkResult {
   to: string
 }
 
+interface MatterActionEntry {
+  actionId: string
+  kindName: string
+  intentKind: string
+  autonomyTier: string
+  actorName: string
+  actorType: string
+  hasReasoningTrace: boolean
+  recordedAt: string
+}
+
+interface MatterEventEntry {
+  eventId: string
+  kindName: string
+  data: Record<string, unknown>
+  occurredAt: string
+}
+
+interface MatterHistory {
+  actions: MatterActionEntry[]
+  events: MatterEventEntry[]
+}
+
 export default function MatterDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const [matter, setMatter] = useState<MatterDetail | null>(null)
   const [latestDraft, setLatestDraft] = useState<DraftPayload | null>(null)
+  const [history, setHistory] = useState<MatterHistory | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [emailStatus, setEmailStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
@@ -107,6 +131,11 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
       } else {
         setLatestDraft(null)
       }
+      const hist = await callAttorneyMcp<MatterHistory>({
+        toolName: 'legal.matter.history',
+        input: { matterEntityId: id },
+      })
+      setHistory(hist)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -259,7 +288,7 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
             }
           >
             {busy === 'generate-draft' && <span className="spinner" />}
-            {busy === 'generate-draft' ? 'Generating…' : 'Generate operating agreement'}
+            {busy === 'generate-draft' ? 'Queueing…' : 'Generate operating agreement (async)'}
           </button>
           <button
             disabled={!hasQuestionnaire || !hasTranscript || busy !== null}
@@ -271,7 +300,7 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
             }
           >
             {busy === 'generate-engagement' && <span className="spinner" />}
-            {busy === 'generate-engagement' ? 'Generating…' : 'Generate engagement letter'}
+            {busy === 'generate-engagement' ? 'Queueing…' : 'Generate engagement letter (async)'}
           </button>
         </div>
         {!hasQuestionnaire && (
@@ -380,6 +409,66 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
           <p className="text-muted">
             No transcript yet. Run the consultation call (or stub it) first.
           </p>
+        )}
+      </section>
+
+      <section>
+        <h2>Action history</h2>
+        <p className="text-muted text-sm">
+          Every change to this matter is an audited action — actor, intent, autonomy tier, and
+          reasoning-trace linkage.
+        </p>
+        {history && history.actions.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Action</th>
+                  <th>Actor</th>
+                  <th>Intent</th>
+                  <th>Autonomy</th>
+                  <th>Trace</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.actions.map((a) => (
+                  <tr key={a.actionId}>
+                    <td>{new Date(a.recordedAt).toLocaleString()}</td>
+                    <td>
+                      <code>{a.kindName}</code>
+                    </td>
+                    <td>
+                      {a.actorName}
+                      {a.actorType === 'agent' && <span className="badge info"> AI</span>}
+                      {a.actorType === 'system' && <span className="badge"> system</span>}
+                    </td>
+                    <td>{humanizeKind(a.intentKind)}</td>
+                    <td>{humanizeKind(a.autonomyTier)}</td>
+                    <td>{a.hasReasoningTrace ? '✓' : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-muted">No actions recorded yet.</p>
+        )}
+        {history && history.events.length > 0 && (
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <h3>Lifecycle events</h3>
+            <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+              {history.events.map((e) => (
+                <span
+                  key={e.eventId}
+                  className="badge"
+                  title={new Date(e.occurredAt).toLocaleString()}
+                >
+                  {e.kindName}
+                </span>
+              ))}
+            </div>
+          </div>
         )}
       </section>
     </main>

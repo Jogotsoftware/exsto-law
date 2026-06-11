@@ -15,6 +15,9 @@ export interface MatterSummary {
   status: string
   scheduledAt: string | null
   createdAt: string
+  // Compat fields consumed by the existing attorney screens (WP8 retires them).
+  practiceArea: string
+  summary: string
 }
 
 export interface MatterDetail extends MatterSummary {
@@ -77,6 +80,8 @@ export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> 
       status: r.status ?? 'intake_submitted',
       scheduledAt: r.scheduled_at,
       createdAt: r.created_at,
+      practiceArea: r.service_key ?? '',
+      summary: '',
     }))
   })
 }
@@ -150,6 +155,8 @@ export async function getMatter(
       status: (attributes.matter_status as string | undefined) ?? 'intake_submitted',
       scheduledAt: base.scheduled_at,
       createdAt: base.created_at,
+      practiceArea: (attributes.service_key as string | undefined) ?? '',
+      summary: '',
       attributes,
       questionnaireResponses: questionnaireResponses ?? null,
       transcriptText: transcriptText ?? null,
