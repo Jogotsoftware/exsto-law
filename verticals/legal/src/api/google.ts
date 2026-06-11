@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import {
   GOOGLE_OAUTH_SCOPES_CALENDAR,
+  GOOGLE_OAUTH_SCOPES_MAIL,
   GOOGLE_OAUTH_SCOPES_SIGNIN,
   buildOAuthClient,
   cancelEvent,
@@ -17,7 +18,7 @@ import {
 import { lookupActorByEmail } from './identity.js'
 import type { ActionContext } from '@exsto/substrate'
 
-export type GoogleAuthMode = 'signin' | 'calendar'
+export type GoogleAuthMode = 'signin' | 'calendar' | 'mail'
 
 export interface GoogleConnectionStatus {
   connected: boolean
@@ -49,10 +50,15 @@ export function buildGoogleAuthUrl(
   const state = Buffer.from(
     JSON.stringify({ tenantId, returnTo, mode, nonce: randomUUID() }),
   ).toString('base64url')
-  const scope = mode === 'signin' ? GOOGLE_OAUTH_SCOPES_SIGNIN : GOOGLE_OAUTH_SCOPES_CALENDAR
+  const scope =
+    mode === 'signin'
+      ? GOOGLE_OAUTH_SCOPES_SIGNIN
+      : mode === 'mail'
+        ? GOOGLE_OAUTH_SCOPES_MAIL
+        : GOOGLE_OAUTH_SCOPES_CALENDAR
   return oauth2.generateAuthUrl({
-    access_type: mode === 'calendar' ? 'offline' : 'online',
-    prompt: mode === 'calendar' ? 'consent' : 'select_account',
+    access_type: mode === 'signin' ? 'online' : 'offline',
+    prompt: mode === 'signin' ? 'select_account' : 'consent',
     scope,
     state,
   })
@@ -81,7 +87,8 @@ export async function exchangeGoogleCode(state: string, code: string): Promise<E
   }
   // Default to 'signin' (identity-only, no DB write) so a malformed or
   // stale state never accidentally trips the calendar-mode DB save path.
-  const mode: GoogleAuthMode = parsedState.mode === 'calendar' ? 'calendar' : 'signin'
+  const mode: GoogleAuthMode =
+    parsedState.mode === 'calendar' ? 'calendar' : parsedState.mode === 'mail' ? 'mail' : 'signin'
 
   // Direct fetch for the token exchange — avoids the heavy googleapis cold
   // start in Netlify Functions. Saves ~3-5 seconds on first invocation.
@@ -136,7 +143,7 @@ export async function exchangeGoogleCode(state: string, code: string): Promise<E
       resolvedTenantId = resolved.tenantId
       resolvedDisplayName = resolved.displayName
     }
-  } else if (mode === 'calendar') {
+  } else if (mode === 'calendar' || mode === 'mail') {
     if (!tokens.refresh_token) {
       throw new Error(
         'No refresh token returned. Re-authorize with consent screen (revoke at https://myaccount.google.com/permissions and try again).',

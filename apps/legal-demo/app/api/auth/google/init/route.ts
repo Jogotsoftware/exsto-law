@@ -11,7 +11,8 @@ export async function GET(request: Request) {
   const modeParam = url.searchParams.get('mode')
   // Default to 'signin' — calendar mode requires an explicit opt-in (and a
   // tenant_id from the signed-in session).
-  const mode: GoogleAuthMode = modeParam === 'calendar' ? 'calendar' : 'signin'
+  const mode: GoogleAuthMode =
+    modeParam === 'calendar' ? 'calendar' : modeParam === 'mail' ? 'mail' : 'signin'
   const tenantIdParam = url.searchParams.get('tenant_id')
 
   // Sign-in mode doesn't need a tenant (the callback resolves it from email).
