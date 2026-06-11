@@ -12,6 +12,7 @@ export { resolveAnthropicApiKey } from './adapters/claude.js'
 export { resolvePerplexityApiKey } from './adapters/perplexity.js'
 export type { ResearchRequest, ResearchResult } from './adapters/perplexity.js'
 export { redactSecret } from './adapters/redact.js'
+export { signOAuthState, verifyOAuthState } from './adapters/oauthState.js'
 // Server-side credential store (Vault-backed) — exported for tests and ops
 // tooling; never reachable from client bundles.
 export {

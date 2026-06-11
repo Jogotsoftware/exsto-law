@@ -6,6 +6,7 @@ import '@exsto/legal/mcp'
 import { isClientPortalTool } from '@exsto/legal/mcp'
 import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
+import { verifyCaptchaIfConfigured } from '@/lib/captcha'
 
 export const runtime = 'nodejs'
 
@@ -38,6 +39,16 @@ export async function POST(request: Request) {
   const tool = isClientPortalTool(body.toolName) ? findTool(body.toolName) : undefined
   if (!tool) {
     return NextResponse.json({ error: `Unknown tool: ${body.toolName}` }, { status: 404 })
+  }
+
+  // CAPTCHA gate on the public WRITE (booking/intake) when configured. No-op
+  // until TURNSTILE_SECRET/HCAPTCHA_SECRET is set; then it requires a verified
+  // body.captchaToken. Reads (service list, availability, draft view) are exempt.
+  if (tool.mode === 'write') {
+    const captcha = await verifyCaptchaIfConfigured(body.captchaToken, clientIpFrom(request))
+    if (!captcha.ok) {
+      return NextResponse.json({ error: captcha.reason ?? 'Captcha required.' }, { status: 403 })
+    }
   }
 
   const ctx: ActionContext = { tenantId: TENANT_ID, actorId: ACTOR_ID }

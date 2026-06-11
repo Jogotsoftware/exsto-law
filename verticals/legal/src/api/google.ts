@@ -16,6 +16,7 @@ import {
   type CreatedEvent,
 } from '../adapters/googleCalendar.js'
 import { lookupActorByEmail } from './identity.js'
+import { signOAuthState, verifyOAuthState } from '../adapters/oauthState.js'
 import type { ActionContext } from '@exsto/substrate'
 
 export type GoogleAuthMode = 'signin' | 'calendar' | 'mail'
@@ -47,9 +48,8 @@ export function buildGoogleAuthUrl(
   mode: GoogleAuthMode = 'calendar',
 ): string {
   const oauth2 = buildOAuthClient()
-  const state = Buffer.from(
-    JSON.stringify({ tenantId, returnTo, mode, nonce: randomUUID() }),
-  ).toString('base64url')
+  // HMAC-signed so the browser can't tamper with tenantId/returnTo/mode.
+  const state = signOAuthState({ tenantId, returnTo, mode, nonce: randomUUID() })
   const scope =
     mode === 'signin'
       ? GOOGLE_OAUTH_SCOPES_SIGNIN
@@ -79,9 +79,11 @@ export interface ExchangeResult {
 }
 
 export async function exchangeGoogleCode(state: string, code: string): Promise<ExchangeResult> {
+  // Verify the HMAC before trusting ANY field. A tampered or unsigned state
+  // (forged tenantId/returnTo) is rejected here, fail-closed.
   let parsedState: { tenantId: string; returnTo: string; mode?: GoogleAuthMode; nonce: string }
   try {
-    parsedState = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'))
+    parsedState = verifyOAuthState(state)
   } catch {
     throw new Error('Invalid OAuth state.')
   }
