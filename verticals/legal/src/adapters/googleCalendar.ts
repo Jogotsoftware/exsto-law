@@ -5,6 +5,7 @@ import {
   disconnect,
   markConnectionError,
 } from './connectionStore.js'
+import { redactSecret } from './redact.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // OAuth + token storage
@@ -306,7 +307,11 @@ export async function getAvailability(
     const slots = await getGoogleAvailability(tenantId, daysOut)
     return { slots, source: 'google' }
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
+    // Defense-in-depth: scrub any bearer/token-like substring before this
+    // reason reaches the logs or the client-readable last_error column. The
+    // OAuth token is not held in this scope (it lives inside getGoogleAvailability),
+    // so the pattern backstop in redactSecret does the work.
+    const reason = redactSecret(err instanceof Error ? err.message : String(err))
     console.error(
       `[getAvailability] Google availability failed for tenant ${tenantId}; falling back to stub. Reason: ${reason}`,
     )

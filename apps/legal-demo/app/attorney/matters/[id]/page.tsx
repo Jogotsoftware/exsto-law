@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useState } from 'react'
+import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
@@ -412,6 +412,8 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
         )}
       </section>
 
+      <ResearchPanel matterEntityId={id} />
+
       <section>
         <h2>Action history</h2>
         <p className="text-muted text-sm">
@@ -472,6 +474,130 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
         )}
       </section>
     </main>
+  )
+}
+
+interface ResearchEntry {
+  eventId: string
+  question: string
+  answer: string
+  citations: string[]
+  model: string
+  recordedAt: string
+}
+
+function ResearchPanel({ matterEntityId }: { matterEntityId: string }) {
+  const [question, setQuestion] = useState('')
+  const [entries, setEntries] = useState<ResearchEntry[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ research: ResearchEntry[] }>({
+        toolName: 'legal.research.list',
+        input: { matterEntityId },
+      })
+      setEntries(r.research)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [matterEntityId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function ask() {
+    if (!question.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      await callAttorneyMcp<{ research: ResearchEntry }>({
+        toolName: 'legal.research.ask',
+        input: { matterEntityId, question: question.trim() },
+      })
+      setQuestion('')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section>
+      <h2>Research</h2>
+      <p className="text-muted text-sm">
+        Ask Perplexity a research question for this matter. Answers and citations are recorded on
+        the timeline with provenance. Uses the firm’s Settings-managed Perplexity key.
+      </p>
+      <div className="row" style={{ gap: 'var(--space-2)', alignItems: 'flex-start' }}>
+        <textarea
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          rows={2}
+          placeholder="e.g. What are NC’s default quorum rules for a member-managed LLC?"
+          style={{ flex: 1 }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) ask()
+          }}
+        />
+        <button className="primary" onClick={ask} disabled={busy || !question.trim()}>
+          {busy ? 'Researching…' : 'Ask'}
+        </button>
+      </div>
+      {error && <div className="alert alert-error">{error}</div>}
+
+      {entries === null ? (
+        <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
+          <span className="spinner" /> Loading research…
+        </p>
+      ) : entries.length === 0 ? (
+        <p className="text-muted" style={{ marginTop: 'var(--space-3)' }}>
+          No research yet.
+        </p>
+      ) : (
+        <div style={{ marginTop: 'var(--space-3)', display: 'grid', gap: 'var(--space-3)' }}>
+          {entries.map((r) => (
+            <ResearchCard key={r.eventId} entry={r} />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ResearchCard({ entry }: { entry: ResearchEntry }) {
+  return (
+    <div
+      style={{
+        border: '1px solid var(--border)',
+        borderRadius: '8px',
+        padding: 'var(--space-3)',
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 'var(--space-2)' }}>{entry.question}</div>
+      <div style={{ whiteSpace: 'pre-wrap' }}>{entry.answer}</div>
+      {entry.citations.length > 0 && (
+        <div style={{ marginTop: 'var(--space-2)' }}>
+          <div className="text-muted text-sm">Sources</div>
+          <ol style={{ margin: '0.25rem 0 0', paddingLeft: '1.2rem' }}>
+            {entry.citations.map((c, i) => (
+              <li key={i}>
+                <a href={c} target="_blank" rel="noreferrer">
+                  {c}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      <div className="text-muted text-sm" style={{ marginTop: 'var(--space-2)' }}>
+        {entry.model} · {new Date(entry.recordedAt).toLocaleString()}
+      </div>
+    </div>
   )
 }
 
