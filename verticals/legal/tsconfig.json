@@ -11,6 +11,7 @@
     { "path": "../../packages/shared" },
     { "path": "../../packages/substrate" },
     { "path": "../../packages/mcp-tools" },
+    { "path": "../../packages/primitives" },
     { "path": "../../workers/runtime" }
   ]
 }

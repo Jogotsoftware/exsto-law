@@ -164,6 +164,50 @@ export async function insertEvent(
   return eventId
 }
 
+// Record a realized outcome about an entity (e.g. a draft review decision).
+export async function insertOutcome(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    outcomeKindName: string
+    subjectEntityId: string
+    polarity: 'positive' | 'neutral' | 'negative'
+    data?: Record<string, unknown>
+    sourceType?: 'human' | 'integration' | 'agent' | 'system'
+    sourceRef?: string | null
+  },
+): Promise<string> {
+  const outcomeKindId = await lookupKindId(
+    client,
+    'outcome_kind_definition',
+    args.tenantId,
+    args.outcomeKindName,
+  )
+  const id = randomUUID()
+  await client.query(
+    `INSERT INTO outcome (
+       id, tenant_id, action_id, outcome_kind_id, subject_entity_id,
+       outcome_data, polarity, confidence, evidence, source_type, source_ref,
+       occurred_at, occurred_at_precision
+     ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9::jsonb,$10,$11, now(), 'exact_instant')`,
+    [
+      id,
+      args.tenantId,
+      args.actionId,
+      outcomeKindId,
+      args.subjectEntityId,
+      JSON.stringify(args.data ?? {}),
+      args.polarity,
+      1.0,
+      JSON.stringify([]),
+      args.sourceType ?? 'human',
+      args.sourceRef ?? null,
+    ],
+  )
+  return id
+}
+
 export async function insertContentBlob(
   client: DbClient,
   args: {

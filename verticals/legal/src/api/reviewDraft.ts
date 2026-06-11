@@ -10,7 +10,7 @@ export async function approveDraft(
   input: DraftReviewInput,
 ): Promise<ActionResult> {
   return submitAction(ctx, {
-    actionKindName: 'legal.draft.approve',
+    actionKindName: 'draft.approve',
     intentKind: 'enforcement',
     payload: {
       document_version_id: input.documentVersionId,
@@ -27,7 +27,7 @@ export async function requestDraftRevision(
     throw new Error('Review notes are required to request a revision.')
   }
   return submitAction(ctx, {
-    actionKindName: 'legal.draft.request_revision',
+    actionKindName: 'draft.request_revision',
     intentKind: 'correction',
     payload: {
       document_version_id: input.documentVersionId,
@@ -41,7 +41,7 @@ export async function rejectDraft(
   input: DraftReviewInput,
 ): Promise<ActionResult> {
   return submitAction(ctx, {
-    actionKindName: 'legal.draft.reject',
+    actionKindName: 'draft.reject',
     intentKind: 'enforcement',
     payload: {
       document_version_id: input.documentVersionId,
