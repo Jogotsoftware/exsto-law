@@ -129,3 +129,38 @@ build directive's autonomy protocol. Each entry: what, why, where it lands.
     emit section anchors — kept for the prompt-library iteration in Phase 1.
 20. **intake.submit linked to matter history via matter.open's back-reference**
     (`intake_action_id`) since intake actions predate the matter id.
+
+## WP6 (PR #7)
+
+21. **Attorney address resolves from the connected Google account** (env override
+    `ATTORNEY_EMAIL`) — no settings table needed in Phase 0.
+22. **Prospect confirmations queue at booking time for both intake and booking**
+    (the flow is one orchestration); failures retry in the worker, never block
+    the booking response.
+
+## WP7 (PR #8)
+
+23. **In-app calendar management covers consultation (matter-linked) events;
+    external Google events render read-only.** booking.* actions require a matter;
+    arbitrary personal-event CRUD through the action layer would need a
+    non-matter event model — out of Phase 0 scope.
+24. **Gmail thread idempotency keys live in jsonb** (thread: participants jsonb
+    carries gmail_thread_id; message: payload jsonb carries gmail_message_id) —
+    communication tables have no metadata column; no DDL on core tables.
+
+## WP8 (PR #9)
+
+25. **Demo seed never resets.** The wedge-era seed deleted append-only tables —
+    which the 0017 triggers now (correctly) forbid. The seed is idempotent by
+    detection (demo client email) and books a multi-member matter with cached
+    drafts per REQ-DEMO-02 (auto-drafting itself stays single-member-only).
+26. **Wedge surfaces retired**: Templates/Services-edit/Share/Contacts pages and
+    nav (Phase 1 library layer); firm-settings editing degrades to defaults with
+    a clear "Phase 1" refusal on save (the wedge tenant_settings table is not
+    part of the certified foundation).
+27. **Dashboard calendar queries fixed to the vocabulary** (client name via
+    client_of → full_name).
+28. **Attorney Google SSO via Supabase Auth remains pending the provider toggle**
+    (founder dashboard step or PAT approval — offered, unanswered). The demo
+    bypass and the existing custom Google signin continue to gate the attorney
+    app; flagged as the one REQ-AUTH-01 gap in the phase report.

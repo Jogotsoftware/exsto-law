@@ -17,7 +17,7 @@ const ATTORNEY_ACTOR = '00000000-0000-0000-0001-000000000002'
 function randomSlot(offsetDays = 1600): { startIso: string; endIso: string } {
   const daysAhead = offsetDays + Math.floor(Math.random() * 150)
   const start = new Date(Date.now() + daysAhead * 24 * 3600 * 1000)
-  start.setUTCHours(14, Math.random() < 0.5 ? 0 : 30, 0, 0)
+  start.setUTCHours(8 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 60), 0, 0)
   return { startIso: start.toISOString(), endIso: new Date(start.getTime() + 1800e3).toISOString() }
 }
 

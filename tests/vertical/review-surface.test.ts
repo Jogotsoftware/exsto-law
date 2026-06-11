@@ -12,9 +12,9 @@ const PUBLIC_INTAKE_ACTOR = '00000000-0000-0000-0001-000000000005'
 const ATTORNEY_ACTOR = '00000000-0000-0000-0001-000000000002'
 
 function randomSlot(): { startIso: string; endIso: string } {
-  const daysAhead = 1000 + Math.floor(Math.random() * 200)
+  const daysAhead = 60 + Math.floor(Math.random() * 3000)
   const start = new Date(Date.now() + daysAhead * 24 * 3600 * 1000)
-  start.setUTCHours(17, Math.random() < 0.5 ? 0 : 30, 0, 0)
+  start.setUTCHours(8 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 60), 0, 0)
   return { startIso: start.toISOString(), endIso: new Date(start.getTime() + 1800e3).toISOString() }
 }
 

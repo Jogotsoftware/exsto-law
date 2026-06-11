@@ -141,6 +141,77 @@ async function checkSeedDataPresent(): Promise<void> {
   }
 }
 
+async function checkVerticalLedger(): Promise<void> {
+  try {
+    let n = 0
+    await withSuperuser(async (client) => {
+      const res = await client.query<{ c: number }>(
+        `SELECT count(*)::int AS c FROM private.vertical_migration`,
+      )
+      n = res.rows[0]?.c ?? 0
+    })
+    if (n >= 6) {
+      record('Vertical migrations applied', 'pass', `${n} recorded in private.vertical_migration`)
+    } else {
+      record(
+        'Vertical migrations applied',
+        'fail',
+        `only ${n} recorded — run pnpm migrate:vertical`,
+      )
+    }
+  } catch (error) {
+    record(
+      'Vertical migrations applied',
+      'fail',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+}
+
+async function checkIntegrationConnections(): Promise<void> {
+  try {
+    const rows: Array<{ provider: string; status: string; account_email: string | null }> = []
+    await withSuperuser(async (client) => {
+      const res = await client.query<{
+        provider: string
+        status: string
+        account_email: string | null
+      }>(
+        `SELECT provider, status, account_email FROM legal_integration_connection
+         WHERE tenant_id = $1 ORDER BY provider`,
+        [TENANT_ID],
+      )
+      rows.push(...res.rows)
+    })
+    const google = rows.find((r) => r.provider === 'google')
+    if (google?.status === 'connected') {
+      record('Google connection', 'pass', `connected as ${google.account_email ?? '?'}`)
+    } else if (google?.status === 'error') {
+      record('Google connection', 'warn', 'connection in ERROR state — reconnect in Settings')
+    } else {
+      record(
+        'Google connection',
+        'warn',
+        'not connected — calendar sync, invites, and email use fallbacks until connected in Settings',
+      )
+    }
+    const granola = rows.find((r) => r.provider === 'granola')
+    record(
+      'Granola connection',
+      granola?.status === 'connected' ? 'pass' : 'warn',
+      granola?.status === 'connected'
+        ? 'connected'
+        : 'not connected — call ingestion uses the stub driver until connected in Settings',
+    )
+  } catch (error) {
+    record(
+      'Integration connections',
+      'fail',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+}
+
 async function checkAnthropicKey(): Promise<void> {
   if (!process.env.ANTHROPIC_API_KEY) {
     record(
@@ -220,10 +291,13 @@ async function main(): Promise<void> {
       await checkSeedDataPresent()
     }
   }
+  if (dbReachable) {
+    await checkVerticalLedger()
+    await checkIntegrationConnections()
+  }
   await checkAnthropicKey()
   await checkPortAvailable(4000, 'MCP server')
-  await checkPortAvailable(3001, 'Attorney app')
-  await checkPortAvailable(3002, 'Client portal')
+  await checkPortAvailable(3000, 'Web app (attorney + portal)')
 
   const failed = results.filter((r) => r.status === 'fail').length
   const warned = results.filter((r) => r.status === 'warn').length
