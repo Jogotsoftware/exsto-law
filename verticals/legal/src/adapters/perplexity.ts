@@ -25,6 +25,31 @@ export interface ResearchResult {
   model: string
 }
 
+// Connectivity check used by Settings before persisting a pasted key. Lives
+// here so this adapter stays the only place that talks to the Perplexity API
+// (matches verifyAnthropicKey in the claude adapter). Returns null when the key
+// works, otherwise a user-facing error string with the key scrubbed.
+export async function verifyPerplexityKey(apiKey: string): Promise<string | null> {
+  try {
+    const res = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: DEFAULT_MODEL,
+        max_tokens: 8,
+        messages: [{ role: 'user', content: 'ping' }],
+      }),
+    })
+    if (!res.ok) {
+      const body = redactSecret((await res.text().catch(() => '')).slice(0, 200), apiKey)
+      return `Perplexity returned ${res.status}: ${body}`
+    }
+    return null
+  } catch (err) {
+    return redactSecret(err instanceof Error ? err.message : String(err), apiKey)
+  }
+}
+
 export async function resolvePerplexityApiKey(
   tenantId: string | null,
 ): Promise<{ apiKey: string; source: 'connection' | 'env' }> {

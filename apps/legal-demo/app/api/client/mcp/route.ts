@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import { findTool } from '@exsto/mcp-tools'
-// Register the legal vertical's MCP tools into the shared registry (side effect).
-// @exsto/mcp-tools is now vertical-agnostic; the legal surface opts its tools in.
+// Register the legal vertical's MCP tools into the shared registry (side effect),
+// and import the vertical's allowlist of which tools the PUBLIC portal may call.
 import '@exsto/legal/mcp'
+import { isClientPortalTool } from '@exsto/legal/mcp'
 import type { ActionContext } from '@exsto/substrate'
 
 export const runtime = 'nodejs'
@@ -18,7 +19,11 @@ export async function POST(request: Request) {
   if (!body?.toolName) {
     return NextResponse.json({ error: 'toolName is required' }, { status: 400 })
   }
-  const tool = findTool(body.toolName)
+  // Default-deny: this route is unauthenticated and runs as the firm's public
+  // intake actor, so it may only invoke tools the vertical marks client-safe.
+  // A non-allowlisted name gets the SAME 404 as an unknown tool — no oracle for
+  // which attorney-only tools exist.
+  const tool = isClientPortalTool(body.toolName) ? findTool(body.toolName) : undefined
   if (!tool) {
     return NextResponse.json({ error: `Unknown tool: ${body.toolName}` }, { status: 404 })
   }

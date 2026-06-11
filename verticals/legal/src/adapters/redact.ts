@@ -9,7 +9,16 @@
 // caller's job to pass the secret values it holds; we also scrub anything that
 // looks like a long bearer/sk- token as a backstop.
 
-const TOKEN_LIKE = /\b(?:sk-|pk-|whsec_|Bearer\s+)[A-Za-z0-9_\-]{12,}\b/g
+// Backstop patterns for when we don't hold the exact secret (e.g. the Google
+// path, where the OAuth token lives deeper in the SDK). Covers the key shapes
+// of every provider this vertical talks to: Anthropic/OpenAI (sk-/pk-),
+// webhook secrets (whsec_), Perplexity (pplx-), Google OAuth (ya29., 1//) and
+// API keys (AIza), plus a bare Bearer token.
+const TOKEN_LIKE = [
+  /\b(?:sk-|pk-|whsec_|pplx-|AIza|Bearer\s+)[A-Za-z0-9_\-]{10,}\b/g,
+  /\bya29\.[A-Za-z0-9_\-]{10,}\b/g,
+  /\b1\/\/[A-Za-z0-9_\-]{10,}\b/g,
+]
 
 export function redactSecret(text: string, ...secrets: Array<string | null | undefined>): string {
   let out = text
@@ -20,5 +29,6 @@ export function redactSecret(text: string, ...secrets: Array<string | null | und
       out = out.replace(new RegExp(escaped, 'g'), '***')
     }
   }
-  return out.replace(TOKEN_LIKE, '***')
+  for (const pat of TOKEN_LIKE) out = out.replace(pat, '***')
+  return out
 }

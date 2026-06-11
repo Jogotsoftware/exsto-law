@@ -30,3 +30,6 @@ import './tools/workspaceTools.js'
 import './tools/researchTools.js'
 // Note: ./tools/sendDraftLinkEmail.js exists but was never wired into the registry
 // upstream; left unregistered to preserve the prior tool surface exactly.
+
+// The public-client-portal allowlist travels with the tools it gates.
+export { CLIENT_PORTAL_TOOLS, isClientPortalTool } from './clientPolicy.js'
