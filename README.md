@@ -1,6 +1,8 @@
-# Exsto
+# exsto-law
 
-An operational data substrate exposed via MCP. Built so AI agents can reason across the full context of a business, with provenance, time, governance, and auditability built in from the foundation.
+AI-native legal practice platform for Pacheco Law Firm, built on the Exsto substrate (certified foundation v1.0.0, cloned via /newplatform). The substrate is an operational data substrate exposed via MCP — built so AI agents can reason across the full context of a business, with provenance, time, governance, and auditability built in from the foundation.
+
+Product docs: `docs/ROADMAP.md` (build sequencing) and `docs/product/05_PRODUCT_REQUIREMENTS.md` (PRD). Supabase project: `jfcarzprfpoztxuqykoe` (us-east-1).
 
 This README is the bootstrap guide. If you are reading this for the first time, follow it top to bottom and you should end up with a working local setup.
 
