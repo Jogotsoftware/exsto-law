@@ -29,6 +29,7 @@
     "@exsto/mcp-tools": "workspace:*",
     "@exsto/shared": "workspace:*",
     "@exsto/substrate": "workspace:*",
+    "@exsto/worker-runtime": "workspace:*",
     "googleapis": "^144.0.0",
     "marked": "^18.0.4",
     "pdf-parse": "^2.4.5",

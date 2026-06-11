@@ -203,6 +203,9 @@ importers:
       '@exsto/substrate':
         specifier: workspace:*
         version: link:../../packages/substrate
+      '@exsto/worker-runtime':
+        specifier: workspace:*
+        version: link:../../workers/runtime
       googleapis:
         specifier: ^144.0.0
         version: 144.0.0

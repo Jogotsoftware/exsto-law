@@ -23,7 +23,7 @@
     "dev": "pnpm build && pnpm --filter @exsto/legal-demo dev",
     "dev:web": "pnpm --filter @exsto/legal-demo dev",
     "dev:mcp": "pnpm --filter @exsto/mcp-server start",
-    "dev:worker": "pnpm --filter @exsto/worker-runtime start",
+    "dev:worker": "node --env-file=.env.local verticals/legal/dist/worker.js",
     "migrate": "supabase db push && pnpm migrate:vertical",
     "migrate:core": "supabase db push",
     "migrate:vertical": "node --env-file=.env.local scripts/migrate-vertical.mjs",
