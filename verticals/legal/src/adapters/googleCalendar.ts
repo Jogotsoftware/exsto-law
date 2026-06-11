@@ -43,7 +43,15 @@ export const GOOGLE_OAUTH_SCOPES_CALENDAR = [
   'https://www.googleapis.com/auth/userinfo.email',
 ]
 
+// Incremental scope set for the Mail tab (REQ-CALMAIL-03/REQ-AUTH-03): read
+// access is requested only on first Mail-tab use, never at signin.
+export const GOOGLE_OAUTH_SCOPES_MAIL = [
+  ...GOOGLE_OAUTH_SCOPES_CALENDAR,
+  'https://www.googleapis.com/auth/gmail.readonly',
+]
+
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
+export const GMAIL_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 
 // Backwards compat for any existing imports.
 export const GOOGLE_OAUTH_SCOPES = GOOGLE_OAUTH_SCOPES_CALENDAR
@@ -307,6 +315,50 @@ export async function getAvailability(
     await markConnectionError(tenantId, 'google', reason).catch(() => {})
     return { slots: getStubAvailability(daysOut), source: 'stub', reason }
   }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Workspace reads (WP7): the attorney's real calendar, day/week/month.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface WorkspaceEvent {
+  eventId: string
+  summary: string
+  startIso: string | null
+  endIso: string | null
+  allDay: boolean
+  htmlLink: string | null
+  attendeeEmails: string[]
+  status: string
+}
+
+export async function listCalendarEvents(
+  tenantId: string,
+  fromIso: string,
+  toIso: string,
+): Promise<WorkspaceEvent[]> {
+  const { oauth2, creds } = await authedClient(tenantId)
+  const calendar = google.calendar({ version: 'v3', auth: oauth2 })
+  const res = await calendar.events.list({
+    calendarId: creds.calendarId,
+    timeMin: fromIso,
+    timeMax: toIso,
+    singleEvents: true,
+    orderBy: 'startTime',
+    maxResults: 250,
+  })
+  return (res.data.items ?? [])
+    .filter((e) => e.status !== 'cancelled')
+    .map((e) => ({
+      eventId: e.id ?? '',
+      summary: e.summary ?? '(no title)',
+      startIso: e.start?.dateTime ?? (e.start?.date ? `${e.start.date}T00:00:00Z` : null),
+      endIso: e.end?.dateTime ?? (e.end?.date ? `${e.end.date}T00:00:00Z` : null),
+      allDay: Boolean(e.start?.date && !e.start?.dateTime),
+      htmlLink: e.htmlLink ?? null,
+      attendeeEmails: (e.attendees ?? []).map((a) => a.email ?? '').filter((x) => x.includes('@')),
+      status: e.status ?? 'confirmed',
+    }))
 }
 
 export interface CreateEventInput {

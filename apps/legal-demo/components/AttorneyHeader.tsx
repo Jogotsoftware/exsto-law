@@ -76,6 +76,27 @@ export function AttorneyHeader() {
                 Matters
               </Link>
               <Link
+                href="/attorney/review"
+                className={isActive('/attorney/review') ? 'active' : ''}
+                role="menuitem"
+              >
+                Review
+              </Link>
+              <Link
+                href="/attorney/calendar"
+                className={isActive('/attorney/calendar') ? 'active' : ''}
+                role="menuitem"
+              >
+                Calendar
+              </Link>
+              <Link
+                href="/attorney/mail"
+                className={isActive('/attorney/mail') ? 'active' : ''}
+                role="menuitem"
+              >
+                Mail
+              </Link>
+              <Link
                 href="/attorney/contacts"
                 className={isActive('/attorney/contacts') ? 'active' : ''}
                 role="menuitem"
