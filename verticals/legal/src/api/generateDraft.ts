@@ -112,7 +112,7 @@ export async function runDraftGeneration(
     documentKind: input.documentKind,
   })
 
-  const result = await callClaudeDrafter({ prompt })
+  const result = await callClaudeDrafter(agentCtx.tenantId, { prompt })
 
   const reasoningTraceId = await persistReasoningTrace(agentCtx, {
     prompt,

@@ -477,6 +477,7 @@ function ConnectKeyModal({
 }) {
   const meta = PROVIDER_META[provider]
   const [apiKey, setApiKey] = useState('')
+  const [webhookSecret, setWebhookSecret] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -488,9 +489,16 @@ function ConnectKeyModal({
     setBusy(true)
     setError(null)
     try {
+      const input: { provider: ApiKeyProvider; apiKey: string; webhookSecret?: string } = {
+        provider,
+        apiKey: apiKey.trim(),
+      }
+      if (provider === 'granola' && webhookSecret.trim()) {
+        input.webhookSecret = webhookSecret.trim()
+      }
       const r = await callAttorneyMcp<{ ok: boolean; error?: string }>({
         toolName: 'legal.integration.connect',
-        input: { provider, apiKey: apiKey.trim() },
+        input,
       })
       if (!r.ok) {
         setError(r.error ?? 'Failed to verify the key.')
@@ -528,6 +536,18 @@ function ConnectKeyModal({
               autoFocus
             />
           </label>
+          {provider === 'granola' && (
+            <label>
+              <span>Webhook signing secret (optional)</span>
+              <input
+                type="password"
+                autoComplete="off"
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                placeholder="whsec_… — leave blank to keep the current one"
+              />
+            </label>
+          )}
           {error && <div className="alert alert-error">{error}</div>}
         </div>
         <div className="modal-foot">
