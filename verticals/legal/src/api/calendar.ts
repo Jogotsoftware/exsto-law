@@ -38,7 +38,12 @@ export async function listUpcomingBookings(
        SELECT
          e.id AS matter_entity_id,
          e.name AS matter_number,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_name') AS client_name,
+         (SELECT a2.value #>> '{}'
+            FROM relationship r
+            JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'client_of'
+            JOIN attrs a2 ON a2.entity_id = r.source_entity_id AND a2.kind_name = 'full_name'
+            WHERE r.tenant_id = $1 AND r.target_entity_id = e.id
+            LIMIT 1) AS client_name,
          (e.metadata->>'service_key') AS service_key,
          (e.metadata->>'scheduled_at') AS scheduled_at,
          (e.metadata->>'scheduled_end') AS scheduled_end,
@@ -99,7 +104,12 @@ export async function listRecentBookings(ctx: ActionContext, limit = 10): Promis
        SELECT
          e.id AS matter_entity_id,
          e.name AS matter_number,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_name') AS client_name,
+         (SELECT a2.value #>> '{}'
+            FROM relationship r
+            JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'client_of'
+            JOIN attrs a2 ON a2.entity_id = r.source_entity_id AND a2.kind_name = 'full_name'
+            WHERE r.tenant_id = $1 AND r.target_entity_id = e.id
+            LIMIT 1) AS client_name,
          (e.metadata->>'service_key') AS service_key,
          (e.metadata->>'scheduled_at') AS scheduled_at,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,

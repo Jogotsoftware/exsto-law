@@ -22,7 +22,29 @@ const EMPTY: TenantSettings = {
   updatedAt: null,
 }
 
+// Phase 0: the wedge-era tenant_settings table is not part of the certified
+// foundation. Firm-settings editing arrives with the Phase 1 library layer
+// (schema-as-data, not a bespoke table); until then reads degrade to defaults
+// so Settings renders, and writes refuse loudly.
+const FIRM_DEFAULTS: TenantSettings = {
+  ...EMPTY,
+  firmName: 'Pacheco Law Firm',
+  attorneyName: 'Juan Carlos Pacheco',
+}
+
 export async function getTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
+  try {
+    return await readTenantSettings(ctx)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('tenant_settings') || msg.includes('does not exist')) {
+      return FIRM_DEFAULTS
+    }
+    throw err
+  }
+}
+
+async function readTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       firm_name: string | null
@@ -70,6 +92,9 @@ export async function updateTenantSettings(
   ctx: ActionContext,
   input: UpdateTenantSettingsInput,
 ): Promise<TenantSettings> {
+  throw new Error(
+    'Firm settings editing arrives with the Phase 1 library layer (settings become substrate configuration, not a bespoke table).',
+  )
   return withActionContext(ctx, async (client) => {
     await client.query(
       `INSERT INTO tenant_settings (
