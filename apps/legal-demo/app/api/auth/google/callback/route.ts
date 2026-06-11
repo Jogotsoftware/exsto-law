@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import dns from 'node:dns'
 import { exchangeGoogleCode } from '@exsto/legal'
+import { safeInternalPath } from '@/lib/safeRedirect'
 
 export const runtime = 'nodejs'
 
@@ -40,8 +41,10 @@ export async function GET(request: Request) {
 
     try {
       const result = await exchangeGoogleCode(state, code)
-      const safeReturnTo =
-        result.returnTo && result.returnTo.startsWith('/') ? result.returnTo : '/attorney'
+      // returnTo rides in the UNSIGNED OAuth state → attacker-controlled. Allow
+      // only clean same-origin paths (a naive startsWith('/') lets //host through
+      // as a protocol-relative open redirect).
+      const safeReturnTo = safeInternalPath(result.returnTo)
 
       // Calendar mode just confirms the connection — no session change needed.
       if (result.mode === 'calendar') {

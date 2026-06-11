@@ -5,6 +5,7 @@ import { findTool } from '@exsto/mcp-tools'
 import '@exsto/legal/mcp'
 import { isClientPortalTool } from '@exsto/legal/mcp'
 import type { ActionContext } from '@exsto/substrate'
+import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 
 export const runtime = 'nodejs'
 
@@ -15,6 +16,17 @@ const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0000-0
 // identity (Marcus, Priya) is captured in the client_contact entity and is
 // not the action's actor. See ADR 0035.
 export async function POST(request: Request) {
+  // Unauthenticated public route → per-IP rate limit so booking/intake can't be
+  // spammed into unbounded matter creation, notification email, and calendar
+  // invites (DoS / DB bloat / cost). Best-effort in-memory; see lib/rateLimit.
+  const rl = checkPublicRateLimit(clientIpFrom(request))
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please slow down and try again shortly.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+    )
+  }
+
   const body = await request.json().catch(() => null)
   if (!body?.toolName) {
     return NextResponse.json({ error: 'toolName is required' }, { status: 400 })

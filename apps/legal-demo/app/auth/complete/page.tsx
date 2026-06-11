@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { setSession } from '@/lib/auth'
+import { safeInternalPath } from '@/lib/safeRedirect'
 
 export default function AuthCompletePage() {
   const router = useRouter()
@@ -17,7 +18,9 @@ export default function AuthCompletePage() {
     const actorId = params.get('actor_id') ?? ''
     const tenantId = params.get('tenant_id') ?? ''
     const displayName = params.get('display_name') ?? email
-    const cont = params.get('continue') ?? '/attorney'
+    // This page is directly reachable with an arbitrary ?continue= — re-validate
+    // here too (defense in depth) so router.replace can't be steered off-site.
+    const cont = safeInternalPath(params.get('continue'))
     const calendarConnected = params.get('calendar_connected') === '1'
     setEmail(email)
 
