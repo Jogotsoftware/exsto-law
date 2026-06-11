@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { loadConnection, markConnectionError } from './connectionStore.js'
+import { redactSecret } from './redact.js'
 
 // Default to a current Claude 4.x model; allow override via env so we can pin
 // a specific model for evaluation or use the latest as Anthropic publishes new
@@ -95,7 +96,7 @@ export async function callClaudeDrafter(
     // integration card surfaces the broken sync instead of failing silently
     // in the worker log.
     if (source === 'connection' && tenantId && isAuthError(err)) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = redactSecret(err instanceof Error ? err.message : String(err), apiKey)
       await markConnectionError(tenantId, 'anthropic', `Drafting failed: ${msg}`)
       throw new Error(
         'Anthropic rejected the connected API key. Replace it in Settings → Integrations.',

@@ -9,6 +9,9 @@ export * from './queries/index.js'
 export * from './templates/loader.js'
 export type { ClaudeDraftRequest, ClaudeDraftResult } from './adapters/claude.js'
 export { resolveAnthropicApiKey } from './adapters/claude.js'
+export { resolvePerplexityApiKey } from './adapters/perplexity.js'
+export type { ResearchRequest, ResearchResult } from './adapters/perplexity.js'
+export { redactSecret } from './adapters/redact.js'
 // Server-side credential store (Vault-backed) — exported for tests and ops
 // tooling; never reachable from client bundles.
 export {
