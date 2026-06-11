@@ -6,6 +6,10 @@ export interface SimulateCallInput {
   matterEntityId: string
 }
 
+// Local-dev / demo driver: produces a stub Granola payload and runs it through
+// the SAME pipeline shape as production (raw_event.ingest → call.ingest), so
+// stub assumptions cannot leak into callers (binding Lesson #1). The matter is
+// explicit, so matching is skipped.
 export async function simulateCall(
   ctx: ActionContext,
   input: SimulateCallInput,
@@ -25,17 +29,34 @@ export async function simulateCall(
     questionnaireHighlights: pickQuestionnaireHighlights(questionnaireResponses),
   })
 
-  return submitAction(ctx, {
-    actionKindName: 'legal.call.simulate',
-    intentKind: 'enforcement',
+  const raw = await submitAction(ctx, {
+    actionKindName: 'raw_event.ingest',
+    intentKind: 'exploration',
     payload: {
+      source_type: 'integration',
+      source_ref: 'granola:stub',
+      external_id: stub.call_id,
+      payload: stub,
+    },
+  })
+  const rawEffects = (raw.effects[0] ?? {}) as { rawEventLogId?: string }
+
+  return submitAction(ctx, {
+    actionKindName: 'call.ingest',
+    intentKind: 'exploration',
+    payload: {
+      granola_call_id: stub.call_id,
       matter_entity_id: input.matterEntityId,
-      external_call_id: stub.external_call_id,
       started_at: stub.started_at,
       ended_at: stub.ended_at,
-      transcript_text: stub.transcript_text,
-      transcript_source: stub.transcript_source,
-      raw_payload: stub,
+      duration_seconds: Math.round(
+        (new Date(stub.ended_at).getTime() - new Date(stub.started_at).getTime()) / 1000,
+      ),
+      transcript_text: stub.transcript,
+      transcript_source: 'stub',
+      notes: null,
+      attendee_emails: stub.attendees.map((a) => a.email),
+      raw_event_log_id: rawEffects.rawEventLogId ?? null,
     },
   })
 }

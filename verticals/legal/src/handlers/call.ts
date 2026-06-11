@@ -1,38 +1,60 @@
-import { randomUUID } from 'node:crypto'
-import { createHash } from 'node:crypto'
 import { registerActionHandler } from '@exsto/substrate'
-import { insertAttribute, insertEntity, insertRelationship, lookupKindId } from './common.js'
+import type { DbClient } from '@exsto/shared'
+import {
+  insertAttribute,
+  insertEntity,
+  insertEvent,
+  insertRelationship,
+  lookupKindId,
+} from './common.js'
 
-interface CallSimulatePayload {
-  matter_entity_id: string
-  external_call_id: string
-  started_at: string
-  ended_at: string
+// ───────────────────────────────────────────────────────────────────────────
+// call.ingest — project a (raw_event_log'd) Granola payload into call_session
+// + transcript entities (REQ-CALL-02/03, invariant 13: deterministic
+// projection). Idempotent on granola_call_id: replaying the same webhook
+// creates no duplicates. matter_entity_id may be null — unmatched transcripts
+// land in the review queue (call_sessions without a call_of relationship),
+// never the void.
+// ───────────────────────────────────────────────────────────────────────────
+
+interface CallIngestPayload {
+  granola_call_id: string
+  matter_entity_id: string | null
+  started_at: string | null
+  ended_at: string | null
+  duration_seconds: number | null
   transcript_text: string
-  transcript_source: 'stub' | 'granola' | 'manual'
-  raw_payload: Record<string, unknown>
+  transcript_source: 'granola' | 'stub' | 'manual'
+  notes: Record<string, unknown> | null
+  attendee_emails?: string[]
+  raw_event_log_id?: string | null
 }
 
-registerActionHandler('legal.call.simulate', async (ctx, client, payload, actionId) => {
-  const parsed = payload as unknown as CallSimulatePayload
-
-  const rawEventId = randomUUID()
-  const contentHash = createHash('sha256')
-    .update(JSON.stringify(parsed.raw_payload), 'utf8')
-    .digest()
-  await client.query(
-    `INSERT INTO raw_event_log (id, tenant_id, source_type, source_ref, external_id, payload, content_hash)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
-    [
-      rawEventId,
-      ctx.tenantId,
-      'integration',
-      'granola:stub',
-      parsed.external_call_id,
-      JSON.stringify(parsed.raw_payload),
-      contentHash,
-    ],
+async function findCallByGranolaId(
+  client: DbClient,
+  tenantId: string,
+  granolaCallId: string,
+): Promise<string | null> {
+  const res = await client.query<{ entity_id: string }>(
+    `SELECT a.entity_id FROM attribute a
+     JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND akd.kind_name = 'granola_call_id'
+       AND a.value #>> '{}' = $2
+     LIMIT 1`,
+    [tenantId, granolaCallId],
   )
+  return res.rows[0]?.entity_id ?? null
+}
+
+registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as CallIngestPayload
+  const sourceRef = `granola:${p.granola_call_id}`
+
+  // Idempotency: a replayed webhook or re-run projection is a no-op.
+  const existing = await findCallByGranolaId(client, ctx.tenantId, p.granola_call_id)
+  if (existing) {
+    return { callEntityId: existing, deduplicated: true }
+  }
 
   const callKindId = await lookupKindId(
     client,
@@ -45,34 +67,40 @@ registerActionHandler('legal.call.simulate', async (ctx, client, payload, action
     ctx.tenantId,
     actionId,
     callKindId,
-    parsed.external_call_id,
-    { raw_event_log_id: rawEventId },
+    `Call ${p.granola_call_id}`,
+    {
+      raw_event_log_id: p.raw_event_log_id ?? null,
+      attendee_emails: p.attendee_emails ?? [],
+      transcript_source: p.transcript_source,
+    },
   )
 
-  const callAttrs: Array<{ kind: string; value: unknown }> = [
-    { kind: 'call_external_id', value: parsed.external_call_id },
-    { kind: 'call_started_at', value: parsed.started_at },
-    { kind: 'call_ended_at', value: parsed.ended_at },
+  const callAttrs: Array<{ kind: string; value: unknown; precision?: string }> = [
+    { kind: 'granola_call_id', value: p.granola_call_id },
   ]
+  if (p.started_at)
+    callAttrs.push({ kind: 'call_started_at', value: p.started_at, precision: 'second' })
+  if (p.ended_at) callAttrs.push({ kind: 'call_ended_at', value: p.ended_at, precision: 'second' })
+  if (p.duration_seconds != null)
+    callAttrs.push({ kind: 'call_duration_seconds', value: p.duration_seconds })
+  if (p.notes) callAttrs.push({ kind: 'call_notes', value: p.notes })
+
   for (const a of callAttrs) {
-    const attributeKindId = await lookupKindId(
-      client,
-      'attribute_kind_definition',
-      ctx.tenantId,
-      a.kind,
-    )
+    const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
       entityId: callEntityId,
-      attributeKindId,
+      attributeKindId: akId,
       value: a.value,
       confidence: 1.0,
+      timePrecision: a.precision ?? 'exact_instant',
       sourceType: 'integration',
-      sourceRef: parsed.external_call_id,
+      sourceRef,
     })
   }
 
+  // Transcript entity + content.
   const transcriptKindId = await lookupKindId(
     client,
     'entity_kind_definition',
@@ -84,102 +112,100 @@ registerActionHandler('legal.call.simulate', async (ctx, client, payload, action
     ctx.tenantId,
     actionId,
     transcriptKindId,
-    `Transcript for ${parsed.external_call_id}`,
+    `Transcript for ${p.granola_call_id}`,
   )
+  const wordCount = p.transcript_text.split(/\s+/).filter(Boolean).length
+  const transcriptAttrs: Array<{ kind: string; value: unknown; confidence?: number }> = [
+    { kind: 'transcript_text', value: p.transcript_text, confidence: 0.9 },
+    { kind: 'transcript_source', value: p.transcript_source },
+    { kind: 'transcript_word_count', value: wordCount },
+  ]
+  for (const a of transcriptAttrs) {
+    const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: transcriptEntityId,
+      attributeKindId: akId,
+      value: a.value,
+      confidence: a.confidence ?? 1.0,
+      sourceType: 'integration',
+      sourceRef,
+    })
+  }
 
-  const transcriptTextKindId = await lookupKindId(
-    client,
-    'attribute_kind_definition',
-    ctx.tenantId,
-    'transcript_text',
-  )
-  await insertAttribute(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    entityId: transcriptEntityId,
-    attributeKindId: transcriptTextKindId,
-    value: parsed.transcript_text,
-    confidence: 0.9,
-    sourceType: 'integration',
-    sourceRef: parsed.external_call_id,
-  })
-
-  const transcriptSourceKindId = await lookupKindId(
-    client,
-    'attribute_kind_definition',
-    ctx.tenantId,
-    'transcript_source',
-  )
-  await insertAttribute(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    entityId: transcriptEntityId,
-    attributeKindId: transcriptSourceKindId,
-    value: parsed.transcript_source,
-    confidence: 1.0,
-    sourceType: 'system',
-    sourceRef: null,
-  })
-
-  const matterCallRelKindId = await lookupKindId(
+  // transcript_of: transcript → call_session (WP1 seed kinds).
+  const transcriptOfId = await lookupKindId(
     client,
     'relationship_kind_definition',
     ctx.tenantId,
-    'matter_has_call',
+    'transcript_of',
   )
   await insertRelationship(client, {
     tenantId: ctx.tenantId,
     actionId,
-    sourceEntityId: parsed.matter_entity_id,
+    sourceEntityId: transcriptEntityId,
     targetEntityId: callEntityId,
-    relationshipKindId: matterCallRelKindId,
+    relationshipKindId: transcriptOfId,
   })
 
-  const matterTranscriptRelKindId = await lookupKindId(
-    client,
-    'relationship_kind_definition',
-    ctx.tenantId,
-    'matter_has_transcript',
-  )
-  await insertRelationship(client, {
+  // call_of: call_session → matter, only when matched.
+  if (p.matter_entity_id) {
+    const callOfId = await lookupKindId(
+      client,
+      'relationship_kind_definition',
+      ctx.tenantId,
+      'call_of',
+    )
+    await insertRelationship(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      sourceEntityId: callEntityId,
+      targetEntityId: p.matter_entity_id,
+      relationshipKindId: callOfId,
+    })
+
+    const statusKindId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'matter_status',
+    )
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: p.matter_entity_id,
+      attributeKindId: statusKindId,
+      value: 'consulted',
+      confidence: 1.0,
+      sourceType: 'integration',
+      sourceRef,
+    })
+  }
+
+  await insertEvent(client, {
     tenantId: ctx.tenantId,
     actionId,
-    sourceEntityId: parsed.matter_entity_id,
-    targetEntityId: transcriptEntityId,
-    relationshipKindId: matterTranscriptRelKindId,
+    eventKindName: 'transcript.received',
+    primaryEntityId: p.matter_entity_id ?? callEntityId,
+    secondaryEntityIds: p.matter_entity_id
+      ? [callEntityId, transcriptEntityId]
+      : [transcriptEntityId],
+    data: {
+      granola_call_id: p.granola_call_id,
+      matched: Boolean(p.matter_entity_id),
+      transcript_source: p.transcript_source,
+      word_count: wordCount,
+    },
+    sourceType: 'integration',
+    sourceRef,
+    occurredAt: p.ended_at ?? null,
   })
 
-  const callTranscriptRelKindId = await lookupKindId(
-    client,
-    'relationship_kind_definition',
-    ctx.tenantId,
-    'call_has_transcript',
-  )
-  await insertRelationship(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    sourceEntityId: callEntityId,
-    targetEntityId: transcriptEntityId,
-    relationshipKindId: callTranscriptRelKindId,
-  })
-
-  // Advance matter status.
-  const statusKindId = await lookupKindId(
-    client,
-    'attribute_kind_definition',
-    ctx.tenantId,
-    'matter_status',
-  )
-  await insertAttribute(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    entityId: parsed.matter_entity_id,
-    attributeKindId: statusKindId,
-    value: 'consultation_completed',
-    confidence: 1.0,
-    sourceType: 'system',
-    sourceRef: null,
-  })
-
-  return { callEntityId, transcriptEntityId, rawEventId }
+  return {
+    callEntityId,
+    transcriptEntityId,
+    matched: Boolean(p.matter_entity_id),
+    deduplicated: false,
+  }
 })
