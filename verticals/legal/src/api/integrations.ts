@@ -1,10 +1,11 @@
-import type { ActionContext } from '@exsto/substrate'
+import { submitAction, type ActionContext } from '@exsto/substrate'
 import {
   listConnections,
   saveConnection,
   loadConnection,
   disconnect as disconnectProvider,
 } from '../adapters/connectionStore.js'
+import { verifyAnthropicKey } from '../adapters/claude.js'
 
 export type IntegrationProvider = 'granola' | 'perplexity' | 'anthropic' | 'openai'
 
@@ -88,21 +89,8 @@ export async function loadApiKey(
 async function verifyKey(provider: IntegrationProvider, apiKey: string): Promise<string | null> {
   try {
     if (provider === 'anthropic') {
-      const r = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 8,
-          messages: [{ role: 'user', content: 'ping' }],
-        }),
-      })
-      if (!r.ok) return `Anthropic returned ${r.status}: ${await safeBody(r)}`
-      return null
+      // The claude adapter owns all Anthropic API traffic (vertical rule).
+      return await verifyAnthropicKey(apiKey)
     }
     if (provider === 'openai') {
       const r = await fetch('https://api.openai.com/v1/models', {
@@ -155,12 +143,57 @@ async function safeBody(r: Response): Promise<string> {
 export interface ConnectIntegrationInput {
   provider: IntegrationProvider
   apiKey: string
+  // Granola only: the webhook signing secret rides in the same Vault record.
+  webhookSecret?: string
 }
 
 export interface ConnectResult {
   ok: boolean
   error?: string
   status?: IntegrationStatus
+}
+
+// Persistence half of connect — exported separately so tests can exercise the
+// save/merge semantics without a live provider ping.
+export async function persistIntegrationKey(
+  ctx: ActionContext,
+  input: ConnectIntegrationInput,
+): Promise<void> {
+  let secret: Record<string, string> = { api_key: input.apiKey }
+  if (input.provider === 'granola') {
+    // Replacing the API key must not wipe a previously-stored webhook secret:
+    // both live in the one Vault record and saveConnection overwrites whole.
+    const existing = await loadConnection<{ api_key: string; webhook_secret?: string }>(
+      ctx.tenantId,
+      'granola',
+    )
+    const webhookSecret = input.webhookSecret?.trim() || existing?.secret.webhook_secret
+    secret = webhookSecret ? { api_key: input.apiKey, webhook_secret: webhookSecret } : secret
+  }
+  await saveConnection(ctx.tenantId, input.provider, secret, {
+    detail: { last_four: input.apiKey.slice(-4) },
+  })
+}
+
+// Connecting/disconnecting an integration is a configuration change; record it
+// through the action layer so Settings activity is auditable like everything
+// else. The payload carries NO secret material — provider + masked key only.
+async function recordIntegrationChange(
+  ctx: ActionContext,
+  provider: string,
+  change: 'connected' | 'disconnected',
+  lastFour: string | null,
+): Promise<void> {
+  await submitAction(ctx, {
+    actionKindName: 'config.change',
+    intentKind: 'adjustment',
+    payload: {
+      target_table: 'legal_integration_connection',
+      change_kind: 'update',
+      after_value: { provider, status: change, ...(lastFour ? { last_four: lastFour } : {}) },
+      change_reason: `integration ${change} via Settings`,
+    },
+  })
 }
 
 export async function connectIntegration(
@@ -170,12 +203,8 @@ export async function connectIntegration(
   const verifyError = await verifyKey(input.provider, input.apiKey)
   if (verifyError) return { ok: false, error: verifyError }
 
-  await saveConnection(
-    ctx.tenantId,
-    input.provider,
-    { api_key: input.apiKey },
-    { detail: { last_four: input.apiKey.slice(-4) } },
-  )
+  await persistIntegrationKey(ctx, input)
+  await recordIntegrationChange(ctx, input.provider, 'connected', input.apiKey.slice(-4))
   const statuses = await listIntegrationStatuses(ctx)
   const status = statuses.find((s) => s.provider === input.provider)
   return { ok: true, status }
@@ -186,4 +215,5 @@ export async function disconnectIntegration(
   provider: IntegrationProvider,
 ): Promise<void> {
   await disconnectProvider(ctx.tenantId, provider)
+  await recordIntegrationChange(ctx, provider, 'disconnected', null)
 }

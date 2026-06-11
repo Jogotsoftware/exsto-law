@@ -1,9 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { loadConnection, markConnectionError } from './connectionStore.js'
 
 // Default to a current Claude 4.x model; allow override via env so we can pin
 // a specific model for evaluation or use the latest as Anthropic publishes new
 // versions.
 const DEFAULT_MODEL = process.env.LEGAL_DRAFTING_MODEL ?? 'claude-sonnet-4-6'
+
+type AnthropicSecret = { api_key: string }
 
 export interface ClaudeDraftRequest {
   prompt: string
@@ -27,33 +30,79 @@ export interface ClaudeDraftResult {
   rawResponse: string
 }
 
-let client: Anthropic | undefined
-
-function getClient(): Anthropic {
-  if (!client) {
-    const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      throw new Error(
-        'ANTHROPIC_API_KEY is required for the legal drafting adapter. ' +
-          'Set it in .env.local for local runs or via the worker env in deployment.',
-      )
-    }
-    client = new Anthropic({ apiKey })
+// Key precedence: the tenant's Settings-managed key (Vault, via the
+// 'anthropic' integration connection) beats the platform-default env var —
+// that is the contract the Settings card promises. Resolved per call so a key
+// saved or replaced in the UI takes effect on the next draft, no restart.
+export async function resolveAnthropicApiKey(
+  tenantId: string | null,
+): Promise<{ apiKey: string; source: 'connection' | 'env' }> {
+  if (tenantId) {
+    const conn = await loadConnection<AnthropicSecret>(tenantId, 'anthropic')
+    if (conn?.secret.api_key) return { apiKey: conn.secret.api_key, source: 'connection' }
   }
-  return client
+  const envKey = process.env.ANTHROPIC_API_KEY
+  if (envKey) return { apiKey: envKey, source: 'env' }
+  throw new Error(
+    'No Anthropic API key available. Connect Anthropic in Settings → Integrations, ' +
+      'or set ANTHROPIC_API_KEY as the platform default.',
+  )
+}
+
+// Connectivity check used by Settings before persisting a pasted key. Lives
+// here so this adapter stays the only place that talks to the Anthropic API.
+// Returns null when the key works, otherwise a user-facing error string.
+export async function verifyAnthropicKey(apiKey: string): Promise<string | null> {
+  try {
+    const anthropic = new Anthropic({ apiKey })
+    await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 8,
+      messages: [{ role: 'user', content: 'ping' }],
+    })
+    return null
+  } catch (err) {
+    if (err instanceof Anthropic.APIError) {
+      return `Anthropic returned ${err.status}: ${err.message.slice(0, 200)}`
+    }
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
+function isAuthError(err: unknown): boolean {
+  return err instanceof Anthropic.APIError && (err.status === 401 || err.status === 403)
 }
 
 // Calls Claude with the assembled drafting prompt and parses the response into
 // (a) the document markdown and (b) the structured reasoning trace block.
 // The prompt instructs Claude to produce both in a specific order; we split
 // on the trailing ```json fence.
-export async function callClaudeDrafter(request: ClaudeDraftRequest): Promise<ClaudeDraftResult> {
-  const anthropic = getClient()
-  const response = await anthropic.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: request.maxTokens ?? 8000,
-    messages: [{ role: 'user', content: request.prompt }],
-  })
+export async function callClaudeDrafter(
+  tenantId: string | null,
+  request: ClaudeDraftRequest,
+): Promise<ClaudeDraftResult> {
+  const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
+  const anthropic = new Anthropic({ apiKey })
+  let response: Anthropic.Message
+  try {
+    response = await anthropic.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: request.maxTokens ?? 8000,
+      messages: [{ role: 'user', content: request.prompt }],
+    })
+  } catch (err) {
+    // A rejected Settings-managed key flips the connection to 'error' so the
+    // integration card surfaces the broken sync instead of failing silently
+    // in the worker log.
+    if (source === 'connection' && tenantId && isAuthError(err)) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await markConnectionError(tenantId, 'anthropic', `Drafting failed: ${msg}`)
+      throw new Error(
+        'Anthropic rejected the connected API key. Replace it in Settings → Integrations.',
+      )
+    }
+    throw err
+  }
 
   const textBlock = response.content.find((block) => block.type === 'text')
   if (!textBlock || textBlock.type !== 'text') {
