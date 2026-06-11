@@ -28,8 +28,8 @@ One command does everything:
 
 ```bash
 DATABASE_URL=<clone owner url> pnpm upgrade            # to foundation/main
-# or a specific release:
-DATABASE_URL=… node scripts/upgrade-foundation.mjs --to foundation/v1.1.0
+# or a specific release (tag refs resolve via the fetched tag namespace):
+DATABASE_URL=… node scripts/upgrade-foundation.mjs --to v1.0.2
 # first time (no remote yet):
 DATABASE_URL=… node scripts/upgrade-foundation.mjs --foundation https://github.com/Jogotsoftware/exsto.git
 ```
@@ -42,8 +42,10 @@ DATABASE_URL=… node scripts/upgrade-foundation.mjs --foundation https://github
    cross a **major** boundary unless `docs/upgrades/<from>-to-<to>.md` exists (or
    `--force-major`) — breaking changes need a written guide.
 4. **Syncs foundation-owned paths** at the target ref (migrations, substrate
-   packages, adapters, skills, ADRs, VERSION). It NEVER touches `verticals/`, your
-   vertical app, `supabase/migrations_vertical/`, or `.env.local`.
+   packages, adapters, skills, ADRs, the invariant test suite, VERSION). It NEVER
+   touches `verticals/`, your vertical app, `supabase/migrations_vertical/`,
+   `vitest.config.ts`, or `.env.local`. It then **re-executes itself** so the rest
+   of the run uses the target version's own tooling.
 5. `pnpm install && pnpm build`.
 6. Applies **core** migrations (`supabase db push`) then **vertical** migrations
    (`scripts/migrate-vertical.mjs`).
