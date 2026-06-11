@@ -36,6 +36,10 @@ export function registerActionHandler(actionKindName: string, handler: ActionEff
   actionHandlers.set(actionKindName, handler)
 }
 
+export function hasActionHandler(actionKindName: string): boolean {
+  return actionHandlers.has(actionKindName)
+}
+
 export function clearActionHandlers(): void {
   actionHandlers.clear()
 }
@@ -73,6 +77,21 @@ async function submitActionInner(ctx: ActionContext, input: ActionInput): Promis
     const kind = kindResult.rows[0]!
     if (kind.requires_reasoning_trace && !input.reasoningTraceId) {
       throw new Error(`Action kind ${input.actionKindName} requires a reasoning trace.`)
+    }
+
+    // v1.0.1: an unregistered handler is a hard failure BEFORE anything is
+    // recorded. Recording an action row with zero effects would be a silent lie
+    // in the audit trail (invariant 9: the log mirrors real effects). The check
+    // sits ahead of the INSERT so nothing — no action row, no events, no
+    // partial state — exists for a rejected submission; the surrounding
+    // transaction would also roll back any earlier statements.
+    const handler = actionHandlers.get(input.actionKindName)
+    if (!handler) {
+      throw new Error(
+        `No registered action handler for kind '${input.actionKindName}'. ` +
+          `Refusing to record an effect-less action. Import the package that registers ` +
+          `this handler (e.g. @exsto/primitives for the generic kinds) before submitting.`,
+      )
     }
 
     const hlc = nextHlc()
@@ -114,8 +133,7 @@ async function submitActionInner(ctx: ActionContext, input: ActionInput): Promis
       ],
     )
 
-    const handler = actionHandlers.get(input.actionKindName)
-    const effects = handler ? [await handler(ctx, client, input.payload, actionId)] : []
+    const effects = [await handler(ctx, client, input.payload, actionId)]
 
     return { actionId, effects }
   })

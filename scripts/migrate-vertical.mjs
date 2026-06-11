@@ -59,7 +59,11 @@ async function main() {
     let count = 0
     for (const file of files) {
       const version = file.replace(/_.*$/, '').replace(/\.sql$/, '')
-      const sql = readFileSync(join(DIR, file), 'utf8')
+      // Normalize line endings before hashing AND applying: on Windows, git's
+      // autocrlf re-materializes files with CRLF, which silently changed the
+      // checksum of already-applied migrations (first real-world upgrade drill,
+      // exsto-law -> v1.0.1). Ledger checksums are LF-based.
+      const sql = readFileSync(join(DIR, file), 'utf8').replace(/\r\n/g, '\n')
       const checksum = createHash('sha256').update(sql).digest('hex')
 
       if (applied.has(version)) {

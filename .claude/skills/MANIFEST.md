@@ -18,6 +18,7 @@ Hand-written, grounded in real migrations/primitives/tools, shipped in every clo
 | [exsto-query-substrate](exsto-query-substrate/SKILL.md) | Bitemporal reads done right (current / as-of / history); knowability, confidence, provenance, polarity; read as `authenticated`. **(gold-standard reference)** |
 | [exsto-ai-operation](exsto-ai-operation/SKILL.md) | AI actions record a linked reasoning trace and write only through the action layer; honest confidence + autonomy tier. |
 | [exsto-bootstrap-tenant](exsto-bootstrap-tenant/SKILL.md) | Correct, idempotent order to create a tenant (tenant → actor → kinds) so no half-formed tenants. |
+| [exsto-external-api](exsto-external-api/SKILL.md) | Consume external services: raw_event_log first, worker-run idempotent projection, verified signatures, server-side tenant resolution, secrets in Vault. Grounded in the exsto-law Granola/Google reference implementations. |
 
 ## Meta / lifecycle skills
 

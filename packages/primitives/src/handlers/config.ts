@@ -116,3 +116,54 @@ registerActionHandler('kind.define', async (ctx, client: DbClient, payload, acti
 
   return { definitionId, registry: p.registry, kindName: p.kind_name }
 })
+
+// ---------------------------------------------------------------------------
+// config.change — generic configuration-change recorder (invariant 18). The
+// effect is the append-only configuration_change row itself; richer flows
+// (kind.define, workflow.define, ...) have their own dedicated handlers.
+// Registered so the foundation's own seed vocabulary is handler-complete
+// (v1.0.1: unregistered submissions hard-fail).
+// ---------------------------------------------------------------------------
+interface ConfigChangePayload {
+  target_table: string
+  target_id?: string | null
+  change_kind: 'create' | 'update' | 'archive' | string
+  before_value?: Record<string, unknown> | null
+  after_value?: Record<string, unknown> | null
+  change_reason?: string | null
+  blast_radius?: string | null
+}
+
+registerActionHandler('config.change', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as ConfigChangePayload
+  const res = await client.query<{ id: string }>(
+    `INSERT INTO configuration_change
+       (tenant_id, action_id, target_table, target_id, change_kind,
+        before_value, after_value, change_reason, blast_radius, authoring_actor_id)
+     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10)
+     RETURNING id`,
+    [
+      ctx.tenantId,
+      actionId,
+      p.target_table,
+      p.target_id ?? null,
+      p.change_kind,
+      p.before_value ? JSON.stringify(p.before_value) : null,
+      p.after_value ? JSON.stringify(p.after_value) : null,
+      p.change_reason ?? null,
+      p.blast_radius ?? null,
+      ctx.actorId,
+    ],
+  )
+  return { configurationChangeId: res.rows[0]!.id }
+})
+
+// ---------------------------------------------------------------------------
+// system.bootstrap — the bootstrap/seed marker action. Its substantive effects
+// are the seed rows themselves (written by the owner-run migration/seed); the
+// action row records WHO ran a bootstrap and WHEN with provenance. Registered
+// as an explicit marker so the seed vocabulary is handler-complete.
+// ---------------------------------------------------------------------------
+registerActionHandler('system.bootstrap', async (_ctx, _client, payload) => {
+  return { bootstrap: true, detail: payload ?? {} }
+})
