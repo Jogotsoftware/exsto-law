@@ -1,10 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { createHash } from 'node:crypto'
+import { nextHlc } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 
 export async function lookupKindId(
   client: DbClient,
-  table: 'entity_kind_definition' | 'attribute_kind_definition' | 'relationship_kind_definition',
+  table:
+    | 'entity_kind_definition'
+    | 'attribute_kind_definition'
+    | 'relationship_kind_definition'
+    | 'event_kind_definition'
+    | 'outcome_kind_definition',
   tenantId: string,
   kindName: string,
 ): Promise<string> {
@@ -103,6 +109,59 @@ export async function insertRelationship(
     ],
   )
   return relationshipId
+}
+
+// Append an immutable lifecycle event inside the current action's transaction.
+// Mirrors the generic event.record primitive's insert (invariants 14, 15).
+export async function insertEvent(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    eventKindName: string
+    primaryEntityId?: string | null
+    secondaryEntityIds?: string[]
+    data?: Record<string, unknown>
+    sourceType?: 'human' | 'integration' | 'agent' | 'system'
+    sourceRef?: string | null
+    occurredAt?: string | null
+  },
+): Promise<string> {
+  const eventKindId = await lookupKindId(
+    client,
+    'event_kind_definition',
+    args.tenantId,
+    args.eventKindName,
+  )
+  const hlc = nextHlc()
+  const eventId = randomUUID()
+  await client.query(
+    `INSERT INTO event (
+       id, tenant_id, action_id, event_kind_id, primary_entity_id,
+       secondary_entity_ids, payload, confidence, source_type, source_ref,
+       occurred_at, occurred_at_precision,
+       hlc_physical_time, hlc_logical_counter, hlc_source_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,
+              COALESCE($11::timestamptz, now()),$12,$13,$14,$15)`,
+    [
+      eventId,
+      args.tenantId,
+      args.actionId,
+      eventKindId,
+      args.primaryEntityId ?? null,
+      args.secondaryEntityIds ?? [],
+      JSON.stringify(args.data ?? {}),
+      1.0,
+      args.sourceType ?? 'human',
+      args.sourceRef ?? null,
+      args.occurredAt ?? null,
+      'exact_instant',
+      hlc.physical_time,
+      hlc.logical_counter,
+      hlc.source_id,
+    ],
+  )
+  return eventId
 }
 
 export async function insertContentBlob(

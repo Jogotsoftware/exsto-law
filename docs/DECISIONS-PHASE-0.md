@@ -56,3 +56,41 @@ build directive's autonomy protocol. Each entry: what, why, where it lands.
 9. **No `ANTHROPIC_API_KEY` found in this environment's related env files.** WP4
    (drafting) requires one. Queued to request from the founder at the next legitimate
    stop; drafting is built and tested behind the worker interface either way.
+
+## WP1 (PR #2)
+
+10. **Service kinds = `workflow_definition` rows.** Route (auto/manual) + intake form
+    binding live in `transitions` jsonb; states = matter lifecycle. Zero new tables;
+    Phase 1's library layer evolves these as config. Seed anchors them to an honest
+    `system.bootstrap` action row (`workflow_definition.action_id` is NOT NULL).
+11. **Google OAuth client creds pulled from wedge Netlify env (founder-approved).**
+    Secret came back 20 chars (possibly scope-masked) — proven or disproven by the
+    WP2 connect round-trip. No Anthropic/Granola keys existed on that site.
+12. **Directive's skills map names `exsto-external-api`, which doesn't exist in the
+    skill library.** Closest guidance: `exsto-rest-api` (exposing REST) + ingestion
+    patterns in docs/patterns + ADRs (raw_event_log, projection workers). Flagged for
+    the phase report.
+
+## WP2 design plan (continuity note — written before building)
+
+- **Wedge-era vertical code in this template references tables that don't exist on
+  the certified clone** (`service_definition`, `document_template`,
+  `service_document_template`, `google_oauth`, `integration_credential`) and stores
+  tokens plaintext (violates REQ-SEC-01). WP2 replaces:
+  - services → read from `workflow_definition` service kinds + repo-file intake forms
+    (Lesson #3: templates-as-repo-files OK in Phase 0, loader stays library-ready)
+  - credential storage → Supabase **Vault** (`vault.create_secret` / rotated by name
+    `legal/<provider>/<tenant_id>`), plus one vertical TABLE
+    `legal_integration_connection` for connection METADATA only (provider, status,
+    account_email, scope, vault secret name, expiry) — RLS'd, no secret material.
+    Classified as an operational lifecycle table (ADR 0039 analog).
+- **Action vocabulary rewire:** intake flow = `intake.submit` (client_contact +
+  questionnaire_response) → `matter.open` (matter) → `booking.create` (calendar event
+  + schedule attrs), replacing the wedge's monolithic `legal.booking.submit`.
+- **Double-booking guard:** `pg_advisory_xact_lock` on (tenant, slot) inside the
+  booking handler + app-level overlap check. The wedge's unique index lived in a
+  wedge-only migration; adding an index to the core `entity` table from a vertical
+  migration would touch core namespace — rejected.
+- **Attorney auth:** Supabase Auth Google SSO (REQ-AUTH-01); provider enablement is
+  a dashboard step for the founder OR PAT-based config (offered; pending). Code path
+  built regardless; public-intake actor handles the anonymous portal.

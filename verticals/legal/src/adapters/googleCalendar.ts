@@ -1,5 +1,10 @@
 import { google, type calendar_v3 } from 'googleapis'
-import { withSuperuser, type DbClient } from '@exsto/shared'
+import {
+  saveConnection,
+  loadConnection,
+  disconnect,
+  markConnectionError,
+} from './connectionStore.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // OAuth + token storage
@@ -57,35 +62,26 @@ export function buildOAuthClient(
   return new google.auth.OAuth2(cfg.clientId, cfg.clientSecret, redirectOverride ?? cfg.redirectUri)
 }
 
-export async function loadCredentials(tenantId: string): Promise<GoogleOAuthCredentials | null> {
-  return withSuperuser(async (client) => loadCredentialsWith(client, tenantId))
+// Secret material lives in Vault (connectionStore); only connection metadata
+// (status, email, scope, expiry) is queryable. REQ-SEC-01.
+type GoogleSecret = {
+  accessToken: string
+  refreshToken: string
+  expiresAt: string // ISO
+  scope: string
+  calendarId: string
 }
 
-async function loadCredentialsWith(
-  client: DbClient,
-  tenantId: string,
-): Promise<GoogleOAuthCredentials | null> {
-  const res = await client.query<{
-    account_email: string
-    access_token: string
-    refresh_token: string
-    expires_at: Date
-    scope: string
-    calendar_id: string
-  }>(
-    `SELECT account_email, access_token, refresh_token, expires_at, scope, calendar_id
-     FROM google_oauth WHERE tenant_id = $1`,
-    [tenantId],
-  )
-  const row = res.rows[0]
-  if (!row) return null
+export async function loadCredentials(tenantId: string): Promise<GoogleOAuthCredentials | null> {
+  const conn = await loadConnection<GoogleSecret>(tenantId, 'google')
+  if (!conn) return null
   return {
-    accountEmail: row.account_email,
-    accessToken: row.access_token,
-    refreshToken: row.refresh_token,
-    expiresAt: new Date(row.expires_at),
-    scope: row.scope,
-    calendarId: row.calendar_id,
+    accountEmail: conn.info.accountEmail ?? '',
+    accessToken: conn.secret.accessToken,
+    refreshToken: conn.secret.refreshToken,
+    expiresAt: new Date(conn.secret.expiresAt),
+    scope: conn.secret.scope,
+    calendarId: conn.secret.calendarId,
   }
 }
 
@@ -93,35 +89,22 @@ export async function saveCredentials(
   tenantId: string,
   creds: GoogleOAuthCredentials,
 ): Promise<void> {
-  await withSuperuser(async (client) => {
-    await client.query(
-      `INSERT INTO google_oauth (tenant_id, account_email, access_token, refresh_token, expires_at, scope, calendar_id, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-       ON CONFLICT (tenant_id) DO UPDATE
-       SET account_email = EXCLUDED.account_email,
-           access_token = EXCLUDED.access_token,
-           refresh_token = EXCLUDED.refresh_token,
-           expires_at = EXCLUDED.expires_at,
-           scope = EXCLUDED.scope,
-           calendar_id = EXCLUDED.calendar_id,
-           updated_at = now()`,
-      [
-        tenantId,
-        creds.accountEmail,
-        creds.accessToken,
-        creds.refreshToken,
-        creds.expiresAt,
-        creds.scope,
-        creds.calendarId,
-      ],
-    )
+  const secret: GoogleSecret = {
+    accessToken: creds.accessToken,
+    refreshToken: creds.refreshToken,
+    expiresAt: creds.expiresAt.toISOString(),
+    scope: creds.scope,
+    calendarId: creds.calendarId,
+  }
+  await saveConnection(tenantId, 'google', secret, {
+    accountEmail: creds.accountEmail,
+    scope: creds.scope,
+    expiresAt: creds.expiresAt,
   })
 }
 
 export async function deleteCredentials(tenantId: string): Promise<void> {
-  await withSuperuser(async (client) => {
-    await client.query(`DELETE FROM google_oauth WHERE tenant_id = $1`, [tenantId])
-  })
+  await disconnect(tenantId, 'google')
 }
 
 async function authedClient(tenantId: string) {
@@ -319,6 +302,9 @@ export async function getAvailability(
     console.error(
       `[getAvailability] Google availability failed for tenant ${tenantId}; falling back to stub. Reason: ${reason}`,
     )
+    // Flip the connection to 'error' so Settings shows the broken sync
+    // prominently instead of the UI silently serving stub slots.
+    await markConnectionError(tenantId, 'google', reason).catch(() => {})
     return { slots: getStubAvailability(daysOut), source: 'stub', reason }
   }
 }

@@ -49,6 +49,29 @@ export function loadIntakeQuestionnaire(): IntakeQuestionnaire {
   return cached.intakeQuestionnaireOa
 }
 
+// Intake forms are repo files in Phase 0 (binding Lesson #3: acceptable for now,
+// loader interface stays library-ready so Phase 1 can move them to substrate
+// content rows without call-site changes). Keyed by the intake_form_id each
+// service kind binds in workflow_definition.transitions.
+const INTAKE_FORM_FILES: Record<string, string> = {
+  'nc-llc-single-member-oa-v1': 'intake-questionnaire-oa.json',
+  'nc-llc-multi-member-v1': 'intake-nc-llc-multi-member.json',
+  'something-else-v1': 'intake-something-else.json',
+}
+
+const intakeFormCache = new Map<string, IntakeQuestionnaire>()
+
+export function loadIntakeForm(intakeFormId: string): IntakeQuestionnaire {
+  let form = intakeFormCache.get(intakeFormId)
+  if (!form) {
+    const file = INTAKE_FORM_FILES[intakeFormId]
+    if (!file) throw new Error(`Unknown intake form id: ${intakeFormId}`)
+    form = JSON.parse(readFileSync(resolve(templatesDir, file), 'utf8')) as IntakeQuestionnaire
+    intakeFormCache.set(intakeFormId, form)
+  }
+  return form
+}
+
 export function loadOperatingAgreementTemplate(): string {
   if (!cached.operatingAgreementTemplate) {
     cached.operatingAgreementTemplate = readFileSync(
