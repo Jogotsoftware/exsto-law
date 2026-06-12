@@ -95,11 +95,14 @@ run('service questionnaire editor (live DB)', { timeout: 90_000 }, () => {
     const members = fetched!.sections[0]!.fields.find((f) => f.id === 'members')!
     expect(members.memberFields?.map((m) => m.id)).toEqual(['name'])
 
-    // The write went through the versioned upsert path: version 2 is active, v1 sealed.
+    // The write went through the versioned upsert path: version 2 is current, v1
+    // sealed. (PR4: the new version carries the prior status forward — a freshly
+    // created service is disabled, so the current row stays 'deprecated' until the
+    // attorney enables it. The contract here is the bitemporal seal, not status.)
     const after = await activeRows(key)
     expect(after.rowCount).toBe(1)
     expect(after.rows[0]!.version).toBe(2)
-    expect(after.rows[0]!.status).toBe('active')
+    expect(after.rows[0]!.status).toBe('deprecated')
     const sealed = await db.query<{ status: string; valid_to: string | null }>(
       `SELECT status, valid_to FROM workflow_definition WHERE id = $1`,
       [v1.id],

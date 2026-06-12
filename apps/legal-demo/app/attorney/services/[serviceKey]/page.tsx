@@ -26,6 +26,12 @@ interface FormState {
   sortOrder: string
 }
 
+interface Completeness {
+  serviceKey: string
+  ready: boolean
+  missing: string[]
+}
+
 const EMPTY: FormState = {
   displayName: '',
   description: '',
@@ -42,8 +48,10 @@ export default function ServiceEditorPage() {
 
   const [form, setForm] = useState<FormState | null>(isNew ? EMPTY : null)
   const [meta, setMeta] = useState<ServiceDefinition | null>(null)
+  const [completeness, setCompleteness] = useState<Completeness | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [enabling, setEnabling] = useState(false)
   const [saved, setSaved] = useState(false)
 
   const load = useCallback(async () => {
@@ -65,6 +73,11 @@ export default function ServiceEditorPage() {
         documents: r.service.documents.join(', '),
         sortOrder: String(r.service.sortOrder),
       })
+      const c = await callAttorneyMcp<Completeness>({
+        toolName: 'legal.service.completeness',
+        input: { serviceKey },
+      })
+      setCompleteness(c)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -73,6 +86,22 @@ export default function ServiceEditorPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  async function setActive(active: boolean) {
+    setEnabling(true)
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.service.set_active',
+        input: { serviceKey, active },
+      })
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setEnabling(false)
+    }
+  }
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => (f ? { ...f, [key]: value } : f))
@@ -105,7 +134,10 @@ export default function ServiceEditorPage() {
           toolName: 'legal.service.create',
           input: base,
         })
-        router.push(`/attorney/services/${r.service.serviceKey}`)
+        // Guided flow: a new service is created disabled with an empty
+        // questionnaire, so send the attorney straight into the questionnaire
+        // editor (step ②) rather than back to a half-built editor page.
+        router.push(`/attorney/services/${r.service.serviceKey}/questionnaire`)
         return
       }
       await callAttorneyMcp({
@@ -152,6 +184,18 @@ export default function ServiceEditorPage() {
           Saving creates a new immutable version. The intake form binding and workflow route carry
           forward unless changed here.
         </p>
+      )}
+
+      {!isNew && meta && (
+        <SetupChecklist
+          serviceKey={serviceKey}
+          route={meta.route}
+          isActive={meta.isActive}
+          completeness={completeness}
+          enabling={enabling}
+          onEnable={() => setActive(true)}
+          onDisable={() => setActive(false)}
+        />
       )}
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -229,5 +273,126 @@ export default function ServiceEditorPage() {
         </section>
       )}
     </main>
+  )
+}
+
+// The guided setup checklist + enable gate (PR4). Steps mirror the build flow:
+// ① metadata (done once the row exists) ② questionnaire ③ prompt (auto only)
+// ④ Enable. Steps ②/③ derive their status from the server's completeness check,
+// so the UI and the set_active handler guard never disagree. The Enable button is
+// disabled until completeness.ready; the remaining reasons are listed beneath it.
+function SetupChecklist({
+  serviceKey,
+  route,
+  isActive,
+  completeness,
+  enabling,
+  onEnable,
+  onDisable,
+}: {
+  serviceKey: string
+  route: 'auto' | 'manual'
+  isActive: boolean
+  completeness: { ready: boolean; missing: string[] } | null
+  enabling: boolean
+  onEnable: () => void
+  onDisable: () => void
+}) {
+  const missing = completeness?.missing ?? []
+  const needsQuestionnaire = missing.some((m) => m.toLowerCase().includes('questionnaire'))
+  const needsPrompt = missing.some((m) => m.toLowerCase().includes('prompt'))
+  const ready = completeness?.ready ?? false
+
+  const steps: { n: string; label: string; done: boolean; href?: string }[] = [
+    { n: '①', label: 'Service details', done: true },
+    {
+      n: '②',
+      label: 'Questionnaire',
+      done: !needsQuestionnaire,
+      href: `/attorney/services/${serviceKey}/questionnaire`,
+    },
+  ]
+  if (route === 'auto') {
+    steps.push({
+      n: '③',
+      label: 'Drafting prompt',
+      done: !needsPrompt,
+      href: `/attorney/services/${serviceKey}/prompt`,
+    })
+  }
+
+  return (
+    <section style={{ borderLeft: '3px solid var(--border)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
+        <strong>Setup checklist</strong>
+        <span className={`badge ${isActive ? 'ok' : ''}`} style={{ marginLeft: 'auto' }}>
+          {isActive ? 'Enabled' : 'Disabled'}
+        </span>
+      </div>
+
+      <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '0.4rem' }}>
+        {steps.map((s) => (
+          <li
+            key={s.n}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}
+          >
+            <span aria-hidden style={{ color: s.done ? '#166534' : 'var(--muted)' }}>
+              {s.done ? '✓' : '◯'}
+            </span>
+            <span style={{ color: s.done ? 'inherit' : 'var(--muted)' }}>{s.label}</span>
+            {s.href && (
+              <Link href={s.href} className="back-link" style={{ marginLeft: '0.4rem' }}>
+                {s.done ? 'Edit' : 'Set up'}
+              </Link>
+            )}
+          </li>
+        ))}
+        <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}>
+          <span aria-hidden style={{ color: isActive ? '#166534' : 'var(--muted)' }}>
+            {isActive ? '✓' : '◯'}
+          </span>
+          <span style={{ color: isActive ? 'inherit' : 'var(--muted)' }}>Enable for booking</span>
+        </li>
+      </ol>
+
+      <div style={{ marginTop: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+        {isActive ? (
+          <button className="danger outline" onClick={onDisable} disabled={enabling}>
+            {enabling ? '…' : 'Disable service'}
+          </button>
+        ) : (
+          <button
+            className="primary"
+            onClick={onEnable}
+            disabled={enabling || !ready || completeness === null}
+            title={
+              ready ? 'Make this service bookable' : `Finish setup first: ${missing.join('; ')}`
+            }
+          >
+            {enabling ? 'Enabling…' : 'Enable service'}
+          </button>
+        )}
+        {!isActive && !ready && completeness && (
+          <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+            Not bookable yet — complete the steps above.
+          </span>
+        )}
+      </div>
+
+      {!isActive && missing.length > 0 && (
+        <ul
+          style={{
+            margin: '0.6rem 0 0',
+            paddingLeft: '1.1rem',
+            color: '#991b1b',
+            fontSize: '0.82rem',
+          }}
+        >
+          {missing.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }

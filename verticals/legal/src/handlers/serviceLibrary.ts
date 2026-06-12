@@ -17,6 +17,11 @@
 import { randomUUID } from 'node:crypto'
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
+// Pure completeness rules shared with the API/UI. Importing from the api module is
+// safe (no cycle): services.ts depends only on the substrate/templates, never on
+// handlers. The gate logic lives in ONE place so the handler guard and the UI's
+// readiness check can never drift apart.
+import { completenessFromTransitions } from '../api/services.js'
 
 interface ServiceTransitions {
   route?: string
@@ -36,6 +41,7 @@ interface ServiceWorkflowRow {
   participating_entity_kinds: unknown
   display_name: string
   description: string | null
+  status: string
 }
 
 // Slugify a display name into a stable kind_name. Mirrors the (deleted)
@@ -74,7 +80,7 @@ async function currentActive(
   kindName: string,
 ): Promise<ServiceWorkflowRow | null> {
   const res = await client.query<ServiceWorkflowRow>(
-    `SELECT id, version, states, transitions, participating_entity_kinds, display_name, description
+    `SELECT id, version, states, transitions, participating_entity_kinds, display_name, description, status
        FROM workflow_definition
       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
       ORDER BY version DESC
@@ -171,12 +177,22 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
     )
   }
 
+  // Status on the new version (PR4):
+  //  - CREATE: a brand-new service starts 'deprecated' (disabled) — it is not yet
+  //    complete (no questionnaire), so it must NOT appear on the public booking
+  //    page until the attorney finishes it and explicitly enables it through the
+  //    gated set_active path. (The table default is 'active', so this is set
+  //    explicitly.)
+  //  - UPDATE: carry the prior row's status forward, so saving a new version of a
+  //    LIVE service keeps it live and editing a disabled one keeps it disabled.
+  //    Enable/disable stays the sole job of set_active.
+  const status = isUpdate ? (prior?.status ?? 'active') : 'deprecated'
   const newId = randomUUID()
   await client.query(
     `INSERT INTO workflow_definition
        (id, tenant_id, action_id, kind_name, display_name, description,
-        states, transitions, participating_entity_kinds, version)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10)`,
+        states, transitions, participating_entity_kinds, version, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)`,
     [
       newId,
       ctx.tenantId,
@@ -188,6 +204,7 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
       JSON.stringify(merged),
       JSON.stringify(participating),
       nextVersion,
+      status,
     ],
   )
 
@@ -222,9 +239,10 @@ registerActionHandler('legal.service.set_active', async (ctx, client, payload, a
 
   // Find the current row REGARDLESS of status (re-enable must reach a
   // deprecated row). The current row is the latest version that is not sealed
-  // by a newer version, i.e. valid_to IS NULL.
-  const res = await client.query<{ id: string; status: string }>(
-    `SELECT id, status
+  // by a newer version, i.e. valid_to IS NULL. Pull transitions too so the enable
+  // gate can read the service's config directly (PR4).
+  const res = await client.query<{ id: string; status: string; transitions: ServiceTransitions }>(
+    `SELECT id, status, transitions
        FROM workflow_definition
       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
       ORDER BY version DESC
@@ -233,6 +251,20 @@ registerActionHandler('legal.service.set_active', async (ctx, client, payload, a
   )
   const row = res.rows[0]
   if (!row) throw new Error(`Service not found: ${p.service_key}`)
+
+  // ENABLE GATE (PR4): a service must be complete before it can go live. A
+  // service with no questionnaire — or an auto-route service missing a drafting
+  // prompt + required slots for any document kind — is not bookable. Disabling is
+  // always allowed (an incomplete service should be disableable). The rules come
+  // from the shared pure helper so they match the API/UI completeness check.
+  if (p.active) {
+    const completeness = completenessFromTransitions(p.service_key, row.transitions)
+    if (!completeness.ready) {
+      throw new Error(
+        `Cannot enable "${p.service_key}" — it is not complete yet: ${completeness.missing.join('; ')}.`,
+      )
+    }
+  }
 
   const nextStatus = p.active ? 'active' : 'deprecated'
   await client.query(

@@ -10,6 +10,7 @@ import {
   getDraftingPrompt,
   getQuestionnaire,
   listServicesIncludingInactive,
+  serviceCompleteness,
   setServiceActive,
   updateDraftingPrompt,
   updateQuestionnaire,
@@ -17,6 +18,7 @@ import {
   type CreateServiceInput,
   type DraftingPromptDoc,
   type QuestionnaireDoc,
+  type ServiceCompleteness,
   type ServiceDefinition,
   type UpdateServiceMetadataInput,
 } from '../../index.js'
@@ -54,10 +56,21 @@ const setActiveTool: Tool<
 > = {
   name: 'legal.service.set_active',
   description:
-    'Enable or disable a service offering without writing a new version. Disabled services disappear from the public booking page but their definition persists.',
+    'Enable or disable a service offering without writing a new version. Enabling is gated on completeness: a service with no questionnaire — or an auto-route service missing a drafting prompt for any document kind — cannot be enabled (the call throws explaining what is missing). Disabling is always allowed. Disabled services disappear from the public booking page but their definition persists.',
   mode: 'write',
   handler: async (ctx: ActionContext, input) =>
     setServiceActive(ctx, input.serviceKey, input.active),
+}
+
+// Completeness check (PR4). READ — lets the attorney UI gate the "Enable service"
+// button and show exactly what is still missing before an enable would succeed.
+// Attorney-only: NOT in CLIENT_PORTAL_TOOLS (clientPolicy.ts is default-deny).
+const completenessTool: Tool<{ serviceKey: string }, ServiceCompleteness> = {
+  name: 'legal.service.completeness',
+  description:
+    'Check whether a service offering is complete enough to enable (book). Returns { serviceKey, ready, missing }: ready is true only when the service has a questionnaire and — for auto-route services — a drafting prompt with all required slots for every document kind. missing lists the human-readable reasons it is not yet enableable.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => serviceCompleteness(ctx, input.serviceKey),
 }
 
 // Questionnaire editor (PR2). Read returns the resolved intake form (in-app config
@@ -128,6 +141,7 @@ registerTool(listAllTool)
 registerTool(createTool)
 registerTool(updateTool)
 registerTool(setActiveTool)
+registerTool(completenessTool)
 registerTool(questionnaireGetTool)
 registerTool(questionnaireUpdateTool)
 registerTool(promptGetTool)
