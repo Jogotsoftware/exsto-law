@@ -125,23 +125,45 @@ export async function runGranolaProjection(
   }
 }
 
-// Single-member (auto-route) matters get their drafts queued the moment the
-// transcript lands (REQ-DRAFT-01/05). Manual-route matters get nothing here —
-// the attorney email is their path (WP6).
+// Auto-route matters get their drafts queued the moment the transcript lands
+// (REQ-DRAFT-01/05). The set of documents to draft is config-as-data: it is the
+// service's transitions.documents (single-member = OA + engagement letter;
+// multi-member = OA), NOT a hardcoded pair — so flipping a service to auto in
+// config is all it takes for its transcript to trigger the right drafts.
+// Manual-route matters get nothing here — the attorney email is their path (WP6).
+const SUPPORTED_DRAFT_KINDS = new Set<string>(['operating_agreement', 'engagement_letter'])
+
 async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: string): Promise<void> {
-  const route = await withActionContext(ctx, async (client) => {
-    const res = await client.query<{ route: string | null }>(
-      `SELECT e.metadata->>'workflow_route' AS route FROM entity e
-       WHERE e.tenant_id = $1 AND e.id = $2`,
+  const matterRoute = await withActionContext(ctx, async (client) => {
+    const res = await client.query<{ route: string | null; service_key: string | null }>(
+      `SELECT e.metadata->>'workflow_route' AS route,
+              (SELECT a.value #>> '{}'
+                 FROM attribute a
+                 JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+                WHERE a.tenant_id = e.tenant_id AND a.entity_id = e.id
+                  AND akd.kind_name = 'service_key'
+                ORDER BY a.valid_from DESC LIMIT 1) AS service_key
+         FROM entity e
+        WHERE e.tenant_id = $1 AND e.id = $2`,
       [ctx.tenantId, matterEntityId],
     )
-    return res.rows[0]?.route ?? null
+    return res.rows[0] ?? null
   })
-  if (route !== 'auto') return
+  if (matterRoute?.route !== 'auto') return
+
+  // Resolve the document kinds from the service config. Fall back to the OA when
+  // the service is auto but lists no documents, so an auto service is never silent.
+  const { getService } = await import('./services.js')
+  const service = matterRoute.service_key ? await getService(ctx, matterRoute.service_key) : null
+  const configured = (service?.documents ?? []).filter((k) => SUPPORTED_DRAFT_KINDS.has(k))
+  const documentKinds = configured.length > 0 ? configured : ['operating_agreement']
 
   const { requestDraft } = await import('./generateDraft.js')
-  for (const documentKind of ['operating_agreement', 'engagement_letter'] as const) {
-    await requestDraft(ctx, { matterEntityId, documentKind })
+  for (const documentKind of documentKinds) {
+    await requestDraft(ctx, {
+      matterEntityId,
+      documentKind: documentKind as 'operating_agreement' | 'engagement_letter',
+    })
   }
 }
 

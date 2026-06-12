@@ -125,7 +125,10 @@ run('booking flow (live DB)', { timeout: 60_000 }, () => {
     await expect(submitBooking(ctx, mk(2))).rejects.toThrow(/SLOT_TAKEN/)
   })
 
-  it('multi-member routes manual', async () => {
+  // Booking stamps the service's route onto the matter. nc_llc_multi_member is now
+  // auto (vertical migration 0013); 'something_else' is the catch-all that stays
+  // manual. Both directions are exercised so the route-wiring is covered either way.
+  it('multi-member booking stamps the auto route onto the matter', async () => {
     const { submitBooking } = await import('@exsto/legal')
     const slot = randomSlot()
     const result = await submitBooking(ctx, {
@@ -134,6 +137,29 @@ run('booking flow (live DB)', { timeout: 60_000 }, () => {
       attributionSource: 'vertical-test',
       serviceKey: 'nc_llc_multi_member',
       intakeResponses: { company_name: 'MM Test LLC', member_count: '3' },
+      scheduledAtIso: slot.startIso,
+      scheduledEndIso: slot.endIso,
+    })
+    const booked = result.effects[0] as { matterEntityId: string }
+    const route = await db.query<{ value: string }>(
+      `SELECT a.value #>> '{}' AS value FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+       WHERE a.tenant_id=$1 AND a.entity_id=$2 AND akd.kind_name='workflow_route'
+       ORDER BY a.valid_from DESC LIMIT 1`,
+      [TENANT, booked.matterEntityId],
+    )
+    expect(route.rows[0].value).toBe('auto')
+  })
+
+  it('catch-all (something_else) booking stamps the manual route onto the matter', async () => {
+    const { submitBooking } = await import('@exsto/legal')
+    const slot = randomSlot()
+    const result = await submitBooking(ctx, {
+      clientFullName: 'WP2 Catch All',
+      clientEmail: `wp2-ce-${randomUUID().slice(0, 8)}@example.test`,
+      attributionSource: 'vertical-test',
+      serviceKey: 'something_else',
+      intakeResponses: { matter_description: 'general consult' },
       scheduledAtIso: slot.startIso,
       scheduledEndIso: slot.endIso,
     })

@@ -10,7 +10,7 @@ import { callClaudeDrafter } from '../adapters/claude.js'
 import {
   loadDraftingPrompt,
   loadEngagementLetterTemplate,
-  loadOperatingAgreementTemplate,
+  resolveOperatingAgreementTemplate,
 } from '../templates/loader.js'
 import { getDraftingPrompt } from './services.js'
 import { getMatter } from '../queries/matters.js'
@@ -102,10 +102,15 @@ export async function runDraftGeneration(
   }
 
   const m = matter!
+  // Document-BODY selection is service-aware: an operating_agreement for a
+  // multi-member service resolves to the multi-member body (member schedule,
+  // ownership %, voting/distributions by member), every other service keeps the
+  // single-member body. The engagement letter is service-independent. This fills
+  // the {{operating_agreement_template}} slot below.
   const template =
     input.documentKind === 'engagement_letter'
       ? loadEngagementLetterTemplate()
-      : loadOperatingAgreementTemplate()
+      : resolveOperatingAgreementTemplate(m.serviceKey)
 
   // Resolve the drafting prompt from the matter's service config
   // (transitions.drafting.prompts[documentKind]) with a repo-file fallback. The
@@ -182,7 +187,7 @@ export async function runDraftGeneration(
   return generated
 }
 
-interface AssembleArgs {
+export interface AssembleArgs {
   basePrompt: string
   template: string
   questionnaireResponses: Record<string, unknown>
@@ -190,7 +195,10 @@ interface AssembleArgs {
   documentKind: 'operating_agreement' | 'engagement_letter'
 }
 
-function assembleDraftingPrompt(args: AssembleArgs): string {
+// Fills the FIXED three-slot contract from the (config-or-repo) base prompt.
+// Exported so tests can verify slot-filling for a service without a live Claude
+// key (mirrors how draft-flow.test.ts exercises the no-live-key path).
+export function assembleDraftingPrompt(args: AssembleArgs): string {
   // basePrompt is resolved by the caller (config-first, repo fallback). The slot
   // contract is FIXED: these are the same three slots the prompt editor validates.
   return args.basePrompt

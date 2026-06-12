@@ -11,6 +11,7 @@ const templatesDir = resolve(here, '..', '..', 'templates')
 let cached: {
   intakeQuestionnaireOa?: IntakeQuestionnaire
   operatingAgreementTemplate?: string
+  operatingAgreementTemplateMultiMember?: string
   engagementLetterTemplate?: string
   draftingPrompt?: string
 } = {}
@@ -80,6 +81,43 @@ export function loadOperatingAgreementTemplate(): string {
     )
   }
   return cached.operatingAgreementTemplate
+}
+
+// Multi-member NC LLC operating-agreement body. Same mustache-slot contract the
+// drafting prompt expects, but the structure adds the multi-member-specific
+// machinery: a member schedule with ownership %, capital contributions and
+// capital accounts, voting in proportion to ownership, supermajority/deadlock
+// rules, pro-rata distributions, a right of first refusal, and a buy-sell on
+// dissociation. This is a TEMPLATE the attorney reviews in the existing review
+// surface — a first draft, never final legal advice.
+export function loadMultiMemberOperatingAgreementTemplate(): string {
+  if (!cached.operatingAgreementTemplateMultiMember) {
+    cached.operatingAgreementTemplateMultiMember = readFileSync(
+      resolve(templatesDir, 'nc-llc-operating-agreement-multi-member.md'),
+      'utf8',
+    )
+  }
+  return cached.operatingAgreementTemplateMultiMember
+}
+
+// Service keys that draft the MULTI-MEMBER operating-agreement body. The drafting
+// worker selects the document-body template by (document kind, service): an
+// operating_agreement for a multi-member service gets the multi-member body;
+// every other service keeps the single-member body. Config-as-data lives in the
+// service's transitions; this is the thin code-side selector that maps the
+// service kind to its bundled body file (the bodies are repo files in this phase,
+// loader interface stays library-ready — binding Lesson #3).
+const MULTI_MEMBER_SERVICE_KEYS = new Set<string>(['nc_llc_multi_member'])
+
+// Resolve the operating-agreement BODY template for a given service. Single-member
+// (and any unknown service) → the single-member body, so this is strictly additive
+// and cannot break the single-member path. A multi-member service → the
+// multi-member body.
+export function resolveOperatingAgreementTemplate(serviceKey: string | null | undefined): string {
+  if (serviceKey && MULTI_MEMBER_SERVICE_KEYS.has(serviceKey)) {
+    return loadMultiMemberOperatingAgreementTemplate()
+  }
+  return loadOperatingAgreementTemplate()
 }
 
 export function loadEngagementLetterTemplate(): string {

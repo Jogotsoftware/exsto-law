@@ -53,7 +53,9 @@ run('service library (live DB)', { timeout: 90_000 }, () => {
     expect(t.rows[0]?.route).toBe('auto')
     expect(t.rows[0]?.on_transcript).toBe('draft.generate')
 
-    expect(byKey.get('nc_llc_multi_member')?.route).toBe('manual')
+    // nc_llc_multi_member flipped to auto in vertical migration 0013 (parity with
+    // single-member). The catch-all 'something_else' stays manual.
+    expect(byKey.get('nc_llc_multi_member')?.route).toBe('auto')
     expect(byKey.get('something_else')?.route).toBe('manual')
 
     // sort_order backfill keeps the seeded display order stable.
