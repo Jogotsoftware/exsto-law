@@ -132,6 +132,11 @@ export default function ServiceEditorPage() {
         <Link href="/attorney/services" className="back-link" style={{ marginLeft: 'auto' }}>
           Back to services
         </Link>
+        {!isNew && (
+          <Link href={`/attorney/services/${serviceKey}/questionnaire`} className="back-link">
+            Edit questionnaire
+          </Link>
+        )}
         <button className="primary" onClick={save} disabled={busy || !form}>
           {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
         </button>

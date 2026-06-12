@@ -5,7 +5,7 @@ import {
   type ActionContext,
   type ActionResult,
 } from '@exsto/substrate'
-import { loadIntakeForm } from '../templates/loader.js'
+import { loadIntakeForm, type IntakeQuestionnaire } from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
 
@@ -59,6 +59,7 @@ type WorkflowRow = {
     intake_form_id?: string
     documents?: string[]
     sort_order?: number
+    intake_schema?: IntakeSchema
     [k: string]: unknown
   }
   status: string
@@ -73,15 +74,29 @@ function sortOrderOf(r: WorkflowRow): number {
   return typeof r.transitions.sort_order === 'number' ? r.transitions.sort_order : 99
 }
 
+// Resolve the questionnaire for a service from the three-tier fallback:
+// in-app config → repo file → empty. Always returns a well-formed IntakeSchema.
+function resolveIntakeSchema(
+  configured: IntakeSchema | undefined,
+  intakeFormId: string,
+): IntakeSchema {
+  if (configured && Array.isArray(configured.sections)) {
+    return { sections: configured.sections }
+  }
+  try {
+    return { sections: loadIntakeForm(intakeFormId).sections }
+  } catch {
+    return { sections: [] }
+  }
+}
+
 function mapRow(r: WorkflowRow): ServiceDefinition {
   const intakeFormId = r.transitions.intake_form_id ?? ''
-  let intakeSchema: IntakeSchema = { sections: [] }
-  try {
-    intakeSchema = { sections: loadIntakeForm(intakeFormId).sections }
-  } catch {
-    // An unbound or unknown form id renders as an empty form rather than a 500;
-    // the booking wizard treats zero sections as "nothing to ask".
-  }
+  // Resolution order (PR2): in-app config (transitions.intake_schema) wins, so an
+  // attorney's edits take effect immediately; otherwise fall back to the Phase-0
+  // repo file bound by intake_form_id; otherwise an empty form (no 500). The
+  // booking page treats zero sections as "nothing to ask".
+  const intakeSchema = resolveIntakeSchema(r.transitions.intake_schema, intakeFormId)
   return {
     id: r.id,
     serviceKey: r.kind_name,
@@ -238,6 +253,198 @@ export async function setServiceActive(
     payload: { service_key: serviceKey, active },
   })
   return res.effects[0] as { serviceKey: string; status: string }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Questionnaire editor (PR2): read + versioned write of a service's intake form.
+//
+// The questionnaire is config-as-data living in transitions.intake_schema. A
+// write is just a service upsert with a transitions_patch — the same versioned
+// path metadata edits use (seal prior active row, insert version+1, record a
+// configuration_change). No new action kind. The public booking page reads the
+// resolved schema through mapRow's in-app-config-first fallback.
+// ───────────────────────────────────────────────────────────────────────────
+
+// The exact field types the public FieldRenderer (apps/legal-demo/app/book) and
+// validateIntake understand. The editor emits ONLY these — anything else would
+// silently fall through to a plain text input on the booking page. members_repeater
+// carries memberFields + minItems; select carries options.
+export const KNOWN_FIELD_TYPES = [
+  'text',
+  'textarea',
+  'select',
+  'date',
+  'number',
+  'address_autocomplete',
+  'members_repeater',
+] as const
+
+export type KnownFieldType = (typeof KNOWN_FIELD_TYPES)[number]
+
+const KNOWN_FIELD_TYPE_SET = new Set<string>(KNOWN_FIELD_TYPES)
+
+// The full questionnaire shape (FIXED contract). The repo files and the in-app
+// config both conform to this; the editor saves exactly this shape.
+export interface QuestionnaireDoc {
+  id: string
+  version: number
+  title: string
+  description?: string
+  jurisdiction?: string
+  sections: ServiceSection[]
+}
+
+// Read a service's questionnaire: in-app config (transitions.intake_schema) wins;
+// else the bound repo file; else null when nothing is bound. Returns the full doc
+// shape (id/version/title/sections), not just sections, so the editor can round-trip
+// the header fields.
+export async function getQuestionnaire(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<QuestionnaireDoc | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    const r = res.rows[0]
+    if (!r) return null
+
+    const configured = r.transitions.intake_schema
+    if (configured && Array.isArray(configured.sections)) {
+      return normalizeDoc(configured as Partial<QuestionnaireDoc>, serviceKey)
+    }
+    const intakeFormId = r.transitions.intake_form_id ?? ''
+    try {
+      const form: IntakeQuestionnaire = loadIntakeForm(intakeFormId)
+      return normalizeDoc(form, serviceKey)
+    } catch {
+      return null
+    }
+  })
+}
+
+// Coerce a partial/loaded doc into the full QuestionnaireDoc shape. The id/version
+// defaults keep the booking page and downstream readers happy even when an edited
+// schema omitted the header fields.
+function normalizeDoc(
+  doc: Partial<QuestionnaireDoc> & { sections?: unknown },
+  serviceKey: string,
+): QuestionnaireDoc {
+  return {
+    id: typeof doc.id === 'string' && doc.id ? doc.id : serviceKey,
+    version: typeof doc.version === 'number' ? doc.version : 1,
+    title: typeof doc.title === 'string' ? doc.title : '',
+    description: typeof doc.description === 'string' ? doc.description : undefined,
+    jurisdiction: typeof doc.jurisdiction === 'string' ? doc.jurisdiction : undefined,
+    sections: Array.isArray(doc.sections) ? (doc.sections as ServiceSection[]) : [],
+  }
+}
+
+// Validate an intake schema against the FIXED contract before persisting. Throws a
+// descriptive Error on the first problem (the editor surfaces .message). This is a
+// write-path guard only — reads never validate, so legacy repo forms with extra
+// field types still render.
+export function validateIntakeSchema(schema: unknown): QuestionnaireDoc {
+  if (!schema || typeof schema !== 'object') {
+    throw new Error('Questionnaire must be an object.')
+  }
+  const doc = schema as Record<string, unknown>
+  if (!Array.isArray(doc.sections)) {
+    throw new Error('Questionnaire must have a sections array.')
+  }
+  if (doc.title !== undefined && typeof doc.title !== 'string') {
+    throw new Error('Questionnaire title must be a string.')
+  }
+  const seenSection = new Set<string>()
+  for (const [si, rawSection] of (doc.sections as unknown[]).entries()) {
+    if (!rawSection || typeof rawSection !== 'object') {
+      throw new Error(`Section ${si + 1} must be an object.`)
+    }
+    const section = rawSection as Record<string, unknown>
+    if (typeof section.id !== 'string' || !section.id.trim()) {
+      throw new Error(`Section ${si + 1} needs a non-empty id.`)
+    }
+    if (seenSection.has(section.id)) {
+      throw new Error(`Duplicate section id: ${section.id}`)
+    }
+    seenSection.add(section.id)
+    if (typeof section.title !== 'string') {
+      throw new Error(`Section ${section.id} needs a title.`)
+    }
+    if (!Array.isArray(section.fields)) {
+      throw new Error(`Section ${section.id} must have a fields array.`)
+    }
+    for (const rawField of section.fields as unknown[]) {
+      validateField(rawField, section.id)
+    }
+  }
+  return schema as QuestionnaireDoc
+}
+
+function validateField(rawField: unknown, sectionId: string): void {
+  if (!rawField || typeof rawField !== 'object') {
+    throw new Error(`A field in section ${sectionId} must be an object.`)
+  }
+  const field = rawField as Record<string, unknown>
+  if (typeof field.id !== 'string' || !field.id.trim()) {
+    throw new Error(`A field in section ${sectionId} needs a non-empty id.`)
+  }
+  if (typeof field.label !== 'string') {
+    throw new Error(`Field ${field.id} needs a label.`)
+  }
+  if (typeof field.type !== 'string' || !KNOWN_FIELD_TYPE_SET.has(field.type)) {
+    throw new Error(
+      `Field ${field.id} has an unsupported type "${String(field.type)}". ` +
+        `Allowed: ${KNOWN_FIELD_TYPES.join(', ')}.`,
+    )
+  }
+  if (field.type === 'select') {
+    if (!Array.isArray(field.options) || field.options.length === 0) {
+      throw new Error(`Select field ${field.id} needs a non-empty options array.`)
+    }
+    if (!(field.options as unknown[]).every((o) => typeof o === 'string')) {
+      throw new Error(`Select field ${field.id} options must all be strings.`)
+    }
+  }
+  if (field.type === 'members_repeater') {
+    if (!Array.isArray(field.memberFields) || field.memberFields.length === 0) {
+      throw new Error(`Members field ${field.id} needs a non-empty memberFields array.`)
+    }
+    for (const sub of field.memberFields as unknown[]) {
+      validateField(sub, `${sectionId}.${field.id}`)
+    }
+  }
+}
+
+// Write a service's questionnaire as a new immutable version. Validates the shape
+// (throws on the first problem), reads the current display_name (the upsert
+// requires it and preserves the rest of transitions), then submits the upsert with
+// a transitions_patch carrying intake_schema. Returns the saved doc.
+export async function updateQuestionnaire(
+  ctx: ActionContext,
+  serviceKey: string,
+  intakeSchema: unknown,
+): Promise<QuestionnaireDoc> {
+  const validated = validateIntakeSchema(intakeSchema)
+  const current = await getService(ctx, serviceKey)
+  if (!current) throw new Error(`Service not found: ${serviceKey}`)
+
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: serviceKey,
+      display_name: current.displayName,
+      transitions_patch: { intake_schema: validated },
+    },
+  })
+
+  const saved = await getQuestionnaire(ctx, serviceKey)
+  if (!saved) throw new Error(`Questionnaire not found after update: ${serviceKey}`)
+  return saved
 }
 
 export interface SubmitBookingInput {

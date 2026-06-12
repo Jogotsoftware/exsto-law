@@ -125,6 +125,12 @@ export default function ServicesPage() {
                     >
                       Edit
                     </Link>
+                    <Link
+                      href={`/attorney/services/${svc.serviceKey}/questionnaire`}
+                      style={{ marginRight: '0.7rem' }}
+                    >
+                      Questionnaire
+                    </Link>
                     <button
                       className={svc.isActive ? 'danger outline' : 'primary'}
                       onClick={() => toggleActive(svc)}
