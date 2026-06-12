@@ -2,8 +2,11 @@ import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   getClientMatterTimeline,
   listClientMatters,
+  getMatterThread,
+  postClientMessage,
   type ClientMatterTimeline,
   type ClientMatterListItem,
+  type PortalMessage,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -46,5 +49,48 @@ const mattersTool: Tool<MattersInput, { matters: ClientMatterListItem[] }> = {
   }),
 }
 
+// ── Messaging (PR2) ─────────────────────────────────────────────────────────
+// Both arrive via the authed route, which stamps clientContactId from the cookie
+// and asserts matterEntityId ∈ session.matterIds BEFORE dispatch. These handlers
+// therefore trust the stamped fields; the client identity on a posted message is
+// the client_contact ENTITY (ADR 0035), never the action's actor.
+
+interface ThreadGetInput {
+  matterEntityId: string
+}
+
+const threadGetTool: Tool<ThreadGetInput, { messages: PortalMessage[] }> = {
+  name: 'legal.client.thread_get',
+  description:
+    "Read the message thread between the signed-in client and the attorney for one of the client's own matters.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    messages: await getMatterThread(ctx, input.matterEntityId),
+  }),
+}
+
+interface MessagePostInput {
+  matterEntityId: string
+  body: string
+  // Stamped by the authed route from the session cookie's clientContactId.
+  clientContactId: string
+}
+
+const messagePostTool: Tool<MessagePostInput, { posted: boolean }> = {
+  name: 'legal.client.message_post',
+  description: "Post a message to the attorney on one of the signed-in client's own matters.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => {
+    await postClientMessage(ctx, {
+      matterEntityId: input.matterEntityId,
+      body: input.body,
+      clientContactId: input.clientContactId,
+    })
+    return { posted: true }
+  },
+}
+
 registerTool(matterTimelineTool)
 registerTool(mattersTool)
+registerTool(threadGetTool)
+registerTool(messagePostTool)

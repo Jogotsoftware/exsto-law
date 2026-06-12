@@ -31,6 +31,7 @@ import './tools/researchTools.js'
 import './tools/assistantTools.js'
 import './tools/granolaImportTools.js'
 import './tools/clientPortalTools.js'
+import './tools/matterMessagingTools.js'
 // Note: ./tools/sendDraftLinkEmail.js exists but was never wired into the registry
 // upstream; left unregistered to preserve the prior tool surface exactly.
 

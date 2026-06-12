@@ -46,10 +46,15 @@ describe('client portal AUTHED tool allowlist (no DB)', () => {
     await import('@exsto/legal/mcp')
   }, 30_000)
 
-  it('exposes exactly the two read-only client tools', async () => {
+  it('exposes exactly the client portal tools (reads + PR2 messaging)', async () => {
     const { CLIENT_PORTAL_AUTHED_TOOLS } = await import('@exsto/legal/mcp')
     expect([...CLIENT_PORTAL_AUTHED_TOOLS].sort()).toEqual(
-      ['legal.client.matter_timeline', 'legal.client.matters'].sort(),
+      [
+        'legal.client.matter_timeline',
+        'legal.client.matters',
+        'legal.client.message_post',
+        'legal.client.thread_get',
+      ].sort(),
     )
   })
 
@@ -70,14 +75,18 @@ describe('client portal AUTHED tool allowlist (no DB)', () => {
     }
   })
 
-  it('every authed-allowlisted tool is registered and read-mode', async () => {
+  it('every authed-allowlisted tool is registered (reads + the one PR2 write)', async () => {
     await import('@exsto/legal/mcp')
     const { findTool } = await import('@exsto/mcp-tools')
     const { CLIENT_PORTAL_AUTHED_TOOLS } = await import('@exsto/legal/mcp')
+    // PR2 intentionally adds ONE write tool (legal.client.message_post) — clients
+    // post messages. Everything else stays read-mode; the route still gates the
+    // whole set + per-matter authz.
+    const WRITE_OK = new Set(['legal.client.message_post'])
     for (const name of CLIENT_PORTAL_AUTHED_TOOLS) {
       const tool = findTool(name) as { mode?: string } | undefined
       expect(tool, `${name} should resolve`).toBeTruthy()
-      expect(tool!.mode, `${name} should be read-mode`).toBe('read')
+      expect(tool!.mode, `${name} mode`).toBe(WRITE_OK.has(name) ? 'write' : 'read')
     }
   })
 })
