@@ -3,23 +3,31 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { readSession } from '@/lib/auth'
+import { fetchSession } from '@/lib/auth'
 
 export default function LoginPage() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (readSession()) {
-      router.replace('/attorney')
-      return
-    }
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search)
-      const err = params.get('error')
-      if (err === 'not_allowed')
-        setError('That Google account is not authorized to access Pacheco Law.')
-      else if (err) setError(decodeURIComponent(err))
+    let cancelled = false
+    // Already signed in (valid httpOnly cookie / dev shim)? Skip the login page.
+    fetchSession().then((session) => {
+      if (cancelled) return
+      if (session) {
+        router.replace('/attorney')
+        return
+      }
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search)
+        const err = params.get('error')
+        if (err === 'not_allowed')
+          setError('That Google account is not authorized to access Pacheco Law.')
+        else if (err) setError(decodeURIComponent(err))
+      }
+    })
+    return () => {
+      cancelled = true
     }
   }, [router])
 

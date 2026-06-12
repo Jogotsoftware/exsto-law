@@ -3,9 +3,12 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { setSession } from '@/lib/auth'
 import { safeInternalPath } from '@/lib/safeRedirect'
 
+// This page now only handles the CALENDAR/MAIL connect bounce. Sign-in no longer
+// passes through here: the callback route sets the httpOnly session cookie and
+// redirects straight to the `continue` path, so there is no client session to
+// write. Calendar mode just confirms the connection and bounces back.
 export default function AuthCompletePage() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
@@ -15,33 +18,19 @@ export default function AuthCompletePage() {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     const email = params.get('email') ?? ''
-    const actorId = params.get('actor_id') ?? ''
-    const tenantId = params.get('tenant_id') ?? ''
-    const displayName = params.get('display_name') ?? email
     // This page is directly reachable with an arbitrary ?continue= — re-validate
     // here too (defense in depth) so router.replace can't be steered off-site.
     const cont = safeInternalPath(params.get('continue'))
     const calendarConnected = params.get('calendar_connected') === '1'
     setEmail(email)
 
-    // Calendar connect flow doesn't change the session — just bounce back.
     if (calendarConnected) {
       router.replace(cont)
       return
     }
 
-    if (!email || !actorId || !tenantId) {
-      setError('Sign-in did not return a valid session. Try again.')
-      return
-    }
-
-    setSession({
-      email,
-      displayName,
-      actorId,
-      tenantId,
-      signedInAt: new Date().toISOString(),
-    })
+    // Any other arrival here is unexpected (signin sets the cookie + redirects
+    // directly). Don't strand the user — bounce to the validated continue path.
     router.replace(cont)
   }, [router])
 
@@ -63,7 +52,7 @@ export default function AuthCompletePage() {
   return (
     <main>
       <div className="loading-block" style={{ marginTop: '4rem' }}>
-        <span className="spinner" /> Signing you in{email ? ` as ${email}` : ''}…
+        <span className="spinner" /> Finishing up{email ? ` for ${email}` : ''}…
       </div>
     </main>
   )

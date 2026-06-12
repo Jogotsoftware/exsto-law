@@ -22,6 +22,10 @@ export default defineConfig({
         new URL('./verticals/legal/dist/mcp/index.js', import.meta.url),
       ),
       '@exsto/legal': fileURLToPath(new URL('./verticals/legal/dist/index.js', import.meta.url)),
+      // legal-demo uses the `@/` path alias for app-local imports. Route-handler
+      // tests import those files, so map `@/` to the app root here too. No other
+      // workspace uses `@/`, so this is safe globally.
+      '@/': fileURLToPath(new URL('./apps/legal-demo/', import.meta.url)),
     },
   },
   test: {

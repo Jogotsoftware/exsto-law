@@ -1,22 +1,29 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { clearSession, readSession, type DemoSession } from '@/lib/auth'
+import { fetchSession, clearDevSession, type DemoSession } from '@/lib/auth'
 import { SearchBar } from '@/components/SearchBar'
 
 export function AttorneyHeader() {
-  const router = useRouter()
   const [session, setSession] = useState<DemoSession | null>(null)
 
   useEffect(() => {
     document.body.classList.remove('surface-client')
-    setSession(readSession())
+    let cancelled = false
+    fetchSession().then((s) => {
+      if (!cancelled) setSession(s)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   function handleSignOut() {
-    clearSession()
-    router.push('/')
+    // Clear the dev shim (no-op in prod) and navigate to the server logout
+    // route, which clears the httpOnly cookie and redirects to '/'. We use a
+    // full navigation (not router.push) so the Set-Cookie response applies.
+    clearDevSession()
+    window.location.href = '/api/auth/logout'
   }
 
   // Navigation lives in the left sidebar (WP8 UI standard); the header keeps

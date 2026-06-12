@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { ReactNode } from 'react'
-import { readSession } from '@/lib/auth'
+import { fetchSession } from '@/lib/auth'
 
 export function AttorneyAuthGate({ children }: { children: ReactNode }) {
   const router = useRouter()
@@ -11,13 +11,27 @@ export function AttorneyAuthGate({ children }: { children: ReactNode }) {
   const [ok, setOk] = useState(false)
 
   useEffect(() => {
-    const session = readSession()
-    if (!session) {
-      router.replace('/')
-    } else {
-      setOk(true)
+    let cancelled = false
+    // The session is an httpOnly cookie, so we can't read it synchronously —
+    // ask the server (/api/auth/me) whether we're signed in.
+    fetchSession()
+      .then((session) => {
+        if (cancelled) return
+        if (!session) {
+          router.replace('/')
+        } else {
+          setOk(true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) router.replace('/')
+      })
+      .finally(() => {
+        if (!cancelled) setChecking(false)
+      })
+    return () => {
+      cancelled = true
     }
-    setChecking(false)
   }, [router])
 
   if (checking || !ok) {
