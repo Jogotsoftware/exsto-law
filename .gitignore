@@ -88,3 +88,6 @@ desktop.ini
 *.tgz
 .npm
 .yarn-integrity
+
+# Transient agent worktrees (isolated builds)
+.claude/worktrees/
