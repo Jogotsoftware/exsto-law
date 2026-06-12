@@ -1659,6 +1659,13 @@ main.book-main {
   }
 }
 
+.book-main .captcha-block {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+  min-height: 65px;
+}
+
 .book-main .step-actions {
   display: flex;
   gap: 0.6rem;

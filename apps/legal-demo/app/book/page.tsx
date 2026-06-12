@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
@@ -8,7 +8,14 @@ import { callClientMcp } from '@/lib/mcpClient'
 import { AddressAutocomplete, type StructuredAddress } from '@/components/AddressAutocomplete'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { LanguageToggle } from '@/components/LanguageToggle'
+import { Turnstile } from '@/components/Turnstile'
 import { useI18n } from '@/lib/i18n'
+
+// CAPTCHA is gated on a PUBLIC site key. Unset (demo/dev default) → no widget,
+// no token, and the server gate is also a no-op, so booking works unchanged.
+// Set → render the Turnstile widget and require a token before submit. Enabling
+// the gate end-to-end also needs TURNSTILE_SECRET on the server.
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
 
 interface ServiceField {
   id: string
@@ -92,6 +99,12 @@ export default function BookPage() {
   const [step, setStep] = useState<Step>('service')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // CAPTCHA token + a reset handle the widget hands back. Both stay null when
+  // the site key is unset (the widget never renders), and the submit flow below
+  // only requires/sends a token in that case.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const resetCaptchaRef = useRef<(() => void) | null>(null)
   const [confirmation, setConfirmation] = useState<{
     matterNumber: string
     scheduledAt: string
@@ -215,6 +228,13 @@ export default function BookPage() {
 
   async function submitBooking() {
     if (!selectedService || !selectedSlot) return
+    // When the CAPTCHA is enabled, a verified token is mandatory before we hit
+    // the server (which would otherwise 403). When it's disabled the widget
+    // never renders, captchaToken stays null, and this guard is skipped.
+    if (TURNSTILE_SITE_KEY && !captchaToken) {
+      setError(t('error.captcha'))
+      return
+    }
     setBusy('submit')
     setError(null)
     try {
@@ -240,6 +260,8 @@ export default function BookPage() {
           scheduledAtIso: selectedSlot.startIso,
           scheduledEndIso: selectedSlot.endIso,
         },
+        // undefined when CAPTCHA is disabled → callClientMcp omits the field.
+        captchaToken: captchaToken ?? undefined,
       })
 
       const effect = result.effects[0]
@@ -248,6 +270,12 @@ export default function BookPage() {
       setStep('done')
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err)
+      // A Turnstile token is single-use; any failed submit consumed it, so
+      // reset the widget and require a fresh solve before the next attempt.
+      if (TURNSTILE_SITE_KEY) {
+        setCaptchaToken(null)
+        resetCaptchaRef.current?.()
+      }
       if (raw.includes('SLOT_TAKEN')) {
         // Someone else grabbed this slot between when the calendar was last
         // refreshed and when we hit submit. Translate the error, force a
@@ -508,11 +536,24 @@ export default function BookPage() {
               }}
             />
           )}
+          {TURNSTILE_SITE_KEY && (
+            <div className="captcha-block" aria-live="polite">
+              <Turnstile
+                siteKey={TURNSTILE_SITE_KEY}
+                onToken={setCaptchaToken}
+                onReady={(reset) => {
+                  resetCaptchaRef.current = reset
+                }}
+              />
+            </div>
+          )}
           <div className="step-actions sticky">
             <button onClick={() => setStep('intake')}>{t('common.back')}</button>
             <button
               className="primary full"
-              disabled={!selectedSlot || busy === 'submit'}
+              disabled={
+                !selectedSlot || busy === 'submit' || (Boolean(TURNSTILE_SITE_KEY) && !captchaToken)
+              }
               onClick={submitBooking}
             >
               {busy === 'submit' && <span className="spinner" />}

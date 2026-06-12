@@ -64,6 +64,7 @@ const en: Record<string, string> = {
   'error.member_name': 'Each member needs a name.',
   'error.member_address': 'Each member needs an address.',
   'error.fill_field': 'Please fill out: {field}',
+  'error.captcha': 'Please complete the verification challenge before booking.',
 
   // Members repeater
   'member.label': 'Member {n}',
@@ -201,6 +202,7 @@ const es: Record<string, string> = {
   'error.member_name': 'Cada miembro necesita un nombre.',
   'error.member_address': 'Cada miembro necesita una dirección.',
   'error.fill_field': 'Por favor completa: {field}',
+  'error.captcha': 'Por favor completa la verificación antes de reservar.',
 
   // Members repeater
   'member.label': 'Miembro {n}',
