@@ -169,9 +169,9 @@ run('multi-member auto-drafting (live DB)', { timeout: 120_000 }, () => {
 
   it('requestDraft now ACCEPTS a multi-member matter (was refused as manual before)', async () => {
     const { submitBooking, loadCall, requestDraft } = await import('@exsto/legal')
-    const daysAhead = 60 + Math.floor(Math.random() * 3000)
+    const daysAhead = 60 + Math.floor(Math.random() * 200000)
     const start = new Date(Date.now() + daysAhead * 24 * 3600 * 1000)
-    start.setUTCHours(8 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 60), 0, 0)
+    start.setUTCHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 2) * 30, 0, 0)
     const startIso = start.toISOString()
     const endIso = new Date(start.getTime() + 1800e3).toISOString()
 

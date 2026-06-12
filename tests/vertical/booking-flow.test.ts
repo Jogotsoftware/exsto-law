@@ -14,9 +14,9 @@ const PUBLIC_INTAKE_ACTOR = '00000000-0000-0000-0001-000000000005'
 // A far-future weekday slot randomized per run so reruns never collide with
 // earlier test bookings (test data persists on the dev DB).
 function randomSlot(): { startIso: string; endIso: string } {
-  const daysAhead = 60 + Math.floor(Math.random() * 3000)
+  const daysAhead = 60 + Math.floor(Math.random() * 200000)
   const start = new Date(Date.now() + daysAhead * 24 * 3600 * 1000)
-  start.setUTCHours(8 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 60), 0, 0)
+  start.setUTCHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 2) * 30, 0, 0)
   const end = new Date(start.getTime() + 30 * 60 * 1000)
   return { startIso: start.toISOString(), endIso: end.toISOString() }
 }
