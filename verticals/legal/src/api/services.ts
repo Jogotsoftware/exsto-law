@@ -58,17 +58,19 @@ type WorkflowRow = {
     route?: string
     intake_form_id?: string
     documents?: string[]
+    sort_order?: number
     [k: string]: unknown
   }
   status: string
   recorded_at: string
 }
 
-// Stable display order for the booking page's service selection (REQ-INTAKE-02).
-const SERVICE_ORDER: Record<string, number> = {
-  nc_llc_single_member: 0,
-  nc_llc_multi_member: 1,
-  something_else: 2,
+// Display order for the booking page's service selection (REQ-INTAKE-02) is now
+// config-as-data: transitions.sort_order, backfilled for the seeded services in
+// vertical migration 0010. A service with no sort_order sinks to the bottom
+// (99) and ties break on kind_name for a stable order.
+function sortOrderOf(r: WorkflowRow): number {
+  return typeof r.transitions.sort_order === 'number' ? r.transitions.sort_order : 99
 }
 
 function mapRow(r: WorkflowRow): ServiceDefinition {
@@ -90,9 +92,13 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     intakeSchema,
     documents: Array.isArray(r.transitions.documents) ? r.transitions.documents : [],
     isActive: r.status === 'active',
-    sortOrder: SERVICE_ORDER[r.kind_name] ?? 99,
+    sortOrder: sortOrderOf(r),
     updatedAt: r.recorded_at,
   }
+}
+
+function compareServices(a: ServiceDefinition, b: ServiceDefinition): number {
+  return a.sortOrder - b.sortOrder || a.serviceKey.localeCompare(b.serviceKey)
 }
 
 const WORKFLOW_COLS = `
@@ -110,7 +116,7 @@ export async function listServices(ctx: ActionContext): Promise<ServiceDefinitio
        ORDER BY kind_name`,
       [ctx.tenantId],
     )
-    return res.rows.map(mapRow).sort((a, b) => a.sortOrder - b.sortOrder)
+    return res.rows.map(mapRow).sort(compareServices)
   })
 }
 
@@ -128,6 +134,110 @@ export async function getService(
     const r = res.rows[0]
     return r ? mapRow(r) : null
   })
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Service Library (PR1): admin read + versioned writes.
+// listServices / getService above stay active-only and unchanged so the public
+// booking page only ever sees bookable services. The admin surface needs to see
+// disabled ones too, so it can re-enable them.
+// ───────────────────────────────────────────────────────────────────────────
+
+// Admin list: the CURRENT row of every service (valid_to IS NULL), active OR
+// deprecated. Deprecated history versions (valid_to set) are excluded — only the
+// latest definition per service shows up.
+export async function listServicesIncludingInactive(
+  ctx: ActionContext,
+): Promise<ServiceDefinition[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND valid_to IS NULL
+       ORDER BY kind_name`,
+      [ctx.tenantId],
+    )
+    return res.rows.map(mapRow).sort(compareServices)
+  })
+}
+
+export interface CreateServiceInput {
+  displayName: string
+  description?: string | null
+  route?: WorkflowRoute
+  documents?: string[]
+  sortOrder?: number
+}
+
+export interface UpdateServiceMetadataInput {
+  serviceKey: string
+  displayName: string
+  description?: string | null
+  route?: WorkflowRoute
+  documents?: string[]
+  sortOrder?: number
+}
+
+// Create a new service (metadata only — questionnaire/prompt editors are a
+// later PR). Returns the freshly-created service definition.
+export async function createService(
+  ctx: ActionContext,
+  input: CreateServiceInput,
+): Promise<ServiceDefinition> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'enforcement',
+    payload: {
+      display_name: input.displayName,
+      description: input.description ?? null,
+      route: input.route,
+      documents: input.documents,
+      sort_order: input.sortOrder,
+    },
+  })
+  const eff = res.effects[0] as { serviceKey: string }
+  const created = await getService(ctx, eff.serviceKey)
+  if (!created) throw new Error('Service create succeeded but the new row could not be read back.')
+  return created
+}
+
+// Update metadata = a NEW immutable version (the handler seals the prior active
+// row and inserts version+1). Operational transitions (intake_form_id, route,
+// documents, on_transcript) carry forward verbatim unless overridden here.
+export async function updateServiceMetadata(
+  ctx: ActionContext,
+  input: UpdateServiceMetadataInput,
+): Promise<ServiceDefinition> {
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: input.serviceKey,
+      display_name: input.displayName,
+      description: input.description ?? null,
+      route: input.route,
+      documents: input.documents,
+      sort_order: input.sortOrder,
+    },
+  })
+  const updated = await getService(ctx, input.serviceKey)
+  if (!updated) throw new Error(`Service not found after update: ${input.serviceKey}`)
+  return updated
+}
+
+// Enable/disable (no new version) — flips the current row's status. A disabled
+// service drops out of the public listServices but its definition persists.
+export async function setServiceActive(
+  ctx: ActionContext,
+  serviceKey: string,
+  active: boolean,
+): Promise<{ serviceKey: string; status: string }> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.service.set_active',
+    intentKind: 'adjustment',
+    payload: { service_key: serviceKey, active },
+  })
+  return res.effects[0] as { serviceKey: string; status: string }
 }
 
 export interface SubmitBookingInput {

@@ -12,6 +12,7 @@ const NAV = [
   { href: '/attorney/review', label: 'Review' },
   { href: '/attorney/calendar', label: 'Calendar' },
   { href: '/attorney/mail', label: 'Mail' },
+  { href: '/attorney/services', label: 'Services' },
   { href: '/attorney/settings', label: 'Settings' },
 ]
 

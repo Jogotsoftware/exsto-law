@@ -1,0 +1,255 @@
+// ───────────────────────────────────────────────────────────────────────────
+// legal.service.upsert / legal.service.set_active — the Service Library write
+// path (PR1). Service offerings are workflow_definition rows (seeded in 0001);
+// these handlers make them editable in-app as VERSIONED config.
+//
+// "Update" is never an in-place edit: it SEALS the current active row
+// (valid_to = now(), status = 'deprecated') and INSERTs version+1, so the
+// history of every service definition is immutable (invariant 17 — config
+// version binding). Writing workflow_definition from a handler is allowed: the
+// handler IS the action layer (hard rule 1). Each change also appends a
+// configuration_change row (invariant 18, the audit of who changed config).
+//
+// Why a vertical handler and not the foundation's workflow.define: that handler
+// always inserts version=1 and never seals the prior version (and the directive
+// forbids changing the foundation). Versioning is the whole point here.
+// ───────────────────────────────────────────────────────────────────────────
+import { randomUUID } from 'node:crypto'
+import { registerActionHandler } from '@exsto/substrate'
+import type { DbClient } from '@exsto/shared'
+
+interface ServiceTransitions {
+  route?: string
+  intake_form_id?: string
+  documents?: string[]
+  on_transcript?: string
+  sort_order?: number
+  notify?: string
+  [k: string]: unknown
+}
+
+interface ServiceWorkflowRow {
+  id: string
+  version: number
+  states: unknown
+  transitions: ServiceTransitions
+  participating_entity_kinds: unknown
+  display_name: string
+  description: string | null
+}
+
+// Slugify a display name into a stable kind_name. Mirrors the (deleted)
+// templates.ts slug/unique pattern, but the write goes through this handler.
+function slugify(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 60) || 'service'
+  )
+}
+
+async function uniqueKindName(client: DbClient, tenantId: string, base: string): Promise<string> {
+  let key = base
+  let n = 2
+  // Check ALL versions (not just active) so a re-created service never collides
+  // with a deprecated history row's kind_name.
+  for (;;) {
+    const res = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM workflow_definition WHERE tenant_id = $1 AND kind_name = $2
+       ) AS exists`,
+      [tenantId, key],
+    )
+    if (!res.rows[0]?.exists) return key
+    key = `${base}_${n}`
+    n += 1
+  }
+}
+
+async function currentActive(
+  client: DbClient,
+  tenantId: string,
+  kindName: string,
+): Promise<ServiceWorkflowRow | null> {
+  const res = await client.query<ServiceWorkflowRow>(
+    `SELECT id, version, states, transitions, participating_entity_kinds, display_name, description
+       FROM workflow_definition
+      WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
+      ORDER BY version DESC
+      LIMIT 1`,
+    [tenantId, kindName],
+  )
+  return res.rows[0] ?? null
+}
+
+async function recordConfigChange(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    targetId: string
+    // configuration_change.change_kind is constrained to these three
+    // (core migration 0010_config_and_capability.sql).
+    changeKind: 'create' | 'update' | 'deprecate'
+    before: Record<string, unknown> | null
+    after: Record<string, unknown>
+  },
+) {
+  await client.query(
+    `INSERT INTO configuration_change
+       (tenant_id, action_id, target_table, target_id, change_kind,
+        before_value, after_value, authoring_actor_id)
+     VALUES ($1, $2, 'workflow_definition', $3, $4, $5::jsonb, $6::jsonb, $7)`,
+    [
+      args.tenantId,
+      args.actionId,
+      args.targetId,
+      args.changeKind,
+      args.before ? JSON.stringify(args.before) : null,
+      JSON.stringify(args.after),
+      args.actorId,
+    ],
+  )
+}
+
+interface ServiceUpsertPayload {
+  service_key?: string // existing kind_name; omit to create a new service
+  display_name: string
+  description?: string | null
+  route?: string // 'auto' | 'manual'
+  documents?: string[]
+  sort_order?: number
+  // Additional transitions keys to merge in (e.g. intake_form_id later). The
+  // preserved keys (intake_form_id/route/documents/on_transcript) always win
+  // from the prior row unless explicitly overridden here.
+  transitions_patch?: Record<string, unknown>
+}
+
+registerActionHandler('legal.service.upsert', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as ServiceUpsertPayload
+  const displayName = p.display_name?.trim()
+  if (!displayName) throw new Error('display_name is required')
+
+  const isUpdate = Boolean(p.service_key)
+  const prior = isUpdate ? await currentActive(client, ctx.tenantId, p.service_key!) : null
+  if (isUpdate && !prior) throw new Error(`Service not found: ${p.service_key}`)
+
+  const kindName = isUpdate
+    ? p.service_key!
+    : await uniqueKindName(client, ctx.tenantId, slugify(displayName))
+
+  // Merge transitions: start from the prior row's config so intake_form_id,
+  // route, documents, on_transcript and any other operational keys survive an
+  // edit verbatim unless the caller overrides them. Metadata edits (route,
+  // documents, sort_order) layer on top.
+  const baseTransitions: ServiceTransitions = prior ? { ...prior.transitions } : {}
+  const merged: ServiceTransitions = { ...baseTransitions, ...(p.transitions_patch ?? {}) }
+  if (p.route !== undefined) merged.route = p.route
+  if (p.documents !== undefined) merged.documents = p.documents
+  if (p.sort_order !== undefined) merged.sort_order = p.sort_order
+  // A brand-new service has no intake form bound yet (deferred to a later PR);
+  // default route to manual so it never auto-drafts before a form exists.
+  if (!isUpdate && merged.route === undefined) merged.route = 'manual'
+
+  const states = prior ? prior.states : []
+  const participating = prior
+    ? prior.participating_entity_kinds
+    : ['matter', 'client_contact', 'questionnaire_response', 'call_session', 'transcript']
+  const nextVersion = prior ? prior.version + 1 : 1
+
+  // Seal the prior active row FIRST (bitemporal close: valid_to set, status
+  // deprecated). The new version then becomes the sole active row.
+  if (prior) {
+    await client.query(
+      `UPDATE workflow_definition
+          SET valid_to = now(), status = 'deprecated'
+        WHERE tenant_id = $1 AND id = $2`,
+      [ctx.tenantId, prior.id],
+    )
+  }
+
+  const newId = randomUUID()
+  await client.query(
+    `INSERT INTO workflow_definition
+       (id, tenant_id, action_id, kind_name, display_name, description,
+        states, transitions, participating_entity_kinds, version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10)`,
+    [
+      newId,
+      ctx.tenantId,
+      actionId,
+      kindName,
+      displayName,
+      p.description ?? prior?.description ?? null,
+      JSON.stringify(states),
+      JSON.stringify(merged),
+      JSON.stringify(participating),
+      nextVersion,
+    ],
+  )
+
+  await recordConfigChange(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    targetId: newId,
+    changeKind: isUpdate ? 'update' : 'create',
+    before: prior
+      ? { kind_name: kindName, version: prior.version, transitions: prior.transitions }
+      : null,
+    after: {
+      kind_name: kindName,
+      version: nextVersion,
+      display_name: displayName,
+      transitions: merged,
+    },
+  })
+
+  return { workflowDefinitionId: newId, serviceKey: kindName, version: nextVersion }
+})
+
+interface ServiceSetActivePayload {
+  service_key: string
+  active: boolean
+}
+
+registerActionHandler('legal.service.set_active', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as ServiceSetActivePayload
+  if (!p.service_key) throw new Error('service_key is required')
+
+  // Find the current row REGARDLESS of status (re-enable must reach a
+  // deprecated row). The current row is the latest version that is not sealed
+  // by a newer version, i.e. valid_to IS NULL.
+  const res = await client.query<{ id: string; status: string }>(
+    `SELECT id, status
+       FROM workflow_definition
+      WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
+      ORDER BY version DESC
+      LIMIT 1`,
+    [ctx.tenantId, p.service_key],
+  )
+  const row = res.rows[0]
+  if (!row) throw new Error(`Service not found: ${p.service_key}`)
+
+  const nextStatus = p.active ? 'active' : 'deprecated'
+  await client.query(
+    `UPDATE workflow_definition SET status = $3
+      WHERE tenant_id = $1 AND id = $2`,
+    [ctx.tenantId, row.id, nextStatus],
+  )
+
+  await recordConfigChange(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    targetId: row.id,
+    changeKind: p.active ? 'update' : 'deprecate',
+    before: { status: row.status },
+    after: { status: nextStatus, kind_name: p.service_key },
+  })
+
+  return { serviceKey: p.service_key, status: nextStatus }
+})
