@@ -120,6 +120,62 @@ export async function callClaudeDrafter(
   }
 }
 
+export interface ChatMessage {
+  // 'system' is accepted as the FIRST element only — it is lifted to Anthropic's
+  // top-level `system` param (the Messages API does not take a system role in
+  // the messages array). The remaining turns must be user/assistant.
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+// Plain conversational turn against Claude for the in-app assistant. Separate
+// from callClaudeDrafter because this is a lightweight chat (system + history +
+// user) with no structured-trace contract to parse — the assistant just replies
+// in prose. Reuses resolveAnthropicApiKey so the firm's Settings-managed Vault
+// key beats the env default, and mirrors callClaudeDrafter's connection-auth
+// error handling so a rejected key flips the integration card to 'error'.
+export async function chatWithAssistant(
+  tenantId: string | null,
+  messages: ChatMessage[],
+): Promise<string> {
+  const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
+  const anthropic = new Anthropic({ apiKey })
+
+  // Lift a leading system turn into the top-level `system` param; everything
+  // else is a user/assistant turn. Anthropic requires the first messages[] entry
+  // to be 'user', which the post-system turns satisfy.
+  const system = messages[0]?.role === 'system' ? messages[0].content : undefined
+  const turns = messages.filter((m) => m.role !== 'system') as Array<{
+    role: 'user' | 'assistant'
+    content: string
+  }>
+
+  let response: Anthropic.Message
+  try {
+    response = await anthropic.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 1024,
+      system,
+      messages: turns,
+    })
+  } catch (err) {
+    if (source === 'connection' && tenantId && isAuthError(err)) {
+      const msg = redactSecret(err instanceof Error ? err.message : String(err), apiKey)
+      await markConnectionError(tenantId, 'anthropic', `Assistant chat failed: ${msg}`)
+      throw new Error(
+        'Anthropic rejected the connected API key. Replace it in Settings → Integrations.',
+      )
+    }
+    throw err
+  }
+
+  const textBlock = response.content.find((block) => block.type === 'text')
+  if (!textBlock || textBlock.type !== 'text') {
+    throw new Error('Claude response contained no text block.')
+  }
+  return textBlock.text
+}
+
 function splitDocumentAndTrace(raw: string): {
   documentMarkdown: string
   reasoningTrace: ClaudeDraftReasoningTrace
