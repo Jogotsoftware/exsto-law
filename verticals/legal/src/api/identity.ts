@@ -11,6 +11,12 @@ export interface ResolvedActor {
 // tenant the email belongs to yet — that's literally the question. Returns
 // null if no active human actor with that email exists.
 //
+// A human actor's email is its `external_id` — the actor table (core substrate
+// schema) has no `email` column; identity for a human actor is the external
+// identifier the firm signs in with (their Google email). An earlier version of
+// this query referenced a non-existent `email` column (a wedge→core schema port
+// defect) and threw on every sign-in; resolving by external_id is the fix.
+//
 // If the same email exists in multiple tenants (future multi-firm), this
 // returns the most recently created one. A real tenant picker UI is the right
 // fix once that's a real scenario.
@@ -23,9 +29,9 @@ export async function lookupActorByEmail(email: string): Promise<ResolvedActor |
       display_name: string
       email: string
     }>(
-      `SELECT id, tenant_id, display_name, email
+      `SELECT id, tenant_id, display_name, external_id AS email
        FROM actor
-       WHERE lower(email) = lower($1)
+       WHERE lower(external_id) = lower($1)
          AND actor_type = 'human'
          AND status = 'active'
        ORDER BY created_at DESC
