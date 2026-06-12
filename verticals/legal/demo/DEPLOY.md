@@ -37,8 +37,16 @@ Either through the dashboard (Site settings ▸ Environment variables) or via th
 ```bash
 netlify env:set DATABASE_URL "postgresql://postgres.qlqkpuyhppfodmpeybcz:YOUR_DB_PASSWORD@aws-1-us-east-1.pooler.supabase.com:6543/postgres"
 netlify env:set SUPABASE_URL "https://qlqkpuyhppfodmpeybcz.supabase.co"
-netlify env:set ANTHROPIC_API_KEY "your-anthropic-key"
+netlify env:set ANTHROPIC_API_KEY "your-anthropic-key"   # platform default; per-firm key set in Settings
 netlify env:set NODE_ENV "production"
+
+# --- Sign-in / OAuth (REQUIRED for Google sign-in + calendar/mail connect) ---
+# OAUTH_STATE_SECRET signs the OAuth state so tenant/returnTo can't be forged.
+# Google sign-in FAILS CLOSED without it. Generate: openssl rand -base64 32
+netlify env:set OAUTH_STATE_SECRET "$(openssl rand -base64 32)"
+netlify env:set GOOGLE_OAUTH_CLIENT_ID "your-google-oauth-client-id"
+netlify env:set GOOGLE_OAUTH_CLIENT_SECRET "your-google-oauth-client-secret"
+netlify env:set GOOGLE_OAUTH_REDIRECT_URI "https://<your-site>.netlify.app/api/auth/google/callback"
 
 # Public-intake actor (only needed for the client portal MCP route)
 netlify env:set LEGAL_CLIENT_TENANT_ID "00000000-0000-0000-0000-000000000001"
@@ -50,7 +58,20 @@ netlify env:set LEGAL_CLIENT_ACTOR_ID "00000000-0000-0000-0000-000000000004"
 
 `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are not required by the deployed app — the substrate writes use `DATABASE_URL` directly.
 
-`LEGAL_DRAFTING_MODEL` is optional; defaults to `claude-sonnet-4-6`.
+**Integration keys are managed in the UI** (Settings → Integrations, stored in
+Vault per tenant): Anthropic, Granola, Google, Perplexity. The env vars above are
+only **platform defaults / OAuth client config**; a per-firm API key pasted in
+Settings overrides the env default. Never put a firm's Granola/Perplexity key in
+the deploy env.
+
+**Optional** env:
+
+- `LEGAL_DRAFTING_MODEL` — pin the drafting model (defaults to `claude-sonnet-4-6`).
+- `TURNSTILE_SECRET` **or** `HCAPTCHA_SECRET` — enable the booking-form CAPTCHA
+  gate (also add the matching widget to `/book`). Unset = no CAPTCHA.
+- `PUBLIC_RATE_MAX` / `PUBLIC_RATE_WINDOW_MS` — tune the public-route rate limit
+  (defaults: 20 requests / 60s per IP).
+- `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` — booking-page address autocomplete.
 
 ## Seed the database first
 
