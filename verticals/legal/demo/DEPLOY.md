@@ -67,8 +67,12 @@ the deploy env.
 **Optional** env:
 
 - `LEGAL_DRAFTING_MODEL` — pin the drafting model (defaults to `claude-sonnet-4-6`).
-- `TURNSTILE_SECRET` **or** `HCAPTCHA_SECRET` — enable the booking-form CAPTCHA
-  gate (also add the matching widget to `/book`). Unset = no CAPTCHA.
+- `TURNSTILE_SECRET` **or** `HCAPTCHA_SECRET` — server half of the booking-form
+  CAPTCHA gate (verifies the token). Unset = no CAPTCHA. For Cloudflare
+  Turnstile the widget on `/book` only renders when the **public** site key
+  `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is also set, so enabling the booking CAPTCHA
+  end-to-end requires **both** `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (frontend) and
+  `TURNSTILE_SECRET` (server). With only one set, booking submits as today.
 - `PUBLIC_RATE_MAX` / `PUBLIC_RATE_WINDOW_MS` — tune the public-route rate limit
   (defaults: 20 requests / 60s per IP).
 - `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` — booking-page address autocomplete.
