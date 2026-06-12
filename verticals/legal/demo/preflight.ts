@@ -279,6 +279,23 @@ function maskUrl(url: string): string {
   return url.replace(/:[^:@/]+@/, ':***@')
 }
 
+function checkOauthStateSecret(): void {
+  const s = process.env.OAUTH_STATE_SECRET
+  if (!s) {
+    record(
+      'OAUTH_STATE_SECRET set',
+      'fail',
+      'Missing — Google sign-in + calendar/mail connect FAIL CLOSED. Generate: openssl rand -base64 32',
+    )
+    return
+  }
+  if (s.length < 16) {
+    record('OAUTH_STATE_SECRET set', 'fail', `Too short (${s.length} chars); need ≥16.`)
+    return
+  }
+  record('OAUTH_STATE_SECRET set', 'pass', 'present (≥16 chars)')
+}
+
 async function main(): Promise<void> {
   console.log('Pacheco Law wedge — pre-flight check\n')
 
@@ -296,6 +313,7 @@ async function main(): Promise<void> {
     await checkIntegrationConnections()
   }
   await checkAnthropicKey()
+  checkOauthStateSecret()
   await checkPortAvailable(4000, 'MCP server')
   await checkPortAvailable(3000, 'Web app (attorney + portal)')
 
