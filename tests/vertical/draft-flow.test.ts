@@ -192,7 +192,9 @@ run('draft pipeline (live DB)', { timeout: 120_000 }, () => {
     )
     expect(evt.rowCount).toBe(1)
 
-    const manualMatter = await makeConsultedMatter('nc_llc_multi_member')
+    // 'something_else' is the catch-all that STAYS manual (nc_llc_multi_member
+    // flipped to auto in vertical migration 0013), so it is the manual-refusal case.
+    const manualMatter = await makeConsultedMatter('something_else')
     await expect(
       requestDraft(
         { tenantId: TENANT, actorId: ATTORNEY_ACTOR },

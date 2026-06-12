@@ -73,7 +73,9 @@ run('notifications (live DB)', { timeout: 90_000 }, () => {
   })
 
   it('manual-workflow booking queues attorney safety-net email + both prospect confirmations', async () => {
-    const { routes } = await bookAndGetNotifyJobs(db, 'nc_llc_multi_member')
+    // 'something_else' is the catch-all that STAYS manual (nc_llc_multi_member
+    // flipped to auto in vertical migration 0013).
+    const { routes } = await bookAndGetNotifyJobs(db, 'something_else')
     expect(routes).toEqual([
       'attorney_manual_matter',
       'prospect_booking_confirmation',
