@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import dns from 'node:dns'
 import { exchangeGoogleCode } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
+import { signSession, buildSessionCookie } from '@/lib/session'
 
 export const runtime = 'nodejs'
 
@@ -59,14 +60,20 @@ export async function GET(request: Request) {
         )
       }
 
-      const params = new URLSearchParams({
+      // Mint a signed, httpOnly session cookie server-side. The identity NEVER
+      // rides in the redirect URL anymore (it used to: actor_id/tenant_id/email
+      // in the query string were visible to the browser/JS and not the basis of
+      // any server check). The cookie is the only authority; the client reads
+      // its display fields via /api/auth/me, never the token itself.
+      const token = signSession({
+        actorId: result.actorId,
+        tenantId: result.tenantId,
         email: result.accountEmail,
-        actor_id: result.actorId,
-        tenant_id: result.tenantId,
-        display_name: result.displayName ?? result.accountEmail,
-        continue: safeReturnTo,
+        displayName: result.displayName ?? result.accountEmail,
       })
-      return NextResponse.redirect(`${BASE_URL}/auth/complete?${params.toString()}`)
+      const redirect = NextResponse.redirect(`${BASE_URL}${safeReturnTo}`)
+      redirect.headers.set('Set-Cookie', buildSessionCookie(token))
+      return redirect
     } catch (err) {
       const message = extractErrorMessage(err, 'token exchange threw')
       console.error('[google-callback] exchange failed:', err)

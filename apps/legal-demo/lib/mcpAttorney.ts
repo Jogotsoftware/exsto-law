@@ -1,4 +1,4 @@
-import { readSession } from './auth'
+import { readDevSession } from './auth'
 
 export interface McpCall<I = unknown> {
   toolName: string
@@ -9,18 +9,48 @@ interface McpEnvelope<O> {
   result: O
 }
 
-export async function callAttorneyMcp<O = unknown, I = unknown>(req: McpCall<I>): Promise<O> {
-  const session = readSession()
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (session) {
-    headers['x-actor-id'] = session.actorId
-    headers['x-tenant-id'] = session.tenantId
+// Thrown on a 401 so callers/UI can bounce to sign-in distinctly from other
+// failures.
+export class SessionExpiredError extends Error {
+  constructor(message = 'Your session expired — sign in again.') {
+    super(message)
+    this.name = 'SessionExpiredError'
   }
+}
+
+const IS_DEV = process.env.NODE_ENV !== 'production'
+
+export async function callAttorneyMcp<O = unknown, I = unknown>(req: McpCall<I>): Promise<O> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+
+  // PRODUCTION: send NO identity headers. The signed httpOnly cookie is attached
+  // automatically on same-origin requests and is the only thing the server
+  // trusts. DEV ONLY: forward the demo shim as x-actor-id / x-tenant-id so the
+  // `?demo_user=` flow works without OAuth (the route accepts these headers only
+  // when NODE_ENV !== 'production').
+  if (IS_DEV) {
+    const dev = readDevSession()
+    if (dev) {
+      headers['x-actor-id'] = dev.actorId
+      headers['x-tenant-id'] = dev.tenantId
+    }
+  }
+
   const res = await fetch('/api/attorney/mcp', {
     method: 'POST',
     headers,
+    credentials: 'same-origin',
     body: JSON.stringify(req),
   })
+  if (res.status === 401) {
+    // Session expired / not signed in: bounce the whole UI to sign-in. We also
+    // throw so the calling component stops its own work; the redirect is what
+    // the user actually sees.
+    if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+      window.location.href = '/'
+    }
+    throw new SessionExpiredError()
+  }
   if (!res.ok) {
     let detail = ''
     try {

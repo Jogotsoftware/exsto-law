@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { readSession } from '@/lib/auth'
+import { fetchSession } from '@/lib/auth'
 
 type Provider = 'google_calendar' | 'anthropic' | 'openai' | 'perplexity' | 'granola' | 'docusign'
 
@@ -154,8 +154,10 @@ export default function SettingsPage() {
     }
   }
 
-  function connectGoogle() {
-    const session = readSession()
+  async function connectGoogle() {
+    // tenant_id comes from the verified session (cookie in prod, dev shim in
+    // dev) — calendar connect is firm-scoped and needs the tenant explicitly.
+    const session = await fetchSession()
     if (!session) {
       setError('Sign in first, then connect your calendar.')
       return
