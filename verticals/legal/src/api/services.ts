@@ -247,6 +247,14 @@ export async function updateServiceMetadata(
 
 // Enable/disable (no new version) — flips the current row's status. A disabled
 // service drops out of the public listServices but its definition persists.
+//
+// Enabling (active=true) is GATED on completeness (PR4): the set_active handler
+// loads the current row's transitions and rejects an enable when the service is
+// not bookable yet (no questionnaire, or an auto-route service missing a drafting
+// prompt + required slots for any document kind). Disabling is unconditional.
+// The handler is the source of truth for the gate; serviceCompleteness below
+// computes the same rules for the UI (so it can disable the Enable button and
+// show what's missing before the click).
 export async function setServiceActive(
   ctx: ActionContext,
   serviceKey: string,
@@ -258,6 +266,131 @@ export async function setServiceActive(
     payload: { service_key: serviceKey, active },
   })
   return res.effects[0] as { serviceKey: string; status: string }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Completeness gate (PR4). A service is not bookable until it is complete; the
+// set_active handler enforces this on enable, and the attorney UI reads this to
+// gate the "Enable service" button. The rules MUST match the handler guard
+// (serviceLibrary.ts) so the UI never offers an enable that the handler rejects.
+//
+// The gate is deliberately CONFIG-SPECIFIC — it inspects transitions.intake_schema
+// and transitions.drafting.prompts[kind], NOT the repo-file fallbacks. A service
+// is "complete" only when the attorney has authored these in-app; the bundled
+// repo defaults are a rendering safety net, not a substitute for explicit setup
+// (and the repo drafting prompt is the same single file for every kind, so it
+// could never prove a per-kind prompt exists). Rules:
+//  1. transitions.intake_schema must be non-empty — ≥1 section with ≥1 field.
+//  2. If route === 'auto', then for EVERY document kind in transitions.documents
+//     there must be a transitions.drafting.prompts[kind] containing all
+//     REQUIRED_DRAFTING_SLOTS. An auto service with no documents has nothing to
+//     draft, which also fails.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface ServiceCompleteness {
+  serviceKey: string
+  ready: boolean
+  // Human-readable reasons the service is not yet enableable. Empty when ready.
+  missing: string[]
+}
+
+// True when an intake schema has at least one section carrying at least one field.
+function intakeSchemaHasFields(schema: IntakeSchema | undefined): boolean {
+  if (!schema || !Array.isArray(schema.sections)) return false
+  return schema.sections.some((s) => Array.isArray(s.fields) && s.fields.length > 0)
+}
+
+// Pure completeness check over the CONFIG inputs (the in-app authored values).
+// Shared shape so the handler (which reads transitions directly) and this API path
+// produce identical reasons. promptByKind carries the CONFIG prompt text per kind
+// (transitions.drafting.prompts[kind]); null when the attorney hasn't authored one.
+export function computeCompleteness(args: {
+  serviceKey: string
+  route: WorkflowRoute
+  documents: string[]
+  intakeSchema: IntakeSchema | undefined
+  promptByKind: Record<string, string | null>
+}): ServiceCompleteness {
+  const missing: string[] = []
+
+  if (!intakeSchemaHasFields(args.intakeSchema)) {
+    missing.push('needs a questionnaire (at least one section with one field)')
+  }
+
+  if (args.route === 'auto') {
+    if (args.documents.length === 0) {
+      missing.push('auto-route service needs at least one document to draft')
+    }
+    for (const kind of args.documents) {
+      const text = args.promptByKind[kind] ?? null
+      if (!text || !text.trim()) {
+        missing.push(`needs a drafting prompt for "${kind}"`)
+        continue
+      }
+      const slots = missingDraftingSlots(text)
+      if (slots.length > 0) {
+        missing.push(`drafting prompt for "${kind}" is missing slot(s): ${slots.join(', ')}`)
+      }
+    }
+  }
+
+  return { serviceKey: args.serviceKey, ready: missing.length === 0, missing }
+}
+
+// Compute completeness for a service by reading its current definition's
+// transitions row directly. Returns ready=false with a "service not found" reason
+// for an unknown key (so the UI can surface it without throwing).
+export async function serviceCompleteness(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<ServiceCompleteness> {
+  const transitions = await withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0]?.transitions ?? null
+  })
+  if (!transitions) {
+    return { serviceKey, ready: false, missing: [`Service not found: ${serviceKey}`] }
+  }
+  return completenessFromTransitions(serviceKey, transitions)
+}
+
+// Synchronous completeness over a raw transitions object — the form the set_active
+// HANDLER has in hand (it reads the row's transitions directly). This is the
+// single source of truth for the enable gate: both the UI path
+// (serviceCompleteness) and the handler guard call it, so they can never disagree.
+export function completenessFromTransitions(
+  serviceKey: string,
+  transitions: {
+    route?: string
+    documents?: string[]
+    intake_schema?: IntakeSchema
+    drafting?: DraftingConfig
+  },
+): ServiceCompleteness {
+  const route: WorkflowRoute = transitions.route === 'auto' ? 'auto' : 'manual'
+  const documents = Array.isArray(transitions.documents) ? transitions.documents : []
+
+  const promptByKind: Record<string, string | null> = {}
+  if (route === 'auto') {
+    const prompts = transitions.drafting?.prompts ?? {}
+    for (const kind of documents) {
+      const t = prompts[kind]
+      promptByKind[kind] = typeof t === 'string' ? t : null
+    }
+  }
+
+  return computeCompleteness({
+    serviceKey,
+    route,
+    documents,
+    intakeSchema: transitions.intake_schema,
+    promptByKind,
+  })
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -299,6 +432,26 @@ export interface QuestionnaireDoc {
   sections: ServiceSection[]
 }
 
+// Pure questionnaire resolver shared by getQuestionnaire and the completeness
+// gate (the handler reuses this so its enable guard applies the SAME config→repo
+// resolution as the API). Returns null when nothing resolves. Side-effect-free.
+export function resolveQuestionnaireDoc(
+  transitions: { intake_schema?: IntakeSchema; intake_form_id?: string } | undefined,
+  serviceKey: string,
+): QuestionnaireDoc | null {
+  const configured = transitions?.intake_schema
+  if (configured && Array.isArray(configured.sections)) {
+    return normalizeDoc(configured as Partial<QuestionnaireDoc>, serviceKey)
+  }
+  const intakeFormId = transitions?.intake_form_id ?? ''
+  try {
+    const form: IntakeQuestionnaire = loadIntakeForm(intakeFormId)
+    return normalizeDoc(form, serviceKey)
+  } catch {
+    return null
+  }
+}
+
 // Read a service's questionnaire: in-app config (transitions.intake_schema) wins;
 // else the bound repo file; else null when nothing is bound. Returns the full doc
 // shape (id/version/title/sections), not just sections, so the editor can round-trip
@@ -316,18 +469,7 @@ export async function getQuestionnaire(
     )
     const r = res.rows[0]
     if (!r) return null
-
-    const configured = r.transitions.intake_schema
-    if (configured && Array.isArray(configured.sections)) {
-      return normalizeDoc(configured as Partial<QuestionnaireDoc>, serviceKey)
-    }
-    const intakeFormId = r.transitions.intake_form_id ?? ''
-    try {
-      const form: IntakeQuestionnaire = loadIntakeForm(intakeFormId)
-      return normalizeDoc(form, serviceKey)
-    } catch {
-      return null
-    }
+    return resolveQuestionnaireDoc(r.transitions, serviceKey)
   })
 }
 

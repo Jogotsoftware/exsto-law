@@ -70,7 +70,9 @@ run('service library (live DB)', { timeout: 90_000 }, () => {
       description: 'created by service-library test',
     })
     expect(created.serviceKey).toBeTruthy()
-    expect(created.isActive).toBe(true)
+    // PR4: a brand-new service is created DISABLED (no questionnaire yet) so it
+    // stays off the public booking page until the attorney finishes + enables it.
+    expect(created.isActive).toBe(false)
     // metadata-only create has no intake form yet → defaults to manual route.
     expect(created.route).toBe('manual')
 
@@ -87,16 +89,27 @@ run('service library (live DB)', { timeout: 90_000 }, () => {
   })
 
   it('update seals the prior active row and inserts version+1 (exactly one active)', async () => {
-    const { createService, updateServiceMetadata } = await import('@exsto/legal')
+    const { createService, updateQuestionnaire, setServiceActive, updateServiceMetadata } =
+      await import('@exsto/legal')
     const created = await createService(ctx, {
       displayName: `PR1 Versioned ${randomUUID().slice(0, 8)}`,
     })
     const key = created.serviceKey
 
+    // PR4: a new service is created disabled. Give it a questionnaire and enable
+    // it, so version 1 is the live (active) row before the metadata edit. This
+    // also proves the new invariant: editing a LIVE service keeps it live
+    // (status carries forward across the versioned upsert).
+    await updateQuestionnaire(ctx, key, {
+      sections: [{ id: 's', title: 'S', fields: [{ id: 'q', label: 'Q', type: 'text' }] }],
+    })
+    await setServiceActive(ctx, key, true)
+
     const before = await activeRows(key)
     expect(before.rowCount).toBe(1)
     const v1 = before.rows[0]!
-    expect(v1.version).toBe(1)
+    // version 2 here: create=v1, updateQuestionnaire sealed v1 and inserted v2.
+    expect(v1.status).toBe('active')
 
     const updated = await updateServiceMetadata(ctx, {
       serviceKey: key,
@@ -105,10 +118,11 @@ run('service library (live DB)', { timeout: 90_000 }, () => {
     })
     expect(updated.displayName).toContain('(renamed)')
 
-    // Exactly one active (valid_to IS NULL) row, and it is version 2.
+    // Exactly one active (valid_to IS NULL) row, and it is the next version.
     const after = await activeRows(key)
     expect(after.rowCount).toBe(1)
-    expect(after.rows[0]!.version).toBe(2)
+    expect(after.rows[0]!.version).toBe(v1.version + 1)
+    // Editing a live service keeps it live: status carried forward.
     expect(after.rows[0]!.status).toBe('active')
 
     // The prior row is sealed: valid_to set, status deprecated.
@@ -121,12 +135,25 @@ run('service library (live DB)', { timeout: 90_000 }, () => {
   })
 
   it('set_active disable drops from listServices but the row persists; re-enable restores', async () => {
-    const { createService, setServiceActive, listServices, listServicesIncludingInactive } =
-      await import('@exsto/legal')
+    const {
+      createService,
+      updateQuestionnaire,
+      setServiceActive,
+      listServices,
+      listServicesIncludingInactive,
+    } = await import('@exsto/legal')
     const created = await createService(ctx, {
       displayName: `PR1 Toggle ${randomUUID().slice(0, 8)}`,
     })
     const key = created.serviceKey
+
+    // PR4: give the (manual-route) service a questionnaire so the enable gate is
+    // satisfied. New services are created disabled, so enable it first.
+    await updateQuestionnaire(ctx, key, {
+      sections: [{ id: 's', title: 'S', fields: [{ id: 'q', label: 'Q', type: 'text' }] }],
+    })
+    await setServiceActive(ctx, key, true)
+    expect((await listServices(ctx)).some((s) => s.serviceKey === key)).toBe(true)
 
     // Disable.
     const off = await setServiceActive(ctx, key, false)

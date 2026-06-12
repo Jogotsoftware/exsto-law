@@ -165,11 +165,14 @@ run('service drafting-prompt editor (live DB)', { timeout: 90_000 }, () => {
     expect(fetched!.source).toBe('config')
     expect(fetched!.promptVersion).toBe(1)
 
-    // Versioned upsert path: version 2 active, v1 sealed.
+    // Versioned upsert path: version 2 is the current row, v1 sealed. (PR4: the
+    // new version carries the prior status forward — a freshly created service is
+    // disabled, so the current row stays 'deprecated'. The contract here is the
+    // bitemporal seal + prompt_version bump, not the enabled status.)
     const after = await activeRows(key)
     expect(after.rowCount).toBe(1)
     expect(after.rows[0]!.version).toBe(2)
-    expect(after.rows[0]!.status).toBe('active')
+    expect(after.rows[0]!.status).toBe('deprecated')
     const sealed = await db.query<{ status: string; valid_to: string | null }>(
       `SELECT status, valid_to FROM workflow_definition WHERE id = $1`,
       [v1.id],
