@@ -1,11 +1,17 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
 import { Tabs, type TabSpec } from '@/components/Tabs'
-import { CalendarIcon, ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
+import { WeeklyCalendar, type BookingCategory } from '@/components/WeeklyCalendar'
+import { ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
+
+// Newly-booked consultations should appear without a manual reload. True Google
+// push-sync is out of scope; we poll the existing `legal.calendar.upcoming`
+// source on this interval — "live enough" for the dashboard.
+const CALENDAR_POLL_MS = 45_000
 
 interface UpcomingBooking {
   matterEntityId: string
@@ -15,6 +21,7 @@ interface UpcomingBooking {
   scheduledAt: string
   scheduledEnd: string | null
   status: string
+  category: BookingCategory
 }
 
 interface RecentBooking {
@@ -70,15 +77,6 @@ function humanizeService(key: string): string {
   return key.replace(/_/g, ' ')
 }
 
-function dayKey(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
-}
-
-function timeOnly(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-}
-
 function timeAgo(iso: string): string {
   const t = new Date(iso).getTime()
   if (!Number.isFinite(t)) return '—'
@@ -97,38 +95,41 @@ export default function AttorneyHome() {
   const [recent, setRecent] = useState<RecentBooking[] | null>(null)
   const [matters, setMatters] = useState<MatterSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
+
+  // Fetch just the calendar feed; reused by the initial load and the live poll.
+  const refreshUpcoming = useCallback(async () => {
+    const u = await callAttorneyMcp<{ upcoming: UpcomingBooking[] }>({
+      toolName: 'legal.calendar.upcoming',
+      input: { limit: 200 },
+    })
+    setUpcoming(u.upcoming)
+    setLastRefreshedAt(Date.now())
+  }, [])
 
   useEffect(() => {
     Promise.all([
-      callAttorneyMcp<{ upcoming: UpcomingBooking[] }>({
-        toolName: 'legal.calendar.upcoming',
-        input: { limit: 50 },
-      }),
+      refreshUpcoming(),
       callAttorneyMcp<{ recent: RecentBooking[] }>({
         toolName: 'legal.calendar.recent_bookings',
         input: { limit: 10 },
-      }),
-      callAttorneyMcp<{ matters: MatterSummary[] }>({ toolName: 'legal.matter.list' }),
-    ])
-      .then(([u, r, m]) => {
-        setUpcoming(u.upcoming)
-        setRecent(r.recent)
-        setMatters(m.matters)
-      })
-      .catch((e) => setError(e.message))
-  }, [])
+      }).then((r) => setRecent(r.recent)),
+      callAttorneyMcp<{ matters: MatterSummary[] }>({ toolName: 'legal.matter.list' }).then((m) =>
+        setMatters(m.matters),
+      ),
+    ]).catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [refreshUpcoming])
 
-  const upcomingByDay = useMemo(() => {
-    if (!upcoming) return new Map<string, UpcomingBooking[]>()
-    const map = new Map<string, UpcomingBooking[]>()
-    for (const b of upcoming) {
-      const key = dayKey(b.scheduledAt)
-      const list = map.get(key) ?? []
-      list.push(b)
-      map.set(key, list)
-    }
-    return map
-  }, [upcoming])
+  // Live sync: poll the upcoming feed so newly-booked consultations appear
+  // without a manual reload. Polling-only (no Google push); clears on unmount.
+  useEffect(() => {
+    const id = setInterval(() => {
+      refreshUpcoming().catch(() => {
+        // Transient poll failure: keep the last-good data, retry next tick.
+      })
+    }, CALENDAR_POLL_MS)
+    return () => clearInterval(id)
+  }, [refreshUpcoming])
 
   const matterGroups = useMemo(() => {
     const buckets: Record<string, MatterSummary[]> = {}
@@ -188,44 +189,36 @@ export default function AttorneyHome() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      <section>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <h2>This week</h2>
+          <Link href="/attorney/share" className="icon-inline" style={{ fontSize: '0.85rem' }}>
+            <Share2Icon size={13} />
+            Share a booking link
+          </Link>
+        </div>
+        {upcoming === null && !error ? (
+          <div className="loading-block">
+            <span className="spinner" /> Loading…
+          </div>
+        ) : (
+          <WeeklyCalendar
+            meetings={upcoming ?? []}
+            loaded={upcoming !== null}
+            lastRefreshedAt={lastRefreshedAt}
+          />
+        )}
+      </section>
+
       <div className="home-grid">
         <section>
-          <h2>Upcoming consultations</h2>
-          {upcoming === null && !error && (
+          <h2>Matters</h2>
+          {matters === null && !error && (
             <div className="loading-block">
               <span className="spinner" /> Loading…
             </div>
           )}
-          {upcoming && upcoming.length === 0 && (
-            <p className="text-muted">
-              No upcoming consultations. <Link href="/attorney/share">Share a booking link.</Link>
-            </p>
-          )}
-          {upcoming && upcoming.length > 0 && (
-            <div className="day-list">
-              {Array.from(upcomingByDay.entries()).map(([day, bookings]) => (
-                <div key={day} className="day-group">
-                  <div className="day-label">
-                    <CalendarIcon size={12} />
-                    {day}
-                  </div>
-                  {bookings.map((b) => (
-                    <Link
-                      key={b.matterEntityId}
-                      href={`/attorney/matters/${b.matterEntityId}`}
-                      className="cal-card"
-                    >
-                      <div className="cal-time">{timeOnly(b.scheduledAt)}</div>
-                      <div>
-                        <div className="cal-client">{b.clientName || b.matterNumber}</div>
-                        <div className="cal-service">{humanizeService(b.serviceKey)}</div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
+          {matters && <Tabs tabs={matterTabs} />}
         </section>
 
         <section>
@@ -258,16 +251,6 @@ export default function AttorneyHome() {
           )}
         </section>
       </div>
-
-      <section>
-        <h2>Matters</h2>
-        {matters === null && !error && (
-          <div className="loading-block">
-            <span className="spinner" /> Loading…
-          </div>
-        )}
-        {matters && <Tabs tabs={matterTabs} />}
-      </section>
     </main>
   )
 }
