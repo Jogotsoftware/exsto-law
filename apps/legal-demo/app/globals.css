@@ -1916,6 +1916,294 @@ main.book-main {
   }
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+   Attorney dashboard WEEKLY CALENDAR (WeeklyCalendar.tsx). Namespaced .wcal-*
+   to stay independent of the client-facing booking picker's .cal-* styles.
+   Color-coded by booking category; each block deep-links to its matter.
+   ─────────────────────────────────────────────────────────────────────────── */
+.wcal-wrap {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xl);
+  background: white;
+  padding: 0.75rem 0.85rem 0.65rem;
+  margin-top: 0.5rem;
+}
+.wcal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.wcal-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.wcal-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-full);
+  padding: 0;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--fg);
+}
+.wcal-nav-btn:hover {
+  border-color: var(--accent-attorney);
+  color: var(--accent-attorney);
+}
+.wcal-today-btn {
+  font-size: var(--text-xs);
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: white;
+}
+.wcal-week-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+}
+.wcal-this-week {
+  color: var(--muted);
+  font-weight: var(--weight-regular);
+  font-size: var(--text-sm);
+}
+
+.wcal-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 0.65rem;
+  font-size: var(--text-xs);
+}
+.wcal-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--ok);
+  font-weight: var(--weight-medium);
+}
+.wcal-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-full);
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+  animation: wcal-live-pulse 2.2s ease-in-out infinite;
+}
+.wcal-live-time {
+  color: var(--muted);
+  font-weight: var(--weight-regular);
+}
+@keyframes wcal-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+.wcal-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  color: var(--muted);
+}
+.wcal-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.wcal-swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.wcal-empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  padding: 0.75rem 0.5rem;
+  background: var(--rule-soft);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.65rem;
+}
+.wcal-jump {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-attorney);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.wcal-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+.wcal-day-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--radius-md);
+  padding: 0.1rem;
+}
+.wcal-today-col {
+  background: var(--accent-attorney-soft);
+}
+.wcal-day-head {
+  text-align: center;
+  padding: 0.35rem 0 0.45rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+.wcal-day-dow {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.wcal-day-num {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+  margin-top: 0.05rem;
+}
+.wcal-today-col .wcal-day-num {
+  color: var(--accent-attorney);
+}
+.wcal-day-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-top: 0.4rem;
+  min-height: 2.5rem;
+}
+.wcal-day-empty {
+  text-align: center;
+  color: var(--border);
+  font-size: 0.9rem;
+  padding: 0.35rem 0;
+}
+
+.wcal-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  text-align: left;
+  width: 100%;
+  padding: 0.4rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  border-left-width: 3px;
+  cursor: pointer;
+  background: white;
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease;
+}
+.wcal-block:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+.wcal-block-time {
+  font-size: 0.72rem;
+  font-weight: var(--weight-semibold);
+}
+.wcal-block-client {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wcal-block-service {
+  font-size: 0.7rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Category color coding — used by both blocks (.wcal-block) and legend swatches
+   (.wcal-swatch). new_consultation = attorney blue, new_matter = ok green,
+   existing_project = muted grey. */
+.wcal-block.wcal-new_consultation {
+  background: var(--accent-attorney-soft);
+  border-color: var(--accent-attorney);
+}
+.wcal-block.wcal-new_consultation .wcal-block-time {
+  color: var(--accent-attorney);
+}
+.wcal-swatch.wcal-new_consultation {
+  background: var(--accent-attorney);
+}
+.wcal-block.wcal-new_matter {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+}
+.wcal-block.wcal-new_matter .wcal-block-time {
+  color: var(--ok);
+}
+.wcal-swatch.wcal-new_matter {
+  background: var(--ok);
+}
+.wcal-block.wcal-existing_project {
+  background: var(--rule-soft);
+  border-color: var(--muted);
+}
+.wcal-block.wcal-existing_project .wcal-block-time {
+  color: var(--muted);
+}
+.wcal-swatch.wcal-existing_project {
+  background: var(--muted);
+}
+
+.wcal-mobile-list {
+  display: none;
+}
+@media (max-width: 720px) {
+  .wcal-week-grid {
+    display: none;
+  }
+  .wcal-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .wcal-mobile-day {
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .wcal-mobile-day-head {
+    padding: 0.6rem 0.85rem;
+    font-weight: var(--weight-semibold);
+    font-size: var(--text-sm);
+    background: var(--rule-soft);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .wcal-mobile-day-slots {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.6rem 0.85rem;
+  }
+}
+
 /* Contact detail grid */
 .contact-grid {
   display: grid;
