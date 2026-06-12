@@ -22,3 +22,24 @@ export const CLIENT_PORTAL_TOOLS: ReadonlySet<string> = new Set([
 export function isClientPortalTool(toolName: string): boolean {
   return CLIENT_PORTAL_TOOLS.has(toolName)
 }
+
+// Which legal MCP tools the AUTHENTICATED client portal (/api/client/portal/mcp)
+// may call. This is a SEPARATE, additional security boundary from the public
+// CLIENT_PORTAL_TOOLS above: the authed route runs only after a signed client
+// session cookie is verified, but it STILL default-denies against this list so
+// that an authenticated client can never invoke attorney research, settings,
+// matter history, billable AI calls, or any write — only the read-only,
+// client-safe portal tools belong here.
+//
+// Authorization to a SPECIFIC matter (this client may see THIS matter) is a
+// further check done in the route against the session's matterIds; this list
+// only governs WHICH tools are reachable at all. Keep it MINIMAL — every entry
+// must return a client-safe projection. All entries are read-mode.
+export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
+  'legal.client.matters', // matter switcher: the signed-in client's own matters
+  'legal.client.matter_timeline', // status + whitelisted milestone timeline for one matter
+])
+
+export function isClientPortalAuthedTool(toolName: string): boolean {
+  return CLIENT_PORTAL_AUTHED_TOOLS.has(toolName)
+}

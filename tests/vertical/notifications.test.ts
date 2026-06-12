@@ -66,6 +66,7 @@ run('notifications (live DB)', { timeout: 90_000 }, () => {
     expect(routes.rows.map((r) => r.kind_name)).toEqual([
       'attorney_draft_completed',
       'attorney_manual_matter',
+      'client_portal_magic_link',
       'prospect_booking_confirmation',
       'prospect_intake_confirmation',
     ])

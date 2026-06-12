@@ -48,6 +48,21 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `— Pacheco Law Firm`,
     ].join('\n'),
   }),
+  'client-portal-magic-link': (v) => ({
+    subject: `Your Pacheco Law sign-in link`,
+    bodyText: [
+      `Hi ${s(v.client_full_name, 'there')},`,
+      ``,
+      `Use the secure link below to sign in to your Pacheco Law client portal and`,
+      `view the status of your matter. The link expires in 30 minutes.`,
+      ``,
+      `${s(v.login_url, '(sign-in link unavailable)')}`,
+      ``,
+      `If you didn't request this, you can safely ignore this email.`,
+      ``,
+      `— Pacheco Law Firm`,
+    ].join('\n'),
+  }),
   'prospect-booking-confirmation': (v) => ({
     subject: `Your consultation is booked — Pacheco Law`,
     bodyText: [
