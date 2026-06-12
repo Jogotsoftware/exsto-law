@@ -5,7 +5,11 @@ import {
   type ActionContext,
   type ActionResult,
 } from '@exsto/substrate'
-import { loadIntakeForm, type IntakeQuestionnaire } from '../templates/loader.js'
+import {
+  loadDraftingPrompt,
+  loadIntakeForm,
+  type IntakeQuestionnaire,
+} from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
 
@@ -60,6 +64,7 @@ type WorkflowRow = {
     documents?: string[]
     sort_order?: number
     intake_schema?: IntakeSchema
+    drafting?: DraftingConfig
     [k: string]: unknown
   }
   status: string
@@ -444,6 +449,190 @@ export async function updateQuestionnaire(
 
   const saved = await getQuestionnaire(ctx, serviceKey)
   if (!saved) throw new Error(`Questionnaire not found after update: ${serviceKey}`)
+  return saved
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Drafting-prompt editor (PR3): read + versioned write of a service's drafting
+// prompt, PER DOCUMENT KIND.
+//
+// The drafting prompt is config-as-data living in transitions.drafting.prompts
+// keyed by document kind (operating_agreement, engagement_letter, …). A write is
+// just a service upsert with a transitions_patch — the same versioned path the
+// metadata and questionnaire editors use (seal prior active row, insert
+// version+1, record a configuration_change). No new action kind. The drafting
+// worker (generateDraft) reads the resolved prompt through resolveDraftingPrompt,
+// config-first with a repo-file fallback.
+//
+// The prompt is fed to assembleDraftingPrompt, which fills three mustache slots.
+// An edited prompt MUST contain all of them or drafting silently breaks, so the
+// write path validates their presence before persisting. This is the FIXED slot
+// contract — it mirrors the .replace() calls in generateDraft.assembleDraftingPrompt.
+// ───────────────────────────────────────────────────────────────────────────
+
+// The mustache slots assembleDraftingPrompt fills (generateDraft.ts). EVERY stored
+// prompt must contain all three; the document-body slot is named
+// {{operating_agreement_template}} regardless of document kind (the worker fills
+// that one slot with whichever body template the kind maps to).
+export const REQUIRED_DRAFTING_SLOTS = [
+  '{{questionnaire_responses_json}}',
+  '{{transcript_text}}',
+  '{{operating_agreement_template}}',
+] as const
+
+export interface DraftingConfig {
+  prompt_version?: number
+  prompts?: Record<string, string>
+}
+
+export interface DraftingPromptDoc {
+  serviceKey: string
+  documentKind: string
+  // The resolved prompt text. Null when neither config nor a repo file yields one.
+  promptText: string | null
+  // 'config' when it came from transitions.drafting.prompts; 'repo' when it fell
+  // back to the bundled drafting-prompt.md; 'none' when nothing resolved.
+  source: 'config' | 'repo' | 'none'
+  // The config prompt_version when source === 'config'; null otherwise.
+  promptVersion: number | null
+  // The required mustache slots, for the editor's checklist.
+  requiredSlots: readonly string[]
+}
+
+// Which required slots a prompt is MISSING. Empty array = valid.
+export function missingDraftingSlots(promptText: string): string[] {
+  return REQUIRED_DRAFTING_SLOTS.filter((slot) => !promptText.includes(slot))
+}
+
+// Read a service's drafting prompt for one document kind. Resolution order:
+// in-app config (transitions.drafting.prompts[documentKind]) → repo file
+// (loadDraftingPrompt) → null. Returns a doc carrying the source + version so the
+// editor can show provenance and the worker can record it.
+export async function getDraftingPrompt(
+  ctx: ActionContext,
+  serviceKey: string,
+  documentKind: string,
+): Promise<DraftingPromptDoc | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    const r = res.rows[0]
+    if (!r) return null
+    return resolveDraftingPromptDoc(r.transitions.drafting, serviceKey, documentKind)
+  })
+}
+
+// Pure resolver shared by getDraftingPrompt and the drafting worker: config wins,
+// else the repo file, else null. Kept side-effect-free so generateDraft can reuse
+// it without a second DB round-trip (it already has the service's transitions in
+// hand via the matter's service config).
+export function resolveDraftingPromptDoc(
+  drafting: DraftingConfig | undefined,
+  serviceKey: string,
+  documentKind: string,
+): DraftingPromptDoc {
+  const configured = drafting?.prompts?.[documentKind]
+  if (typeof configured === 'string' && configured.trim()) {
+    return {
+      serviceKey,
+      documentKind,
+      promptText: configured,
+      source: 'config',
+      promptVersion: typeof drafting?.prompt_version === 'number' ? drafting.prompt_version : null,
+      requiredSlots: REQUIRED_DRAFTING_SLOTS,
+    }
+  }
+  try {
+    return {
+      serviceKey,
+      documentKind,
+      promptText: loadDraftingPrompt(),
+      source: 'repo',
+      promptVersion: null,
+      requiredSlots: REQUIRED_DRAFTING_SLOTS,
+    }
+  } catch {
+    return {
+      serviceKey,
+      documentKind,
+      promptText: null,
+      source: 'none',
+      promptVersion: null,
+      requiredSlots: REQUIRED_DRAFTING_SLOTS,
+    }
+  }
+}
+
+// Validate a drafting prompt against the FIXED slot contract before persisting.
+// Throws a descriptive Error naming the missing slots (the editor surfaces
+// .message). Reads never validate — a legacy repo prompt always renders.
+export function validateDraftingPrompt(promptText: unknown): string {
+  if (typeof promptText !== 'string' || !promptText.trim()) {
+    throw new Error('The drafting prompt must be non-empty text.')
+  }
+  const missing = missingDraftingSlots(promptText)
+  if (missing.length > 0) {
+    throw new Error(
+      `The drafting prompt is missing required slot(s): ${missing.join(', ')}. ` +
+        `Every prompt must contain ${REQUIRED_DRAFTING_SLOTS.join(', ')} so the worker can fill them.`,
+    )
+  }
+  return promptText
+}
+
+// Write a service's drafting prompt for one document kind as a new immutable
+// version. Validates the required slots are present (throws otherwise), reads the
+// current row to MERGE into the existing drafting config (so other document kinds'
+// prompts survive), bumps drafting.prompt_version, and submits the upsert with a
+// transitions_patch. Returns the saved doc.
+export async function updateDraftingPrompt(
+  ctx: ActionContext,
+  serviceKey: string,
+  documentKind: string,
+  promptText: unknown,
+): Promise<DraftingPromptDoc> {
+  if (!documentKind || typeof documentKind !== 'string') {
+    throw new Error('A document kind is required.')
+  }
+  const validated = validateDraftingPrompt(promptText)
+
+  const row = await withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0] ?? null
+  })
+  if (!row) throw new Error(`Service not found: ${serviceKey}`)
+
+  // Merge into the existing drafting config so sibling document kinds' prompts are
+  // preserved. Bump prompt_version on every save (a new version of the prompt set).
+  const existing: DraftingConfig = row.transitions.drafting ?? {}
+  const nextVersion =
+    (typeof existing.prompt_version === 'number' ? existing.prompt_version : 0) + 1
+  const mergedDrafting: DraftingConfig = {
+    prompt_version: nextVersion,
+    prompts: { ...(existing.prompts ?? {}), [documentKind]: validated },
+  }
+
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: serviceKey,
+      display_name: row.display_name,
+      transitions_patch: { drafting: mergedDrafting },
+    },
+  })
+
+  const saved = await getDraftingPrompt(ctx, serviceKey, documentKind)
+  if (!saved) throw new Error(`Drafting prompt not found after update: ${serviceKey}`)
   return saved
 }
 

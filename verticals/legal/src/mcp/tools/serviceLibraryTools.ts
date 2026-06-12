@@ -7,12 +7,15 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   createService,
+  getDraftingPrompt,
   getQuestionnaire,
   listServicesIncludingInactive,
   setServiceActive,
+  updateDraftingPrompt,
   updateQuestionnaire,
   updateServiceMetadata,
   type CreateServiceInput,
+  type DraftingPromptDoc,
   type QuestionnaireDoc,
   type ServiceDefinition,
   type UpdateServiceMetadataInput,
@@ -88,9 +91,44 @@ const questionnaireUpdateTool: Tool<
   }),
 }
 
+// Drafting-prompt editor (PR3). Per-document-kind prompt. Read resolves the
+// in-app config first, else the bundled repo prompt, else null. Write validates
+// the FIXED mustache-slot contract and saves a new immutable version of the
+// service with the edited prompt patched into transitions.drafting.prompts. The
+// drafting worker (generateDraft) reads the same resolution. NEITHER is
+// client-portal-callable (clientPolicy.ts is default-deny): drafting prompts are
+// attorney-only configuration.
+const promptGetTool: Tool<
+  { serviceKey: string; documentKind: string },
+  { prompt: DraftingPromptDoc | null }
+> = {
+  name: 'legal.service.prompt.get',
+  description:
+    "Get a service offering's drafting prompt for one document kind (e.g. operating_agreement, engagement_letter). Returns the in-app config prompt if saved, otherwise the bundled repo prompt, otherwise null. Includes the required mustache slots and the prompt's source/version.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    prompt: await getDraftingPrompt(ctx, input.serviceKey, input.documentKind),
+  }),
+}
+
+const promptUpdateTool: Tool<
+  { serviceKey: string; documentKind: string; promptText: string },
+  { prompt: DraftingPromptDoc }
+> = {
+  name: 'legal.service.prompt.update',
+  description:
+    "Save a service offering's drafting prompt for one document kind. Validates that all required mustache slots are present, then writes a NEW immutable version (the prior definition is sealed) and bumps the prompt version. The drafting worker uses the new prompt immediately.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    prompt: await updateDraftingPrompt(ctx, input.serviceKey, input.documentKind, input.promptText),
+  }),
+}
+
 registerTool(listAllTool)
 registerTool(createTool)
 registerTool(updateTool)
 registerTool(setActiveTool)
 registerTool(questionnaireGetTool)
 registerTool(questionnaireUpdateTool)
+registerTool(promptGetTool)
+registerTool(promptUpdateTool)

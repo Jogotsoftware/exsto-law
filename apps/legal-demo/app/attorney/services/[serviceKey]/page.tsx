@@ -137,6 +137,11 @@ export default function ServiceEditorPage() {
             Edit questionnaire
           </Link>
         )}
+        {!isNew && (
+          <Link href={`/attorney/services/${serviceKey}/prompt`} className="back-link">
+            Edit prompt
+          </Link>
+        )}
         <button className="primary" onClick={save} disabled={busy || !form}>
           {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
         </button>
