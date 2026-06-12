@@ -414,6 +414,8 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
 
       <ResearchPanel matterEntityId={id} />
 
+      <MessagesSection matterEntityId={id} />
+
       <section>
         <h2>Action history</h2>
         <p className="text-muted text-sm">
@@ -572,6 +574,130 @@ function ResearchPanel({ matterEntityId }: { matterEntityId: string }) {
           ))}
         </div>
       )}
+    </section>
+  )
+}
+
+interface PortalMessage {
+  author: 'client' | 'attorney'
+  body: string
+  sentAt: string
+}
+
+// Attorney side of the client↔attorney portal thread. Reads via
+// legal.matter.thread_get and replies via legal.matter.message_post (attorney
+// provenance). Same data the client sees in their portal — one thread per matter.
+function MessagesSection({ matterEntityId }: { matterEntityId: string }) {
+  const [messages, setMessages] = useState<PortalMessage[] | null>(null)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ messages: PortalMessage[] }>({
+        toolName: 'legal.matter.thread_get',
+        input: { matterEntityId },
+      })
+      setMessages(r.messages)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setMessages((prev) => prev ?? [])
+    }
+  }, [matterEntityId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function reply() {
+    if (busy || !draft.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.matter.message_post',
+        input: { matterEntityId, body: draft.trim() },
+      })
+      setDraft('')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section>
+      <h2>Messages</h2>
+      <p className="text-muted text-sm">
+        The client↔attorney message thread for this matter. Replies are sent to the client and
+        appear in their portal.
+      </p>
+      {error && <div className="alert alert-error">{error}</div>}
+
+      {messages === null ? (
+        <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
+          <span className="spinner" /> Loading messages…
+        </p>
+      ) : messages.length === 0 ? (
+        <p className="text-muted" style={{ marginTop: 'var(--space-3)' }}>
+          No messages yet.
+        </p>
+      ) : (
+        <div
+          style={{
+            marginTop: 'var(--space-3)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--space-2)',
+          }}
+        >
+          {messages.map((m, i) => (
+            <div
+              key={`${m.sentAt}-${i}`}
+              style={{
+                alignSelf: m.author === 'attorney' ? 'flex-end' : 'flex-start',
+                maxWidth: '80%',
+                padding: 'var(--space-2) var(--space-3)',
+                borderRadius: '10px',
+                background:
+                  m.author === 'attorney'
+                    ? 'var(--accent-soft, #e0e7ff)'
+                    : 'var(--surface, #f4f4f5)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>
+                {m.body}
+              </div>
+              <div className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
+                {m.author === 'attorney' ? 'You' : 'Client'} · {new Date(m.sentAt).toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div
+        className="row"
+        style={{ gap: 'var(--space-2)', alignItems: 'flex-start', marginTop: 'var(--space-3)' }}
+      >
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={2}
+          placeholder="Reply to the client…"
+          style={{ flex: 1 }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) reply()
+          }}
+        />
+        <button className="primary" onClick={reply} disabled={busy || !draft.trim()}>
+          {busy ? 'Sending…' : 'Reply'}
+        </button>
+      </div>
     </section>
   )
 }

@@ -63,6 +63,34 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `— Pacheco Law Firm`,
     ].join('\n'),
   }),
+  'attorney-portal-message': (v) => ({
+    subject: `New client message — ${s(v.matter_number, 'a matter')}`,
+    bodyText: [
+      `A client posted a new message on the portal.`,
+      ``,
+      `Matter: ${s(v.matter_number, '—')}`,
+      ``,
+      // No message body in the email — open the matter to read and reply.
+      `Open the matter to read and reply: ${s(v.matter_url, '(set NEXT_PUBLIC_BASE_URL)')}`,
+      ``,
+      `— Pacheco Law Firm`,
+    ].join('\n'),
+  }),
+  'client-portal-message': (v) => ({
+    subject: `You have a new message from Pacheco Law`,
+    bodyText: [
+      `Hi there,`,
+      ``,
+      `Your attorney posted a new message about your matter${
+        v.matter_number ? ` (${s(v.matter_number)})` : ''
+      }.`,
+      ``,
+      // No message body in the email — sign in to the portal to read and reply.
+      `Sign in to your client portal to read and reply: ${s(v.portal_url, '(portal link unavailable)')}`,
+      ``,
+      `— Pacheco Law Firm`,
+    ].join('\n'),
+  }),
   'prospect-booking-confirmation': (v) => ({
     subject: `Your consultation is booked — Pacheco Law`,
     bodyText: [

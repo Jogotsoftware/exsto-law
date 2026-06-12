@@ -38,6 +38,8 @@ export function isClientPortalTool(toolName: string): boolean {
 export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.client.matters', // matter switcher: the signed-in client's own matters
   'legal.client.matter_timeline', // status + whitelisted milestone timeline for one matter
+  'legal.client.thread_get', // read the client↔attorney portal thread for one matter
+  'legal.client.message_post', // post a message to the attorney on one of the client's matters
 ])
 
 export function isClientPortalAuthedTool(toolName: string): boolean {
