@@ -12,6 +12,7 @@ import {
   loadEngagementLetterTemplate,
   loadOperatingAgreementTemplate,
 } from '../templates/loader.js'
+import { getDraftingPrompt } from './services.js'
 import { getMatter } from '../queries/matters.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent).
@@ -105,7 +106,21 @@ export async function runDraftGeneration(
     input.documentKind === 'engagement_letter'
       ? loadEngagementLetterTemplate()
       : loadOperatingAgreementTemplate()
+
+  // Resolve the drafting prompt from the matter's service config
+  // (transitions.drafting.prompts[documentKind]) with a repo-file fallback. The
+  // {{slot}} replacement below is unchanged — only the base prompt's source moves
+  // from a fixed repo file to editable config. The document-BODY template
+  // (operating-agreement / engagement-letter markdown) stays a repo file this PR.
+  const resolved = m.serviceKey
+    ? await getDraftingPrompt(agentCtx, m.serviceKey, input.documentKind)
+    : null
+  const basePrompt = resolved?.promptText ?? loadDraftingPrompt()
+  const promptSource = resolved?.promptText ? resolved.source : 'repo'
+  const promptVersion = resolved?.promptText ? resolved.promptVersion : null
+
   const prompt = assembleDraftingPrompt({
+    basePrompt,
     template,
     questionnaireResponses: m.questionnaireResponses!,
     transcriptText: m.transcriptText!,
@@ -122,6 +137,12 @@ export async function runDraftGeneration(
     confidence: result.reasoningTrace.confidence,
     modelIdentity: result.modelIdentity,
     fullTrace: result.reasoningTrace,
+    // Record which prompt produced this draft so the audit trail names the config
+    // version (or the repo fallback) the worker actually used.
+    promptId:
+      promptSource === 'config' && promptVersion != null
+        ? `${m.serviceKey}/${input.documentKind}@config-v${promptVersion}`
+        : `${input.documentKind}@repo`,
   })
 
   const generated = await submitAction(agentCtx, {
@@ -162,6 +183,7 @@ export async function runDraftGeneration(
 }
 
 interface AssembleArgs {
+  basePrompt: string
   template: string
   questionnaireResponses: Record<string, unknown>
   transcriptText: string
@@ -169,8 +191,9 @@ interface AssembleArgs {
 }
 
 function assembleDraftingPrompt(args: AssembleArgs): string {
-  const basePrompt = loadDraftingPrompt()
-  return basePrompt
+  // basePrompt is resolved by the caller (config-first, repo fallback). The slot
+  // contract is FIXED: these are the same three slots the prompt editor validates.
+  return args.basePrompt
     .replace(
       '{{questionnaire_responses_json}}',
       JSON.stringify(args.questionnaireResponses, null, 2),
@@ -191,10 +214,21 @@ interface PersistTraceArgs {
   confidence: number
   modelIdentity: string
   fullTrace: unknown
+  // Identifies WHICH drafting prompt produced this draft (config version vs repo
+  // fallback). reasoning_trace has no prompt_id column, so we fold it into the
+  // stored trace jsonb under prompt_config — no schema change, full audit.
+  promptId?: string
 }
 
 async function persistReasoningTrace(ctx: ActionContext, args: PersistTraceArgs): Promise<string> {
   const id = randomUUID()
+  const traceWithPromptId =
+    args.promptId && args.fullTrace && typeof args.fullTrace === 'object'
+      ? {
+          ...(args.fullTrace as Record<string, unknown>),
+          prompt_config: { prompt_id: args.promptId },
+        }
+      : args.fullTrace
   await withActionContext(ctx, async (client) => {
     await client.query(
       `INSERT INTO reasoning_trace (
@@ -211,7 +245,7 @@ async function persistReasoningTrace(ctx: ActionContext, args: PersistTraceArgs)
         args.conclusion,
         clampConfidence(args.confidence),
         args.modelIdentity,
-        JSON.stringify(args.fullTrace),
+        JSON.stringify(traceWithPromptId),
       ],
     )
   })
