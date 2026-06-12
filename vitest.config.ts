@@ -23,9 +23,12 @@ export default defineConfig({
       ),
       '@exsto/legal': fileURLToPath(new URL('./verticals/legal/dist/index.js', import.meta.url)),
       // legal-demo uses the `@/` path alias for app-local imports. Route-handler
-      // tests import those files, so map `@/` to the app root here too. No other
-      // workspace uses `@/`, so this is safe globally.
-      '@/': fileURLToPath(new URL('./apps/legal-demo/', import.meta.url)),
+      // tests import those files, so map it here too. The key must be '@' (not
+      // '@/'): @rollup/plugin-alias matches `find + '/'`, so '@' matches '@/lib/…'
+      // while '@/' would require '@//…' and never fire. Safe for @exsto/* — those
+      // start with '@e', not '@/', so they don't match '@' and keep their own
+      // (earlier) aliases.
+      '@': fileURLToPath(new URL('./apps/legal-demo', import.meta.url)),
     },
   },
   test: {

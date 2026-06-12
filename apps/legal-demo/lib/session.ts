@@ -51,10 +51,7 @@ function secret(): string {
 // Domain-separated MAC: the prefix means a session MAC and an OAuth-state MAC
 // over the same bytes differ, so neither token can be confused for the other.
 function mac(payloadB64: string): string {
-  return createHmac('sha256', secret())
-    .update(DOMAIN_PREFIX)
-    .update(payloadB64)
-    .digest('base64url')
+  return createHmac('sha256', secret()).update(DOMAIN_PREFIX).update(payloadB64).digest('base64url')
 }
 
 // Mint a signed session for a resolved actor. `iat`/`exp` are filled in here so

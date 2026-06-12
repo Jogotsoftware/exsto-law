@@ -13,7 +13,7 @@
 // Lives under apps/legal-demo/tests so `next/server` resolves (root tests/ has no
 // Next install). OAUTH_STATE_SECRET is set in-test (the lib fails closed without
 // it).
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
   signSession,
   verifySession,
@@ -94,13 +94,16 @@ describe('lib/session — HMAC sign/verify (no DB)', () => {
     expect(verifySession('.onlysig')).toBeNull()
   })
 
+  // 30s timeout: the dynamic `import('@exsto/legal')` cold-loads the whole
+  // vertical (primitives/handlers) and can exceed the 5s default under full-suite
+  // parallel load — it's import cost, not logic.
   it('is domain-separated from OAuth state (a session MAC is not an OAuth-state MAC)', async () => {
     // Same secret, same payload bytes, but the session signer prefixes the MAC
     // with "session.v1:", so an OAuth-state verifier must reject a session token.
     const { verifyOAuthState } = await import('@exsto/legal')
     const token = signSession(IDENTITY)
     expect(() => verifyOAuthState(token)).toThrow()
-  })
+  }, 30_000)
 
   it('fails closed when OAUTH_STATE_SECRET is missing', () => {
     delete process.env.OAUTH_STATE_SECRET
@@ -216,9 +219,7 @@ describe('/api/attorney/mcp resolveCtx — production cookie gating', () => {
 
   it('rejects with 401 when only forged x-actor-id/x-tenant-id headers are sent (production)', async () => {
     const { POST } = await import('../app/api/attorney/mcp/route')
-    const res = await POST(
-      mcpRequest({ 'x-actor-id': ATTORNEY_ACTOR, 'x-tenant-id': TENANT }),
-    )
+    const res = await POST(mcpRequest({ 'x-actor-id': ATTORNEY_ACTOR, 'x-tenant-id': TENANT }))
     // In production the headers are NOT trusted — the old hole is closed.
     expect(res.status).toBe(401)
   })
