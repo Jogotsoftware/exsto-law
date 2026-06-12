@@ -13,9 +13,10 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { loadConnection } from './connectionStore.js'
 
-// Granola's public API is in beta; the base is overridable so a schema move is
-// a config change, not a code change.
-const GRANOLA_API_BASE = process.env.GRANOLA_API_BASE ?? 'https://api.granola.ai/v1'
+// Granola's public REST API. Base is overridable so a schema move is a config
+// change, not a code change. The public surface lives under public-api.granola.ai
+// (verified against the live API; the old api.granola.ai host 404s every route).
+const GRANOLA_API_BASE = process.env.GRANOLA_API_BASE ?? 'https://public-api.granola.ai/v1'
 
 export interface GranolaCallData {
   callId: string
@@ -134,6 +135,169 @@ export function normalizeGranolaPayload(payload: Record<string, unknown>): Grano
     attendeeEmails,
     transcriptText,
     notes: notes as Record<string, unknown> | null,
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Folder/note browse + transcript pull (REST). Drives the attorney "import a
+// Granola folder" flow: list folders → list a folder's notes → pull one note's
+// metadata (preview) or full transcript (import). Distinct from the webhook path
+// above, which is push-driven; this is the attorney pulling existing notes in.
+//
+// EVERY field below can be null/empty per the API contract — parse defensively.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface GranolaFolder {
+  id: string
+  name: string
+}
+
+export interface GranolaNoteSummary {
+  id: string
+  title: string
+  createdAt: string | null
+  ownerEmail: string | null
+}
+
+export interface GranolaNoteDetail {
+  id: string
+  title: string
+  startedAt: string | null
+  attendeeEmails: string[]
+  transcriptText: string
+  summaryMarkdown: string | null
+}
+
+// Shared GET helper: resolves the key (throwing the same "not connected" error
+// as fetchGranolaCall so the UI can react to it), issues the request, and turns
+// a non-2xx into a clear error. 404 is surfaced as-is — the caller decides
+// whether a missing note is fatal (a brand-new meeting can 404 transiently).
+async function granolaGet(tenantId: string, path: string): Promise<Record<string, unknown>> {
+  const key = await granolaKey(tenantId)
+  if (!key) {
+    throw new Error(
+      'Granola is not connected (no API key in Vault or GRANOLA_API_KEY env). Connect Granola from Settings.',
+    )
+  }
+  const res = await fetch(`${GRANOLA_API_BASE}${path}`, {
+    headers: { authorization: `Bearer ${key}` },
+  })
+  if (!res.ok) {
+    throw new Error(`Granola API returned ${res.status} for ${path}`)
+  }
+  return (await res.json()) as Record<string, unknown>
+}
+
+// Cursor pagination: the API caps page_size at 30 and returns { ..., hasMore,
+// cursor }. We loop until hasMore is false, passing the prior cursor. A hard cap
+// on pages prevents an unbounded loop if the API ever lies about hasMore.
+async function paginate<T>(
+  tenantId: string,
+  basePath: string,
+  itemsKey: string,
+  mapItem: (raw: Record<string, unknown>) => T | null,
+): Promise<T[]> {
+  const out: T[] = []
+  let cursor: string | null = null
+  for (let page = 0; page < 100; page++) {
+    const sep = basePath.includes('?') ? '&' : '?'
+    const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+    const data = await granolaGet(tenantId, `${basePath}${sep}page_size=30${cursorParam}`)
+    const items = Array.isArray(data[itemsKey]) ? (data[itemsKey] as Record<string, unknown>[]) : []
+    for (const raw of items) {
+      const mapped = mapItem(raw)
+      if (mapped) out.push(mapped)
+    }
+    if (data.hasMore !== true || typeof data.cursor !== 'string' || !data.cursor) break
+    cursor = data.cursor
+  }
+  return out
+}
+
+// All folders for the tenant. parent_folder_id is ignored here — notes are
+// listed by folder_id, which already includes child folders (API contract).
+export async function listGranolaFolders(tenantId: string): Promise<GranolaFolder[]> {
+  return paginate<GranolaFolder>(tenantId, '/folders', 'folders', (raw) => {
+    const id = typeof raw.id === 'string' ? raw.id : null
+    if (!id) return null
+    return { id, name: typeof raw.name === 'string' ? raw.name : '(untitled folder)' }
+  })
+}
+
+// Note summaries in a folder. The list endpoint does NOT include attendees or
+// transcript — those need a per-note GET (see getGranolaNote).
+export async function listGranolaNotesInFolder(
+  tenantId: string,
+  folderId: string,
+): Promise<GranolaNoteSummary[]> {
+  return paginate<GranolaNoteSummary>(
+    tenantId,
+    `/notes?folder_id=${encodeURIComponent(folderId)}`,
+    'notes',
+    (raw) => {
+      const id = typeof raw.id === 'string' ? raw.id : null
+      if (!id) return null
+      const owner = (raw.owner ?? null) as { email?: unknown } | null
+      return {
+        id,
+        title: typeof raw.title === 'string' && raw.title ? raw.title : '(untitled note)',
+        createdAt: typeof raw.created_at === 'string' ? raw.created_at : null,
+        ownerEmail: owner && typeof owner.email === 'string' ? owner.email.toLowerCase() : null,
+      }
+    },
+  )
+}
+
+// Pull one note. Without opts.transcript we skip ?include=transcript to stay
+// light (preview only needs metadata + attendees). attendeeEmails is the union
+// of attendees[].email, calendar_event.invitees[].email and the organiser —
+// lowercased, deduped — because Granola populates these inconsistently.
+export async function getGranolaNote(
+  tenantId: string,
+  noteId: string,
+  opts?: { transcript?: boolean },
+): Promise<GranolaNoteDetail> {
+  const include = opts?.transcript ? '?include=transcript' : ''
+  const note = await granolaGet(tenantId, `/notes/${encodeURIComponent(noteId)}${include}`)
+
+  const emails = new Set<string>()
+  const addEmail = (v: unknown) => {
+    if (typeof v === 'string' && v.includes('@')) emails.add(v.toLowerCase().trim())
+  }
+  const attendees = Array.isArray(note.attendees)
+    ? (note.attendees as Array<{ email?: unknown }>)
+    : []
+  for (const a of attendees) addEmail(a?.email)
+
+  const cal = (note.calendar_event ?? null) as {
+    invitees?: unknown
+    organiser?: unknown
+    scheduled_start_time?: unknown
+  } | null
+  if (cal) {
+    const invitees = Array.isArray(cal.invitees) ? (cal.invitees as Array<{ email?: unknown }>) : []
+    for (const i of invitees) addEmail(i?.email)
+    addEmail(cal.organiser)
+  }
+
+  const transcriptRows = Array.isArray(note.transcript)
+    ? (note.transcript as Array<{ text?: unknown }>)
+    : []
+  const transcriptText = transcriptRows
+    .map((r) => (typeof r?.text === 'string' ? r.text : ''))
+    .filter(Boolean)
+    .join('\n')
+
+  return {
+    id: typeof note.id === 'string' ? note.id : noteId,
+    title: typeof note.title === 'string' && note.title ? note.title : '(untitled note)',
+    // scheduled_start_time is the real meeting time; created_at is a fallback.
+    startedAt:
+      (cal && typeof cal.scheduled_start_time === 'string' ? cal.scheduled_start_time : null) ??
+      (typeof note.created_at === 'string' ? note.created_at : null),
+    attendeeEmails: [...emails],
+    transcriptText,
+    summaryMarkdown: typeof note.summary_markdown === 'string' ? note.summary_markdown : null,
   }
 }
 
