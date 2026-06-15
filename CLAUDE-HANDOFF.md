@@ -39,5 +39,14 @@ direct DB. See the foundation repo (`exsto`) for the substrate rules.
 - The live Netlify env **must** set `OAUTH_STATE_SECRET` (≥16 chars) or Google OAuth fails closed.
 - Enabling CAPTCHA additionally needs the frontend widget on `/book` + `TURNSTILE_SECRET`/`HCAPTCHA_SECRET`.
 
-## Integration keys & secrets
-`.env` / Vault hold the secrets and are gitignored → not on GitHub. They ship only in the folder copy.
+## Secrets / .env — where to find them
+This repo's secrets are gitignored, so they are NOT on GitHub. File(s) needed:
+- `.env.local` — incl. `OAUTH_STATE_SECRET` (required) and any provider keys. Note: most
+  third-party API keys here are **user-managed in the app and Vault-stored**, not in `.env`.
+
+Find them in either place (both were migrated via iCloud):
+1. Inside this project folder itself (the `.env.local` is already at the path above), or
+2. The consolidated **`ENV-FILES-BACKUP`** folder made during the migration — it mirrors every
+   repo's env files and has a `RESTORE.txt` mapping each back to its path.
+
+All keys are re-issuable from their source dashboards / the app's Settings → Integrations if stale.
