@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { fetchSession } from '@/lib/auth'
 import { PageHead } from '@/components/PageHead'
 
 interface ThreadSummary {
@@ -126,6 +127,24 @@ export default function MailPage() {
     }
   }
 
+  // Mail/calendar OAuth modes REQUIRE tenant_id (the init route 400s without it).
+  // Pull it from the verified session, exactly like the Settings "Connect Google"
+  // button — the old static <a> link omitted tenant_id (and used returnTo instead
+  // of the route's return_to), so "Enable Mail access" always failed.
+  async function enableMail() {
+    const session = await fetchSession()
+    if (!session) {
+      setError('Sign in first, then enable Mail.')
+      return
+    }
+    const params = new URLSearchParams({
+      mode: 'mail',
+      tenant_id: session.tenantId,
+      return_to: '/attorney/mail',
+    })
+    window.location.href = `/api/auth/google/init?${params.toString()}`
+  }
+
   return (
     <main>
       <PageHead
@@ -136,11 +155,9 @@ export default function MailPage() {
         <div className="alert">
           <strong>Enable Mail.</strong> Reading client threads needs one extra Gmail permission
           (asked only now, not at sign-in).{' '}
-          <a href="/api/auth/google/init?mode=mail&returnTo=/attorney/mail">
-            <button className="primary" style={{ marginLeft: 'var(--space-2)' }}>
-              Enable Mail access
-            </button>
-          </a>
+          <button className="primary" style={{ marginLeft: 'var(--space-2)' }} onClick={enableMail}>
+            Enable Mail access
+          </button>
         </div>
       )}
       {error && <div className="alert alert-error">{error}</div>}

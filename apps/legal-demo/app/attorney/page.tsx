@@ -8,6 +8,33 @@ import { Tabs, type TabSpec } from '@/components/Tabs'
 import { WeeklyCalendar, type BookingCategory } from '@/components/WeeklyCalendar'
 import { ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
 
+// Copies the public booking-page link to the clipboard. Replaces the old
+// "/attorney/share" link, which 404'd (no such route) — the link prospects use
+// to book is the public /book page.
+function ShareBookingButton({ compact }: { compact?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/book`)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className="icon-inline"
+      style={compact ? { fontSize: '0.85rem' } : undefined}
+    >
+      <Share2Icon size={compact ? 13 : 14} />
+      {copied ? 'Link copied!' : compact ? 'Share a booking link' : 'Share booking link'}
+    </button>
+  )
+}
+
 // Newly-booked consultations should appear without a manual reload. True Google
 // push-sync is out of scope; we poll the existing `legal.calendar.upcoming`
 // source on this interval — "live enough" for the dashboard.
@@ -175,27 +202,14 @@ export default function AttorneyHome() {
 
   return (
     <main>
-      <PageHead
-        title="Hi, Juan Carlos"
-        actions={
-          <Link href="/attorney/share">
-            <button className="icon-inline">
-              <Share2Icon size={14} />
-              Share booking link
-            </button>
-          </Link>
-        }
-      />
+      <PageHead title="Hi, Juan Carlos" actions={<ShareBookingButton />} />
 
       {error && <div className="alert alert-error">{error}</div>}
 
       <section>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
           <h2>This week</h2>
-          <Link href="/attorney/share" className="icon-inline" style={{ fontSize: '0.85rem' }}>
-            <Share2Icon size={13} />
-            Share a booking link
-          </Link>
+          <ShareBookingButton compact />
         </div>
         {upcoming === null && !error ? (
           <div className="loading-block">
