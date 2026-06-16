@@ -127,12 +127,12 @@ export async function runGranolaProjection(
 
 // Auto-route matters get their drafts queued the moment the transcript lands
 // (REQ-DRAFT-01/05). The set of documents to draft is config-as-data: it is the
-// service's transitions.documents (single-member = OA + engagement letter;
-// multi-member = OA), NOT a hardcoded pair — so flipping a service to auto in
-// config is all it takes for its transcript to trigger the right drafts.
+// service's transitions.documents, with NO hardcoded allow-list of kinds (Doc-Types
+// PR1) — so a service configured with a novel kind (NDA, amendment, …) drafts it
+// just like the bundled kinds. This is safe because the completeness gate blocks
+// enabling an auto service unless every configured kind has a drafting prompt and a
+// resolvable body template; a matter only reaches here when its service is auto.
 // Manual-route matters get nothing here — the attorney email is their path (WP6).
-const SUPPORTED_DRAFT_KINDS = new Set<string>(['operating_agreement', 'engagement_letter'])
-
 async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: string): Promise<void> {
   const matterRoute = await withActionContext(ctx, async (client) => {
     const res = await client.query<{ route: string | null; service_key: string | null }>(
@@ -155,14 +155,14 @@ async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: string): Pr
   // the service is auto but lists no documents, so an auto service is never silent.
   const { getService } = await import('./services.js')
   const service = matterRoute.service_key ? await getService(ctx, matterRoute.service_key) : null
-  const configured = (service?.documents ?? []).filter((k) => SUPPORTED_DRAFT_KINDS.has(k))
+  const configured = service?.documents ?? []
   const documentKinds = configured.length > 0 ? configured : ['operating_agreement']
 
   const { requestDraft } = await import('./generateDraft.js')
   for (const documentKind of documentKinds) {
     await requestDraft(ctx, {
       matterEntityId,
-      documentKind: documentKind as 'operating_agreement' | 'engagement_letter',
+      documentKind,
     })
   }
 }

@@ -6,8 +6,10 @@ import {
   type ActionResult,
 } from '@exsto/substrate'
 import {
+  hasRepoTemplate,
   loadDraftingPrompt,
   loadIntakeForm,
+  resolveRepoDocumentTemplate,
   type IntakeQuestionnaire,
 } from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
@@ -65,6 +67,7 @@ type WorkflowRow = {
     sort_order?: number
     intake_schema?: IntakeSchema
     drafting?: DraftingConfig
+    document_templates?: DocumentTemplateConfig
     [k: string]: unknown
   }
   status: string
@@ -310,6 +313,12 @@ export function computeCompleteness(args: {
   documents: string[]
   intakeSchema: IntakeSchema | undefined
   promptByKind: Record<string, string | null>
+  // Per-kind body-template availability: 'config' (authored in-app), 'repo' (a
+  // bundled body ships for the kind), or 'none'. Optional: when a kind is absent,
+  // it defaults to 'repo' if the kind has a bundled body, else 'none' — so callers
+  // that predate the document-template editor (e.g. older completeness tests) still
+  // get the right answer for the bundled kinds without threading the map through.
+  templateByKind?: Record<string, 'config' | 'repo' | 'none'>
 }): ServiceCompleteness {
   const missing: string[] = []
 
@@ -322,14 +331,22 @@ export function computeCompleteness(args: {
       missing.push('auto-route service needs at least one document to draft')
     }
     for (const kind of args.documents) {
+      // Drafting prompt: present and carrying all required slots.
       const text = args.promptByKind[kind] ?? null
       if (!text || !text.trim()) {
         missing.push(`needs a drafting prompt for "${kind}"`)
-        continue
+      } else {
+        const slots = missingDraftingSlots(text)
+        if (slots.length > 0) {
+          missing.push(`drafting prompt for "${kind}" is missing slot(s): ${slots.join(', ')}`)
+        }
       }
-      const slots = missingDraftingSlots(text)
-      if (slots.length > 0) {
-        missing.push(`drafting prompt for "${kind}" is missing slot(s): ${slots.join(', ')}`)
+      // Document BODY template: an in-app config template OR a bundled repo body.
+      // A novel kind (no bundled body) cannot be drafted until a template is
+      // authored — otherwise the worker would have no document to fill.
+      const tplSource = args.templateByKind?.[kind] ?? (hasRepoTemplate(kind) ? 'repo' : 'none')
+      if (tplSource === 'none') {
+        missing.push(`needs a document template for "${kind}"`)
       }
     }
   }
@@ -370,17 +387,23 @@ export function completenessFromTransitions(
     documents?: string[]
     intake_schema?: IntakeSchema
     drafting?: DraftingConfig
+    document_templates?: DocumentTemplateConfig
   },
 ): ServiceCompleteness {
   const route: WorkflowRoute = transitions.route === 'auto' ? 'auto' : 'manual'
   const documents = Array.isArray(transitions.documents) ? transitions.documents : []
 
   const promptByKind: Record<string, string | null> = {}
+  const templateByKind: Record<string, 'config' | 'repo' | 'none'> = {}
   if (route === 'auto') {
     const prompts = transitions.drafting?.prompts ?? {}
+    const templates = transitions.document_templates?.templates ?? {}
     for (const kind of documents) {
       const t = prompts[kind]
       promptByKind[kind] = typeof t === 'string' ? t : null
+      const tpl = templates[kind]
+      templateByKind[kind] =
+        typeof tpl === 'string' && tpl.trim() ? 'config' : hasRepoTemplate(kind) ? 'repo' : 'none'
     }
   }
 
@@ -390,6 +413,7 @@ export function completenessFromTransitions(
     documents,
     intakeSchema: transitions.intake_schema,
     promptByKind,
+    templateByKind,
   })
 }
 
@@ -775,6 +799,159 @@ export async function updateDraftingPrompt(
 
   const saved = await getDraftingPrompt(ctx, serviceKey, documentKind)
   if (!saved) throw new Error(`Drafting prompt not found after update: ${serviceKey}`)
+  return saved
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Document-template editor (Doc-Types PR1) — the LAST service binding to move
+// from repo file to config-as-data, PER DOCUMENT KIND. This is what lets an
+// attorney stand up a brand-new document type (NDA, amendment, opposing-counsel
+// letter) with no code change.
+//
+// The body template lives in transitions.document_templates.templates[<kind>],
+// exactly parallel to the drafting prompt in transitions.drafting.prompts[<kind>].
+// A write is a service upsert with a transitions_patch — the same versioned path
+// (seal prior active row, insert version+1, record a configuration_change). No new
+// action kind. The drafting worker (generateDraft) resolves the body through the
+// same resolveDocumentTemplateDoc, config-first with a bundled repo fallback for
+// the two Phase-0 kinds (operating_agreement / engagement_letter).
+//
+// Unlike the drafting prompt there is NO required-slot contract: the body template
+// is a reference the model follows, and any {{variable}} markers inside it are
+// filled by the model from the questionnaire/transcript, not by code. Validation is
+// therefore just "non-empty text".
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface DocumentTemplateConfig {
+  template_version?: number
+  templates?: Record<string, string>
+}
+
+export interface DocumentTemplateDoc {
+  serviceKey: string
+  documentKind: string
+  // The resolved body template. Null when neither config nor a bundled repo body
+  // yields one (a novel kind the attorney has not authored yet).
+  templateText: string | null
+  // 'config' when it came from transitions.document_templates; 'repo' when it fell
+  // back to a bundled body file; 'none' when nothing resolved.
+  source: 'config' | 'repo' | 'none'
+  // The config template_version when source === 'config'; null otherwise.
+  templateVersion: number | null
+}
+
+// Pure resolver shared by getDocumentTemplate and the drafting worker: config wins,
+// else the bundled repo body (service-aware for the operating agreement), else null
+// for a kind with neither. Side-effect-free apart from the cached repo file read, so
+// generateDraft can reuse it without a second DB round-trip.
+export function resolveDocumentTemplateDoc(
+  documentTemplates: DocumentTemplateConfig | undefined,
+  serviceKey: string,
+  documentKind: string,
+): DocumentTemplateDoc {
+  const configured = documentTemplates?.templates?.[documentKind]
+  if (typeof configured === 'string' && configured.trim()) {
+    return {
+      serviceKey,
+      documentKind,
+      templateText: configured,
+      source: 'config',
+      templateVersion:
+        typeof documentTemplates?.template_version === 'number'
+          ? documentTemplates.template_version
+          : null,
+    }
+  }
+  if (hasRepoTemplate(documentKind)) {
+    return {
+      serviceKey,
+      documentKind,
+      templateText: resolveRepoDocumentTemplate(documentKind, serviceKey),
+      source: 'repo',
+      templateVersion: null,
+    }
+  }
+  return { serviceKey, documentKind, templateText: null, source: 'none', templateVersion: null }
+}
+
+// Read a service's body template for one document kind. Resolution order: in-app
+// config (transitions.document_templates.templates[kind]) → bundled repo body →
+// null. Returns null only when the SERVICE does not exist (a kind with no template
+// still returns a doc with source 'none').
+export async function getDocumentTemplate(
+  ctx: ActionContext,
+  serviceKey: string,
+  documentKind: string,
+): Promise<DocumentTemplateDoc | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    const r = res.rows[0]
+    if (!r) return null
+    return resolveDocumentTemplateDoc(r.transitions.document_templates, serviceKey, documentKind)
+  })
+}
+
+// Validate a body template before persisting. The only rule is non-empty text;
+// reads never validate, so a bundled repo body always renders.
+export function validateDocumentTemplate(templateText: unknown): string {
+  if (typeof templateText !== 'string' || !templateText.trim()) {
+    throw new Error('The document template must be non-empty text.')
+  }
+  return templateText
+}
+
+// Write a service's body template for one document kind as a new immutable version.
+// Validates non-empty, reads the current row to MERGE into the existing
+// document_templates config (so other kinds' templates survive), bumps
+// template_version, and submits the upsert with a transitions_patch. Returns the
+// saved doc.
+export async function updateDocumentTemplate(
+  ctx: ActionContext,
+  serviceKey: string,
+  documentKind: string,
+  templateText: unknown,
+): Promise<DocumentTemplateDoc> {
+  if (!documentKind || typeof documentKind !== 'string') {
+    throw new Error('A document kind is required.')
+  }
+  const validated = validateDocumentTemplate(templateText)
+
+  const row = await withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0] ?? null
+  })
+  if (!row) throw new Error(`Service not found: ${serviceKey}`)
+
+  const existing: DocumentTemplateConfig = row.transitions.document_templates ?? {}
+  const nextVersion =
+    (typeof existing.template_version === 'number' ? existing.template_version : 0) + 1
+  const merged: DocumentTemplateConfig = {
+    template_version: nextVersion,
+    templates: { ...(existing.templates ?? {}), [documentKind]: validated },
+  }
+
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: serviceKey,
+      display_name: row.display_name,
+      transitions_patch: { document_templates: merged },
+    },
+  })
+
+  const saved = await getDocumentTemplate(ctx, serviceKey, documentKind)
+  if (!saved) throw new Error(`Document template not found after update: ${serviceKey}`)
   return saved
 }
 

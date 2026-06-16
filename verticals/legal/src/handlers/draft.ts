@@ -21,7 +21,9 @@ import {
 
 interface DraftGeneratePayload {
   matter_entity_id: string
-  document_kind: 'operating_agreement' | 'engagement_letter'
+  // Any service-configured document kind (the two Phase-0 kinds plus any added via
+  // the Service Library). Stored verbatim as the document_kind attribute/label.
+  document_kind: string
   document_markdown: string
   model_identity: string
   reasoning_trace_id: string

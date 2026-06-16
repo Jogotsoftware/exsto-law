@@ -130,6 +130,33 @@ export function loadEngagementLetterTemplate(): string {
   return cached.engagementLetterTemplate
 }
 
+// Document kinds that ship a bundled repo BODY template (the Phase-0 fallback).
+// The Service Library lets an attorney author a body template per document kind as
+// config (Doc-Types PR1); a kind that is NOT one of these has no built-in body, so
+// it can only be drafted once a config template exists. This set is the single
+// source of truth for "is there a repo fallback for this kind", shared by the
+// document-template resolver and the service completeness gate. Keep it narrow:
+// adding a kind here means committing a bundled template file for it.
+const REPO_TEMPLATE_KINDS = new Set<string>(['operating_agreement', 'engagement_letter'])
+
+export function hasRepoTemplate(documentKind: string): boolean {
+  return REPO_TEMPLATE_KINDS.has(documentKind)
+}
+
+// Resolve the bundled repo BODY template for a known document kind, service-aware
+// for the operating agreement (multi-member vs single-member body). Throws for a
+// kind with no bundled template — callers gate on hasRepoTemplate() first. This is
+// the thin code-side fallback the config resolver delegates to (binding Lesson #3:
+// bodies are repo files in this phase, the interface stays library-ready).
+export function resolveRepoDocumentTemplate(
+  documentKind: string,
+  serviceKey: string | null | undefined,
+): string {
+  if (documentKind === 'engagement_letter') return loadEngagementLetterTemplate()
+  if (documentKind === 'operating_agreement') return resolveOperatingAgreementTemplate(serviceKey)
+  throw new Error(`No bundled template for document kind: ${documentKind}`)
+}
+
 export function loadDraftingPrompt(): string {
   if (!cached.draftingPrompt) {
     cached.draftingPrompt = readFileSync(resolve(templatesDir, 'drafting-prompt.md'), 'utf8')

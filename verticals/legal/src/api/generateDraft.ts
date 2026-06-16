@@ -7,12 +7,8 @@ import {
 } from '@exsto/substrate'
 import { enqueueJob } from '@exsto/worker-runtime'
 import { callClaudeDrafter } from '../adapters/claude.js'
-import {
-  loadDraftingPrompt,
-  loadEngagementLetterTemplate,
-  resolveOperatingAgreementTemplate,
-} from '../templates/loader.js'
-import { getDraftingPrompt } from './services.js'
+import { loadDraftingPrompt } from '../templates/loader.js'
+import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent).
@@ -20,7 +16,10 @@ const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
 
 export interface GenerateDraftInput {
   matterEntityId: string
-  documentKind: 'operating_agreement' | 'engagement_letter'
+  // Any service-configured document kind. The two Phase-0 kinds
+  // (operating_agreement, engagement_letter) ship a bundled body; novel kinds
+  // (NDA, amendment, …) supply their body template through the Service Library.
+  documentKind: string
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -102,21 +101,41 @@ export async function runDraftGeneration(
   }
 
   const m = matter!
-  // Document-BODY selection is service-aware: an operating_agreement for a
-  // multi-member service resolves to the multi-member body (member schedule,
-  // ownership %, voting/distributions by member), every other service keeps the
-  // single-member body. The engagement letter is service-independent. This fills
-  // the {{operating_agreement_template}} slot below.
-  const template =
-    input.documentKind === 'engagement_letter'
-      ? loadEngagementLetterTemplate()
-      : resolveOperatingAgreementTemplate(m.serviceKey)
+  // Document-BODY selection is now config-as-data, per document kind (Doc-Types
+  // PR1): an attorney-authored template in the service config wins; otherwise a
+  // bundled repo body for the two Phase-0 kinds (the operating-agreement body is
+  // service-aware — multi-member vs single-member). A novel kind with neither has
+  // no document to draft — a non-retryable precondition. The completeness gate
+  // normally blocks enabling such a service, so this is defense in depth. This
+  // fills the {{operating_agreement_template}} slot below.
+  const templateDoc = m.serviceKey
+    ? await getDocumentTemplate(agentCtx, m.serviceKey, input.documentKind)
+    : resolveDocumentTemplateDoc(undefined, '', input.documentKind)
+  const template = templateDoc?.templateText ?? null
+  if (!template) {
+    await submitAction(agentCtx, {
+      actionKindName: 'event.record',
+      intentKind: 'automatic_sync',
+      payload: {
+        event_kind_name: 'draft.failed',
+        primary_entity_id: input.matterEntityId,
+        data: {
+          document_kind: input.documentKind,
+          reason: `No document template configured for "${input.documentKind}"`,
+          retryable: false,
+        },
+        source_type: 'system',
+      },
+    })
+    return null
+  }
+  const templateSource = templateDoc?.source ?? 'none'
+  const templateVersion = templateDoc?.templateVersion ?? null
 
   // Resolve the drafting prompt from the matter's service config
   // (transitions.drafting.prompts[documentKind]) with a repo-file fallback. The
   // {{slot}} replacement below is unchanged — only the base prompt's source moves
-  // from a fixed repo file to editable config. The document-BODY template
-  // (operating-agreement / engagement-letter markdown) stays a repo file this PR.
+  // from a fixed repo file to editable config.
   const resolved = m.serviceKey
     ? await getDraftingPrompt(agentCtx, m.serviceKey, input.documentKind)
     : null
@@ -148,6 +167,12 @@ export async function runDraftGeneration(
       promptSource === 'config' && promptVersion != null
         ? `${m.serviceKey}/${input.documentKind}@config-v${promptVersion}`
         : `${input.documentKind}@repo`,
+    // Name the BODY template the worker used too (config version vs bundled repo),
+    // so the audit trail captures both inputs to the draft.
+    templateId:
+      templateSource === 'config' && templateVersion != null
+        ? `${m.serviceKey}/${input.documentKind}@template-v${templateVersion}`
+        : `${input.documentKind}@template-repo`,
   })
 
   const generated = await submitAction(agentCtx, {
@@ -192,7 +217,7 @@ export interface AssembleArgs {
   template: string
   questionnaireResponses: Record<string, unknown>
   transcriptText: string
-  documentKind: 'operating_agreement' | 'engagement_letter'
+  documentKind: string
 }
 
 // Fills the FIXED three-slot contract from the (config-or-repo) base prompt.
@@ -222,19 +247,25 @@ interface PersistTraceArgs {
   confidence: number
   modelIdentity: string
   fullTrace: unknown
-  // Identifies WHICH drafting prompt produced this draft (config version vs repo
-  // fallback). reasoning_trace has no prompt_id column, so we fold it into the
-  // stored trace jsonb under prompt_config — no schema change, full audit.
+  // Identifies WHICH drafting prompt and body template produced this draft (config
+  // version vs repo fallback). reasoning_trace has no column for these, so we fold
+  // them into the stored trace jsonb under prompt_config — no schema change, full
+  // audit.
   promptId?: string
+  templateId?: string
 }
 
 async function persistReasoningTrace(ctx: ActionContext, args: PersistTraceArgs): Promise<string> {
   const id = randomUUID()
+  const promptConfig =
+    args.promptId || args.templateId
+      ? { prompt_id: args.promptId ?? null, template_id: args.templateId ?? null }
+      : null
   const traceWithPromptId =
-    args.promptId && args.fullTrace && typeof args.fullTrace === 'object'
+    promptConfig && args.fullTrace && typeof args.fullTrace === 'object'
       ? {
           ...(args.fullTrace as Record<string, unknown>),
-          prompt_config: { prompt_id: args.promptId },
+          prompt_config: promptConfig,
         }
       : args.fullTrace
   await withActionContext(ctx, async (client) => {

@@ -7,15 +7,18 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   createService,
+  getDocumentTemplate,
   getDraftingPrompt,
   getQuestionnaire,
   listServicesIncludingInactive,
   serviceCompleteness,
   setServiceActive,
+  updateDocumentTemplate,
   updateDraftingPrompt,
   updateQuestionnaire,
   updateServiceMetadata,
   type CreateServiceInput,
+  type DocumentTemplateDoc,
   type DraftingPromptDoc,
   type QuestionnaireDoc,
   type ServiceCompleteness,
@@ -68,7 +71,7 @@ const setActiveTool: Tool<
 const completenessTool: Tool<{ serviceKey: string }, ServiceCompleteness> = {
   name: 'legal.service.completeness',
   description:
-    'Check whether a service offering is complete enough to enable (book). Returns { serviceKey, ready, missing }: ready is true only when the service has a questionnaire and — for auto-route services — a drafting prompt with all required slots for every document kind. missing lists the human-readable reasons it is not yet enableable.',
+    'Check whether a service offering is complete enough to enable (book). Returns { serviceKey, ready, missing }: ready is true only when the service has a questionnaire and — for auto-route services — for every document kind both a drafting prompt with all required slots and a resolvable body template (a bundled one for operating_agreement/engagement_letter, or one authored in-app for novel kinds). missing lists the human-readable reasons it is not yet enableable.',
   mode: 'read',
   handler: async (ctx: ActionContext, input) => serviceCompleteness(ctx, input.serviceKey),
 }
@@ -137,6 +140,44 @@ const promptUpdateTool: Tool<
   }),
 }
 
+// Document-template editor (Doc-Types PR1). Per-document-kind BODY template. Read
+// resolves the in-app config template first, else the bundled repo body, else null
+// (source 'none') for a novel kind not yet authored. Write validates non-empty and
+// saves a new immutable version of the service with the template patched into
+// transitions.document_templates. The drafting worker (generateDraft) reads the same
+// resolution. NEITHER is client-portal-callable (clientPolicy.ts is default-deny):
+// document templates are attorney-only configuration.
+const templateGetTool: Tool<
+  { serviceKey: string; documentKind: string },
+  { template: DocumentTemplateDoc | null }
+> = {
+  name: 'legal.service.template.get',
+  description:
+    "Get a service offering's document body template for one document kind (e.g. operating_agreement, engagement_letter, or a novel kind like non_disclosure_agreement). Returns the in-app config template if saved, otherwise the bundled repo body for the two built-in kinds, otherwise null/source 'none'. Includes the template's source and version.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    template: await getDocumentTemplate(ctx, input.serviceKey, input.documentKind),
+  }),
+}
+
+const templateUpdateTool: Tool<
+  { serviceKey: string; documentKind: string; templateText: string },
+  { template: DocumentTemplateDoc }
+> = {
+  name: 'legal.service.template.update',
+  description:
+    "Save a service offering's document body template for one document kind. Validates the template is non-empty, then writes a NEW immutable version (the prior definition is sealed) and bumps the template version. This is what lets a brand-new document type be drafted with no code change. The drafting worker uses the new template immediately.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    template: await updateDocumentTemplate(
+      ctx,
+      input.serviceKey,
+      input.documentKind,
+      input.templateText,
+    ),
+  }),
+}
+
 registerTool(listAllTool)
 registerTool(createTool)
 registerTool(updateTool)
@@ -146,3 +187,5 @@ registerTool(questionnaireGetTool)
 registerTool(questionnaireUpdateTool)
 registerTool(promptGetTool)
 registerTool(promptUpdateTool)
+registerTool(templateGetTool)
+registerTool(templateUpdateTool)
