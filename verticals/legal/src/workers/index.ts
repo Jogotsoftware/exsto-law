@@ -21,7 +21,7 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
   const p = payload as { matter_entity_id: string; document_kind: string }
   await runDraftGeneration(ctx, {
     matterEntityId: p.matter_entity_id,
-    documentKind: p.document_kind as 'operating_agreement' | 'engagement_letter',
+    documentKind: p.document_kind,
   })
 })
 

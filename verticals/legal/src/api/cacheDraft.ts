@@ -19,7 +19,7 @@ export interface CachedReasoningTrace {
 
 export interface CacheDraftInput {
   matterEntityId: string
-  documentKind: 'operating_agreement' | 'engagement_letter'
+  documentKind: string
   documentMarkdown: string
   prompt: string
   reasoningTrace: CachedReasoningTrace

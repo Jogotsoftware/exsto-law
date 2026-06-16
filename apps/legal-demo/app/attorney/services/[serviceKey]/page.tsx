@@ -174,6 +174,11 @@ export default function ServiceEditorPage() {
             Edit prompt
           </Link>
         )}
+        {!isNew && (
+          <Link href={`/attorney/services/${serviceKey}/template`} className="back-link">
+            Edit templates
+          </Link>
+        )}
         <button className="primary" onClick={save} disabled={busy || !form}>
           {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
         </button>
@@ -301,6 +306,7 @@ function SetupChecklist({
   const missing = completeness?.missing ?? []
   const needsQuestionnaire = missing.some((m) => m.toLowerCase().includes('questionnaire'))
   const needsPrompt = missing.some((m) => m.toLowerCase().includes('prompt'))
+  const needsTemplate = missing.some((m) => m.toLowerCase().includes('template'))
   const ready = completeness?.ready ?? false
 
   const steps: { n: string; label: string; done: boolean; href?: string }[] = [
@@ -318,6 +324,12 @@ function SetupChecklist({
       label: 'Drafting prompt',
       done: !needsPrompt,
       href: `/attorney/services/${serviceKey}/prompt`,
+    })
+    steps.push({
+      n: '④',
+      label: 'Document template',
+      done: !needsTemplate,
+      href: `/attorney/services/${serviceKey}/template`,
     })
   }
 
