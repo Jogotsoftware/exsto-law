@@ -1,6 +1,7 @@
 export * from './matters.js'
 export * from './drafts.js'
 export * from './contacts.js'
+export * from './client.js'
 export * from './partners.js'
 export * from './history.js'
 export * from './clientPortal.js'
