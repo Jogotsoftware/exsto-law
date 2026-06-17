@@ -48,6 +48,13 @@ registerWorkerHandler('legal.notify', async (ctx, payload) => {
 // re-enqueues the NEXT pass at the end. ensureMeetingReconcileScheduled (called at
 // worker startup) seeds the FIRST one and is idempotent, so a restart never spawns
 // a second chain. A Google read error skips that one meeting, not the batch.
+//
+// The handler CATCHES its own errors (never throws): if it threw, the dispatcher
+// would retry this job AND the finally below would queue the next — forking the
+// chain on every error. By swallowing + logging, the job always "succeeds" and the
+// single re-enqueue keeps exactly one chain. (Per-event Google errors are already
+// handled inside reconcileAllMeetings; a throw here would be a systemic failure,
+// retried by the next scheduled pass anyway.)
 registerWorkerHandler('legal.meeting.reconcile', async (ctx) => {
   try {
     const { reconcileAllMeetings } = await import('../api/meetings.js')
@@ -55,8 +62,10 @@ registerWorkerHandler('legal.meeting.reconcile', async (ctx) => {
     console.log(
       `[meeting.reconcile] checked=${summary.checked} updated=${summary.updated} cancelled=${summary.cancelled} skipped=${summary.skipped}`,
     )
+  } catch (err) {
+    console.error('[meeting.reconcile] pass failed (next pass will retry):', err)
   } finally {
-    // Always queue the next pass, even if this one threw, so the chain survives.
+    // Exactly one next pass — the chain continues without a dispatcher retry fork.
     await enqueueJob({
       tenantId: ctx.tenantId,
       jobKind: 'legal.meeting.reconcile',
