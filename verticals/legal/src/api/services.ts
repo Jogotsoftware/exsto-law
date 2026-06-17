@@ -271,6 +271,21 @@ export async function setServiceActive(
   return res.effects[0] as { serviceKey: string; status: string }
 }
 
+// Retire a service: seal it with no successor so it leaves every listing while
+// its history is preserved (legal.service.retire). Used to clear leftover
+// test-fixture service rows (Obj 12).
+export async function retireService(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<{ serviceKey: string; retired: boolean }> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.service.retire',
+    intentKind: 'correction',
+    payload: { service_key: serviceKey },
+  })
+  return res.effects[0] as { serviceKey: string; retired: boolean }
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Completeness gate (PR4). A service is not bookable until it is complete; the
 // set_active handler enforces this on enable, and the attorney UI reads this to
