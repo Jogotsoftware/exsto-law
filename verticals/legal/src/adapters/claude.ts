@@ -7,6 +7,19 @@ import { redactSecret } from './redact.js'
 // versions.
 const DEFAULT_MODEL = process.env.LEGAL_DRAFTING_MODEL ?? 'claude-sonnet-4-6'
 
+// Every Anthropic client in this adapter is constructed here so they all hit the
+// same endpoint. We pin baseURL to Anthropic's real API on purpose: the SDK
+// otherwise silently honors an ANTHROPIC_BASE_URL env var, and a stray or
+// misconfigured value in the deployment (e.g. a leftover LLM-gateway URL)
+// redirects every request and returns opaque bodyless 401s — which is exactly
+// what broke key verification in Settings on the deployed site. If a deliberate
+// proxy is ever needed, set it here intentionally rather than via the environment.
+const ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
+
+function makeAnthropic(apiKey: string): Anthropic {
+  return new Anthropic({ apiKey, baseURL: ANTHROPIC_BASE_URL })
+}
+
 type AnthropicSecret = { api_key: string }
 
 export interface ClaudeDraftRequest {
@@ -54,8 +67,10 @@ export async function resolveAnthropicApiKey(
 // here so this adapter stays the only place that talks to the Anthropic API.
 // Returns null when the key works, otherwise a user-facing error string.
 export async function verifyAnthropicKey(apiKey: string): Promise<string | null> {
+  const key = apiKey?.trim()
+  if (!key) return 'No API key was provided to verify.'
   try {
-    const anthropic = new Anthropic({ apiKey })
+    const anthropic = makeAnthropic(key)
     await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 8,
@@ -64,7 +79,20 @@ export async function verifyAnthropicKey(apiKey: string): Promise<string | null>
     return null
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
-      return `Anthropic returned ${err.status}: ${err.message.slice(0, 200)}`
+      const detail = err.message?.trim() ?? ''
+      // Anthropic's own API always returns a JSON error body (e.g.
+      // "invalid x-api-key" on a bad key). A bodyless response means an
+      // intermediary — a proxy or gateway between us and api.anthropic.com —
+      // answered instead of Anthropic. Surface that plainly rather than the
+      // SDK's cryptic "<status> status code (no body)".
+      if (!detail || /status code \(no body\)/i.test(detail)) {
+        return (
+          `Could not reach Anthropic at ${ANTHROPIC_BASE_URL} ` +
+          `(HTTP ${err.status}, empty response). A proxy or gateway is ` +
+          `intercepting the request — this 401 is not coming from Anthropic.`
+        )
+      }
+      return `Anthropic returned ${err.status}: ${detail.slice(0, 200)}`
     }
     return err instanceof Error ? err.message : String(err)
   }
@@ -83,7 +111,7 @@ export async function callClaudeDrafter(
   request: ClaudeDraftRequest,
 ): Promise<ClaudeDraftResult> {
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
-  const anthropic = new Anthropic({ apiKey })
+  const anthropic = makeAnthropic(apiKey)
   let response: Anthropic.Message
   try {
     response = await anthropic.messages.create({
@@ -140,7 +168,7 @@ export async function chatWithAssistant(
   model?: string,
 ): Promise<string> {
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
-  const anthropic = new Anthropic({ apiKey })
+  const anthropic = makeAnthropic(apiKey)
 
   // Lift a leading system turn into the top-level `system` param; everything
   // else is a user/assistant turn. Anthropic requires the first messages[] entry
