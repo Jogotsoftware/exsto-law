@@ -41,6 +41,16 @@ export type WorkflowRoute = 'auto' | 'manual'
 // A service kind = a workflow_definition row (definition data, not a table —
 // WP1 seed). The intake form itself is a Phase 0 repo file resolved through
 // the loader by the bound intake_form_id.
+// Cost of a service (beta sprint Obj 10). Money is a decimal STRING (ADR 0044):
+// 'hourly' → amount is the hourly rate and hours is the estimated engagement
+// length; 'fixed' → amount is the flat fee (hours is null).
+export type ServiceCostType = 'hourly' | 'fixed'
+export interface ServiceCost {
+  type: ServiceCostType
+  amount: string
+  hours: number | null
+}
+
 export interface ServiceDefinition {
   id: string
   serviceKey: string
@@ -50,6 +60,7 @@ export interface ServiceDefinition {
   intakeFormId: string
   intakeSchema: IntakeSchema
   documents: string[]
+  cost: ServiceCost | null
   isActive: boolean
   sortOrder: number
   updatedAt: string
@@ -68,6 +79,7 @@ type WorkflowRow = {
     intake_schema?: IntakeSchema
     drafting?: DraftingConfig
     document_templates?: DocumentTemplateConfig
+    cost?: { type?: string; amount?: string; hours?: number | null }
     [k: string]: unknown
   }
   status: string
@@ -98,6 +110,23 @@ function resolveIntakeSchema(
   }
 }
 
+// A money decimal string (ADR 0044): non-negative, up to 2 fractional digits.
+const MONEY_RE = /^\d+(\.\d{1,2})?$/
+
+// Resolve a stored cost config into a well-formed ServiceCost, or null when no
+// (valid) cost is set. Defensive: a malformed stored value reads as "no cost".
+function parseServiceCost(
+  cost: { type?: string; amount?: string; hours?: number | null } | undefined,
+): ServiceCost | null {
+  if (!cost || (cost.type !== 'hourly' && cost.type !== 'fixed')) return null
+  if (typeof cost.amount !== 'string' || !MONEY_RE.test(cost.amount)) return null
+  return {
+    type: cost.type,
+    amount: cost.amount,
+    hours: cost.type === 'hourly' && typeof cost.hours === 'number' ? cost.hours : null,
+  }
+}
+
 function mapRow(r: WorkflowRow): ServiceDefinition {
   const intakeFormId = r.transitions.intake_form_id ?? ''
   // Resolution order (PR2): in-app config (transitions.intake_schema) wins, so an
@@ -114,6 +143,7 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     intakeFormId,
     intakeSchema,
     documents: Array.isArray(r.transitions.documents) ? r.transitions.documents : [],
+    cost: parseServiceCost(r.transitions.cost),
     isActive: r.status === 'active',
     sortOrder: sortOrderOf(r),
     updatedAt: r.recorded_at,
@@ -269,6 +299,67 @@ export async function setServiceActive(
     payload: { service_key: serviceKey, active },
   })
   return res.effects[0] as { serviceKey: string; status: string }
+}
+
+// Retire a service: seal it with no successor so it leaves every listing while
+// its history is preserved (legal.service.retire). Used to clear leftover
+// test-fixture service rows (Obj 12).
+export async function retireService(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<{ serviceKey: string; retired: boolean }> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.service.retire',
+    intentKind: 'correction',
+    payload: { service_key: serviceKey },
+  })
+  return res.effects[0] as { serviceKey: string; retired: boolean }
+}
+
+export interface SetServiceCostInput {
+  serviceKey: string
+  // Omit or pass null to clear the cost.
+  cost?: ServiceCost | null
+}
+
+// Set (or clear) a service's cost. Validates the money decimal string (ADR 0044)
+// and writes it into transitions.cost via a new immutable version (the upsert
+// handler seals the prior row). Clearing passes cost:null through the patch.
+export async function setServiceCost(
+  ctx: ActionContext,
+  input: SetServiceCostInput,
+): Promise<ServiceDefinition> {
+  const existing = await getService(ctx, input.serviceKey)
+  if (!existing) throw new Error(`Service not found: ${input.serviceKey}`)
+
+  let costPatch: ServiceCost | null = null
+  if (input.cost) {
+    if (input.cost.type !== 'hourly' && input.cost.type !== 'fixed') {
+      throw new Error("cost.type must be 'hourly' or 'fixed'.")
+    }
+    if (!MONEY_RE.test(input.cost.amount)) {
+      throw new Error('cost.amount must be a decimal string like "350.00" (ADR 0044).')
+    }
+    const hours =
+      input.cost.type === 'hourly' && typeof input.cost.hours === 'number' ? input.cost.hours : null
+    if (hours != null && (hours < 0 || !Number.isFinite(hours))) {
+      throw new Error('cost.hours must be a non-negative number.')
+    }
+    costPatch = { type: input.cost.type, amount: input.cost.amount, hours }
+  }
+
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: input.serviceKey,
+      display_name: existing.displayName,
+      transitions_patch: { cost: costPatch },
+    },
+  })
+  const updated = await getService(ctx, input.serviceKey)
+  if (!updated) throw new Error('Service cost saved but the new row could not be read back.')
+  return updated
 }
 
 // ───────────────────────────────────────────────────────────────────────────
