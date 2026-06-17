@@ -181,28 +181,39 @@ p {
 button {
   cursor: pointer;
   font-family: inherit;
+  font-weight: 500;
   font-size: 0.92rem;
-  padding: 0.55rem 0.95rem;
-  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: white;
-  transition: background 0.1s ease;
+  background: var(--surface);
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    transform var(--transition),
+    box-shadow var(--transition);
 }
 .surface-client button {
   font-size: 1rem;
-  padding: 0.65rem 1.1rem;
-  border-radius: 8px;
+  padding: 0.65rem 1.15rem;
 }
 button:hover:not(:disabled) {
   background: var(--rule-soft);
+  border-color: var(--border-strong);
 }
 button.primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--navy-700) 0%, var(--navy) 60%, var(--navy-500) 100%);
   color: white;
-  border-color: var(--accent);
+  border-color: transparent;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 button.primary:hover:not(:disabled) {
-  filter: brightness(0.95);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -8px rgba(30, 58, 138, 0.5);
+}
+button.primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 button.ok {
   background: var(--ok);
@@ -228,24 +239,28 @@ input,
 textarea,
 select {
   font-family: inherit;
-  font-size: 0.95rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  font-size: 1rem;
+  padding: 0.6rem 0.8rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
   width: 100%;
-  background: white;
+  background: var(--surface);
+  color: var(--fg);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
 }
 .surface-client input,
 .surface-client textarea,
 .surface-client select {
-  font-size: 1rem;
-  padding: 0.55rem 0.7rem;
+  padding: 0.65rem 0.85rem;
 }
 input:focus,
 textarea:focus,
 select:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.13);
 }
 input.error,
 textarea.error,
