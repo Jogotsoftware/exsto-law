@@ -1,0 +1,27 @@
+# Dedicated worker process for the legal vertical (beta sprint Obj 7b).
+#
+# Netlify runs only the Next.js app (serverless) — it does NOT run the long-lived
+# job-queue worker. This image packages that worker (verticals/legal/dist/worker.js):
+# Granola call projection (legal.granola.project), async document drafting
+# (legal.draft.run), and notification delivery (legal.notify). Deploy it as an
+# always-on background service (Render worker / Fly / Railway). See
+# docs/ops/worker-deploy.md.
+
+# ---- builder: install the whole pnpm workspace and build every package ----
+FROM node:22-slim AS builder
+WORKDIR /app
+RUN corepack enable
+# The worker depends on every workspace package, so build the whole repo.
+COPY . .
+RUN pnpm install --frozen-lockfile && pnpm build
+
+# ---- runner: the built workspace + the worker entrypoint ----
+FROM node:22-slim AS runner
+ENV NODE_ENV=production
+WORKDIR /app
+RUN corepack enable
+COPY --from=builder /app /app
+# The worker handles SIGTERM/SIGINT for a clean shutdown (closes the DB pool).
+# RLS requires connecting as a NON-OWNER role — set SUBSTRATE_DB_ROLE=authenticated
+# (or point DATABASE_URL at a non-owner role). See docs/ops/worker-deploy.md.
+CMD ["node", "verticals/legal/dist/worker.js"]
