@@ -3,10 +3,12 @@ import {
   assistantChat,
   listAssistantThread,
   listAssistantModels,
+  listAssistantFeedback,
   type AssistantChatInput,
   type AssistantChatReply,
   type AssistantThreadEntry,
   type AssistantModel,
+  type AssistantFeedbackEntry,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -58,6 +60,16 @@ registerTool({
         enum: ['feedback', 'question'],
         description: 'Optional hint: a "Leave feedback" entry point forces feedback.',
       },
+      category: {
+        type: 'string',
+        enum: ['ui', 'ai', 'workflow', 'other'],
+        description: 'Beta-feedback category (feedback turns only).',
+      },
+      pageContext: {
+        type: 'object',
+        description: 'Where the attorney was (e.g. { path }) when leaving feedback.',
+        additionalProperties: true,
+      },
     },
     required: ['message', 'modelId'],
     additionalProperties: false,
@@ -85,3 +97,12 @@ registerTool({
   { matterEntityId?: string; contactEntityId?: string },
   { turns: AssistantThreadEntry[] }
 >)
+
+registerTool({
+  name: 'legal.assistant.feedback_list',
+  description:
+    'All beta feedback (newest first) with its category (ui/ai/workflow/other) and page context — the triage surface.',
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ feedback: await listAssistantFeedback(ctx) }),
+} satisfies Tool<Record<string, never>, { feedback: AssistantFeedbackEntry[] }>)
