@@ -18,6 +18,9 @@ import { randomUUID } from 'node:crypto'
 import { closeDbPool, withSuperuser } from '@exsto/shared'
 import { submitAction, type ActionContext } from '@exsto/substrate'
 import { archiveEntity } from '@exsto/primitives'
+// Side-effect import: registers the legal action handlers (intake.submit,
+// matter.open, legal.client.create, …); without it submitAction can't dispatch.
+import '@exsto/legal'
 
 const TENANT_ID = '00000000-0000-0000-0000-000000000001'
 const PUBLIC_INTAKE_ACTOR_ID = '00000000-0000-0000-0001-000000000005'
