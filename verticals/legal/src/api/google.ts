@@ -17,6 +17,7 @@ import {
 } from '../adapters/googleCalendar.js'
 import { lookupActorByEmail } from './identity.js'
 import { signOAuthState, verifyOAuthState } from '../adapters/oauthState.js'
+import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import type { ActionContext } from '@exsto/substrate'
 
 export type GoogleAuthMode = 'signin' | 'calendar' | 'mail'
@@ -29,8 +30,16 @@ export interface GoogleConnectionStatus {
   expiresAt: string | null
 }
 
-export async function getGoogleStatus(ctx: ActionContext): Promise<GoogleConnectionStatus> {
-  const creds = await loadCredentials(ctx.tenantId)
+// Google is per-attorney (migration 0016). By default this reads the signed-in
+// attorney's own connection (ctx.actorId). Firm-level callers (the public
+// booking page) pass an explicit actorId — the firm's primary attorney — so
+// they don't read the anonymous intake actor's (non-existent) connection.
+export async function getGoogleStatus(
+  ctx: ActionContext,
+  actorIdOverride?: string | null,
+): Promise<GoogleConnectionStatus> {
+  const actorId = actorIdOverride === undefined ? ctx.actorId : actorIdOverride
+  const creds = await loadCredentials(ctx.tenantId, actorId)
   if (!creds)
     return { connected: false, accountEmail: null, calendarId: null, scope: null, expiresAt: null }
   return {
@@ -46,10 +55,19 @@ export function buildGoogleAuthUrl(
   tenantId: string,
   returnTo: string,
   mode: GoogleAuthMode = 'calendar',
+  actorId?: string | null,
 ): string {
   const oauth2 = buildOAuthClient()
-  // HMAC-signed so the browser can't tamper with tenantId/returnTo/mode.
-  const state = signOAuthState({ tenantId, returnTo, mode, nonce: randomUUID() })
+  // HMAC-signed so the browser can't tamper with tenantId/returnTo/mode/actorId.
+  // actorId binds the connecting attorney into the state for calendar/mail mode,
+  // so the callback stores credentials under THAT attorney (per-attorney, 0016).
+  const state = signOAuthState({
+    tenantId,
+    returnTo,
+    mode,
+    actorId: actorId ?? null,
+    nonce: randomUUID(),
+  })
   const scope =
     mode === 'signin'
       ? GOOGLE_OAUTH_SCOPES_SIGNIN
@@ -81,7 +99,13 @@ export interface ExchangeResult {
 export async function exchangeGoogleCode(state: string, code: string): Promise<ExchangeResult> {
   // Verify the HMAC before trusting ANY field. A tampered or unsigned state
   // (forged tenantId/returnTo) is rejected here, fail-closed.
-  let parsedState: { tenantId: string; returnTo: string; mode?: GoogleAuthMode; nonce: string }
+  let parsedState: {
+    tenantId: string
+    returnTo: string
+    mode?: GoogleAuthMode
+    actorId?: string | null
+    nonce: string
+  }
   try {
     parsedState = verifyOAuthState(state)
   } catch {
@@ -152,14 +176,20 @@ export async function exchangeGoogleCode(state: string, code: string): Promise<E
       )
     }
     const expiresAt = new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000)
-    await saveCredentials(parsedState.tenantId, {
-      accountEmail: email,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiresAt,
-      scope: tokens.scope ?? GOOGLE_OAUTH_SCOPES_CALENDAR.join(' '),
-      calendarId: 'primary',
-    })
+    // Store under the connecting attorney bound into the signed state — never a
+    // value from the request — so one attorney can't overwrite another's tokens.
+    await saveCredentials(
+      parsedState.tenantId,
+      {
+        accountEmail: email,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiresAt,
+        scope: tokens.scope ?? GOOGLE_OAUTH_SCOPES_CALENDAR.join(' '),
+        calendarId: 'primary',
+      },
+      parsedState.actorId ?? null,
+    )
     stored = true
   }
 
@@ -175,14 +205,17 @@ export async function exchangeGoogleCode(state: string, code: string): Promise<E
 }
 
 export async function disconnectGoogle(ctx: ActionContext): Promise<void> {
-  await deleteCredentials(ctx.tenantId)
+  await deleteCredentials(ctx.tenantId, ctx.actorId)
 }
 
 export async function fetchAvailability(
   ctx: ActionContext,
   daysOut: number,
 ): Promise<{ slots: AvailabilitySlot[]; source: 'google' | 'stub' }> {
-  return getAvailability(ctx.tenantId, daysOut)
+  // Public booking page: no signed-in attorney, so read the firm's primary
+  // connected attorney's calendar. (Per-link attorney selection is track B.)
+  const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
+  return getAvailability(ctx.tenantId, daysOut, firmActor)
 }
 
 export interface CreateBookingEventArgs {
@@ -202,7 +235,9 @@ export async function tryCreateBookingEvent(
   ctx: ActionContext,
   args: CreateBookingEventArgs,
 ): Promise<CreatedEvent | null> {
-  const status = await getGoogleStatus(ctx)
+  // Public booking: book on the firm's primary connected attorney's calendar.
+  const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
+  const status = await getGoogleStatus(ctx, firmActor)
   if (!status.connected) return null
   const baseUrl =
     process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? 'https://exstolaw.netlify.app'
@@ -219,6 +254,7 @@ ${args.intakeSummary ? `<b>Intake summary:</b><br>${args.intakeSummary}<br><br>`
   try {
     return await createBookingEvent({
       tenantId: ctx.tenantId,
+      actorId: firmActor,
       summary: `Pacheco Law — ${args.serviceDisplayName} (${args.clientFullName})`,
       descriptionHtml,
       startIso: args.scheduledAtIso,
@@ -242,9 +278,13 @@ export async function rescheduleBookingEvent(
   newStartIso: string,
   newEndIso: string,
 ): Promise<void> {
-  return rescheduleEvent(ctx.tenantId, eventId, newStartIso, newEndIso)
+  // Client-initiated reschedule from the public booking link: the event lives on
+  // the firm's primary attorney's calendar (per-matter assignment is track C).
+  const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
+  return rescheduleEvent(ctx.tenantId, eventId, newStartIso, newEndIso, firmActor)
 }
 
 export async function cancelBookingEvent(ctx: ActionContext, eventId: string): Promise<void> {
-  return cancelEvent(ctx.tenantId, eventId)
+  const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
+  return cancelEvent(ctx.tenantId, eventId, firmActor)
 }

@@ -30,14 +30,18 @@ export interface GranolaCallData {
 
 type GranolaSecret = { api_key: string; webhook_secret?: string }
 
-async function granolaKey(tenantId: string): Promise<string | null> {
-  // Connected key (Vault) wins; env fallback keeps local dev working.
-  const conn = await loadConnection<GranolaSecret>(tenantId, 'granola')
+async function granolaKey(tenantId: string, actorId?: string | null): Promise<string | null> {
+  // Connected key (Vault) wins; env fallback keeps local dev working. Granola is
+  // per-attorney (migration 0016), so the key is scoped to actorId.
+  const conn = await loadConnection<GranolaSecret>(tenantId, 'granola', actorId)
   return conn?.secret.api_key ?? process.env.GRANOLA_API_KEY ?? null
 }
 
-export async function granolaWebhookSecret(tenantId: string): Promise<string | null> {
-  const conn = await loadConnection<GranolaSecret>(tenantId, 'granola')
+export async function granolaWebhookSecret(
+  tenantId: string,
+  actorId?: string | null,
+): Promise<string | null> {
+  const conn = await loadConnection<GranolaSecret>(tenantId, 'granola', actorId)
   return conn?.secret.webhook_secret ?? process.env.GRANOLA_WEBHOOK_SECRET ?? null
 }
 
@@ -60,8 +64,12 @@ export function verifyGranolaSignature(
 // Tolerant parsing: webhook payloads that already embed the transcript skip
 // the API round-trip entirely (see normalizeGranolaPayload), so this is only
 // called when a fetch is actually needed.
-export async function fetchGranolaCall(tenantId: string, callId: string): Promise<GranolaCallData> {
-  const key = await granolaKey(tenantId)
+export async function fetchGranolaCall(
+  tenantId: string,
+  callId: string,
+  actorId?: string | null,
+): Promise<GranolaCallData> {
+  const key = await granolaKey(tenantId, actorId)
   if (!key) {
     throw new Error(
       'Granola is not connected (no API key in Vault or GRANOLA_API_KEY env). Connect Granola from Settings.',
@@ -172,8 +180,12 @@ export interface GranolaNoteDetail {
 // as fetchGranolaCall so the UI can react to it), issues the request, and turns
 // a non-2xx into a clear error. 404 is surfaced as-is — the caller decides
 // whether a missing note is fatal (a brand-new meeting can 404 transiently).
-async function granolaGet(tenantId: string, path: string): Promise<Record<string, unknown>> {
-  const key = await granolaKey(tenantId)
+async function granolaGet(
+  tenantId: string,
+  path: string,
+  actorId?: string | null,
+): Promise<Record<string, unknown>> {
+  const key = await granolaKey(tenantId, actorId)
   if (!key) {
     throw new Error(
       'Granola is not connected (no API key in Vault or GRANOLA_API_KEY env). Connect Granola from Settings.',
@@ -196,13 +208,14 @@ async function paginate<T>(
   basePath: string,
   itemsKey: string,
   mapItem: (raw: Record<string, unknown>) => T | null,
+  actorId?: string | null,
 ): Promise<T[]> {
   const out: T[] = []
   let cursor: string | null = null
   for (let page = 0; page < 100; page++) {
     const sep = basePath.includes('?') ? '&' : '?'
     const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
-    const data = await granolaGet(tenantId, `${basePath}${sep}page_size=30${cursorParam}`)
+    const data = await granolaGet(tenantId, `${basePath}${sep}page_size=30${cursorParam}`, actorId)
     const items = Array.isArray(data[itemsKey]) ? (data[itemsKey] as Record<string, unknown>[]) : []
     for (const raw of items) {
       const mapped = mapItem(raw)
@@ -216,12 +229,21 @@ async function paginate<T>(
 
 // All folders for the tenant. parent_folder_id is ignored here — notes are
 // listed by folder_id, which already includes child folders (API contract).
-export async function listGranolaFolders(tenantId: string): Promise<GranolaFolder[]> {
-  return paginate<GranolaFolder>(tenantId, '/folders', 'folders', (raw) => {
-    const id = typeof raw.id === 'string' ? raw.id : null
-    if (!id) return null
-    return { id, name: typeof raw.name === 'string' ? raw.name : '(untitled folder)' }
-  })
+export async function listGranolaFolders(
+  tenantId: string,
+  actorId?: string | null,
+): Promise<GranolaFolder[]> {
+  return paginate<GranolaFolder>(
+    tenantId,
+    '/folders',
+    'folders',
+    (raw) => {
+      const id = typeof raw.id === 'string' ? raw.id : null
+      if (!id) return null
+      return { id, name: typeof raw.name === 'string' ? raw.name : '(untitled folder)' }
+    },
+    actorId,
+  )
 }
 
 // Note summaries in a folder. The list endpoint does NOT include attendees or
@@ -229,6 +251,7 @@ export async function listGranolaFolders(tenantId: string): Promise<GranolaFolde
 export async function listGranolaNotesInFolder(
   tenantId: string,
   folderId: string,
+  actorId?: string | null,
 ): Promise<GranolaNoteSummary[]> {
   return paginate<GranolaNoteSummary>(
     tenantId,
@@ -245,6 +268,7 @@ export async function listGranolaNotesInFolder(
         ownerEmail: owner && typeof owner.email === 'string' ? owner.email.toLowerCase() : null,
       }
     },
+    actorId,
   )
 }
 
@@ -256,9 +280,10 @@ export async function getGranolaNote(
   tenantId: string,
   noteId: string,
   opts?: { transcript?: boolean },
+  actorId?: string | null,
 ): Promise<GranolaNoteDetail> {
   const include = opts?.transcript ? '?include=transcript' : ''
-  const note = await granolaGet(tenantId, `/notes/${encodeURIComponent(noteId)}${include}`)
+  const note = await granolaGet(tenantId, `/notes/${encodeURIComponent(noteId)}${include}`, actorId)
 
   const emails = new Set<string>()
   const addEmail = (v: unknown) => {

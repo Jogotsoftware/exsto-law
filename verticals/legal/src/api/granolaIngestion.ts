@@ -25,6 +25,7 @@ import {
   verifyGranolaSignature,
   type GranolaCallData,
 } from '../adapters/granola.js'
+import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 
 const TENANT_ZERO = process.env.LEGAL_CLIENT_TENANT_ID ?? '00000000-0000-0000-0000-000000000001'
 const SYSTEM_ACTOR = '00000000-0000-0000-0001-000000000001'
@@ -111,7 +112,10 @@ export async function runGranolaProjection(
     if (!callId) {
       throw new Error('Granola payload had neither transcript content nor a call id')
     }
-    data = await fetchGranolaCall(ctx.tenantId, callId)
+    // Granola is per-attorney (migration 0016). The push/webhook pipeline has no
+    // signed-in attorney, so it uses the firm's primary Granola connection.
+    const granolaActor = await resolveFirmPrimaryActor(ctx.tenantId, 'granola')
+    data = await fetchGranolaCall(ctx.tenantId, callId, granolaActor)
   }
   const result = await projectGranolaCall(ctx, data, {
     source: 'granola',
@@ -182,7 +186,10 @@ export async function handleGranolaWebhook(
   signatureHeader: string | null,
 ): Promise<WebhookResult> {
   const ctx = ingestionContext()
-  const secret = await granolaWebhookSecret(ctx.tenantId)
+  // Verify against the firm's primary Granola connection's webhook secret. Until
+  // per-attorney webhook routing lands, a single endpoint maps to one secret.
+  const granolaActor = await resolveFirmPrimaryActor(ctx.tenantId, 'granola')
+  const secret = await granolaWebhookSecret(ctx.tenantId, granolaActor)
   if (!secret) {
     return { ok: false, status: 503, error: 'Granola webhook secret not configured' }
   }
