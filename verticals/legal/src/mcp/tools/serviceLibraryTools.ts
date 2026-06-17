@@ -11,6 +11,7 @@ import {
   getDraftingPrompt,
   getQuestionnaire,
   listServicesIncludingInactive,
+  retireService,
   serviceCompleteness,
   setServiceActive,
   setServiceCost,
@@ -96,6 +97,20 @@ const costSetTool: Tool<SetServiceCostInput, { service: ServiceDefinition }> = {
     additionalProperties: false,
   },
   handler: async (ctx: ActionContext, input) => ({ service: await setServiceCost(ctx, input) }),
+}
+
+const retireTool: Tool<{ serviceKey: string }, { serviceKey: string; retired: boolean }> = {
+  name: 'legal.service.retire',
+  description:
+    'Permanently retire a service offering: it is sealed with no successor version so it leaves every listing, while its history is preserved. Unlike disabling (set_active), a retired service cannot be re-enabled — a new one must be created. Use to remove obsolete or test offerings.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: { serviceKey: { type: 'string', description: 'The service kind_name to retire.' } },
+    required: ['serviceKey'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => retireService(ctx, input.serviceKey),
 }
 
 // Completeness check (PR4). READ — lets the attorney UI gate the "Enable service"
@@ -216,6 +231,7 @@ registerTool(createTool)
 registerTool(updateTool)
 registerTool(setActiveTool)
 registerTool(costSetTool)
+registerTool(retireTool)
 registerTool(completenessTool)
 registerTool(questionnaireGetTool)
 registerTool(questionnaireUpdateTool)
