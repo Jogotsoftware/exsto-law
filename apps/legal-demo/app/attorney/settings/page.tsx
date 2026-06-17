@@ -66,6 +66,16 @@ const PROVIDER_META: Record<Provider, { name: string; desc: string }> = {
   },
 }
 
+// Deep links to where each provider issues API keys, surfaced as a
+// "Find my API key →" link in the connect modal. These providers are API-key
+// based — none offers an OAuth "log in to connect" flow for API access — so the
+// help link is the best we can do until one does.
+const API_KEY_HELP: Partial<Record<Provider, string>> = {
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  openai: 'https://platform.openai.com/api-keys',
+  perplexity: 'https://www.perplexity.ai/settings/api',
+}
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<TenantSettings | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationStatus[] | null>(null)
@@ -478,6 +488,7 @@ function ConnectKeyModal({
   onDone: () => void
 }) {
   const meta = PROVIDER_META[provider]
+  const keyHelpUrl = API_KEY_HELP[provider]
   const [apiKey, setApiKey] = useState('')
   const [webhookSecret, setWebhookSecret] = useState('')
   const [busy, setBusy] = useState(false)
@@ -538,6 +549,16 @@ function ConnectKeyModal({
               autoFocus
             />
           </label>
+          {keyHelpUrl && (
+            <a
+              href={keyHelpUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: 'inline-block', fontSize: '0.82rem', marginTop: '-0.3rem' }}
+            >
+              Find my {meta.name} API key →
+            </a>
+          )}
           {provider === 'granola' && (
             <label>
               <span>Webhook signing secret (optional)</span>
