@@ -1,6 +1,12 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
-import { insertAttribute, insertEntity, insertRelationship, lookupKindId } from './common.js'
+import {
+  getLatestAttributeValue,
+  insertAttribute,
+  insertEntity,
+  insertRelationship,
+  lookupKindId,
+} from './common.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Calendar events as meetings (beta sprint Obj 8 — the meetings half). A
@@ -234,4 +240,106 @@ registerActionHandler('legal.meeting.unassign', async (ctx, client, payload) => 
     priorMatter: open.targetEntityId,
     unassigned: true,
   }
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// legal.meeting.reconcile — APPEND corrections when the Google event changed
+// after capture (moved/renamed/cancelled). Re-read happens in the worker; this
+// handler is a pure substrate writer. Each CHANGED field becomes a NEW attribute
+// row with integration:'google:'+id provenance (append-only, Hard rule 3); an
+// unchanged field writes nothing (so a no-op pass appends zero rows). A deleted /
+// cancelled event sets meeting_event_status='cancelled'. Times compared by instant
+// (not string form) so a format-only difference is NOT a spurious change.
+// ───────────────────────────────────────────────────────────────────────────
+
+interface MeetingReconcilePayload {
+  calendar_event_entity_id: string
+  google_event_id: string
+  deleted?: boolean
+  summary?: string
+  started_at?: string | null
+  ended_at?: string | null
+  all_day?: boolean
+  attendee_emails?: string[]
+  html_link?: string | null
+  event_status?: string
+}
+
+function sameTime(a: unknown, b: unknown): boolean {
+  if (a == null || b == null) return a == null && b == null
+  const ta = new Date(String(a)).getTime()
+  const tb = new Date(String(b)).getTime()
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return String(a) === String(b)
+  return ta === tb
+}
+
+function sameEmails(a: unknown, b: unknown): boolean {
+  const sa = Array.isArray(a) ? [...a].map(String).sort() : []
+  const sb = Array.isArray(b) ? [...b].map(String).sort() : []
+  return JSON.stringify(sa) === JSON.stringify(sb)
+}
+
+registerActionHandler('legal.meeting.reconcile', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as MeetingReconcilePayload
+  await requireActiveEntity(client, ctx.tenantId, p.calendar_event_entity_id, 'calendar_event')
+  const sourceRef = `google:${p.google_event_id}`
+  const changed: string[] = []
+
+  async function append(
+    kind: string,
+    value: unknown,
+    precision = 'exact_instant',
+    know = 'observed',
+  ) {
+    const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, kind)
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: p.calendar_event_entity_id,
+      attributeKindId: akId,
+      value,
+      confidence: 1.0,
+      knowabilityState: know,
+      timePrecision: precision,
+      sourceType: 'integration',
+      sourceRef,
+    })
+    changed.push(kind)
+  }
+
+  const latest = (kind: string) =>
+    getLatestAttributeValue(client, ctx.tenantId, p.calendar_event_entity_id, kind)
+
+  if (p.deleted) {
+    if ((await latest('meeting_event_status')) !== 'cancelled') {
+      await append('meeting_event_status', 'cancelled')
+    }
+    return { calendarEventEntityId: p.calendar_event_entity_id, deleted: true, changed }
+  }
+
+  const precision = p.all_day ? 'day' : 'minute'
+  if (p.summary !== undefined && p.summary !== (await latest('meeting_title')))
+    await append('meeting_title', p.summary)
+  if (p.event_status !== undefined && p.event_status !== (await latest('meeting_event_status')))
+    await append('meeting_event_status', p.event_status)
+  if (p.all_day !== undefined && Boolean(p.all_day) !== Boolean(await latest('meeting_all_day')))
+    await append('meeting_all_day', Boolean(p.all_day))
+  if (p.started_at != null && !sameTime(await latest('meeting_started_at'), p.started_at))
+    await append('meeting_started_at', p.started_at, precision)
+  if (p.ended_at != null && !sameTime(await latest('meeting_ended_at'), p.ended_at))
+    await append('meeting_ended_at', p.ended_at, precision)
+  if (p.html_link != null && p.html_link !== (await latest('meeting_html_link')))
+    await append('meeting_html_link', p.html_link)
+  if (
+    p.attendee_emails !== undefined &&
+    !sameEmails(await latest('meeting_attendee_emails'), p.attendee_emails)
+  )
+    await append(
+      'meeting_attendee_emails',
+      p.attendee_emails,
+      'exact_instant',
+      p.attendee_emails.length > 0 ? 'observed' : 'observed_null',
+    )
+
+  return { calendarEventEntityId: p.calendar_event_entity_id, changed }
 })
