@@ -4,6 +4,7 @@ import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
+import { TimeExpensePanel } from '@/components/TimeExpensePanel'
 import { ChevronLeftIcon } from '@/components/icons'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 
@@ -313,6 +314,15 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
             Run the consultation simulation (or attach a real Granola transcript) before generating.
           </p>
         )}
+      </section>
+
+      <section>
+        <h2>Time &amp; expenses</h2>
+        <p className="text-muted text-sm">
+          Log billable time and matter expenses. Each entry is recorded on the matter timeline; the
+          billing module rolls these up into invoices.
+        </p>
+        <TimeExpensePanel matterEntityId={id} />
       </section>
 
       {latestDraft && (
