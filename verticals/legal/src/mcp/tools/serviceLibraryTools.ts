@@ -14,11 +14,13 @@ import {
   retireService,
   serviceCompleteness,
   setServiceActive,
+  setServiceCost,
   updateDocumentTemplate,
   updateDraftingPrompt,
   updateQuestionnaire,
   updateServiceMetadata,
   type CreateServiceInput,
+  type SetServiceCostInput,
   type DocumentTemplateDoc,
   type DraftingPromptDoc,
   type QuestionnaireDoc,
@@ -64,6 +66,37 @@ const setActiveTool: Tool<
   mode: 'write',
   handler: async (ctx: ActionContext, input) =>
     setServiceActive(ctx, input.serviceKey, input.active),
+}
+
+// Cost editor (Obj 10). Sets the service's price: hourly (rate + estimated hours)
+// or a fixed fee, money as a decimal string (ADR 0044). Pass cost:null to clear.
+// Written as a new immutable version into transitions.cost. Reads come back on
+// every ServiceDefinition (list_all / list), so no separate get tool is needed.
+const costSetTool: Tool<SetServiceCostInput, { service: ServiceDefinition }> = {
+  name: 'legal.service.cost.set',
+  description:
+    "Set a service offering's cost: type 'hourly' (amount = hourly rate, hours = estimated hours) or 'fixed' (amount = flat fee). Amounts are decimal strings like \"350.00\". Pass cost:null to clear. Saves a new immutable version; the cost appears on the service in legal.service.list/list_all.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      serviceKey: { type: 'string' },
+      cost: {
+        type: 'object',
+        description: 'The cost to set. Omit (or pass null) to clear the cost.',
+        properties: {
+          type: { type: 'string', enum: ['hourly', 'fixed'] },
+          amount: { type: 'string', description: 'Decimal string, e.g. "350.00".' },
+          hours: { type: 'number', description: 'Estimated hours (hourly only).' },
+        },
+        required: ['type', 'amount'],
+        additionalProperties: false,
+      },
+    },
+    required: ['serviceKey'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({ service: await setServiceCost(ctx, input) }),
 }
 
 const retireTool: Tool<{ serviceKey: string }, { serviceKey: string; retired: boolean }> = {
@@ -197,6 +230,7 @@ registerTool(listAllTool)
 registerTool(createTool)
 registerTool(updateTool)
 registerTool(setActiveTool)
+registerTool(costSetTool)
 registerTool(retireTool)
 registerTool(completenessTool)
 registerTool(questionnaireGetTool)
