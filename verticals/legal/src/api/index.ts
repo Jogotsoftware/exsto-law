@@ -1,6 +1,6 @@
 export * from './createMatter.js'
 export * from './submitQuestionnaire.js'
-export * from './simulateCall.js'
+export * from './recordManualCall.js'
 export * from './loadCall.js'
 export * from './generateDraft.js'
 export * from './cacheDraft.js'
