@@ -32,7 +32,7 @@
     "stamp": "node --env-file=.env.local scripts/stamp-version.mjs",
     "upgrade": "node --env-file=.env.local scripts/upgrade-foundation.mjs",
     "seed:demo": "tsx --env-file=.env.local verticals/legal/demo/seed.ts",
-    "reseed:pilot": "tsx --env-file=.env.local scripts/reseed-pilot.ts",
+    "reseed:pilot": "tsx --env-file=.env.local verticals/legal/demo/reseed-pilot.ts",
     "preflight": "tsx --env-file=.env.local verticals/legal/demo/preflight.ts"
   },
   "devDependencies": {
