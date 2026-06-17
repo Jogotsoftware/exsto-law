@@ -1,0 +1,25 @@
+# Render blueprint — a dedicated always-on worker for the legal vertical
+# (beta sprint Obj 7b). Connect this repo as a Blueprint on render.com and it
+# provisions the worker from this file. Set the secret env vars in the Render
+# dashboard (sync:false below means "ask me, don't read from a file").
+#
+# The Next.js app stays on Netlify; this is ONLY the background worker.
+services:
+  - type: worker
+    name: exsto-law-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile.worker
+    plan: starter
+    autoDeploy: true
+    envVars:
+      # Supabase Postgres connection string. Use a NON-OWNER role (e.g. the
+      # pooled 'authenticated' connection) so row-level security stays enforced.
+      - key: DATABASE_URL
+        sync: false
+      # Belt-and-suspenders: drop to a non-owner role after connecting, so RLS
+      # is enforced even if DATABASE_URL is an owner connection.
+      - key: SUBSTRATE_DB_ROLE
+        value: authenticated
+      # Idle poll interval (ms) when the job queue is empty.
+      - key: WORKER_IDLE_POLL_MS
+        value: "2000"

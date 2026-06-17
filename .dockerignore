@@ -1,0 +1,12 @@
+# Keep the build context small and never ship secrets or stale build output.
+.git
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+*.log
+# Secrets — env files must NEVER enter the image; inject env at runtime instead.
+.env
+.env.*
+!.env.example
