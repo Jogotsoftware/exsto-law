@@ -366,11 +366,12 @@ tbody tr:hover {
 }
 
 section {
-  background: white;
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  padding: 1.25rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.35rem 1.6rem;
   margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-sm);
 }
 section h2 {
   margin-top: 0;
@@ -861,14 +862,25 @@ pre {
 
 .alert {
   padding: 0.75rem 1rem;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin-bottom: 1rem;
   font-size: 0.92rem;
+  border: 1px solid transparent;
 }
 .alert-error {
   background: var(--danger-soft);
   color: #991b1b;
-  border: 1px solid #fca5a5;
+  border-color: #fca5a5;
+}
+.alert-warn {
+  background: var(--warn-soft);
+  color: #92400e;
+  border-color: #fcd9a8;
+}
+.alert-success {
+  background: var(--ok-soft);
+  color: #166534;
+  border-color: #bbf7d0;
 }
 
 .confirm-card {
