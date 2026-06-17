@@ -34,8 +34,10 @@ import './tools/granolaImportTools.js'
 import './tools/clientPortalTools.js'
 import './tools/matterMessagingTools.js'
 import './tools/timeExpenseTools.js'
-// Note: ./tools/sendDraftLinkEmail.js exists but was never wired into the registry
-// upstream; left unregistered to preserve the prior tool surface exactly.
+// Beta sprint Obj 7 (make email live): register the real draft-link email tool —
+// it sends through the attorney's Gmail (mail.send provenance). The matter page
+// already calls legal.email.send_draft_link.
+import './tools/sendDraftLinkEmail.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

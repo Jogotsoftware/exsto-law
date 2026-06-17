@@ -137,7 +137,7 @@ export async function runGranolaProjection(
 // enabling an auto service unless every configured kind has a drafting prompt and a
 // resolvable body template; a matter only reaches here when its service is auto.
 // Manual-route matters get nothing here — the attorney email is their path (WP6).
-async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: string): Promise<void> {
+export async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: string): Promise<void> {
   const matterRoute = await withActionContext(ctx, async (client) => {
     const res = await client.query<{ route: string | null; service_key: string | null }>(
       `SELECT e.metadata->>'workflow_route' AS route,
