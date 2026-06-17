@@ -42,7 +42,7 @@ interface TenantSettings {
 const PROVIDER_META: Record<Provider, { name: string; desc: string }> = {
   google_calendar: {
     name: 'Google (Calendar & Email)',
-    desc: 'Real availability on the booking page, Google Calendar invites when clients book, and draft-link emails sent from your Gmail.',
+    desc: 'One connection covers everything: booking-page availability, Google Calendar invites, reading client email threads, and sending email from your Gmail.',
   },
   anthropic: {
     name: 'Anthropic Claude',
@@ -405,13 +405,20 @@ function IntegrationCard({
       </div>
       <div className="integration-card-desc">{meta.desc}</div>
 
-      {/* Google scope detail — keeps the parallel session's email-scope warning */}
+      {/* Google scope detail — one connection should show calendar + email read
+          + email send all granted. A legacy connection missing email read shows
+          a reconnect hint. */}
       {isGoogle && google?.connected && (
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
           {(google.scope ?? '').includes('calendar.events') ? (
             <span className="badge ok">Calendar ✓</span>
           ) : (
             <span className="badge danger">Calendar missing</span>
+          )}
+          {(google.scope ?? '').includes('gmail.readonly') ? (
+            <span className="badge ok">Email read ✓</span>
+          ) : (
+            <span className="badge warn">Email read not granted — reconnect to enable</span>
           )}
           {(google.scope ?? '').includes('gmail.send') ? (
             <span className="badge ok">Email send ✓</span>

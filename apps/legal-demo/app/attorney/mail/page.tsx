@@ -1,10 +1,12 @@
 'use client'
 
-// Mail tab (WP7, REQ-CALMAIL-02/03): client-related Gmail only — read, reply,
+// Mail tab (WP7, REQ-CALMAIL-02): client-related Gmail only — read, reply,
 // compose in-app through the attorney's real account. Opening a thread also
 // ingests it (mail.ingest, idempotent) so each matter carries its
-// communication history. Gmail read scope is requested incrementally on first
-// use (REQ-AUTH-03).
+// communication history. Gmail read is granted as part of the single
+// "Connect Google" consent in Settings (one connection = calendar + full email);
+// the in-tab "Reconnect Google" button is only a fallback for legacy connections
+// made before that consent was unified.
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
@@ -127,17 +129,19 @@ export default function MailPage() {
     }
   }
 
-  // Mail mode connects THIS attorney's own Gmail (per-attorney, migration 0016).
-  // The init route reads tenantId + actorId from the verified session cookie, so
-  // we only need to confirm there is a session for a friendly "sign in first".
-  async function enableMail() {
+  // Reconnect Google to grant email reading. One Google connection now covers
+  // calendar + full email, so this is only a fallback for LEGACY connections made
+  // before that change — it routes through the same full-scope connect (the init
+  // route reads tenantId + actorId from the verified session cookie, per-attorney
+  // migration 0016) and comes back with read + send + calendar all granted.
+  async function reconnectGoogle() {
     const session = await fetchSession()
     if (!session) {
-      setError('Sign in first, then enable Mail.')
+      setError('Sign in first, then reconnect Google.')
       return
     }
     const params = new URLSearchParams({
-      mode: 'mail',
+      mode: 'calendar',
       return_to: '/attorney/mail',
     })
     window.location.href = `/api/auth/google/init?${params.toString()}`
@@ -151,10 +155,15 @@ export default function MailPage() {
       />
       {needsMailScope && (
         <div className="alert">
-          <strong>Enable Mail.</strong> Reading client threads needs one extra Gmail permission
-          (asked only now, not at sign-in).{' '}
-          <button className="primary" style={{ marginLeft: 'var(--space-2)' }} onClick={enableMail}>
-            Enable Mail access
+          <strong>Reconnect Google.</strong> This Google connection was made before email reading
+          was included. Reconnect once to grant it — a single connection now covers calendar and
+          full email.{' '}
+          <button
+            className="primary"
+            style={{ marginLeft: 'var(--space-2)' }}
+            onClick={reconnectGoogle}
+          >
+            Reconnect Google
           </button>
         </div>
       )}

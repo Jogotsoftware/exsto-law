@@ -18,7 +18,8 @@ const statusTool: Tool<Record<string, never>, { status: GoogleConnectionStatus }
 
 const connectUrlTool: Tool<{ returnTo?: string }, { url: string }> = {
   name: 'legal.google.connect_url',
-  description: 'Generate the Google OAuth URL the attorney should visit to connect their calendar.',
+  description:
+    'Generate the Google OAuth URL the attorney visits to connect their Google account. One connection grants calendar + Gmail read + Gmail send.',
   mode: 'read',
   handler: async (ctx: ActionContext, input) => ({
     // Connect the calling attorney's own Google account (per-attorney, 0016).
