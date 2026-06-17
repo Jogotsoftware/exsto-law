@@ -18,6 +18,7 @@ import {
   type WorkspaceEvent,
 } from '../adapters/googleCalendar.js'
 import { getMatter } from '../queries/matters.js'
+import { listMatterConsultations, type UpcomingBooking, type BookingCategory } from './calendar.js'
 
 export interface WorkspaceCalendarEvent extends WorkspaceEvent {
   matterEntityId: string | null
@@ -65,6 +66,91 @@ export async function listWorkspaceEvents(
     }),
     source: 'google',
   }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Unified calendar feed: the attorney's REAL Google calendar for a date range,
+// merged with app-booked consultations. This is what the dashboard renders so it
+// shows live Google events — not just app consultations. Consultations carry full
+// matter context (clickable); the attorney's other Google events ride along as
+// read-only "external" items. Matter-linked Google events ARE the consultations,
+// so they're skipped from the external list (dedup, see mergeCalendarFeed).
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface CalendarFeedItem {
+  id: string
+  title: string
+  startIso: string
+  endIso: string | null
+  allDay: boolean
+  // 'consultation' = an app-booked matter consultation (clickable → matter);
+  // 'external' = one of the attorney's own Google events with no matter link.
+  kind: 'consultation' | 'external'
+  matterEntityId: string | null
+  matterNumber: string | null
+  clientName: string | null
+  serviceKey: string | null
+  category: BookingCategory | null
+  status: string | null
+  htmlLink: string | null
+}
+
+// Pure merge so the dedup logic is unit-testable without a DB or Google.
+export function mergeCalendarFeed(
+  consultations: UpcomingBooking[],
+  workspaceEvents: WorkspaceCalendarEvent[],
+): CalendarFeedItem[] {
+  const items: CalendarFeedItem[] = consultations.map((c) => ({
+    id: `consult:${c.matterEntityId}:${c.scheduledAt}`,
+    title: c.clientName || c.matterNumber,
+    startIso: c.scheduledAt,
+    endIso: c.scheduledEnd,
+    allDay: false,
+    kind: 'consultation',
+    matterEntityId: c.matterEntityId,
+    matterNumber: c.matterNumber,
+    clientName: c.clientName || null,
+    serviceKey: c.serviceKey || null,
+    category: c.category,
+    status: c.status || null,
+    htmlLink: null,
+  }))
+  for (const e of workspaceEvents) {
+    // managedByApp events are the app consultations above — skip to avoid showing
+    // each booked consultation twice (once as a consultation, once as a Google
+    // event). Skip events Google couldn't give a start time for.
+    if (e.managedByApp || !e.startIso) continue
+    items.push({
+      id: `gcal:${e.eventId}`,
+      title: e.summary || '(busy)',
+      startIso: e.startIso,
+      endIso: e.endIso,
+      allDay: e.allDay,
+      kind: 'external',
+      matterEntityId: null,
+      matterNumber: null,
+      clientName: null,
+      serviceKey: null,
+      category: null,
+      status: e.status || null,
+      htmlLink: e.htmlLink,
+    })
+  }
+  return items.sort((a, b) => new Date(a.startIso).getTime() - new Date(b.startIso).getTime())
+}
+
+// Fetch consultations + the real Google calendar for [fromIso, toIso) and merge.
+// When Google is disconnected, source='disconnected' and only consultations show.
+export async function listCalendarFeed(
+  ctx: ActionContext,
+  fromIso: string,
+  toIso: string,
+): Promise<{ items: CalendarFeedItem[]; source: 'google' | 'disconnected' }> {
+  const [consultations, workspace] = await Promise.all([
+    listMatterConsultations(ctx, fromIso, toIso),
+    listWorkspaceEvents(ctx, fromIso, toIso),
+  ])
+  return { items: mergeCalendarFeed(consultations, workspace.events), source: workspace.source }
 }
 
 export interface CreateConsultationInput {

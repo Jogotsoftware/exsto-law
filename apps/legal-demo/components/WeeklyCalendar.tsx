@@ -1,10 +1,11 @@
 'use client'
 
-// Attorney dashboard weekly calendar. Renders upcoming consultations/meetings in
-// a 7-day (Sun–Sat) grid, color-coded by category, each block deep-linking to its
-// matter. Pure presentation: the parent fetches `meetings` and owns the live
-// polling refresh, passing freshly-fetched data down. Namespaced `.wcal-*` to
-// avoid colliding with the client-facing AvailabilityCalendar's `.cal-*` styles.
+// Attorney dashboard calendar. Renders the unified calendar feed — app-booked
+// consultations PLUS the attorney's real Google events — in a Week / Day / Month
+// view. Consultations are color-coded by category and deep-link to their matter;
+// external Google events ride along read-only and open in Google. The parent
+// fetches `items` (legal.calendar.feed) and owns the live polling refresh.
+// Namespaced `.wcal-*` to avoid colliding with the public AvailabilityCalendar.
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -12,16 +13,20 @@ import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon } from '@/components/ic
 
 export type BookingCategory = 'new_consultation' | 'new_matter' | 'existing_project'
 
-export interface CalendarMeeting {
-  matterEntityId: string
-  matterNumber: string
-  clientName: string
-  serviceKey: string
-  scheduledAt: string
-  scheduledEnd: string | null
-  status: string
-  category: BookingCategory
+export interface CalendarItem {
+  id: string
+  title: string
+  startIso: string
+  endIso: string | null
+  allDay: boolean
+  kind: 'consultation' | 'external'
+  matterEntityId: string | null
+  serviceKey: string | null
+  category: BookingCategory | null
+  htmlLink: string | null
 }
+
+type View = 'week' | 'day' | 'month'
 
 const DAY_MS = 24 * 3600 * 1000
 
@@ -30,9 +35,15 @@ const CATEGORY_LABELS: Record<BookingCategory, string> = {
   new_matter: 'New matter',
   existing_project: 'Existing project',
 }
-
-// Order controls the legend; keeps a stable, readable sequence.
 const CATEGORY_ORDER: BookingCategory[] = ['new_consultation', 'new_matter', 'existing_project']
+
+// Muted styling for external (non-app) Google events — inline so it doesn't
+// depend on a new global CSS class.
+const EXTERNAL_STYLE: React.CSSProperties = {
+  background: '#f1f5f9',
+  color: '#475569',
+  borderLeft: '3px solid #94a3b8',
+}
 
 function startOfWeek(d: Date): Date {
   const x = new Date(d)
@@ -40,15 +51,20 @@ function startOfWeek(d: Date): Date {
   x.setDate(x.getDate() - x.getDay()) // Sunday
   return x
 }
-
+function startOfDay(d: Date): Date {
+  const x = new Date(d)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1)
+}
 function sameDay(a: Date, b: Date): boolean {
   return a.toDateString() === b.toDateString()
 }
-
 function timeOnly(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
-
 function humanizeService(key: string): string {
   if (!key) return ''
   if (key === 'llc_formation' || key === 'business_formation') return 'NC LLC formation'
@@ -58,88 +74,114 @@ function humanizeService(key: string): string {
 }
 
 interface WeeklyCalendarProps {
-  meetings: CalendarMeeting[]
+  items: CalendarItem[]
   /** True once the first fetch has completed (so we can show an empty state). */
   loaded: boolean
   /** ISO of the most recent successful refresh, for the "live" indicator. */
   lastRefreshedAt: number | null
 }
 
-export function WeeklyCalendar({ meetings, loaded, lastRefreshedAt }: WeeklyCalendarProps) {
+export function WeeklyCalendar({ items, loaded, lastRefreshedAt }: WeeklyCalendarProps) {
   const router = useRouter()
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
+  const [view, setView] = useState<View>('week')
+  // The anchor date: which week/day/month is shown. Navigation moves it.
+  const [anchor, setAnchor] = useState(() => new Date())
 
-  const weekEnd = useMemo(() => new Date(weekStart.getTime() + 7 * DAY_MS), [weekStart])
-  const days = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => new Date(weekStart.getTime() + i * DAY_MS)),
-    [weekStart],
-  )
-
-  // Valid (parseable, future-or-this-week) meetings sorted by time.
   const sorted = useMemo(
     () =>
-      meetings
-        .filter((m) => Number.isFinite(new Date(m.scheduledAt).getTime()))
+      items
+        .filter((i) => Number.isFinite(new Date(i.startIso).getTime()))
         .slice()
-        .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()),
-    [meetings],
+        .sort((a, b) => new Date(a.startIso).getTime() - new Date(b.startIso).getTime()),
+    [items],
   )
-
-  const inWeek = useMemo(
-    () =>
-      sorted.filter((m) => {
-        const t = new Date(m.scheduledAt).getTime()
-        return t >= weekStart.getTime() && t < weekEnd.getTime()
-      }),
-    [sorted, weekStart, weekEnd],
-  )
-
-  // The next upcoming meeting overall, used to nudge the attorney when the
-  // current week is empty but meetings exist further out.
-  const nextMeeting = useMemo(() => {
-    const now = Date.now()
-    return sorted.find((m) => new Date(m.scheduledAt).getTime() >= now) ?? null
-  }, [sorted])
-
-  const meetingsByDay = (day: Date) => inWeek.filter((m) => sameDay(new Date(m.scheduledAt), day))
-
-  const today = new Date()
-  const isCurrentWeek = sameDay(weekStart, startOfWeek(today))
-
-  const weekLabel = `${weekStart.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })} – ${new Date(weekEnd.getTime() - DAY_MS).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })}`
 
   function goToMatter(matterEntityId: string) {
     router.push(`/attorney/matters/${matterEntityId}`)
   }
 
-  function renderBlock(m: CalendarMeeting) {
-    const label = `${m.clientName || m.matterNumber} at ${timeOnly(m.scheduledAt)} — ${
-      CATEGORY_LABELS[m.category]
-    }`
+  function itemsOn(day: Date): CalendarItem[] {
+    return sorted.filter((i) => sameDay(new Date(i.startIso), day))
+  }
+
+  function renderBlock(it: CalendarItem) {
+    if (it.kind === 'external') {
+      const label = `${it.title} ${it.allDay ? '(all day)' : `at ${timeOnly(it.startIso)}`} — Google event`
+      return (
+        <a
+          key={it.id}
+          href={it.htmlLink ?? '#'}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="wcal-block"
+          style={EXTERNAL_STYLE}
+          title={label}
+          aria-label={label}
+        >
+          <span className="wcal-block-time">{it.allDay ? 'all day' : timeOnly(it.startIso)}</span>
+          <span className="wcal-block-client">{it.title}</span>
+          <span className="wcal-block-service">Google event</span>
+        </a>
+      )
+    }
+    const cat = it.category ?? 'new_consultation'
+    const label = `${it.title} at ${timeOnly(it.startIso)} — ${CATEGORY_LABELS[cat]}`
     return (
       <button
-        key={`${m.matterEntityId}-${m.scheduledAt}`}
+        key={it.id}
         type="button"
-        className={`wcal-block wcal-${m.category}`}
-        onClick={() => goToMatter(m.matterEntityId)}
+        className={`wcal-block wcal-${cat}`}
+        onClick={() => it.matterEntityId && goToMatter(it.matterEntityId)}
         title={label}
         aria-label={label}
       >
-        <span className="wcal-block-time">{timeOnly(m.scheduledAt)}</span>
-        <span className="wcal-block-client">{m.clientName || m.matterNumber}</span>
-        {m.serviceKey && (
-          <span className="wcal-block-service">{humanizeService(m.serviceKey)}</span>
+        <span className="wcal-block-time">{timeOnly(it.startIso)}</span>
+        <span className="wcal-block-client">{it.title}</span>
+        {it.serviceKey && (
+          <span className="wcal-block-service">{humanizeService(it.serviceKey)}</span>
         )}
       </button>
     )
   }
+
+  // ── Range + label per view ────────────────────────────────────────────────
+  const step = view === 'week' ? 7 * DAY_MS : view === 'day' ? DAY_MS : 0
+  function shift(dir: -1 | 1) {
+    if (view === 'month') {
+      setAnchor((a) => new Date(a.getFullYear(), a.getMonth() + dir, 1))
+    } else {
+      setAnchor((a) => new Date(a.getTime() + dir * step))
+    }
+  }
+  function goToday() {
+    setAnchor(new Date())
+  }
+
+  const today = new Date()
+  const rangeLabel =
+    view === 'day'
+      ? anchor.toLocaleDateString(undefined, {
+          weekday: 'long',
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })
+      : view === 'month'
+        ? anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+        : (() => {
+            const ws = startOfWeek(anchor)
+            const we = new Date(ws.getTime() + 6 * DAY_MS)
+            return `${ws.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${we.toLocaleDateString(
+              undefined,
+              { month: 'short', day: 'numeric', year: 'numeric' },
+            )}`
+          })()
+
+  // ── Empty-state / "next" helper (any view) ────────────────────────────────
+  const nextItem = useMemo(() => {
+    const now = Date.now()
+    return sorted.find((i) => new Date(i.startIso).getTime() >= now) ?? null
+  }, [sorted])
 
   return (
     <div className="wcal-wrap">
@@ -147,31 +189,42 @@ export function WeeklyCalendar({ meetings, loaded, lastRefreshedAt }: WeeklyCale
         <button
           type="button"
           className="wcal-nav-btn"
-          aria-label="Previous week"
-          onClick={() => setWeekStart(new Date(weekStart.getTime() - 7 * DAY_MS))}
+          aria-label="Previous"
+          onClick={() => shift(-1)}
         >
           <ChevronLeftIcon size={16} />
         </button>
         <div className="wcal-week-label">
-          <CalendarIcon size={14} /> {weekLabel}
-          {isCurrentWeek && <span className="wcal-this-week"> · this week</span>}
+          <CalendarIcon size={14} /> {rangeLabel}
         </div>
         <div className="wcal-nav-right">
-          {!isCurrentWeek && (
-            <button
-              type="button"
-              className="wcal-today-btn"
-              onClick={() => setWeekStart(startOfWeek(new Date()))}
-            >
-              Today
-            </button>
-          )}
-          <button
-            type="button"
-            className="wcal-nav-btn"
-            aria-label="Next week"
-            onClick={() => setWeekStart(new Date(weekStart.getTime() + 7 * DAY_MS))}
-          >
+          <div className="wcal-viewswitch" role="tablist" aria-label="Calendar view">
+            {(['day', 'week', 'month'] as View[]).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={view === v}
+                className={`wcal-view-btn${view === v ? ' wcal-view-active' : ''}`}
+                style={{
+                  fontSize: '0.8rem',
+                  padding: '0.2rem 0.55rem',
+                  borderRadius: '0.35rem',
+                  border: '1px solid var(--border)',
+                  background: view === v ? 'var(--accent, #2563eb)' : 'transparent',
+                  color: view === v ? '#fff' : 'inherit',
+                  textTransform: 'capitalize',
+                }}
+                onClick={() => setView(v)}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="wcal-today-btn" onClick={goToday}>
+            Today
+          </button>
+          <button type="button" className="wcal-nav-btn" aria-label="Next" onClick={() => shift(1)}>
             <ChevronRightIcon size={16} />
           </button>
         </div>
@@ -197,36 +250,79 @@ export function WeeklyCalendar({ meetings, loaded, lastRefreshedAt }: WeeklyCale
               <span className={`wcal-swatch wcal-${c}`} /> {CATEGORY_LABELS[c]}
             </span>
           ))}
+          <span className="wcal-legend-item">
+            <span className="wcal-swatch" style={{ background: '#94a3b8' }} /> Google event
+          </span>
         </span>
       </div>
 
-      {loaded && inWeek.length === 0 && (
+      {view === 'week' && (
+        <WeekGrid anchor={anchor} itemsOn={itemsOn} renderBlock={renderBlock} today={today} />
+      )}
+      {view === 'day' && (
+        <DayColumn day={startOfDay(anchor)} items={itemsOn(anchor)} renderBlock={renderBlock} />
+      )}
+      {view === 'month' && (
+        <MonthGrid
+          anchor={anchor}
+          itemsOn={itemsOn}
+          today={today}
+          onPickDay={(d) => {
+            setAnchor(d)
+            setView('day')
+          }}
+        />
+      )}
+
+      {loaded && sorted.length === 0 && (
         <div className="wcal-empty">
-          No meetings this week.
-          {nextMeeting && (
+          Nothing on the calendar yet.
+          {nextItem && (
             <>
               {' '}
-              Next meeting:{' '}
+              Next:{' '}
               <button
                 type="button"
                 className="wcal-jump"
-                onClick={() => setWeekStart(startOfWeek(new Date(nextMeeting.scheduledAt)))}
+                onClick={() => {
+                  setAnchor(new Date(nextItem.startIso))
+                  setView('day')
+                }}
               >
-                {new Date(nextMeeting.scheduledAt).toLocaleDateString(undefined, {
+                {new Date(nextItem.startIso).toLocaleDateString(undefined, {
                   weekday: 'short',
                   month: 'short',
                   day: 'numeric',
                 })}{' '}
-                — jump to that week
+                — jump to it
               </button>
             </>
           )}
         </div>
       )}
+    </div>
+  )
+}
 
-      <div className="wcal-week-grid" role="grid" aria-label="Weekly meeting calendar">
+// ── Week view (the original 7-col grid) ──────────────────────────────────────
+function WeekGrid({
+  anchor,
+  itemsOn,
+  renderBlock,
+  today,
+}: {
+  anchor: Date
+  itemsOn: (d: Date) => CalendarItem[]
+  renderBlock: (it: CalendarItem) => React.ReactNode
+  today: Date
+}) {
+  const ws = startOfWeek(anchor)
+  const days = Array.from({ length: 7 }, (_, i) => new Date(ws.getTime() + i * DAY_MS))
+  return (
+    <>
+      <div className="wcal-week-grid" role="grid" aria-label="Weekly calendar">
         {days.map((day) => {
-          const dayMeetings = meetingsByDay(day)
+          const dayItems = itemsOn(day)
           const isToday = sameDay(day, today)
           return (
             <div
@@ -241,22 +337,20 @@ export function WeeklyCalendar({ meetings, loaded, lastRefreshedAt }: WeeklyCale
                 <div className="wcal-day-num">{day.getDate()}</div>
               </div>
               <div className="wcal-day-slots">
-                {dayMeetings.length === 0 ? (
+                {dayItems.length === 0 ? (
                   <span className="wcal-day-empty">—</span>
                 ) : (
-                  dayMeetings.map(renderBlock)
+                  dayItems.map(renderBlock)
                 )}
               </div>
             </div>
           )
         })}
       </div>
-
-      {/* Mobile: a stacked per-day list (the 7-col grid is too narrow on phones). */}
       <div className="wcal-mobile-list">
         {days.map((day) => {
-          const dayMeetings = meetingsByDay(day)
-          if (dayMeetings.length === 0) return null
+          const dayItems = itemsOn(day)
+          if (dayItems.length === 0) return null
           return (
             <div key={day.toISOString()} className="wcal-mobile-day">
               <div className="wcal-mobile-day-head">
@@ -266,8 +360,141 @@ export function WeeklyCalendar({ meetings, loaded, lastRefreshedAt }: WeeklyCale
                   day: 'numeric',
                 })}
               </div>
-              <div className="wcal-mobile-day-slots">{dayMeetings.map(renderBlock)}</div>
+              <div className="wcal-mobile-day-slots">{dayItems.map(renderBlock)}</div>
             </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+// ── Day view (a single day, stacked) ─────────────────────────────────────────
+function DayColumn({
+  items,
+  renderBlock,
+}: {
+  day: Date
+  items: CalendarItem[]
+  renderBlock: (it: CalendarItem) => React.ReactNode
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.4rem',
+        border: '1px solid var(--border)',
+        borderRadius: '0.5rem',
+        padding: '0.6rem',
+      }}
+    >
+      {items.length === 0 ? (
+        <span className="wcal-day-empty">No events this day.</span>
+      ) : (
+        items.map(renderBlock)
+      )}
+    </div>
+  )
+}
+
+// ── Month view (6×7 grid; click a day → day view) ────────────────────────────
+function MonthGrid({
+  anchor,
+  itemsOn,
+  today,
+  onPickDay,
+}: {
+  anchor: Date
+  itemsOn: (d: Date) => CalendarItem[]
+  today: Date
+  onPickDay: (d: Date) => void
+}) {
+  const first = startOfMonth(anchor)
+  const gridStart = startOfWeek(first)
+  const cells = Array.from({ length: 42 }, (_, i) => new Date(gridStart.getTime() + i * DAY_MS))
+  const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  return (
+    <div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, 1fr)',
+          fontSize: '0.72rem',
+          color: 'var(--muted)',
+          marginBottom: '0.25rem',
+        }}
+      >
+        {dow.map((d) => (
+          <div key={d} style={{ textAlign: 'center', padding: '0.2rem 0' }}>
+            {d}
+          </div>
+        ))}
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, 1fr)',
+          gap: '1px',
+          background: 'var(--border)',
+          border: '1px solid var(--border)',
+          borderRadius: '0.5rem',
+          overflow: 'hidden',
+        }}
+      >
+        {cells.map((day) => {
+          const dayItems = itemsOn(day)
+          const inMonth = day.getMonth() === anchor.getMonth()
+          const isToday = sameDay(day, today)
+          return (
+            <button
+              key={day.toISOString()}
+              type="button"
+              onClick={() => onPickDay(day)}
+              style={{
+                minHeight: '5.5rem',
+                background: '#fff',
+                opacity: inMonth ? 1 : 0.45,
+                border: 'none',
+                borderTop: isToday ? '2px solid var(--accent, #2563eb)' : '2px solid transparent',
+                textAlign: 'left',
+                padding: '0.25rem 0.3rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.15rem',
+                cursor: 'pointer',
+              }}
+              aria-label={`${day.toLocaleDateString()} — ${dayItems.length} event(s)`}
+            >
+              <span style={{ fontSize: '0.72rem', fontWeight: isToday ? 700 : 500 }}>
+                {day.getDate()}
+              </span>
+              {dayItems.slice(0, 3).map((it) => (
+                <span
+                  key={it.id}
+                  style={{
+                    fontSize: '0.66rem',
+                    borderRadius: '0.2rem',
+                    padding: '0.05rem 0.25rem',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    ...(it.kind === 'external'
+                      ? EXTERNAL_STYLE
+                      : { background: '#dbeafe', color: '#1e3a8a' }),
+                  }}
+                  title={it.title}
+                >
+                  {it.allDay ? '' : `${timeOnly(it.startIso)} `}
+                  {it.title}
+                </span>
+              ))}
+              {dayItems.length > 3 && (
+                <span style={{ fontSize: '0.64rem', color: 'var(--muted)' }}>
+                  +{dayItems.length - 3} more
+                </span>
+              )}
+            </button>
           )
         })}
       </div>

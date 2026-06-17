@@ -5,24 +5,13 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
 import { Tabs, type TabSpec } from '@/components/Tabs'
-import { WeeklyCalendar, type BookingCategory } from '@/components/WeeklyCalendar'
+import { WeeklyCalendar, type CalendarItem } from '@/components/WeeklyCalendar'
 import { ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
 
 // Newly-booked consultations should appear without a manual reload. True Google
 // push-sync is out of scope; we poll the existing `legal.calendar.upcoming`
 // source on this interval — "live enough" for the dashboard.
 const CALENDAR_POLL_MS = 45_000
-
-interface UpcomingBooking {
-  matterEntityId: string
-  matterNumber: string
-  clientName: string
-  serviceKey: string
-  scheduledAt: string
-  scheduledEnd: string | null
-  status: string
-  category: BookingCategory
-}
 
 interface RecentBooking {
   matterEntityId: string
@@ -91,19 +80,24 @@ function timeAgo(iso: string): string {
 }
 
 export default function AttorneyHome() {
-  const [upcoming, setUpcoming] = useState<UpcomingBooking[] | null>(null)
+  const [upcoming, setUpcoming] = useState<CalendarItem[] | null>(null)
   const [recent, setRecent] = useState<RecentBooking[] | null>(null)
   const [matters, setMatters] = useState<MatterSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
 
-  // Fetch just the calendar feed; reused by the initial load and the live poll.
+  // Fetch the unified calendar feed (real Google events + app consultations) for a
+  // broad window; the calendar navigates within it client-side. Reused by the
+  // initial load and the live poll.
   const refreshUpcoming = useCallback(async () => {
-    const u = await callAttorneyMcp<{ upcoming: UpcomingBooking[] }>({
-      toolName: 'legal.calendar.upcoming',
-      input: { limit: 200 },
+    const now = Date.now()
+    const fromIso = new Date(now - 7 * 24 * 3600 * 1000).toISOString()
+    const toIso = new Date(now + 90 * 24 * 3600 * 1000).toISOString()
+    const r = await callAttorneyMcp<{ items: CalendarItem[]; source: string }>({
+      toolName: 'legal.calendar.feed',
+      input: { fromIso, toIso },
     })
-    setUpcoming(u.upcoming)
+    setUpcoming(r.items)
     setLastRefreshedAt(Date.now())
   }, [])
 
@@ -203,7 +197,7 @@ export default function AttorneyHome() {
           </div>
         ) : (
           <WeeklyCalendar
-            meetings={upcoming ?? []}
+            items={upcoming ?? []}
             loaded={upcoming !== null}
             lastRefreshedAt={lastRefreshedAt}
           />
