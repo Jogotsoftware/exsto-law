@@ -106,6 +106,33 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
   }),
 }
 
+// Human titles for the Templates catalog (Obj 9). Keyed by template_ref; a ref
+// with no entry falls back to a humanized form of its key.
+const TEMPLATE_TITLES: Record<string, string> = {
+  'attorney-manual-matter': 'Attorney — new manual matter',
+  'attorney-draft-completed': 'Attorney — draft ready for review',
+  'prospect-intake-confirmation': 'Prospect — intake received',
+  'client-portal-magic-link': 'Client — portal sign-in link',
+  'attorney-portal-message': 'Attorney — new client message',
+  'client-portal-message': 'Client — new attorney message',
+  'prospect-booking-confirmation': 'Prospect — consultation booked',
+}
+
+export interface NotificationTemplateRef {
+  ref: string
+  title: string
+}
+
+// List the firm's email templates (Phase 0: the in-memory set) for the Templates
+// catalog, without exposing the private renderer map. Phase 1 moves these to
+// substrate content rows; this signature stays stable.
+export function listNotificationTemplateRefs(): NotificationTemplateRef[] {
+  return Object.keys(TEMPLATES).map((ref) => ({
+    ref,
+    title: TEMPLATE_TITLES[ref] ?? ref.replace(/[-_]/g, ' '),
+  }))
+}
+
 export function renderNotificationTemplate(
   templateRef: string,
   variables: Vars,
