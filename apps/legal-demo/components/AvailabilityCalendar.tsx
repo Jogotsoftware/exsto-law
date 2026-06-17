@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useI18n } from '@/lib/i18n'
+import { ChevronLeftIcon, ChevronRightIcon, RefreshIcon } from '@/components/icons'
 
 export interface CalendarSlot {
   startIso: string
@@ -48,6 +49,10 @@ function dayKey(d: Date): string {
   return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`
 }
 
+function isSameDay(a: Date, b: Date): boolean {
+  return dayKey(a) === dayKey(b)
+}
+
 // Weekly calendar view. Slot times are interpreted in the viewer's local
 // timezone (so a NY-issued 10am slot shows as 7am for a CA viewer). The
 // stepper navigates by week and is bounded to weeks that contain at least
@@ -68,6 +73,7 @@ export function AvailabilityCalendar({
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time',
     [],
   )
+  const today = useMemo(() => new Date(), [])
 
   // Group slots by local day.
   const dayMap = useMemo(() => {
@@ -131,35 +137,35 @@ export function AvailabilityCalendar({
   })()
 
   return (
-    <div className="cal-wrap">
-      <div className="cal-nav">
+    <div className="bk-cal">
+      <div className="bk-cal-nav">
         <button
           type="button"
-          className="cal-nav-btn"
+          className="bk-cal-arrow"
           disabled={!canPrev}
           onClick={() => setWeekStart(new Date(weekStart.getTime() - 7 * DAY_MS))}
           aria-label={t('cal.prev_week')}
         >
-          ‹
+          <ChevronLeftIcon size={18} />
         </button>
-        <div className="cal-week-label">{weekRangeLabel}</div>
+        <div className="bk-cal-range">{weekRangeLabel}</div>
         <button
           type="button"
-          className="cal-nav-btn"
+          className="bk-cal-arrow"
           disabled={!canNext}
           onClick={() => setWeekStart(new Date(weekStart.getTime() + 7 * DAY_MS))}
           aria-label={t('cal.next_week')}
         >
-          ›
+          <ChevronRightIcon size={18} />
         </button>
       </div>
 
-      <div className="cal-meta">
-        <div className="cal-tz-note">{t('cal.local_time', { tz: localTz })}</div>
-        <div className="cal-live">
-          <span className="cal-live-dot" aria-hidden /> {t('cal.live')}
+      <div className="bk-cal-meta">
+        <div className="bk-cal-tz">{t('cal.local_time', { tz: localTz })}</div>
+        <div className="bk-cal-live">
+          <span className="bk-cal-live-dot" aria-hidden /> {t('cal.live')}
           {lastUpdated && (
-            <span className="cal-live-time">
+            <span className="bk-cal-updated">
               ·{' '}
               {t('cal.updated', {
                 time: lastUpdated.toLocaleTimeString(dateLocale, {
@@ -172,58 +178,61 @@ export function AvailabilityCalendar({
           {onRefresh && (
             <button
               type="button"
-              className="cal-refresh"
+              className={`bk-cal-refresh ${refreshing ? 'spinning' : ''}`}
               onClick={onRefresh}
               disabled={refreshing}
               aria-label={t('cal.refresh')}
             >
-              {refreshing ? '…' : '↻'}
+              <RefreshIcon size={15} />
             </button>
           )}
         </div>
       </div>
 
       {/* Desktop: 7-column grid */}
-      <div className="cal-week-grid">
-        {days.map((d) => (
-          <div key={d.iso} className="cal-day-col">
-            <div className="cal-day-head">
-              <div className="cal-day-dow">
-                {d.dayStart.toLocaleDateString(dateLocale, { weekday: 'short' })}
+      <div className="bk-cal-grid">
+        {days.map((d) => {
+          const isToday = isSameDay(d.dayStart, today)
+          return (
+            <div key={d.iso} className={`bk-cal-col ${isToday ? 'today' : ''}`}>
+              <div className="bk-cal-col-head">
+                <div className="bk-cal-dow">
+                  {d.dayStart.toLocaleDateString(dateLocale, { weekday: 'short' })}
+                </div>
+                <div className="bk-cal-date">{d.dayStart.getDate()}</div>
               </div>
-              <div className="cal-day-num">{d.dayStart.getDate()}</div>
+              <div className="bk-cal-col-slots">
+                {d.slots.length === 0 ? (
+                  <div className="bk-cal-empty">—</div>
+                ) : (
+                  d.slots.map((s) => (
+                    <button
+                      key={s.startIso}
+                      type="button"
+                      className={`bk-slot ${selectedStartIso === s.startIso ? 'selected' : ''} ${s.available ? '' : 'taken'}`}
+                      onClick={() => s.available && onSelect(s)}
+                      disabled={!s.available}
+                      aria-label={s.available ? undefined : t('cal.taken')}
+                      title={s.available ? undefined : t('cal.taken')}
+                    >
+                      {new Date(s.startIso).toLocaleTimeString(dateLocale, {
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
-            <div className="cal-day-slots">
-              {d.slots.length === 0 ? (
-                <div className="cal-day-empty">—</div>
-              ) : (
-                d.slots.map((s) => (
-                  <button
-                    key={s.startIso}
-                    type="button"
-                    className={`cal-slot-btn ${selectedStartIso === s.startIso ? 'selected' : ''} ${s.available ? '' : 'unavailable'}`}
-                    onClick={() => s.available && onSelect(s)}
-                    disabled={!s.available}
-                    aria-label={s.available ? undefined : t('cal.taken')}
-                    title={s.available ? undefined : t('cal.taken')}
-                  >
-                    {new Date(s.startIso).toLocaleTimeString(dateLocale, {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {isPastLoadedHorizon && onLoadMoreWeeks && (
-        <div className="cal-load-more">
+        <div className="bk-cal-more">
           <button
             type="button"
-            className="cal-load-more-btn"
+            className="bk-btn bk-btn-soft"
             onClick={onLoadMoreWeeks}
             disabled={loadingMoreWeeks}
           >
@@ -233,7 +242,7 @@ export function AvailabilityCalendar({
       )}
 
       {/* Mobile: accordion */}
-      <div className="cal-mobile-list">
+      <div className="bk-cal-mobile">
         {days.map((d) => {
           const open = openDayIso === d.iso
           const hasSlots = d.slots.length > 0
@@ -246,30 +255,32 @@ export function AvailabilityCalendar({
           return (
             <div
               key={d.iso}
-              className={`cal-mobile-day ${open ? 'open' : ''} ${hasSlots ? '' : 'empty'}`}
+              className={`bk-cal-day ${open ? 'open' : ''} ${hasSlots ? '' : 'empty'}`}
             >
               <button
                 type="button"
-                className="cal-mobile-day-head"
+                className="bk-cal-day-head"
                 onClick={() => setOpenDayIso(open ? null : d.iso)}
                 disabled={!hasSlots}
               >
-                <span className="cal-mobile-day-label">
+                <span className="bk-cal-day-label">
                   {d.dayStart.toLocaleDateString(dateLocale, {
                     weekday: 'long',
                     month: 'short',
                     day: 'numeric',
                   })}
                 </span>
-                <span className="cal-mobile-day-count">{summary}</span>
+                <span className={`bk-cal-day-count ${hasSlots && openCount > 0 ? 'has' : ''}`}>
+                  {summary}
+                </span>
               </button>
               {open && hasSlots && (
-                <div className="cal-mobile-day-slots">
+                <div className="bk-cal-day-slots">
                   {d.slots.map((s) => (
                     <button
                       key={s.startIso}
                       type="button"
-                      className={`cal-slot-btn ${selectedStartIso === s.startIso ? 'selected' : ''} ${s.available ? '' : 'unavailable'}`}
+                      className={`bk-slot ${selectedStartIso === s.startIso ? 'selected' : ''} ${s.available ? '' : 'taken'}`}
                       onClick={() => s.available && onSelect(s)}
                       disabled={!s.available}
                     >

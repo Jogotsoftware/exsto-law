@@ -79,11 +79,40 @@ const en: Record<string, string> = {
   // Inputs
   'select.choose': 'Choose…',
 
-  // Service titles & descriptions (fallback to DB values if missing)
-  'service.llc_formation.title': 'NC LLC formation',
-  'service.business_formation.title': 'NC LLC formation',
-  'service.oa_amendment.title': 'OA amendment',
-  'service.other.title': 'Custom',
+  // Service titles & descriptions (plain language — fallback to DB values if missing)
+  'service.nc_llc_single_member.title': 'Start a business (just you)',
+  'service.nc_llc_single_member.desc':
+    'Set up your single-owner North Carolina LLC with a tailored operating agreement.',
+  'service.nc_llc_multi_member.title': 'Start a business (with partners)',
+  'service.nc_llc_multi_member.desc':
+    'Set up your North Carolina LLC and get a tailored operating agreement for you and your co-owners.',
+  'service.something_else.title': 'Something else',
+  'service.something_else.desc':
+    "Not sure what you need? Book a general consultation and we'll point you the right way.",
+  'service.llc_formation.title': 'Start a business (LLC)',
+  'service.llc_formation.desc':
+    'Set up your North Carolina LLC and get a tailored operating agreement.',
+  'service.business_formation.title': 'Start a business (LLC)',
+  'service.business_formation.desc':
+    'Set up your North Carolina LLC and get a tailored operating agreement.',
+  'service.oa_amendment.title': 'Update your operating agreement',
+  'service.oa_amendment.desc': 'Change or amend the operating agreement you already have.',
+  'service.other.title': 'Something else',
+  'service.other.desc': "Not sure which fits? Tell us what you need and we'll point you the right way.",
+
+  // Booking flow (redesign) copy
+  'service.subtitle': 'Choose what you need help with — in everyday language.',
+  'contact.subtitle': 'So we can reach you and get ready for your consultation.',
+  'intake.subtitle': 'A few details about your situation so your time with us counts.',
+  'slot.subtitle': 'Pick a time that works for you — shown in your local time zone.',
+  'progress.service': 'Service',
+  'progress.contact': 'Contact',
+  'progress.intake': 'About you',
+  'progress.time': 'Time',
+  'progress.step_of': 'Step {n} of {total}',
+  'book.secure': 'Your information is encrypted and kept confidential.',
+  'common.optional': 'Optional',
+  'slot.selected_label': 'Your selected time',
 
   // Section titles
   'section.company.title': 'About the company',
@@ -217,11 +246,40 @@ const es: Record<string, string> = {
   // Inputs
   'select.choose': 'Selecciona…',
 
-  // Service titles
-  'service.llc_formation.title': 'Constitución de LLC en NC',
-  'service.business_formation.title': 'Constitución de LLC en NC',
-  'service.oa_amendment.title': 'Enmienda al acuerdo operativo',
-  'service.other.title': 'Personalizado',
+  // Service titles (lenguaje sencillo)
+  'service.nc_llc_single_member.title': 'Inicia un negocio (solo tú)',
+  'service.nc_llc_single_member.desc':
+    'Constituye tu LLC de un solo dueño en Carolina del Norte con un acuerdo operativo a tu medida.',
+  'service.nc_llc_multi_member.title': 'Inicia un negocio (con socios)',
+  'service.nc_llc_multi_member.desc':
+    'Constituye tu LLC en Carolina del Norte y obtén un acuerdo operativo a tu medida para ti y tus socios.',
+  'service.something_else.title': 'Otra cosa',
+  'service.something_else.desc':
+    '¿No sabes qué necesitas? Agenda una consulta general y te orientamos.',
+  'service.llc_formation.title': 'Inicia un negocio (LLC)',
+  'service.llc_formation.desc':
+    'Constituye tu LLC en Carolina del Norte y obtén un acuerdo operativo a tu medida.',
+  'service.business_formation.title': 'Inicia un negocio (LLC)',
+  'service.business_formation.desc':
+    'Constituye tu LLC en Carolina del Norte y obtén un acuerdo operativo a tu medida.',
+  'service.oa_amendment.title': 'Actualiza tu acuerdo operativo',
+  'service.oa_amendment.desc': 'Cambia o enmienda el acuerdo operativo que ya tienes.',
+  'service.other.title': 'Otra cosa',
+  'service.other.desc': '¿No sabes cuál elegir? Cuéntanos qué necesitas y te orientamos.',
+
+  // Booking flow (rediseño)
+  'service.subtitle': 'Elige en qué necesitas ayuda — en lenguaje cotidiano.',
+  'contact.subtitle': 'Para poder contactarte y preparar tu consulta.',
+  'intake.subtitle': 'Algunos datos sobre tu situación para aprovechar tu consulta.',
+  'slot.subtitle': 'Elige un horario que te convenga — en tu zona horaria local.',
+  'progress.service': 'Servicio',
+  'progress.contact': 'Contacto',
+  'progress.intake': 'Sobre ti',
+  'progress.time': 'Horario',
+  'progress.step_of': 'Paso {n} de {total}',
+  'book.secure': 'Tu información está cifrada y se mantiene confidencial.',
+  'common.optional': 'Opcional',
+  'slot.selected_label': 'Tu horario seleccionado',
 
   // Section titles
   'section.company.title': 'Sobre la empresa',

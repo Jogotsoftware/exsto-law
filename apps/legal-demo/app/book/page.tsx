@@ -10,6 +10,24 @@ import { AvailabilityCalendar, type CalendarSlot } from '@/components/Availabili
 import { LanguageToggle } from '@/components/LanguageToggle'
 import { Turnstile } from '@/components/Turnstile'
 import { useI18n } from '@/lib/i18n'
+import {
+  ArrowRightIcon,
+  Building2Icon,
+  BriefcaseIcon,
+  CheckIcon,
+  ChevronLeftIcon,
+  ClockIcon,
+  FileTextIcon,
+  HelpCircleIcon,
+  LockIcon,
+  MailIcon,
+  MegaphoneIcon,
+  PhoneIcon,
+  ScaleIcon,
+  SparklesIcon,
+  UserIcon,
+  UsersIcon,
+} from '@/components/icons'
 
 // CAPTCHA is gated on a PUBLIC site key. Unset (demo/dev default) → no widget,
 // no token, and the server gate is also a no-op, so booking works unchanged.
@@ -56,6 +74,22 @@ interface MemberRow {
 const INITIAL_HORIZON_DAYS = 60
 const HORIZON_INCREMENT_DAYS = 28
 const REFRESH_MS = 60_000
+
+const PROGRESS_STEPS: ReadonlyArray<{ key: Exclude<Step, 'done'>; labelKey: string }> = [
+  { key: 'service', labelKey: 'progress.service' },
+  { key: 'contact', labelKey: 'progress.contact' },
+  { key: 'intake', labelKey: 'progress.intake' },
+  { key: 'slot', labelKey: 'progress.time' },
+]
+
+// Plain-language services map to a friendly icon; anything unknown gets a doc icon.
+function ServiceIcon({ serviceKey, size = 22 }: { serviceKey: string; size?: number }) {
+  if (serviceKey === 'other') return <HelpCircleIcon size={size} />
+  if (serviceKey.includes('amendment')) return <FileTextIcon size={size} />
+  if (serviceKey.includes('llc') || serviceKey.includes('formation') || serviceKey.includes('business'))
+    return <Building2Icon size={size} />
+  return <SparklesIcon size={size} />
+}
 
 function newMemberId(): string {
   return `m_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`
@@ -128,7 +162,25 @@ export default function BookPage() {
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [])
 
+  // A ?service= preset jumps straight to the contact step before services have
+  // loaded. Once they do, validate the preset: if it doesn't resolve to a real
+  // service, drop it and return the user to the picker instead of stranding
+  // them on a blank intake step.
+  useEffect(() => {
+    if (!services || !presetServiceKey) return
+    if (!services.some((s) => s.serviceKey === presetServiceKey)) {
+      setPresetServiceKey(null)
+      setSelectedServiceKey(null)
+      setStep('service')
+    }
+  }, [services, presetServiceKey])
+
+  // Monotonic request id: a newer availability fetch supersedes any in-flight
+  // older one, so a slow earlier response can never overwrite fresher slots.
+  const slotsReqSeq = useRef(0)
+
   const fetchSlots = useCallback(async (daysOut: number, opts: { silent?: boolean } = {}) => {
+    const seq = ++slotsReqSeq.current
     if (!opts.silent) setSlotsRefreshing(true)
     try {
       const r = await callClientMcp<{
@@ -139,6 +191,7 @@ export default function BookPage() {
         toolName: 'legal.calendar.availability',
         input: { daysOut },
       })
+      if (seq !== slotsReqSeq.current) return // superseded by a newer fetch
       setSlots(r.slots)
       setSlotsSource(r.source)
       setSlotsLastUpdated(new Date())
@@ -150,14 +203,16 @@ export default function BookPage() {
     } catch {
       // leave previous slots in place on transient failure
     } finally {
-      if (!opts.silent) setSlotsRefreshing(false)
+      if (seq === slotsReqSeq.current && !opts.silent) setSlotsRefreshing(false)
     }
   }, [])
 
-  // Initial slot load + 60s background refresh while on the slot step.
+  // Initial slot load (mount only). Subsequent windows are fetched explicitly
+  // by the "load more" handler and the refresh button; keeping horizonDays out
+  // of the deps avoids a second, racing fetch on every window change.
   useEffect(() => {
-    fetchSlots(horizonDays, { silent: slots !== null })
-  }, [horizonDays, fetchSlots])
+    fetchSlots(INITIAL_HORIZON_DAYS)
+  }, [fetchSlots])
 
   useEffect(() => {
     if (step !== 'slot') return
@@ -292,6 +347,7 @@ export default function BookPage() {
     }
   }
 
+  // ---- Confirmation screen ------------------------------------------------
   if (step === 'done' && confirmation) {
     const whenStr = new Date(confirmation.scheduledAt).toLocaleString(
       lang === 'es' ? 'es-US' : undefined,
@@ -306,285 +362,416 @@ export default function BookPage() {
     const [scheduledMiddle, scheduledAfter] = (restAfterAttorney ?? '').split('__WHEN__')
     const [emailBefore, emailAfter] = emailTemplate.split('__EMAIL__')
     return (
-      <main className="book-main">
-        <div className="book-lang-bar">
-          <LanguageToggle />
-        </div>
-        <div className="confirm-card">
-          <div className="check-mark">✓</div>
-          <h1>{t('confirm.title')}</h1>
-          <p style={{ fontSize: '1.05rem', color: '#374151' }}>
-            {scheduledBefore}
-            <strong>Juan Carlos Pacheco</strong>
-            {scheduledMiddle}
-            <strong>{whenStr}</strong>
-            {scheduledAfter}
-          </p>
-          <p style={{ color: 'var(--muted)' }}>
-            {emailBefore}
-            <strong>{contact.email}</strong>
-            {emailAfter}
-          </p>
-          <p style={{ marginTop: '2rem', color: 'var(--muted)', fontSize: '0.88rem' }}>
-            {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
-          </p>
-          <Link href="/">
-            <button>{t('confirm.back')}</button>
-          </Link>
+      <main className="bk-shell">
+        <div className="bk-aurora" aria-hidden />
+        <div className="bk-frame">
+          <BookTopbar />
+          <section className="bk-card bk-confirm" key="done">
+            <div className="bk-success">
+              <span className="bk-success-ring" aria-hidden />
+              <span className="bk-success-check">
+                <CheckIcon size={40} />
+              </span>
+            </div>
+            <h1 className="bk-h1">{t('confirm.title')}</h1>
+            <p className="bk-confirm-line">
+              {scheduledBefore}
+              <strong>Juan Carlos Pacheco</strong>
+              {scheduledMiddle}
+              <strong>{whenStr}</strong>
+              {scheduledAfter}
+            </p>
+            <p className="bk-sub">
+              {emailBefore}
+              <strong>{contact.email}</strong>
+              {emailAfter}
+            </p>
+            <div className="bk-matter-ref">
+              {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
+            </div>
+            <Link href="/" className="bk-btn bk-btn-ghost bk-btn-wide">
+              {t('confirm.back')}
+            </Link>
+          </section>
         </div>
       </main>
     )
   }
 
+  const stepTitle =
+    step === 'service'
+      ? t('header.service')
+      : step === 'contact'
+        ? t('contact.heading')
+        : step === 'intake'
+          ? t('intake.heading')
+          : t('slot.heading')
+  const stepSubtitle =
+    step === 'service'
+      ? t('service.subtitle')
+      : step === 'contact'
+        ? t('contact.subtitle')
+        : step === 'intake'
+          ? t('intake.subtitle')
+          : t('slot.subtitle')
+
   return (
-    <main className="book-main">
-      <div className="book-lang-bar">
-        <LanguageToggle />
-      </div>
-      <Stepper step={step} />
+    <main className="bk-shell">
+      <div className="bk-aurora" aria-hidden />
+      <div className="bk-frame">
+        <BookTopbar />
+        <BookProgress step={step} />
 
-      {step === 'service' && (
-        <header className="book-header">
-          <h1>{t('header.service')}</h1>
-        </header>
-      )}
-      {step !== 'service' && (
-        <header className="book-header">
-          <h1>{t('header.book')}</h1>
-        </header>
-      )}
-
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {step === 'service' && (
-        <section>
-          {services === null && (
-            <div className="loading-block">
-              <span className="spinner" />
-              {t('service.loading')}
+        <section className="bk-card">
+          {/* key={step} remounts the stage so each step animates in cleanly */}
+          <div className="bk-stage" key={step}>
+            <div className="bk-stage-head">
+              <h1 className="bk-h1">{stepTitle}</h1>
+              <p className="bk-sub">{stepSubtitle}</p>
             </div>
-          )}
-          {services && (
-            <div className="service-list">
-              {services.map((s) => (
-                <label
-                  key={s.serviceKey}
-                  className={`service-card ${selectedServiceKey === s.serviceKey ? 'selected' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="service"
-                    value={s.serviceKey}
-                    checked={selectedServiceKey === s.serviceKey}
-                    onChange={() => setSelectedServiceKey(s.serviceKey)}
-                  />
-                  <div>
-                    <div className="service-title">
-                      {t(`service.${s.serviceKey}.title`, undefined, s.displayName)}
-                    </div>
-                    {s.description && (
-                      <div className="service-desc">
-                        {t(`service.${s.serviceKey}.desc`, undefined, s.description)}
-                      </div>
-                    )}
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-          <div className="step-actions sticky">
-            <button
-              className="primary full"
-              onClick={advanceFromService}
-              disabled={!selectedServiceKey}
-            >
-              {t('common.continue')}
-            </button>
-          </div>
-        </section>
-      )}
 
-      {step === 'contact' && (
-        <section>
-          <h2>{t('contact.heading')}</h2>
-          <label>
-            <span>{t('contact.name')}</span>
-            <input
-              value={contact.fullName}
-              onChange={(e) => setContact((prev) => ({ ...prev, fullName: e.target.value }))}
-              required
-              autoComplete="name"
-            />
-          </label>
-          <label>
-            <span>{t('contact.email')}</span>
-            <input
-              type="email"
-              value={contact.email}
-              onChange={(e) => setContact((prev) => ({ ...prev, email: e.target.value }))}
-              required
-              autoComplete="email"
-              inputMode="email"
-            />
-          </label>
-          <label>
-            <span>{t('contact.phone')}</span>
-            <PhoneInput
-              international
-              defaultCountry="US"
-              value={contact.phone}
-              onChange={(v) => setContact((prev) => ({ ...prev, phone: v ?? '' }))}
-              className="phone-input"
-            />
-          </label>
-          <label>
-            <span>{t('contact.company')}</span>
-            <input
-              value={contact.companyName}
-              onChange={(e) => setContact((prev) => ({ ...prev, companyName: e.target.value }))}
-              autoComplete="organization"
-            />
-          </label>
-          <label>
-            <span>{t('contact.source')}</span>
-            <input
-              value={contact.attributionSource}
-              onChange={(e) =>
-                setContact((prev) => ({ ...prev, attributionSource: e.target.value }))
-              }
-              required
-            />
-          </label>
-          <div className="step-actions sticky">
-            {!presetServiceKey && (
-              <button onClick={() => setStep('service')}>{t('common.back')}</button>
+            {error && (
+              <div className="bk-alert" role="alert">
+                {error}
+              </div>
             )}
-            <button className="primary full" onClick={advanceFromContact}>
-              {t('common.continue')}
-            </button>
-          </div>
-        </section>
-      )}
 
-      {step === 'intake' && selectedService && (
-        <section>
-          <h2>{t('intake.heading')}</h2>
-          {selectedService.intakeSchema.sections.map((section) => (
-            <div key={section.id} className="intake-section">
-              <h3>{t(`section.${section.id}.title`, undefined, section.title)}</h3>
-              {section.fields.map((field) => (
-                <FieldRenderer
-                  key={field.id}
-                  field={field}
-                  responses={intakeResponses}
-                  setResponses={setIntakeResponses}
-                  members={members}
-                  setMembers={setMembers}
-                />
-              ))}
-            </div>
-          ))}
-          <div className="step-actions sticky">
-            <button onClick={() => setStep('contact')}>{t('common.back')}</button>
-            <button className="primary full" onClick={advanceFromIntake}>
-              {t('common.continue')}
-            </button>
-          </div>
-        </section>
-      )}
+            {step === 'service' && (
+              <>
+                {services === null ? (
+                  <div className="bk-loading">
+                    <span className="bk-spinner" />
+                    {t('service.loading')}
+                  </div>
+                ) : (
+                  <div className="bk-service-grid">
+                    {services.map((s) => {
+                      const selected = selectedServiceKey === s.serviceKey
+                      return (
+                        <button
+                          key={s.serviceKey}
+                          type="button"
+                          className={`bk-service-card ${selected ? 'selected' : ''}`}
+                          aria-pressed={selected}
+                          onClick={() => setSelectedServiceKey(s.serviceKey)}
+                        >
+                          <span className="bk-service-icon">
+                            <ServiceIcon serviceKey={s.serviceKey} />
+                          </span>
+                          <span className="bk-service-text">
+                            <span className="bk-service-title">
+                              {t(`service.${s.serviceKey}.title`, undefined, s.displayName)}
+                            </span>
+                            <span className="bk-service-desc">
+                              {t(
+                                `service.${s.serviceKey}.desc`,
+                                undefined,
+                                s.description ?? '',
+                              )}
+                            </span>
+                          </span>
+                          <span className="bk-service-tick" aria-hidden>
+                            <CheckIcon size={14} />
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                <div className="bk-actions">
+                  <button
+                    className="bk-btn bk-btn-primary bk-btn-wide"
+                    onClick={advanceFromService}
+                    disabled={!selectedServiceKey}
+                  >
+                    {t('common.continue')}
+                    <ArrowRightIcon size={18} />
+                  </button>
+                </div>
+              </>
+            )}
 
-      {step === 'slot' && (
-        <section>
-          <h2>{t('slot.heading')}</h2>
-          {slotsSource === 'stub' && (
-            <div
-              style={{
-                background: 'var(--warn-soft)',
-                border: '1px solid #fcd34d',
-                color: '#92400e',
-                padding: '0.6rem 0.85rem',
-                borderRadius: 8,
-                fontSize: '0.88rem',
-                marginBottom: '0.85rem',
-              }}
-            >
-              {t('slot.stub_notice')}
-            </div>
-          )}
-          {slots === null ? (
-            <div className="loading-block">
-              <span className="spinner" />
-              {t('slot.loading')}
-            </div>
-          ) : slots.length === 0 ? (
-            <p>{t('slot.none')}</p>
-          ) : (
-            <AvailabilityCalendar
-              slots={slots}
-              selectedStartIso={selectedSlot?.startIso ?? null}
-              onSelect={setSelectedSlot}
-              lastUpdated={slotsLastUpdated}
-              refreshing={slotsRefreshing}
-              onRefresh={() => fetchSlots(horizonDays)}
-              loadingMoreWeeks={loadingMoreWeeks}
-              onLoadMoreWeeks={async () => {
-                setLoadingMoreWeeks(true)
-                const next = horizonDays + HORIZON_INCREMENT_DAYS
-                setHorizonDays(next)
-                await fetchSlots(next, { silent: true })
-                setLoadingMoreWeeks(false)
-              }}
-            />
-          )}
-          {TURNSTILE_SITE_KEY && (
-            <div className="captcha-block" aria-live="polite">
-              <Turnstile
-                siteKey={TURNSTILE_SITE_KEY}
-                onToken={setCaptchaToken}
-                onReady={(reset) => {
-                  resetCaptchaRef.current = reset
-                }}
-              />
-            </div>
-          )}
-          <div className="step-actions sticky">
-            <button onClick={() => setStep('intake')}>{t('common.back')}</button>
-            <button
-              className="primary full"
-              disabled={
-                !selectedSlot || busy === 'submit' || (Boolean(TURNSTILE_SITE_KEY) && !captchaToken)
-              }
-              onClick={submitBooking}
-            >
-              {busy === 'submit' && <span className="spinner" />}
-              {busy === 'submit' ? t('slot.booking') : t('slot.confirm')}
-            </button>
+            {step === 'contact' && (
+              <>
+                <div className="bk-fields">
+                  <ContactField
+                    label={t('contact.name')}
+                    icon={<UserIcon size={18} />}
+                    value={contact.fullName}
+                    onChange={(v) => setContact((p) => ({ ...p, fullName: v }))}
+                    autoComplete="name"
+                  />
+                  <ContactField
+                    label={t('contact.email')}
+                    icon={<MailIcon size={18} />}
+                    type="email"
+                    inputMode="email"
+                    value={contact.email}
+                    onChange={(v) => setContact((p) => ({ ...p, email: v }))}
+                    autoComplete="email"
+                  />
+                  <div className="bk-field">
+                    <span className="bk-label">{t('contact.phone')}</span>
+                    <div className="bk-input-wrap bk-phone-wrap">
+                      <PhoneInput
+                        international
+                        defaultCountry="US"
+                        value={contact.phone}
+                        onChange={(v) => setContact((prev) => ({ ...prev, phone: v ?? '' }))}
+                        className="phone-input"
+                      />
+                    </div>
+                  </div>
+                  <ContactField
+                    label={t('contact.company')}
+                    icon={<BriefcaseIcon size={18} />}
+                    value={contact.companyName}
+                    onChange={(v) => setContact((p) => ({ ...p, companyName: v }))}
+                    autoComplete="organization"
+                  />
+                  <ContactField
+                    label={t('contact.source')}
+                    icon={<MegaphoneIcon size={18} />}
+                    value={contact.attributionSource}
+                    onChange={(v) => setContact((p) => ({ ...p, attributionSource: v }))}
+                  />
+                </div>
+                <div className="bk-actions">
+                  {!presetServiceKey && (
+                    <button className="bk-btn bk-btn-ghost" onClick={() => setStep('service')}>
+                      <ChevronLeftIcon size={18} />
+                      {t('common.back')}
+                    </button>
+                  )}
+                  <button className="bk-btn bk-btn-primary bk-btn-grow" onClick={advanceFromContact}>
+                    {t('common.continue')}
+                    <ArrowRightIcon size={18} />
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 'intake' && selectedService && (
+              <>
+                <div className="bk-sections">
+                  {selectedService.intakeSchema.sections.map((section) => (
+                    <div key={section.id} className="bk-section">
+                      <h3 className="bk-section-title">
+                        {t(`section.${section.id}.title`, undefined, section.title)}
+                      </h3>
+                      <div className="bk-fields">
+                        {section.fields.map((field) => (
+                          <FieldRenderer
+                            key={field.id}
+                            field={field}
+                            responses={intakeResponses}
+                            setResponses={setIntakeResponses}
+                            members={members}
+                            setMembers={setMembers}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="bk-actions">
+                  <button className="bk-btn bk-btn-ghost" onClick={() => setStep('contact')}>
+                    <ChevronLeftIcon size={18} />
+                    {t('common.back')}
+                  </button>
+                  <button className="bk-btn bk-btn-primary bk-btn-grow" onClick={advanceFromIntake}>
+                    {t('common.continue')}
+                    <ArrowRightIcon size={18} />
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 'slot' && (
+              <>
+                {slotsSource === 'stub' && (
+                  <div className="bk-notice">{t('slot.stub_notice')}</div>
+                )}
+                {slots === null ? (
+                  <div className="bk-loading">
+                    <span className="bk-spinner" />
+                    {t('slot.loading')}
+                  </div>
+                ) : slots.length === 0 ? (
+                  <p className="bk-empty">{t('slot.none')}</p>
+                ) : (
+                  <AvailabilityCalendar
+                    slots={slots}
+                    selectedStartIso={selectedSlot?.startIso ?? null}
+                    onSelect={setSelectedSlot}
+                    lastUpdated={slotsLastUpdated}
+                    refreshing={slotsRefreshing}
+                    onRefresh={() => fetchSlots(horizonDays)}
+                    loadingMoreWeeks={loadingMoreWeeks}
+                    onLoadMoreWeeks={async () => {
+                      setLoadingMoreWeeks(true)
+                      const next = horizonDays + HORIZON_INCREMENT_DAYS
+                      setHorizonDays(next)
+                      await fetchSlots(next, { silent: true })
+                      setLoadingMoreWeeks(false)
+                    }}
+                  />
+                )}
+
+                {selectedSlot && (
+                  <div className="bk-selected" aria-live="polite">
+                    <span className="bk-selected-icon">
+                      <ClockIcon size={18} />
+                    </span>
+                    <span className="bk-selected-text">
+                      <span className="bk-selected-label">{t('slot.selected_label')}</span>
+                      <span className="bk-selected-value">
+                        {new Date(selectedSlot.startIso).toLocaleString(
+                          lang === 'es' ? 'es-US' : undefined,
+                          { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+                        )}
+                      </span>
+                    </span>
+                  </div>
+                )}
+
+                {TURNSTILE_SITE_KEY && (
+                  <div className="bk-captcha" aria-live="polite">
+                    <Turnstile
+                      siteKey={TURNSTILE_SITE_KEY}
+                      onToken={setCaptchaToken}
+                      onReady={(reset) => {
+                        resetCaptchaRef.current = reset
+                      }}
+                    />
+                  </div>
+                )}
+                <div className="bk-actions">
+                  <button className="bk-btn bk-btn-ghost" onClick={() => setStep('intake')}>
+                    <ChevronLeftIcon size={18} />
+                    {t('common.back')}
+                  </button>
+                  <button
+                    className="bk-btn bk-btn-primary bk-btn-grow"
+                    disabled={
+                      !selectedSlot ||
+                      busy === 'submit' ||
+                      (Boolean(TURNSTILE_SITE_KEY) && !captchaToken)
+                    }
+                    onClick={submitBooking}
+                  >
+                    {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
+                    {busy === 'submit' ? t('slot.booking') : t('slot.confirm')}
+                    {busy !== 'submit' && <CheckIcon size={18} />}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </section>
-      )}
+
+        <p className="bk-secure">
+          <LockIcon size={14} />
+          {t('book.secure')}
+        </p>
+      </div>
     </main>
   )
 }
 
-function Stepper({ step }: { step: Step }) {
-  const { t } = useI18n()
-  const steps: Array<{ key: Step; labelKey: string }> = [
-    { key: 'service', labelKey: 'step.service' },
-    { key: 'contact', labelKey: 'step.contact' },
-    { key: 'intake', labelKey: 'step.intake' },
-    { key: 'slot', labelKey: 'step.time' },
-  ]
-  const idx = steps.findIndex((s) => s.key === step)
+function BookTopbar() {
   return (
-    <div className="stepper">
-      {steps.map((s, i) => (
-        <div
-          key={s.key}
-          className={`stepper-step ${i <= idx ? 'active' : ''} ${i === idx ? 'current' : ''}`}
-        >
-          {t(s.labelKey)}
+    <header className="bk-topbar">
+      <div className="bk-brand">
+        <span className="bk-brand-mark">
+          <ScaleIcon size={18} />
+        </span>
+        <span className="bk-brand-name">Pacheco Law</span>
+      </div>
+      <LanguageToggle />
+    </header>
+  )
+}
+
+function BookProgress({ step }: { step: Step }) {
+  const { t } = useI18n()
+  const idx = PROGRESS_STEPS.findIndex((s) => s.key === step)
+  const safeIdx = idx < 0 ? 0 : idx
+  const railPct = (safeIdx / (PROGRESS_STEPS.length - 1)) * 100
+  const mobilePct = ((safeIdx + 1) / PROGRESS_STEPS.length) * 100
+  const current = PROGRESS_STEPS[safeIdx]
+
+  return (
+    <nav className="bk-progress" aria-label={t('progress.step_of', { n: safeIdx + 1, total: PROGRESS_STEPS.length })}>
+      <div className="bk-progress-mobile">
+        <div className="bk-progress-mobile-row">
+          <span className="bk-progress-step">
+            {t('progress.step_of', { n: safeIdx + 1, total: PROGRESS_STEPS.length })}
+          </span>
+          <span className="bk-progress-current">{current ? t(current.labelKey) : ''}</span>
         </div>
-      ))}
+        <div className="bk-progress-bar">
+          <div className="bk-progress-bar-fill" style={{ width: `${mobilePct}%` }} />
+        </div>
+      </div>
+
+      <ol className="bk-progress-rail">
+        <div className="bk-progress-rail-track" aria-hidden>
+          <div className="bk-progress-rail-fill" style={{ width: `${railPct}%` }} />
+        </div>
+        {PROGRESS_STEPS.map((s, i) => {
+          const state = i < safeIdx ? 'done' : i === safeIdx ? 'current' : 'upcoming'
+          return (
+            <li key={s.key} className={`bk-progress-node ${state}`}>
+              <span className="bk-progress-dot">
+                {i < safeIdx ? <CheckIcon size={14} /> : i + 1}
+              </span>
+              <span className="bk-progress-label">{t(s.labelKey)}</span>
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
+  )
+}
+
+function ContactField({
+  label,
+  icon,
+  value,
+  onChange,
+  type = 'text',
+  inputMode,
+  autoComplete,
+}: {
+  label: string
+  icon: React.ReactNode
+  value: string
+  onChange: (v: string) => void
+  type?: string
+  inputMode?: 'email' | 'text' | 'tel'
+  autoComplete?: string
+}) {
+  const id = useId()
+  return (
+    <div className="bk-field">
+      <label className="bk-label" htmlFor={id}>
+        {label}
+      </label>
+      <div className="bk-input-wrap">
+        <span className="bk-input-icon" aria-hidden>
+          {icon}
+        </span>
+        <input
+          id={id}
+          className="bk-input"
+          type={type}
+          inputMode={inputMode}
+          autoComplete={autoComplete}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
     </div>
   )
 }
@@ -610,32 +797,32 @@ function FieldRenderer({
 
   if (field.type === 'members_repeater') {
     return (
-      <div>
-        <label>
-          <span>
-            {fieldLabel}
-            {field.required ? ' *' : ''}
-          </span>
-        </label>
+      <div className="bk-field bk-field-wide">
+        <span className="bk-label">
+          <UsersIcon size={15} />
+          {fieldLabel}
+          {field.required ? <em className="bk-req">*</em> : ''}
+        </span>
         {members.map((m, idx) => (
-          <fieldset key={m.id} className="member-row">
-            <legend>{t('member.label', { n: idx + 1 })}</legend>
-            <div className="member-grid">
-              <label>
-                <span>{t('member.fullname')}</span>
+          <fieldset key={m.id} className="bk-member">
+            <legend className="bk-member-legend">{t('member.label', { n: idx + 1 })}</legend>
+            <div className="bk-member-grid">
+              <div className="bk-field">
+                <label className="bk-label">{t('member.fullname')}</label>
                 <input
+                  className="bk-input bk-input-bare"
                   value={m.name}
                   onChange={(e) =>
                     setMembers((prev) =>
                       prev.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)),
                     )
                   }
-                  required
                 />
-              </label>
-              <label>
-                <span>{t('member.capital')}</span>
+              </div>
+              <div className="bk-field">
+                <label className="bk-label">{t('member.capital')}</label>
                 <input
+                  className="bk-input bk-input-bare"
                   type="number"
                   inputMode="decimal"
                   value={m.capital_contribution}
@@ -647,10 +834,11 @@ function FieldRenderer({
                     )
                   }
                 />
-              </label>
-              <label>
-                <span>{t('member.ownership')}</span>
+              </div>
+              <div className="bk-field">
+                <label className="bk-label">{t('member.ownership')}</label>
                 <input
+                  className="bk-input bk-input-bare"
                   type="number"
                   inputMode="decimal"
                   value={m.ownership_percentage}
@@ -662,8 +850,8 @@ function FieldRenderer({
                     )
                   }
                 />
-              </label>
-              <label className="member-manager">
+              </div>
+              <label className="bk-checkbox">
                 <input
                   type="checkbox"
                   checked={m.is_manager}
@@ -687,7 +875,7 @@ function FieldRenderer({
             {members.length > 1 && (
               <button
                 type="button"
-                className="member-remove"
+                className="bk-member-remove"
                 onClick={() => setMembers((prev) => prev.filter((_, i) => i !== idx))}
               >
                 {t('member.remove')}
@@ -695,7 +883,11 @@ function FieldRenderer({
             )}
           </fieldset>
         ))}
-        <button type="button" onClick={() => setMembers((prev) => [...prev, emptyMember()])}>
+        <button
+          type="button"
+          className="bk-btn bk-btn-soft bk-member-add"
+          onClick={() => setMembers((prev) => [...prev, emptyMember()])}
+        >
           {t('member.add')}
         </button>
       </div>
@@ -704,12 +896,14 @@ function FieldRenderer({
 
   if (field.type === 'address_autocomplete') {
     return (
-      <AddressAutocomplete
-        label={fieldLabel}
-        required={field.required}
-        value={(value as StructuredAddress) ?? null}
-        onChange={(addr) => set(addr)}
-      />
+      <div className="bk-field bk-field-wide">
+        <AddressAutocomplete
+          label={fieldLabel}
+          required={field.required}
+          value={(value as StructuredAddress) ?? null}
+          onChange={(addr) => set(addr)}
+        />
+      </div>
     )
   }
 
@@ -717,13 +911,14 @@ function FieldRenderer({
 
   if (field.type === 'select' && field.options) {
     return (
-      <label htmlFor={fieldId}>
-        <span>
+      <div className="bk-field">
+        <label htmlFor={fieldId} className="bk-label">
           {fieldLabel}
-          {field.required ? ' *' : ''}
-        </span>
+          {field.required ? <em className="bk-req">*</em> : ''}
+        </label>
         <select
           id={fieldId}
+          className="bk-input bk-select"
           value={typeof value === 'string' ? value : ''}
           onChange={(e) => set(e.target.value)}
           required={field.required}
@@ -735,46 +930,48 @@ function FieldRenderer({
             </option>
           ))}
         </select>
-        {helpText && <div className="help">{helpText}</div>}
-      </label>
+        {helpText && <div className="bk-help">{helpText}</div>}
+      </div>
     )
   }
 
   if (field.type === 'textarea') {
     return (
-      <label htmlFor={fieldId}>
-        <span>
+      <div className="bk-field bk-field-wide">
+        <label htmlFor={fieldId} className="bk-label">
           {fieldLabel}
-          {field.required ? ' *' : ''}
-        </span>
+          {field.required ? <em className="bk-req">*</em> : ''}
+        </label>
         <textarea
           id={fieldId}
+          className="bk-input bk-textarea"
           value={typeof value === 'string' ? value : ''}
           onChange={(e) => set(e.target.value)}
           rows={4}
           required={field.required}
         />
-        {helpText && <div className="help">{helpText}</div>}
-      </label>
+        {helpText && <div className="bk-help">{helpText}</div>}
+      </div>
     )
   }
 
   const inputType = field.type === 'date' ? 'date' : field.type === 'number' ? 'number' : 'text'
   return (
-    <label htmlFor={fieldId}>
-      <span>
+    <div className="bk-field">
+      <label htmlFor={fieldId} className="bk-label">
         {fieldLabel}
-        {field.required ? ' *' : ''}
-      </span>
+        {field.required ? <em className="bk-req">*</em> : ''}
+      </label>
       <input
         id={fieldId}
+        className="bk-input bk-input-bare"
         type={inputType}
         inputMode={field.type === 'number' ? 'decimal' : undefined}
         value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
         onChange={(e) => set(e.target.value)}
         required={field.required}
       />
-      {helpText && <div className="help">{helpText}</div>}
-    </label>
+      {helpText && <div className="bk-help">{helpText}</div>}
+    </div>
   )
 }
