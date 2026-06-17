@@ -135,6 +135,82 @@ export async function listUpcomingBookings(
   })
 }
 
+// Matter consultations whose scheduled_at falls in [fromIso, toIso). Same shape
+// and classification as listUpcomingBookings, but range-bounded (not "upcoming
+// only") so a navigable week/day/month calendar can show past and future weeks.
+// The dashboard fetches a broad range once and navigates client-side.
+export async function listMatterConsultations(
+  ctx: ActionContext,
+  fromIso: string,
+  toIso: string,
+): Promise<UpcomingBooking[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      matter_entity_id: string
+      matter_number: string
+      client_name: string | null
+      service_key: string | null
+      scheduled_at: string
+      scheduled_end: string | null
+      status: string | null
+      booked_at: Date
+      has_draft: boolean
+    }>(
+      `WITH attrs AS (
+         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
+           a.entity_id, akd.kind_name, a.value
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+         WHERE a.tenant_id = $1
+         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
+       )
+       SELECT
+         e.id AS matter_entity_id,
+         e.name AS matter_number,
+         (SELECT a2.value #>> '{}'
+            FROM relationship r
+            JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'client_of'
+            JOIN attrs a2 ON a2.entity_id = r.source_entity_id AND a2.kind_name = 'full_name'
+            WHERE r.tenant_id = $1 AND r.target_entity_id = e.id
+            LIMIT 1) AS client_name,
+         (e.metadata->>'service_key') AS service_key,
+         (e.metadata->>'scheduled_at') AS scheduled_at,
+         (e.metadata->>'scheduled_end') AS scheduled_end,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
+         e.created_at AS booked_at,
+         EXISTS (
+           SELECT 1 FROM relationship rd
+           JOIN relationship_kind_definition rkd2 ON rkd2.id = rd.relationship_kind_id AND rkd2.kind_name = 'draft_of'
+           WHERE rd.tenant_id = $1 AND rd.target_entity_id = e.id
+         ) AS has_draft
+       FROM entity e
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+       WHERE e.tenant_id = $1
+         AND ekd.kind_name = 'matter'
+         AND (e.metadata->>'scheduled_at') IS NOT NULL
+         AND (e.metadata->>'scheduled_at')::timestamptz >= $2::timestamptz
+         AND (e.metadata->>'scheduled_at')::timestamptz < $3::timestamptz
+       ORDER BY (e.metadata->>'scheduled_at')::timestamptz ASC`,
+      [ctx.tenantId, fromIso, toIso],
+    )
+    return res.rows.map((r) => {
+      const status = r.status ?? ''
+      const bookedAt = r.booked_at.toISOString()
+      return {
+        matterEntityId: r.matter_entity_id,
+        matterNumber: r.matter_number,
+        clientName: r.client_name ?? '',
+        serviceKey: r.service_key ?? '',
+        scheduledAt: r.scheduled_at,
+        scheduledEnd: r.scheduled_end,
+        status,
+        bookedAt,
+        category: classifyBooking({ status, hasDraft: r.has_draft === true, bookedAt }),
+      }
+    })
+  })
+}
+
 export interface RecentBooking {
   matterEntityId: string
   matterNumber: string

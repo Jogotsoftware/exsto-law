@@ -2,6 +2,8 @@ import { registerTool, type Tool } from '@exsto/mcp-tools'
 import type { ActionContext, ActionResult } from '@exsto/substrate'
 import {
   listWorkspaceEvents,
+  listCalendarFeed,
+  type CalendarFeedItem,
   createConsultation,
   rescheduleBooking,
   cancelBooking,
@@ -27,6 +29,20 @@ const listEventsTool: Tool<
     "The attorney's real calendar for a window (live Google read), with matter linkage on consultation events.",
   mode: 'read',
   handler: (ctx: ActionContext, input) => listWorkspaceEvents(ctx, input.fromIso, input.toIso),
+}
+
+// The dashboard calendar feed: real Google events + app consultations, merged and
+// deduped, for [fromIso, toIso). This is what makes the dashboard show the
+// attorney's actual live calendar (not just app-booked consultations).
+const calendarFeedTool: Tool<
+  { fromIso: string; toIso: string },
+  { items: CalendarFeedItem[]; source: 'google' | 'disconnected' }
+> = {
+  name: 'legal.calendar.feed',
+  description:
+    "The attorney's calendar for a window: real live Google events merged with app-booked consultations (deduped). Consultations carry matter context; the attorney's other Google events ride along as read-only. source='disconnected' means Google isn't connected, so only consultations are returned.",
+  mode: 'read',
+  handler: (ctx: ActionContext, input) => listCalendarFeed(ctx, input.fromIso, input.toIso),
 }
 
 const createConsultationTool: Tool<
@@ -110,6 +126,7 @@ const matterCommunicationsTool: Tool<
 }
 
 registerTool(listEventsTool)
+registerTool(calendarFeedTool)
 registerTool(createConsultationTool)
 registerTool(rescheduleTool)
 registerTool(cancelTool)
