@@ -165,8 +165,10 @@ export default function SettingsPage() {
   }
 
   async function connectGoogle() {
-    // tenant_id comes from the verified session (cookie in prod, dev shim in
-    // dev) — calendar connect is firm-scoped and needs the tenant explicitly.
+    // Per-attorney connect (migration 0016): the init route reads the connecting
+    // attorney's tenantId + actorId from the verified session cookie, so the
+    // credentials are stored under THIS attorney. We still check the session
+    // client-side for a friendly "sign in first" message.
     const session = await fetchSession()
     if (!session) {
       setError('Sign in first, then connect your calendar.')
@@ -175,7 +177,6 @@ export default function SettingsPage() {
     setBusy('connect_google')
     const params = new URLSearchParams({
       mode: 'calendar',
-      tenant_id: session.tenantId,
       return_to: '/attorney/settings',
     })
     window.location.href = `/api/auth/google/init?${params.toString()}`

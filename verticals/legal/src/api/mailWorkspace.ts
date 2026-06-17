@@ -66,7 +66,7 @@ export async function listMailThreads(ctx: ActionContext): Promise<{
   const index = await clientEmailIndex(ctx)
   const emails = [...index.keys()].filter((e) => !e.endsWith('@example.test'))
   if (emails.length === 0) return { threads: [], clientEmailCount: 0 }
-  const threads = await listClientThreads(ctx.tenantId, emails)
+  const threads = await listClientThreads(ctx.tenantId, emails, 25, ctx.actorId)
   return {
     clientEmailCount: emails.length,
     threads: threads.map((t) => ({
@@ -94,7 +94,7 @@ export async function openMailThread(
   ctx: ActionContext,
   gmailThreadId: string,
 ): Promise<MailThreadView> {
-  const detail = await getClientThread(ctx.tenantId, gmailThreadId)
+  const detail = await getClientThread(ctx.tenantId, gmailThreadId, ctx.actorId)
   const index = await clientEmailIndex(ctx)
   const matters = dedupeMatters(
     detail.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? []),
@@ -135,20 +135,24 @@ export interface ReplyInput {
 // Reply in-app: goes out through the attorney's real Gmail, recorded as a
 // mail.send action with provenance integration:gmail.
 export async function replyToThread(ctx: ActionContext, input: ReplyInput): Promise<ActionResult> {
-  const detail = await getClientThread(ctx.tenantId, input.gmailThreadId)
+  const detail = await getClientThread(ctx.tenantId, input.gmailThreadId, ctx.actorId)
   const index = await clientEmailIndex(ctx)
   const clientParticipant = detail.participantEmails.find((e) => index.has(e.toLowerCase()))
   if (!clientParticipant) {
     throw new Error('Refusing to reply: thread has no known client participant.')
   }
   const last = detail.messages[detail.messages.length - 1]
-  const sent = await sendEmail(ctx.tenantId, {
-    to: clientParticipant,
-    subject: detail.subject.startsWith('Re:') ? detail.subject : `Re: ${detail.subject}`,
-    body: input.bodyText,
-    gmailThreadId: input.gmailThreadId,
-    inReplyToMessageIdHeader: last?.messageIdHeader ?? undefined,
-  })
+  const sent = await sendEmail(
+    ctx.tenantId,
+    {
+      to: clientParticipant,
+      subject: detail.subject.startsWith('Re:') ? detail.subject : `Re: ${detail.subject}`,
+      body: input.bodyText,
+      gmailThreadId: input.gmailThreadId,
+      inReplyToMessageIdHeader: last?.messageIdHeader ?? undefined,
+    },
+    ctx.actorId,
+  )
   const matters = dedupeMatters(
     detail.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? []),
   )
@@ -185,11 +189,15 @@ export async function composeToClient(
       `Refusing to compose: ${input.to} is not a known client contact (client-mail-only discipline).`,
     )
   }
-  const sent = await sendEmail(ctx.tenantId, {
-    to: input.to,
-    subject: input.subject,
-    body: input.bodyText,
-  })
+  const sent = await sendEmail(
+    ctx.tenantId,
+    {
+      to: input.to,
+      subject: input.subject,
+      body: input.bodyText,
+    },
+    ctx.actorId,
+  )
   return submitAction(ctx, {
     actionKindName: 'mail.send',
     intentKind: 'enforcement',

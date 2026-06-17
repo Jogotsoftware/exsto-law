@@ -127,10 +127,9 @@ export default function MailPage() {
     }
   }
 
-  // Mail/calendar OAuth modes REQUIRE tenant_id (the init route 400s without it).
-  // Pull it from the verified session, exactly like the Settings "Connect Google"
-  // button — the old static <a> link omitted tenant_id (and used returnTo instead
-  // of the route's return_to), so "Enable Mail access" always failed.
+  // Mail mode connects THIS attorney's own Gmail (per-attorney, migration 0016).
+  // The init route reads tenantId + actorId from the verified session cookie, so
+  // we only need to confirm there is a session for a friendly "sign in first".
   async function enableMail() {
     const session = await fetchSession()
     if (!session) {
@@ -139,7 +138,6 @@ export default function MailPage() {
     }
     const params = new URLSearchParams({
       mode: 'mail',
-      tenant_id: session.tenantId,
       return_to: '/attorney/mail',
     })
     window.location.href = `/api/auth/google/init?${params.toString()}`

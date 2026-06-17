@@ -21,7 +21,13 @@ const connectUrlTool: Tool<{ returnTo?: string }, { url: string }> = {
   description: 'Generate the Google OAuth URL the attorney should visit to connect their calendar.',
   mode: 'read',
   handler: async (ctx: ActionContext, input) => ({
-    url: buildGoogleAuthUrl(ctx.tenantId, input?.returnTo ?? '/attorney/settings'),
+    // Connect the calling attorney's own Google account (per-attorney, 0016).
+    url: buildGoogleAuthUrl(
+      ctx.tenantId,
+      input?.returnTo ?? '/attorney/settings',
+      'calendar',
+      ctx.actorId,
+    ),
   }),
 }
 
