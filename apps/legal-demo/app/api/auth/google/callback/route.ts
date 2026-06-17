@@ -42,13 +42,18 @@ export async function GET(request: Request) {
 
     try {
       const result = await exchangeGoogleCode(state, code)
-      // returnTo rides in the UNSIGNED OAuth state → attacker-controlled. Allow
-      // only clean same-origin paths (a naive startsWith('/') lets //host through
-      // as a protocol-relative open redirect).
+      // returnTo is part of the HMAC-signed OAuth state, so callback-side tampering
+      // is already rejected by verifyOAuthState before we get here. safeInternalPath
+      // stays as defense-in-depth (and is the real guard for /auth/complete, which
+      // is directly reachable with an unsigned ?continue= param): allow only clean
+      // same-origin paths (a naive startsWith('/') lets //host through as a
+      // protocol-relative open redirect).
       const safeReturnTo = safeInternalPath(result.returnTo)
 
-      // Calendar mode just confirms the connection — no session change needed.
-      if (result.mode === 'calendar') {
+      // A connect (calendar or mail mode) just confirms the connection — no
+      // session change. Both now request the full Google scope set, so either
+      // mode lands here; only 'signin' continues to the actor-resolution path.
+      if (result.mode === 'calendar' || result.mode === 'mail') {
         const dest = `${BASE_URL}/auth/complete?email=${encodeURIComponent(result.accountEmail)}&continue=${encodeURIComponent(safeReturnTo)}&calendar_connected=1`
         return NextResponse.redirect(dest)
       }

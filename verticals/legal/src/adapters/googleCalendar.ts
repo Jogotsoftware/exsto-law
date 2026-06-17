@@ -32,30 +32,29 @@ export function getOAuthClientConfig(): {
   return { clientId, clientSecret, redirectUri }
 }
 
+// Identity-only sign-in (no credential storage): just enough to resolve the
+// Google email → attorney actor.
 export const GOOGLE_OAUTH_SCOPES_SIGNIN = [
   'openid',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
 ]
 
-export const GOOGLE_OAUTH_SCOPES_CALENDAR = [
+// ONE Google connection grants everything the app uses: calendar read/write,
+// Gmail read, and Gmail send. We deliberately retired the old staged consent
+// (calendar first, "Enable Mail" later for gmail.readonly): the single
+// "Connect Google" in Settings asks for the full set in one consent, so an
+// attorney connects once and has calendar + full email. (Supersedes the
+// incremental REQ-CALMAIL-03/REQ-AUTH-03 staging.)
+export const GOOGLE_OAUTH_SCOPES_CONNECT = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/userinfo.email',
-]
-
-// Incremental scope set for the Mail tab (REQ-CALMAIL-03/REQ-AUTH-03): read
-// access is requested only on first Mail-tab use, never at signin.
-export const GOOGLE_OAUTH_SCOPES_MAIL = [
-  ...GOOGLE_OAUTH_SCOPES_CALENDAR,
   'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/userinfo.email',
 ]
 
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
 export const GMAIL_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
-
-// Backwards compat for any existing imports.
-export const GOOGLE_OAUTH_SCOPES = GOOGLE_OAUTH_SCOPES_CALENDAR
 
 // Loose return type; the actual type lives in google-auth-library, which we
 // don't want as a direct workspace dep — googleapis re-exports the runtime.

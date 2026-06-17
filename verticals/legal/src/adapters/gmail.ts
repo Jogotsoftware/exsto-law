@@ -123,8 +123,11 @@ async function gmailClient(tenantId: string, actorId?: string | null) {
     throw new Error('Google account not connected. Connect Google in Settings.')
   }
   if (!creds.scope.includes(GMAIL_READ_SCOPE)) {
+    // Only legacy connections (made before Connect Google requested Gmail read)
+    // land here. The MAIL_SCOPE_MISSING prefix lets the Mail tab show a one-click
+    // "Reconnect Google" — a single reconnect now grants calendar + full email.
     throw new Error(
-      'MAIL_SCOPE_MISSING: Gmail read permission not granted yet. Enable Mail to grant it (incremental consent).',
+      'MAIL_SCOPE_MISSING: Gmail read permission not granted on this connection. Reconnect Google in Settings to enable email.',
     )
   }
   const oauth2 = buildOAuthClient()

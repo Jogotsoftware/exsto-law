@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
-  GOOGLE_OAUTH_SCOPES_CALENDAR,
-  GOOGLE_OAUTH_SCOPES_MAIL,
+  GOOGLE_OAUTH_SCOPES_CONNECT,
   GOOGLE_OAUTH_SCOPES_SIGNIN,
   buildOAuthClient,
   cancelEvent,
@@ -68,12 +67,10 @@ export function buildGoogleAuthUrl(
     actorId: actorId ?? null,
     nonce: randomUUID(),
   })
-  const scope =
-    mode === 'signin'
-      ? GOOGLE_OAUTH_SCOPES_SIGNIN
-      : mode === 'mail'
-        ? GOOGLE_OAUTH_SCOPES_MAIL
-        : GOOGLE_OAUTH_SCOPES_CALENDAR
+  // Any non-signin connect (calendar or mail mode) requests the FULL set —
+  // one Google connection covers calendar + Gmail read + Gmail send. offline +
+  // consent so we always get a refresh token and the user sees the full grant.
+  const scope = mode === 'signin' ? GOOGLE_OAUTH_SCOPES_SIGNIN : GOOGLE_OAUTH_SCOPES_CONNECT
   return oauth2.generateAuthUrl({
     access_type: mode === 'signin' ? 'online' : 'offline',
     prompt: mode === 'signin' ? 'select_account' : 'consent',
@@ -185,7 +182,7 @@ export async function exchangeGoogleCode(state: string, code: string): Promise<E
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         expiresAt,
-        scope: tokens.scope ?? GOOGLE_OAUTH_SCOPES_CALENDAR.join(' '),
+        scope: tokens.scope ?? GOOGLE_OAUTH_SCOPES_CONNECT.join(' '),
         calendarId: 'primary',
       },
       parsedState.actorId ?? null,

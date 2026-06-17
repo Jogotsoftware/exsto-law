@@ -107,7 +107,7 @@ Every customer-facing surface goes through the operation core's adapters (MCP pr
 
 **REQ-CALMAIL-02.** The attorney app includes a Mail tab surfacing client-related Gmail threads (matched to matter contacts by email), shown on the Mail tab and on each matter as matter-scoped communication history. The attorney can read, reply, and compose to clients in-app; sends go through the action layer with `integration:gmail` provenance and his real Gmail account; inbound client mail is ingested via raw_event_log, idempotent on Gmail message ids.
 
-**REQ-CALMAIL-03.** Client-related mail only — never ingest or display unrelated personal/firm mail. Gmail scopes requested incrementally on first Mail tab use.
+**REQ-CALMAIL-03.** Client-related mail only — never ingest or display unrelated personal/firm mail. ~~Gmail scopes requested incrementally on first Mail tab use.~~ **Superseded:** a single "Connect Google" grants the full set (calendar + Gmail read + Gmail send) in one consent — the incremental "Enable Mail" step was retired so an attorney connects once. The client-related-mail-only discipline still holds (the Mail tab queries are scoped to known matter-contact addresses regardless of the granted read scope).
 
 **REQ-CALMAIL-04.** Integration connection UX: one-click "Connect Google Calendar" / "Connect Granola" from a Settings screen — visible connection health, reconnect path on token expiry, no developer steps for the attorney. A broken connection is shown prominently.
 
@@ -301,7 +301,7 @@ Every customer-facing surface goes through the operation core's adapters (MCP pr
 
 **REQ-AUTH-02.** The client portal accepts anonymous intake submission. Accounts are implicit, indexed by email + phone.
 
-**REQ-AUTH-03.** OAuth scopes are requested incrementally — base profile + email at login, additional scopes (calendar, gmail, drive) requested when each feature is first used.
+**REQ-AUTH-03.** Sign-in is identity-only (base profile + email, no refresh token, no credential storage). ~~OAuth scopes are requested incrementally — additional scopes requested when each feature is first used.~~ **Superseded:** the post-login "Connect Google" requests the full feature scope set (calendar.events + gmail.send + gmail.readonly) in one consent rather than incrementally, so an attorney connects once and has calendar + full email. (Sign-in itself stays minimal-scope; only the explicit connect step grants the feature scopes.)
 
 **REQ-AUTH-04.** Multi-account support is deferred — only the firm's primary Google account is in scope at launch (no secondary account merge).
 
