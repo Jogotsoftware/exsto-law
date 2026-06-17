@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import {
+  getRelatedEntityIds,
   insertAttribute,
   insertEntity,
   insertEvent,
@@ -207,5 +208,66 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
     transcriptEntityId,
     matched: Boolean(p.matter_entity_id),
     deduplicated: false,
+  }
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// legal.call.assign — route a call from the review queue to a matter (beta
+// sprint Obj 8). Adds call_of (call_session → matter) so the call surfaces on
+// the matter's and the contact's calls list. The attorney is the source, so the
+// link carries human provenance. Linking only: matter_status is left untouched,
+// so assigning a call to an already-advanced matter cannot regress its stage.
+// ───────────────────────────────────────────────────────────────────────────
+
+interface CallAssignPayload {
+  call_entity_id: string
+  matter_entity_id: string
+}
+
+async function requireActiveEntity(
+  client: DbClient,
+  tenantId: string,
+  entityId: string,
+  kindName: string,
+): Promise<void> {
+  const res = await client.query<{ id: string }>(
+    `SELECT e.id FROM entity e
+     JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = $3
+     WHERE e.tenant_id = $1 AND e.id = $2 AND e.status = 'active'`,
+    [tenantId, entityId, kindName],
+  )
+  if (!res.rows[0]) throw new Error(`${kindName} not found: ${entityId}`)
+}
+
+registerActionHandler('legal.call.assign', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as CallAssignPayload
+  await requireActiveEntity(client, ctx.tenantId, p.call_entity_id, 'call_session')
+  await requireActiveEntity(client, ctx.tenantId, p.matter_entity_id, 'matter')
+
+  // Idempotency / safety: a call already attached to a matter is not re-routed
+  // here (a deliberate re-assignment is a separate flow). No-op, report the link.
+  const existing = await getRelatedEntityIds(client, ctx.tenantId, p.call_entity_id, 'call_of')
+  if (existing.length > 0) {
+    return { callEntityId: p.call_entity_id, matterEntityId: existing[0], alreadyAssigned: true }
+  }
+
+  const callOfId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    ctx.tenantId,
+    'call_of',
+  )
+  await insertRelationship(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    sourceEntityId: p.call_entity_id,
+    targetEntityId: p.matter_entity_id,
+    relationshipKindId: callOfId,
+  })
+
+  return {
+    callEntityId: p.call_entity_id,
+    matterEntityId: p.matter_entity_id,
+    alreadyAssigned: false,
   }
 })
