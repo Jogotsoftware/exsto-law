@@ -1,5 +1,57 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 
+// CRM lead pipeline stage, derived (not stored) from a contact's matter statuses
+// so it stays in sync without a separate field to maintain. A contact with any
+// open (non-closed) matter sits at that matter's furthest stage; only when every
+// matter is closed do they become 'closed'; no matters yet ⇒ 'prospect'.
+export type LeadStage = 'prospect' | 'consulted' | 'engaged' | 'active' | 'closed'
+
+// Order = pipeline progression; index is the rank used to pick the furthest stage.
+export const LEAD_STAGES: readonly LeadStage[] = [
+  'prospect',
+  'consulted',
+  'engaged',
+  'active',
+  'closed',
+]
+
+const OPEN_STAGE_ORDER: LeadStage[] = ['prospect', 'consulted', 'engaged', 'active']
+
+// Map a single matter_status to a pipeline stage.
+export function statusToStage(status: string): LeadStage {
+  switch (status) {
+    case 'matter_closed':
+    case 'closed':
+      return 'closed'
+    case 'engagement_signed':
+    case 'matter_active':
+      return 'active'
+    case 'drafting':
+    case 'in_review':
+    case 'review_pending':
+    case 'approved':
+      return 'engaged'
+    case 'consultation_scheduled':
+    case 'consultation_completed':
+      return 'consulted'
+    default:
+      // inquiry / questionnaire_* / intake_submitted / unknown
+      return 'prospect'
+  }
+}
+
+// Derive a contact's pipeline stage from all their matters' statuses.
+export function deriveLeadStage(matterStatuses: string[]): LeadStage {
+  const stages = matterStatuses.map(statusToStage)
+  const open = stages.filter((s) => s !== 'closed')
+  if (open.length === 0) return matterStatuses.length > 0 ? 'closed' : 'prospect'
+  let best: LeadStage = 'prospect'
+  for (const s of open) {
+    if (OPEN_STAGE_ORDER.indexOf(s) > OPEN_STAGE_ORDER.indexOf(best)) best = s
+  }
+  return best
+}
+
 export interface ContactSummary {
   contactEntityId: string
   fullName: string
@@ -8,6 +60,7 @@ export interface ContactSummary {
   companyName: string | null
   attributionSource: string | null
   matterCount: number
+  leadStage: LeadStage
   firstSeenAt: string
   lastActivityAt: string
 }
@@ -35,6 +88,7 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
       company_name: string | null
       attribution_source: string | null
       matter_count: string
+      matter_statuses: string[] | null
       first_seen_at: Date
       last_activity_at: Date
     }>(
@@ -54,6 +108,15 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
          JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
          WHERE r.tenant_id = $1 AND rkd.kind_name = 'matter_has_client'
          GROUP BY r.target_entity_id
+       ),
+       matter_statuses AS (
+         SELECT r.target_entity_id AS contact_id,
+                array_agg(ms.value #>> '{}') FILTER (WHERE ms.value IS NOT NULL) AS statuses
+         FROM relationship r
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'matter_has_client'
+         LEFT JOIN attrs ms ON ms.entity_id = r.source_entity_id AND ms.kind_name = 'matter_status'
+         WHERE r.tenant_id = $1
+         GROUP BY r.target_entity_id
        )
        SELECT
          e.id AS contact_entity_id,
@@ -63,11 +126,13 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_company_name')     AS company_name,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_attribution_source') AS attribution_source,
          COALESCE(mc.n, 0)::text AS matter_count,
+         mstat.statuses AS matter_statuses,
          e.created_at AS first_seen_at,
          COALESCE(mc.last_at, e.created_at) AS last_activity_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        LEFT JOIN matter_counts mc ON mc.contact_id = e.id
+       LEFT JOIN matter_statuses mstat ON mstat.contact_id = e.id
        WHERE e.tenant_id = $1
          AND ekd.kind_name = 'client_contact'
          AND e.status = 'active'
@@ -82,6 +147,7 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
       companyName: r.company_name,
       attributionSource: r.attribution_source,
       matterCount: Number(r.matter_count),
+      leadStage: deriveLeadStage(r.matter_statuses ?? []),
       firstSeenAt: r.first_seen_at.toISOString(),
       lastActivityAt: r.last_activity_at.toISOString(),
     }))
@@ -158,6 +224,7 @@ export async function getContact(
       companyName: attrs['contact_company_name'] ?? null,
       attributionSource: attrs['contact_attribution_source'] ?? null,
       matterCount: matters.rows.length,
+      leadStage: deriveLeadStage(matters.rows.map((r) => r.status ?? 'inquiry')),
       firstSeenAt: baseCreatedAtIso,
       lastActivityAt: matters.rows[0]?.created_at ?? baseCreatedAtIso,
       matters: matters.rows.map((r) => ({

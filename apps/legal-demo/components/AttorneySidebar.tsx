@@ -8,7 +8,7 @@ import { usePathname } from 'next/navigation'
 const NAV = [
   { href: '/attorney', label: 'Dashboard', exact: true },
   { href: '/attorney/matters', label: 'Matters' },
-  { href: '/attorney/import', label: 'Import' },
+  { href: '/attorney/contacts', label: 'Contacts' },
   { href: '/attorney/review', label: 'Review' },
   { href: '/attorney/calendar', label: 'Calendar' },
   { href: '/attorney/mail', label: 'Mail' },
