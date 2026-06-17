@@ -115,6 +115,7 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [emailStatus, setEmailStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+  const [callTranscript, setCallTranscript] = useState('')
 
   async function load() {
     setError(null)
@@ -272,13 +273,35 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
         <h2>Workflow</h2>
         {error && <div className="alert alert-error">{error}</div>}
         <div className="row" style={{ gap: 'var(--space-3)' }}>
-          <button
-            disabled={!hasQuestionnaire || busy !== null}
-            onClick={() => action('simulate-call', 'legal.call.simulate', { matterEntityId: id })}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-2)',
+              flex: '1 1 100%',
+            }}
           >
-            {busy === 'simulate-call' && <span className="spinner" />}
-            {busy === 'simulate-call' ? 'Running…' : 'Simulate consultation call'}
-          </button>
+            <textarea
+              value={callTranscript}
+              onChange={(e) => setCallTranscript(e.target.value)}
+              placeholder="Paste the consultation transcript to record the call…"
+              rows={4}
+              disabled={!hasQuestionnaire || busy !== null}
+            />
+            <button
+              disabled={!hasQuestionnaire || !callTranscript.trim() || busy !== null}
+              onClick={async () => {
+                await action('record-call', 'legal.call.record_manual', {
+                  matterEntityId: id,
+                  transcriptText: callTranscript,
+                })
+                setCallTranscript('')
+              }}
+            >
+              {busy === 'record-call' && <span className="spinner" />}
+              {busy === 'record-call' ? 'Recording…' : 'Record consultation call'}
+            </button>
+          </div>
           <button
             className="primary"
             disabled={!hasQuestionnaire || !hasTranscript || busy !== null}

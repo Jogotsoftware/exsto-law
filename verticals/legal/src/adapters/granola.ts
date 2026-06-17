@@ -1,6 +1,7 @@
-// Granola adapter — REAL integration surface (Phase 0, WP3) plus the local
-// stub driver behind the same interface (binding Lesson #1: stub assumptions
-// must not leak into callers).
+// Granola adapter — REAL integration surface (Phase 0, WP3). The transcript
+// projection (call.ingest) is shared with the manual-entry path so the attorney
+// can record a real call when Granola didn't capture it; there is no synthetic
+// transcript generator (the demo/stub driver was removed for the beta pilot).
 //
 // Production path (REQ-CALL-01..04):
 // 1. Granola POSTs a webhook on call completion → apps/legal-demo
@@ -324,63 +325,4 @@ export async function getGranolaNote(
     transcriptText,
     summaryMarkdown: typeof note.summary_markdown === 'string' ? note.summary_markdown : null,
   }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Local stub driver (demo seed + local dev where webhooks can't reach
-// localhost). Same downstream interface as the real path: the produced payload
-// flows through raw_event.ingest → legal.granola.project → call.ingest.
-// ───────────────────────────────────────────────────────────────────────────
-
-export interface StubCallInput {
-  matterClientName: string
-  matterCompanyName: string
-  matterSummary: string
-  questionnaireHighlights: Record<string, unknown>
-}
-
-export interface StubGranolaPayload {
-  call_id: string
-  started_at: string
-  ended_at: string
-  transcript: string
-  attendees: Array<{ email: string }>
-  transcript_source: 'stub'
-}
-
-export function buildStubCallSession(
-  input: StubCallInput,
-  attendeeEmail = 'client@example.test',
-): StubGranolaPayload {
-  const startedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString()
-  const endedAt = new Date().toISOString()
-  return {
-    call_id: `stub-${Date.now()}`,
-    started_at: startedAt,
-    ended_at: endedAt,
-    transcript: renderStubTranscript(input),
-    attendees: [{ email: attendeeEmail }],
-    transcript_source: 'stub',
-  }
-}
-
-function renderStubTranscript(input: StubCallInput): string {
-  const highlights = Object.entries(input.questionnaireHighlights)
-    .map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
-    .join('\n')
-
-  return [
-    `[STUB CONSULTATION TRANSCRIPT — generated locally for the demo path, not a real Granola payload]`,
-    ``,
-    `Attorney (Juan Carlos): Thanks for taking the time today, ${input.matterClientName}. I want to confirm a few details about ${input.matterCompanyName}.`,
-    `Client: Sure, ready when you are.`,
-    `Attorney: From the intake form you sent in, here's what I'm working with:`,
-    highlights,
-    ``,
-    `Attorney: Anything in there you want to change?`,
-    `Client: No, that all matches our intent.`,
-    `Attorney: Got it. I'll assemble the first draft and circulate it for revisions.`,
-    ``,
-    `Summary: ${input.matterSummary}`,
-  ].join('\n')
 }
