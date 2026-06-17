@@ -133,7 +133,7 @@ export async function buildMatterEmailIndex(ctx: ActionContext): Promise<MatterE
 
 // List the connected Granola account's folders for the picker.
 export async function listImportFolders(ctx: ActionContext): Promise<GranolaFolder[]> {
-  return listGranolaFolders(ctx.tenantId)
+  return listGranolaFolders(ctx.tenantId, ctx.actorId)
 }
 
 // Granola allows ~5 rps / 25 burst; firing a getNote per note in parallel would
@@ -170,13 +170,18 @@ export async function previewFolderImport(
   folderId: string,
 ): Promise<NotePreview[]> {
   const [summaries, index] = await Promise.all([
-    listGranolaNotesInFolder(ctx.tenantId, folderId),
+    listGranolaNotesInFolder(ctx.tenantId, folderId, ctx.actorId),
     buildMatterEmailIndex(ctx),
   ])
 
   return mapWithConcurrency(summaries, 4, async (summary) => {
     try {
-      const note = await getGranolaNote(ctx.tenantId, summary.id, { transcript: false })
+      const note = await getGranolaNote(
+        ctx.tenantId,
+        summary.id,
+        { transcript: false },
+        ctx.actorId,
+      )
       return {
         noteId: summary.id,
         title: note.title || summary.title,
@@ -208,7 +213,7 @@ export async function importNotes(
   const results: ImportResult[] = []
   for (const sel of selections) {
     try {
-      const note = await getGranolaNote(ctx.tenantId, sel.noteId, { transcript: true })
+      const note = await getGranolaNote(ctx.tenantId, sel.noteId, { transcript: true }, ctx.actorId)
       if (!note.transcriptText) {
         // No transcript yet (summary-only / brand-new note): skip, don't error.
         results.push({ noteId: sel.noteId, status: 'skipped', matterEntityId: sel.matterEntityId })

@@ -35,7 +35,7 @@ export async function listWorkspaceEvents(
 ): Promise<{ events: WorkspaceCalendarEvent[]; source: 'google' | 'disconnected' }> {
   let events: WorkspaceEvent[]
   try {
-    events = await listCalendarEvents(ctx.tenantId, fromIso, toIso)
+    events = await listCalendarEvents(ctx.tenantId, fromIso, toIso, ctx.actorId)
   } catch {
     return { events: [], source: 'disconnected' }
   }
@@ -169,13 +169,14 @@ export async function createConsultation(
   const matter = await getMatter(ctx, input.matterEntityId)
   if (!matter) throw new Error(`Matter not found: ${input.matterEntityId}`)
 
-  const creds = await loadCredentials(ctx.tenantId)
+  const creds = await loadCredentials(ctx.tenantId, ctx.actorId)
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? 'http://localhost:3000'
   let googleEventId: string | null = null
   let googleEventUrl: string | null = null
   if (creds) {
     const created = await createBookingEvent({
       tenantId: ctx.tenantId,
+      actorId: ctx.actorId,
       summary: `Consultation — ${matter.clientName || matter.matterNumber}`,
       descriptionHtml: `Consultation for matter <b>${matter.matterNumber}</b> (${matter.serviceKey}).<br><a href="${baseUrl}/attorney/matters/${matter.matterEntityId}">Open the matter</a>`,
       startIso: input.startIso,
@@ -216,7 +217,7 @@ export async function rescheduleBooking(
 ): Promise<ActionResult> {
   const eventId = await matterGoogleEventId(ctx, input.matterEntityId)
   if (eventId) {
-    await rescheduleEvent(ctx.tenantId, eventId, input.startIso, input.endIso)
+    await rescheduleEvent(ctx.tenantId, eventId, input.startIso, input.endIso, ctx.actorId)
   }
   return submitAction(ctx, {
     actionKindName: 'booking.update',
@@ -236,7 +237,7 @@ export async function cancelBooking(
 ): Promise<ActionResult> {
   const eventId = await matterGoogleEventId(ctx, input.matterEntityId)
   if (eventId) {
-    await cancelEvent(ctx.tenantId, eventId).catch(() => {
+    await cancelEvent(ctx.tenantId, eventId, ctx.actorId).catch(() => {
       // Event already gone in Google — the substrate record still closes out.
     })
   }

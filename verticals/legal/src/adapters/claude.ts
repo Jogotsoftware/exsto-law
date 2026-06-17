@@ -137,6 +137,7 @@ export interface ChatMessage {
 export async function chatWithAssistant(
   tenantId: string | null,
   messages: ChatMessage[],
+  model?: string,
 ): Promise<string> {
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
   const anthropic = new Anthropic({ apiKey })
@@ -153,7 +154,9 @@ export async function chatWithAssistant(
   let response: Anthropic.Message
   try {
     response = await anthropic.messages.create({
-      model: DEFAULT_MODEL,
+      // The unified assistant chat passes the attorney's chosen Claude model;
+      // fall back to the firm default when none is specified.
+      model: model ?? DEFAULT_MODEL,
       max_tokens: 1024,
       system,
       messages: turns,

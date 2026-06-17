@@ -21,4 +21,6 @@ export {
   getConnectionInfo,
   listConnections,
   disconnect,
+  resolveFirmPrimaryActor,
+  isPerActorProvider,
 } from './adapters/connectionStore.js'

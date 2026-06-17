@@ -41,7 +41,9 @@ const STATIC_INTEGRATIONS: Array<{
 // Connection metadata lives in legal_integration_connection; secret material in
 // Vault (REQ-SEC-01). The 'google' provider row backs the google_calendar card.
 export async function listIntegrationStatuses(ctx: ActionContext): Promise<IntegrationStatus[]> {
-  const conns = await listConnections(ctx.tenantId)
+  // The attorney's own personal connections (google/granola) + the firm-wide AI
+  // keys (actor_id NULL). listConnections returns both for this actor.
+  const conns = await listConnections(ctx.tenantId, ctx.actorId)
   const byProvider = new Map(conns.map((c) => [c.provider, c]))
 
   return STATIC_INTEGRATIONS.map(({ provider, authKind, comingSoon }) => {
@@ -159,13 +161,20 @@ export async function persistIntegrationKey(
     const existing = await loadConnection<{ api_key: string; webhook_secret?: string }>(
       ctx.tenantId,
       'granola',
+      ctx.actorId,
     )
     const webhookSecret = input.webhookSecret?.trim() || existing?.secret.webhook_secret
     secret = webhookSecret ? { api_key: input.apiKey, webhook_secret: webhookSecret } : secret
   }
-  await saveConnection(ctx.tenantId, input.provider, secret, {
-    detail: { last_four: input.apiKey.slice(-4) },
-  })
+  // Pass the attorney's actorId for every provider: the store scopes personal
+  // providers (granola) to the actor and ignores it for firm-wide AI keys.
+  await saveConnection(
+    ctx.tenantId,
+    input.provider,
+    secret,
+    { detail: { last_four: input.apiKey.slice(-4) } },
+    ctx.actorId,
+  )
 }
 
 // Connecting/disconnecting an integration is a configuration change; record it
@@ -207,6 +216,6 @@ export async function disconnectIntegration(
   ctx: ActionContext,
   provider: IntegrationProvider,
 ): Promise<void> {
-  await disconnectProvider(ctx.tenantId, provider)
+  await disconnectProvider(ctx.tenantId, provider, ctx.actorId)
   await recordIntegrationChange(ctx, provider, 'disconnected', null)
 }

@@ -81,8 +81,11 @@ type GoogleSecret = {
   calendarId: string
 }
 
-export async function loadCredentials(tenantId: string): Promise<GoogleOAuthCredentials | null> {
-  const conn = await loadConnection<GoogleSecret>(tenantId, 'google')
+export async function loadCredentials(
+  tenantId: string,
+  actorId?: string | null,
+): Promise<GoogleOAuthCredentials | null> {
+  const conn = await loadConnection<GoogleSecret>(tenantId, 'google', actorId)
   if (!conn) return null
   return {
     accountEmail: conn.info.accountEmail ?? '',
@@ -97,6 +100,7 @@ export async function loadCredentials(tenantId: string): Promise<GoogleOAuthCred
 export async function saveCredentials(
   tenantId: string,
   creds: GoogleOAuthCredentials,
+  actorId?: string | null,
 ): Promise<void> {
   const secret: GoogleSecret = {
     accessToken: creds.accessToken,
@@ -105,19 +109,25 @@ export async function saveCredentials(
     scope: creds.scope,
     calendarId: creds.calendarId,
   }
-  await saveConnection(tenantId, 'google', secret, {
-    accountEmail: creds.accountEmail,
-    scope: creds.scope,
-    expiresAt: creds.expiresAt,
-  })
+  await saveConnection(
+    tenantId,
+    'google',
+    secret,
+    {
+      accountEmail: creds.accountEmail,
+      scope: creds.scope,
+      expiresAt: creds.expiresAt,
+    },
+    actorId,
+  )
 }
 
-export async function deleteCredentials(tenantId: string): Promise<void> {
-  await disconnect(tenantId, 'google')
+export async function deleteCredentials(tenantId: string, actorId?: string | null): Promise<void> {
+  await disconnect(tenantId, 'google', actorId)
 }
 
-async function authedClient(tenantId: string) {
-  const creds = await loadCredentials(tenantId)
+async function authedClient(tenantId: string, actorId?: string | null) {
+  const creds = await loadCredentials(tenantId, actorId)
   if (!creds) throw new Error('Google Calendar not connected for this tenant.')
   const oauth2 = buildOAuthClient()
   oauth2.setCredentials({
@@ -137,7 +147,7 @@ async function authedClient(tenantId: string) {
           expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : creds.expiresAt,
           scope: tokens.scope ?? creds.scope,
         }
-        await saveCredentials(tenantId, refreshed)
+        await saveCredentials(tenantId, refreshed, actorId)
       } catch {
         // best-effort; don't break the calling request
       }
@@ -269,8 +279,9 @@ export function getStubAvailability(daysOut = 7): AvailabilitySlot[] {
 export async function getGoogleAvailability(
   tenantId: string,
   daysOut = 14,
+  actorId?: string | null,
 ): Promise<AvailabilitySlot[]> {
-  const { oauth2, creds } = await authedClient(tenantId)
+  const { oauth2, creds } = await authedClient(tenantId, actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
   const now = new Date()
   // Pad the horizon by 1 day so freebusy covers the last slot's end time.
@@ -302,9 +313,10 @@ export async function getGoogleAvailability(
 export async function getAvailability(
   tenantId: string,
   daysOut = 14,
+  actorId?: string | null,
 ): Promise<{ slots: AvailabilitySlot[]; source: 'google' | 'stub'; reason?: string }> {
   try {
-    const slots = await getGoogleAvailability(tenantId, daysOut)
+    const slots = await getGoogleAvailability(tenantId, daysOut, actorId)
     return { slots, source: 'google' }
   } catch (err) {
     // Defense-in-depth: scrub any bearer/token-like substring before this
@@ -317,7 +329,7 @@ export async function getAvailability(
     )
     // Flip the connection to 'error' so Settings shows the broken sync
     // prominently instead of the UI silently serving stub slots.
-    await markConnectionError(tenantId, 'google', reason).catch(() => {})
+    await markConnectionError(tenantId, 'google', reason, actorId).catch(() => {})
     return { slots: getStubAvailability(daysOut), source: 'stub', reason }
   }
 }
@@ -341,8 +353,9 @@ export async function listCalendarEvents(
   tenantId: string,
   fromIso: string,
   toIso: string,
+  actorId?: string | null,
 ): Promise<WorkspaceEvent[]> {
-  const { oauth2, creds } = await authedClient(tenantId)
+  const { oauth2, creds } = await authedClient(tenantId, actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
   const res = await calendar.events.list({
     calendarId: creds.calendarId,
@@ -368,6 +381,9 @@ export async function listCalendarEvents(
 
 export interface CreateEventInput {
   tenantId: string
+  // The attorney whose calendar the event is created on. For the public booking
+  // flow (no logged-in attorney) the caller resolves this via resolveFirmPrimaryActor.
+  actorId?: string | null
   summary: string
   descriptionHtml: string
   startIso: string
@@ -387,7 +403,7 @@ export interface CreatedEvent {
 }
 
 export async function createBookingEvent(input: CreateEventInput): Promise<CreatedEvent> {
-  const { oauth2, creds } = await authedClient(input.tenantId)
+  const { oauth2, creds } = await authedClient(input.tenantId, input.actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
 
   const rescheduleUrl = `${input.bookingBaseUrl}${input.matterReschedulePath}`
@@ -439,8 +455,9 @@ export async function rescheduleEvent(
   eventId: string,
   newStartIso: string,
   newEndIso: string,
+  actorId?: string | null,
 ): Promise<void> {
-  const { oauth2, creds } = await authedClient(tenantId)
+  const { oauth2, creds } = await authedClient(tenantId, actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
   await calendar.events.patch({
     calendarId: creds.calendarId,
@@ -453,8 +470,12 @@ export async function rescheduleEvent(
   })
 }
 
-export async function cancelEvent(tenantId: string, eventId: string): Promise<void> {
-  const { oauth2, creds } = await authedClient(tenantId)
+export async function cancelEvent(
+  tenantId: string,
+  eventId: string,
+  actorId?: string | null,
+): Promise<void> {
+  const { oauth2, creds } = await authedClient(tenantId, actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
   await calendar.events.delete({
     calendarId: creds.calendarId,

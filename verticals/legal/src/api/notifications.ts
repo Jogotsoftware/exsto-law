@@ -11,7 +11,7 @@
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { enqueueJob } from '@exsto/worker-runtime'
 import { sendEmail } from '../adapters/gmail.js'
-import { getConnectionInfo } from '../adapters/connectionStore.js'
+import { getConnectionInfo, resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import { renderNotificationTemplate } from './notificationTemplates.js'
 
 export interface NotificationRoute {
@@ -53,7 +53,10 @@ async function getRoute(ctx: ActionContext, kindName: string): Promise<Notificat
 // account (his real Gmail — the same account the calendar lives on).
 export async function attorneyEmail(tenantId: string): Promise<string | null> {
   if (process.env.ATTORNEY_EMAIL) return process.env.ATTORNEY_EMAIL
-  const conn = await getConnectionInfo(tenantId, 'google')
+  // No specific attorney in a firm-level notification: use the firm's primary
+  // (earliest-connected) Google attorney. Per-link sender attribution is track B.
+  const actorId = await resolveFirmPrimaryActor(tenantId, 'google')
+  const conn = await getConnectionInfo(tenantId, 'google', actorId)
   return conn?.accountEmail ?? null
 }
 
@@ -64,11 +67,18 @@ type ChannelDriver = (
 
 const DRIVERS: Record<string, ChannelDriver> = {
   email: async (ctx, args) => {
-    const result = await sendEmail(ctx.tenantId, {
-      to: args.to,
-      subject: args.subject,
-      body: args.bodyText,
-    })
+    // Automated mail goes out through the firm's primary connected Google
+    // attorney (per-link sender attribution lands in track B).
+    const actorId = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
+    const result = await sendEmail(
+      ctx.tenantId,
+      {
+        to: args.to,
+        subject: args.subject,
+        body: args.bodyText,
+      },
+      actorId,
+    )
     return { providerMessageId: result.messageId || null }
   },
   // NO sms driver in Phase 0 (REQ-NOTIFY-01: interface is provider-agnostic;

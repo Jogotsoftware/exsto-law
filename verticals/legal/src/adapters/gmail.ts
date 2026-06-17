@@ -25,8 +25,12 @@ export interface SendEmailResult {
 // Send a plain-text email from the attorney's Google account using the Gmail
 // API. Requires the gmail.send scope on the stored OAuth credentials. Throws
 // a user-friendly error if Google isn't connected or the scope is missing.
-export async function sendEmail(tenantId: string, args: SendEmailArgs): Promise<SendEmailResult> {
-  const creds = await loadCredentials(tenantId)
+export async function sendEmail(
+  tenantId: string,
+  args: SendEmailArgs,
+  actorId?: string | null,
+): Promise<SendEmailResult> {
+  const creds = await loadCredentials(tenantId, actorId)
   if (!creds) {
     throw new Error('Google account not connected. Connect Google in Settings to send email.')
   }
@@ -113,8 +117,8 @@ export interface GmailThreadDetail {
   messages: GmailMessage[]
 }
 
-async function gmailClient(tenantId: string) {
-  const creds = await loadCredentials(tenantId)
+async function gmailClient(tenantId: string, actorId?: string | null) {
+  const creds = await loadCredentials(tenantId, actorId)
   if (!creds) {
     throw new Error('Google account not connected. Connect Google in Settings.')
   }
@@ -163,9 +167,10 @@ export async function listClientThreads(
   tenantId: string,
   clientEmails: string[],
   max = 25,
+  actorId?: string | null,
 ): Promise<GmailThreadSummary[]> {
   if (clientEmails.length === 0) return []
-  const { gmail } = await gmailClient(tenantId)
+  const { gmail } = await gmailClient(tenantId, actorId)
   const q = clientEmails.map((e) => `(from:${e} OR to:${e})`).join(' OR ')
   const list = await gmail.users.threads.list({ userId: 'me', q, maxResults: max })
   const out: GmailThreadSummary[] = []
@@ -201,8 +206,9 @@ export async function listClientThreads(
 export async function getClientThread(
   tenantId: string,
   gmailThreadId: string,
+  actorId?: string | null,
 ): Promise<GmailThreadDetail> {
-  const { gmail } = await gmailClient(tenantId)
+  const { gmail } = await gmailClient(tenantId, actorId)
   const detail = await gmail.users.threads.get({
     userId: 'me',
     id: gmailThreadId,

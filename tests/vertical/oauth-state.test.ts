@@ -26,6 +26,28 @@ describe('OAuth state signing (no DB)', () => {
     expect(verifyOAuthState(state)).toEqual(payload)
   })
 
+  it('binds the connecting attorney (actorId) tamper-proof into the state', () => {
+    // Per-attorney connect (migration 0016): the callback stores Google/Gmail
+    // credentials under the actorId carried here, so it MUST be signed — a forged
+    // actorId would let one attorney connect under another's identity.
+    const payload = {
+      tenantId: 't-1',
+      returnTo: '/attorney/settings',
+      mode: 'calendar',
+      actorId: 'attorney-A',
+      nonce: 'n',
+    }
+    const state = signOAuthState(payload)
+    expect(verifyOAuthState(state)).toEqual(payload)
+
+    // Swapping actorId while keeping the signature is rejected.
+    const sig = state.slice(state.indexOf('.') + 1)
+    const forged = Buffer.from(JSON.stringify({ ...payload, actorId: 'attorney-B' })).toString(
+      'base64url',
+    )
+    expect(() => verifyOAuthState(`${forged}.${sig}`)).toThrow(/signature mismatch/i)
+  })
+
   it('rejects a tampered payload (forged tenantId / returnTo)', () => {
     const state = signOAuthState({ tenantId: 'victim', returnTo: '/attorney', mode: 'calendar' })
     const [payloadB64, sig] = state.split('.')

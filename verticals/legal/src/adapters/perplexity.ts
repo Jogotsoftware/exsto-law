@@ -17,6 +17,9 @@ export interface ResearchRequest {
   // what leaves the firm.
   context?: string
   maxTokens?: number
+  // The attorney's chosen Perplexity model from the unified assistant chat.
+  // Falls back to the firm default when omitted.
+  model?: string
 }
 
 export interface ResearchResult {
@@ -84,12 +87,13 @@ export async function callPerplexity(
     'flag when something is jurisdiction-specific or uncertain. Do not give a ' +
     'final legal opinion; support the attorney’s own judgment.'
   const user = request.context ? `${request.context}\n\n${request.question}` : request.question
+  const model = request.model ?? DEFAULT_MODEL
 
   const res = await fetch('https://api.perplexity.ai/chat/completions', {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: DEFAULT_MODEL,
+      model,
       max_tokens: request.maxTokens ?? 1024,
       messages: [
         { role: 'system', content: system },
@@ -110,7 +114,7 @@ export async function callPerplexity(
   const citations =
     data.citations ?? data.search_results?.map((s) => s.url).filter((u): u is string => !!u) ?? []
   if (!answer) throw new Error('Perplexity returned an empty answer.')
-  return { answer, citations, model: DEFAULT_MODEL }
+  return { answer, citations, model }
 }
 
 // Resolve the key, call Perplexity, and on an auth failure with a connected key
