@@ -235,7 +235,7 @@ export default function ServiceEditorPage() {
                 onChange={(e) => update('route', e.target.value as 'auto' | 'manual')}
               >
                 <option value="manual">Manual — attorney drafts</option>
-                <option value="auto">Auto — AI drafts after consultation</option>
+                <option value="auto">Auto — AI drafts on submit (re-drafts after the call)</option>
               </select>
             </label>
             <label>

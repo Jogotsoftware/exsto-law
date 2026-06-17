@@ -79,13 +79,15 @@ export async function runDraftGeneration(
   const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
   const matter = await getMatter(agentCtx, input.matterEntityId)
 
+  // Drafting fires at QUESTIONNAIRE SUBMIT (beta sprint Obj 6) — the questionnaire
+  // is the only hard precondition. A consultation transcript ENRICHES the draft
+  // when present (post-call regeneration), but is NOT required: an initial draft is
+  // produced from the intake answers alone, with no call dependency.
   const precondition = !matter
     ? `Matter not found: ${input.matterEntityId}`
     : !matter.questionnaireResponses
       ? `Matter ${input.matterEntityId} has no questionnaire response`
-      : !matter.transcriptText
-        ? `Matter ${input.matterEntityId} has no transcript yet`
-        : null
+      : null
   if (precondition) {
     await submitAction(agentCtx, {
       actionKindName: 'event.record',
@@ -147,7 +149,11 @@ export async function runDraftGeneration(
     basePrompt,
     template,
     questionnaireResponses: m.questionnaireResponses!,
-    transcriptText: m.transcriptText!,
+    // Transcript is optional now (Obj 6): when the matter has no call yet, tell the
+    // model to draft from the intake answers. A post-call run fills the real one.
+    transcriptText:
+      m.transcriptText ??
+      '(No consultation transcript yet — draft from the intake questionnaire answers above.)',
     documentKind: input.documentKind,
   })
 

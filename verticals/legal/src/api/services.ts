@@ -1137,6 +1137,18 @@ export async function submitBooking(
     })
   }
 
+  // Beta sprint Obj 6: auto-route services draft their documents AT SUBMIT, from
+  // the questionnaire — no dependency on a consultation call. enqueueAutoDrafts is
+  // a no-op for manual routes, and a post-call transcript still triggers a redraft
+  // (granolaIngestion). Dynamic import avoids a cycle (granolaIngestion imports
+  // services back). Best-effort: a drafting hiccup must not fail the booking.
+  try {
+    const { enqueueAutoDrafts } = await import('./granolaIngestion.js')
+    await enqueueAutoDrafts(ctx, matterEntityId)
+  } catch (err) {
+    console.error('[submitBooking] auto-draft enqueue failed (booking still saved):', err)
+  }
+
   return booked
 }
 
