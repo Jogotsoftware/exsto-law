@@ -39,6 +39,7 @@ import './tools/granolaImportTools.js'
 import './tools/clientPortalTools.js'
 import './tools/matterMessagingTools.js'
 import './tools/timeExpenseTools.js'
+import './tools/savedViewTools.js'
 // Beta sprint Obj 7 (make email live): register the real draft-link email tool —
 // it sends through the attorney's Gmail (mail.send provenance). The matter page
 // already calls legal.email.send_draft_link.
