@@ -1,6 +1,7 @@
 import type { ActionContext } from '@exsto/substrate'
 import { listServices, getDocumentTemplate } from './services.js'
 import { listNotificationTemplateRefs } from './notificationTemplates.js'
+import { listStandaloneTemplates } from '../queries/templates.js'
 
 // Templates catalog (beta sprint Obj 9) — a single read that aggregates the
 // firm's templates across THREE categories for the Templates nav tab:
@@ -31,6 +32,10 @@ export interface TemplateCatalogEntry {
   hasContent: boolean
   // The owning service's enabled state (null for email templates).
   isActive: boolean | null
+  // A standalone (not service-bound) template entity. When true, serviceKey is
+  // null and templateEntityId points at the editable template entity.
+  standalone: boolean
+  templateEntityId: string | null
 }
 
 export interface TemplatesCatalog {
@@ -63,6 +68,8 @@ export async function listTemplatesCatalog(ctx: ActionContext): Promise<Template
       source: null,
       hasContent: fieldCount > 0,
       isActive: svc.isActive,
+      standalone: false,
+      templateEntityId: null,
     }
   })
 
@@ -82,6 +89,8 @@ export async function listTemplatesCatalog(ctx: ActionContext): Promise<Template
         source: doc?.source ?? 'none',
         hasContent: Boolean(doc?.templateText),
         isActive: svc.isActive,
+        standalone: false,
+        templateEntityId: null,
       })
     }
   }
@@ -96,7 +105,29 @@ export async function listTemplatesCatalog(ctx: ActionContext): Promise<Template
     source: 'builtin',
     hasContent: true,
     isActive: null,
+    standalone: false,
+    templateEntityId: null,
   }))
+
+  // Standalone (not service-bound) templates — the firm's reusable library. They
+  // merge into the document/email categories with serviceKey null + standalone:true.
+  for (const t of await listStandaloneTemplates(ctx)) {
+    const entry: TemplateCatalogEntry = {
+      category: t.category,
+      key: `standalone:${t.templateEntityId}`,
+      title: t.name,
+      serviceKey: null,
+      serviceName: null,
+      documentKind: t.docKind,
+      source: 'config',
+      hasContent: t.body.trim().length > 0,
+      isActive: null,
+      standalone: true,
+      templateEntityId: t.templateEntityId,
+    }
+    if (t.category === 'email') emails.push(entry)
+    else documents.push(entry)
+  }
 
   return { forms, documents, emails }
 }
