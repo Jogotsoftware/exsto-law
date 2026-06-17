@@ -111,6 +111,7 @@ export default function AttorneyHome() {
   const [recent, setRecent] = useState<RecentBooking[] | null>(null)
   const [matters, setMatters] = useState<MatterSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [calendarError, setCalendarError] = useState<string | null>(null)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
 
   // Fetch the unified calendar feed (real Google events + app consultations) for a
@@ -120,11 +121,14 @@ export default function AttorneyHome() {
     const now = Date.now()
     const fromIso = new Date(now - 7 * 24 * 3600 * 1000).toISOString()
     const toIso = new Date(now + 90 * 24 * 3600 * 1000).toISOString()
-    const r = await callAttorneyMcp<{ items: CalendarItem[]; source: string }>({
+    const r = await callAttorneyMcp<{ items: CalendarItem[]; source: string; error?: string }>({
       toolName: 'legal.calendar.feed',
       input: { fromIso, toIso },
     })
     setUpcoming(r.items)
+    // Surface a connected-but-failed Google read (e.g. Calendar API not enabled)
+    // instead of silently showing only app consultations.
+    setCalendarError(r.source === 'error' ? (r.error ?? 'Google calendar read failed.') : null)
     setLastRefreshedAt(Date.now())
   }, [])
 
@@ -205,6 +209,14 @@ export default function AttorneyHome() {
           <h2>This week</h2>
           <ShareBookingButton compact />
         </div>
+        {calendarError && (
+          <div className="alert alert-error">
+            <strong>Google connected, but the live calendar read failed.</strong> {calendarError}{' '}
+            <span className="text-muted">
+              (If you just enabled the Calendar API in Google Cloud, wait a few minutes and reload.)
+            </span>
+          </div>
+        )}
         {upcoming === null && !error ? (
           <div className="loading-block">
             <span className="spinner" /> Loading…

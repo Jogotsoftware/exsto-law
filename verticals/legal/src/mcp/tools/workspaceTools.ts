@@ -13,6 +13,7 @@ import {
   composeToClient,
   matterCommunications,
   type WorkspaceCalendarEvent,
+  type CalendarSource,
   type MailThreadSummary,
   type MailThreadView,
   type MatterCommunication,
@@ -22,7 +23,7 @@ import {
 
 const listEventsTool: Tool<
   { fromIso: string; toIso: string },
-  { events: WorkspaceCalendarEvent[]; source: 'google' | 'disconnected' }
+  { events: WorkspaceCalendarEvent[]; source: CalendarSource; error?: string }
 > = {
   name: 'legal.calendar.events',
   description:
@@ -36,11 +37,11 @@ const listEventsTool: Tool<
 // attorney's actual live calendar (not just app-booked consultations).
 const calendarFeedTool: Tool<
   { fromIso: string; toIso: string },
-  { items: CalendarFeedItem[]; source: 'google' | 'disconnected' }
+  { items: CalendarFeedItem[]; source: CalendarSource; error?: string }
 > = {
   name: 'legal.calendar.feed',
   description:
-    "The attorney's calendar for a window: real live Google events merged with app-booked consultations (deduped). Consultations carry matter context; the attorney's other Google events ride along as read-only. source='disconnected' means Google isn't connected, so only consultations are returned.",
+    "The attorney's calendar for a window: real live Google events merged with app-booked consultations (deduped). Consultations carry matter context; the attorney's other Google events ride along as read-only. source='disconnected' = Google not connected; source='error' = connected but the live read failed (the cause is in `error`, e.g. the Calendar API is disabled in the Cloud project); both return consultations only.",
   mode: 'read',
   handler: (ctx: ActionContext, input) => listCalendarFeed(ctx, input.fromIso, input.toIso),
 }

@@ -17,8 +17,25 @@ import {
   loadCredentials,
   type WorkspaceEvent,
 } from '../adapters/googleCalendar.js'
+import { redactSecret } from '../adapters/redact.js'
 import { getMatter } from '../queries/matters.js'
 import { listMatterConsultations, type UpcomingBooking, type BookingCategory } from './calendar.js'
+
+// 'google'       — live read succeeded.
+// 'disconnected' — no Google credentials for this attorney (genuinely not set up).
+// 'error'        — credentials EXIST but the Google API call failed (e.g. the
+//                  Calendar API is not enabled in the Cloud project, or the token
+//                  was revoked). Previously this was swallowed as 'disconnected'
+//                  and rendered as an empty calendar, hiding the real cause.
+export type CalendarSource = 'google' | 'disconnected' | 'error'
+
+// Concise, secret-safe message from a Google API failure. Google's own errors are
+// the most actionable thing we can show (they name the disabled API + project), so
+// surface them — just truncated and with any token-like substring scrubbed.
+export function cleanGoogleError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  return redactSecret(raw).replace(/\s+/g, ' ').trim().slice(0, 400)
+}
 
 export interface WorkspaceCalendarEvent extends WorkspaceEvent {
   matterEntityId: string | null
@@ -32,12 +49,20 @@ export async function listWorkspaceEvents(
   ctx: ActionContext,
   fromIso: string,
   toIso: string,
-): Promise<{ events: WorkspaceCalendarEvent[]; source: 'google' | 'disconnected' }> {
+): Promise<{ events: WorkspaceCalendarEvent[]; source: CalendarSource; error?: string }> {
+  // No credentials = genuinely disconnected (not an error). Distinguishing this
+  // up front means a real API failure below surfaces instead of masquerading as
+  // an empty, "disconnected" calendar.
+  const creds = await loadCredentials(ctx.tenantId, ctx.actorId)
+  if (!creds) return { events: [], source: 'disconnected' }
+
   let events: WorkspaceEvent[]
   try {
     events = await listCalendarEvents(ctx.tenantId, fromIso, toIso, ctx.actorId)
-  } catch {
-    return { events: [], source: 'disconnected' }
+  } catch (err) {
+    // Connected, but the Google read failed (Calendar API disabled in the
+    // project, revoked token, …). Surface the cause rather than hiding it.
+    return { events: [], source: 'error', error: cleanGoogleError(err) }
   }
 
   const ids = events.map((e) => e.eventId)
@@ -140,17 +165,22 @@ export function mergeCalendarFeed(
 }
 
 // Fetch consultations + the real Google calendar for [fromIso, toIso) and merge.
-// When Google is disconnected, source='disconnected' and only consultations show.
+// source='disconnected' (no Google) or 'error' (connected but the read failed,
+// with `error` set) both fall back to consultations-only; the UI surfaces `error`.
 export async function listCalendarFeed(
   ctx: ActionContext,
   fromIso: string,
   toIso: string,
-): Promise<{ items: CalendarFeedItem[]; source: 'google' | 'disconnected' }> {
+): Promise<{ items: CalendarFeedItem[]; source: CalendarSource; error?: string }> {
   const [consultations, workspace] = await Promise.all([
     listMatterConsultations(ctx, fromIso, toIso),
     listWorkspaceEvents(ctx, fromIso, toIso),
   ])
-  return { items: mergeCalendarFeed(consultations, workspace.events), source: workspace.source }
+  return {
+    items: mergeCalendarFeed(consultations, workspace.events),
+    source: workspace.source,
+    error: workspace.error,
+  }
 }
 
 export interface CreateConsultationInput {
