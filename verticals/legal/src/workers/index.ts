@@ -6,9 +6,18 @@ import { withTenant } from '@exsto/shared'
 import { runGranolaProjection } from '../api/granolaIngestion.js'
 
 // How often the calendar reconciliation pass re-reads Google (default 6h).
-const RECONCILE_INTERVAL_MS = Number(
-  process.env.MEETING_RECONCILE_INTERVAL_MS ?? 6 * 60 * 60 * 1000,
-)
+// Validated at module load so a misconfigured env fails loudly at startup rather
+// than throwing 'Invalid time value' inside the re-enqueue (which would stall the
+// reconcile chain on every pass).
+const RECONCILE_INTERVAL_MS = (() => {
+  const raw = process.env.MEETING_RECONCILE_INTERVAL_MS
+  if (!raw) return 6 * 60 * 60 * 1000
+  const ms = Number(raw)
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new Error(`MEETING_RECONCILE_INTERVAL_MS must be a non-negative number, got: "${raw}"`)
+  }
+  return ms
+})()
 
 // Projects a webhook'd (or polled) Granola payload into call_session +
 // transcript via call.ingest. Retries/backoff per the worker runtime; the
@@ -66,17 +75,29 @@ registerWorkerHandler('legal.meeting.reconcile', async (ctx) => {
     console.error('[meeting.reconcile] pass failed (next pass will retry):', err)
   } finally {
     // Exactly one next pass — the chain continues without a dispatcher retry fork.
-    await enqueueJob({
-      tenantId: ctx.tenantId,
-      jobKind: 'legal.meeting.reconcile',
-      runAt: new Date(Date.now() + RECONCILE_INTERVAL_MS),
-    })
+    // If the enqueue itself fails (transient DB error), RE-THROW so the dispatcher
+    // retries THIS job (re-running the idempotent pass + re-enqueue) rather than
+    // letting the chain die silently. The startup bootstrap is the last-resort
+    // backstop if it ever dead-letters.
+    try {
+      await enqueueJob({
+        tenantId: ctx.tenantId,
+        jobKind: 'legal.meeting.reconcile',
+        runAt: new Date(Date.now() + RECONCILE_INTERVAL_MS),
+      })
+    } catch (err) {
+      console.error('[meeting.reconcile] failed to enqueue next pass:', err)
+      throw err
+    }
   }
 })
 
 // Seed the FIRST reconcile pass at worker startup — idempotent: it no-ops when a
-// reconcile job is already pending/running, so restarts never spawn a second
-// self-perpetuating chain. Call once from the worker entrypoint.
+// reconcile job is already pending/running, so a restart never spawns a second
+// self-perpetuating chain. The check (SELECT count → INSERT) assumes a SINGLE
+// worker instance (the Render deploy); two instances starting at the exact same
+// moment could both seed — at multi-instance scale, gate this with a unique
+// constraint / advisory lock. Call once from the worker entrypoint.
 export async function ensureMeetingReconcileScheduled(tenantId: string): Promise<void> {
   const pending = await withTenant(tenantId, async (client) => {
     const r = await client.query<{ n: string }>(

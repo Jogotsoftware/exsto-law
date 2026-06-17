@@ -404,9 +404,13 @@ export async function getCalendarEvent(
     if (res.data.status === 'cancelled') return null
     return mapGoogleEvent(res.data)
   } catch (err) {
-    const code = (err as { code?: number; response?: { status?: number } })?.code
-    const status = (err as { response?: { status?: number } })?.response?.status
-    if (code === 404 || code === 410 || status === 404 || status === 410) return null
+    // Gone from Google = 404/410. The reliable signal is response.status (a number);
+    // Gaxios's err.code is often a Node string (e.g. 'ECONNRESET'), so coerce both
+    // and check numerically. Any OTHER error (auth, network) re-throws so the caller
+    // skips this one and retries next pass rather than mis-marking it deleted.
+    const e = err as { code?: number | string; response?: { status?: number } }
+    const httpStatus = Number(e?.response?.status ?? e?.code)
+    if (httpStatus === 404 || httpStatus === 410) return null
     throw err
   }
 }
