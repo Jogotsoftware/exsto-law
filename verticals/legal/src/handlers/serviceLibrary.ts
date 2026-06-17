@@ -285,3 +285,40 @@ registerActionHandler('legal.service.set_active', async (ctx, client, payload, a
 
   return { serviceKey: p.service_key, status: nextStatus }
 })
+
+interface ServiceRetirePayload {
+  service_key: string
+}
+
+// legal.service.retire — permanently retire a service WITHOUT a replacement
+// version. Unlike set_active (a status flip that leaves the row current) and
+// upsert (seal-then-insert), retire seals the current row (valid_to = now()) and
+// inserts NO successor, so the service leaves every listing (all reads filter
+// valid_to IS NULL) while its history stays immutable. Used to clear leftover
+// test-fixture services from the config table (beta sprint Obj 12).
+registerActionHandler('legal.service.retire', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as ServiceRetirePayload
+  if (!p.service_key) throw new Error('service_key is required')
+
+  const row = await currentActive(client, ctx.tenantId, p.service_key)
+  if (!row) throw new Error(`Service not found (or already retired): ${p.service_key}`)
+
+  await client.query(
+    `UPDATE workflow_definition
+        SET valid_to = now(), status = 'deprecated'
+      WHERE tenant_id = $1 AND id = $2`,
+    [ctx.tenantId, row.id],
+  )
+
+  await recordConfigChange(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    targetId: row.id,
+    changeKind: 'deprecate',
+    before: { status: row.status, kind_name: p.service_key, valid_to: null },
+    after: { status: 'deprecated', kind_name: p.service_key, retired: true },
+  })
+
+  return { serviceKey: p.service_key, retired: true }
+})
