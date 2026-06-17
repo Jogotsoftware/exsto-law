@@ -28,6 +28,12 @@ interface CallIngestPayload {
   notes: Record<string, unknown> | null
   attendee_emails?: string[]
   raw_event_log_id?: string | null
+  // Provenance overrides. The Granola webhook path leaves these unset and the
+  // facts carry integration/granola provenance. A manual entry (the attorney
+  // recording a real call) passes source_type='human' + source_ref=actorId so
+  // the substrate records who actually asserted it (Hard rule 4).
+  source_type?: 'integration' | 'human' | 'agent' | 'system'
+  source_ref?: string
 }
 
 async function findCallByGranolaId(
@@ -48,7 +54,9 @@ async function findCallByGranolaId(
 
 registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as CallIngestPayload
-  const sourceRef = `granola:${p.granola_call_id}`
+  // Default to integration/Granola provenance; a manual entry overrides both.
+  const sourceType = p.source_type ?? 'integration'
+  const sourceRef = p.source_ref ?? `granola:${p.granola_call_id}`
 
   // Idempotency: a replayed webhook or re-run projection is a no-op.
   const existing = await findCallByGranolaId(client, ctx.tenantId, p.granola_call_id)
@@ -95,7 +103,7 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
       value: a.value,
       confidence: 1.0,
       timePrecision: a.precision ?? 'exact_instant',
-      sourceType: 'integration',
+      sourceType,
       sourceRef,
     })
   }
@@ -129,7 +137,7 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
       attributeKindId: akId,
       value: a.value,
       confidence: a.confidence ?? 1.0,
-      sourceType: 'integration',
+      sourceType,
       sourceRef,
     })
   }
@@ -178,7 +186,7 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
       attributeKindId: statusKindId,
       value: 'consulted',
       confidence: 1.0,
-      sourceType: 'integration',
+      sourceType,
       sourceRef,
     })
   }
@@ -197,7 +205,7 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
       transcript_source: p.transcript_source,
       word_count: wordCount,
     },
-    sourceType: 'integration',
+    sourceType,
     sourceRef,
     occurredAt: p.ended_at ?? null,
   })
