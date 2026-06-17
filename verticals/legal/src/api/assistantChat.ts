@@ -24,6 +24,9 @@ import {
 
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
 export type AssistantScope = 'matter' | 'contact' | 'global'
+// Beta-feedback category (Obj 11): the attorney tags feedback so the team can
+// triage by area. Only meaningful for feedback turns.
+export type FeedbackCategory = 'ui' | 'ai' | 'workflow' | 'other'
 
 export interface AssistantChatInput {
   message: string
@@ -36,6 +39,9 @@ export interface AssistantChatInput {
   contactEntityId?: string
   // Optional widget hint: a "Leave feedback" entry point forces kind='feedback'.
   intent?: 'feedback' | 'question'
+  // Beta feedback (Obj 11): the category the attorney tagged + where they were.
+  category?: FeedbackCategory
+  pageContext?: { path?: string; [k: string]: unknown }
 }
 
 export interface AssistantChatReply {
@@ -121,6 +127,9 @@ export async function recordAssistantTurn(
     citations: string[]
     scope: AssistantScope
     primaryEntityId: string | null
+    // Feedback turns (Obj 11): the tagged category + the page the attorney was on.
+    category?: FeedbackCategory | null
+    pageContext?: Record<string, unknown> | null
   },
 ): Promise<{ eventId: string }> {
   const res = await submitAction(ctx, {
@@ -141,6 +150,9 @@ export async function recordAssistantTurn(
         kind: input.kind,
         citations: input.citations,
         scope: input.scope,
+        // Only feedback carries a category; default 'other' so triage never sees null.
+        category: input.kind === 'feedback' ? (input.category ?? 'other') : null,
+        page_context: input.pageContext ?? null,
       },
     },
   })
@@ -198,6 +210,8 @@ export async function assistantChat(
     citations,
     scope,
     primaryEntityId: input.matterEntityId ?? input.contactEntityId ?? null,
+    category: input.category ?? null,
+    pageContext: input.pageContext ?? null,
   })
 
   return { eventId, reply, citations, provider: model.provider, model: model.model, kind, scope }
@@ -249,5 +263,47 @@ export async function listAssistantThread(
         { ...base, role: 'assistant' as const, message: '', reply: r.payload.reply ?? '' },
       ]
     })
+  })
+}
+
+export interface AssistantFeedbackEntry {
+  eventId: string
+  message: string
+  category: FeedbackCategory
+  pageContext: Record<string, unknown> | null
+  recordedAt: string
+}
+
+// All beta-feedback turns, newest-first, with category + page context — the
+// triage surface (Obj 11). Tenant-scoped read of assistant.turn events tagged
+// kind='feedback'.
+export async function listAssistantFeedback(ctx: ActionContext): Promise<AssistantFeedbackEntry[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      event_id: string
+      payload: {
+        message?: string
+        category?: FeedbackCategory
+        page_context?: Record<string, unknown> | null
+      }
+      occurred_at: string
+    }>(
+      `SELECT e.id AS event_id, e.payload,
+              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS occurred_at
+       FROM event e
+       JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
+       WHERE e.tenant_id = $1
+         AND ekd.kind_name = 'assistant.turn'
+         AND e.payload->>'kind' = 'feedback'
+       ORDER BY e.occurred_at DESC`,
+      [ctx.tenantId],
+    )
+    return res.rows.map((r) => ({
+      eventId: r.event_id,
+      message: r.payload.message ?? '',
+      category: r.payload.category ?? 'other',
+      pageContext: r.payload.page_context ?? null,
+      recordedAt: r.occurred_at,
+    }))
   })
 }
