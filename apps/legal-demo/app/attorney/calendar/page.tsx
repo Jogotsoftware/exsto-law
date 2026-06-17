@@ -41,7 +41,8 @@ function startOfWeek(d: Date): Date {
 export default function CalendarPage() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
   const [events, setEvents] = useState<WorkspaceEvent[]>([])
-  const [source, setSource] = useState<'google' | 'disconnected' | null>(null)
+  const [source, setSource] = useState<'google' | 'disconnected' | 'error' | null>(null)
+  const [googleError, setGoogleError] = useState<string | null>(null)
   const [matters, setMatters] = useState<MatterOption[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -60,13 +61,15 @@ export default function CalendarPage() {
     try {
       const res = await callAttorneyMcp<{
         events: WorkspaceEvent[]
-        source: 'google' | 'disconnected'
+        source: 'google' | 'disconnected' | 'error'
+        error?: string
       }>({
         toolName: 'legal.calendar.events',
         input: { fromIso: weekStart.toISOString(), toIso: weekEnd.toISOString() },
       })
       setEvents(res.events)
       setSource(res.source)
+      setGoogleError(res.error ?? null)
       const m = await callAttorneyMcp<{ matters: MatterOption[] }>({
         toolName: 'legal.matter.list',
         input: {},
@@ -111,6 +114,13 @@ export default function CalendarPage() {
         <div className="alert alert-error">
           <strong>Google Calendar is not connected.</strong> The calendar cannot load.{' '}
           <Link href="/attorney/settings">Connect Google in Settings →</Link>
+        </div>
+      )}
+      {source === 'error' && (
+        <div className="alert alert-error">
+          <strong>Google connected, but the calendar read failed.</strong>{' '}
+          {googleError ??
+            'The Google Calendar API call errored. If you just enabled the Calendar API in Google Cloud, wait a few minutes and reload.'}
         </div>
       )}
       {error && <div className="alert alert-error">{error}</div>}
