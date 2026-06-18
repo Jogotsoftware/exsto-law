@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
 import { TimeExpensePanel } from '@/components/TimeExpensePanel'
+import { MatterResearchPanel } from '@/components/MatterResearchPanel'
 import { UnifiedAssistantChat } from '@/components/UnifiedAssistantChat'
 import { ChevronLeftIcon } from '@/components/icons'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
@@ -377,6 +378,11 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
           billing module rolls these up into invoices.
         </p>
         <TimeExpensePanel matterEntityId={id} />
+      </section>
+
+      <section>
+        <h2>Research</h2>
+        <MatterResearchPanel matterEntityId={id} />
       </section>
 
       {latestDraft && (
