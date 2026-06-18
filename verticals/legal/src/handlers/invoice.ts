@@ -383,10 +383,19 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
 
 interface SendInvoicePayload {
   invoice_entity_id: string
-  to_email?: string | null
-  message?: string | null
+  // The actual email send happens in api/billing.sendInvoice through Contract B
+  // (enqueueClientEmail); this handler RECORDS the result. `delivered` reflects
+  // whether the email actually went out (false only if a caller records a send
+  // attempt without delivery).
+  to?: string | null
+  message_id?: string | null
+  delivered?: boolean
+  pay_url?: string | null
 }
 
+// Record an invoice send (invoice.sent event + status='sent') through the core.
+// The email itself is sent by the api layer via Contract B and its mail.send audit
+// row; this is the invoice-lifecycle record that references it.
 registerActionHandler('invoice.send', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as SendInvoicePayload
   const invoiceId = (p.invoice_entity_id ?? '').trim()
@@ -411,31 +420,11 @@ registerActionHandler('invoice.send', async (ctx, client, payload, actionId) => 
     'invoice_client_id',
   )
   if (!number || !status) throw new Error('Invoice not found.')
-  if (status !== 'issued' && status !== 'sent')
+  if (status !== 'issued' && status !== 'sent') {
     throw new Error(`Invoice ${number} is ${status}; only issued invoices can be sent.`)
-
-  // Resolve recipient: explicit override, else the client's main-contact email.
-  let to = (p.to_email ?? '').trim()
-  if (!to && clientEntityId) {
-    const mainContactId = await getLatestAttributeValue<string>(
-      client,
-      ctx.tenantId,
-      clientEntityId,
-      'client_main_contact',
-    )
-    if (mainContactId)
-      to =
-        (await getLatestAttributeValue<string>(client, ctx.tenantId, mainContactId, 'email')) ?? ''
   }
 
-  // ── Live-delivery seam (Contract B) ──────────────────────────────────────────
-  // The comms send contract (enqueueClientEmail, Session 3) is not present in the
-  // repo yet, and live Gmail delivery additionally requires the firm's Google
-  // connection. So v1 RECORDS the send through the core and flags it
-  // activation-gated; it does not fabricate a delivery. When S3's enqueueClientEmail
-  // lands, call it here and set delivered/activation_gated from its result.
-  const activationGated = true
-  const delivered = false
+  const delivered = p.delivered !== false
 
   await insertEvent(client, {
     tenantId: ctx.tenantId,
@@ -446,17 +435,14 @@ registerActionHandler('invoice.send', async (ctx, client, payload, actionId) => 
     sourceType: 'human',
     sourceRef: ctx.actorId,
     data: {
-      to: to || null,
+      to: (p.to ?? '').trim() || null,
       channel: 'email',
-      activation_gated: activationGated,
       delivered,
-      message: (p.message ?? '').trim() || null,
+      message_id: p.message_id ?? null,
+      pay_url: p.pay_url ?? null,
     },
   })
 
-  // The send was recorded through the core; mark the invoice sent. Delivery state
-  // (activation_gated / delivered) lives on the invoice.sent event, so the UI can
-  // show "Sent — queued (activation-gated)" honestly rather than claiming delivery.
   await setAttr(client, {
     tenantId: ctx.tenantId,
     actionId,
@@ -466,5 +452,5 @@ registerActionHandler('invoice.send', async (ctx, client, payload, actionId) => 
     value: 'sent',
   })
 
-  return { sent: true, activationGated, delivered, to: to || null, invoiceNumber: number }
+  return { sent: true, delivered, to: (p.to ?? '').trim() || null, invoiceNumber: number }
 })
