@@ -45,6 +45,9 @@ import './tools/savedViewTools.js'
 // it sends through the attorney's Gmail (mail.send provenance). The matter page
 // already calls legal.email.send_draft_link.
 import './tools/sendDraftLinkEmail.js'
+// Session 5 (WP5.2): "Send for signature" — provider-agnostic e-sign, beside
+// the draft-link email tool. Creates a signature envelope through the core.
+import './tools/sendForSignature.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

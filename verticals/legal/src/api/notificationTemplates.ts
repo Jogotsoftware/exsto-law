@@ -63,6 +63,21 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `— Pacheco Law Firm`,
     ].join('\n'),
   }),
+  'esign-sign-request': (v) => ({
+    subject: `Please sign: ${s(v.document_title, 'your document')} — Pacheco Law`,
+    bodyText: [
+      `Hi ${s(v.signer_name, 'there')},`,
+      ``,
+      `Pacheco Law has prepared a document for your electronic signature. Use the`,
+      `secure link below to review it and sign. The link expires in 14 days.`,
+      ``,
+      `${s(v.sign_url, '(signing link unavailable)')}`,
+      ``,
+      `If you weren't expecting this, you can safely ignore this email.`,
+      ``,
+      `— Pacheco Law Firm`,
+    ].join('\n'),
+  }),
   'attorney-portal-message': (v) => ({
     subject: `New client message — ${s(v.matter_number, 'a matter')}`,
     bodyText: [
@@ -113,6 +128,7 @@ const TEMPLATE_TITLES: Record<string, string> = {
   'attorney-draft-completed': 'Attorney — draft ready for review',
   'prospect-intake-confirmation': 'Prospect — intake received',
   'client-portal-magic-link': 'Client — portal sign-in link',
+  'esign-sign-request': 'Signer — e-signature request',
   'attorney-portal-message': 'Attorney — new client message',
   'client-portal-message': 'Client — new attorney message',
   'prospect-booking-confirmation': 'Prospect — consultation booked',
