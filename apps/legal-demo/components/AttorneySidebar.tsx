@@ -8,6 +8,7 @@ import { usePathname } from 'next/navigation'
 import {
   CalendarIcon,
   CheckCircleIcon,
+  FileTextIcon,
   LayersIcon,
   LayoutGridIcon,
   MailIcon,
@@ -30,6 +31,7 @@ const NAV: Array<{
   { href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
   { href: '/attorney/mail', label: 'Mail', Icon: MailIcon },
   { href: '/attorney/services', label: 'Services', Icon: LayersIcon },
+  { href: '/attorney/billing', label: 'Billing', Icon: FileTextIcon },
   { href: '/attorney/settings', label: 'Settings', Icon: SettingsIcon },
 ]
 
