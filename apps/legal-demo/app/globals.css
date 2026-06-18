@@ -4311,6 +4311,25 @@ button.danger.outline:hover:not(:disabled) {
   box-shadow: 0 5px 14px -5px rgba(208, 138, 62, 0.7);
   flex: none;
 }
+.att-side-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.04;
+}
+.att-side-brand-name {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.32rem;
+  font-weight: 600;
+}
+.att-side-brand-sub {
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #e7b667;
+  margin-top: 4px;
+}
 .att-side-nav {
   display: flex;
   flex-direction: column;
@@ -4362,6 +4381,148 @@ button.danger.outline:hover:not(:disabled) {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* Questionnaire builder (WP2.4): toggles, choice pills, drag handle. */
+.qb-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.5rem 0 0.2rem;
+}
+.qb-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  color: #334155;
+}
+.qb-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+.qb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.2rem 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #1e293b;
+  font-size: 0.85rem;
+}
+.qb-pill button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+}
+.qb-pill button:hover {
+  color: #b91c1c;
+}
+.qb-pill-add {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  max-width: 28rem;
+}
+.qb-grip {
+  cursor: grab;
+  color: #94a3b8;
+  user-select: none;
+  font-size: 1rem;
+  line-height: 1;
+}
+.qb-grip:active {
+  cursor: grabbing;
+}
+/* Booking: muted "I don't know" affordance under a field (WP2.4). */
+.bk-unknown {
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+/* Contacts CRM four-way tabs + standing pill (WP2.2). */
+.crm-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.crm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border, #e2e8f0);
+  background: transparent;
+  color: #475569;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.crm-tab:hover {
+  background: rgba(20, 48, 107, 0.05);
+}
+.crm-tab.active {
+  background: #14306b;
+  border-color: #14306b;
+  color: #fff;
+}
+.crm-tab-count {
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+.crm-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Document template editor (WP2.5): point-and-click insert bar + document canvas. */
+.tpl-insert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.tpl-insert-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+.tpl-insert .qb-pill {
+  border: none;
+  cursor: pointer;
+}
+.tpl-insert .qb-pill:hover {
+  background: #e0e7ff;
+}
+.tpl-newfield {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.tpl-newfield input {
+  width: 12rem;
+}
+.tpl-canvas {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  background: #fff;
+  padding: 1.25rem 1.5rem;
+}
 /* Public draft view — the shared-link document page (/d/[versionId]). Salvaged
    from the parallel redesign so this page isn't unstyled on prod. */
 .public-draft {

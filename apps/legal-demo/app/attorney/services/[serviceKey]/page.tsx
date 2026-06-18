@@ -20,9 +20,10 @@ interface ServiceDefinition {
 
 interface FormState {
   displayName: string
+  // Round-tripped, not shown (WP2.3: no descriptions / no raw sort_order surfaced).
   description: string
   route: 'auto' | 'manual'
-  documents: string
+  documents: string[]
   sortOrder: string
 }
 
@@ -36,7 +37,7 @@ const EMPTY: FormState = {
   displayName: '',
   description: '',
   route: 'manual',
-  documents: '',
+  documents: [],
   sortOrder: '',
 }
 
@@ -53,6 +54,9 @@ export default function ServiceEditorPage() {
   const [busy, setBusy] = useState(false)
   const [enabling, setEnabling] = useState(false)
   const [saved, setSaved] = useState(false)
+  // Existing services open in a clean read state; the form (the "wizard") shows
+  // only when editing or creating (WP2.3).
+  const [editing, setEditing] = useState(isNew)
 
   const load = useCallback(async () => {
     if (isNew) return
@@ -70,7 +74,7 @@ export default function ServiceEditorPage() {
         displayName: r.service.displayName,
         description: r.service.description ?? '',
         route: r.service.route,
-        documents: r.service.documents.join(', '),
+        documents: r.service.documents,
         sortOrder: String(r.service.sortOrder),
       })
       const c = await callAttorneyMcp<Completeness>({
@@ -117,10 +121,7 @@ export default function ServiceEditorPage() {
     setBusy(true)
     setError(null)
     try {
-      const documents = form.documents
-        .split(',')
-        .map((d) => d.trim())
-        .filter(Boolean)
+      const documents = form.documents.map((d) => d.trim()).filter(Boolean)
       const sortOrder = form.sortOrder.trim() ? Number(form.sortOrder) : undefined
       const base = {
         displayName: form.displayName.trim(),
@@ -147,6 +148,7 @@ export default function ServiceEditorPage() {
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
       await load()
+      setEditing(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -179,9 +181,15 @@ export default function ServiceEditorPage() {
             Edit templates
           </Link>
         )}
-        <button className="primary" onClick={save} disabled={busy || !form}>
-          {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
-        </button>
+        {editing || isNew ? (
+          <button className="primary" onClick={save} disabled={busy || !form}>
+            {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
+          </button>
+        ) : (
+          <button className="primary" onClick={() => setEditing(true)}>
+            Edit details
+          </button>
+        )}
       </div>
 
       {!isNew && (
@@ -191,7 +199,7 @@ export default function ServiceEditorPage() {
         </p>
       )}
 
-      {!isNew && meta && (
+      {!isNew && meta && (editing || !meta.isActive) && (
         <SetupChecklist
           serviceKey={serviceKey}
           route={meta.route}
@@ -217,7 +225,7 @@ export default function ServiceEditorPage() {
         <div className="loading-block">
           <span className="spinner" /> Loading…
         </div>
-      ) : (
+      ) : editing || isNew ? (
         <section>
           <div className="form-grid">
             <label>
@@ -235,49 +243,120 @@ export default function ServiceEditorPage() {
                 onChange={(e) => update('route', e.target.value as 'auto' | 'manual')}
               >
                 <option value="manual">Manual — attorney drafts</option>
-                <option value="auto">Auto — AI drafts on submit (re-drafts after the call)</option>
+                <option value="auto">Auto — drafts on submit (re-drafts after the call)</option>
               </select>
             </label>
-            <label>
-              <span>Documents (comma-separated)</span>
-              <input
-                value={form.documents}
-                onChange={(e) => update('documents', e.target.value)}
-                placeholder="operating_agreement, engagement_letter"
-              />
-            </label>
-            <label>
-              <span>Sort order</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                value={form.sortOrder}
-                onChange={(e) => update('sortOrder', e.target.value)}
-                placeholder="0"
-              />
-            </label>
           </div>
-          <label>
-            <span>Description</span>
-            <textarea
-              value={form.description}
-              onChange={(e) => update('description', e.target.value)}
-              rows={3}
-            />
-          </label>
-          {!isNew && meta && (
-            <p style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
-              Service key: <code>{meta.serviceKey}</code>
-              {meta.intakeFormId && (
-                <>
-                  {' · '}Intake form: <code>{meta.intakeFormId}</code>
-                </>
-              )}
-            </p>
+          <DocumentsPills
+            documents={form.documents}
+            onChange={(docs) => update('documents', docs)}
+          />
+          {!isNew && (
+            <div style={{ marginTop: '0.9rem' }}>
+              <button
+                onClick={() => {
+                  setEditing(false)
+                  load()
+                }}
+              >
+                Cancel
+              </button>
+            </div>
           )}
+        </section>
+      ) : (
+        <section>
+          <div className="kv-grid">
+            <div>
+              <div className="kv-label">Status</div>
+              <div className="kv-value">
+                <span className={`badge ${meta?.isActive ? 'ok' : ''}`}>
+                  {meta?.isActive ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+            </div>
+            <div>
+              <div className="kv-label">Workflow</div>
+              <div className="kv-value">
+                {form.route === 'auto' ? 'Auto — drafts on submit' : 'Manual — attorney drafts'}
+              </div>
+            </div>
+            <div>
+              <div className="kv-label">Documents</div>
+              <div className="kv-value">
+                {form.documents.length === 0
+                  ? '—'
+                  : form.documents.map((d) => (
+                      <span key={d} className="qb-pill" style={{ marginRight: '0.3rem' }}>
+                        {d.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+              </div>
+            </div>
+          </div>
         </section>
       )}
     </main>
+  )
+}
+
+// Documents this service produces, as add/remove pills (WP2.3) — replaces the raw
+// comma-separated input. Labels are humanized; the stored value is the slug.
+function DocumentsPills({
+  documents,
+  onChange,
+}: {
+  documents: string[]
+  onChange: (d: string[]) => void
+}) {
+  const [draft, setDraft] = useState('')
+  const add = () => {
+    const v = draft
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+    if (!v || documents.includes(v)) return setDraft('')
+    onChange([...documents, v])
+    setDraft('')
+  }
+  return (
+    <div style={{ marginTop: '0.6rem' }}>
+      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Documents this service produces</span>
+      <div className="qb-pills">
+        {documents.map((d) => (
+          <span key={d} className="qb-pill">
+            {d.replace(/_/g, ' ')}
+            <button
+              type="button"
+              title="Remove"
+              onClick={() => onChange(documents.filter((x) => x !== d))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {documents.length === 0 && (
+          <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>None yet</span>
+        )}
+      </div>
+      <div className="qb-pill-add">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              add()
+            }
+          }}
+          placeholder="e.g. operating agreement"
+        />
+        <button type="button" onClick={add}>
+          Add
+        </button>
+      </div>
+    </div>
   )
 }
 

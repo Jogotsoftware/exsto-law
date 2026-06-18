@@ -26,7 +26,7 @@ export interface CacheDraftInput {
   modelIdentity: string
 }
 
-// Persists a pre-generated draft document + its reasoning trace as if Sage had
+// Persists a pre-generated draft document + its reasoning trace as if the agent had
 // just produced it. Used by the demo seed so the walkthrough does not depend
 // on a live Claude API call (and so the cached draft can be a known-good
 // example rather than whatever Claude happens to produce on the day).

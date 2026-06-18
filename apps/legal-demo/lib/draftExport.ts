@@ -1,5 +1,5 @@
 // Tiny markdown renderer (subset: headings, bold, italic, code, lists, hr,
-// paragraphs) — good enough for the legal drafts Sage produces. Escapes HTML
+// paragraphs) — good enough for the legal drafts the agent produces. Escapes HTML
 // before applying inline syntax so output is safe to inject.
 
 function escapeHtml(s: string): string {

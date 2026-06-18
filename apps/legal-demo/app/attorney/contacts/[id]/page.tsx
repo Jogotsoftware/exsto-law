@@ -1,6 +1,6 @@
 'use client'
 
-// Contact detail (CRM). Shows the contact's attributes, pipeline stage, referral
+// Contact detail (CRM). Shows the contact's attributes, standing, referral
 // source, and all their matters (clickable through to each). Read-only over the
 // existing legal.contact.get query.
 
@@ -9,7 +9,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
-type LeadStage = 'prospect' | 'consulted' | 'engaged' | 'active' | 'closed'
+type CrmBucket = 'active' | 'prospective' | 'prior'
 
 interface ContactMatter {
   matterEntityId: string
@@ -28,18 +28,16 @@ interface ContactDetail {
   companyName: string | null
   attributionSource: string | null
   matterCount: number
-  leadStage: LeadStage
+  crmBucket: CrmBucket
   firstSeenAt: string
   lastActivityAt: string
   matters: ContactMatter[]
 }
 
-const STAGE_META: Record<LeadStage, { label: string; color: string }> = {
-  prospect: { label: 'Prospect', color: '#94a3b8' },
-  consulted: { label: 'Consulted', color: '#3b82f6' },
-  engaged: { label: 'Engaged', color: '#8b5cf6' },
+const BUCKET_META: Record<CrmBucket, { label: string; color: string }> = {
   active: { label: 'Active', color: '#16a34a' },
-  closed: { label: 'Closed', color: '#6b7280' },
+  prospective: { label: 'Prospective', color: '#3b82f6' },
+  prior: { label: 'Prior', color: '#6b7280' },
 }
 
 function humanizeService(key: string): string {
@@ -78,7 +76,7 @@ export default function ContactDetailPage() {
     load()
   }, [load])
 
-  const stage = contact ? STAGE_META[contact.leadStage] : null
+  const standing = contact ? BUCKET_META[contact.crmBucket] : null
 
   return (
     <main>
@@ -87,12 +85,12 @@ export default function ContactDetailPage() {
         style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
       >
         <h1 style={{ margin: 0 }}>{contact?.fullName || contact?.email || 'Contact'}</h1>
-        {stage && (
+        {standing && (
           <span
             className="badge"
-            style={{ background: stage.color, color: '#fff', borderColor: stage.color }}
+            style={{ background: standing.color, color: '#fff', borderColor: standing.color }}
           >
-            {stage.label}
+            {standing.label}
           </span>
         )}
         <Link href="/attorney/contacts" className="back-link" style={{ marginLeft: 'auto' }}>

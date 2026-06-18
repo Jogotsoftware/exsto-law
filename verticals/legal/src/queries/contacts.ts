@@ -52,6 +52,20 @@ export function deriveLeadStage(matterStatuses: string[]): LeadStage {
   return best
 }
 
+// Four-way CRM bucket (WP2.2), derived from a contact's matter statuses:
+//   Active       — ≥1 open (non-closed) matter
+//   Prior        — no open matters, but ≥1 reached closed (an open→closed history)
+//   Prospective  — no matters closed and none open (a pure lead)
+export type CrmBucket = 'active' | 'prospective' | 'prior'
+const CLOSED_MATTER_STATUSES = new Set(['closed', 'matter_closed'])
+export function deriveCrmBucket(matterStatuses: string[]): CrmBucket {
+  const open = matterStatuses.filter((s) => !CLOSED_MATTER_STATUSES.has(s)).length
+  if (open > 0) return 'active'
+  const closed = matterStatuses.filter((s) => CLOSED_MATTER_STATUSES.has(s)).length
+  if (closed > 0) return 'prior'
+  return 'prospective'
+}
+
 export interface ContactSummary {
   contactEntityId: string
   fullName: string
@@ -61,6 +75,7 @@ export interface ContactSummary {
   attributionSource: string | null
   matterCount: number
   leadStage: LeadStage
+  crmBucket: CrmBucket
   firstSeenAt: string
   lastActivityAt: string
 }
@@ -100,23 +115,34 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
          WHERE a.tenant_id = $1
          ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
        ),
-       matter_counts AS (
-         SELECT r.target_entity_id AS contact_id,
-                count(*) AS n,
-                max(r.recorded_at) AS last_at
+       -- A contact's matters come from two relationship paths: the direct
+       -- matter_has_client (booking) and, post-0020, the client parent
+       -- (contact -contact_of-> client <-matter_of- matter). Union both, dedup on
+       -- (contact, matter), then roll up status + recency for the four-way bucket.
+       contact_matter AS (
+         SELECT r.target_entity_id AS contact_id, r.source_entity_id AS matter_id
          FROM relationship r
          JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
          WHERE r.tenant_id = $1 AND rkd.kind_name = 'matter_has_client'
-         GROUP BY r.target_entity_id
+         UNION
+         SELECT co.source_entity_id AS contact_id, mo.source_entity_id AS matter_id
+         FROM relationship co
+         JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id AND cok.kind_name = 'contact_of'
+         JOIN relationship mo ON mo.target_entity_id = co.target_entity_id
+         JOIN relationship_kind_definition mok ON mok.id = mo.relationship_kind_id AND mok.kind_name = 'matter_of'
+         WHERE co.tenant_id = $1
+           AND (co.valid_to IS NULL OR co.valid_to > now())
+           AND (mo.valid_to IS NULL OR mo.valid_to > now())
        ),
-       matter_statuses AS (
-         SELECT r.target_entity_id AS contact_id,
-                array_agg(ms.value #>> '{}') FILTER (WHERE ms.value IS NOT NULL) AS statuses
-         FROM relationship r
-         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'matter_has_client'
-         LEFT JOIN attrs ms ON ms.entity_id = r.source_entity_id AND ms.kind_name = 'matter_status'
-         WHERE r.tenant_id = $1
-         GROUP BY r.target_entity_id
+       matter_rollup AS (
+         SELECT cm.contact_id,
+                count(*) AS n,
+                array_agg(ms.value #>> '{}') FILTER (WHERE ms.value IS NOT NULL) AS statuses,
+                max(me.created_at) AS last_at
+         FROM contact_matter cm
+         JOIN entity me ON me.id = cm.matter_id AND me.tenant_id = $1
+         LEFT JOIN attrs ms ON ms.entity_id = cm.matter_id AND ms.kind_name = 'matter_status'
+         GROUP BY cm.contact_id
        )
        SELECT
          e.id AS contact_entity_id,
@@ -125,18 +151,17 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_phone')            AS phone,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_company_name')     AS company_name,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_attribution_source') AS attribution_source,
-         COALESCE(mc.n, 0)::text AS matter_count,
-         mstat.statuses AS matter_statuses,
+         COALESCE(mr.n, 0)::text AS matter_count,
+         mr.statuses AS matter_statuses,
          e.created_at AS first_seen_at,
-         COALESCE(mc.last_at, e.created_at) AS last_activity_at
+         COALESCE(mr.last_at, e.created_at) AS last_activity_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
-       LEFT JOIN matter_counts mc ON mc.contact_id = e.id
-       LEFT JOIN matter_statuses mstat ON mstat.contact_id = e.id
+       LEFT JOIN matter_rollup mr ON mr.contact_id = e.id
        WHERE e.tenant_id = $1
          AND ekd.kind_name = 'client_contact'
          AND e.status = 'active'
-       ORDER BY COALESCE(mc.last_at, e.created_at) DESC`,
+       ORDER BY COALESCE(mr.last_at, e.created_at) DESC`,
       [ctx.tenantId],
     )
     return res.rows.map((r) => ({
@@ -148,6 +173,7 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
       attributionSource: r.attribution_source,
       matterCount: Number(r.matter_count),
       leadStage: deriveLeadStage(r.matter_statuses ?? []),
+      crmBucket: deriveCrmBucket(r.matter_statuses ?? []),
       firstSeenAt: r.first_seen_at.toISOString(),
       lastActivityAt: r.last_activity_at.toISOString(),
     }))
@@ -225,6 +251,7 @@ export async function getContact(
       attributionSource: attrs['contact_attribution_source'] ?? null,
       matterCount: matters.rows.length,
       leadStage: deriveLeadStage(matters.rows.map((r) => r.status ?? 'inquiry')),
+      crmBucket: deriveCrmBucket(matters.rows.map((r) => r.status ?? 'inquiry')),
       firstSeenAt: baseCreatedAtIso,
       lastActivityAt: matters.rows[0]?.created_at ?? baseCreatedAtIso,
       matters: matters.rows.map((r) => ({

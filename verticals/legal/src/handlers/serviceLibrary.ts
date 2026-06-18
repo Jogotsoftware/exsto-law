@@ -30,6 +30,9 @@ interface ServiceTransitions {
   on_transcript?: string
   sort_order?: number
   notify?: string
+  // Contract G (WP2.3): how a document is produced. 'template_merge' is the
+  // deterministic default (renderTemplate, no AI); 'ai_draft' is opt-in.
+  generation_mode?: string
   [k: string]: unknown
 }
 
@@ -159,6 +162,9 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
   // A brand-new service has no intake form bound yet (deferred to a later PR);
   // default route to manual so it never auto-drafts before a form exists.
   if (!isUpdate && merged.route === undefined) merged.route = 'manual'
+  // Contract G (WP2.3): default document generation to the deterministic
+  // template merge; 'ai_draft' stays available but opt-in (never the default).
+  if (merged.generation_mode === undefined) merged.generation_mode = 'template_merge'
 
   const states = prior ? prior.states : []
   const participating = prior

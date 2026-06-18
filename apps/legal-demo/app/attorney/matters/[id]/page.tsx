@@ -8,6 +8,7 @@ import { TimeExpensePanel } from '@/components/TimeExpensePanel'
 import { UnifiedAssistantChat } from '@/components/UnifiedAssistantChat'
 import { ChevronLeftIcon } from '@/components/icons'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { launchCompose, launchScheduler } from '@/lib/contractD'
 
 interface MatterDetail {
   matterEntityId: string
@@ -23,6 +24,7 @@ interface MatterDetail {
   transcriptText: string | null
   latestDraftVersionId: string | null
   latestDraftStatus: string | null
+  clientEntityId: string | null
 }
 
 interface DraftPayload {
@@ -243,12 +245,40 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
       </Link>
       <PageHead title={matter.matterNumber} description={matter.summary || undefined} />
 
+      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: 'var(--space-3)' }}>
+        <button
+          onClick={() =>
+            launchCompose({
+              matterId: matter.matterEntityId,
+              to: matter.clientEmail ?? undefined,
+            })
+          }
+          title={matter.clientEmail ? `Email ${matter.clientEmail}` : 'Compose an email'}
+        >
+          Email
+        </button>
+        <button
+          onClick={() => launchScheduler({ matterId: matter.matterEntityId })}
+          title="Schedule a meeting"
+        >
+          Schedule
+        </button>
+      </div>
+
       <section>
         <h2>Overview</h2>
         <div className="kv-grid">
           <div>
             <div className="kv-label">Client</div>
-            <div className="kv-value">{matter.clientName || '—'}</div>
+            <div className="kv-value">
+              {matter.clientEntityId ? (
+                <Link href={`/attorney/clients/${matter.clientEntityId}`}>
+                  {matter.clientName || 'View client'}
+                </Link>
+              ) : (
+                matter.clientName || '—'
+              )}
+            </div>
           </div>
           <div>
             <div className="kv-label">Practice area</div>
