@@ -233,6 +233,42 @@ export interface AvailabilitySlot {
   available: boolean
 }
 
+// A merged busy interval on the synced Google calendar. Contract M: S5's
+// availability engine consumes these, so the shape is deliberately minimal and
+// stable — free time is the complement of busy within the queried range.
+export interface BusyInterval {
+  startIso: string
+  endIso: string
+}
+
+// Pure: clamp raw busy blocks to [fromMs, toMs], drop empties, sort by start,
+// and coalesce overlapping or touching intervals into a minimal disjoint set.
+// No Google / no DB, so it is unit-testable in isolation. Touching intervals
+// (b.start === last.end) merge too — adjacency is not free time.
+export function mergeBusyIntervals(
+  raw: Array<{ start: number; end: number }>,
+  fromMs: number,
+  toMs: number,
+): BusyInterval[] {
+  const clamped = raw
+    .map((b) => ({ start: Math.max(b.start, fromMs), end: Math.min(b.end, toMs) }))
+    .filter((b) => Number.isFinite(b.start) && Number.isFinite(b.end) && b.end > b.start)
+    .sort((a, b) => a.start - b.start)
+  const merged: Array<{ start: number; end: number }> = []
+  for (const b of clamped) {
+    const last = merged[merged.length - 1]
+    if (last && b.start <= last.end) {
+      last.end = Math.max(last.end, b.end)
+    } else {
+      merged.push({ ...b })
+    }
+  }
+  return merged.map((b) => ({
+    startIso: new Date(b.start).toISOString(),
+    endIso: new Date(b.end).toISOString(),
+  }))
+}
+
 // Attorney working timezone. TODO: lift to tenant config (currently Pacheco
 // Law only; everything is NY time).
 const ATTORNEY_TZ = 'America/New_York'
@@ -339,27 +375,39 @@ export function getStubAvailability(daysOut = 7): AvailabilitySlot[] {
   return generateCandidateSlots(daysOut)
 }
 
+// Raw busy blocks (epoch ms) from the synced Google calendar's freebusy for a
+// window. Throws when Google isn't connected (authedClient) so the api layer can
+// tag the result 'disconnected' vs 'error' explicitly. Shared by the slot-based
+// availability and the Contract-M busy-interval reads so both see one source.
+async function queryBusyBlocks(
+  tenantId: string,
+  fromIso: string,
+  toIso: string,
+  actorId?: string | null,
+): Promise<Array<{ start: number; end: number }>> {
+  const { oauth2, creds } = await authedClient(tenantId, actorId)
+  const calendar = google.calendar({ version: 'v3', auth: oauth2 })
+  const busyRes = await calendar.freebusy.query({
+    requestBody: {
+      timeMin: fromIso,
+      timeMax: toIso,
+      items: [{ id: creds.calendarId }],
+    },
+  })
+  return (busyRes.data.calendars?.[creds.calendarId]?.busy ?? [])
+    .map((b) => ({ start: new Date(b.start!).getTime(), end: new Date(b.end!).getTime() }))
+    .filter((b) => Number.isFinite(b.start) && Number.isFinite(b.end))
+}
+
 export async function getGoogleAvailability(
   tenantId: string,
   daysOut = 14,
   actorId?: string | null,
 ): Promise<AvailabilitySlot[]> {
-  const { oauth2, creds } = await authedClient(tenantId, actorId)
-  const calendar = google.calendar({ version: 'v3', auth: oauth2 })
   const now = new Date()
   // Pad the horizon by 1 day so freebusy covers the last slot's end time.
   const end = new Date(now.getTime() + (daysOut + 1) * 24 * 3600 * 1000)
-  const busyRes = await calendar.freebusy.query({
-    requestBody: {
-      timeMin: now.toISOString(),
-      timeMax: end.toISOString(),
-      items: [{ id: creds.calendarId }],
-    },
-  })
-  const busy = (busyRes.data.calendars?.[creds.calendarId]?.busy ?? []).map((b) => ({
-    start: new Date(b.start!).getTime(),
-    end: new Date(b.end!).getTime(),
-  }))
+  const busy = await queryBusyBlocks(tenantId, now.toISOString(), end.toISOString(), actorId)
 
   const candidates = generateCandidateSlots(daysOut)
   return candidates.map((slot) => {
@@ -368,6 +416,19 @@ export async function getGoogleAvailability(
     const conflict = busy.some((b) => s < b.end && e > b.start)
     return { ...slot, available: !conflict }
   })
+}
+
+// Contract M (low-level): merged busy intervals on the synced Google calendar
+// for [fromIso, toIso). Throws if Google isn't connected; the api-level
+// getBusyIntervals wraps this with disconnected/error source tagging for S5.
+export async function fetchBusyIntervals(
+  tenantId: string,
+  fromIso: string,
+  toIso: string,
+  actorId?: string | null,
+): Promise<BusyInterval[]> {
+  const busy = await queryBusyBlocks(tenantId, fromIso, toIso, actorId)
+  return mergeBusyIntervals(busy, new Date(fromIso).getTime(), new Date(toIso).getTime())
 }
 
 // Tries Google first; falls back to stub if anything goes wrong. Logs the

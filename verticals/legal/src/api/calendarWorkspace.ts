@@ -15,7 +15,9 @@ import {
   rescheduleEvent,
   cancelEvent,
   loadCredentials,
+  fetchBusyIntervals,
   type WorkspaceEvent,
+  type BusyInterval,
 } from '../adapters/googleCalendar.js'
 import { redactSecret } from '../adapters/redact.js'
 import { getMatter } from '../queries/matters.js'
@@ -90,6 +92,41 @@ export async function listWorkspaceEvents(
       }
     }),
     source: 'google',
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Contract M — getBusyIntervals(range): the busy/free picture of the attorney's
+// synced Google calendar. S5's availability engine consumes this; keep the shape
+// stable. Returns merged BUSY intervals within [fromIso, toIso) — free time is
+// the complement, which the caller computes against its own working-hours model.
+// `source` mirrors listWorkspaceEvents: 'disconnected' (no Google creds),
+// 'error' (connected but the read failed; cause in `error`), 'google' (live).
+// ───────────────────────────────────────────────────────────────────────────
+export interface BusyIntervalsResult {
+  intervals: BusyInterval[]
+  source: CalendarSource
+  error?: string
+}
+
+export async function getBusyIntervals(
+  ctx: ActionContext,
+  range: { fromIso: string; toIso: string },
+): Promise<BusyIntervalsResult> {
+  // Same disconnected-vs-error discipline as listWorkspaceEvents: no creds is a
+  // genuine 'disconnected', a thrown read is a real 'error' with a clean cause.
+  const creds = await loadCredentials(ctx.tenantId, ctx.actorId)
+  if (!creds) return { intervals: [], source: 'disconnected' }
+  try {
+    const intervals = await fetchBusyIntervals(
+      ctx.tenantId,
+      range.fromIso,
+      range.toIso,
+      ctx.actorId,
+    )
+    return { intervals, source: 'google' }
+  } catch (err) {
+    return { intervals: [], source: 'error', error: cleanGoogleError(err) }
   }
 }
 
