@@ -9,12 +9,15 @@ import {
   getAvailability,
   getOAuthClientConfig,
   loadCredentials,
+  probeGoogleCapabilities,
   rescheduleEvent,
   saveCredentials,
+  REQUIRED_CONNECT_SCOPES,
   type AvailabilitySlot,
   type CreatedEvent,
 } from '../adapters/googleCalendar.js'
 import { lookupActorByEmail } from './identity.js'
+import { recordIntegrationProbe } from './integrations.js'
 import { signOAuthState, verifyOAuthState } from '../adapters/oauthState.js'
 import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import type { ActionContext } from '@exsto/substrate'
@@ -172,6 +175,48 @@ export async function exchangeGoogleCode(state: string, code: string): Promise<E
         'No refresh token returned. Re-authorize with consent screen (revoke at https://myaccount.google.com/permissions and try again).',
       )
     }
+    // Calendar/mail connect always carries the signed-in attorney (the init route
+    // requires a session; actorId is bound into the HMAC-signed state). Assert it
+    // so the connection is stored under — and the probe recorded for — a real
+    // attorney, never the firm-wide slot.
+    if (!parsedState.actorId) {
+      throw new Error('Calendar/mail connect requires a signed-in attorney.')
+    }
+    const connectingActorId: string = parsedState.actorId
+    // Minimal action context from the HMAC-signed state (never the request): the
+    // connecting attorney + their tenant. Used to record the probe through the
+    // core (legal.integration.probe). recordIntegrationProbe is best-effort here —
+    // the connect outcome is decided locally below; a missing kind or transient
+    // audit failure must never turn a good connect into a failure.
+    const probeCtx: ActionContext = {
+      tenantId: parsedState.tenantId,
+      actorId: connectingActorId,
+    }
+    const auditProbe = (outcome: 'connected' | 'error', detail: string | null) =>
+      recordIntegrationProbe(probeCtx, 'google', outcome, detail, email).catch((e) =>
+        console.error('[google] probe audit failed (non-fatal):', e),
+      )
+
+    // Force full re-consent when the broad grant came back narrowed (a box was
+    // unchecked, or a stale incremental grant): store nothing, surface exactly
+    // what's missing, and leave an 'error' row so Settings shows "reconnect".
+    const granted = (tokens.scope ?? '').split(/\s+/).filter(Boolean)
+    const missing = REQUIRED_CONNECT_SCOPES.filter((s) => !granted.includes(s))
+    if (missing.length > 0) {
+      const detail = `Google returned an incomplete grant — missing ${missing.join(', ')}. Reconnect and approve all requested access.`
+      await auditProbe('error', detail)
+      throw new Error(detail)
+    }
+
+    // Capability probe with the in-hand access token BEFORE persisting: only a
+    // passing Gmail-read AND Calendar-list flips the connection to 'connected'.
+    // (Fixes the original bug where status was set on token receipt alone.)
+    const probe = await probeGoogleCapabilities(tokens.access_token)
+    if (!probe.ok) {
+      await auditProbe('error', probe.detail)
+      throw new Error(`Google connected, but the capability check failed: ${probe.detail}`)
+    }
+
     const expiresAt = new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000)
     // Store under the connecting attorney bound into the signed state — never a
     // value from the request — so one attorney can't overwrite another's tokens.
@@ -185,8 +230,10 @@ export async function exchangeGoogleCode(state: string, code: string): Promise<E
         scope: tokens.scope ?? GOOGLE_OAUTH_SCOPES_CONNECT.join(' '),
         calendarId: 'primary',
       },
-      parsedState.actorId ?? null,
+      connectingActorId,
     )
+    // Probe passed → record it through the core (stamps last_probe_at + audits).
+    await auditProbe('connected', null)
     stored = true
   }
 

@@ -1,6 +1,7 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   connectIntegration,
+  disconnectGranola,
   disconnectIntegration,
   getTenantSettings,
   listIntegrationStatuses,
@@ -59,3 +60,15 @@ registerTool({
     return { ok: true }
   },
 } satisfies Tool<{ provider: IntegrationProvider }, { ok: true }>)
+
+// Granola is OAuth (per-attorney), not an api-key provider — connect happens via
+// the browser flow (/api/auth/granola/*); this is its disconnect (WP1.2).
+registerTool({
+  name: 'legal.granola.disconnect',
+  description: "Disconnect the signed-in attorney's Granola OAuth connection.",
+  mode: 'write',
+  handler: async (ctx: ActionContext) => {
+    await disconnectGranola(ctx)
+    return { ok: true }
+  },
+} satisfies Tool<Record<string, never>, { ok: true }>)

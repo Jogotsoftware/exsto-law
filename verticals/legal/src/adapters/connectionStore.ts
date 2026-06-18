@@ -47,6 +47,28 @@ export function isPerActorProvider(provider: string): boolean {
   return PER_ACTOR_PROVIDERS.has(provider)
 }
 
+// Public wrappers over the per-row scoping helpers, so the probe action handler
+// (which writes the connection row on its own action-transaction client, not
+// withSuperuser) can resolve the same owner + Vault-secret name this module uses
+// — keeping one source of truth for the (provider, actor) → row/secret mapping.
+export function connectionOwner(
+  provider: string,
+  actorId: string | null | undefined,
+): string | null {
+  return ownerActor(provider, actorId)
+}
+export function integrationSecretName(
+  tenantId: string,
+  provider: string,
+  owner: string | null,
+): string {
+  return secretName(tenantId, provider, owner)
+}
+// The (tenant, provider, COALESCE(actor_id, FIRM_ACTOR_SENTINEL)) uniqueness slot
+// (migration 0016). Exported so the probe handler's ON CONFLICT targets the same
+// index expression this module relies on.
+export const FIRM_ACTOR_SENTINEL = FIRM_ACTOR
+
 // The actor that OWNS a connection for (provider, requesting actor): the attorney
 // for personal providers, null (firm-wide) otherwise. A personal provider with no
 // actorId resolves to null too — which only matches the empty post-migration
@@ -239,7 +261,10 @@ export async function markConnectionError(
   await withSuperuser(async (client) => {
     await client.query(
       `UPDATE legal_integration_connection
-       SET status = 'error', last_error = left($3, 500), updated_at = now()
+       SET status = 'error',
+           last_error = left($3, 500),
+           detail = legal_integration_connection.detail || jsonb_build_object('last_probe_at', now()),
+           updated_at = now()
        WHERE tenant_id = $1 AND provider = $2
          AND COALESCE(actor_id, '${FIRM_ACTOR}'::uuid) = COALESCE($4::uuid, '${FIRM_ACTOR}'::uuid)
          AND status <> 'disconnected'`,
