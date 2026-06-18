@@ -7,6 +7,8 @@ import './handlers/index.js'
 export * from './api/index.js'
 export * from './queries/index.js'
 export * from './templates/loader.js'
+// Contract H — deterministic template merge (WP2.5).
+export * from './lib/templates/render.js'
 export type { ClaudeDraftRequest, ClaudeDraftResult } from './adapters/claude.js'
 export { resolveAnthropicApiKey } from './adapters/claude.js'
 export { resolvePerplexityApiKey } from './adapters/perplexity.js'

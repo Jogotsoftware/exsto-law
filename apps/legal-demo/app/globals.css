@@ -4487,3 +4487,39 @@ button.danger.outline:hover:not(:disabled) {
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* Document template editor (WP2.5): point-and-click insert bar + document canvas. */
+.tpl-insert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.tpl-insert-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+.tpl-insert .qb-pill {
+  border: none;
+  cursor: pointer;
+}
+.tpl-insert .qb-pill:hover {
+  background: #e0e7ff;
+}
+.tpl-newfield {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.tpl-newfield input {
+  width: 12rem;
+}
+.tpl-canvas {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  background: #fff;
+  padding: 1.25rem 1.5rem;
+}
