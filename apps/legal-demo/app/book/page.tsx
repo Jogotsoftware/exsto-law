@@ -603,6 +603,7 @@ export default function BookPage() {
                 ) : (
                   <AvailabilityCalendar
                     slots={slots}
+                    live={slotsSource !== 'stub'}
                     selectedStartIso={selectedSlot?.startIso ?? null}
                     onSelect={setSelectedSlot}
                     lastUpdated={slotsLastUpdated}

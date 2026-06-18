@@ -8,6 +8,7 @@ import {
   insertEvent,
   getLatestAttributeValue,
 } from './common.js'
+import { readFirmDefaultRate } from './firmSettings.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Billing handlers (Session 4): invoice.issue + invoice.send.
@@ -239,12 +240,16 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
     )
   }
 
-  const defaultRate = await getLatestAttributeValue<string>(
+  // Contract K (Session 7): the per-line default rate is the client's explicit
+  // client_billable_rate, falling back to the firm default when the client has
+  // none. A per-line rate_override still wins over both (priceLine).
+  const clientRate = await getLatestAttributeValue<string>(
     client,
     ctx.tenantId,
     clientEntityId,
     'client_billable_rate',
   )
+  const defaultRate = clientRate ?? (await readFirmDefaultRate(client, ctx.tenantId))
 
   // Resolve + price every line first (also validates each source is unbilled).
   const priced: PricedLine[] = []
