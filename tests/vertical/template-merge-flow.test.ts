@@ -54,7 +54,11 @@ run('template_merge generation (live DB) — Objective 6', { timeout: 120_000 },
 
     const result = await runDraftGeneration(
       { tenantId: TENANT, actorId: AGENT_ACTOR },
-      { matterEntityId: matterId, documentKind: 'engagement_letter', generationMode: 'template_merge' },
+      {
+        matterEntityId: matterId,
+        documentKind: 'engagement_letter',
+        generationMode: 'template_merge',
+      },
     )
     expect(result).not.toBeNull()
     const effects = result!.effects[0] as { draftEntityId: string; documentVersionId: string }
