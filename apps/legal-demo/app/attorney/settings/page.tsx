@@ -42,6 +42,18 @@ interface TenantSettings {
   updatedAt: string | null
 }
 
+interface FirmSignature {
+  signature: string | null
+  enabled: boolean
+  isDefault: boolean
+  resolved: string
+}
+
+interface SignatureSettings {
+  signature: FirmSignature
+  sendAsDisplayName: string
+}
+
 const PROVIDER_META: Record<Provider, { name: string; desc: string }> = {
   google_calendar: {
     name: 'Google (Calendar & Email)',
@@ -96,6 +108,10 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [connectingProvider, setConnectingProvider] = useState<ApiKeyProvider | null>(null)
   const [feedback, setFeedback] = useState<AssistantFeedbackEntry[] | null>(null)
+  const [sig, setSig] = useState<SignatureSettings | null>(null)
+  const [sigDraft, setSigDraft] = useState<string>('')
+  const [sigEnabled, setSigEnabled] = useState<boolean>(true)
+  const [savedSig, setSavedSig] = useState(false)
 
   const refreshIntegrations = useCallback(async () => {
     try {
@@ -145,17 +161,33 @@ export default function SettingsPage() {
     }
   }, [])
 
+  const refreshSignature = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<SignatureSettings>({
+        toolName: 'legal.settings.signature.get',
+      })
+      setSig(r)
+      // Seed the editable draft with the stored text, or the firm-derived default
+      // so the attorney edits from a sensible starting point rather than blank.
+      setSigDraft(r.signature.signature ?? r.signature.resolved ?? '')
+      setSigEnabled(r.signature.enabled)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
   useEffect(() => {
     refreshSettings()
     refreshIntegrations()
     refreshGoogle()
     refreshFeedback()
+    refreshSignature()
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       const err = params.get('google_error')
       if (err) setError(err)
     }
-  }, [refreshSettings, refreshIntegrations, refreshGoogle, refreshFeedback])
+  }, [refreshSettings, refreshIntegrations, refreshGoogle, refreshFeedback, refreshSignature])
 
   function updateField<K extends keyof TenantSettings>(key: K, value: TenantSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s))
@@ -181,6 +213,26 @@ export default function SettingsPage() {
       })
       setSavedSettings(true)
       setTimeout(() => setSavedSettings(false), 2000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function saveSignature() {
+    setBusy('signature')
+    setError(null)
+    try {
+      const r = await callAttorneyMcp<SignatureSettings>({
+        toolName: 'legal.settings.signature.set',
+        input: { signature: sigDraft, enabled: sigEnabled },
+      })
+      setSig(r)
+      setSigDraft(r.signature.signature ?? r.signature.resolved ?? '')
+      setSigEnabled(r.signature.enabled)
+      setSavedSig(true)
+      setTimeout(() => setSavedSig(false), 2000)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -409,6 +461,86 @@ export default function SettingsPage() {
                 rows={2}
               />
             </label>
+          </>
+        )}
+      </section>
+
+      <section>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.85rem' }}
+        >
+          <h2 style={{ margin: 0 }}>Email signature</h2>
+          <button
+            className="primary"
+            onClick={saveSignature}
+            disabled={busy === 'signature' || !sig}
+            style={{ marginLeft: 'auto' }}
+          >
+            {busy === 'signature' ? 'Saving…' : 'Save signature'}
+          </button>
+        </div>
+        {savedSig && (
+          <div
+            className="alert"
+            style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
+          >
+            Saved. New emails will use this signature.
+          </div>
+        )}
+        {!sig ? (
+          <div className="loading-block">
+            <span className="spinner" /> Loading…
+          </div>
+        ) : (
+          <>
+            <p style={{ color: 'var(--muted)', margin: '0 0 0.85rem' }}>
+              Appended automatically to every outbound client email — manual sends, replies, booking
+              confirmations and invoices. Sent as <strong>{sig.sendAsDisplayName}</strong> from your
+              connected Gmail.
+            </p>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                marginBottom: '0.7rem',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={sigEnabled}
+                onChange={(e) => {
+                  setSigEnabled(e.target.checked)
+                  setSavedSig(false)
+                }}
+                style={{ width: 'auto' }}
+              />
+              <span>Append a signature to outbound email</span>
+            </label>
+            <label>
+              <span>Signature</span>
+              <textarea
+                value={sigDraft}
+                onChange={(e) => {
+                  setSigDraft(e.target.value)
+                  setSavedSig(false)
+                }}
+                rows={5}
+                disabled={!sigEnabled}
+                placeholder={'Best regards,\nJuan Carlos Pacheco\nPacheco Law Firm'}
+              />
+            </label>
+            {sigEnabled && sig.signature.isDefault && (
+              <p style={{ color: 'var(--muted)', fontSize: '0.85rem', margin: '0.4rem 0 0' }}>
+                Until you save your own, emails are signed with a signature derived from your firm
+                details above.
+              </p>
+            )}
+            {!sigEnabled && (
+              <p style={{ color: 'var(--muted)', fontSize: '0.85rem', margin: '0.4rem 0 0' }}>
+                Outbound email will not carry a signature.
+              </p>
+            )}
           </>
         )}
       </section>
