@@ -4250,3 +4250,97 @@ button.danger.outline:hover:not(:disabled) {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ── Attorney sidebar (modern icon nav) ─────────────────────────────────── */
+.att-side {
+  width: 232px;
+  min-width: 232px;
+  min-height: 100vh;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #0e1f3f 0%, #15315f 100%);
+  box-shadow:
+    1px 0 0 rgba(255, 255, 255, 0.05),
+    6px 0 30px -18px rgba(15, 23, 42, 0.6);
+  padding: 0.55rem;
+}
+.att-side-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.9rem 0.7rem 1.1rem;
+  margin-bottom: 0.35rem;
+  color: #fff;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.32rem;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.att-side-brand:hover {
+  text-decoration: none;
+}
+.att-side-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: #14306b;
+  background: linear-gradient(135deg, #f3cd8c 0%, #d08a3e 100%);
+  box-shadow: 0 5px 14px -5px rgba(208, 138, 62, 0.7);
+  flex: none;
+}
+.att-side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 0.35rem;
+}
+.att-side-link {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.62rem 0.7rem;
+  border-radius: 9px;
+  color: #aeb9c9;
+  font-size: 0.93rem;
+  font-weight: 500;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+.att-side-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  text-decoration: none;
+}
+.att-side-link.active {
+  background: rgba(255, 255, 255, 0.11);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+.att-side-ico {
+  display: inline-flex;
+  color: #8094ad;
+  flex: none;
+  transition: color 0.16s ease;
+}
+.att-side-link:hover .att-side-ico {
+  color: #cdd9ea;
+}
+.att-side-link.active .att-side-ico {
+  color: #e7a44e;
+}
+.att-side-foot {
+  margin-top: auto;
+  padding: 1rem 0.75rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: #7e8da0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
