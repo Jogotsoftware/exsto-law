@@ -326,18 +326,17 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
     setNotice(null)
     try {
       const r = await callAttorneyMcp<{
-        activationGated: boolean
         delivered: boolean
-        to: string | null
+        to: string
       }>({
         toolName: 'legal.invoice.send',
-        input: { invoiceEntityId: inv.invoiceEntityId },
+        input: {
+          invoiceEntityId: inv.invoiceEntityId,
+          // The "Pay now" link in the email lands on this app's portal.
+          payUrlBase: typeof window !== 'undefined' ? window.location.origin : '',
+        },
       })
-      setNotice(
-        r.activationGated
-          ? `${inv.invoiceNumber} recorded as sent to ${r.to ?? 'the client'} — live email delivery is activation-gated (connect Google + comms send to enable).`
-          : `${inv.invoiceNumber} sent to ${r.to ?? 'the client'}.`,
-      )
+      setNotice(`${inv.invoiceNumber} emailed to ${r.to} with a Pay-now link.`)
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

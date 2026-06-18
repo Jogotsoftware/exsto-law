@@ -97,7 +97,7 @@ registerTool({
 registerTool({
   name: 'legal.invoice.send',
   description:
-    'Send an issued invoice to the client and record invoice.sent through the core. v1 live delivery is activation-gated (Google connect + comms send contract) — the response flags activationGated.',
+    'Email an issued invoice to the client (amounts + a "Pay now" link to the portal) through the firm\'s Gmail, and record invoice.sent through the core. Requires Google to be connected; throws a clear error if it is not.',
   mode: 'write',
   inputSchema: {
     type: 'object',
@@ -107,7 +107,12 @@ registerTool({
         type: 'string',
         description: 'Recipient override; defaults to the client main-contact email.',
       },
-      message: { type: 'string', description: 'Optional cover message.' },
+      message: { type: 'string', description: 'Optional cover line added under the greeting.' },
+      payUrlBase: {
+        type: 'string',
+        description:
+          'App origin for the "Pay now" link (e.g. https://app.pacheco.law); the link is `${payUrlBase}/portal/pay/<invoiceNumber>`. Pass window.location.origin from the browser.',
+      },
     },
     required: ['invoiceEntityId'],
     additionalProperties: false,
