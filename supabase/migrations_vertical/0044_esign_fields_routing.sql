@@ -1,7 +1,7 @@
 -- =============================================================================
--- Vertical migration 0028: E-signature fields, routing order, and status
+-- Vertical migration 0044: E-signature fields, routing order, and status
 --
--- Extends the native e-sign lifecycle (0027) toward a DocuSign-style flow, still
+-- Extends the native e-sign lifecycle (0043) toward a DocuSign-style flow, still
 -- config-as-data (no schema change). Adds:
 --   • signature fields as anchor tags (esign/fields.ts) — the parsed field plan
 --     is stored on the envelope (envelope_fields); each signer's filled values on

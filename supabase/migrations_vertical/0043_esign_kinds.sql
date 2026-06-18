@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0027: E-signature envelope lifecycle (Session 5)
+-- Vertical migration 0043: E-signature envelope lifecycle (Session 5)
 --
 -- Configuration-as-data (invariant 12 / 23): e-signature is composed from the
 -- existing primitives — no schema change, no new tables.
