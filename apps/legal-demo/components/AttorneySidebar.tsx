@@ -24,10 +24,11 @@ export function AttorneySidebar() {
   return (
     <aside
       style={{
-        width: 208,
-        minWidth: 208,
+        width: 216,
+        minWidth: 216,
         minHeight: '100vh',
-        background: '#1b2a41',
+        background: 'linear-gradient(180deg, #0f2143 0%, #16335f 100%)',
+        boxShadow: '1px 0 0 rgba(255,255,255,0.05), 4px 0 24px -12px rgba(15,23,42,0.4)',
         color: '#cdd6e3',
         display: 'flex',
         flexDirection: 'column',
@@ -43,9 +44,10 @@ export function AttorneySidebar() {
           display: 'block',
           padding: '1.1rem 1.25rem',
           color: '#ffffff',
-          fontWeight: 700,
-          fontSize: '1.05rem',
-          letterSpacing: '0.01em',
+          fontFamily: 'var(--font-serif, Georgia, serif)',
+          fontWeight: 600,
+          fontSize: '1.25rem',
+          letterSpacing: '0',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
         }}
       >
@@ -60,9 +62,9 @@ export function AttorneySidebar() {
               href={item.href}
               style={{
                 padding: '0.6rem 1.25rem',
-                color: active ? '#ffffff' : '#aab7c8',
-                background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
-                borderLeft: active ? '3px solid #7da2cc' : '3px solid transparent',
+                color: active ? '#ffffff' : '#aeb9c9',
+                background: active ? 'rgba(255,255,255,0.09)' : 'transparent',
+                borderLeft: active ? '3px solid #d08a3e' : '3px solid transparent',
                 fontWeight: active ? 600 : 400,
                 fontSize: '0.92rem',
               }}

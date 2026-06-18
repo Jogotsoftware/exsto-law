@@ -102,7 +102,13 @@ body {
     sans-serif
   );
   font-size: var(--text-base);
-  background: var(--bg);
+  /* Subtle aurora canvas (matches the booking flagship) so the whole app reads
+     as premium depth, not a flat page — glass cards blur this behind them. */
+  background:
+    radial-gradient(1100px 620px at 8% -10%, rgba(37, 99, 235, 0.1), transparent 58%),
+    radial-gradient(900px 600px at 100% 0%, rgba(180, 83, 9, 0.06), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--fg);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -366,12 +372,16 @@ tbody tr:hover {
 }
 
 section {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 1.35rem 1.6rem;
-  margin-bottom: 1.25rem;
-  box-shadow: var(--shadow-sm);
+  /* Glassy elevated card: translucent + backdrop blur over the aurora canvas,
+     soft layered depth (ui-ux-pro-max: Glassmorphism + Dimensional Layering). */
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: var(--radius-xl);
+  padding: 1.5rem 1.7rem;
+  margin-bottom: 1.35rem;
+  box-shadow: var(--shadow-lg);
 }
 section h2 {
   margin-top: 0;
