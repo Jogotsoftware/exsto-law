@@ -11,7 +11,11 @@ import { verifyCaptchaIfConfigured } from '@/lib/captcha'
 export const runtime = 'nodejs'
 
 const TENANT_ID = process.env.LEGAL_CLIENT_TENANT_ID ?? '00000000-0000-0000-0000-000000000001'
-const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0000-000000000004'
+// The public-intake system actor seeded by 0001_pacheco_law_vertical_seed.sql.
+// MUST match a real actor row — the prior default (…0000-000000000004) was never
+// seeded, so every booking action.insert FK-failed (action_actor_id_fkey) and the
+// whole booking rolled back. The other client routes already use …0001-…0005.
+const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 // Client portal writes always come from the public-intake system actor; client
 // identity (Marcus, Priya) is captured in the client_contact entity and is

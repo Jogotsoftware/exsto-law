@@ -50,7 +50,7 @@ netlify env:set GOOGLE_OAUTH_REDIRECT_URI "https://<your-site>.netlify.app/api/a
 
 # Public-intake actor (only needed for the client portal MCP route)
 netlify env:set LEGAL_CLIENT_TENANT_ID "00000000-0000-0000-0000-000000000001"
-netlify env:set LEGAL_CLIENT_ACTOR_ID "00000000-0000-0000-0000-000000000004"
+netlify env:set LEGAL_CLIENT_ACTOR_ID "00000000-0000-0000-0001-000000000005"
 
 # Attorney side derives ctx from the signed-in session (actor table) — no
 # tenant/actor env vars needed.
