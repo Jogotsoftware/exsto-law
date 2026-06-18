@@ -45,6 +45,9 @@ import './tools/savedViewTools.js'
 // it sends through the attorney's Gmail (mail.send provenance). The matter page
 // already calls legal.email.send_draft_link.
 import './tools/sendDraftLinkEmail.js'
+// Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
+// invoices, list/inspect them, and send (activation-gated). Session 4.
+import './tools/billingTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {
