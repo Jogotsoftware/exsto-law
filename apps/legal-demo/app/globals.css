@@ -4551,3 +4551,14 @@ button.danger.outline:hover:not(:disabled) {
   gap: 0.6rem;
   flex-wrap: wrap;
 }
+
+/* Form field label — used by the Templates tab editor and simple forms. */
+.field-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
