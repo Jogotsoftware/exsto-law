@@ -1215,6 +1215,10 @@ export async function submitBooking(
       timeZoneName: 'short',
     }),
     matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
+    // Client account access (S10): magic-link portal sign-in. The prospect
+    // booking confirmation email links here so the client can set up portal
+    // access using the same email they just booked with.
+    portal_url: baseUrl ? `${baseUrl}/portal/login` : null,
   }
   await queueNotification(ctx, {
     routeKindName: 'prospect_intake_confirmation',
