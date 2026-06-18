@@ -115,7 +115,15 @@ export function getGranolaRedirectUri(): string {
   return `${base}/api/auth/granola/callback`
 }
 
-const GRANOLA_SCOPE = process.env.GRANOLA_OAUTH_SCOPE ?? 'openid offline_access'
+// Scope: the protected-resource metadata (mcp.granola.ai/.well-known/
+// oauth-protected-resource) declares scope `mcp`; `offline_access` gets us a
+// refresh token. Override via env if Granola changes it.
+const GRANOLA_SCOPE = process.env.GRANOLA_OAUTH_SCOPE ?? 'mcp offline_access'
+
+// RFC 8707 resource indicator — the MCP server URL the token must be audience-
+// bound to. Sent on authorize + token + refresh so mcp.granola.ai/mcp accepts the
+// bearer. Defaults to the same MCP endpoint granolaMcp connects to.
+const GRANOLA_RESOURCE = process.env.GRANOLA_MCP_URL ?? 'https://mcp.granola.ai/mcp'
 
 export async function buildGranolaAuthUrl(args: {
   clientId: string
@@ -132,6 +140,7 @@ export async function buildGranolaAuthUrl(args: {
   url.searchParams.set('state', args.state)
   url.searchParams.set('code_challenge', args.challenge)
   url.searchParams.set('code_challenge_method', 'S256')
+  url.searchParams.set('resource', GRANOLA_RESOURCE)
   return url.toString()
 }
 
@@ -173,6 +182,7 @@ export async function exchangeGranolaCode(args: {
       client_id: args.clientId,
       redirect_uri: args.redirectUri,
       code_verifier: args.verifier,
+      resource: GRANOLA_RESOURCE,
     }),
   })
   if (!res.ok) {
@@ -195,6 +205,7 @@ export async function refreshGranolaTokens(args: {
       grant_type: 'refresh_token',
       refresh_token: args.refreshToken,
       client_id: args.clientId,
+      resource: GRANOLA_RESOURCE,
     }),
   })
   if (!res.ok) {
