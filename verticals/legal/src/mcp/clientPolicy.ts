@@ -40,6 +40,10 @@ export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.client.matter_timeline', // status + whitelisted milestone timeline for one matter
   'legal.client.thread_get', // read the client↔attorney portal thread for one matter
   'legal.client.message_post', // post a message to the attorney on one of the client's matters
+  'legal.esign.portal.list', // the client's documents awaiting their signature
+  'legal.esign.portal.load', // load one of the client's signing requests (+ their fields)
+  'legal.esign.portal.sign', // record the client's signature on their own request
+  'legal.esign.portal.decline', // record the client declining their own request
 ])
 
 export function isClientPortalAuthedTool(toolName: string): boolean {

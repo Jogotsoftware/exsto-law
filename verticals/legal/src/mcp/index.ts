@@ -45,6 +45,10 @@ import './tools/savedViewTools.js'
 // it sends through the attorney's Gmail (mail.send provenance). The matter page
 // already calls legal.email.send_draft_link.
 import './tools/sendDraftLinkEmail.js'
+// Session 5: "Send for signature" + envelope status + portal signing.
+import './tools/sendForSignature.js'
+import './tools/esignAttorneyTools.js'
+import './tools/esignPortalTools.js'
 // Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
 // invoices, list/inspect them, and send (activation-gated). Session 4.
 import './tools/billingTools.js'
