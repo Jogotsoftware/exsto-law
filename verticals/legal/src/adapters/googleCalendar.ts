@@ -364,18 +364,55 @@ export async function listCalendarEvents(
     orderBy: 'startTime',
     maxResults: 250,
   })
-  return (res.data.items ?? [])
-    .filter((e) => e.status !== 'cancelled')
-    .map((e) => ({
-      eventId: e.id ?? '',
-      summary: e.summary ?? '(no title)',
-      startIso: e.start?.dateTime ?? (e.start?.date ? `${e.start.date}T00:00:00Z` : null),
-      endIso: e.end?.dateTime ?? (e.end?.date ? `${e.end.date}T00:00:00Z` : null),
-      allDay: Boolean(e.start?.date && !e.start?.dateTime),
-      htmlLink: e.htmlLink ?? null,
-      attendeeEmails: (e.attendees ?? []).map((a) => a.email ?? '').filter((x) => x.includes('@')),
-      status: e.status ?? 'confirmed',
-    }))
+  return (res.data.items ?? []).filter((e) => e.status !== 'cancelled').map(mapGoogleEvent)
+}
+
+function mapGoogleEvent(e: {
+  id?: string | null
+  summary?: string | null
+  start?: { dateTime?: string | null; date?: string | null } | null
+  end?: { dateTime?: string | null; date?: string | null } | null
+  htmlLink?: string | null
+  attendees?: Array<{ email?: string | null }> | null
+  status?: string | null
+}): WorkspaceEvent {
+  return {
+    eventId: e.id ?? '',
+    summary: e.summary ?? '(no title)',
+    startIso: e.start?.dateTime ?? (e.start?.date ? `${e.start.date}T00:00:00Z` : null),
+    endIso: e.end?.dateTime ?? (e.end?.date ? `${e.end.date}T00:00:00Z` : null),
+    allDay: Boolean(e.start?.date && !e.start?.dateTime),
+    htmlLink: e.htmlLink ?? null,
+    attendeeEmails: (e.attendees ?? []).map((a) => a.email ?? '').filter((x) => x.includes('@')),
+    status: e.status ?? 'confirmed',
+  }
+}
+
+// Fetch ONE event by id (for reconciliation). Returns null when the event is gone
+// from Google — either cancelled (events.get returns status='cancelled') or hard-
+// deleted (404/410). Other errors (auth, network) throw so the caller can skip and
+// retry next pass rather than mis-mark a still-live event as deleted.
+export async function getCalendarEvent(
+  tenantId: string,
+  eventId: string,
+  actorId?: string | null,
+): Promise<WorkspaceEvent | null> {
+  const { oauth2, creds } = await authedClient(tenantId, actorId)
+  const calendar = google.calendar({ version: 'v3', auth: oauth2 })
+  try {
+    const res = await calendar.events.get({ calendarId: creds.calendarId, eventId })
+    if (res.data.status === 'cancelled') return null
+    return mapGoogleEvent(res.data)
+  } catch (err) {
+    // Gone from Google = 404/410. The reliable signal is response.status (a number);
+    // Gaxios's err.code is often a Node string (e.g. 'ECONNRESET'), so coerce both
+    // and check numerically. Any OTHER error (auth, network) re-throws so the caller
+    // skips this one and retries next pass rather than mis-marking it deleted.
+    const e = err as { code?: number | string; response?: { status?: number } }
+    const httpStatus = Number(e?.response?.status ?? e?.code)
+    if (httpStatus === 404 || httpStatus === 410) return null
+    throw err
+  }
 }
 
 export interface CreateEventInput {

@@ -128,6 +128,18 @@ export async function listMeetingsForContact(
   })
 }
 
+// All meetings currently assigned to a matter (open meeting_of) — the set the
+// reconciliation pass re-reads against Google. Each row carries the current
+// snapshot so the worker can diff before writing a correction.
+export async function listMeetingsToReconcile(ctx: ActionContext): Promise<MeetingSummary[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<MeetingRow>(meetingSelect(`mr.target_entity_id IS NOT NULL`), [
+      ctx.tenantId,
+    ])
+    return res.rows.map(mapMeeting)
+  })
+}
+
 // Captured meetings not currently assigned to any matter (no open meeting_of) —
 // e.g. a meeting the attorney pulled in then unassigned.
 export async function listUnassignedMeetings(ctx: ActionContext): Promise<MeetingSummary[]> {
