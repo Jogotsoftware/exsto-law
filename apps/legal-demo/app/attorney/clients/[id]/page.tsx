@@ -4,11 +4,14 @@
 // matters (migration 0020). Shows both, each clickable through, plus Contract-D
 // Email / Schedule launchers aimed at the client's main contact.
 
-import { use, useEffect, useState } from 'react'
+import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { ChevronLeftIcon } from '@/components/icons'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
+
+type BillingType = '' | 'hourly' | 'fixed'
+const MONEY_RE = /^\d+(\.\d{1,2})?$/
 
 interface ClientContactRow {
   contactEntityId: string
@@ -46,8 +49,16 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [client, setClient] = useState<ClientDetail | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [form, setForm] = useState<{
+    name: string
+    billingType: BillingType
+    rate: string
+    mainContactId: string
+  }>({ name: '', billingType: '', rate: '', mainContactId: '' })
 
-  useEffect(() => {
+  const load = useCallback(() => {
     callAttorneyMcp<{ client: ClientDetail | null }>({
       toolName: 'legal.client.get',
       input: { clientEntityId: id },
@@ -56,7 +67,53 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [id])
 
+  useEffect(load, [load])
+
   const mainContact = client?.contacts.find((c) => c.isMain) ?? client?.contacts[0] ?? null
+
+  function beginEdit() {
+    if (!client) return
+    setForm({
+      name: client.name ?? '',
+      billingType: (client.billingType as BillingType) ?? '',
+      rate: client.billableRate ?? '',
+      mainContactId: client.mainContactId ?? '',
+    })
+    setError(null)
+    setEditing(true)
+  }
+
+  async function save() {
+    if (!client) return
+    if (!form.name.trim()) {
+      setError('A client name is required.')
+      return
+    }
+    if (form.billingType !== '' && form.rate.trim() && !MONEY_RE.test(form.rate.trim())) {
+      setError('Enter the rate as an amount like 350 or 350.00.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const input: Record<string, unknown> = {
+        client_entity_id: client.clientEntityId,
+        client_name: form.name.trim(),
+      }
+      if (form.billingType !== '') {
+        input.billing_type = form.billingType
+        if (form.rate.trim()) input.billable_rate = form.rate.trim()
+      }
+      if (form.mainContactId) input.main_contact_id = form.mainContactId
+      await callAttorneyMcp({ toolName: 'legal.client.update', input })
+      setEditing(false)
+      load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <main>
@@ -79,6 +136,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           >
             <h1 style={{ margin: 0 }}>{client.name || 'Client'}</h1>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem' }}>
+              {!editing && <button onClick={beginEdit}>Edit</button>}
               <button
                 onClick={() =>
                   launchCompose({
@@ -101,6 +159,75 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
               </button>
             </div>
           </div>
+
+          {editing && (
+            <section style={{ borderLeft: '3px solid var(--border)' }}>
+              <h2 style={{ marginTop: 0 }}>Edit client</h2>
+              <div className="form-grid">
+                <label>
+                  <span>Client name</span>
+                  <input
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>Billing</span>
+                  <select
+                    value={form.billingType}
+                    onChange={(e) =>
+                      setForm({ ...form, billingType: e.target.value as BillingType })
+                    }
+                  >
+                    <option value="">Not set</option>
+                    <option value="hourly">Hourly</option>
+                    <option value="fixed">Fixed</option>
+                  </select>
+                </label>
+                {form.billingType !== '' && (
+                  <label>
+                    <span>{form.billingType === 'hourly' ? 'Hourly rate (USD)' : 'Fee (USD)'}</span>
+                    <input
+                      inputMode="decimal"
+                      value={form.rate}
+                      onChange={(e) => setForm({ ...form, rate: e.target.value })}
+                      placeholder="350.00"
+                    />
+                  </label>
+                )}
+                {client.contacts.length > 0 && (
+                  <label>
+                    <span>Main contact</span>
+                    <select
+                      value={form.mainContactId}
+                      onChange={(e) => setForm({ ...form, mainContactId: e.target.value })}
+                    >
+                      <option value="">—</option>
+                      {client.contacts.map((c) => (
+                        <option key={c.contactEntityId} value={c.contactEntityId}>
+                          {c.fullName || c.email || '(no name)'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+              <div style={{ marginTop: '0.9rem', display: 'flex', gap: '0.5rem' }}>
+                <button className="primary" onClick={save} disabled={busy || !form.name.trim()}>
+                  {busy ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => {
+                    setEditing(false)
+                    setError(null)
+                  }}
+                  disabled={busy}
+                >
+                  Cancel
+                </button>
+              </div>
+            </section>
+          )}
 
           <section>
             <div className="kv-grid">
