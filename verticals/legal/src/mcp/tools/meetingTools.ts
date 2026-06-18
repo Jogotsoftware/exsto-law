@@ -2,12 +2,14 @@ import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   assignMeeting,
   unassignMeeting,
+  reconcileAllMeetings,
   listMeetingsForMatter,
   listMeetingsForContact,
   listUnassignedMeetings,
   type AssignMeetingInput,
   type AssignMeetingResult,
   type MeetingSummary,
+  type ReconcileSummary,
 } from '../../index.js'
 import type { ActionContext, ActionResult } from '@exsto/substrate'
 
@@ -101,8 +103,22 @@ const unassignedTool: Tool<Record<string, never>, { meetings: MeetingSummary[] }
   handler: async (ctx: ActionContext) => ({ meetings: await listUnassignedMeetings(ctx) }),
 }
 
+// Drive the meeting↔Google two-way sync. The reconcile handler + reconcileAllMeetings
+// already existed but nothing called them (legal.meeting.reconcile had fired 0×);
+// this exposes them so a re-route/rename/cancel made in Google flows back as an
+// append-only correction. Best-effort per event, safe to re-run, no input.
+const reconcileTool: Tool<Record<string, never>, ReconcileSummary> = {
+  name: 'legal.meeting.reconcile_all',
+  description:
+    'Reconcile every matter-assigned meeting against Google: re-reads each captured event and appends a legal.meeting.reconcile correction when it moved, was renamed, or was cancelled. Returns {checked, updated, cancelled, skipped}. Best-effort per event; safe to re-run.',
+  mode: 'write',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: (ctx: ActionContext) => reconcileAllMeetings(ctx),
+}
+
 registerTool(assignTool)
 registerTool(unassignTool)
+registerTool(reconcileTool)
 registerTool(forMatterTool)
 registerTool(forContactTool)
 registerTool(unassignedTool)
