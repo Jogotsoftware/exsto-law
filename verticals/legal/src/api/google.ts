@@ -20,7 +20,8 @@ import { lookupActorByEmail } from './identity.js'
 import { recordIntegrationProbe } from './integrations.js'
 import { signOAuthState, verifyOAuthState } from '../adapters/oauthState.js'
 import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
-import type { ActionContext } from '@exsto/substrate'
+import { getFirmBookingRules } from './firmBookingRules.js'
+import { withActionContext, type ActionContext } from '@exsto/substrate'
 
 export type GoogleAuthMode = 'signin' | 'calendar' | 'mail'
 
@@ -252,14 +253,46 @@ export async function disconnectGoogle(ctx: ActionContext): Promise<void> {
   await deleteCredentials(ctx.tenantId, ctx.actorId)
 }
 
+// Per-service slot length (Contract G): the service's configured
+// duration_minutes when set, else the firm default. Read with a direct query
+// (not getService) to avoid a google.ts ↔ services.ts import cycle.
+async function resolveServiceDuration(
+  ctx: ActionContext,
+  serviceKey: string | undefined,
+  fallbackMinutes: number,
+): Promise<number> {
+  if (!serviceKey) return fallbackMinutes
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ dm: number | null }>(
+      `SELECT (transitions->'booking'->>'duration_minutes')::int AS dm
+         FROM workflow_definition
+        WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
+        ORDER BY version DESC
+        LIMIT 1`,
+      [ctx.tenantId, serviceKey],
+    )
+    const dm = res.rows[0]?.dm
+    return typeof dm === 'number' && dm > 0 ? dm : fallbackMinutes
+  })
+}
+
 export async function fetchAvailability(
   ctx: ActionContext,
   daysOut: number,
+  opts: { serviceKey?: string } = {},
 ): Promise<{ slots: AvailabilitySlot[]; source: 'google' | 'stub' }> {
   // Public booking page: no signed-in attorney, so read the firm's primary
   // connected attorney's calendar. (Per-link attorney selection is track B.)
   const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
-  return getAvailability(ctx.tenantId, daysOut, firmActor)
+  // Firm rules (Contract L) shape the grid; the service's duration (Contract G)
+  // sizes each slot, falling back to the firm default duration.
+  const rules = await getFirmBookingRules(ctx)
+  const durationMinutes = await resolveServiceDuration(
+    ctx,
+    opts.serviceKey,
+    rules.defaultDurationMinutes,
+  )
+  return getAvailability(ctx.tenantId, daysOut, firmActor, rules, durationMinutes)
 }
 
 export interface CreateBookingEventArgs {
