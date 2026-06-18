@@ -13,32 +13,54 @@ import {
 } from './common.js'
 
 // ───────────────────────────────────────────────────────────────────────────
-// draft.generate — persist an AI-generated draft (REQ-DRAFT-01..04). The
-// action kind requires a reasoning trace (invariant 20); submitAction enforces
-// it, the worker persists it first. Creates document_draft + content_blob +
-// document_version v1 (pending_review), wires draft_of, emits draft.completed.
+// draft.generate / draft.merge — persist a first-draft document (REQ-DRAFT-01..04,
+// WP3.4). Two production paths share one persistence shape:
+//   • draft.generate — AI draft. requires_reasoning_trace=true; the worker
+//     persists the trace first, then submits with it. Provenance: the model.
+//   • draft.merge    — deterministic template merge (Objective 6). No model call,
+//     so no reasoning trace. Provenance: system. Same document_draft + version.
+// Both create content_blob + document_draft entity + document_version v1
+// (pending_review), wire draft_of, flip the matter to in_review, emit
+// draft.completed, and record generation_mode so the audit trail names the METHOD.
 // ───────────────────────────────────────────────────────────────────────────
 
-interface DraftGeneratePayload {
-  matter_entity_id: string
-  // Any service-configured document kind (the two Phase-0 kinds plus any added via
-  // the Service Library). Stored verbatim as the document_kind attribute/label.
-  document_kind: string
-  document_markdown: string
-  model_identity: string
-  reasoning_trace_id: string
+type GenerationMode = 'ai_draft' | 'template_merge'
+
+interface PersistDraftArgs {
+  matterEntityId: string
+  // Any service-configured document kind. Stored verbatim as the document_kind
+  // attribute/label.
+  documentKind: string
+  documentMarkdown: string
   jurisdiction: string
+  generationMode: GenerationMode
+  // Set for ai_draft (the trace is mandatory there); null for template_merge.
+  reasoningTraceId: string | null
+  // Provenance of the produced facts: 'agent' (the model) for ai_draft,
+  // 'system' (deterministic render) for template_merge.
+  sourceType: 'agent' | 'system'
+  // The model identity for ai_draft; the merge method label for template_merge.
+  sourceRef: string
   confidence?: number
+  versionMetadata?: Record<string, unknown>
 }
 
-registerActionHandler('draft.generate', async (ctx, client, payload, actionId) => {
-  const p = payload as unknown as DraftGeneratePayload
-
+async function persistDraftDocument(
+  ctx: { tenantId: string; actorId: string },
+  client: DbClient,
+  actionId: string,
+  p: PersistDraftArgs,
+): Promise<{
+  draftEntityId: string
+  contentBlobId: string
+  documentVersionId: string
+  versionNumber: number
+}> {
   const contentBlobId = await insertContentBlob(client, {
     tenantId: ctx.tenantId,
     actionId,
     contentType: 'text/markdown',
-    body: p.document_markdown,
+    body: p.documentMarkdown,
   })
 
   const docKindId = await lookupKindId(
@@ -52,14 +74,15 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     ctx.tenantId,
     actionId,
     docKindId,
-    `${p.document_kind} draft`,
-    { document_kind: p.document_kind, jurisdiction: p.jurisdiction },
+    `${p.documentKind} draft`,
+    { document_kind: p.documentKind, jurisdiction: p.jurisdiction },
   )
 
   const draftAttrs: Array<{ kind: string; value: unknown; confidence?: number }> = [
-    { kind: 'document_kind', value: p.document_kind },
+    { kind: 'document_kind', value: p.documentKind },
     { kind: 'draft_status', value: 'pending_review' },
     { kind: 'document_jurisdiction', value: p.jurisdiction },
+    { kind: 'generation_mode', value: p.generationMode },
   ]
   if (p.confidence != null)
     draftAttrs.push({ kind: 'drafting_confidence', value: p.confidence, confidence: p.confidence })
@@ -72,8 +95,8 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
       attributeKindId: akId,
       value: a.value,
       confidence: a.confidence ?? 1.0,
-      sourceType: 'agent',
-      sourceRef: p.model_identity,
+      sourceType: p.sourceType,
+      sourceRef: p.sourceRef,
     })
   }
 
@@ -84,8 +107,8 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     contentBlobId,
     versionNumber: 1,
     status: 'pending_review',
-    reasoningTraceId: p.reasoning_trace_id,
-    metadata: { model_identity: p.model_identity },
+    reasoningTraceId: p.reasoningTraceId,
+    metadata: { generation_mode: p.generationMode, ...(p.versionMetadata ?? {}) },
   })
 
   const draftOfId = await lookupKindId(
@@ -98,16 +121,16 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     tenantId: ctx.tenantId,
     actionId,
     sourceEntityId: draftEntityId,
-    targetEntityId: p.matter_entity_id,
+    targetEntityId: p.matterEntityId,
     relationshipKindId: draftOfId,
-    properties: { document_kind: p.document_kind },
+    properties: { document_kind: p.documentKind },
   })
 
   // Matter moves to in_review once a draft lands (unless already terminal).
   const currentStatus = await getLatestAttributeValue<string>(
     client,
     ctx.tenantId,
-    p.matter_entity_id,
+    p.matterEntityId,
     'matter_status',
   )
   if (currentStatus !== 'approved' && currentStatus !== 'closed') {
@@ -120,7 +143,7 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
-      entityId: p.matter_entity_id,
+      entityId: p.matterEntityId,
       attributeKindId: statusKindId,
       value: 'in_review',
       confidence: 1.0,
@@ -133,18 +156,73 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     tenantId: ctx.tenantId,
     actionId,
     eventKindName: 'draft.completed',
-    primaryEntityId: p.matter_entity_id,
+    primaryEntityId: p.matterEntityId,
     secondaryEntityIds: [draftEntityId],
     data: {
-      document_kind: p.document_kind,
+      document_kind: p.documentKind,
       document_version_id: versionId,
-      model_identity: p.model_identity,
+      generation_mode: p.generationMode,
+      model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
     },
-    sourceType: 'agent',
-    sourceRef: p.model_identity,
+    sourceType: p.sourceType,
+    sourceRef: p.sourceRef,
   })
 
   return { draftEntityId, contentBlobId, documentVersionId: versionId, versionNumber: 1 }
+}
+
+interface DraftGeneratePayload {
+  matter_entity_id: string
+  document_kind: string
+  document_markdown: string
+  model_identity: string
+  reasoning_trace_id: string
+  jurisdiction: string
+  confidence?: number
+}
+
+registerActionHandler('draft.generate', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as DraftGeneratePayload
+  return persistDraftDocument(ctx, client, actionId, {
+    matterEntityId: p.matter_entity_id,
+    documentKind: p.document_kind,
+    documentMarkdown: p.document_markdown,
+    jurisdiction: p.jurisdiction,
+    generationMode: 'ai_draft',
+    reasoningTraceId: p.reasoning_trace_id,
+    sourceType: 'agent',
+    sourceRef: p.model_identity,
+    confidence: p.confidence,
+  })
+})
+
+interface DraftMergePayload {
+  matter_entity_id: string
+  document_kind: string
+  document_markdown: string
+  jurisdiction: string
+  // The template the merge rendered (config version vs bundled repo), for audit.
+  template_id?: string
+  // Slots left unfilled by the deterministic merge — surfaced to the attorney.
+  missing_fields?: string[]
+}
+
+registerActionHandler('draft.merge', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as DraftMergePayload
+  return persistDraftDocument(ctx, client, actionId, {
+    matterEntityId: p.matter_entity_id,
+    documentKind: p.document_kind,
+    documentMarkdown: p.document_markdown,
+    jurisdiction: p.jurisdiction,
+    generationMode: 'template_merge',
+    reasoningTraceId: null,
+    sourceType: 'system',
+    sourceRef: 'template_merge',
+    versionMetadata: {
+      template_id: p.template_id ?? null,
+      missing_fields: p.missing_fields ?? [],
+    },
+  })
 })
 
 // ───────────────────────────────────────────────────────────────────────────

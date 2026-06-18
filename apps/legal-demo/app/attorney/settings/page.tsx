@@ -6,7 +6,9 @@ import { fetchSession } from '@/lib/auth'
 
 type Provider = 'google_calendar' | 'anthropic' | 'openai' | 'perplexity' | 'granola' | 'docusign'
 
-type ApiKeyProvider = Exclude<Provider, 'google_calendar' | 'docusign'>
+// google_calendar AND granola are OAuth providers (connect via a browser flow),
+// docusign is coming-soon — the rest are api-key.
+type ApiKeyProvider = Exclude<Provider, 'google_calendar' | 'docusign' | 'granola'>
 
 interface IntegrationStatus {
   provider: Provider
@@ -17,6 +19,7 @@ interface IntegrationStatus {
   connectedAt: string | null
   lastVerifiedAt: string | null
   lastVerifyError: string | null
+  lastProbeAt: string | null
   accountEmail?: string | null
 }
 
@@ -222,6 +225,36 @@ export default function SettingsPage() {
     }
   }
 
+  // Granola: per-attorney browser OAuth → MCP (WP1.2). Mirrors Google: redirect to
+  // the server-side init route, which stores the connection under this attorney.
+  async function connectGranola() {
+    const session = await fetchSession()
+    if (!session) {
+      setError('Sign in first, then connect Granola.')
+      return
+    }
+    setBusy('connect_granola')
+    window.location.href = `/api/auth/granola/init?return_to=/attorney/settings`
+  }
+
+  async function disconnectGranola() {
+    if (
+      !confirm(
+        'Disconnect Granola? Consultation transcripts will stop importing until reconnected.',
+      )
+    )
+      return
+    setBusy('disconnect_granola')
+    try {
+      await callAttorneyMcp({ toolName: 'legal.granola.disconnect' })
+      await refreshIntegrations()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function handleDisconnect(provider: ApiKeyProvider) {
     if (!confirm(`Disconnect ${PROVIDER_META[provider].name}?`)) return
     setBusy(`disconnect_${provider}`)
@@ -259,6 +292,8 @@ export default function SettingsPage() {
                 busy={busy}
                 onConnectGoogle={connectGoogle}
                 onDisconnectGoogle={disconnectGoogle}
+                onConnectGranola={connectGranola}
+                onDisconnectGranola={disconnectGranola}
                 onConnectKey={() =>
                   i.provider !== 'google_calendar' &&
                   i.provider !== 'docusign' &&
@@ -434,6 +469,8 @@ function IntegrationCard({
   busy,
   onConnectGoogle,
   onDisconnectGoogle,
+  onConnectGranola,
+  onDisconnectGranola,
   onConnectKey,
   onDisconnectKey,
 }: {
@@ -442,11 +479,14 @@ function IntegrationCard({
   busy: string | null
   onConnectGoogle: () => void
   onDisconnectGoogle: () => void
+  onConnectGranola: () => void
+  onDisconnectGranola: () => void
   onConnectKey: () => void
   onDisconnectKey: () => void
 }) {
   const meta = PROVIDER_META[status.provider]
   const isGoogle = status.provider === 'google_calendar'
+  const isGranola = status.provider === 'granola'
   return (
     <div
       className={`integration-card ${status.connected ? 'connected' : ''} ${status.comingSoon ? 'coming-soon' : ''}`}
@@ -460,7 +500,7 @@ function IntegrationCard({
       {/* Google scope detail — one connection should show calendar + email read
           + email send all granted. A legacy connection missing email read shows
           a reconnect hint. */}
-      {isGoogle && google?.connected && (
+      {isGoogle && status.connected && google?.connected && (
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
           {(google.scope ?? '').includes('calendar.events') ? (
             <span className="badge ok">Calendar ✓</span>
@@ -484,6 +524,17 @@ function IntegrationCard({
         <div className="integration-card-error">{status.lastVerifyError}</div>
       )}
 
+      {/* Probe-gated freshness (WP1.5): when a connection last passed a real
+          capability check. 'Connected' only ever appears after a probe passes. */}
+      {status.connected && status.lastProbeAt && (
+        <div
+          style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.3rem' }}
+          title={status.lastProbeAt}
+        >
+          Last checked {new Date(status.lastProbeAt).toLocaleString()}
+        </div>
+      )}
+
       <div className="integration-card-actions">
         {status.comingSoon && <button disabled>Coming soon</button>}
         {isGoogle &&
@@ -503,6 +554,25 @@ function IntegrationCard({
               disabled={busy === 'connect_google'}
             >
               {busy === 'connect_google' ? 'Redirecting…' : 'Connect Google'}
+            </button>
+          ))}
+        {isGranola &&
+          !status.comingSoon &&
+          (status.connected ? (
+            <button
+              className="danger outline"
+              onClick={onDisconnectGranola}
+              disabled={busy === 'disconnect_granola'}
+            >
+              {busy === 'disconnect_granola' ? 'Disconnecting…' : 'Disconnect'}
+            </button>
+          ) : (
+            <button
+              className="primary"
+              onClick={onConnectGranola}
+              disabled={busy === 'connect_granola'}
+            >
+              {busy === 'connect_granola' ? 'Redirecting…' : 'Connect Granola'}
             </button>
           ))}
         {status.authKind === 'api_key' &&
@@ -550,7 +620,6 @@ function ConnectKeyModal({
   const meta = PROVIDER_META[provider]
   const keyHelpUrl = API_KEY_HELP[provider]
   const [apiKey, setApiKey] = useState('')
-  const [webhookSecret, setWebhookSecret] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -562,12 +631,9 @@ function ConnectKeyModal({
     setBusy(true)
     setError(null)
     try {
-      const input: { provider: ApiKeyProvider; apiKey: string; webhookSecret?: string } = {
+      const input: { provider: ApiKeyProvider; apiKey: string } = {
         provider,
         apiKey: apiKey.trim(),
-      }
-      if (provider === 'granola' && webhookSecret.trim()) {
-        input.webhookSecret = webhookSecret.trim()
       }
       const r = await callAttorneyMcp<{ ok: boolean; error?: string }>({
         toolName: 'legal.integration.connect',
@@ -618,18 +684,6 @@ function ConnectKeyModal({
             >
               Find my {meta.name} API key →
             </a>
-          )}
-          {provider === 'granola' && (
-            <label>
-              <span>Webhook signing secret (optional)</span>
-              <input
-                type="password"
-                autoComplete="off"
-                value={webhookSecret}
-                onChange={(e) => setWebhookSecret(e.target.value)}
-                placeholder="whsec_… — leave blank to keep the current one"
-              />
-            </label>
           )}
           {error && <div className="alert alert-error">{error}</div>}
         </div>

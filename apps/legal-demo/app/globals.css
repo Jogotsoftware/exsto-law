@@ -4522,4 +4522,31 @@ button.danger.outline:hover:not(:disabled) {
   line-height: 1.6;
   background: #fff;
   padding: 1.25rem 1.5rem;
+/* Public draft view — the shared-link document page (/d/[versionId]). Salvaged
+   from the parallel redesign so this page isn't unstyled on prod. */
+.public-draft {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 5rem;
+}
+.public-draft-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: 1rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+.public-draft-firm {
+  font-family: var(--font-serif);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--navy-900);
+}
+.public-draft-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }

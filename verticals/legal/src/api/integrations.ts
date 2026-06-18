@@ -8,10 +8,13 @@ import {
 import { verifyAnthropicKey } from '../adapters/claude.js'
 import { verifyPerplexityKey } from '../adapters/perplexity.js'
 
-export type IntegrationProvider = 'granola' | 'perplexity' | 'anthropic' | 'openai'
+// Granola is NOT here: it moved off api-key to per-attorney OAuth/MCP (WP1.2),
+// so it is an oauth provider (like google), connected via its own flow — never
+// through the api-key connect path below.
+export type IntegrationProvider = 'perplexity' | 'anthropic' | 'openai'
 
 export interface IntegrationStatus {
-  provider: IntegrationProvider | 'docusign' | 'google_calendar'
+  provider: IntegrationProvider | 'docusign' | 'google_calendar' | 'granola'
   authKind: 'api_key' | 'oauth' | 'coming_soon'
   connected: boolean
   comingSoon?: boolean
@@ -21,6 +24,9 @@ export interface IntegrationStatus {
   connectedAt: string | null
   lastVerifiedAt: string | null
   lastVerifyError: string | null
+  // When the last capability probe ran (connect or refresh). Drives the
+  // "Last checked …" line in the panel (WP1.5). Null if never probed.
+  lastProbeAt: string | null
   // OAuth providers only
   accountEmail?: string | null
 }
@@ -31,10 +37,10 @@ const STATIC_INTEGRATIONS: Array<{
   comingSoon?: boolean
 }> = [
   { provider: 'google_calendar', authKind: 'oauth' },
+  { provider: 'granola', authKind: 'oauth' },
   { provider: 'anthropic', authKind: 'api_key' },
   { provider: 'openai', authKind: 'api_key' },
   { provider: 'perplexity', authKind: 'api_key' },
-  { provider: 'granola', authKind: 'api_key' },
   { provider: 'docusign', authKind: 'coming_soon', comingSoon: true },
 ]
 
@@ -58,6 +64,7 @@ export async function listIntegrationStatuses(ctx: ActionContext): Promise<Integ
         connectedAt: null,
         lastVerifiedAt: null,
         lastVerifyError: null,
+        lastProbeAt: null,
       }
     }
     const c = byProvider.get(provider === 'google_calendar' ? 'google' : provider)
@@ -72,7 +79,12 @@ export async function listIntegrationStatuses(ctx: ActionContext): Promise<Integ
       connectedAt: c?.connectedAt?.toISOString() ?? null,
       lastVerifiedAt: c?.updatedAt?.toISOString() ?? null,
       lastVerifyError: c?.lastError ?? null,
-      accountEmail: provider === 'google_calendar' ? (c?.accountEmail ?? null) : undefined,
+      lastProbeAt:
+        typeof c?.detail?.last_probe_at === 'string' ? (c.detail.last_probe_at as string) : null,
+      accountEmail:
+        provider === 'google_calendar' || provider === 'granola'
+          ? (c?.accountEmail ?? null)
+          : undefined,
     }
   })
 }
@@ -107,19 +119,6 @@ async function verifyKey(provider: IntegrationProvider, apiKey: string): Promise
       // mirroring the Anthropic refactor.
       return await verifyPerplexityKey(apiKey)
     }
-    if (provider === 'granola') {
-      // Granola's public API is in beta; best-effort check against their
-      // documented /v1/me endpoint. If it 404s we accept the key on the
-      // assumption that the schema may have shifted — the connection will
-      // surface real failures when the integration is actually used.
-      const r = await fetch('https://api.granola.ai/v1/me', {
-        headers: { authorization: `Bearer ${apiKey}` },
-      })
-      if (r.status === 401 || r.status === 403) {
-        return `Granola rejected the key (${r.status})`
-      }
-      return null
-    }
     return `Unknown provider: ${provider as string}`
   } catch (err) {
     return err instanceof Error ? err.message : String(err)
@@ -138,8 +137,6 @@ async function safeBody(r: Response): Promise<string> {
 export interface ConnectIntegrationInput {
   provider: IntegrationProvider
   apiKey: string
-  // Granola only: the webhook signing secret rides in the same Vault record.
-  webhookSecret?: string
 }
 
 export interface ConnectResult {
@@ -154,20 +151,8 @@ export async function persistIntegrationKey(
   ctx: ActionContext,
   input: ConnectIntegrationInput,
 ): Promise<void> {
-  let secret: Record<string, string> = { api_key: input.apiKey }
-  if (input.provider === 'granola') {
-    // Replacing the API key must not wipe a previously-stored webhook secret:
-    // both live in the one Vault record and saveConnection overwrites whole.
-    const existing = await loadConnection<{ api_key: string; webhook_secret?: string }>(
-      ctx.tenantId,
-      'granola',
-      ctx.actorId,
-    )
-    const webhookSecret = input.webhookSecret?.trim() || existing?.secret.webhook_secret
-    secret = webhookSecret ? { api_key: input.apiKey, webhook_secret: webhookSecret } : secret
-  }
-  // Pass the attorney's actorId for every provider: the store scopes personal
-  // providers (granola) to the actor and ignores it for firm-wide AI keys.
+  // Firm-wide AI keys only (anthropic/openai/perplexity) — granola is OAuth now.
+  const secret: Record<string, string> = { api_key: input.apiKey }
   await saveConnection(
     ctx.tenantId,
     input.provider,
@@ -198,6 +183,33 @@ async function recordIntegrationChange(
   })
 }
 
+// Record a capability-probe result through the core (legal.integration.probe,
+// migration 0027). The handler performs the connection status write atomically:
+// 'connected' stamps last_probe_at on the just-stored row; 'error' upserts an
+// 'error' row with the (already-redacted) detail. NO secret material in payload.
+// Callers treat this as best-effort audit/stamp where the connect outcome is
+// already decided — a missing kind (pre-0027 env) or transient failure must not
+// break a connect that otherwise succeeded.
+export async function recordIntegrationProbe(
+  ctx: ActionContext,
+  provider: string,
+  outcome: 'connected' | 'error',
+  detail: string | null,
+  accountEmail?: string | null,
+): Promise<void> {
+  await submitAction(ctx, {
+    actionKindName: 'legal.integration.probe',
+    intentKind: 'automatic_sync',
+    payload: {
+      provider,
+      outcome,
+      detail: detail ?? null,
+      accountEmail: accountEmail ?? null,
+      actorId: ctx.actorId ?? null,
+    },
+  })
+}
+
 export async function connectIntegration(
   ctx: ActionContext,
   input: ConnectIntegrationInput,
@@ -207,6 +219,12 @@ export async function connectIntegration(
 
   await persistIntegrationKey(ctx, input)
   await recordIntegrationChange(ctx, input.provider, 'connected', input.apiKey.slice(-4))
+  // verifyKey above WAS a live provider probe — record it through the core so
+  // last_probe_at is stamped and the panel's "Last checked" shows. Best-effort:
+  // a missing kind (pre-0027 env) or transient failure must not fail the connect.
+  await recordIntegrationProbe(ctx, input.provider, 'connected', null).catch((e) =>
+    console.error('[integrations] probe audit failed (non-fatal):', e),
+  )
   const statuses = await listIntegrationStatuses(ctx)
   const status = statuses.find((s) => s.provider === input.provider)
   return { ok: true, status }

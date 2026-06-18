@@ -32,7 +32,9 @@ const ctx: ActionContext = {
   actorId: '00000000-0000-0000-0001-000000000002',
 }
 
-const TOUCHED = ['anthropic', 'granola'] as const
+// granola is no longer api-key (it moved to OAuth/MCP, WP1.2) — only the firm AI
+// keys are exercised here now.
+const TOUCHED = ['anthropic'] as const
 type Saved = { secret: unknown; detail: Record<string, unknown> } | null
 
 run('integration key management (live DB)', { timeout: 90_000 }, () => {
@@ -76,26 +78,6 @@ run('integration key management (live DB)', { timeout: 90_000 }, () => {
     expect(anthropic?.connected).toBe(true)
     expect(anthropic?.lastFour).toBe('7788')
     expect(JSON.stringify(statuses)).not.toContain('sk-vault-test-7788')
-  })
-
-  it('replacing the Granola key preserves the webhook secret; explicit secret replaces it', async () => {
-    await persistIntegrationKey(ctx, {
-      provider: 'granola',
-      apiKey: 'gk-one',
-      webhookSecret: 'whs-original',
-    })
-    await persistIntegrationKey(ctx, { provider: 'granola', apiKey: 'gk-two' })
-
-    let conn = await loadConnection<{ api_key: string; webhook_secret?: string }>(TENANT, 'granola')
-    expect(conn?.secret).toEqual({ api_key: 'gk-two', webhook_secret: 'whs-original' })
-
-    await persistIntegrationKey(ctx, {
-      provider: 'granola',
-      apiKey: 'gk-three',
-      webhookSecret: 'whs-rotated',
-    })
-    conn = await loadConnection<{ api_key: string; webhook_secret?: string }>(TENANT, 'granola')
-    expect(conn?.secret).toEqual({ api_key: 'gk-three', webhook_secret: 'whs-rotated' })
   })
 
   it('disconnect removes the Vault secret and resolution falls back to env, then errors helpfully', async () => {
