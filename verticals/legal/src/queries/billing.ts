@@ -60,7 +60,9 @@ export interface UnbilledClient {
   total: string
 }
 
-export async function listUnbilled(ctx: ActionContext): Promise<{ clients: UnbilledClient[]; currency: string }> {
+export async function listUnbilled(
+  ctx: ActionContext,
+): Promise<{ clients: UnbilledClient[]; currency: string }> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       event_id: string
@@ -132,7 +134,12 @@ export async function listUnbilled(ctx: ActionContext): Promise<{ clients: Unbil
       }
       let m = c.matters.find((x) => x.matterEntityId === r.matter_id)
       if (!m) {
-        m = { matterEntityId: r.matter_id, matterNumber: r.matter_number, entries: [], total: '0.00' }
+        m = {
+          matterEntityId: r.matter_id,
+          matterNumber: r.matter_number,
+          entries: [],
+          total: '0.00',
+        }
         c.matters.push(m)
       }
 
@@ -186,7 +193,10 @@ export async function listUnbilled(ctx: ActionContext): Promise<{ clients: Unbil
     for (const c of clients) {
       let clientCents = 0
       for (const m of c.matters) {
-        const matterCents = m.entries.reduce((s, e) => s + (e.amount ? amountToCents(e.amount) : 0), 0)
+        const matterCents = m.entries.reduce(
+          (s, e) => s + (e.amount ? amountToCents(e.amount) : 0),
+          0,
+        )
         m.total = centsToAmount(matterCents)
         clientCents += matterCents
       }
@@ -278,7 +288,10 @@ export interface InvoiceDetail extends InvoiceSummary {
   lines: InvoiceLine[]
 }
 
-export async function getInvoice(ctx: ActionContext, invoiceEntityId: string): Promise<InvoiceDetail | null> {
+export async function getInvoice(
+  ctx: ActionContext,
+  invoiceEntityId: string,
+): Promise<InvoiceDetail | null> {
   return withActionContext(ctx, async (client) => {
     const head = await client.query<{
       invoice_id: string

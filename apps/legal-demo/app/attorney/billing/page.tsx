@@ -116,7 +116,8 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
       .map((e) => ({
         sourceEventId: e.sourceEventId,
         kind: e.kind,
-        rateOverride: e.kind === 'time' && !e.rate ? (rateOverrides[e.sourceEventId] ?? null) : null,
+        rateOverride:
+          e.kind === 'time' && !e.rate ? (rateOverrides[e.sourceEventId] ?? null) : null,
       }))
     if (lines.length === 0) {
       setError('Select at least one entry for this client.')
@@ -126,11 +127,17 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
     setError(null)
     setNotice(null)
     try {
-      const res = await callAttorneyMcp<{ invoiceNumber: string; total: string; lineCount: number }>({
+      const res = await callAttorneyMcp<{
+        invoiceNumber: string
+        total: string
+        lineCount: number
+      }>({
         toolName: 'legal.invoice.issue',
         input: { clientEntityId: c.clientEntityId, currency, lines },
       })
-      setNotice(`Issued ${res.invoiceNumber} — ${money(res.total, currency)} (${res.lineCount} lines).`)
+      setNotice(
+        `Issued ${res.invoiceNumber} — ${money(res.total, currency)} (${res.lineCount} lines).`,
+      )
       setSelected({})
       setRateOverrides({})
       await refresh()
@@ -157,11 +164,17 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
     <div>
       {error && <div className="alert alert-error">{error}</div>}
       {notice && <div className="alert">{notice}</div>}
-      {clients.length === 0 && <div className="loading-block">Nothing unbilled — every time/expense entry is invoiced.</div>}
+      {clients.length === 0 && (
+        <div className="loading-block">
+          Nothing unbilled — every time/expense entry is invoiced.
+        </div>
+      )}
 
       {billable.map((c) => (
         <section key={c.clientEntityId} style={{ marginBottom: '1.4rem', padding: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.6rem' }}>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.6rem' }}
+          >
             <h3 style={{ margin: 0 }}>{c.clientName}</h3>
             <span className="badge info">
               {c.billableRate ? `${money(c.billableRate, currency)}/hr` : 'no rate set'}
@@ -222,7 +235,10 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
                             placeholder="rate"
                             value={rateOverrides[e.sourceEventId] ?? ''}
                             onChange={(ev) =>
-                              setRateOverrides((s) => ({ ...s, [e.sourceEventId]: ev.target.value }))
+                              setRateOverrides((s) => ({
+                                ...s,
+                                [e.sourceEventId]: ev.target.value,
+                              }))
                             }
                             style={{ width: '5rem', textAlign: 'right' }}
                           />
@@ -244,8 +260,8 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
         <section key="__none__" style={{ marginBottom: '1.4rem', padding: '1rem', opacity: 0.85 }}>
           <h3 style={{ marginTop: 0 }}>{c.clientName}</h3>
           <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-            These matters aren’t linked to a client yet, so they can’t be invoiced. Attach the matter to a
-            client (Clients screen) first. Unbilled {money(c.total, currency)}.
+            These matters aren’t linked to a client yet, so they can’t be invoiced. Attach the
+            matter to a client (Clients screen) first. Unbilled {money(c.total, currency)}.
           </p>
         </section>
       ))}
@@ -273,7 +289,9 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
   const refresh = useCallback(async () => {
     setError(null)
     try {
-      const r = await callAttorneyMcp<{ invoices: InvoiceSummary[] }>({ toolName: 'legal.invoice.list' })
+      const r = await callAttorneyMcp<{ invoices: InvoiceSummary[] }>({
+        toolName: 'legal.invoice.list',
+      })
       setInvoices(r.invoices)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -307,7 +325,11 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
     setError(null)
     setNotice(null)
     try {
-      const r = await callAttorneyMcp<{ activationGated: boolean; delivered: boolean; to: string | null }>({
+      const r = await callAttorneyMcp<{
+        activationGated: boolean
+        delivered: boolean
+        to: string | null
+      }>({
         toolName: 'legal.invoice.send',
         input: { invoiceEntityId: inv.invoiceEntityId },
       })
@@ -362,7 +384,9 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                   </td>
                   <td>{inv.clientName}</td>
                   <td>
-                    <span className={`badge ${inv.status === 'sent' ? 'ok' : 'info'}`}>{inv.status}</span>
+                    <span className={`badge ${inv.status === 'sent' ? 'ok' : 'info'}`}>
+                      {inv.status}
+                    </span>
                   </td>
                   <td>{fmtDate(inv.issuedDate)}</td>
                   <td style={{ textAlign: 'right' }}>{inv.lineCount}</td>
@@ -374,7 +398,11 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                     >
                       {openId === inv.invoiceEntityId ? 'Hide' : 'View'}
                     </button>
-                    <button className="primary" disabled={busy === inv.invoiceEntityId} onClick={() => send(inv)}>
+                    <button
+                      className="primary"
+                      disabled={busy === inv.invoiceEntityId}
+                      onClick={() => send(inv)}
+                    >
                       {busy === inv.invoiceEntityId ? '…' : 'Send'}
                     </button>
                   </td>
@@ -402,13 +430,19 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                             {detail.lines.map((l) => (
                               <tr key={l.lineEntityId}>
                                 <td>
-                                  <span className={`badge ${l.kind === 'time' ? 'info' : ''}`}>{l.kind}</span>
+                                  <span className={`badge ${l.kind === 'time' ? 'info' : ''}`}>
+                                    {l.kind}
+                                  </span>
                                 </td>
                                 <td>{l.matterNumber ?? '—'}</td>
                                 <td>{l.description}</td>
                                 <td style={{ textAlign: 'right' }}>{l.quantity}</td>
-                                <td style={{ textAlign: 'right' }}>{money(l.rate, detail.currency)}</td>
-                                <td style={{ textAlign: 'right' }}>{money(l.amount, detail.currency)}</td>
+                                <td style={{ textAlign: 'right' }}>
+                                  {money(l.rate, detail.currency)}
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  {money(l.amount, detail.currency)}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -434,7 +468,9 @@ function RatesTab() {
   useEffect(() => {
     ;(async () => {
       try {
-        const r = await callAttorneyMcp<{ clients: ClientSummary[] }>({ toolName: 'legal.client.list' })
+        const r = await callAttorneyMcp<{ clients: ClientSummary[] }>({
+          toolName: 'legal.client.list',
+        })
         setClients(r.clients)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -453,8 +489,9 @@ function RatesTab() {
   return (
     <div>
       <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        Read-only mirror of the client billable rates set on the Clients screen. Per-service pricing is
-        configured under Services. Time entries roll up at the client’s rate (override per line when issuing).
+        Read-only mirror of the client billable rates set on the Clients screen. Per-service pricing
+        is configured under Services. Time entries roll up at the client’s rate (override per line
+        when issuing).
       </p>
       <table className="data-table">
         <thead>
@@ -472,7 +509,9 @@ function RatesTab() {
                 <strong>{c.name}</strong>
               </td>
               <td>{c.billingType ?? '—'}</td>
-              <td style={{ textAlign: 'right' }}>{c.billableRate ? `${money(c.billableRate)}/hr` : '—'}</td>
+              <td style={{ textAlign: 'right' }}>
+                {c.billableRate ? `${money(c.billableRate)}/hr` : '—'}
+              </td>
               <td style={{ textAlign: 'right' }}>{c.matterCount}</td>
             </tr>
           ))}
@@ -497,7 +536,11 @@ export default function BillingPage() {
       </p>
       <Tabs
         tabs={[
-          { key: 'unbilled', label: 'Unbilled', content: <UnbilledTab onIssued={() => setReloadKey((k) => k + 1)} /> },
+          {
+            key: 'unbilled',
+            label: 'Unbilled',
+            content: <UnbilledTab onIssued={() => setReloadKey((k) => k + 1)} />,
+          },
           { key: 'invoices', label: 'Invoices', content: <InvoicesTab reloadKey={reloadKey} /> },
           { key: 'rates', label: 'Rates', content: <RatesTab /> },
         ]}

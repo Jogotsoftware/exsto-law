@@ -39,7 +39,8 @@ registerTool({
 
 registerTool({
   name: 'legal.invoice.get',
-  description: 'Get one invoice with its lines (each line references its source time/expense entry).',
+  description:
+    'Get one invoice with its lines (each line references its source time/expense entry).',
   mode: 'read',
   inputSchema: {
     type: 'object',
@@ -47,7 +48,9 @@ registerTool({
     required: ['invoiceEntityId'],
     additionalProperties: false,
   },
-  handler: async (ctx: ActionContext, input) => ({ invoice: await getInvoice(ctx, input.invoiceEntityId) }),
+  handler: async (ctx: ActionContext, input) => ({
+    invoice: await getInvoice(ctx, input.invoiceEntityId),
+  }),
 } satisfies Tool<{ invoiceEntityId: string }, { invoice: InvoiceDetail | null }>)
 
 registerTool({
@@ -69,9 +72,15 @@ registerTool({
         items: {
           type: 'object',
           properties: {
-            sourceEventId: { type: 'string', description: 'Id of the time.logged / expense.recorded event.' },
+            sourceEventId: {
+              type: 'string',
+              description: 'Id of the time.logged / expense.recorded event.',
+            },
             kind: { type: 'string', enum: ['time', 'expense'] },
-            rateOverride: { type: 'string', description: 'Per-line rate override (decimal string); time only.' },
+            rateOverride: {
+              type: 'string',
+              description: 'Per-line rate override (decimal string); time only.',
+            },
             descriptionOverride: { type: 'string' },
           },
           required: ['sourceEventId', 'kind'],
@@ -94,7 +103,10 @@ registerTool({
     type: 'object',
     properties: {
       invoiceEntityId: { type: 'string' },
-      toEmail: { type: 'string', description: 'Recipient override; defaults to the client main-contact email.' },
+      toEmail: {
+        type: 'string',
+        description: 'Recipient override; defaults to the client main-contact email.',
+      },
       message: { type: 'string', description: 'Optional cover message.' },
     },
     required: ['invoiceEntityId'],

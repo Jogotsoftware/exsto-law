@@ -72,7 +72,14 @@ interface PricedLine {
 
 async function setAttr(
   client: DbClient,
-  args: { tenantId: string; actionId: string; actorId: string; entityId: string; kind: string; value: unknown },
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    entityId: string
+    kind: string
+    value: unknown
+  },
 ): Promise<void> {
   const akId = await lookupKindId(client, 'attribute_kind_definition', args.tenantId, args.kind)
   await insertAttribute(client, {
@@ -88,7 +95,11 @@ async function setAttr(
 }
 
 // Has this ledger event already been billed onto some invoice line?
-async function isAlreadyBilled(client: DbClient, tenantId: string, sourceEventId: string): Promise<boolean> {
+async function isAlreadyBilled(
+  client: DbClient,
+  tenantId: string,
+  sourceEventId: string,
+): Promise<boolean> {
   const res = await client.query<{ n: string }>(
     `SELECT count(*)::text AS n
        FROM event e
@@ -125,7 +136,10 @@ async function loadSourceEvent(
 
 // hours = round(minutes / 60, 2); amount = round(hours * rate). Billing on
 // 2-dp hours keeps quantity x rate === amount exactly to the cent on the invoice.
-function priceTimeLine(minutes: number, rateStr: string): { quantity: string; amountCents: number } {
+function priceTimeLine(
+  minutes: number,
+  rateStr: string,
+): { quantity: string; amountCents: number } {
   const hoursHundredths = Math.round((minutes * 100) / 60) // hours in 1/100ths
   const rateCents = amountToCents(rateStr)
   const amountCents = Math.round((hoursHundredths * rateCents) / 100)
@@ -146,17 +160,26 @@ async function priceLine(
   if (!src.matterId) throw new Error(`Source entry ${spec.source_event_id} has no matter.`)
 
   if (spec.kind === 'time') {
-    if (src.kindName !== 'time.logged') throw new Error(`Entry ${spec.source_event_id} is not a time entry.`)
+    if (src.kindName !== 'time.logged')
+      throw new Error(`Entry ${spec.source_event_id} is not a time entry.`)
     const minutes = Number((src.payload as { duration_minutes?: number }).duration_minutes ?? 0)
     if (!(minutes > 0)) throw new Error(`Time entry ${spec.source_event_id} has no duration.`)
     const rate = (spec.rate_override ?? defaultRate ?? '').trim()
-    if (!rate) throw new Error(`No billable rate for entry ${spec.source_event_id}; set the client rate or a per-line rate.`)
+    if (!rate)
+      throw new Error(
+        `No billable rate for entry ${spec.source_event_id}; set the client rate or a per-line rate.`,
+      )
     const { quantity, amountCents } = priceTimeLine(minutes, rate)
     return {
       sourceEventId: spec.source_event_id,
       kind: 'time',
       matterId: src.matterId,
-      description: (spec.description_override ?? (src.payload as { description?: string }).description ?? '').trim() || 'Legal services',
+      description:
+        (
+          spec.description_override ??
+          (src.payload as { description?: string }).description ??
+          ''
+        ).trim() || 'Legal services',
       quantity,
       rate: centsToAmount(amountToCents(rate)),
       amountCents,
@@ -164,14 +187,20 @@ async function priceLine(
   }
 
   // expense
-  if (src.kindName !== 'expense.recorded') throw new Error(`Entry ${spec.source_event_id} is not an expense.`)
+  if (src.kindName !== 'expense.recorded')
+    throw new Error(`Entry ${spec.source_event_id} is not an expense.`)
   const amount = String((src.payload as { amount?: string }).amount ?? '0')
   const amountCents = amountToCents(amount)
   return {
     sourceEventId: spec.source_event_id,
     kind: 'expense',
     matterId: src.matterId,
-    description: (spec.description_override ?? (src.payload as { description?: string }).description ?? '').trim() || 'Expense',
+    description:
+      (
+        spec.description_override ??
+        (src.payload as { description?: string }).description ??
+        ''
+      ).trim() || 'Expense',
     quantity: '1',
     rate: centsToAmount(amountCents),
     amountCents,
@@ -200,7 +229,12 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
     throw new Error('Select at least one unbilled time or expense entry to invoice.')
   }
 
-  const defaultRate = await getLatestAttributeValue<string>(client, ctx.tenantId, clientEntityId, 'client_billable_rate')
+  const defaultRate = await getLatestAttributeValue<string>(
+    client,
+    ctx.tenantId,
+    clientEntityId,
+    'client_billable_rate',
+  )
 
   // Resolve + price every line first (also validates each source is unbilled).
   const priced: PricedLine[] = []
@@ -213,10 +247,29 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
   const issuedDate = new Date().toISOString().slice(0, 10)
 
   // ── Invoice header ──────────────────────────────────────────────────────────
-  const invoiceKindId = await lookupKindId(client, 'entity_kind_definition', ctx.tenantId, INVOICE_KIND)
-  const invoiceId = await insertEntity(client, ctx.tenantId, actionId, invoiceKindId, invoiceNumber, {})
+  const invoiceKindId = await lookupKindId(
+    client,
+    'entity_kind_definition',
+    ctx.tenantId,
+    INVOICE_KIND,
+  )
+  const invoiceId = await insertEntity(
+    client,
+    ctx.tenantId,
+    actionId,
+    invoiceKindId,
+    invoiceNumber,
+    {},
+  )
   const setHeader = (kind: string, value: unknown) =>
-    setAttr(client, { tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, entityId: invoiceId, kind, value })
+    setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: invoiceId,
+      kind,
+      value,
+    })
   await setHeader('invoice_number', invoiceNumber)
   await setHeader('invoice_status', 'issued')
   await setHeader('invoice_client_id', clientEntityId)
@@ -228,7 +281,12 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
   if (p.notes && String(p.notes).trim()) await setHeader('invoice_notes', String(p.notes).trim())
 
   // invoice → client (substrate-native parent pointer)
-  const invoiceOfId = await lookupKindId(client, 'relationship_kind_definition', ctx.tenantId, 'invoice_of')
+  const invoiceOfId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    ctx.tenantId,
+    'invoice_of',
+  )
   await insertRelationship(client, {
     tenantId: ctx.tenantId,
     actionId,
@@ -238,13 +296,37 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
   })
 
   // ── Lines + billed events ─────────────────────────────────────────────────────
-  const lineOfId = await lookupKindId(client, 'relationship_kind_definition', ctx.tenantId, 'line_of')
-  const invoiceLineKindId = await lookupKindId(client, 'entity_kind_definition', ctx.tenantId, INVOICE_LINE_KIND)
+  const lineOfId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    ctx.tenantId,
+    'line_of',
+  )
+  const invoiceLineKindId = await lookupKindId(
+    client,
+    'entity_kind_definition',
+    ctx.tenantId,
+    INVOICE_LINE_KIND,
+  )
   for (const l of priced) {
     const lineAmount = centsToAmount(l.amountCents)
-    const lineId = await insertEntity(client, ctx.tenantId, actionId, invoiceLineKindId, `${invoiceNumber} · ${l.kind}`, {})
+    const lineId = await insertEntity(
+      client,
+      ctx.tenantId,
+      actionId,
+      invoiceLineKindId,
+      `${invoiceNumber} · ${l.kind}`,
+      {},
+    )
     const setLine = (kind: string, value: unknown) =>
-      setAttr(client, { tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, entityId: lineId, kind, value })
+      setAttr(client, {
+        tenantId: ctx.tenantId,
+        actionId,
+        actorId: ctx.actorId,
+        entityId: lineId,
+        kind,
+        value,
+      })
     await setLine('line_invoice_id', invoiceId)
     await setLine('line_kind', l.kind)
     await setLine('line_source_event_id', l.sourceEventId)
@@ -310,17 +392,40 @@ registerActionHandler('invoice.send', async (ctx, client, payload, actionId) => 
   const invoiceId = (p.invoice_entity_id ?? '').trim()
   if (!invoiceId) throw new Error('invoice_entity_id is required.')
 
-  const number = await getLatestAttributeValue<string>(client, ctx.tenantId, invoiceId, 'invoice_number')
-  const status = await getLatestAttributeValue<string>(client, ctx.tenantId, invoiceId, 'invoice_status')
-  const clientEntityId = await getLatestAttributeValue<string>(client, ctx.tenantId, invoiceId, 'invoice_client_id')
+  const number = await getLatestAttributeValue<string>(
+    client,
+    ctx.tenantId,
+    invoiceId,
+    'invoice_number',
+  )
+  const status = await getLatestAttributeValue<string>(
+    client,
+    ctx.tenantId,
+    invoiceId,
+    'invoice_status',
+  )
+  const clientEntityId = await getLatestAttributeValue<string>(
+    client,
+    ctx.tenantId,
+    invoiceId,
+    'invoice_client_id',
+  )
   if (!number || !status) throw new Error('Invoice not found.')
-  if (status !== 'issued' && status !== 'sent') throw new Error(`Invoice ${number} is ${status}; only issued invoices can be sent.`)
+  if (status !== 'issued' && status !== 'sent')
+    throw new Error(`Invoice ${number} is ${status}; only issued invoices can be sent.`)
 
   // Resolve recipient: explicit override, else the client's main-contact email.
   let to = (p.to_email ?? '').trim()
   if (!to && clientEntityId) {
-    const mainContactId = await getLatestAttributeValue<string>(client, ctx.tenantId, clientEntityId, 'client_main_contact')
-    if (mainContactId) to = (await getLatestAttributeValue<string>(client, ctx.tenantId, mainContactId, 'email')) ?? ''
+    const mainContactId = await getLatestAttributeValue<string>(
+      client,
+      ctx.tenantId,
+      clientEntityId,
+      'client_main_contact',
+    )
+    if (mainContactId)
+      to =
+        (await getLatestAttributeValue<string>(client, ctx.tenantId, mainContactId, 'email')) ?? ''
   }
 
   // ── Live-delivery seam (Contract B) ──────────────────────────────────────────
@@ -352,7 +457,14 @@ registerActionHandler('invoice.send', async (ctx, client, payload, actionId) => 
   // The send was recorded through the core; mark the invoice sent. Delivery state
   // (activation_gated / delivered) lives on the invoice.sent event, so the UI can
   // show "Sent — queued (activation-gated)" honestly rather than claiming delivery.
-  await setAttr(client, { tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, entityId: invoiceId, kind: 'invoice_status', value: 'sent' })
+  await setAttr(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    entityId: invoiceId,
+    kind: 'invoice_status',
+    value: 'sent',
+  })
 
   return { sent: true, activationGated, delivered, to: to || null, invoiceNumber: number }
 })

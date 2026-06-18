@@ -30,7 +30,10 @@ export interface IssuedInvoice {
   lineCount: number
 }
 
-export async function issueInvoice(ctx: ActionContext, input: IssueInvoiceInput): Promise<IssuedInvoice> {
+export async function issueInvoice(
+  ctx: ActionContext,
+  input: IssueInvoiceInput,
+): Promise<IssuedInvoice> {
   if (!input.clientEntityId?.trim()) throw new Error('Pick a client to invoice.')
   if (!Array.isArray(input.lines) || input.lines.length === 0) {
     throw new Error('Select at least one unbilled time or expense entry.')
@@ -71,7 +74,10 @@ export interface SentInvoice {
   invoiceNumber: string
 }
 
-export async function sendInvoice(ctx: ActionContext, input: SendInvoiceInput): Promise<SentInvoice> {
+export async function sendInvoice(
+  ctx: ActionContext,
+  input: SendInvoiceInput,
+): Promise<SentInvoice> {
   if (!input.invoiceEntityId?.trim()) throw new Error('invoiceEntityId is required.')
   const res = await submitAction(ctx, {
     actionKindName: 'invoice.send',
