@@ -22,7 +22,6 @@ import {
   LockIcon,
   MailIcon,
   MegaphoneIcon,
-  PhoneIcon,
   ScaleIcon,
   SparklesIcon,
   UserIcon,
@@ -86,7 +85,11 @@ const PROGRESS_STEPS: ReadonlyArray<{ key: Exclude<Step, 'done'>; labelKey: stri
 function ServiceIcon({ serviceKey, size = 22 }: { serviceKey: string; size?: number }) {
   if (serviceKey === 'other') return <HelpCircleIcon size={size} />
   if (serviceKey.includes('amendment')) return <FileTextIcon size={size} />
-  if (serviceKey.includes('llc') || serviceKey.includes('formation') || serviceKey.includes('business'))
+  if (
+    serviceKey.includes('llc') ||
+    serviceKey.includes('formation') ||
+    serviceKey.includes('business')
+  )
     return <Building2Icon size={size} />
   return <SparklesIcon size={size} />
 }
@@ -463,11 +466,7 @@ export default function BookPage() {
                               {t(`service.${s.serviceKey}.title`, undefined, s.displayName)}
                             </span>
                             <span className="bk-service-desc">
-                              {t(
-                                `service.${s.serviceKey}.desc`,
-                                undefined,
-                                s.description ?? '',
-                              )}
+                              {t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')}
                             </span>
                           </span>
                           <span className="bk-service-tick" aria-hidden>
@@ -543,7 +542,10 @@ export default function BookPage() {
                       {t('common.back')}
                     </button>
                   )}
-                  <button className="bk-btn bk-btn-primary bk-btn-grow" onClick={advanceFromContact}>
+                  <button
+                    className="bk-btn bk-btn-primary bk-btn-grow"
+                    onClick={advanceFromContact}
+                  >
                     {t('common.continue')}
                     <ArrowRightIcon size={18} />
                   </button>
@@ -589,9 +591,7 @@ export default function BookPage() {
 
             {step === 'slot' && (
               <>
-                {slotsSource === 'stub' && (
-                  <div className="bk-notice">{t('slot.stub_notice')}</div>
-                )}
+                {slotsSource === 'stub' && <div className="bk-notice">{t('slot.stub_notice')}</div>}
                 {slots === null ? (
                   <div className="bk-loading">
                     <span className="bk-spinner" />
@@ -628,7 +628,13 @@ export default function BookPage() {
                       <span className="bk-selected-value">
                         {new Date(selectedSlot.startIso).toLocaleString(
                           lang === 'es' ? 'es-US' : undefined,
-                          { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' },
+                          {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          },
                         )}
                       </span>
                     </span>
@@ -702,7 +708,10 @@ function BookProgress({ step }: { step: Step }) {
   const current = PROGRESS_STEPS[safeIdx]
 
   return (
-    <nav className="bk-progress" aria-label={t('progress.step_of', { n: safeIdx + 1, total: PROGRESS_STEPS.length })}>
+    <nav
+      className="bk-progress"
+      aria-label={t('progress.step_of', { n: safeIdx + 1, total: PROGRESS_STEPS.length })}
+    >
       <div className="bk-progress-mobile">
         <div className="bk-progress-mobile-row">
           <span className="bk-progress-step">

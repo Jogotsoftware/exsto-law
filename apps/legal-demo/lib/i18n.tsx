@@ -98,7 +98,8 @@ const en: Record<string, string> = {
   'service.oa_amendment.title': 'Update your operating agreement',
   'service.oa_amendment.desc': 'Change or amend the operating agreement you already have.',
   'service.other.title': 'Something else',
-  'service.other.desc': "Not sure which fits? Tell us what you need and we'll point you the right way.",
+  'service.other.desc':
+    "Not sure which fits? Tell us what you need and we'll point you the right way.",
 
   // Booking flow (redesign) copy
   'service.subtitle': 'Choose what you need help with — in everyday language.',

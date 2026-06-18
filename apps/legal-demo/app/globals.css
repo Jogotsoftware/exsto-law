@@ -106,8 +106,7 @@ body {
      as premium depth, not a flat page — glass cards blur this behind them. */
   background:
     radial-gradient(1100px 620px at 8% -10%, rgba(37, 99, 235, 0.1), transparent 58%),
-    radial-gradient(900px 600px at 100% 0%, rgba(180, 83, 9, 0.06), transparent 55%),
-    var(--bg);
+    radial-gradient(900px 600px at 100% 0%, rgba(180, 83, 9, 0.06), transparent 55%), var(--bg);
   background-attachment: fixed;
   color: var(--fg);
   line-height: 1.55;
@@ -3079,8 +3078,15 @@ button.danger.outline:hover:not(:disabled) {
   --bk-danger-soft: var(--danger-soft, #fee2e2);
   --bk-ok: var(--ok, #15803d);
   /* Navy-family gradient — gold stays the sparing accent, never a gradient. */
-  --bk-grad: linear-gradient(135deg, var(--navy-700, #14306b) 0%, var(--navy, #1e3a8a) 55%, var(--navy-500, #2d4da0) 100%);
-  --bk-shadow-card: var(--shadow-lg, 0 18px 50px -20px rgba(15, 23, 42, 0.18)), 0 2px 8px -2px rgba(15, 23, 42, 0.06);
+  --bk-grad: linear-gradient(
+    135deg,
+    var(--navy-700, #14306b) 0%,
+    var(--navy, #1e3a8a) 55%,
+    var(--navy-500, #2d4da0) 100%
+  );
+  --bk-shadow-card:
+    var(--shadow-lg, 0 18px 50px -20px rgba(15, 23, 42, 0.18)),
+    0 2px 8px -2px rgba(15, 23, 42, 0.06);
   --bk-shadow-pop: 0 10px 24px -8px rgba(30, 58, 138, 0.45);
   /* Radius scale aligned to the foundation: inputs/buttons 8, cards 12, big 16. */
   --bk-r-xl: 16px;
@@ -3088,7 +3094,16 @@ button.danger.outline:hover:not(:disabled) {
   --bk-r-md: 10px;
   --bk-r-sm: 8px;
   --bk-serif: var(--font-serif, 'EB Garamond', Georgia, 'Times New Roman', serif);
-  --bk-sans: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif);
+  --bk-sans: var(
+    --font-sans,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif
+  );
   --bk-ease: cubic-bezier(0.2, 0, 0, 1);
 
   /* Override the global <main> constraints — this surface is full-bleed. */
@@ -3307,7 +3322,9 @@ button.danger.outline:hover:not(:disabled) {
   padding: 0.7rem 0.9rem;
   border-radius: var(--bk-r-md);
   font-size: 0.9rem;
-  animation: bkFadeUp 0.3s var(--bk-ease) both, bkShake 0.4s ease;
+  animation:
+    bkFadeUp 0.3s var(--bk-ease) both,
+    bkShake 0.4s ease;
 }
 .bk-notice {
   background: var(--bk-gold-soft);
