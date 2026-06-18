@@ -9,6 +9,7 @@ import { FIRM_NAME, PRODUCT_TAGLINE, PRODUCT_STAGE } from '@/lib/brand'
 import {
   CalendarIcon,
   CheckCircleIcon,
+  CopyIcon,
   FileTextIcon,
   LayersIcon,
   LayoutGridIcon,
@@ -32,6 +33,7 @@ const NAV: Array<{
   { href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
   { href: '/attorney/mail', label: 'Mail', Icon: MailIcon },
   { href: '/attorney/services', label: 'Services', Icon: LayersIcon },
+  { href: '/attorney/templates', label: 'Templates', Icon: CopyIcon },
   { href: '/attorney/billing', label: 'Billing', Icon: FileTextIcon },
   { href: '/attorney/settings', label: 'Settings', Icon: SettingsIcon },
 ]
