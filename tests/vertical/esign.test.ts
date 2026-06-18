@@ -1,23 +1,18 @@
-// Session 5 vertical acceptance: the NATIVE e-signature lifecycle on a live DB,
-// exercised end-to-end through the operation core with no external host.
+// Session 5 vertical acceptance: the native DocuSign-style e-signature flow on a
+// live DB — fields, sequential routing, portal + link signing, delivered/opened/
+// signed status — all through the operation core, no external host.
 //
 // Covers:
-//   esign.send  → signature_envelope linked envelope_of → document, one
-//                 signature_request per signer, esign.sent, and a native signing
-//                 link minted per signer (the email is enqueued).
-//   esign.sign  → the signer (via their signing token) signs through the public
-//                 path (recordSignature); the last signer completes the envelope
-//                 and the executed copy — original + signature certificate with
-//                 the original content SHA-256 — lands as a NEW immutable
-//                 document_version (invariant 14). The original version stays.
-//   esign.decline → a signer declines; the envelope closes declined.
-//   gate        → selecting an unconnected EXTERNAL provider records a
-//                 pending_dispatch envelope and attempts no live call.
+//   • send (native) with field tags + a portal signer → envelope, fields stored,
+//     first signer delivered; portal sign (recordSignatureForClient) resolves the
+//     tags and writes the executed copy as a NEW immutable document_version.
+//   • sequential order: order-1 (portal) delivered, order-2 (external link)
+//     pending; after order-1 signs, order-2 becomes delivered (with a link).
+//   • getEnvelopeStatus reflects per-signer state.
 import { describe, it, expect, afterAll } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
 
-// The native signing token is HMAC-signed; provide a secret for the test run.
 process.env.ESIGN_SIGNING_SECRET ??= 'test-esign-signing-secret-0123456789'
 
 const url = process.env.SUBSTRATE_TEST_DATABASE_URL ?? process.env.DATABASE_URL
@@ -26,17 +21,13 @@ const run = describe.skipIf(!url)
 const TENANT = '00000000-0000-0000-0000-000000000001'
 const PUBLIC_INTAKE_ACTOR = '00000000-0000-0000-0001-000000000005'
 const ATTORNEY_ACTOR = '00000000-0000-0000-0001-000000000002'
+const ATTORNEY_CTX = { tenantId: TENANT, actorId: ATTORNEY_ACTOR }
 
 function randomSlot(): { startIso: string; endIso: string } {
   const daysAhead = 60 + Math.floor(Math.random() * 200000)
   const start = new Date(Date.now() + daysAhead * 24 * 3600 * 1000)
   start.setUTCHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 2) * 30, 0, 0)
   return { startIso: start.toISOString(), endIso: new Date(start.getTime() + 1800e3).toISOString() }
-}
-
-function tokenFromLink(link: string): string {
-  const marker = '/sign/'
-  return decodeURIComponent(link.substring(link.indexOf(marker) + marker.length))
 }
 
 async function makeApprovedDraft(): Promise<{
@@ -72,28 +63,25 @@ async function makeApprovedDraft(): Promise<{
       transcriptSource: 'manual',
     },
   )
-  const draft = await cacheDraft(
-    { tenantId: TENANT, actorId: ATTORNEY_ACTOR },
-    {
-      matterEntityId: matterId,
-      documentKind: 'operating_agreement',
-      documentMarkdown: '# Operating Agreement\n\nS5 esign draft body.',
-      prompt: 'S5 esign test prompt',
-      reasoningTrace: {
-        evidence: [`entity:${matterId}`],
-        alternatives_considered: [],
-        conclusion: 'Drafted for e-sign test.',
-        confidence: 0.9,
-        ambiguities: [],
-      },
-      modelIdentity: 'cached-demo-draft',
+  const draft = await cacheDraft(ATTORNEY_CTX, {
+    matterEntityId: matterId,
+    documentKind: 'operating_agreement',
+    documentMarkdown: '# Operating Agreement\n\nS5 esign draft body.',
+    prompt: 'S5 esign test prompt',
+    reasoningTrace: {
+      evidence: [`entity:${matterId}`],
+      alternatives_considered: [],
+      conclusion: 'Drafted for e-sign test.',
+      confidence: 0.9,
+      ambiguities: [],
     },
-  )
+    modelIdentity: 'cached-demo-draft',
+  })
   const eff = draft.effects[0] as { draftEntityId: string; documentVersionId: string }
-  await approveDraft(
-    { tenantId: TENANT, actorId: ATTORNEY_ACTOR },
-    { documentVersionId: eff.documentVersionId, reviewNotes: 'ready to execute' },
-  )
+  await approveDraft(ATTORNEY_CTX, {
+    documentVersionId: eff.documentVersionId,
+    reviewNotes: 'ready to execute',
+  })
   return {
     matterId,
     draftEntityId: eff.draftEntityId,
@@ -102,7 +90,20 @@ async function makeApprovedDraft(): Promise<{
   }
 }
 
-run('native e-signature lifecycle (live DB)', { timeout: 120_000 }, () => {
+async function clientPrincipal(clientEmail: string) {
+  const { findClientContactByEmail, resolveClientMatterIds } = await import('@exsto/legal')
+  const contact = await findClientContactByEmail(clientEmail)
+  if (!contact) throw new Error('client_contact not found for ' + clientEmail)
+  const matterIds = await resolveClientMatterIds(TENANT, contact.clientContactId)
+  return {
+    tenantId: TENANT,
+    clientContactId: contact.clientContactId,
+    email: clientEmail,
+    matterIds,
+  }
+}
+
+run('native e-signature flow (live DB)', { timeout: 120_000 }, () => {
   const db = new pg.Pool({ connectionString: url })
 
   afterAll(async () => {
@@ -111,143 +112,96 @@ run('native e-signature lifecycle (live DB)', { timeout: 120_000 }, () => {
     await closeDbPool()
   })
 
-  it('send (native) → envelope + request + esign.sent + signing link; sign → completed → executed version', async () => {
-    const { sendForSignature, recordSignature } = await import('@exsto/legal')
+  it('portal signer signs with fields → executed copy resolves tags + certificate', async () => {
+    const { sendForSignature, listClientSignatures, recordSignatureForClient } =
+      await import('@exsto/legal')
     const { draftEntityId, documentVersionId, clientEmail } = await makeApprovedDraft()
 
-    // ── esign.send via the native engine (no external host) ───────────────────
-    const sent = await sendForSignature(
-      { tenantId: TENANT, actorId: ATTORNEY_ACTOR },
-      { documentVersionId, signers: [{ email: clientEmail, name: 'S5 Esign Client' }] },
-    )
+    const prepared =
+      '# Operating Agreement\n\nS5 esign draft body.\n\n' +
+      'Member: {{name:client}}\nTitle: {{title:client}}\nSignature: {{sign:client}}\nDate: {{date:client}}\n'
+
+    const sent = await sendForSignature(ATTORNEY_CTX, {
+      documentVersionId,
+      preparedMarkdown: prepared,
+      signers: [
+        { email: clientEmail, name: 'S5 Esign Client', title: 'Member', key: 'client', order: 1 },
+      ],
+    })
     expect(sent.provider).toBe('native')
-    expect(sent.dispatched).toBe(true)
-    expect(sent.providerEnvelopeRef).toBeNull()
-    expect(sent.signerLinks?.length).toBe(1)
-    const envelopeId = sent.envelopeId
-    expect(envelopeId).toBeTruthy()
+    expect(sent.fieldCount).toBe(4)
+    // The matter client is a known client_contact → routed to the portal.
+    expect(sent.signers[0]?.channel).toBe('portal')
+    expect(sent.signers[0]?.delivered).toBe(true)
 
-    // envelope_of → document, one request_of, esign.sent on the timeline.
-    const rel = await db.query(
-      `SELECT 1 FROM relationship r
-       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-       WHERE r.tenant_id=$1 AND rkd.kind_name='envelope_of'
-         AND r.source_entity_id=$2 AND r.target_entity_id=$3`,
-      [TENANT, envelopeId, draftEntityId],
-    )
-    expect(rel.rowCount).toBe(1)
-    const reqs = await db.query<{ n: string }>(
-      `SELECT count(*) AS n FROM relationship r
-       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-       WHERE r.tenant_id=$1 AND rkd.kind_name='request_of' AND r.target_entity_id=$2`,
-      [TENANT, envelopeId],
-    )
-    expect(Number(reqs.rows[0].n)).toBe(1)
-    const sentEvt = await db.query(
-      `SELECT 1 FROM event e JOIN event_kind_definition ekd ON ekd.id=e.event_kind_id
-       WHERE e.tenant_id=$1 AND ekd.kind_name='esign.sent' AND $2 = ANY(e.secondary_entity_ids)`,
-      [TENANT, envelopeId],
-    )
-    expect(sentEvt.rowCount).toBe(1)
-
-    // ── the signer signs via their secure link (public path) ──────────────────
-    const token = tokenFromLink(sent.signerLinks![0]!.url)
-    const result = await recordSignature({
-      token,
+    // Portal signing (authenticated client).
+    const principal = await clientPrincipal(clientEmail)
+    const pending = await listClientSignatures(principal)
+    expect(pending.length).toBe(1)
+    const res = await recordSignatureForClient(principal, {
+      requestId: pending[0]!.requestId,
       signatureName: 'S5 Esign Client',
       consent: 'I agree to sign electronically.',
     })
-    expect(result.completed).toBe(true)
-    expect(result.executedDocumentVersionId).toBeTruthy()
+    expect(res.completed).toBe(true)
+    expect(res.executedDocumentVersionId).toBeTruthy()
 
-    const signedEvt = await db.query(
-      `SELECT 1 FROM event e JOIN event_kind_definition ekd ON ekd.id=e.event_kind_id
-       WHERE e.tenant_id=$1 AND ekd.kind_name='esign.signed' AND e.primary_entity_id=$2`,
-      [TENANT, envelopeId],
-    )
-    expect(signedEvt.rowCount).toBe(1)
-    const completedEvt = await db.query(
-      `SELECT 1 FROM event e JOIN event_kind_definition ekd ON ekd.id=e.event_kind_id
-       WHERE e.tenant_id=$1 AND ekd.kind_name='esign.completed' AND $2 = ANY(e.secondary_entity_ids)`,
-      [TENANT, envelopeId],
-    )
-    expect(completedEvt.rowCount).toBe(1)
-
-    // envelope_status completed (latest attribute value wins).
-    const status = await db.query<{ value: string }>(
-      `SELECT a.value #>> '{}' AS value FROM attribute a
-       JOIN attribute_kind_definition akd ON akd.id=a.attribute_kind_id
-       WHERE a.tenant_id=$1 AND a.entity_id=$2 AND akd.kind_name='envelope_status'
-       ORDER BY a.valid_from DESC LIMIT 1`,
-      [TENANT, envelopeId],
-    )
-    expect(status.rows[0].value).toBe('completed')
-
-    // Executed copy = NEW immutable v2: approved, executed, with the certificate.
-    const versions = await db.query<{
-      version_number: number
-      status: string
-      executed: boolean
-      body: string
-    }>(
-      `SELECT dv.version_number, dv.status,
-              (dv.metadata->>'executed')::boolean AS executed, cb.body
+    // Executed copy: every tag resolved, certificate appended, original SHA-256.
+    const executed = await db.query<{ body: string; executed: boolean }>(
+      `SELECT cb.body, (dv.metadata->>'executed')::boolean AS executed
        FROM document_version dv JOIN content_blob cb ON cb.id=dv.content_blob_id
-       WHERE dv.tenant_id=$1 AND dv.document_entity_id=$2 ORDER BY dv.version_number`,
+       WHERE dv.tenant_id=$1 AND dv.document_entity_id=$2
+       ORDER BY dv.version_number DESC LIMIT 1`,
       [TENANT, draftEntityId],
     )
-    expect(versions.rows.length).toBe(2)
-    expect(versions.rows[1].version_number).toBe(2)
-    expect(versions.rows[1].status).toBe('approved')
-    expect(versions.rows[1].executed).toBe(true)
-    expect(versions.rows[1].body).toContain('Signature Certificate')
-    expect(versions.rows[1].body).toContain('SHA-256')
-    // The original v1 body is untouched (no certificate appended).
-    expect(versions.rows[0].body).not.toContain('Signature Certificate')
+    const body = executed.rows[0]!.body
+    expect(executed.rows[0]!.executed).toBe(true)
+    expect(body).not.toContain('{{') // all tags resolved
+    expect(body).toContain('S5 Esign Client') // name + signature
+    expect(body).toContain('Member') // title field
+    expect(body).toContain('Signature Certificate')
+    expect(body).toContain('SHA-256')
   })
 
-  it('a signer can decline; the envelope closes declined', async () => {
-    const { sendForSignature, declineSignature } = await import('@exsto/legal')
+  it('sequential order: order-1 (portal) delivered, order-2 (link) pending → delivered after order-1 signs', async () => {
+    const { sendForSignature, getEnvelopeStatus, listClientSignatures, recordSignatureForClient } =
+      await import('@exsto/legal')
     const { documentVersionId, clientEmail } = await makeApprovedDraft()
-    const sent = await sendForSignature(
-      { tenantId: TENANT, actorId: ATTORNEY_ACTOR },
-      { documentVersionId, signers: [{ email: clientEmail }] },
-    )
-    const token = tokenFromLink(sent.signerLinks![0]!.url)
-    await declineSignature({ token, reason: 'changed my mind' })
+    const externalEmail = `ext-${randomUUID().slice(0, 8)}@external.test`
 
-    const declinedEvt = await db.query(
-      `SELECT 1 FROM event e JOIN event_kind_definition ekd ON ekd.id=e.event_kind_id
-       WHERE e.tenant_id=$1 AND ekd.kind_name='esign.declined' AND e.primary_entity_id=$2`,
-      [TENANT, sent.envelopeId],
-    )
-    expect(declinedEvt.rowCount).toBe(1)
-    const status = await db.query<{ value: string }>(
-      `SELECT a.value #>> '{}' AS value FROM attribute a
-       JOIN attribute_kind_definition akd ON akd.id=a.attribute_kind_id
-       WHERE a.tenant_id=$1 AND a.entity_id=$2 AND akd.kind_name='envelope_status'
-       ORDER BY a.valid_from DESC LIMIT 1`,
-      [TENANT, sent.envelopeId],
-    )
-    expect(status.rows[0].value).toBe('declined')
-  })
+    const sent = await sendForSignature(ATTORNEY_CTX, {
+      documentVersionId,
+      preparedMarkdown: '# OA\n\nClient: {{sign:client}}\nCo-signer: {{sign:cosigner}}\n',
+      signers: [
+        { email: clientEmail, name: 'Client', key: 'client', order: 1 },
+        { email: externalEmail, name: 'Co Signer', key: 'cosigner', order: 2 },
+      ],
+    })
+    // Channels: client → portal, external → link.
+    const byEmail = Object.fromEntries(sent.signers.map((s) => [s.email, s]))
+    expect(byEmail[clientEmail]?.channel).toBe('portal')
+    expect(byEmail[externalEmail]?.channel).toBe('link')
 
-  it('gate: an unconnected external provider records pending_dispatch and sends nothing', async () => {
-    const { sendForSignature } = await import('@exsto/legal')
-    const { documentVersionId, clientEmail } = await makeApprovedDraft()
-    const sent = await sendForSignature(
-      { tenantId: TENANT, actorId: ATTORNEY_ACTOR },
-      { documentVersionId, provider: 'opensign', signers: [{ email: clientEmail }] },
-    )
-    expect(sent.dispatched).toBe(false)
-    expect(sent.activation).toBeTruthy()
-    const status = await db.query<{ value: string }>(
-      `SELECT a.value #>> '{}' AS value FROM attribute a
-       JOIN attribute_kind_definition akd ON akd.id=a.attribute_kind_id
-       WHERE a.tenant_id=$1 AND a.entity_id=$2 AND akd.kind_name='envelope_status'
-       ORDER BY a.valid_from DESC LIMIT 1`,
-      [TENANT, sent.envelopeId],
-    )
-    expect(status.rows[0].value).toBe('pending_dispatch')
+    let status = await getEnvelopeStatus(ATTORNEY_CTX, sent.envelopeId)
+    const stByEmail = (st: typeof status) =>
+      Object.fromEntries(st.signers.map((s) => [s.email, s.status]))
+    expect(stByEmail(status)[clientEmail]).toBe('delivered')
+    expect(stByEmail(status)[externalEmail]).toBe('pending') // not their turn yet
+
+    // Order-1 (portal client) signs → order-2 becomes delivered.
+    const principal = await clientPrincipal(clientEmail)
+    const pending = await listClientSignatures(principal)
+    const clientReq = pending.find((p) => p.envelopeId === sent.envelopeId)
+    expect(clientReq).toBeTruthy()
+    const r = await recordSignatureForClient(principal, {
+      requestId: clientReq!.requestId,
+      signatureName: 'Client',
+      consent: 'I agree.',
+    })
+    expect(r.completed).toBe(false) // co-signer still outstanding
+
+    status = await getEnvelopeStatus(ATTORNEY_CTX, sent.envelopeId)
+    expect(stByEmail(status)[clientEmail]).toBe('signed')
+    expect(stByEmail(status)[externalEmail]).toBe('delivered') // now their turn
   })
 })

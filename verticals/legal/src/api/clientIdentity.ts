@@ -124,3 +124,22 @@ export async function isClientContactActive(
     return res.rows.length === 1
   })
 }
+
+// The client_contact's current email (latest attribute). Tenant-scoped; used to
+// build the signing ClientPrincipal in the portal e-sign tools.
+export async function loadClientContactEmail(
+  tenantId: string,
+  clientContactId: string,
+): Promise<string | null> {
+  return withSuperuser(async (client) => {
+    const res = await client.query<{ email: string }>(
+      `SELECT a.value #>> '{}' AS email
+       FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+       WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'email'
+       ORDER BY a.valid_from DESC LIMIT 1`,
+      [tenantId, clientContactId],
+    )
+    return res.rows[0]?.email ?? null
+  })
+}

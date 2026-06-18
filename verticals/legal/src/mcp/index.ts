@@ -48,6 +48,9 @@ import './tools/sendDraftLinkEmail.js'
 // Session 5 (WP5.2): "Send for signature" — provider-agnostic e-sign, beside
 // the draft-link email tool. Creates a signature envelope through the core.
 import './tools/sendForSignature.js'
+// Session 5: attorney envelope status (delivered/opened/signed) + portal signing.
+import './tools/esignAttorneyTools.js'
+import './tools/esignPortalTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

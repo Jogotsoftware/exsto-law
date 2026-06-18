@@ -20,14 +20,25 @@ export async function POST(request: Request) {
     signatureName?: unknown
     signatureData?: unknown
     consent?: unknown
+    fieldValues?: unknown
   } | null
   const token = typeof body?.token === 'string' ? body.token : ''
   const signatureName = typeof body?.signatureName === 'string' ? body.signatureName : ''
   const signatureData = typeof body?.signatureData === 'string' ? body.signatureData : null
   const consent = typeof body?.consent === 'string' ? body.consent : ''
+  const fieldValues =
+    body?.fieldValues && typeof body.fieldValues === 'object'
+      ? (body.fieldValues as Record<string, string>)
+      : undefined
 
   try {
-    const result = await recordSignature({ token, signatureName, signatureData, consent })
+    const result = await recordSignature({
+      token,
+      signatureName,
+      signatureData,
+      consent,
+      fieldValues,
+    })
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json(

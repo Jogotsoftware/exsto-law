@@ -250,6 +250,13 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           {busy === 'email' && <span className="spinner" />}
           {busy === 'email' ? 'Sending…' : 'Email link to client'}
         </button>
+        <button
+          className="primary"
+          onClick={() => router.push(`/attorney/sign/prepare/${draft.documentVersionId}`)}
+          title="Add signers and signature fields, then send for e-signature"
+        >
+          Send for signature
+        </button>
         <a
           href={shareUrlFor(draft.documentVersionId)}
           target="_blank"
