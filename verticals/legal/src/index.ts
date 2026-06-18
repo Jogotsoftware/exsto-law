@@ -7,8 +7,18 @@ import './handlers/index.js'
 export * from './api/index.js'
 export * from './queries/index.js'
 export * from './templates/loader.js'
-// Contract H — deterministic template merge (WP2.5).
-export * from './lib/templates/render.js'
+// Contract H — deterministic template merge (WP2.5). `renderTemplate` +
+// `RenderResult` are exported by api/templateMerge (the wired draft.merge render),
+// so re-export only this module's editor utilities here to avoid the duplicate
+// root-export ambiguity (TS2308). The editor imports render() from this module
+// directly, so it's unaffected.
+export {
+  extractInputTokens,
+  extractIncludeKeys,
+  humanizeToken,
+  questionnaireFromTemplate,
+  type RenderOptions,
+} from './lib/templates/render.js'
 export type { ClaudeDraftRequest, ClaudeDraftResult } from './adapters/claude.js'
 export { resolveAnthropicApiKey } from './adapters/claude.js'
 export { resolvePerplexityApiKey } from './adapters/perplexity.js'
