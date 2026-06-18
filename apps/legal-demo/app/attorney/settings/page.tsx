@@ -76,6 +76,14 @@ const API_KEY_HELP: Partial<Record<Provider, string>> = {
   perplexity: 'https://www.perplexity.ai/settings/api',
 }
 
+interface AssistantFeedbackEntry {
+  eventId: string
+  message: string
+  category: string
+  pageContext: Record<string, unknown> | null
+  recordedAt: string
+}
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<TenantSettings | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationStatus[] | null>(null)
@@ -84,6 +92,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [connectingProvider, setConnectingProvider] = useState<ApiKeyProvider | null>(null)
+  const [feedback, setFeedback] = useState<AssistantFeedbackEntry[] | null>(null)
 
   const refreshIntegrations = useCallback(async () => {
     try {
@@ -122,16 +131,28 @@ export default function SettingsPage() {
     }
   }, [])
 
+  const refreshFeedback = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ feedback: AssistantFeedbackEntry[] }>({
+        toolName: 'legal.assistant.feedback_list',
+      })
+      setFeedback(r.feedback)
+    } catch {
+      setFeedback([])
+    }
+  }, [])
+
   useEffect(() => {
     refreshSettings()
     refreshIntegrations()
     refreshGoogle()
+    refreshFeedback()
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       const err = params.get('google_error')
       if (err) setError(err)
     }
-  }, [refreshSettings, refreshIntegrations, refreshGoogle])
+  }, [refreshSettings, refreshIntegrations, refreshGoogle, refreshFeedback])
 
   function updateField<K extends keyof TenantSettings>(key: K, value: TenantSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s))
@@ -249,6 +270,37 @@ export default function SettingsPage() {
                   handleDisconnect(i.provider as ApiKeyProvider)
                 }
               />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h2>AI assistant</h2>
+        <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
+          The in-app assistant answers questions about using the app and records beta feedback. Its
+          model is the Anthropic key above; thumbs and notes are saved through the core and triaged
+          here.
+        </p>
+        {feedback === null ? (
+          <div className="loading-block">
+            <span className="spinner" /> Loading…
+          </div>
+        ) : feedback.length === 0 ? (
+          <p className="text-muted">No feedback yet.</p>
+        ) : (
+          <div className="matter-list">
+            {feedback.map((f) => (
+              <div key={f.eventId} className="matter-row" style={{ cursor: 'default' }}>
+                <div>
+                  <div className="matter-row-title">{f.message || '(no message)'}</div>
+                  <div className="matter-row-sub">
+                    {new Date(f.recordedAt).toLocaleString()}
+                    {typeof f.pageContext?.path === 'string' ? ` · ${f.pageContext.path}` : ''}
+                  </div>
+                </div>
+                <span className="crm-pill">{f.category}</span>
+              </div>
             ))}
           </div>
         )}
