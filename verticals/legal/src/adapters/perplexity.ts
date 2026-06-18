@@ -39,7 +39,11 @@ export async function verifyPerplexityKey(apiKey: string): Promise<string | null
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         model: DEFAULT_MODEL,
-        max_tokens: 8,
+        // Perplexity rejects max_tokens < 16 with a 400 (invalid_request), which
+        // made the connect probe fail for every key — valid or not. Keep this at
+        // the API floor: the probe only needs a successful round-trip to confirm
+        // the key works, not the content, so 16 is the cheapest valid call.
+        max_tokens: 16,
         messages: [{ role: 'user', content: 'ping' }],
       }),
     })
