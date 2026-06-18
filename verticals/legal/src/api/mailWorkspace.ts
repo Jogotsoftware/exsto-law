@@ -15,6 +15,7 @@ import {
   sendEmail,
   type GmailThreadSummary,
   type GmailThreadDetail,
+  type EmailAttachment,
 } from '../adapters/gmail.js'
 
 // All client_contact emails with their matters (the allow-list that scopes
@@ -172,33 +173,66 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
   })
 }
 
-export interface ComposeInput {
+// ───────────────────────────────────────────────────────────────────────────
+// Contract B — enqueueClientEmail. The ONE through-the-core send path for
+// human-/system-composed client mail: it sends via the attorney's Gmail and
+// records a mail.send action (provenance integration:gmail) so the message lands
+// in the matter's communication history. Client-mail-scoped: the recipient must
+// be a known client contact, same discipline as every other Mail-tab send.
+//
+// S4 (invoice emails) and S5 (signature-request emails) import this — keep the
+// signature stable. Returns the action result plus the Gmail send details so
+// callers that need the message id (draft links, receipts) can use them.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface EnqueueClientEmailInput {
   to: string
   subject: string
-  bodyText: string
+  body: string
+  // Optional explicit matter linkage. When omitted, resolved from the recipient's
+  // client-contact → matter mapping (first matter).
+  matterId?: string
+  // Optional contact reference (carried for provenance; scoping is by `to`).
+  contactId?: string
+  attachments?: EmailAttachment[]
 }
 
-export async function composeToClient(
+export interface EnqueueClientEmailResult {
+  action: ActionResult
+  messageId: string
+  from: string
+  to: string
+}
+
+export async function enqueueClientEmail(
   ctx: ActionContext,
-  input: ComposeInput,
-): Promise<ActionResult> {
+  input: EnqueueClientEmailInput,
+): Promise<EnqueueClientEmailResult> {
   const index = await clientEmailIndex(ctx)
   const matters = index.get(input.to.toLowerCase())
   if (!matters || matters.length === 0) {
     throw new Error(
-      `Refusing to compose: ${input.to} is not a known client contact (client-mail-only discipline).`,
+      `Refusing to send: ${input.to} is not a known client contact (client-mail-only discipline).`,
     )
   }
+  // Prefer an explicitly supplied matter when it is one this contact belongs to;
+  // otherwise fall back to the contact's first matter.
+  const matterEntityId =
+    (input.matterId && matters.find((m) => m.matterEntityId === input.matterId)?.matterEntityId) ||
+    matters[0]!.matterEntityId
+
   const sent = await sendEmail(
     ctx.tenantId,
     {
       to: input.to,
       subject: input.subject,
-      body: input.bodyText,
+      body: input.body,
+      attachments: input.attachments,
     },
     ctx.actorId,
   )
-  return submitAction(ctx, {
+
+  const action = await submitAction(ctx, {
     actionKindName: 'mail.send',
     intentKind: 'enforcement',
     payload: {
@@ -207,11 +241,34 @@ export async function composeToClient(
       subject: input.subject,
       to: input.to,
       from: sent.from,
-      body_text: input.bodyText,
-      matter_entity_id: matters[0]!.matterEntityId,
+      body_text: input.body,
+      matter_entity_id: matterEntityId,
+      contact_entity_id: input.contactId ?? null,
       participant_emails: [input.to, sent.from],
+      attachment_filenames: (input.attachments ?? []).map((a) => a.filename),
     },
   })
+
+  return { action, messageId: sent.messageId, from: sent.from, to: input.to }
+}
+
+export interface ComposeInput {
+  to: string
+  subject: string
+  bodyText: string
+}
+
+// Mail-tab compose, kept as the thin UI-facing wrapper over Contract B.
+export async function composeToClient(
+  ctx: ActionContext,
+  input: ComposeInput,
+): Promise<ActionResult> {
+  const { action } = await enqueueClientEmail(ctx, {
+    to: input.to,
+    subject: input.subject,
+    body: input.bodyText,
+  })
+  return action
 }
 
 export interface MatterCommunication {
