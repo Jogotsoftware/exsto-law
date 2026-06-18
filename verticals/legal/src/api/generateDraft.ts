@@ -405,7 +405,8 @@ export async function resolveGenerationMode(
   const transitions = await loadServiceTransitions(ctx, serviceKey)
   // Contract G may carry per-document config under `document_generation`
   // (preferred) — read defensively and fall back to the AI path when absent.
-  const docGen = (transitions?.document_generation ?? null) as ServiceGeneration['documentGeneration']
+  const docGen = (transitions?.document_generation ??
+    null) as ServiceGeneration['documentGeneration']
   const mode = docGen?.[documentKind]?.generation_mode
   return mode === 'template_merge' ? 'template_merge' : 'ai_draft'
 }
@@ -413,9 +414,11 @@ export async function resolveGenerationMode(
 function readServiceGenerationFromTransitions(
   transitions: Record<string, unknown> | null,
 ): ServiceGeneration {
-  const cost = (transitions?.cost ?? null) as
-    | { type?: string; amount?: string; hours?: number | null }
-    | null
+  const cost = (transitions?.cost ?? null) as {
+    type?: string
+    amount?: string
+    hours?: number | null
+  } | null
   if (!cost?.amount) return {}
   const amountNum = Number(cost.amount)
   const feeAmountFormatted = Number.isFinite(amountNum)
