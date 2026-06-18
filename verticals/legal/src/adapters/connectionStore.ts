@@ -180,7 +180,7 @@ export async function loadConnection<T>(
        LEFT JOIN vault.decrypted_secrets s ON s.name = c.vault_secret_name
        WHERE c.tenant_id = $1 AND c.provider = $2
          AND COALESCE(c.actor_id, '${FIRM_ACTOR}'::uuid) = COALESCE($3::uuid, '${FIRM_ACTOR}'::uuid)
-         AND c.status <> 'disconnected'`,
+         AND c.status = 'connected'`,
       [tenantId, provider, owner],
     )
     const row = res.rows[0]
@@ -267,7 +267,7 @@ export async function markConnectionError(
            updated_at = now()
        WHERE tenant_id = $1 AND provider = $2
          AND COALESCE(actor_id, '${FIRM_ACTOR}'::uuid) = COALESCE($4::uuid, '${FIRM_ACTOR}'::uuid)
-         AND status <> 'disconnected'`,
+         AND status = 'connected'`,
       [tenantId, provider, error, owner],
     )
   })

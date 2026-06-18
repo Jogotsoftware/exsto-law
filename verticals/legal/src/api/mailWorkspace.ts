@@ -189,6 +189,9 @@ export interface EnqueueClientEmailInput {
   to: string
   subject: string
   body: string
+  // Optional branded HTML alternative (text/html). Plaintext `body` is always the
+  // fallback. Callers render it via the email kit (renderEmailHtml).
+  html?: string
   // Optional explicit matter linkage. When omitted, resolved from the recipient's
   // client-contact → matter mapping (first matter).
   matterId?: string
@@ -227,6 +230,7 @@ export async function enqueueClientEmail(
       to: input.to,
       subject: input.subject,
       body: input.body,
+      html: input.html,
       attachments: input.attachments,
     },
     ctx.actorId,

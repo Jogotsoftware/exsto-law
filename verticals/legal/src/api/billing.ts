@@ -6,6 +6,7 @@ import { submitAction, type ActionContext } from '@exsto/substrate'
 import { enqueueClientEmail } from './mailWorkspace.js'
 import { getInvoice } from '../queries/billing.js'
 import { getClient } from '../queries/client.js'
+import { renderEmailHtml } from '../email/index.js'
 
 export interface IssueInvoiceLineInput {
   sourceEventId: string
@@ -179,6 +180,15 @@ export async function sendInvoice(
     coverMessage: input.message?.trim() || null,
   })
 
+  // Branded HTML alternative (the plaintext `body` above stays the fallback).
+  const branded = renderEmailHtml('client-invoice', {
+    client_first_name: greetingName !== 'there' ? greetingName : undefined,
+    invoice_number: invoice.invoiceNumber,
+    amount_due: invoice.total,
+    pay_url: payUrl,
+    line_items: invoice.lines.map((l) => ({ label: l.description, amount: l.amount })),
+  })
+
   // Real send through Contract B (throws if Google isn't connected — the genuine
   // activation gate — or if `to` isn't a known client contact). We do NOT fake a
   // delivery: a failure here surfaces to the caller.
@@ -186,6 +196,7 @@ export async function sendInvoice(
     to,
     subject,
     body,
+    html: branded?.html,
     matterId: invoice.matterEntityId ?? undefined,
   })
 
