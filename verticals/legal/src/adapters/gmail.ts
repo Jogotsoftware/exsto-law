@@ -22,12 +22,16 @@ export interface SendEmailArgs {
   to: string
   subject: string
   body: string
+  // Optional branded HTML alternative. When present the message body becomes a
+  // multipart/alternative (text/plain `body` + this text/html), so clients render
+  // the HTML while `body` stays the plaintext fallback. Plaintext is ALWAYS sent.
+  html?: string
   // Reply support (WP7 Mail tab): thread the message into an existing Gmail
   // conversation.
   gmailThreadId?: string
   inReplyToMessageIdHeader?: string
   // Optional file attachments (Contract B). When present the message is built as
-  // multipart/mixed; otherwise it stays a single text/plain part.
+  // multipart/mixed; otherwise it stays a single text/plain (or /alternative) part.
   attachments?: EmailAttachment[]
 }
 
@@ -42,8 +46,12 @@ function wrap76(b64: string): string {
   return b64.replace(/(.{76})/g, '$1\r\n')
 }
 
-// Build the raw RFC 5322 message (single-part or multipart/mixed with
-// attachments), base64url-encoded for the Gmail send API.
+// Build the raw RFC 5322 message, base64url-encoded for the Gmail send API.
+// Four shapes, composed from one body section + an optional attachment wrapper:
+//   plain only                  → text/plain
+//   plain + html                → multipart/alternative
+//   plain + attachments         → multipart/mixed[ text/plain, …att ]
+//   plain + html + attachments  → multipart/mixed[ multipart/alternative, …att ]
 function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
   const headers = [
     `To: ${args.to}`,
@@ -54,20 +62,45 @@ function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
     headers.push(`In-Reply-To: ${args.inReplyToMessageIdHeader}`)
     headers.push(`References: ${args.inReplyToMessageIdHeader}`)
   }
+  const seed = Buffer.from(`${args.to}:${args.subject}`).toString('hex').slice(0, 24)
 
+  // The body section: a bare text/plain, or a multipart/alternative (plaintext +
+  // HTML) when an html part is supplied. Returns its own Content-Type header
+  // line(s) so it can sit at the top level OR be nested inside multipart/mixed.
+  function bodySection(): { typeLines: string[]; lines: string[] } {
+    if (args.html) {
+      const altB = `=_exsto_alt_${seed}`
+      return {
+        typeLines: [`Content-Type: multipart/alternative; boundary="${altB}"`],
+        lines: [
+          `--${altB}`,
+          'Content-Type: text/plain; charset="UTF-8"',
+          'Content-Transfer-Encoding: 8bit',
+          '',
+          args.body,
+          `--${altB}`,
+          'Content-Type: text/html; charset="UTF-8"',
+          'Content-Transfer-Encoding: 8bit',
+          '',
+          args.html,
+          `--${altB}--`,
+        ],
+      }
+    }
+    return {
+      typeLines: ['Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: 8bit'],
+      lines: [args.body],
+    }
+  }
+
+  const body = bodySection()
   let mime: string
   if (args.attachments && args.attachments.length > 0) {
-    const boundary = `=_exsto_${Buffer.from(`${args.to}:${args.subject}`).toString('hex').slice(0, 24)}`
-    const parts: string[] = [
-      `--${boundary}`,
-      'Content-Type: text/plain; charset="UTF-8"',
-      'Content-Transfer-Encoding: 8bit',
-      '',
-      args.body,
-    ]
+    const mixB = `=_exsto_mix_${seed}`
+    const parts: string[] = [`--${mixB}`, ...body.typeLines, '', ...body.lines]
     for (const att of args.attachments) {
       parts.push(
-        `--${boundary}`,
+        `--${mixB}`,
         `Content-Type: ${att.contentType}; name="${att.filename}"`,
         'Content-Transfer-Encoding: base64',
         `Content-Disposition: attachment; filename="${att.filename}"`,
@@ -75,23 +108,16 @@ function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
         wrap76(att.contentBase64),
       )
     }
-    parts.push(`--${boundary}--`)
+    parts.push(`--${mixB}--`)
     mime = [
       ...headers,
       'MIME-Version: 1.0',
-      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      `Content-Type: multipart/mixed; boundary="${mixB}"`,
       '',
       ...parts,
     ].join('\r\n')
   } else {
-    mime = [
-      ...headers,
-      'MIME-Version: 1.0',
-      'Content-Type: text/plain; charset="UTF-8"',
-      'Content-Transfer-Encoding: 8bit',
-      '',
-      args.body,
-    ].join('\r\n')
+    mime = [...headers, 'MIME-Version: 1.0', ...body.typeLines, '', ...body.lines].join('\r\n')
   }
 
   return Buffer.from(mime, 'utf-8')

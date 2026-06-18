@@ -20,9 +20,13 @@ const ebGaramond = EB_Garamond({
   weight: ['500', '600', '700'],
 })
 
+// Product wordmark — kept in sync with the email sender display name
+// (adapters/gmail.ts FIRM_SENDER_DISPLAY_NAME). The fuller single-source-of-truth
+// brand module (lib/brand.ts) lands with the Surface/Brand work; this is the
+// canary fix so no browser tab reads "wedge demo".
 export const metadata = {
-  title: 'Pacheco Law — wedge demo',
-  description: 'Pacheco Law operating-agreement workflow demo.',
+  title: 'Pacheco Law — Legal Instruments',
+  description: 'Pacheco Law — AI-native legal practice.',
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {

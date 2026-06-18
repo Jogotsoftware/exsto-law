@@ -13,6 +13,7 @@ import { enqueueJob } from '@exsto/worker-runtime'
 import { sendEmail } from '../adapters/gmail.js'
 import { getConnectionInfo, resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import { renderNotificationTemplate } from './notificationTemplates.js'
+import { renderEmailHtml } from '../email/index.js'
 
 export interface NotificationRoute {
   kindName: string
@@ -62,7 +63,7 @@ export async function attorneyEmail(tenantId: string): Promise<string | null> {
 
 type ChannelDriver = (
   ctx: ActionContext,
-  args: { to: string; subject: string; bodyText: string },
+  args: { to: string; subject: string; bodyText: string; bodyHtml?: string },
 ) => Promise<{ providerMessageId: string | null }>
 
 const DRIVERS: Record<string, ChannelDriver> = {
@@ -76,6 +77,7 @@ const DRIVERS: Record<string, ChannelDriver> = {
         to: args.to,
         subject: args.subject,
         body: args.bodyText,
+        html: args.bodyHtml,
       },
       actorId,
     )
@@ -118,11 +120,12 @@ export async function deliverNotification(ctx: ActionContext, input: NotifyInput
     )
   }
 
-  const { subject, bodyText } = renderNotificationTemplate(
-    route.templateRef ?? route.kindName,
-    input.variables,
-  )
-  const sent = await driver(ctx, { to, subject, bodyText })
+  const ref = route.templateRef ?? route.kindName
+  const { subject, bodyText } = renderNotificationTemplate(ref, input.variables)
+  // Branded HTML alternative when the kit has a matching template (ref keys mirror
+  // the route template_refs); null → plaintext-only, unchanged behaviour.
+  const branded = renderEmailHtml(ref, input.variables)
+  const sent = await driver(ctx, { to, subject, bodyText, bodyHtml: branded?.html })
 
   await submitAction(ctx, {
     actionKindName: 'notification.send',

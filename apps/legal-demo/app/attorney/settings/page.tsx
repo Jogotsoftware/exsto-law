@@ -448,7 +448,7 @@ function IntegrationCard({
       {/* Google scope detail — one connection should show calendar + email read
           + email send all granted. A legacy connection missing email read shows
           a reconnect hint. */}
-      {isGoogle && google?.connected && (
+      {isGoogle && status.connected && google?.connected && (
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
           {(google.scope ?? '').includes('calendar.events') ? (
             <span className="badge ok">Calendar ✓</span>

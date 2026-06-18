@@ -228,6 +228,16 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
   if (!Array.isArray(p.lines) || p.lines.length === 0) {
     throw new Error('Select at least one unbilled time or expense entry to invoice.')
   }
+  // Reject a payload that repeats one source entry: isAlreadyBilled only catches
+  // CROSS-invoice re-billing (the *.billed marker isn't written until the write
+  // loop), so two identical source_event_ids in one payload would otherwise both
+  // price and double the total. Throw rather than collapse (append-only).
+  const sourceIds = p.lines.map((l) => l.source_event_id)
+  if (new Set(sourceIds).size !== sourceIds.length) {
+    throw new Error(
+      'A time or expense entry appears twice in this invoice; each can be billed once.',
+    )
+  }
 
   const defaultRate = await getLatestAttributeValue<string>(
     client,
