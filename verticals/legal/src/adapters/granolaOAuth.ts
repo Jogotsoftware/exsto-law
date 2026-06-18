@@ -100,11 +100,19 @@ export function makePkce(): { verifier: string; challenge: string } {
 }
 
 export function getGranolaRedirectUri(): string {
-  const uri = process.env.GRANOLA_OAUTH_REDIRECT_URI
-  if (!uri) {
-    throw new Error('GRANOLA_OAUTH_REDIRECT_URI is required to connect Granola.')
-  }
-  return uri
+  // Explicit override wins; otherwise DERIVE the callback from the deployment base
+  // URL (same source the callback route uses). Unlike Google — whose redirect URI
+  // must be pre-registered in the Cloud console — Granola uses Dynamic Client
+  // Registration, so we register THIS exact redirect_uri at connect time and any
+  // deterministic same-origin callback works with zero extra configuration.
+  const override = process.env.GRANOLA_OAUTH_REDIRECT_URI
+  if (override) return override.replace(/\/$/, '')
+  const base = (
+    process.env.NEXT_PUBLIC_BASE_URL ??
+    process.env.URL ??
+    'https://exstolaw.netlify.app'
+  ).replace(/\/$/, '')
+  return `${base}/api/auth/granola/callback`
 }
 
 const GRANOLA_SCOPE = process.env.GRANOLA_OAUTH_SCOPE ?? 'openid offline_access'
