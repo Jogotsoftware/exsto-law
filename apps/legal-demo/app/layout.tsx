@@ -2,6 +2,7 @@ import './globals.css'
 import type { ReactNode } from 'react'
 import { Inter, EB_Garamond } from 'next/font/google'
 import { I18nProvider } from '@/lib/i18n'
+import { PRODUCT_NAME } from '@/lib/brand'
 
 // Modern legal-tech type system (platform redesign): Inter for all UI/body,
 // EB Garamond reserved for the firm wordmark + page heroes (a touch of legal
@@ -21,8 +22,9 @@ const ebGaramond = EB_Garamond({
 })
 
 export const metadata = {
-  title: 'Pacheco Law — wedge demo',
-  description: 'Pacheco Law operating-agreement workflow demo.',
+  title: PRODUCT_NAME,
+  applicationName: PRODUCT_NAME,
+  description: 'Intake, drafting, and matter workspace for Pacheco Law Firm.',
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {

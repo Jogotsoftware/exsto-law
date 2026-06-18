@@ -5,6 +5,7 @@
 // via .att-side-* classes in globals.css (so hover/active states work).
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { FIRM_NAME, PRODUCT_TAGLINE, PRODUCT_STAGE } from '@/lib/brand'
 import {
   CalendarIcon,
   CheckCircleIcon,
@@ -44,7 +45,12 @@ export function AttorneySidebar() {
         <span className="att-side-mark">
           <ScaleIcon size={18} />
         </span>
-        <span>Pacheco Law</span>
+        <span className="att-side-brand-text">
+          <span className="att-side-brand-name">{FIRM_NAME}</span>
+          <span className="att-side-brand-sub">
+            {PRODUCT_TAGLINE} · {PRODUCT_STAGE}
+          </span>
+        </span>
       </Link>
       <nav className="att-side-nav">
         {NAV.map((item) => {
@@ -65,11 +71,7 @@ export function AttorneySidebar() {
           )
         })}
       </nav>
-      <div className="att-side-foot">
-        AI-native practice
-        <br />
-        on the Exsto substrate
-      </div>
+      <div className="att-side-foot">AI-native legal practice</div>
     </aside>
   )
 }

@@ -4311,6 +4311,25 @@ button.danger.outline:hover:not(:disabled) {
   box-shadow: 0 5px 14px -5px rgba(208, 138, 62, 0.7);
   flex: none;
 }
+.att-side-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.04;
+}
+.att-side-brand-name {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.32rem;
+  font-weight: 600;
+}
+.att-side-brand-sub {
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #e7b667;
+  margin-top: 4px;
+}
 .att-side-nav {
   display: flex;
   flex-direction: column;
