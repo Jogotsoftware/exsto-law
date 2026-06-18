@@ -20,6 +20,13 @@ export interface ServiceField {
   label: string
   type: string
   required?: boolean
+  // Humane-intake flags (Contract I, WP2.4). allow_unknown: the client may check
+  // "I don't know" instead of answering (treated as an answer). ask_attorney: the
+  // question is flagged for attorney follow-up. Both default absent/false.
+  allow_unknown?: boolean
+  ask_attorney?: boolean
+  // Deprecated: per-field help text is no longer authored or shown to users
+  // (WP2.4). Kept optional so legacy repo/config schemas still type-check on read.
   help?: string
   options?: string[]
   memberFields?: ServiceField[]

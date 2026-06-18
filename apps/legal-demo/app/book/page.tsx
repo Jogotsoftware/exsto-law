@@ -39,8 +39,8 @@ interface ServiceField {
   label: string
   type: string
   required?: boolean
+  allow_unknown?: boolean
   options?: string[]
-  help?: string
 }
 
 interface ServiceSection {
@@ -266,6 +266,7 @@ export default function BookPage() {
           continue
         }
         const val = intakeResponses[field.id]
+        if (val === UNKNOWN_ANSWER) continue
         if (val === undefined || val === null || (typeof val === 'string' && val.trim() === '')) {
           return t('error.fill_field', { field: label })
         }
@@ -785,6 +786,11 @@ function ContactField({
   )
 }
 
+// Sentinel stored as a field's answer when the client checks "I don't know" on a
+// field whose schema sets allow_unknown (WP2.4). It counts as an answer, so a
+// required field is satisfied; the attorney sees the client explicitly didn't know.
+const UNKNOWN_ANSWER = '__unknown__'
+
 function FieldRenderer({
   field,
   responses,
@@ -803,6 +809,17 @@ function FieldRenderer({
   const value = responses[field.id]
   const set = (v: unknown) => setResponses((prev) => ({ ...prev, [field.id]: v }))
   const fieldLabel = t(`field.${field.id}.label`, undefined, field.label)
+  const isUnknown = value === UNKNOWN_ANSWER
+  const unknownToggle = field.allow_unknown ? (
+    <label className="bk-checkbox bk-unknown">
+      <input
+        type="checkbox"
+        checked={isUnknown}
+        onChange={(e) => set(e.target.checked ? UNKNOWN_ANSWER : '')}
+      />
+      <span>{t('field.unknown', undefined, "I don't know")}</span>
+    </label>
+  ) : null
 
   if (field.type === 'members_repeater') {
     return (
@@ -916,8 +933,6 @@ function FieldRenderer({
     )
   }
 
-  const helpText = field.help ? t(`field.${field.id}.help`, undefined, field.help) : null
-
   if (field.type === 'select' && field.options) {
     return (
       <div className="bk-field">
@@ -928,9 +943,10 @@ function FieldRenderer({
         <select
           id={fieldId}
           className="bk-input bk-select"
-          value={typeof value === 'string' ? value : ''}
+          value={isUnknown ? '' : typeof value === 'string' ? value : ''}
           onChange={(e) => set(e.target.value)}
-          required={field.required}
+          required={field.required && !isUnknown}
+          disabled={isUnknown}
         >
           <option value="">{t('select.choose')}</option>
           {field.options.map((opt) => (
@@ -939,7 +955,7 @@ function FieldRenderer({
             </option>
           ))}
         </select>
-        {helpText && <div className="bk-help">{helpText}</div>}
+        {unknownToggle}
       </div>
     )
   }
@@ -954,12 +970,13 @@ function FieldRenderer({
         <textarea
           id={fieldId}
           className="bk-input bk-textarea"
-          value={typeof value === 'string' ? value : ''}
+          value={isUnknown ? '' : typeof value === 'string' ? value : ''}
           onChange={(e) => set(e.target.value)}
           rows={4}
-          required={field.required}
+          required={field.required && !isUnknown}
+          disabled={isUnknown}
         />
-        {helpText && <div className="bk-help">{helpText}</div>}
+        {unknownToggle}
       </div>
     )
   }
@@ -976,11 +993,18 @@ function FieldRenderer({
         className="bk-input bk-input-bare"
         type={inputType}
         inputMode={field.type === 'number' ? 'decimal' : undefined}
-        value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
+        value={
+          isUnknown
+            ? ''
+            : typeof value === 'string' || typeof value === 'number'
+              ? String(value)
+              : ''
+        }
         onChange={(e) => set(e.target.value)}
-        required={field.required}
+        required={field.required && !isUnknown}
+        disabled={isUnknown}
       />
-      {helpText && <div className="bk-help">{helpText}</div>}
+      {unknownToggle}
     </div>
   )
 }

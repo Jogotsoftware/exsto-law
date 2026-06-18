@@ -4380,3 +4380,68 @@ button.danger.outline:hover:not(:disabled) {
   color: #7e8da0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
+
+/* Questionnaire builder (WP2.4): toggles, choice pills, drag handle. */
+.qb-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.5rem 0 0.2rem;
+}
+.qb-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  color: #334155;
+}
+.qb-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+.qb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.2rem 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #1e293b;
+  font-size: 0.85rem;
+}
+.qb-pill button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+}
+.qb-pill button:hover {
+  color: #b91c1c;
+}
+.qb-pill-add {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  max-width: 28rem;
+}
+.qb-grip {
+  cursor: grab;
+  color: #94a3b8;
+  user-select: none;
+  font-size: 1rem;
+  line-height: 1;
+}
+.qb-grip:active {
+  cursor: grabbing;
+}
+/* Booking: muted "I don't know" affordance under a field (WP2.4). */
+.bk-unknown {
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
+  color: #64748b;
+}
