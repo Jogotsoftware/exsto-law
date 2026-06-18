@@ -22,6 +22,10 @@ interface Props {
   // horizon. The parent should fetch additional weeks and re-render.
   onLoadMoreWeeks?: () => void
   loadingMoreWeeks?: boolean
+  // Whether these slots come from the firm's real connected calendar. When
+  // false (the stub fallback), we must NOT show the "Live availability" badge
+  // over sample data — that would be a live claim over non-live times.
+  live?: boolean
 }
 
 interface DayBucket {
@@ -66,6 +70,7 @@ export function AvailabilityCalendar({
   refreshing,
   onLoadMoreWeeks,
   loadingMoreWeeks,
+  live = true,
 }: Props) {
   const { t, lang } = useI18n()
   const dateLocale = lang === 'es' ? 'es-US' : undefined
@@ -162,8 +167,14 @@ export function AvailabilityCalendar({
 
       <div className="bk-cal-meta">
         <div className="bk-cal-tz">{t('cal.local_time', { tz: localTz })}</div>
-        <div className="bk-cal-live">
-          <span className="bk-cal-live-dot" aria-hidden /> {t('cal.live')}
+        <div className={live ? 'bk-cal-live' : 'bk-cal-sample'}>
+          {live ? (
+            <>
+              <span className="bk-cal-live-dot" aria-hidden /> {t('cal.live')}
+            </>
+          ) : (
+            t('cal.sample')
+          )}
           {lastUpdated && (
             <span className="bk-cal-updated">
               ·{' '}
