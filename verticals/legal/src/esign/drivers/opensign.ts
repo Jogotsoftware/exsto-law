@@ -39,7 +39,10 @@ const ACTIVATION_HINT =
 
 async function requireCreds(tenantId: string): Promise<OpenSignSecret> {
   const conn = await loadConnection<OpenSignSecret>(tenantId, 'opensign')
-  if (!conn?.secret?.base_url || !conn.secret.api_token) {
+  // webhook_secret is REQUIRED, not optional: inbound callbacks mutate signature/
+  // document state, so a connection without it would force parseCallback to either
+  // fail open or reject every callback. Require it up front (fail closed).
+  if (!conn?.secret?.base_url || !conn.secret.api_token || !conn.secret.webhook_secret) {
     throw new EsignNotConfiguredError(ACTIVATION_HINT)
   }
   return conn.secret
@@ -158,9 +161,10 @@ export const openSignDriver: EsignDriver = {
     signature: string | null
   }): Promise<EsignCallbackEvent> {
     const { webhook_secret } = await requireCreds(args.tenantId)
-    // A configured secret is verified; OpenSign instances that cannot HMAC-sign
-    // must be fronted by a shared-secret header the route maps to `signature`.
-    if (webhook_secret && !verifyHmac(args.rawBody, args.signature, webhook_secret)) {
+    // Fail CLOSED: requireCreds guarantees webhook_secret is present, but verify
+    // defensively here too — a missing secret or a bad/absent signature rejects the
+    // callback (which would otherwise mutate signature/document state unauthenticated).
+    if (!webhook_secret || !verifyHmac(args.rawBody, args.signature, webhook_secret)) {
       throw new Error('OpenSign webhook signature verification failed')
     }
     const payload = JSON.parse(args.rawBody) as Record<string, unknown>
