@@ -9,7 +9,9 @@ import type { ActionContext } from '@exsto/substrate'
 // selected via `provider`, behind the connection gate.
 interface Input {
   documentVersionId: string
-  signers?: Array<{ email: string; name?: string }>
+  /** Document with field tags inserted by the prepare UI (a new version is saved). */
+  preparedMarkdown?: string
+  signers?: Array<{ email: string; name?: string; title?: string; order?: number; key?: string }>
   subject?: string
   provider?: string
 }

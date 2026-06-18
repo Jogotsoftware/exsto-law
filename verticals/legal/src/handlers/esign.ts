@@ -1,17 +1,21 @@
 // E-signature action handlers (Session 5). All writes flow through these
 // handlers under submitAction (vertical CLAUDE.md). Provider-agnostic: nothing
-// here names a provider — it is an attribute value.
+// here names a provider — it is an attribute value. Native sign-by-link with
+// DocuSign-style fields, per-signer titles, sequential routing, and delivered/
+// opened/signed status.
 //
-//   esign.send          → create signature_envelope (+ one signature_request per
-//                         signer), link envelope_of → document, emit esign.sent.
-//   esign.sign          → NATIVE: a signer adopts their signature; the last
-//                         signer completes the envelope and the executed copy
-//                         (original + signature certificate, with the original
-//                         content SHA-256) is written as a NEW immutable
-//                         document_version (invariant 14). esign.signed/completed.
-//   esign.decline       → NATIVE: a signer declines; envelope closes. esign.declined.
-//   esign.record_status → EXTERNAL (dormant): record a verified provider callback,
-//                         same transitions, for a future external driver.
+//   esign.send     → create signature_envelope (+ one signature_request per
+//                    signer: key/title/order/channel), store the field plan,
+//                    deliver the first routing group. esign.sent + esign.delivered.
+//   esign.open     → a signer opened their document (delivered → opened). esign.opened.
+//   esign.sign     → a signer adopts their signature + fills their fields. When
+//                    the current routing group finishes, the next group is
+//                    delivered (esign.delivered); when ALL sign, the envelope
+//                    completes and the executed copy — every field tag resolved
+//                    + a signature certificate with the original content SHA-256 —
+//                    is written as a NEW immutable document_version (invariant 14).
+//   esign.decline  → a signer declines; the envelope closes. esign.declined.
+//   esign.record_status → EXTERNAL (dormant): same transitions for a future driver.
 import { createHash } from 'node:crypto'
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
@@ -24,10 +28,15 @@ import {
   insertRelationship,
   lookupKindId,
 } from './common.js'
+import { renderTypedSignature, resolveExecutedMarkdown, type EsignField } from '../esign/fields.js'
 
 interface SendSigner {
   email: string
   name?: string | null
+  key?: string | null
+  title?: string | null
+  order?: number | null
+  channel?: 'portal' | 'link' | null
   signer_provider_ref?: string | null
 }
 
@@ -36,12 +45,13 @@ interface EsignSendPayload {
   document_version_id: string
   matter_entity_id?: string | null
   provider: string
-  // Set by the API only when the provider actually dispatched (live host present).
   provider_envelope_ref?: string | null
   dispatched: boolean
   correlation_id: string
   subject: string
   signers: SendSigner[]
+  /** The parsed field plan for the document (anchor tags). */
+  fields?: EsignField[]
 }
 
 registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
@@ -71,7 +81,9 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
   await setAttr(client, tenantId, actionId, envelopeId, 'envelope_subject', p.subject, {
     sourceRef: ctx.actorId,
   })
-  // provider_envelope_ref only exists once a live provider dispatched the envelope.
+  await setAttr(client, tenantId, actionId, envelopeId, 'envelope_fields', p.fields ?? [], {
+    sourceRef: ctx.actorId,
+  })
   if (p.dispatched && p.provider_envelope_ref) {
     await setAttr(
       client,
@@ -84,7 +96,6 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     )
   }
 
-  // envelope_of: the envelope executes this document.
   const envelopeOfId = await lookupKindId(
     client,
     'relationship_kind_definition',
@@ -100,7 +111,6 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     properties: { document_version_id: p.document_version_id },
   })
 
-  // One signature_request per signer, each linked request_of → envelope.
   const requestOfId = await lookupKindId(
     client,
     'relationship_kind_definition',
@@ -114,37 +124,41 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     'signature_request',
   )
   const requestIds: string[] = []
-  for (const signer of p.signers) {
+  for (let i = 0; i < p.signers.length; i++) {
+    const s = p.signers[i]!
     const requestId = await insertEntity(
       client,
       tenantId,
       actionId,
       requestKindId,
-      signer.name ?? signer.email,
-      { email: signer.email },
+      s.name ?? s.email,
+      { email: s.email },
     )
-    await setAttr(client, tenantId, actionId, requestId, 'signer_email', signer.email, {
+    await setAttr(client, tenantId, actionId, requestId, 'signer_email', s.email, {
       sourceRef: ctx.actorId,
     })
-    if (signer.name) {
-      await setAttr(client, tenantId, actionId, requestId, 'signer_name', signer.name, {
+    if (s.name)
+      await setAttr(client, tenantId, actionId, requestId, 'signer_name', s.name, {
         sourceRef: ctx.actorId,
       })
-    }
+    if (s.key)
+      await setAttr(client, tenantId, actionId, requestId, 'signer_key', s.key, {
+        sourceRef: ctx.actorId,
+      })
+    if (s.title)
+      await setAttr(client, tenantId, actionId, requestId, 'signer_title', s.title, {
+        sourceRef: ctx.actorId,
+      })
+    await setAttr(client, tenantId, actionId, requestId, 'signer_order', s.order ?? i + 1, {
+      sourceRef: ctx.actorId,
+    })
+    await setAttr(client, tenantId, actionId, requestId, 'signer_channel', s.channel ?? 'link', {
+      sourceRef: ctx.actorId,
+    })
+    // Everyone starts pending; deliverNextGroup promotes the active routing group.
     await setAttr(client, tenantId, actionId, requestId, 'signer_status', 'pending', {
       sourceRef: ctx.actorId,
     })
-    if (signer.signer_provider_ref) {
-      await setAttr(
-        client,
-        tenantId,
-        actionId,
-        requestId,
-        'signer_provider_ref',
-        signer.signer_provider_ref,
-        { sourceType: 'integration', sourceRef: `integration:${p.provider}` },
-      )
-    }
     await insertRelationship(client, {
       tenantId,
       actionId,
@@ -164,7 +178,6 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     data: {
       provider: p.provider,
       dispatched: p.dispatched,
-      provider_envelope_ref: p.provider_envelope_ref ?? null,
       document_entity_id: p.document_entity_id,
       document_version_id: p.document_version_id,
       signer_count: requestIds.length,
@@ -174,18 +187,195 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     sourceRef: ctx.actorId,
   })
 
-  return { envelopeId, requestIds, status: envelopeStatus, dispatched: p.dispatched }
+  // Deliver the first routing group (sequential) or everyone (parallel).
+  const { delivered } = await deliverNextGroup(client, tenantId, actionId, envelopeId, ctx.actorId)
+
+  return { envelopeId, requestIds, deliveredRequestIds: delivered, status: envelopeStatus }
 })
+
+interface EsignOpenPayload {
+  request_entity_id: string
+  envelope_entity_id: string
+}
+
+registerActionHandler('esign.open', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as EsignOpenPayload
+  const tenantId = ctx.tenantId
+  const sourceRef = `signature_request:${p.request_entity_id}`
+  const status = await latestStatus(client, tenantId, p.request_entity_id)
+  // Only delivered → opened (never downgrade signed/declined).
+  if (status === 'delivered') {
+    await setAttr(client, tenantId, actionId, p.request_entity_id, 'signer_status', 'opened', {
+      sourceType: 'system',
+      sourceRef,
+    })
+    await insertEvent(client, {
+      tenantId,
+      actionId,
+      eventKindName: 'esign.opened',
+      primaryEntityId: p.envelope_entity_id,
+      secondaryEntityIds: [p.request_entity_id],
+      sourceType: 'system',
+      sourceRef,
+    })
+  }
+  return { requestId: p.request_entity_id, status: status === 'delivered' ? 'opened' : status }
+})
+
+interface EsignSignPayload {
+  request_entity_id: string
+  envelope_entity_id: string
+  signature_name: string
+  signature_data?: string | null
+  consent_text: string
+  field_values?: Record<string, string> | null
+  signed_at?: string | null
+}
+
+registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as EsignSignPayload
+  const tenantId = ctx.tenantId
+  const signedAt = p.signed_at ?? new Date().toISOString()
+  const sourceRef = `signature_request:${p.request_entity_id}`
+
+  await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
+
+  await setAttr(client, tenantId, actionId, p.request_entity_id, 'signer_status', 'signed', {
+    sourceRef,
+  })
+  await setAttr(client, tenantId, actionId, p.request_entity_id, 'signed_at', signedAt, {
+    sourceRef,
+  })
+  await setAttr(client, tenantId, actionId, p.request_entity_id, 'signer_consent', p.consent_text, {
+    sourceRef,
+  })
+  await setAttr(
+    client,
+    tenantId,
+    actionId,
+    p.request_entity_id,
+    'signature_data',
+    p.signature_data ?? p.signature_name,
+    { sourceRef },
+  )
+  if (p.field_values) {
+    await setAttr(client, tenantId, actionId, p.request_entity_id, 'field_values', p.field_values, {
+      sourceRef,
+    })
+  }
+
+  await insertEvent(client, {
+    tenantId,
+    actionId,
+    eventKindName: 'esign.signed',
+    primaryEntityId: p.envelope_entity_id,
+    secondaryEntityIds: [p.request_entity_id],
+    data: { signature_name: p.signature_name, signed_at: signedAt },
+    sourceType: 'human',
+    sourceRef,
+  })
+
+  // Advance routing: deliver the next group, or complete when all have signed.
+  const { delivered, completed } = await deliverNextGroup(
+    client,
+    tenantId,
+    actionId,
+    p.envelope_entity_id,
+    sourceRef,
+  )
+
+  if (!completed) {
+    return {
+      envelopeId: p.envelope_entity_id,
+      status: 'signed' as const,
+      completed: false,
+      deliveredRequestIds: delivered,
+    }
+  }
+
+  await setAttr(client, tenantId, actionId, p.envelope_entity_id, 'envelope_status', 'completed', {
+    sourceType: 'system',
+    sourceRef,
+  })
+  const documentEntityId = await resolveEnvelopeDocument(client, tenantId, p.envelope_entity_id)
+  let executedVersionId: string | null = null
+  let executedVersionNumber: number | null = null
+  if (documentEntityId) {
+    const executed = await writeExecutedVersion(
+      client,
+      tenantId,
+      actionId,
+      p.envelope_entity_id,
+      documentEntityId,
+    )
+    executedVersionId = executed.versionId
+    executedVersionNumber = executed.versionNumber
+  }
+  await insertEvent(client, {
+    tenantId,
+    actionId,
+    eventKindName: 'esign.completed',
+    primaryEntityId: documentEntityId ?? p.envelope_entity_id,
+    secondaryEntityIds: [p.envelope_entity_id],
+    data: {
+      document_entity_id: documentEntityId,
+      executed_document_version_id: executedVersionId,
+      executed_version_number: executedVersionNumber,
+    },
+    sourceType: 'system',
+    sourceRef,
+  })
+  return {
+    envelopeId: p.envelope_entity_id,
+    status: 'completed' as const,
+    completed: true,
+    deliveredRequestIds: [],
+    executedDocumentVersionId: executedVersionId,
+    executedVersionNumber,
+  }
+})
+
+interface EsignDeclinePayload {
+  request_entity_id: string
+  envelope_entity_id: string
+  reason?: string | null
+}
+
+registerActionHandler('esign.decline', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as EsignDeclinePayload
+  const tenantId = ctx.tenantId
+  const sourceRef = `signature_request:${p.request_entity_id}`
+
+  await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
+  await setAttr(client, tenantId, actionId, p.request_entity_id, 'signer_status', 'declined', {
+    sourceRef,
+  })
+  await setAttr(client, tenantId, actionId, p.envelope_entity_id, 'envelope_status', 'declined', {
+    sourceType: 'system',
+    sourceRef,
+  })
+  await insertEvent(client, {
+    tenantId,
+    actionId,
+    eventKindName: 'esign.declined',
+    primaryEntityId: p.envelope_entity_id,
+    secondaryEntityIds: [p.request_entity_id],
+    data: { reason: p.reason ?? null },
+    sourceType: 'human',
+    sourceRef,
+  })
+  return { envelopeId: p.envelope_entity_id, status: 'declined' as const }
+})
+
+// ── External provider callback (dormant) ─────────────────────────────────────
 
 interface EsignRecordStatusPayload {
   envelope_entity_id: string
   provider_envelope_ref?: string | null
   status: 'signed' | 'completed' | 'declined'
   signer_email?: string | null
-  // Executed copy bytes, present on completion.
   executed_document?: { content_type: string; body: string } | null
   raw_event_log_id?: string | null
-  // Provenance for the callback, e.g. 'integration:opensign'.
   source_ref?: string | null
 }
 
@@ -197,7 +387,6 @@ registerActionHandler('esign.record_status', async (ctx, client, payload, action
   await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
   const documentEntityId = await resolveEnvelopeDocument(client, tenantId, p.envelope_entity_id)
 
-  // Flip the named signer's status when the callback identifies one.
   let signerRequestId: string | null = null
   if (p.signer_email) {
     signerRequestId = await findSignerRequest(
@@ -243,25 +432,18 @@ registerActionHandler('esign.record_status', async (ctx, client, payload, action
       eventKindName: 'esign.declined',
       primaryEntityId: p.envelope_entity_id,
       secondaryEntityIds: signerRequestId ? [signerRequestId] : [],
-      data: {
-        signer_email: p.signer_email ?? null,
-        provider_envelope_ref: p.provider_envelope_ref ?? null,
-      },
+      data: { signer_email: p.signer_email ?? null },
       sourceType: 'integration',
       sourceRef,
     })
     return { envelopeId: p.envelope_entity_id, status: 'declined' as const }
   }
 
-  // status === 'completed': close the envelope and write the executed copy as a
-  // NEW immutable document_version (invariant 14 — never overwrite in place).
   await setAttr(client, tenantId, actionId, p.envelope_entity_id, 'envelope_status', 'completed', {
     sourceType: 'integration',
     sourceRef,
   })
-
   let executedVersionId: string | null = null
-  let executedVersionNumber: number | null = null
   if (p.executed_document && documentEntityId) {
     const contentBlobId = await insertContentBlob(client, {
       tenantId,
@@ -269,25 +451,23 @@ registerActionHandler('esign.record_status', async (ctx, client, payload, action
       contentType: p.executed_document.content_type || 'application/pdf',
       body: p.executed_document.body,
     })
-    executedVersionNumber = (await maxVersionNumber(client, tenantId, documentEntityId)) + 1
+    const versionNumber = (await maxVersionNumber(client, tenantId, documentEntityId)) + 1
     executedVersionId = await insertDocumentVersion(client, {
       tenantId,
       actionId,
       documentEntityId,
       contentBlobId,
-      versionNumber: executedVersionNumber,
-      // The executed copy is the final, approved artifact.
+      versionNumber,
       status: 'approved',
       reasoningTraceId: null,
       metadata: {
         executed: true,
         executed_from_envelope_id: p.envelope_entity_id,
         provider_envelope_ref: p.provider_envelope_ref ?? null,
-        source: 'esign',
+        source: 'esign-external',
       },
     })
   }
-
   await insertEvent(client, {
     tenantId,
     actionId,
@@ -297,174 +477,19 @@ registerActionHandler('esign.record_status', async (ctx, client, payload, action
     data: {
       provider_envelope_ref: p.provider_envelope_ref ?? null,
       document_entity_id: documentEntityId,
-      executed_document_version_id: executedVersionId,
-      executed_version_number: executedVersionNumber,
     },
     sourceType: 'integration',
     sourceRef,
   })
-
   return {
     envelopeId: p.envelope_entity_id,
     status: 'completed' as const,
     executedDocumentVersionId: executedVersionId,
-    executedVersionNumber,
   }
-})
-
-// ───────────────────────────────────────────────────────────────────────────
-// esign.sign — NATIVE path. A signer adopts their signature on their request.
-// On the last outstanding signer the envelope completes: the executed copy
-// (original document + a signature certificate, with the original content's
-// SHA-256 as tamper-evidence) is written as a NEW immutable document_version
-// (invariant 14). Recorded as the public-intake system actor; signer identity
-// lives on the signature_request, not on an actor (like the client portal).
-// ───────────────────────────────────────────────────────────────────────────
-
-interface EsignSignPayload {
-  request_entity_id: string
-  envelope_entity_id: string
-  signature_name: string // the signer's typed/adopted name
-  signature_data?: string | null // optional drawn-signature image data URL
-  consent_text: string // the intent-to-sign statement accepted (ESIGN/UETA)
-  signed_at?: string | null
-}
-
-registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
-  const p = payload as unknown as EsignSignPayload
-  const tenantId = ctx.tenantId
-  const signedAt = p.signed_at ?? new Date().toISOString()
-  const sourceRef = `signature_request:${p.request_entity_id}`
-
-  await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
-
-  // Record the signature on this signer's request.
-  await setAttr(client, tenantId, actionId, p.request_entity_id, 'signer_status', 'signed', {
-    sourceRef,
-  })
-  await setAttr(client, tenantId, actionId, p.request_entity_id, 'signed_at', signedAt, {
-    sourceRef,
-  })
-  await setAttr(client, tenantId, actionId, p.request_entity_id, 'signer_consent', p.consent_text, {
-    sourceRef,
-  })
-  await setAttr(
-    client,
-    tenantId,
-    actionId,
-    p.request_entity_id,
-    'signature_data',
-    p.signature_data ?? p.signature_name,
-    { sourceRef },
-  )
-
-  await insertEvent(client, {
-    tenantId,
-    actionId,
-    eventKindName: 'esign.signed',
-    primaryEntityId: p.envelope_entity_id,
-    secondaryEntityIds: [p.request_entity_id],
-    data: { signature_name: p.signature_name, signed_at: signedAt },
-    sourceType: 'human',
-    sourceRef,
-  })
-
-  // Last signer? Complete the envelope and write the executed copy.
-  const { total, signed } = await countSignerStatuses(client, tenantId, p.envelope_entity_id)
-  if (total > 0 && signed >= total) {
-    await setAttr(
-      client,
-      tenantId,
-      actionId,
-      p.envelope_entity_id,
-      'envelope_status',
-      'completed',
-      {
-        sourceType: 'system',
-        sourceRef,
-      },
-    )
-    const documentEntityId = await resolveEnvelopeDocument(client, tenantId, p.envelope_entity_id)
-    let executedVersionId: string | null = null
-    let executedVersionNumber: number | null = null
-    if (documentEntityId) {
-      const executed = await writeExecutedVersion(
-        client,
-        tenantId,
-        actionId,
-        p.envelope_entity_id,
-        documentEntityId,
-      )
-      executedVersionId = executed.versionId
-      executedVersionNumber = executed.versionNumber
-    }
-    await insertEvent(client, {
-      tenantId,
-      actionId,
-      eventKindName: 'esign.completed',
-      primaryEntityId: documentEntityId ?? p.envelope_entity_id,
-      secondaryEntityIds: [p.envelope_entity_id],
-      data: {
-        document_entity_id: documentEntityId,
-        executed_document_version_id: executedVersionId,
-        executed_version_number: executedVersionNumber,
-      },
-      sourceType: 'system',
-      sourceRef,
-    })
-    return {
-      envelopeId: p.envelope_entity_id,
-      status: 'completed' as const,
-      completed: true,
-      executedDocumentVersionId: executedVersionId,
-      executedVersionNumber,
-    }
-  }
-
-  return { envelopeId: p.envelope_entity_id, status: 'signed' as const, completed: false }
-})
-
-// ───────────────────────────────────────────────────────────────────────────
-// esign.decline — NATIVE path. A signer declines; the envelope closes declined.
-// ───────────────────────────────────────────────────────────────────────────
-
-interface EsignDeclinePayload {
-  request_entity_id: string
-  envelope_entity_id: string
-  reason?: string | null
-}
-
-registerActionHandler('esign.decline', async (ctx, client, payload, actionId) => {
-  const p = payload as unknown as EsignDeclinePayload
-  const tenantId = ctx.tenantId
-  const sourceRef = `signature_request:${p.request_entity_id}`
-
-  await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
-  await setAttr(client, tenantId, actionId, p.request_entity_id, 'signer_status', 'declined', {
-    sourceRef,
-  })
-  await setAttr(client, tenantId, actionId, p.envelope_entity_id, 'envelope_status', 'declined', {
-    sourceType: 'system',
-    sourceRef,
-  })
-  await insertEvent(client, {
-    tenantId,
-    actionId,
-    eventKindName: 'esign.declined',
-    primaryEntityId: p.envelope_entity_id,
-    secondaryEntityIds: [p.request_entity_id],
-    data: { reason: p.reason ?? null },
-    sourceType: 'human',
-    sourceRef,
-  })
-  return { envelopeId: p.envelope_entity_id, status: 'declined' as const }
 })
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-// Append a new attribute value (temporality: latest-by-valid_from wins, as the
-// draft handlers do). Provenance defaults to a human firm write; callbacks pass
-// sourceType 'integration'.
 async function setAttr(
   client: DbClient,
   tenantId: string,
@@ -506,7 +531,21 @@ async function assertEnvelopeExists(
   if (!res.rows[0]) throw new Error(`signature_envelope not found: ${envelopeId}`)
 }
 
-// envelope_of: envelope (source) → document (target).
+async function latestStatus(
+  client: DbClient,
+  tenantId: string,
+  requestId: string,
+): Promise<string> {
+  const res = await client.query<{ status: string }>(
+    `SELECT a.value #>> '{}' AS status FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+      WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'signer_status'
+      ORDER BY a.valid_from DESC LIMIT 1`,
+    [tenantId, requestId],
+  )
+  return res.rows[0]?.status ?? 'pending'
+}
+
 async function resolveEnvelopeDocument(
   client: DbClient,
   tenantId: string,
@@ -524,7 +563,6 @@ async function resolveEnvelopeDocument(
   return res.rows[0]?.document_id ?? null
 }
 
-// The signature_request (signer slot) for an email within this envelope.
 async function findSignerRequest(
   client: DbClient,
   tenantId: string,
@@ -561,36 +599,77 @@ async function maxVersionNumber(
   return res.rows[0]?.max ?? 0
 }
 
-// How many of the envelope's signers have signed (latest signer_status per
-// request), and how many requests there are in total.
-async function countSignerStatuses(
+interface RoutingRequest {
+  requestId: string
+  order: number
+  status: string
+}
+
+async function loadRoutingRequests(
   client: DbClient,
   tenantId: string,
   envelopeId: string,
-): Promise<{ total: number; signed: number }> {
-  const res = await client.query<{ total: number; signed: number }>(
-    `WITH reqs AS (
-       SELECT r.source_entity_id AS request_id
-       FROM relationship r
-       JOIN relationship_kind_definition rkd
-         ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'request_of'
-       WHERE r.tenant_id = $1 AND r.target_entity_id = $2
-         AND (r.valid_to IS NULL OR r.valid_to > now())
-     ),
-     latest AS (
-       SELECT DISTINCT ON (a.entity_id) a.entity_id, a.value #>> '{}' AS status
-       FROM attribute a
-       JOIN attribute_kind_definition akd
-         ON akd.id = a.attribute_kind_id AND akd.kind_name = 'signer_status'
-       WHERE a.tenant_id = $1 AND a.entity_id IN (SELECT request_id FROM reqs)
-       ORDER BY a.entity_id, a.valid_from DESC
-     )
-     SELECT count(*)::int AS total,
-            count(*) FILTER (WHERE l.status = 'signed')::int AS signed
-     FROM reqs r LEFT JOIN latest l ON l.entity_id = r.request_id`,
+): Promise<RoutingRequest[]> {
+  const res = await client.query<{ request_id: string; ord: string; status: string }>(
+    `SELECT r.source_entity_id AS request_id,
+        COALESCE((SELECT a.value #>> '{}' FROM attribute a
+            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id AND akd.kind_name='signer_order'
+            WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
+            ORDER BY a.valid_from DESC LIMIT 1), '1') AS ord,
+        COALESCE((SELECT a.value #>> '{}' FROM attribute a
+            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id AND akd.kind_name='signer_status'
+            WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
+            ORDER BY a.valid_from DESC LIMIT 1), 'pending') AS status
+     FROM relationship r
+     JOIN relationship_kind_definition rkd
+       ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'request_of'
+     WHERE r.tenant_id = $1 AND r.target_entity_id = $2
+       AND (r.valid_to IS NULL OR r.valid_to > now())`,
     [tenantId, envelopeId],
   )
-  return { total: res.rows[0]?.total ?? 0, signed: res.rows[0]?.signed ?? 0 }
+  return res.rows.map((row) => ({
+    requestId: row.request_id,
+    order: Number(row.ord) || 1,
+    status: row.status,
+  }))
+}
+
+// Deliver the lowest-order routing group that still has pending signers. Returns
+// the newly-delivered request ids and whether the envelope is now fully signed.
+// Pure-sequential (distinct orders) and pure-parallel (one order) both fall out
+// of this: a group becomes active only once every prior group has signed.
+async function deliverNextGroup(
+  client: DbClient,
+  tenantId: string,
+  actionId: string,
+  envelopeId: string,
+  sourceRef: string,
+): Promise<{ delivered: string[]; completed: boolean }> {
+  const reqs = await loadRoutingRequests(client, tenantId, envelopeId)
+  if (reqs.length === 0) return { delivered: [], completed: false }
+  const unresolved = reqs.filter((r) => r.status !== 'signed' && r.status !== 'declined')
+  if (unresolved.length === 0) return { delivered: [], completed: true }
+
+  const minOrder = Math.min(...unresolved.map((r) => r.order))
+  const activePending = unresolved.filter((r) => r.order === minOrder && r.status === 'pending')
+  const delivered: string[] = []
+  for (const r of activePending) {
+    await setAttr(client, tenantId, actionId, r.requestId, 'signer_status', 'delivered', {
+      sourceType: 'system',
+      sourceRef,
+    })
+    await insertEvent(client, {
+      tenantId,
+      actionId,
+      eventKindName: 'esign.delivered',
+      primaryEntityId: envelopeId,
+      secondaryEntityIds: [r.requestId],
+      sourceType: 'system',
+      sourceRef,
+    })
+    delivered.push(r.requestId)
+  }
+  return { delivered, completed: false }
 }
 
 // The latest NON-executed version body — the original we are executing.
@@ -612,36 +691,33 @@ async function loadOriginalBody(
   return res.rows[0]?.body ?? ''
 }
 
-interface CertSigner {
+interface FullSigner {
+  key: string | null
   name: string | null
   email: string | null
+  title: string | null
   signed_at: string | null
   consent: string | null
+  field_values: Record<string, string> | null
 }
 
 async function loadEnvelopeSigners(
   client: DbClient,
   tenantId: string,
   envelopeId: string,
-): Promise<CertSigner[]> {
-  const res = await client.query<CertSigner>(
-    `SELECT
-       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
-          ON akd.id = a.attribute_kind_id AND akd.kind_name = 'signer_name'
-          WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
-          ORDER BY a.valid_from DESC LIMIT 1) AS name,
-       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
-          ON akd.id = a.attribute_kind_id AND akd.kind_name = 'signer_email'
-          WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
-          ORDER BY a.valid_from DESC LIMIT 1) AS email,
-       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
-          ON akd.id = a.attribute_kind_id AND akd.kind_name = 'signed_at'
-          WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
-          ORDER BY a.valid_from DESC LIMIT 1) AS signed_at,
-       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
-          ON akd.id = a.attribute_kind_id AND akd.kind_name = 'signer_consent'
-          WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
-          ORDER BY a.valid_from DESC LIMIT 1) AS consent
+): Promise<FullSigner[]> {
+  const a = (k: string) =>
+    `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
+        ON akd.id = a.attribute_kind_id AND akd.kind_name = '${k}'
+        WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
+        ORDER BY a.valid_from DESC LIMIT 1)`
+  const res = await client.query<FullSigner & { field_values_json: string | null }>(
+    `SELECT ${a('signer_key')} AS key, ${a('signer_name')} AS name, ${a('signer_email')} AS email,
+            ${a('signer_title')} AS title, ${a('signed_at')} AS signed_at, ${a('signer_consent')} AS consent,
+            (SELECT a.value::text FROM attribute a JOIN attribute_kind_definition akd
+               ON akd.id = a.attribute_kind_id AND akd.kind_name = 'field_values'
+               WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
+               ORDER BY a.valid_from DESC LIMIT 1) AS field_values_json
      FROM relationship r
      JOIN relationship_kind_definition rkd
        ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'request_of'
@@ -650,12 +726,40 @@ async function loadEnvelopeSigners(
      ORDER BY r.recorded_at`,
     [tenantId, envelopeId],
   )
-  return res.rows
+  return res.rows.map((row) => ({
+    key: row.key,
+    name: row.name,
+    email: row.email,
+    title: row.title,
+    signed_at: row.signed_at,
+    consent: row.consent,
+    field_values: row.field_values_json
+      ? (JSON.parse(row.field_values_json) as Record<string, string>)
+      : null,
+  }))
 }
 
-// Build + persist the executed copy as a new immutable document_version: the
-// original markdown + a signature certificate, with the original content's
-// SHA-256 embedded so any later tampering is detectable.
+function fieldValue(field: EsignField, signer: FullSigner | undefined): string {
+  const v = signer?.field_values?.[field.id]
+  switch (field.type) {
+    case 'name':
+      return signer?.name ?? ''
+    case 'date':
+      return (signer?.signed_at ?? '').slice(0, 10)
+    case 'title':
+      return v ?? signer?.title ?? ''
+    case 'sign':
+      return renderTypedSignature(v ?? signer?.name ?? '')
+    case 'check':
+      return v ? '☑' : '☐'
+    default:
+      return v ?? ''
+  }
+}
+
+// Build + persist the executed copy: every field tag resolved to its value, plus
+// a signature certificate carrying the original content's SHA-256 (tamper-
+// evidence), as a NEW immutable document_version.
 async function writeExecutedVersion(
   client: DbClient,
   tenantId: string,
@@ -665,7 +769,15 @@ async function writeExecutedVersion(
 ): Promise<{ versionId: string; versionNumber: number }> {
   const original = await loadOriginalBody(client, tenantId, documentEntityId)
   const signers = await loadEnvelopeSigners(client, tenantId, envelopeId)
+  const fields = await loadEnvelopeFields(client, tenantId, envelopeId)
   const originalSha = createHash('sha256').update(original, 'utf8').digest('hex')
+
+  // Resolve each field tag (in the body) to its signer's value.
+  const signerByKey = new Map<string, FullSigner>()
+  for (const s of signers) if (s.key) signerByKey.set(s.key, s)
+  const valuesById: Record<string, string> = {}
+  for (const f of fields) valuesById[f.id] = fieldValue(f, signerByKey.get(f.signerKey))
+  const filledBody = fields.length ? resolveExecutedMarkdown(original, valuesById) : original
 
   const cert = [
     '',
@@ -679,9 +791,9 @@ async function writeExecutedVersion(
     '',
     ...signers.map(
       (sgn) =>
-        `- **${sgn.name ?? sgn.email ?? 'Signer'}** (${sgn.email ?? '—'}) — signed ${
-          sgn.signed_at ?? '—'
-        }\n  Consent: "${sgn.consent ?? '—'}"`,
+        `- **${sgn.name ?? sgn.email ?? 'Signer'}**${sgn.title ? `, ${sgn.title}` : ''} (${
+          sgn.email ?? '—'
+        }) — signed ${sgn.signed_at ?? '—'}\n  Consent: "${sgn.consent ?? '—'}"`,
     ),
     '',
     `**Original content SHA-256:** \`${originalSha}\``,
@@ -689,12 +801,11 @@ async function writeExecutedVersion(
     '',
   ].join('\n')
 
-  const executedMarkdown = `${original}${cert}`
   const contentBlobId = await insertContentBlob(client, {
     tenantId,
     actionId,
     contentType: 'text/markdown',
-    body: executedMarkdown,
+    body: `${filledBody}${cert}`,
   })
   const versionNumber = (await maxVersionNumber(client, tenantId, documentEntityId)) + 1
   const versionId = await insertDocumentVersion(client, {
@@ -710,12 +821,33 @@ async function writeExecutedVersion(
       executed_from_envelope_id: envelopeId,
       original_sha256: originalSha,
       source: 'esign-native',
-      signers: signers.map((sgn) => ({
-        name: sgn.name,
-        email: sgn.email,
-        signed_at: sgn.signed_at,
+      signers: signers.map((s) => ({
+        name: s.name,
+        email: s.email,
+        title: s.title,
+        signed_at: s.signed_at,
       })),
     },
   })
   return { versionId, versionNumber }
+}
+
+async function loadEnvelopeFields(
+  client: DbClient,
+  tenantId: string,
+  envelopeId: string,
+): Promise<EsignField[]> {
+  const res = await client.query<{ value: string }>(
+    `SELECT a.value::text AS value FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+      WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'envelope_fields'
+      ORDER BY a.valid_from DESC LIMIT 1`,
+    [tenantId, envelopeId],
+  )
+  if (!res.rows[0]?.value) return []
+  try {
+    return JSON.parse(res.rows[0].value) as EsignField[]
+  } catch {
+    return []
+  }
 }
