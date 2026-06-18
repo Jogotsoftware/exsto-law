@@ -7,8 +7,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { buildGoogleAuthUrl } from '@exsto/legal'
 
 const CALENDAR = 'https://www.googleapis.com/auth/calendar.events'
+const CALENDAR_FULL = 'https://www.googleapis.com/auth/calendar'
 const GMAIL_SEND = 'https://www.googleapis.com/auth/gmail.send'
 const GMAIL_READ = 'https://www.googleapis.com/auth/gmail.readonly'
+const GMAIL_MODIFY = 'https://www.googleapis.com/auth/gmail.modify'
 
 function scopesOf(url: string): string[] {
   const scope = new URL(url).searchParams.get('scope') ?? ''
@@ -37,11 +39,16 @@ describe('buildGoogleAuthUrl scope set (no DB)', () => {
     set('OAUTH_STATE_SECRET', prior.state)
   })
 
-  it('calendar mode requests the FULL connect set (calendar + gmail read + gmail send) in one consent', () => {
+  it('calendar mode requests the BROADENED connect set (full calendar + gmail modify + send) in one consent', () => {
     const url = buildGoogleAuthUrl('t-1', '/attorney/settings', 'calendar', 'actor-1')
     const scopes = scopesOf(url)
-    expect(scopes).toContain(CALENDAR)
+    // Broadened so the downstream comms client has a full calendar + mail client:
+    // full calendar read/write + Gmail read/modify + Gmail send.
+    expect(scopes).toContain(CALENDAR_FULL)
+    expect(scopes).toContain(GMAIL_MODIFY)
     expect(scopes).toContain(GMAIL_SEND)
+    // The narrower legacy scopes are kept too (existing scope-presence checks).
+    expect(scopes).toContain(CALENDAR)
     expect(scopes).toContain(GMAIL_READ)
     // offline + consent so we always get a refresh token and the user sees the grant.
     const q = new URL(url).searchParams
@@ -51,9 +58,11 @@ describe('buildGoogleAuthUrl scope set (no DB)', () => {
     expect((q.get('state') ?? '').includes('.')).toBe(true)
   })
 
-  it('mail mode requests the same full set (the modes are unified)', () => {
+  it('mail mode requests the same broadened set (the modes are unified)', () => {
     const scopes = scopesOf(buildGoogleAuthUrl('t-1', '/attorney/mail', 'mail', 'actor-1'))
-    expect(scopes).toEqual(expect.arrayContaining([CALENDAR, GMAIL_SEND, GMAIL_READ]))
+    expect(scopes).toEqual(
+      expect.arrayContaining([CALENDAR_FULL, CALENDAR, GMAIL_MODIFY, GMAIL_SEND, GMAIL_READ]),
+    )
   })
 
   it('signin mode stays identity-only — no calendar or Gmail scopes', () => {
@@ -62,8 +71,10 @@ describe('buildGoogleAuthUrl scope set (no DB)', () => {
     expect(scopes).toContain('openid')
     expect(scopes).toContain('https://www.googleapis.com/auth/userinfo.email')
     expect(scopes).not.toContain(CALENDAR)
+    expect(scopes).not.toContain(CALENDAR_FULL)
     expect(scopes).not.toContain(GMAIL_SEND)
     expect(scopes).not.toContain(GMAIL_READ)
+    expect(scopes).not.toContain(GMAIL_MODIFY)
     // Identity-only: online + select_account (no offline refresh token).
     const q = new URL(url).searchParams
     expect(q.get('access_type')).toBe('online')
