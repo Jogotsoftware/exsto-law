@@ -14,6 +14,9 @@ import {
 } from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
+// Reuse the drafting worker's GenerationMode (the single definition) so the
+// package exports exactly one — type-only import, fully erased (no runtime cycle).
+import type { GenerationMode } from './generateDraft.js'
 
 export interface ServiceField {
   id: string
@@ -57,10 +60,6 @@ export interface ServiceCost {
   amount: string
   hours: number | null
 }
-
-// How a service produces its documents (Contract G, WP2.3). 'template_merge' is
-// the deterministic default (renderTemplate, no AI); 'ai_draft' is opt-in.
-export type GenerationMode = 'template_merge' | 'ai_draft'
 
 // Per-service booking config (Contract G, WP2.3). `enabled` offers the service for
 // scheduling; `send_calendar_invite` controls the invite on booking; the slot is
