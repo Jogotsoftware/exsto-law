@@ -73,6 +73,28 @@ export default function MailPage() {
     load()
   }, [])
 
+  // Contract D — launchCompose: open the composer pre-wired from query params
+  // (?compose=1&to=…|contactId=…&subject=…). A contactId is resolved to the
+  // client's email; otherwise `to` is used directly.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('compose') !== '1') return
+    const subject = params.get('subject') ?? ''
+    const to = params.get('to') ?? ''
+    const contactId = params.get('contactId')
+    if (to || !contactId) {
+      setCompose({ to, subject, body: '' })
+      return
+    }
+    callAttorneyMcp<{ contact: { email?: string } | null }>({
+      toolName: 'legal.contact.get',
+      input: { contactEntityId: contactId },
+    })
+      .then((r) => setCompose({ to: r.contact?.email ?? '', subject, body: '' }))
+      .catch(() => setCompose({ to: '', subject, body: '' }))
+  }, [])
+
   async function openThread(gmailThreadId: string) {
     setBusy('open')
     setError(null)

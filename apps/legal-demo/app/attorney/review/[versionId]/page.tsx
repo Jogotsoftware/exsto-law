@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, renderMarkdown, shareUrlFor } from '@/lib/draftExport'
+import { DocumentActionBar } from '@/components/DocumentActionBar'
 
 interface DraftDetail {
   documentVersionId: string
@@ -74,8 +75,6 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
 
-  const [emailStatus, setEmailStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
-
   async function load() {
     setError(null)
     try {
@@ -87,33 +86,6 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       if (res.draft?.reviewNotes) setNotes(res.draft.reviewNotes)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  async function emailDraftLink() {
-    if (!draft) return
-    if (typeof window !== 'undefined' && !window.confirm('Send draft link to the client on file?'))
-      return
-    setBusy('email')
-    setEmailStatus(null)
-    try {
-      const result = await callAttorneyMcp<{ messageId: string; from: string; to: string }>({
-        toolName: 'legal.email.send_draft_link',
-        input: {
-          matterEntityId: draft.matterEntityId,
-          documentVersionId: draft.documentVersionId,
-          shareUrl: shareUrlFor(draft.documentVersionId),
-        },
-      })
-      setEmailStatus({ kind: 'ok', msg: `Sent to ${result.to}` })
-      setTimeout(() => setEmailStatus(null), 6000)
-    } catch (err) {
-      setEmailStatus({
-        kind: 'err',
-        msg: err instanceof Error ? err.message : String(err),
-      })
-    } finally {
-      setBusy(null)
     }
   }
 
@@ -246,10 +218,18 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         >
           Download Word
         </button>
-        <button onClick={emailDraftLink} disabled={busy === 'email'}>
-          {busy === 'email' && <span className="spinner" />}
-          {busy === 'email' ? 'Sending…' : 'Email link to client'}
-        </button>
+        {/* Contract J: auto-discovered document actions (Send via email; the
+            e-signature session's Send for signature appears here automatically). */}
+        <DocumentActionBar
+          context={{
+            documentVersionId: draft.documentVersionId,
+            documentEntityId: draft.documentEntityId,
+            matterEntityId: draft.matterEntityId,
+            matterNumber: draft.matterNumber,
+            documentKind: draft.documentKind,
+            shareUrl: shareUrlFor(draft.documentVersionId),
+          }}
+        />
         <a
           href={shareUrlFor(draft.documentVersionId)}
           target="_blank"
@@ -259,23 +239,6 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           <button>Open client view ↗</button>
         </a>
       </div>
-      {emailStatus && (
-        <div
-          className={`alert ${emailStatus.kind === 'ok' ? '' : 'alert-error'}`}
-          style={
-            emailStatus.kind === 'ok'
-              ? {
-                  background: 'var(--ok-soft)',
-                  color: '#166534',
-                  border: '1px solid #86efac',
-                  marginBottom: 'var(--space-4)',
-                }
-              : { marginBottom: 'var(--space-4)' }
-          }
-        >
-          {emailStatus.msg}
-        </div>
-      )}
 
       <div className="split-review">
         <div

@@ -10,9 +10,12 @@ import { callClaudeDrafter } from '../adapters/claude.js'
 import { loadDraftingPrompt } from '../templates/loader.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
+import { renderTemplate, buildMergeData } from './templateMerge.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent).
 const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
+
+export type GenerationMode = 'ai_draft' | 'template_merge'
 
 export interface GenerateDraftInput {
   matterEntityId: string
@@ -20,6 +23,10 @@ export interface GenerateDraftInput {
   // (operating_agreement, engagement_letter) ship a bundled body; novel kinds
   // (NDA, amendment, …) supply their body template through the Service Library.
   documentKind: string
+  // Optional explicit override of the per-document generation mode. Normally the
+  // worker resolves this from the service config (Contract G); a caller (the
+  // "merge from template" UI action, or a receipt run) may force it.
+  generationMode?: GenerationMode
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -133,7 +140,67 @@ export async function runDraftGeneration(
   }
   const templateSource = templateDoc?.source ?? 'none'
   const templateVersion = templateDoc?.templateVersion ?? null
+  const templateId =
+    templateSource === 'config' && templateVersion != null
+      ? `${m.serviceKey}/${input.documentKind}@template-v${templateVersion}`
+      : `${input.documentKind}@template-repo`
 
+  // ── Generation mode (WP3.4 / Objective 6) ────────────────────────────────
+  // The default path is the AI draft (callClaudeDrafter). When the service config
+  // (Contract G) marks this document as template_merge — or a caller forces it —
+  // the worker renders the template DETERMINISTICALLY with matter + questionnaire
+  // data: no Anthropic call, no reasoning trace. Same document_draft downstream.
+  const generationMode =
+    input.generationMode ??
+    (await resolveGenerationMode(agentCtx, m.serviceKey, input.documentKind))
+
+  if (generationMode === 'template_merge') {
+    const service = await readServiceGeneration(agentCtx, m.serviceKey)
+    const { markdown, missingFields } = renderTemplate(
+      template,
+      buildMergeData(m, {
+        effectiveDateIso: new Date().toISOString(),
+        feeAmountFormatted: service.feeAmountFormatted,
+        feeStructureHuman: service.feeStructureHuman,
+      }),
+    )
+
+    const merged = await submitAction(agentCtx, {
+      actionKindName: 'draft.merge',
+      intentKind: 'automatic_sync',
+      payload: {
+        matter_entity_id: input.matterEntityId,
+        document_kind: input.documentKind,
+        document_markdown: markdown,
+        jurisdiction: 'NC',
+        template_id: templateId,
+        missing_fields: missingFields,
+      },
+    })
+
+    // Same attorney "draft ready" email as the AI path (WP6, REQ-NOTIFY-01).
+    const { queueNotification } = await import('./notifications.js')
+    const mergeEffects = (merged.effects[0] ?? {}) as { documentVersionId?: string }
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+    await queueNotification(agentCtx, {
+      routeKindName: 'attorney_draft_completed',
+      variables: {
+        matter_entity_id: input.matterEntityId,
+        matter_number: m.matterNumber,
+        document_kind: input.documentKind,
+        document_kind_label: input.documentKind.replace(/_/g, ' '),
+        confidence: null,
+        review_url:
+          baseUrl && mergeEffects.documentVersionId
+            ? `${baseUrl}/attorney/review/${mergeEffects.documentVersionId}`
+            : null,
+      },
+    })
+
+    return merged
+  }
+
+  // ── AI draft path (default) ──────────────────────────────────────────────
   // Resolve the drafting prompt from the matter's service config
   // (transitions.drafting.prompts[documentKind]) with a repo-file fallback. The
   // {{slot}} replacement below is unchanged — only the base prompt's source moves
@@ -175,10 +242,7 @@ export async function runDraftGeneration(
         : `${input.documentKind}@repo`,
     // Name the BODY template the worker used too (config version vs bundled repo),
     // so the audit trail captures both inputs to the draft.
-    templateId:
-      templateSource === 'config' && templateVersion != null
-        ? `${m.serviceKey}/${input.documentKind}@template-v${templateVersion}`
-        : `${input.documentKind}@template-repo`,
+    templateId,
   })
 
   const generated = await submitAction(agentCtx, {
@@ -301,4 +365,133 @@ function clampConfidence(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return 0.5
   return Math.min(1, Math.max(0, n))
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Service-config reads (Contract G — service/workflow config is owned by the
+// templates/questionnaire session; the worker only READS it). Workers may read
+// the DB directly (CLAUDE.md hard rule 9). generation_mode defaults to 'ai_draft'
+// when the config does not set it, so the existing AI flow is never regressed.
+// ───────────────────────────────────────────────────────────────────────────
+
+interface ServiceGeneration {
+  feeAmountFormatted?: string
+  feeStructureHuman?: string
+  // Per-document generation modes, when the config carries them.
+  documentGeneration?: Record<string, { generation_mode?: string } | undefined>
+}
+
+async function loadServiceTransitions(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<Record<string, unknown> | null> {
+  if (!serviceKey) return null
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ transitions: Record<string, unknown> }>(
+      `SELECT transitions FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND status = 'active'
+       ORDER BY recorded_at DESC LIMIT 1`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0]?.transitions ?? null
+  })
+}
+
+export async function resolveGenerationMode(
+  ctx: ActionContext,
+  serviceKey: string,
+  documentKind: string,
+): Promise<GenerationMode> {
+  const transitions = await loadServiceTransitions(ctx, serviceKey)
+  // Contract G may carry per-document config under `document_generation`
+  // (preferred) — read defensively and fall back to the AI path when absent.
+  const docGen = (transitions?.document_generation ??
+    null) as ServiceGeneration['documentGeneration']
+  const mode = docGen?.[documentKind]?.generation_mode
+  return mode === 'template_merge' ? 'template_merge' : 'ai_draft'
+}
+
+function readServiceGenerationFromTransitions(
+  transitions: Record<string, unknown> | null,
+): ServiceGeneration {
+  const cost = (transitions?.cost ?? null) as {
+    type?: string
+    amount?: string
+    hours?: number | null
+  } | null
+  if (!cost?.amount) return {}
+  const amountNum = Number(cost.amount)
+  const feeAmountFormatted = Number.isFinite(amountNum)
+    ? amountNum.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+    : `$${cost.amount}`
+  const feeStructureHuman =
+    cost.type === 'hourly'
+      ? `an hourly rate of ${feeAmountFormatted}${cost.hours ? ` (estimated ${cost.hours} hours)` : ''}`
+      : 'a fixed flat fee'
+  return { feeAmountFormatted, feeStructureHuman }
+}
+
+async function readServiceGeneration(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<ServiceGeneration> {
+  const transitions = await loadServiceTransitions(ctx, serviceKey)
+  return readServiceGenerationFromTransitions(transitions)
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// resolveStaleDraftJobs — operational hygiene (WP3.4). A drafting job that was
+// claimed but never reached a terminal state (worker crash, deploy mid-run) can
+// leave a matter stuck "generating" with no draft and no failure. This finds
+// such jobs older than `staleMinutes` and emits draft.failed (retryable) so the
+// matter surfaces the stall instead of hanging silently. Returns what it found.
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function resolveStaleDraftJobs(
+  ctx: ActionContext,
+  staleMinutes = 30,
+): Promise<{ matterEntityId: string; jobId: string; documentKind: string }[]> {
+  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const stale = await withActionContext(agentCtx, async (client) => {
+    // A "stuck" draft job is one CLAIMED (status='running', locked_at set) whose
+    // worker died before reaching a terminal state. Pending jobs are not stuck —
+    // they are waiting/backing off and the queue will retry them. Dead-letter is
+    // already terminal. So target running + stale lock only.
+    const res = await client.query<{
+      id: string
+      payload: { matter_entity_id?: string; document_kind?: string }
+    }>(
+      `SELECT id, payload FROM worker_job
+       WHERE tenant_id = $1
+         AND job_kind = 'legal.draft.run'
+         AND status = 'running'
+         AND locked_at < now() - ($2 || ' minutes')::interval`,
+      [agentCtx.tenantId, String(staleMinutes)],
+    )
+    return res.rows
+  })
+
+  const resolved: { matterEntityId: string; jobId: string; documentKind: string }[] = []
+  for (const job of stale) {
+    const matterEntityId = job.payload?.matter_entity_id
+    const documentKind = job.payload?.document_kind ?? 'unknown'
+    if (!matterEntityId) continue
+    await submitAction(agentCtx, {
+      actionKindName: 'event.record',
+      intentKind: 'automatic_sync',
+      payload: {
+        event_kind_name: 'draft.failed',
+        primary_entity_id: matterEntityId,
+        data: {
+          document_kind: documentKind,
+          reason: `Drafting job ${job.id} stalled beyond ${staleMinutes}m without completing.`,
+          retryable: true,
+          job_id: job.id,
+        },
+        source_type: 'system',
+      },
+    })
+    resolved.push({ matterEntityId, jobId: job.id, documentKind })
+  }
+  return resolved
 }

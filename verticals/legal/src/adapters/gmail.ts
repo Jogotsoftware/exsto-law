@@ -6,6 +6,18 @@ import {
   GMAIL_READ_SCOPE,
 } from './googleCalendar.js'
 
+// Firm sender identity for all outbound client mail (WP3.1 acceptance). Quoted
+// because the name contains "(beta)" — parentheses are comment delimiters in
+// RFC 5322 headers, so an unquoted display name would be misparsed.
+export const FIRM_SENDER_DISPLAY_NAME = 'Pacheco Law - Legal Instruments (beta)'
+
+export interface EmailAttachment {
+  filename: string
+  contentType: string
+  // Raw bytes, base64-encoded (callers pass e.g. a rendered PDF/Word doc).
+  contentBase64: string
+}
+
 export interface SendEmailArgs {
   to: string
   subject: string
@@ -14,12 +26,79 @@ export interface SendEmailArgs {
   // conversation.
   gmailThreadId?: string
   inReplyToMessageIdHeader?: string
+  // Optional file attachments (Contract B). When present the message is built as
+  // multipart/mixed; otherwise it stays a single text/plain part.
+  attachments?: EmailAttachment[]
 }
 
 export interface SendEmailResult {
   messageId: string
   from: string
   to: string
+}
+
+// base64 wrapped at 76 columns per RFC 2045 for attachment parts.
+function wrap76(b64: string): string {
+  return b64.replace(/(.{76})/g, '$1\r\n')
+}
+
+// Build the raw RFC 5322 message (single-part or multipart/mixed with
+// attachments), base64url-encoded for the Gmail send API.
+function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
+  const headers = [
+    `To: ${args.to}`,
+    `From: ${fromHeader}`,
+    `Subject: ${encodeHeaderIfNeeded(args.subject)}`,
+  ]
+  if (args.inReplyToMessageIdHeader) {
+    headers.push(`In-Reply-To: ${args.inReplyToMessageIdHeader}`)
+    headers.push(`References: ${args.inReplyToMessageIdHeader}`)
+  }
+
+  let mime: string
+  if (args.attachments && args.attachments.length > 0) {
+    const boundary = `=_exsto_${Buffer.from(`${args.to}:${args.subject}`).toString('hex').slice(0, 24)}`
+    const parts: string[] = [
+      `--${boundary}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: 8bit',
+      '',
+      args.body,
+    ]
+    for (const att of args.attachments) {
+      parts.push(
+        `--${boundary}`,
+        `Content-Type: ${att.contentType}; name="${att.filename}"`,
+        'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; filename="${att.filename}"`,
+        '',
+        wrap76(att.contentBase64),
+      )
+    }
+    parts.push(`--${boundary}--`)
+    mime = [
+      ...headers,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      '',
+      ...parts,
+    ].join('\r\n')
+  } else {
+    mime = [
+      ...headers,
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: 8bit',
+      '',
+      args.body,
+    ].join('\r\n')
+  }
+
+  return Buffer.from(mime, 'utf-8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
 }
 
 // Send a plain-text email from the attorney's Google account using the Gmail
@@ -50,29 +129,11 @@ export async function sendEmail(
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2 })
 
-  const headers = [
-    `To: ${args.to}`,
-    `From: ${creds.accountEmail}`,
-    `Subject: ${encodeHeaderIfNeeded(args.subject)}`,
-  ]
-  if (args.inReplyToMessageIdHeader) {
-    headers.push(`In-Reply-To: ${args.inReplyToMessageIdHeader}`)
-    headers.push(`References: ${args.inReplyToMessageIdHeader}`)
-  }
-  const mime = [
-    ...headers,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    args.body,
-  ].join('\r\n')
-
-  const raw = Buffer.from(mime, 'utf-8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
+  // Firm-branded sender: "Pacheco Law - Legal Instruments (beta)" <attorney@…>.
+  // Quoted display name (the "(beta)" parentheses would otherwise read as a
+  // header comment). The envelope address stays the attorney's connected account.
+  const fromHeader = `"${FIRM_SENDER_DISPLAY_NAME}" <${creds.accountEmail}>`
+  const raw = buildRawMessage(args, fromHeader)
 
   const res = await gmail.users.messages.send({
     userId: 'me',
