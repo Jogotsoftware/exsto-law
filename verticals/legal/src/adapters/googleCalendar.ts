@@ -47,7 +47,18 @@ export const GOOGLE_OAUTH_SCOPES_SIGNIN = [
 // attorney connects once and has calendar + full email. (Supersedes the
 // incremental REQ-CALMAIL-03/REQ-AUTH-03 staging.)
 export const GOOGLE_OAUTH_SCOPES_CONNECT = [
+  // Calendar: full read/write. `calendar.events` is kept (existing scope-presence
+  // checks key off it) and the broader `calendar` is ADDED so the downstream
+  // client (comms session) can manage calendars/settings, not only events.
+  'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/calendar.events',
+  // Gmail: `gmail.modify` (read + write: labels, read-state, drafts) is the broad
+  // grant the downstream mail client needs; `gmail.send` stays explicit (send is
+  // its own capability) and `gmail.readonly` stays so existing scope-presence
+  // checks (gmail.ts, settings page) remain valid — readonly ⊂ modify, so it is
+  // redundant-but-harmless. Broadening is additive on purpose: under-scoping here
+  // breaks the email/calendar client downstream (do not trim "to shorten consent").
+  'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
@@ -55,6 +66,59 @@ export const GOOGLE_OAUTH_SCOPES_CONNECT = [
 
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
 export const GMAIL_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+export const GMAIL_MODIFY_SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
+export const CALENDAR_FULL_SCOPE = 'https://www.googleapis.com/auth/calendar'
+
+// The scopes a connect MUST come back granted for the downstream calendar + mail
+// client to work. If Google returns a grant missing any of these (the user
+// unchecked a box, or a stale incremental grant narrowed it), exchangeGoogleCode
+// rejects the connect and forces full re-consent rather than storing a half-grant.
+export const REQUIRED_CONNECT_SCOPES = [CALENDAR_FULL_SCOPE, GMAIL_MODIFY_SCOPE, GMAIL_SEND_SCOPE]
+
+// Dual capability probe, run with the freshly-minted access token BEFORE the
+// connection is ever stored as 'connected': a REAL Gmail profile read AND a REAL
+// Calendar list. Both must pass. This is what makes 'connected' mean "we proved
+// the grant actually works", not merely "a token arrived" (the original bug:
+// status was set on token receipt, so a scoped-wrong or dead grant showed green
+// until the first real sync failed). Direct fetch (no googleapis cold start);
+// any error detail is scrubbed of token-like substrings before it leaves here.
+export async function probeGoogleCapabilities(
+  accessToken: string,
+): Promise<{ ok: true } | { ok: false; detail: string }> {
+  const headers = { Authorization: `Bearer ${accessToken}` }
+  try {
+    const gmail = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers })
+    if (!gmail.ok) {
+      return {
+        ok: false,
+        detail: redactSecret(
+          `Gmail profile read failed (HTTP ${gmail.status}: ${await snippet(gmail)})`,
+        ),
+      }
+    }
+    const cal = await fetch(
+      'https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1',
+      { headers },
+    )
+    if (!cal.ok) {
+      return {
+        ok: false,
+        detail: redactSecret(`Calendar list failed (HTTP ${cal.status}: ${await snippet(cal)})`),
+      }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, detail: redactSecret(err instanceof Error ? err.message : String(err)) }
+  }
+}
+
+async function snippet(r: Response): Promise<string> {
+  try {
+    return (await r.text()).slice(0, 150)
+  } catch {
+    return ''
+  }
+}
 
 // Loose return type; the actual type lives in google-auth-library, which we
 // don't want as a direct workspace dep — googleapis re-exports the runtime.

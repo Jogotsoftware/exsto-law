@@ -1,5 +1,5 @@
 import type { ActionContext } from '@exsto/substrate'
-import { sendEmail as sendEmailRaw } from '../adapters/gmail.js'
+import { enqueueClientEmail } from './mailWorkspace.js'
 import { getMatter } from '../queries/matters.js'
 import { getDraftVersion } from '../queries/drafts.js'
 
@@ -56,5 +56,14 @@ export async function sendDraftLinkEmail(
     'Pacheco Law',
   ].join('\r\n')
 
-  return sendEmailRaw(ctx.tenantId, { to, subject, body })
+  // Route through Contract B so the draft-link email is recorded as a mail.send
+  // action and shows up in the matter's communication history (was previously a
+  // raw send with no audit row).
+  const { messageId, from } = await enqueueClientEmail(ctx, {
+    to,
+    subject,
+    body,
+    matterId: input.matterEntityId,
+  })
+  return { messageId, from, to }
 }

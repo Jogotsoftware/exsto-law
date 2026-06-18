@@ -40,6 +40,7 @@ function startOfWeek(d: Date): Date {
 
 export default function CalendarPage() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()))
+  const [view, setView] = useState<'week' | 'list'>('week')
   const [events, setEvents] = useState<WorkspaceEvent[]>([])
   const [source, setSource] = useState<'google' | 'disconnected' | 'error' | null>(null)
   const [googleError, setGoogleError] = useState<string | null>(null)
@@ -53,6 +54,10 @@ export default function CalendarPage() {
     start: string
     end: string
   } | null>(null)
+  // Which unlinked Google event is mid-assignment, and the chosen matter.
+  const [assignFor, setAssignFor] = useState<{ eventId: string; matterEntityId: string } | null>(
+    null,
+  )
 
   const weekEnd = useMemo(() => new Date(weekStart.getTime() + 7 * DAY_MS), [weekStart])
 
@@ -84,6 +89,28 @@ export default function CalendarPage() {
     load()
   }, [weekStart])
 
+  // Contract D — launchScheduler: open the event creator pre-wired from query
+  // params (?create=1&matterId=…). Runs once matters are loaded so the matter
+  // can be preselected.
+  useEffect(() => {
+    if (typeof window === 'undefined' || matters.length === 0) return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('create') !== '1') return
+    const matterId = params.get('matterId') ?? undefined
+    setPanel((prev) =>
+      prev
+        ? prev
+        : {
+            kind: 'create',
+            matterEntityId:
+              (matterId && matters.find((m) => m.matterEntityId === matterId)?.matterEntityId) ||
+              matters[0]?.matterEntityId,
+            start: '',
+            end: '',
+          },
+    )
+  }, [matters])
+
   async function run(toolName: string, input: Record<string, unknown>) {
     setBusy(true)
     setError(null)
@@ -96,6 +123,24 @@ export default function CalendarPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  // WP3.2 — assign an unlinked Google event to a matter (legal.meeting.assign).
+  // Passes the event fields the capture needs; app-booked consultations are
+  // skipped server-side. After assign it reloads and the event shows its matter.
+  async function assignToMatter(e: WorkspaceEvent, matterEntityId: string) {
+    setAssignFor(null)
+    await run('legal.meeting.assign', {
+      googleEventId: e.eventId,
+      matterEntityId,
+      summary: e.summary,
+      startedAt: e.startIso,
+      endedAt: e.endIso,
+      allDay: e.allDay,
+      attendeeEmails: e.attendeeEmails,
+      htmlLink: e.htmlLink,
+      eventStatus: e.status,
+    })
   }
 
   const days = Array.from({ length: 7 }, (_, i) => new Date(weekStart.getTime() + i * DAY_MS))
@@ -145,6 +190,14 @@ export default function CalendarPage() {
               year: 'numeric',
             })}
           </strong>
+          <div className="row" style={{ gap: 0, marginLeft: 'var(--space-3)' }}>
+            <button className={view === 'week' ? 'primary' : ''} onClick={() => setView('week')}>
+              Week
+            </button>
+            <button className={view === 'list' ? 'primary' : ''} onClick={() => setView('list')}>
+              List
+            </button>
+          </div>
           <button
             className="primary"
             style={{ marginLeft: 'auto' }}
@@ -227,121 +280,239 @@ export default function CalendarPage() {
         </section>
       )}
 
-      <section>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(7, minmax(120px, 1fr))',
-            gap: 'var(--space-2)',
-            overflowX: 'auto',
-          }}
-        >
-          {days.map((day) => {
-            const isToday = day.toDateString() === new Date().toDateString()
-            return (
-              <div key={day.toISOString()}>
-                <div
-                  className="kv-label"
-                  style={{
-                    padding: 'var(--space-2)',
-                    borderBottom: '2px solid var(--border)',
-                    fontWeight: isToday ? 700 : 500,
-                  }}
-                >
-                  {day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}
-                  {isToday ? ' · today' : ''}
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-2)',
-                    padding: 'var(--space-2) 0',
-                  }}
-                >
-                  {eventsByDay(day).length === 0 && (
-                    <span className="text-muted text-sm" style={{ padding: 'var(--space-2)' }}>
-                      —
-                    </span>
-                  )}
-                  {eventsByDay(day).map((e) => (
-                    <div
-                      key={e.eventId}
-                      style={{
-                        border: '1px solid var(--border)',
-                        borderLeft: e.managedByApp
-                          ? '3px solid var(--primary, #1e3a5f)'
-                          : '3px solid var(--border)',
-                        borderRadius: 6,
-                        padding: 'var(--space-2)',
-                        fontSize: '0.85rem',
-                      }}
-                    >
-                      <div style={{ fontWeight: 600 }}>
-                        {e.allDay
-                          ? 'All day'
-                          : new Date(e.startIso!).toLocaleTimeString(undefined, {
-                              hour: 'numeric',
-                              minute: '2-digit',
-                            })}
-                      </div>
-                      <div>{e.summary}</div>
-                      {e.matterEntityId ? (
-                        <div style={{ marginTop: 4 }}>
-                          <Link href={`/attorney/matters/${e.matterEntityId}`}>
-                            {e.matterNumber} →
-                          </Link>
-                          <div className="row" style={{ gap: 'var(--space-1)', marginTop: 4 }}>
-                            <button
-                              style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
-                              onClick={() =>
-                                setPanel({
-                                  kind: 'reschedule',
-                                  matterEntityId: e.matterEntityId!,
-                                  start: '',
-                                  end: '',
-                                })
-                              }
-                            >
-                              Reschedule
-                            </button>
-                            <button
-                              style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
-                              disabled={busy}
-                              onClick={() => {
-                                if (
-                                  window.confirm(`Cancel the consultation for ${e.matterNumber}?`)
-                                ) {
-                                  run('legal.booking.cancel', { matterEntityId: e.matterEntityId })
+      {view === 'week' && (
+        <section>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(7, minmax(120px, 1fr))',
+              gap: 'var(--space-2)',
+              overflowX: 'auto',
+            }}
+          >
+            {days.map((day) => {
+              const isToday = day.toDateString() === new Date().toDateString()
+              return (
+                <div key={day.toISOString()}>
+                  <div
+                    className="kv-label"
+                    style={{
+                      padding: 'var(--space-2)',
+                      borderBottom: '2px solid var(--border)',
+                      fontWeight: isToday ? 700 : 500,
+                    }}
+                  >
+                    {day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}
+                    {isToday ? ' · today' : ''}
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-2)',
+                      padding: 'var(--space-2) 0',
+                    }}
+                  >
+                    {eventsByDay(day).length === 0 && (
+                      <span className="text-muted text-sm" style={{ padding: 'var(--space-2)' }}>
+                        —
+                      </span>
+                    )}
+                    {eventsByDay(day).map((e) => (
+                      <div
+                        key={e.eventId}
+                        style={{
+                          border: '1px solid var(--border)',
+                          borderLeft: e.managedByApp
+                            ? '3px solid var(--primary, #1e3a5f)'
+                            : '3px solid var(--border)',
+                          borderRadius: 6,
+                          padding: 'var(--space-2)',
+                          fontSize: '0.85rem',
+                        }}
+                      >
+                        <div style={{ fontWeight: 600 }}>
+                          {e.allDay
+                            ? 'All day'
+                            : new Date(e.startIso!).toLocaleTimeString(undefined, {
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })}
+                        </div>
+                        <div>{e.summary}</div>
+                        {e.matterEntityId ? (
+                          <div style={{ marginTop: 4 }}>
+                            <Link href={`/attorney/matters/${e.matterEntityId}`}>
+                              {e.matterNumber} →
+                            </Link>
+                            <div className="row" style={{ gap: 'var(--space-1)', marginTop: 4 }}>
+                              <button
+                                style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
+                                onClick={() =>
+                                  setPanel({
+                                    kind: 'reschedule',
+                                    matterEntityId: e.matterEntityId!,
+                                    start: '',
+                                    end: '',
+                                  })
                                 }
-                              }}
-                            >
-                              Cancel
-                            </button>
+                              >
+                                Reschedule
+                              </button>
+                              <button
+                                style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
+                                disabled={busy}
+                                onClick={() => {
+                                  if (
+                                    window.confirm(`Cancel the consultation for ${e.matterNumber}?`)
+                                  ) {
+                                    run('legal.booking.cancel', {
+                                      matterEntityId: e.matterEntityId,
+                                    })
+                                  }
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <div className="text-muted text-sm" style={{ marginTop: 4 }}>
-                          Google event{' '}
-                          {e.htmlLink && (
-                            <a href={e.htmlLink} target="_blank" rel="noreferrer">
-                              open ↗
-                            </a>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                        ) : (
+                          <div className="text-muted text-sm" style={{ marginTop: 4 }}>
+                            <div>
+                              Google event{' '}
+                              {e.htmlLink && (
+                                <a href={e.htmlLink} target="_blank" rel="noreferrer">
+                                  open ↗
+                                </a>
+                              )}
+                            </div>
+                            {!e.managedByApp &&
+                              matters.length > 0 &&
+                              (assignFor?.eventId === e.eventId ? (
+                                <div
+                                  className="row"
+                                  style={{ gap: 'var(--space-1)', marginTop: 4, flexWrap: 'wrap' }}
+                                >
+                                  <select
+                                    value={assignFor.matterEntityId}
+                                    style={{ fontSize: '0.75rem' }}
+                                    onChange={(ev) =>
+                                      setAssignFor({
+                                        eventId: e.eventId,
+                                        matterEntityId: ev.target.value,
+                                      })
+                                    }
+                                  >
+                                    {matters.map((m) => (
+                                      <option key={m.matterEntityId} value={m.matterEntityId}>
+                                        {m.matterNumber}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
+                                    disabled={busy || !assignFor.matterEntityId}
+                                    onClick={() => assignToMatter(e, assignFor.matterEntityId)}
+                                  >
+                                    Assign
+                                  </button>
+                                  <button
+                                    style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
+                                    onClick={() => setAssignFor(null)}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    padding: '0.15rem 0.4rem',
+                                    marginTop: 4,
+                                  }}
+                                  onClick={() =>
+                                    setAssignFor({
+                                      eventId: e.eventId,
+                                      matterEntityId: matters[0].matterEntityId,
+                                    })
+                                  }
+                                >
+                                  Assign to matter
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
-        <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-          Consultation events (highlighted) are managed in-app: reschedules and cancellations sync
-          to Google and are recorded as audited actions. Other Google events are shown read-only.
-        </p>
-      </section>
+              )
+            })}
+          </div>
+          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
+            Consultation events (highlighted) are managed in-app: reschedules and cancellations sync
+            to Google and are recorded as audited actions. Other Google events are shown read-only.
+          </p>
+        </section>
+      )}
+
+      {view === 'list' && (
+        <section>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {[...events]
+              .filter((e) => e.startIso)
+              .sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1))
+              .map((e) => (
+                <div
+                  key={e.eventId}
+                  className="row"
+                  style={{
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    border: '1px solid var(--border)',
+                    borderLeft: e.managedByApp
+                      ? '3px solid var(--primary, #1e3a5f)'
+                      : '3px solid var(--border)',
+                    borderRadius: 6,
+                    padding: 'var(--space-2) var(--space-3)',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{e.summary}</div>
+                    <div className="text-muted text-sm">
+                      {new Date(e.startIso!).toLocaleString(undefined, {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: 'var(--space-2)', alignItems: 'center' }}>
+                    {e.matterEntityId ? (
+                      <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
+                    ) : (
+                      e.htmlLink && (
+                        <a href={e.htmlLink} target="_blank" rel="noreferrer" className="text-sm">
+                          Google event ↗
+                        </a>
+                      )
+                    )}
+                  </div>
+                </div>
+              ))}
+            {events.filter((e) => e.startIso).length === 0 && (
+              <p className="text-muted">No events this week.</p>
+            )}
+          </div>
+          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
+            Chronological list of this week&apos;s events. Switch to Week view to book, reschedule,
+            or cancel.
+          </p>
+        </section>
+      )}
     </main>
   )
 }

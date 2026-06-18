@@ -24,3 +24,21 @@ export {
   resolveFirmPrimaryActor,
   isPerActorProvider,
 } from './adapters/connectionStore.js'
+// Contract A — the integration spine (provider credentials + connection status).
+// FROZEN public surface imported by the comms (S3) and e-sign (S5) sessions.
+export { getProviderCredential, getConnectionStatus } from './adapters/providerCredentials.js'
+// Google capability probe + the scopes a connect must come back granted (WP1.1).
+export {
+  probeGoogleCapabilities,
+  REQUIRED_CONNECT_SCOPES,
+  GMAIL_MODIFY_SCOPE,
+  CALENDAR_FULL_SCOPE,
+} from './adapters/googleCalendar.js'
+export type {
+  CredentialProvider,
+  GoogleCredential,
+  ApiKeyCredential,
+  GranolaCredential,
+  ProviderCredential,
+  ConnectionStatusResult,
+} from './adapters/providerCredentials.js'

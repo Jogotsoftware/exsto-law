@@ -45,12 +45,13 @@ import './tools/savedViewTools.js'
 // it sends through the attorney's Gmail (mail.send provenance). The matter page
 // already calls legal.email.send_draft_link.
 import './tools/sendDraftLinkEmail.js'
-// Session 5 (WP5.2): "Send for signature" — provider-agnostic e-sign, beside
-// the draft-link email tool. Creates a signature envelope through the core.
+// Session 5: "Send for signature" + envelope status + portal signing.
 import './tools/sendForSignature.js'
-// Session 5: attorney envelope status (delivered/opened/signed) + portal signing.
 import './tools/esignAttorneyTools.js'
 import './tools/esignPortalTools.js'
+// Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
+// invoices, list/inspect them, and send (activation-gated). Session 4.
+import './tools/billingTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {
