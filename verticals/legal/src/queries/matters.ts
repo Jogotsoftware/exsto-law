@@ -27,6 +27,9 @@ export interface MatterDetail extends MatterSummary {
   latestDraftVersionId: string | null
   latestDraftStatus: string | null
   clientEmail: string | null
+  // The client PARENT entity (matter_of, migration 0020), for linking a matter to
+  // its client page. Null when the matter isn't grouped under a client yet.
+  clientEntityId: string | null
 }
 
 export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> {
@@ -146,6 +149,16 @@ export async function getMatter(
       [ctx.tenantId, matterEntityId],
     )
 
+    const clientParent = await client.query<{ id: string }>(
+      `SELECT r.target_entity_id AS id
+       FROM relationship r
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+       WHERE r.tenant_id = $1 AND r.source_entity_id = $2 AND rkd.kind_name = 'matter_of'
+         AND (r.valid_to IS NULL OR r.valid_to > now())
+       LIMIT 1`,
+      [ctx.tenantId, matterEntityId],
+    )
+
     return {
       matterEntityId,
       matterNumber: base.name,
@@ -163,6 +176,7 @@ export async function getMatter(
       latestDraftVersionId: latestDraft.rows[0]?.version_id ?? null,
       latestDraftStatus: latestDraft.rows[0]?.status ?? null,
       clientEmail: clientEmail ?? null,
+      clientEntityId: clientParent.rows[0]?.id ?? null,
     }
   })
 }

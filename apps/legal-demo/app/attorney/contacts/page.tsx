@@ -1,15 +1,15 @@
 'use client'
 
-// Contacts CRM (replaces the old Import tab). Everyone who's reached the firm,
-// grouped by pipeline stage (derived from their matters), searchable. Each row
-// opens the contact detail. Stage groups follow the lead pipeline:
-// Prospect → Consulted → Engaged → Active → Closed.
+// Contacts CRM (WP2.2). Everyone who's reached the firm, in four views derived
+// from their matter status — Active / Prospective / Prior / All. A contact's
+// standing is a fact about their matters, not a manually-managed stage.
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
-type LeadStage = 'prospect' | 'consulted' | 'engaged' | 'active' | 'closed'
+type CrmBucket = 'active' | 'prospective' | 'prior'
+type Tab = 'all' | CrmBucket
 
 interface Contact {
   contactEntityId: string
@@ -19,18 +19,28 @@ interface Contact {
   companyName: string | null
   attributionSource: string | null
   matterCount: number
-  leadStage: LeadStage
+  crmBucket: CrmBucket
   firstSeenAt: string
   lastActivityAt: string
 }
 
-const STAGES: { key: LeadStage; label: string; color: string }[] = [
-  { key: 'prospect', label: 'Prospect', color: '#94a3b8' },
-  { key: 'consulted', label: 'Consulted', color: '#3b82f6' },
-  { key: 'engaged', label: 'Engaged', color: '#8b5cf6' },
-  { key: 'active', label: 'Active', color: '#16a34a' },
-  { key: 'closed', label: 'Closed', color: '#6b7280' },
+const TABS: { key: Tab; label: string; hint: string }[] = [
+  { key: 'all', label: 'All', hint: 'Everyone who has reached the firm' },
+  { key: 'active', label: 'Active', hint: 'At least one open matter' },
+  { key: 'prospective', label: 'Prospective', hint: 'A lead — no matter yet' },
+  { key: 'prior', label: 'Prior', hint: 'Past clients — every matter closed' },
 ]
+
+const BUCKET_LABEL: Record<CrmBucket, string> = {
+  active: 'Active',
+  prospective: 'Prospective',
+  prior: 'Prior',
+}
+const BUCKET_COLOR: Record<CrmBucket, string> = {
+  active: '#16a34a',
+  prospective: '#3b82f6',
+  prior: '#6b7280',
+}
 
 function timeAgo(iso: string): string {
   const t = new Date(iso).getTime()
@@ -39,14 +49,14 @@ function timeAgo(iso: string): string {
   if (d <= 0) return 'today'
   if (d === 1) return 'yesterday'
   if (d < 30) return `${d}d ago`
-  const mo = Math.round(d / 30)
-  return `${mo}mo ago`
+  return `${Math.round(d / 30)}mo ago`
 }
 
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
+  const [tab, setTab] = useState<Tab>('all')
 
   useEffect(() => {
     callAttorneyMcp<{ contacts: Contact[] }>({ toolName: 'legal.contact.list' })
@@ -54,27 +64,25 @@ export default function ContactsPage() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
 
-  const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase()
-    if (!t) return contacts ?? []
-    return (contacts ?? []).filter((c) =>
-      [c.fullName, c.email, c.companyName ?? '', c.phone ?? ''].some((s) =>
-        s.toLowerCase().includes(t),
-      ),
-    )
-  }, [contacts, q])
-
-  const byStage = useMemo(() => {
-    const m: Record<LeadStage, Contact[]> = {
-      prospect: [],
-      consulted: [],
-      engaged: [],
-      active: [],
-      closed: [],
+  const counts = useMemo(() => {
+    const c: Record<Tab, number> = { all: 0, active: 0, prospective: 0, prior: 0 }
+    for (const x of contacts ?? []) {
+      c.all += 1
+      c[x.crmBucket] += 1
     }
-    for (const c of filtered) m[c.leadStage].push(c)
-    return m
-  }, [filtered])
+    return c
+  }, [contacts])
+
+  const visible = useMemo(() => {
+    const t = q.trim().toLowerCase()
+    return (contacts ?? []).filter((c) => {
+      if (tab !== 'all' && c.crmBucket !== tab) return false
+      if (!t) return true
+      return [c.fullName, c.email, c.companyName ?? '', c.phone ?? ''].some((s) =>
+        s.toLowerCase().includes(t),
+      )
+    })
+  }, [contacts, q, tab])
 
   return (
     <main>
@@ -86,68 +94,70 @@ export default function ContactsPage() {
         {contacts && <span style={{ color: 'var(--muted)' }}>{contacts.length}</span>}
       </div>
       <p style={{ color: 'var(--muted)', marginTop: '-0.3rem' }}>
-        Everyone who&rsquo;s reached the firm, by pipeline stage (derived from their matters).
+        Everyone who&rsquo;s reached the firm, by standing (derived from their matters).
       </p>
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      <div className="crm-tabs" role="tablist">
+        {TABS.map((tEntry) => (
+          <button
+            key={tEntry.key}
+            role="tab"
+            aria-selected={tab === tEntry.key}
+            className={`crm-tab ${tab === tEntry.key ? 'active' : ''}`}
+            title={tEntry.hint}
+            onClick={() => setTab(tEntry.key)}
+          >
+            {tEntry.label}
+            <span className="crm-tab-count">{counts[tEntry.key]}</span>
+          </button>
+        ))}
+      </div>
 
       <input
         type="search"
         placeholder="Search name, email, company, phone…"
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        style={{ width: '100%', maxWidth: 440, marginBottom: '1.1rem' }}
+        style={{ width: '100%', maxWidth: 440, margin: '0.9rem 0 1.1rem' }}
       />
 
       {contacts === null ? (
         <div className="loading-block">
           <span className="spinner" /> Loading…
         </div>
-      ) : filtered.length === 0 ? (
-        <p className="text-muted">No contacts{q ? ' match your search' : ' yet'}.</p>
+      ) : visible.length === 0 ? (
+        <p className="text-muted">
+          No contacts{q ? ' match your search' : tab === 'all' ? ' yet' : ` in ${tab}`}.
+        </p>
       ) : (
-        STAGES.map((stage) => {
-          const rows = byStage[stage.key]
-          if (rows.length === 0) return null
-          return (
-            <section key={stage.key}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  marginBottom: '0.45rem',
-                }}
+        <div className="matter-list">
+          {visible.map((c) => (
+            <Link
+              key={c.contactEntityId}
+              href={`/attorney/contacts/${c.contactEntityId}`}
+              className="matter-row"
+            >
+              <div>
+                <div className="matter-row-title">{c.fullName || c.email || '(no name)'}</div>
+                <div className="matter-row-sub">
+                  {c.companyName && `${c.companyName} · `}
+                  {c.email}
+                  {c.matterCount > 0 &&
+                    ` · ${c.matterCount} matter${c.matterCount === 1 ? '' : 's'}`}
+                  {c.lastActivityAt && ` · ${timeAgo(c.lastActivityAt)}`}
+                </div>
+              </div>
+              <span
+                className="crm-pill"
+                style={{ color: BUCKET_COLOR[c.crmBucket], borderColor: BUCKET_COLOR[c.crmBucket] }}
               >
-                <span
-                  style={{ width: 10, height: 10, borderRadius: '50%', background: stage.color }}
-                />
-                <strong>{stage.label}</strong>
-                <span style={{ color: 'var(--muted)' }}>{rows.length}</span>
-              </div>
-              <div className="matter-list">
-                {rows.map((c) => (
-                  <Link
-                    key={c.contactEntityId}
-                    href={`/attorney/contacts/${c.contactEntityId}`}
-                    className="matter-row"
-                  >
-                    <div>
-                      <div className="matter-row-title">{c.fullName || c.email || '(no name)'}</div>
-                      <div className="matter-row-sub">
-                        {c.companyName && `${c.companyName} · `}
-                        {c.email}
-                        {c.matterCount > 0 &&
-                          ` · ${c.matterCount} matter${c.matterCount === 1 ? '' : 's'}`}
-                        {c.lastActivityAt && ` · ${timeAgo(c.lastActivityAt)}`}
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          )
-        })
+                {BUCKET_LABEL[c.crmBucket]}
+              </span>
+            </Link>
+          ))}
+        </div>
       )}
     </main>
   )

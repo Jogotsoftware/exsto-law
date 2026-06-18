@@ -73,6 +73,15 @@ export default function MailPage() {
     load()
   }, [])
 
+  // Contract D: another page can launch compose prefilled via ?compose=1&to=&subject=.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('compose') === '1') {
+      setCompose({ to: p.get('to') ?? '', subject: p.get('subject') ?? '', body: '' })
+    }
+  }, [])
+
   async function openThread(gmailThreadId: string) {
     setBusy('open')
     setError(null)

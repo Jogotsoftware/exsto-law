@@ -4445,3 +4445,45 @@ button.danger.outline:hover:not(:disabled) {
   font-size: 0.82rem;
   color: #64748b;
 }
+
+/* Contacts CRM four-way tabs + standing pill (WP2.2). */
+.crm-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.crm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--border, #e2e8f0);
+  background: transparent;
+  color: #475569;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.crm-tab:hover {
+  background: rgba(20, 48, 107, 0.05);
+}
+.crm-tab.active {
+  background: #14306b;
+  border-color: #14306b;
+  color: #fff;
+}
+.crm-tab-count {
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+.crm-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
