@@ -259,3 +259,26 @@ export const SettingsIcon = (p: IconProps) => (
     <circle cx="12" cy="12" r="3" />
   </Svg>
 )
+
+export const MenuIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="4" x2="20" y1="6" y2="6" />
+    <line x1="4" x2="20" y1="12" y2="12" />
+    <line x1="4" x2="20" y1="18" y2="18" />
+  </Svg>
+)
+
+export const BellIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+    <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+  </Svg>
+)
+
+export const LogOutIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" />
+    <line x1="21" x2="9" y1="12" y2="12" />
+  </Svg>
+)
