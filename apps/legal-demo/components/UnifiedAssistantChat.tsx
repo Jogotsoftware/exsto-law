@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { renderMarkdown } from '@/lib/draftExport'
 import { SendIcon } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -218,7 +219,18 @@ export function UnifiedAssistantChat({
         {intro && turns.length === 0 && <div className="text-muted text-sm">{intro}</div>}
         {turns.map((t, i) => (
           <div key={i} className={`feedback-bubble feedback-bubble-${t.role}`}>
-            <div style={{ whiteSpace: 'pre-wrap' }}>{t.content}</div>
+            {/* Assistant replies are markdown — render so **bold**, lists and
+                headings display formatted (not as raw syntax). renderMarkdown
+                escapes HTML before formatting, so model output can't inject
+                markup. User turns stay verbatim. */}
+            {t.role === 'assistant' ? (
+              <div
+                className="assistant-md"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
+              />
+            ) : (
+              <div style={{ whiteSpace: 'pre-wrap' }}>{t.content}</div>
+            )}
             {t.citations && t.citations.length > 0 && (
               <ol style={{ margin: '0.4rem 0 0', paddingLeft: '1.2rem', fontSize: '0.85em' }}>
                 {t.citations.map((c, j) => (

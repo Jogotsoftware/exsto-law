@@ -4,6 +4,8 @@ import {
   disconnectGranola,
   disconnectIntegration,
   getFirmBookingRules,
+  getFirmDefaultRate,
+  setFirmDefaultRate,
   getTenantSettings,
   listIntegrationStatuses,
   updateFirmBookingRules,
@@ -55,6 +57,24 @@ registerTool({
     rules: await updateFirmBookingRules(ctx, input),
   }),
 } satisfies Tool<Partial<FirmBookingRules>, { rules: FirmBookingRules }>)
+
+// ── Firm default billing rate (Contract K) ───────────────────────────────────
+
+registerTool({
+  name: 'legal.firm.get_default_rate',
+  description:
+    'Fetch the firm-wide default hourly rate — the fallback used on invoices when a client has no explicit billable rate. Null if never set.',
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ rate: await getFirmDefaultRate(ctx) }),
+} satisfies Tool<Record<string, never>, { rate: string | null }>)
+
+registerTool({
+  name: 'legal.firm.set_default_rate',
+  description:
+    'Set the firm-wide default hourly rate. Decimal string (ADR 0044), e.g. "350.00". Appended as a new effective-dated fact; the prior rate stays in history.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => await setFirmDefaultRate(ctx, input.rate),
+} satisfies Tool<{ rate: string }, { rate: string }>)
 
 // ── Integrations ─────────────────────────────────────────────────────────────
 
