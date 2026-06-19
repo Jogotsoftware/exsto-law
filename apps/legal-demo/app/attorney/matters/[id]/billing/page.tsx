@@ -17,7 +17,7 @@ import { humanizeKind, type MatterDetail } from '../shared'
 
 interface UnbilledEntry {
   sourceEventId: string
-  kind: 'time' | 'expense'
+  kind: 'time' | 'expense' | 'service_fee'
   date: string | null
   description: string
   durationMinutes?: number | null

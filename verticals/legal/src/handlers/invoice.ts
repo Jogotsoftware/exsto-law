@@ -44,7 +44,7 @@ function centsToAmount(cents: number): string {
 
 interface IssueLineSpec {
   source_event_id: string
-  kind: 'time' | 'expense'
+  kind: 'time' | 'expense' | 'service_fee'
   // Optional per-line overrides; rate defaults to the client's billable rate,
   // description defaults to the source entry's description.
   rate_override?: string | null
@@ -63,7 +63,7 @@ interface IssueInvoicePayload {
 // One resolved, priced line ready to write.
 interface PricedLine {
   sourceEventId: string
-  kind: 'time' | 'expense'
+  kind: 'time' | 'expense' | 'service_fee'
   matterId: string
   description: string
   quantity: string // hours (time) or "1" (expense)
@@ -106,7 +106,7 @@ async function isAlreadyBilled(
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
       WHERE e.tenant_id = $1
-        AND ekd.kind_name IN ('time.billed', 'expense.billed')
+        AND ekd.kind_name IN ('time.billed', 'expense.billed', 'service_fee.billed')
         AND e.payload->>'source_event_id' = $2`,
     [tenantId, sourceEventId],
   )
@@ -183,6 +183,28 @@ async function priceLine(
         ).trim() || 'Legal services',
       quantity,
       rate: centsToAmount(amountToCents(rate)),
+      amountCents,
+    }
+  }
+
+  if (spec.kind === 'service_fee') {
+    if (src.kindName !== 'service_fee.recorded')
+      throw new Error(`Entry ${spec.source_event_id} is not a service fee.`)
+    const amount = String((src.payload as { amount?: string }).amount ?? '0')
+    const amountCents = amountToCents(amount)
+    if (!(amountCents > 0)) throw new Error(`Service fee ${spec.source_event_id} has no amount.`)
+    return {
+      sourceEventId: spec.source_event_id,
+      kind: 'service_fee',
+      matterId: src.matterId,
+      description:
+        (
+          spec.description_override ??
+          (src.payload as { description?: string }).description ??
+          ''
+        ).trim() || 'Service fee',
+      quantity: '1',
+      rate: centsToAmount(amountCents),
       amountCents,
     }
   }
@@ -361,7 +383,12 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
     await insertEvent(client, {
       tenantId: ctx.tenantId,
       actionId,
-      eventKindName: l.kind === 'time' ? 'time.billed' : 'expense.billed',
+      eventKindName:
+        l.kind === 'time'
+          ? 'time.billed'
+          : l.kind === 'service_fee'
+            ? 'service_fee.billed'
+            : 'expense.billed',
       primaryEntityId: l.matterId,
       secondaryEntityIds: [invoiceId, lineId],
       sourceType: 'human',

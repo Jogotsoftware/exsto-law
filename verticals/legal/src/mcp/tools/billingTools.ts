@@ -74,9 +74,9 @@ registerTool({
           properties: {
             sourceEventId: {
               type: 'string',
-              description: 'Id of the time.logged / expense.recorded event.',
+              description: 'Id of the time.logged / expense.recorded / service_fee.recorded event.',
             },
-            kind: { type: 'string', enum: ['time', 'expense'] },
+            kind: { type: 'string', enum: ['time', 'expense', 'service_fee'] },
             rateOverride: {
               type: 'string',
               description: 'Per-line rate override (decimal string); time only.',
