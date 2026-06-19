@@ -1,8 +1,9 @@
 'use client'
 
-// Client page (WP2.2). A client is the parent that groups its contacts and
+// CRM › Client page (WP2.2). A client is the parent that groups its contacts and
 // matters (migration 0020). Shows both, each clickable through, plus Contract-D
-// Email / Schedule launchers aimed at the client's main contact.
+// Email / Schedule launchers aimed at the client's main contact. Lives under the
+// CRM layout (Clients · Contacts tabs); contacts link into the Contacts tab.
 
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -116,9 +117,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   }
 
   return (
-    <main>
-      <Link href="/attorney/contacts" className="back-link">
-        <ChevronLeftIcon size={14} /> Contacts
+    <>
+      <Link href="/attorney/crm" className="back-link">
+        <ChevronLeftIcon size={14} /> Clients
       </Link>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -263,7 +264,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
                 {client.contacts.map((c) => (
                   <Link
                     key={c.contactEntityId}
-                    href={`/attorney/contacts/${c.contactEntityId}`}
+                    href={`/attorney/crm/contacts/${c.contactEntityId}`}
                     className="matter-row"
                   >
                     <div>
@@ -312,6 +313,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           </section>
         </>
       )}
-    </main>
+    </>
   )
 }

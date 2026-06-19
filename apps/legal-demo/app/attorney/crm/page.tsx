@@ -1,51 +1,55 @@
 'use client'
 
-// CRM › Companies — the accounts. A company groups its contacts and matters
-// (migration 0067). Creating one fires company.create through the core. Each row
-// links to the company page. Engagement status (prospect/client/inactive) marks
-// which companies are clients (the Clients tab is the client-engaged filter).
+// CRM › Clients — the firm's accounts (a client is the billing parent that
+// groups contacts and matters). This is the CRM home; the Contacts tab is its
+// sibling. Creating one fires legal.client.create through the core (the first
+// place an attorney can add a CRM record by hand — contacts otherwise only
+// arrive via intake). Each row links to the client page.
+
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
-interface CompanySummary {
-  companyEntityId: string
-  name: string
-  engagementStatus: string
+interface ClientSummary {
+  clientEntityId: string
+  name: string | null
   billableRate: string | null
   billingType: string | null
+  mainContactId: string | null
   contactCount: number
   matterCount: number
+  createdAt: string
 }
 
 type BillingType = '' | 'hourly' | 'fixed'
-type Engagement = 'prospect' | 'client' | 'inactive'
+
 const MONEY_RE = /^\d+(\.\d{1,2})?$/
 
-export default function CompaniesPage() {
+export default function ClientsPage() {
   const router = useRouter()
-  const [companies, setCompanies] = useState<CompanySummary[] | null>(null)
+  const [clients, setClients] = useState<ClientSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  // New-client form.
   const [name, setName] = useState('')
-  const [engagement, setEngagement] = useState<Engagement>('prospect')
   const [billingType, setBillingType] = useState<BillingType>('')
   const [rate, setRate] = useState('')
 
   function load() {
-    callAttorneyMcp<{ companies: CompanySummary[] }>({ toolName: 'legal.company.list' })
-      .then((r) => setCompanies(r.companies))
+    callAttorneyMcp<{ clients: ClientSummary[] }>({ toolName: 'legal.client.list' })
+      .then((r) => setClients(r.clients))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }
+
   useEffect(load, [])
 
   async function create() {
-    const companyName = name.trim()
-    if (!companyName) {
-      setError('A company name is required.')
+    const clientName = name.trim()
+    if (!clientName) {
+      setError('A client name is required.')
       return
     }
     if (billingType !== '' && rate.trim() && !MONEY_RE.test(rate.trim())) {
@@ -55,26 +59,23 @@ export default function CompaniesPage() {
     setBusy(true)
     setError(null)
     try {
-      const input: Record<string, unknown> = {
-        company_name: companyName,
-        engagement_status: engagement,
-      }
+      const input: Record<string, unknown> = { client_name: clientName }
       if (billingType !== '') {
         input.billing_type = billingType
         if (rate.trim()) input.billable_rate = rate.trim()
       }
-      const res = await callAttorneyMcp<{ effects?: Array<{ companyEntityId?: string }> }>({
-        toolName: 'legal.company.create',
+      const res = await callAttorneyMcp<{ effects?: Array<{ clientEntityId?: string }> }>({
+        toolName: 'legal.client.create',
         input,
       })
-      const newId = res.effects?.[0]?.companyEntityId
+      const newId = res.effects?.[0]?.clientEntityId
       if (newId) {
-        router.push(`/attorney/crm/company/${newId}`)
+        router.push(`/attorney/crm/${newId}`)
         return
       }
+      // Fall back to refreshing the list if the id wasn't returned.
       setCreating(false)
       setName('')
-      setEngagement('prospect')
       setBillingType('')
       setRate('')
       load()
@@ -91,46 +92,34 @@ export default function CompaniesPage() {
         className="attorney-page-head"
         style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}
       >
-        <h1 style={{ margin: 0 }}>Companies</h1>
-        {companies && <span style={{ color: 'var(--muted)' }}>{companies.length}</span>}
-        <div style={{ marginLeft: 'auto' }}>
+        <h1 style={{ margin: 0 }}>Clients</h1>
+        {clients && <span style={{ color: 'var(--muted)' }}>{clients.length}</span>}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
           {!creating && (
             <button className="primary" onClick={() => setCreating(true)}>
-              New company
+              New client
             </button>
           )}
         </div>
       </div>
       <p style={{ color: 'var(--muted)', marginTop: '-0.3rem' }}>
-        The account that groups a company&rsquo;s contacts and matters. Mark one as a client to see
-        it under the Clients tab.
+        The billing parent that groups a client&rsquo;s contacts and matters.
       </p>
 
       {error && <div className="alert alert-error">{error}</div>}
 
       {creating && (
         <section style={{ borderLeft: '3px solid var(--border)' }}>
-          <h2 style={{ marginTop: 0 }}>New company</h2>
+          <h2 style={{ marginTop: 0 }}>New client</h2>
           <div className="form-grid">
             <label>
-              <span>Company name</span>
+              <span>Client name</span>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Acme Holdings LLC"
                 autoFocus
               />
-            </label>
-            <label>
-              <span>Engagement</span>
-              <select
-                value={engagement}
-                onChange={(e) => setEngagement(e.target.value as Engagement)}
-              >
-                <option value="prospect">Prospect</option>
-                <option value="client">Client</option>
-                <option value="inactive">Inactive</option>
-              </select>
             </label>
             <label>
               <span>Billing</span>
@@ -157,7 +146,7 @@ export default function CompaniesPage() {
           </div>
           <div style={{ marginTop: '0.9rem', display: 'flex', gap: '0.5rem' }}>
             <button className="primary" onClick={create} disabled={busy || !name.trim()}>
-              {busy ? 'Creating…' : 'Create company'}
+              {busy ? 'Creating…' : 'Create client'}
             </button>
             <button
               onClick={() => {
@@ -172,25 +161,23 @@ export default function CompaniesPage() {
         </section>
       )}
 
-      {companies === null ? (
+      {clients === null ? (
         <div className="loading-block">
           <span className="spinner" /> Loading…
         </div>
-      ) : companies.length === 0 ? (
-        <p className="text-muted">No companies yet. Create one to start a CRM record.</p>
+      ) : clients.length === 0 ? (
+        <p className="text-muted">No clients yet. Create one to start a CRM record.</p>
       ) : (
         <div className="matter-list">
-          {companies.map((c) => (
+          {clients.map((c) => (
             <Link
-              key={c.companyEntityId}
-              href={`/attorney/crm/company/${c.companyEntityId}`}
+              key={c.clientEntityId}
+              href={`/attorney/crm/${c.clientEntityId}`}
               className="matter-row"
             >
               <div>
-                <div className="matter-row-title">{c.name || '(unnamed company)'}</div>
+                <div className="matter-row-title">{c.name || '(unnamed client)'}</div>
                 <div className="matter-row-sub">
-                  {c.engagementStatus}
-                  {' · '}
                   {c.contactCount} contact{c.contactCount === 1 ? '' : 's'} · {c.matterCount} matter
                   {c.matterCount === 1 ? '' : 's'}
                   {c.billingType &&

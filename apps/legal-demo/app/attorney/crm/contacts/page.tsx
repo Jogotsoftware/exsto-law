@@ -85,7 +85,7 @@ export default function ContactsPage() {
   }, [contacts, q, tab])
 
   return (
-    <main>
+    <>
       <div
         className="attorney-page-head"
         style={{ display: 'flex', alignItems: 'baseline', gap: '0.6rem' }}
@@ -136,7 +136,7 @@ export default function ContactsPage() {
           {visible.map((c) => (
             <Link
               key={c.contactEntityId}
-              href={`/attorney/contacts/${c.contactEntityId}`}
+              href={`/attorney/crm/contacts/${c.contactEntityId}`}
               className="matter-row"
             >
               <div>
@@ -159,6 +159,6 @@ export default function ContactsPage() {
           ))}
         </div>
       )}
-    </main>
+    </>
   )
 }

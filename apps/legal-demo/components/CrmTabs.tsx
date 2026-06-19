@@ -1,21 +1,27 @@
 'use client'
 
-// Shared tab bar for the CRM section: Companies (the accounts), Clients
-// (companies engaged as clients), and Contacts (the people). Rendered by the
-// /attorney/crm layout and the contacts page so all three feel like one section.
+// Shared tab bar for the CRM section: Clients (the accounts — the billing parent
+// that groups contacts + matters) and Contacts (the people). Both live under the
+// /attorney/crm layout, which renders this bar, so the two always feel like one
+// section and you can never get stranded with no way back.
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-const TABS: Array<{ href: string; label: string; exact?: boolean }> = [
-  { href: '/attorney/crm', label: 'Companies', exact: true },
-  { href: '/attorney/crm/clients', label: 'Clients' },
-  { href: '/attorney/contacts', label: 'Contacts' },
+const TABS: Array<{ href: string; label: string }> = [
+  { href: '/attorney/crm', label: 'Clients' },
+  { href: '/attorney/crm/contacts', label: 'Contacts' },
 ]
 
 export function CrmTabs() {
   const pathname = usePathname()
-  const isActive = (t: (typeof TABS)[number]) =>
-    t.exact ? pathname === t.href : pathname.startsWith(t.href)
+  // Longest-prefix match: '/attorney/crm' is a prefix of '/attorney/crm/contacts',
+  // so on a contact (or contact-detail) path BOTH would match — pick the most
+  // specific. This keeps Clients lit on client-detail pages (/attorney/crm/<id>)
+  // while Contacts owns everything under /attorney/crm/contacts.
+  const activeHref = TABS.filter(
+    (t) => pathname === t.href || pathname.startsWith(t.href + '/'),
+  ).sort((a, b) => b.href.length - a.href.length)[0]?.href
+  const isActive = (t: (typeof TABS)[number]) => t.href === activeHref
   return (
     <div
       style={{

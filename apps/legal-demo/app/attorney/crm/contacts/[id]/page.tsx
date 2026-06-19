@@ -79,7 +79,7 @@ export default function ContactDetailPage() {
   const standing = contact ? BUCKET_META[contact.crmBucket] : null
 
   return (
-    <main>
+    <>
       <div
         className="attorney-page-head"
         style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
@@ -93,7 +93,7 @@ export default function ContactDetailPage() {
             {standing.label}
           </span>
         )}
-        <Link href="/attorney/contacts" className="back-link" style={{ marginLeft: 'auto' }}>
+        <Link href="/attorney/crm/contacts" className="back-link" style={{ marginLeft: 'auto' }}>
           Back to contacts
         </Link>
       </div>
@@ -146,7 +146,7 @@ export default function ContactDetailPage() {
           </section>
         </>
       ) : null}
-    </main>
+    </>
   )
 }
 

@@ -144,8 +144,8 @@ export function SearchBar() {
   function go(r: Result) {
     setOpen(false)
     setQuery('')
-    if (r.type === 'contact') router.push(`/attorney/contacts/${r.id}`)
-    else if (r.type === 'client') router.push(`/attorney/clients/${r.id}`)
+    if (r.type === 'contact') router.push(`/attorney/crm/contacts/${r.id}`)
+    else if (r.type === 'client') router.push(`/attorney/crm/${r.id}`)
     else router.push(`/attorney/matters/${r.id}`)
   }
 
