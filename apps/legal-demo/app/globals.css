@@ -1632,8 +1632,12 @@ pre {
   padding: var(--space-3);
   border-bottom: 1px solid var(--border-soft);
 }
+/* Search flexes to fill the row; the filter selects stay compact and inline, so
+   search + all filters sit on one line (they wrap only on a genuinely narrow
+   viewport). Overrides the global `select { width: 100% }`. */
 .client-search-row input {
-  max-width: 360px;
+  flex: 1 1 220px;
+  min-width: 180px;
   background: var(--rule-soft);
   border-color: transparent;
 }
@@ -1641,6 +1645,8 @@ pre {
   background: white;
 }
 .client-search-row select {
+  flex: 0 0 auto;
+  width: auto;
   background: var(--rule-soft);
   border-color: transparent;
 }

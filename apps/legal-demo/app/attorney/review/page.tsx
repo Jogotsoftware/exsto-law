@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+
+// Shared with the detail page: a step-through review session is the ordered list of
+// selected draft ids + where we are in it, kept in sessionStorage (per tab) and
+// flagged on the URL with ?review=session.
+export const REVIEW_SESSION_KEY = 'reviewSession'
 
 interface PendingDraft {
   documentVersionId: string
@@ -41,6 +47,7 @@ function humanizeKind(kind: string): string {
 }
 
 export default function ReviewQueue() {
+  const router = useRouter()
   const [drafts, setDrafts] = useState<PendingDraft[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -168,6 +175,17 @@ export default function ReviewQueue() {
     await load()
   }
 
+  // Step-through review: open each selected draft in order and auto-advance after
+  // each disposition (the detail page drives the advance). Records the ordered id
+  // list in sessionStorage and opens the first. This is the "review one by one"
+  // path, distinct from the batch-apply above.
+  function beginReview() {
+    const ids = visible.map((d) => d.documentVersionId).filter((id) => selected.has(id))
+    if (ids.length === 0) return
+    sessionStorage.setItem(REVIEW_SESSION_KEY, JSON.stringify({ ids, index: 0 }))
+    router.push(`/attorney/review/${ids[0]}?review=session`)
+  }
+
   const okCount = [...results.values()].filter((r) => r.state === 'ok').length
   const errCount = [...results.values()].filter((r) => r.state === 'error').length
 
@@ -242,6 +260,12 @@ export default function ReviewQueue() {
             >
               <div className="row">
                 <strong>{selectedVisible.length} selected</strong>
+                <button className="primary" onClick={beginReview} disabled={running}>
+                  Begin review →
+                </button>
+                <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
+                  or apply to all:
+                </span>
                 <select
                   value={batchAction}
                   onChange={(e) => setBatchAction(e.target.value as BatchAction)}
