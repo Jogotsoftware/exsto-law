@@ -11,6 +11,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { FIRM_NAME, PRODUCT_TAGLINE, PRODUCT_STAGE } from '@/lib/brand'
 import { fetchSession, clearDevSession, type DemoSession } from '@/lib/auth'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { SearchBar } from '@/components/SearchBar'
 import {
   Building2Icon,
@@ -51,6 +52,17 @@ const NAV: Array<{
 
 type OpenMenu = null | 'nav' | 'notif' | 'user'
 
+// One in-app notification (a resolved beta-feedback item) for the nav bell.
+type NotifItem = {
+  eventId: string
+  note: string | null
+  excerpt: string
+  linkPath: string | null
+  category: string
+  resolvedAt: string
+  unread: boolean
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return '·'
@@ -65,6 +77,8 @@ export function AttorneyTopNav() {
   const navRef = useRef<HTMLDivElement>(null)
   const notifRef = useRef<HTMLDivElement>(null)
   const userRef = useRef<HTMLDivElement>(null)
+  const [notifs, setNotifs] = useState<NotifItem[]>([])
+  const [unread, setUnread] = useState(0)
 
   useEffect(() => {
     // The attorney console never wears the client theme; the old header used to
@@ -74,6 +88,25 @@ export function AttorneyTopNav() {
     fetchSession().then((s) => {
       if (!cancelled) setSession(s)
     })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Load the attorney's in-app notifications (resolved beta feedback) for the bell.
+  useEffect(() => {
+    let cancelled = false
+    callAttorneyMcp<{ items: NotifItem[]; unreadCount: number }>({
+      toolName: 'legal.notifications.list',
+    })
+      .then((r) => {
+        if (cancelled) return
+        setNotifs(r.items)
+        setUnread(r.unreadCount)
+      })
+      .catch(() => {
+        /* leave the bell empty if the load fails */
+      })
     return () => {
       cancelled = true
     }
@@ -177,12 +210,28 @@ export function AttorneyTopNav() {
             <button
               type="button"
               className={`att-icon-btn ${open === 'notif' ? 'active' : ''}`}
-              aria-label="Notifications"
+              aria-label={unread > 0 ? `Notifications (${unread} unread)` : 'Notifications'}
               aria-expanded={open === 'notif'}
               aria-haspopup="true"
-              onClick={() => setOpen(open === 'notif' ? null : 'notif')}
+              onClick={() => {
+                const opening = open !== 'notif'
+                setOpen(opening ? 'notif' : null)
+                // Opening the bell marks everything seen: clear the badge now and
+                // record the marker (fire-and-forget).
+                if (opening && unread > 0) {
+                  setUnread(0)
+                  void callAttorneyMcp({ toolName: 'legal.notifications.mark_seen' }).catch(
+                    () => {},
+                  )
+                }
+              }}
             >
               <BellIcon size={18} />
+              {unread > 0 && (
+                <span className="att-notif-badge" aria-hidden="true">
+                  {unread > 9 ? '9+' : unread}
+                </span>
+              )}
             </button>
             {open === 'notif' && (
               <div
@@ -192,10 +241,42 @@ export function AttorneyTopNav() {
                 aria-live="polite"
               >
                 <div className="att-pop-head">Notifications</div>
-                <div className="att-notif-empty">
-                  <CheckCircleIcon size={22} />
-                  <span>You&rsquo;re all caught up.</span>
-                </div>
+                {notifs.length === 0 ? (
+                  <div className="att-notif-empty">
+                    <CheckCircleIcon size={22} />
+                    <span>You&rsquo;re all caught up.</span>
+                  </div>
+                ) : (
+                  <ul className="att-notif-list">
+                    {notifs.map((n) => {
+                      const body = (
+                        <>
+                          <span className="att-notif-row-top">
+                            {n.unread && <span className="att-notif-dot" aria-hidden="true" />}
+                            <span className="att-notif-title">Feedback resolved</span>
+                            <span className="att-notif-cat">{n.category}</span>
+                          </span>
+                          {n.note && <span className="att-notif-note">{n.note}</span>}
+                          <span className="att-notif-excerpt">“{n.excerpt}”</span>
+                        </>
+                      )
+                      return (
+                        <li
+                          key={n.eventId}
+                          className={`att-notif-item${n.unread ? ' unread' : ''}`}
+                        >
+                          {n.linkPath ? (
+                            <Link href={n.linkPath} className="att-notif-link">
+                              {body}
+                            </Link>
+                          ) : (
+                            <div className="att-notif-link">{body}</div>
+                          )}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
               </div>
             )}
           </div>
