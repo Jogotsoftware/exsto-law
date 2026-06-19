@@ -273,7 +273,7 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
             <div className="kv-label">Client</div>
             <div className="kv-value">
               {matter.clientEntityId ? (
-                <Link href={`/attorney/clients/${matter.clientEntityId}`}>
+                <Link href={`/attorney/crm/${matter.clientEntityId}`}>
                   {matter.clientName || 'View client'}
                 </Link>
               ) : (
