@@ -54,6 +54,21 @@ interface SignatureSettings {
   sendAsDisplayName: string
 }
 
+// Firm booking rules (Contract L) — the constraints the public availability
+// engine slices slots against. Mirrors the FirmBookingRules type in the legal
+// vertical.
+interface BookingRules {
+  timezone: string
+  bookableDays: number[]
+  bookableHours: { start: number; end: number }
+  slotGranularityMinutes: number
+  bufferMinutes: number
+  minLeadTimeHours: number
+  defaultDurationMinutes: number
+}
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
 const PROVIDER_META: Record<Provider, { name: string; desc: string }> = {
   google_calendar: {
     name: 'Google (Calendar & Email)',
@@ -112,6 +127,12 @@ export default function SettingsPage() {
   const [sigDraft, setSigDraft] = useState<string>('')
   const [sigEnabled, setSigEnabled] = useState<boolean>(true)
   const [savedSig, setSavedSig] = useState(false)
+  const [bookingRules, setBookingRules] = useState<BookingRules | null>(null)
+  const [savedRules, setSavedRules] = useState(false)
+  // Firm default hourly rate (Contract K) — the invoice fallback. Substrate-native
+  // (append-only, effective-dated, ADR 0044 decimal string), so it has its own
+  // load/save via legal.firm.* rather than the tenant_settings row.
+  const [firmRate, setFirmRate] = useState<string>('')
 
   const refreshIntegrations = useCallback(async () => {
     try {
@@ -176,22 +197,88 @@ export default function SettingsPage() {
     }
   }, [])
 
+  const refreshBookingRules = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ rules: BookingRules }>({
+        toolName: 'legal.booking_rules.get',
+      })
+      setBookingRules(r.rules)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  const refreshFirmRate = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ rate: string | null }>({
+        toolName: 'legal.firm.get_default_rate',
+      })
+      setFirmRate(r.rate ?? '')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
   useEffect(() => {
     refreshSettings()
     refreshIntegrations()
     refreshGoogle()
     refreshFeedback()
     refreshSignature()
+    refreshBookingRules()
+    refreshFirmRate()
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       const err = params.get('google_error')
       if (err) setError(err)
     }
-  }, [refreshSettings, refreshIntegrations, refreshGoogle, refreshFeedback, refreshSignature])
+  }, [
+    refreshSettings,
+    refreshIntegrations,
+    refreshGoogle,
+    refreshFeedback,
+    refreshSignature,
+    refreshBookingRules,
+    refreshFirmRate,
+  ])
 
   function updateField<K extends keyof TenantSettings>(key: K, value: TenantSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s))
     setSavedSettings(false)
+  }
+
+  function updateRule<K extends keyof BookingRules>(key: K, value: BookingRules[K]) {
+    setBookingRules((r) => (r ? { ...r, [key]: value } : r))
+    setSavedRules(false)
+  }
+
+  function toggleBookableDay(day: number) {
+    setBookingRules((r) => {
+      if (!r) return r
+      const has = r.bookableDays.includes(day)
+      const next = has ? r.bookableDays.filter((d) => d !== day) : [...r.bookableDays, day]
+      return { ...r, bookableDays: next.sort((a, b) => a - b) }
+    })
+    setSavedRules(false)
+  }
+
+  async function saveBookingRules() {
+    if (!bookingRules) return
+    setBusy('booking_rules')
+    setError(null)
+    try {
+      const r = await callAttorneyMcp<{ rules: BookingRules }>({
+        toolName: 'legal.booking_rules.update',
+        input: bookingRules,
+      })
+      setBookingRules(r.rules) // server clamps; reflect the canonical values back
+      setSavedRules(true)
+      setTimeout(() => setSavedRules(false), 2000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function saveSettings() {
@@ -207,10 +294,18 @@ export default function SettingsPage() {
           firmEmail: settings.firmEmail,
           firmPhone: settings.firmPhone,
           firmAddress: settings.firmAddress,
-          defaultHourlyRateUsd: settings.defaultHourlyRateUsd,
           defaultLlcFlatFeeUsd: settings.defaultLlcFlatFeeUsd,
         },
       })
+      // The firm default hourly rate is the substrate-native, invoice-backing
+      // value (Contract K) — saved through its own action, not tenant_settings.
+      const rate = firmRate.trim()
+      if (rate) {
+        await callAttorneyMcp({
+          toolName: 'legal.firm.set_default_rate',
+          input: { rate },
+        })
+      }
       setSavedSettings(true)
       setTimeout(() => setSavedSettings(false), 2000)
     } catch (e) {
@@ -554,14 +649,15 @@ export default function SettingsPage() {
               <input
                 type="number"
                 inputMode="decimal"
-                value={settings.defaultHourlyRateUsd ?? ''}
-                onChange={(e) =>
-                  updateField(
-                    'defaultHourlyRateUsd',
-                    e.target.value ? Number(e.target.value) : null,
-                  )
-                }
+                value={firmRate}
+                onChange={(e) => {
+                  setFirmRate(e.target.value)
+                  setSavedSettings(false)
+                }}
               />
+              <small className="text-muted">
+                The fallback hourly rate billed when a client has no explicit rate.
+              </small>
             </label>
             <label>
               <span>Default NC LLC flat fee (USD)</span>
@@ -578,6 +674,147 @@ export default function SettingsPage() {
               />
             </label>
           </div>
+        )}
+      </section>
+
+      <section>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.35rem' }}
+        >
+          <h2 style={{ margin: 0 }}>Booking rules</h2>
+          <button
+            className="primary"
+            onClick={saveBookingRules}
+            disabled={busy === 'booking_rules' || !bookingRules}
+            style={{ marginLeft: 'auto' }}
+          >
+            {busy === 'booking_rules' ? 'Saving…' : 'Save booking rules'}
+          </button>
+        </div>
+        <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+          The public booking page offers times that fit these rules and the real Google calendar.
+          Per-service durations (set on each service) override the default below.
+        </p>
+        {savedRules && (
+          <div
+            className="alert"
+            style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
+          >
+            Saved.
+          </div>
+        )}
+        {!bookingRules ? (
+          <div className="loading-block">
+            <span className="spinner" /> Loading…
+          </div>
+        ) : (
+          <>
+            <label>
+              <span>Bookable days</span>
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                {WEEKDAY_LABELS.map((label, day) => {
+                  const on = bookingRules.bookableDays.includes(day)
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => toggleBookableDay(day)}
+                      className={on ? 'primary' : ''}
+                      aria-pressed={on}
+                      style={{ minWidth: '3.2rem' }}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </label>
+            <div className="form-grid">
+              <label>
+                <span>Bookable hours — start (0–23)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={bookingRules.bookableHours.start}
+                  onChange={(e) =>
+                    updateRule('bookableHours', {
+                      ...bookingRules.bookableHours,
+                      start: Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                <span>Bookable hours — end (1–24)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={bookingRules.bookableHours.end}
+                  onChange={(e) =>
+                    updateRule('bookableHours', {
+                      ...bookingRules.bookableHours,
+                      end: Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                <span>Buffer between calls (minutes)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={240}
+                  value={bookingRules.bufferMinutes}
+                  onChange={(e) => updateRule('bufferMinutes', Number(e.target.value))}
+                />
+              </label>
+              <label>
+                <span>Minimum notice / lead time (hours)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={720}
+                  value={bookingRules.minLeadTimeHours}
+                  onChange={(e) => updateRule('minLeadTimeHours', Number(e.target.value))}
+                />
+              </label>
+              <label>
+                <span>Slot granularity (minutes)</span>
+                <select
+                  value={bookingRules.slotGranularityMinutes}
+                  onChange={(e) => updateRule('slotGranularityMinutes', Number(e.target.value))}
+                >
+                  {[15, 20, 30, 45, 60].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Default consultation length (minutes)</span>
+                <select
+                  value={bookingRules.defaultDurationMinutes}
+                  onChange={(e) => updateRule('defaultDurationMinutes', Number(e.target.value))}
+                >
+                  {[15, 30, 45, 60].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Timezone (IANA)</span>
+                <input
+                  value={bookingRules.timezone}
+                  onChange={(e) => updateRule('timezone', e.target.value)}
+                />
+              </label>
+            </div>
+          </>
         )}
       </section>
 

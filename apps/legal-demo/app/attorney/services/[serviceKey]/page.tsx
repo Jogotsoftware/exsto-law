@@ -5,6 +5,20 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
+type GenerationMode = 'template_merge' | 'ai_draft'
+type BookingDuration = 15 | 30 | 45 | 60
+
+interface ServiceBooking {
+  enabled: boolean
+  send_calendar_invite: boolean
+  duration_minutes: BookingDuration
+}
+interface ServiceCost {
+  type: 'hourly' | 'fixed'
+  amount: string
+  hours: number | null
+}
+
 interface ServiceDefinition {
   id: string
   serviceKey: string
@@ -13,6 +27,9 @@ interface ServiceDefinition {
   route: 'auto' | 'manual'
   intakeFormId: string
   documents: string[]
+  cost: ServiceCost | null
+  generationMode: GenerationMode
+  booking: ServiceBooking | null
   isActive: boolean
   sortOrder: number
   updatedAt: string
@@ -25,6 +42,15 @@ interface FormState {
   route: 'auto' | 'manual'
   documents: string[]
   sortOrder: string
+  // Contract G (WP2.3): document generation + per-service booking, flattened for
+  // the form. costType '' means no fee is set.
+  generationMode: GenerationMode
+  bookingEnabled: boolean
+  bookingSendInvite: boolean
+  bookingDuration: BookingDuration
+  costType: '' | 'hourly' | 'fixed'
+  costAmount: string
+  costHours: string
 }
 
 interface Completeness {
@@ -39,6 +65,13 @@ const EMPTY: FormState = {
   route: 'manual',
   documents: [],
   sortOrder: '',
+  generationMode: 'template_merge',
+  bookingEnabled: false,
+  bookingSendInvite: true,
+  bookingDuration: 30,
+  costType: '',
+  costAmount: '',
+  costHours: '',
 }
 
 export default function ServiceEditorPage() {
@@ -76,6 +109,13 @@ export default function ServiceEditorPage() {
         route: r.service.route,
         documents: r.service.documents,
         sortOrder: String(r.service.sortOrder),
+        generationMode: r.service.generationMode ?? 'template_merge',
+        bookingEnabled: r.service.booking?.enabled ?? false,
+        bookingSendInvite: r.service.booking?.send_calendar_invite ?? true,
+        bookingDuration: r.service.booking?.duration_minutes ?? 30,
+        costType: r.service.cost?.type ?? '',
+        costAmount: r.service.cost?.amount ?? '',
+        costHours: r.service.cost?.hours != null ? String(r.service.cost.hours) : '',
       })
       const c = await callAttorneyMcp<Completeness>({
         toolName: 'legal.service.completeness',
@@ -118,6 +158,10 @@ export default function ServiceEditorPage() {
       setError('A display name is required.')
       return
     }
+    if (form.costType !== '' && !/^\d+(\.\d{1,2})?$/.test(form.costAmount.trim())) {
+      setError('Enter the rate as an amount like 350 or 350.00.')
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -141,9 +185,26 @@ export default function ServiceEditorPage() {
         router.push(`/attorney/services/${r.service.serviceKey}/questionnaire`)
         return
       }
+      // Contract G (WP2.3): one save writes a single new immutable version carrying
+      // metadata + generation_mode + the booking block + the inline rate. costType
+      // '' clears the fee (cost: null).
+      const cost: ServiceCost | null =
+        form.costType === ''
+          ? null
+          : {
+              type: form.costType,
+              amount: form.costAmount.trim(),
+              hours:
+                form.costType === 'hourly' && form.costHours.trim() ? Number(form.costHours) : null,
+            }
+      const booking: ServiceBooking = {
+        enabled: form.bookingEnabled,
+        send_calendar_invite: form.bookingSendInvite,
+        duration_minutes: form.bookingDuration,
+      }
       await callAttorneyMcp({
         toolName: 'legal.service.update',
-        input: { serviceKey, ...base },
+        input: { serviceKey, ...base, generationMode: form.generationMode, booking, cost },
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -251,6 +312,107 @@ export default function ServiceEditorPage() {
             documents={form.documents}
             onChange={(docs) => update('documents', docs)}
           />
+
+          {!isNew && (
+            <>
+              {/* How documents are produced (Contract G). Deterministic merge is
+                  the default; AI drafting is opt-in. */}
+              <fieldset className="svc-fieldset">
+                <legend>Document generation</legend>
+                <label>
+                  <span>How documents are produced</span>
+                  <select
+                    value={form.generationMode}
+                    onChange={(e) => update('generationMode', e.target.value as GenerationMode)}
+                  >
+                    <option value="template_merge">
+                      Template merge — fill the template from the answers (no AI)
+                    </option>
+                    <option value="ai_draft">AI draft — the assistant writes the document</option>
+                  </select>
+                </label>
+              </fieldset>
+
+              {/* Inline rate (Contract K surfaces this; the value lives on the
+                  service as transitions.cost). */}
+              <fieldset className="svc-fieldset">
+                <legend>Pricing</legend>
+                <div className="form-grid">
+                  <label>
+                    <span>Fee</span>
+                    <select
+                      value={form.costType}
+                      onChange={(e) => update('costType', e.target.value as FormState['costType'])}
+                    >
+                      <option value="">No fee set</option>
+                      <option value="hourly">Hourly rate</option>
+                      <option value="fixed">Fixed fee</option>
+                    </select>
+                  </label>
+                  {form.costType !== '' && (
+                    <label>
+                      <span>
+                        {form.costType === 'hourly' ? 'Hourly rate (USD)' : 'Flat fee (USD)'}
+                      </span>
+                      <input
+                        inputMode="decimal"
+                        value={form.costAmount}
+                        onChange={(e) => update('costAmount', e.target.value)}
+                        placeholder="350.00"
+                      />
+                    </label>
+                  )}
+                  {form.costType === 'hourly' && (
+                    <label>
+                      <span>Estimated hours (optional)</span>
+                      <input
+                        inputMode="numeric"
+                        value={form.costHours}
+                        onChange={(e) => update('costHours', e.target.value)}
+                        placeholder="e.g. 3"
+                      />
+                    </label>
+                  )}
+                </div>
+              </fieldset>
+
+              {/* Per-service booking (Contract G). S5/S6 read this block. */}
+              <fieldset className="svc-fieldset">
+                <legend>Bookings</legend>
+                <label className="svc-check">
+                  <input
+                    type="checkbox"
+                    checked={form.bookingEnabled}
+                    onChange={(e) => update('bookingEnabled', e.target.checked)}
+                  />
+                  <span>Offer this service for online booking</span>
+                </label>
+                <label className="svc-check">
+                  <input
+                    type="checkbox"
+                    checked={form.bookingSendInvite}
+                    onChange={(e) => update('bookingSendInvite', e.target.checked)}
+                  />
+                  <span>Send a calendar invite when a consultation is booked</span>
+                </label>
+                <label style={{ maxWidth: 240 }}>
+                  <span>Consultation length</span>
+                  <select
+                    value={form.bookingDuration}
+                    onChange={(e) =>
+                      update('bookingDuration', Number(e.target.value) as BookingDuration)
+                    }
+                  >
+                    <option value={15}>15 minutes</option>
+                    <option value={30}>30 minutes</option>
+                    <option value={45}>45 minutes</option>
+                    <option value={60}>60 minutes</option>
+                  </select>
+                </label>
+              </fieldset>
+            </>
+          )}
+
           {!isNew && (
             <div style={{ marginTop: '0.9rem' }}>
               <button
@@ -291,6 +453,30 @@ export default function ServiceEditorPage() {
                         {d.replace(/_/g, ' ')}
                       </span>
                     ))}
+              </div>
+            </div>
+            <div>
+              <div className="kv-label">Generation</div>
+              <div className="kv-value">
+                {form.generationMode === 'ai_draft' ? 'AI draft' : 'Template merge'}
+              </div>
+            </div>
+            <div>
+              <div className="kv-label">Pricing</div>
+              <div className="kv-value">
+                {form.costType === ''
+                  ? '—'
+                  : form.costType === 'hourly'
+                    ? `$${form.costAmount}/hr${form.costHours ? ` · ~${form.costHours}h` : ''}`
+                    : `$${form.costAmount} fixed`}
+              </div>
+            </div>
+            <div>
+              <div className="kv-label">Booking</div>
+              <div className="kv-value">
+                {form.bookingEnabled
+                  ? `${form.bookingDuration} min${form.bookingSendInvite ? ' · sends invite' : ''}`
+                  : 'Off'}
               </div>
             </div>
           </div>

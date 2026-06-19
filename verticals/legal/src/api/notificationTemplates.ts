@@ -109,7 +109,18 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `Your consultation with Juan Carlos Pacheco is confirmed for ${s(v.scheduled_at_label, s(v.scheduled_at, 'the selected time'))}.`,
       `A calendar invitation is on its way to your inbox.`,
       ``,
-      `Need to change it? Use the reschedule link in the calendar invite.`,    ].join('\n'),
+      `Need to change it? Use the reschedule link in the calendar invite.`,
+      // Account access (S10): the portal is magic-link based, so the "create your
+      // account" link is the sign-in page where the client enters this same email
+      // and gets a secure link — no password, no token embedded in this email.
+      ...(v.portal_url
+        ? [
+            ``,
+            `Set up your client portal to track your matter and sign documents.`,
+            `Use the email you just gave us to sign in: ${s(v.portal_url)}`,
+          ]
+        : []),
+    ].join('\n'),
   }),
 }
 

@@ -14,6 +14,7 @@ import {
 } from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
+import type { GenerationMode } from './generateDraft.js'
 
 export interface ServiceField {
   id: string
@@ -58,6 +59,21 @@ export interface ServiceCost {
   hours: number | null
 }
 
+// GenerationMode (how a service produces documents — 'template_merge' = the
+// deterministic renderTemplate path, 'ai_draft' = opt-in AI) has its single
+// definition in the drafting worker; re-use it here (imported above) so the
+// barrel doesn't export the name twice (TS2308).
+
+// Per-service booking config (Contract G, WP2.3). `enabled` offers the service for
+// scheduling; `send_calendar_invite` controls the invite on booking; the slot is
+// `duration_minutes` long. Stored under transitions.booking; null when never set.
+export type BookingDuration = 15 | 30 | 45 | 60
+export interface ServiceBooking {
+  enabled: boolean
+  send_calendar_invite: boolean
+  duration_minutes: BookingDuration
+}
+
 export interface ServiceDefinition {
   id: string
   serviceKey: string
@@ -68,6 +84,8 @@ export interface ServiceDefinition {
   intakeSchema: IntakeSchema
   documents: string[]
   cost: ServiceCost | null
+  generationMode: GenerationMode
+  booking: ServiceBooking | null
   isActive: boolean
   sortOrder: number
   updatedAt: string
@@ -87,6 +105,8 @@ type WorkflowRow = {
     drafting?: DraftingConfig
     document_templates?: DocumentTemplateConfig
     cost?: { type?: string; amount?: string; hours?: number | null }
+    generation_mode?: string
+    booking?: { enabled?: boolean; send_calendar_invite?: boolean; duration_minutes?: number }
     [k: string]: unknown
   }
   status: string
@@ -134,6 +154,64 @@ function parseServiceCost(
   }
 }
 
+// The four bookable slot lengths (Contract G, WP2.3).
+const BOOKING_DURATIONS: readonly number[] = [15, 30, 45, 60]
+
+// Resolve a stored generation_mode. Default is 'ai_draft' so the editor's
+// read-out agrees with the drafting worker (which also defaults to AI) for rows
+// that predate the field; an explicit 'template_merge' is the no-AI path. Both
+// explicit values are preserved on write.
+function parseGenerationMode(m: unknown): GenerationMode {
+  return m === 'template_merge' ? 'template_merge' : 'ai_draft'
+}
+
+// Resolve a stored booking block into a well-formed ServiceBooking, or null when
+// none is set. Defensive: an unknown/malformed duration snaps to 30 minutes.
+function parseBooking(
+  b: { enabled?: boolean; send_calendar_invite?: boolean; duration_minutes?: number } | undefined,
+): ServiceBooking | null {
+  if (!b || typeof b !== 'object') return null
+  const dm =
+    typeof b.duration_minutes === 'number' && BOOKING_DURATIONS.includes(b.duration_minutes)
+      ? (b.duration_minutes as BookingDuration)
+      : 30
+  return {
+    enabled: b.enabled === true,
+    send_calendar_invite: b.send_calendar_invite === true,
+    duration_minutes: dm,
+  }
+}
+
+// Validate + normalize a cost patch (throws on a bad money string). Shared by the
+// dedicated cost setter and the metadata save so both write an identical shape.
+function normalizeCost(cost: ServiceCost | null | undefined): ServiceCost | null {
+  if (!cost) return null
+  if (cost.type !== 'hourly' && cost.type !== 'fixed') {
+    throw new Error("cost.type must be 'hourly' or 'fixed'.")
+  }
+  if (!MONEY_RE.test(cost.amount)) {
+    throw new Error('cost.amount must be a decimal string like "350.00" (ADR 0044).')
+  }
+  const hours = cost.type === 'hourly' && typeof cost.hours === 'number' ? cost.hours : null
+  if (hours != null && (hours < 0 || !Number.isFinite(hours))) {
+    throw new Error('cost.hours must be a non-negative number.')
+  }
+  return { type: cost.type, amount: cost.amount, hours }
+}
+
+// Validate + normalize a booking block (throws on a bad duration).
+function normalizeBooking(b: ServiceBooking | null | undefined): ServiceBooking | null {
+  if (!b) return null
+  if (!BOOKING_DURATIONS.includes(b.duration_minutes)) {
+    throw new Error('booking.duration_minutes must be one of 15, 30, 45, 60.')
+  }
+  return {
+    enabled: b.enabled === true,
+    send_calendar_invite: b.send_calendar_invite === true,
+    duration_minutes: b.duration_minutes,
+  }
+}
+
 function mapRow(r: WorkflowRow): ServiceDefinition {
   const intakeFormId = r.transitions.intake_form_id ?? ''
   // Resolution order (PR2): in-app config (transitions.intake_schema) wins, so an
@@ -151,6 +229,8 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     intakeSchema,
     documents: Array.isArray(r.transitions.documents) ? r.transitions.documents : [],
     cost: parseServiceCost(r.transitions.cost),
+    generationMode: parseGenerationMode(r.transitions.generation_mode),
+    booking: parseBooking(r.transitions.booking),
     isActive: r.status === 'active',
     sortOrder: sortOrderOf(r),
     updatedAt: r.recorded_at,
@@ -173,6 +253,7 @@ export async function listServices(ctx: ActionContext): Promise<ServiceDefinitio
       `SELECT ${WORKFLOW_COLS}
        FROM workflow_definition
        WHERE tenant_id = $1 AND status = 'active' AND valid_to IS NULL
+         AND kind_name NOT LIKE 'firm.%'
        ORDER BY kind_name`,
       [ctx.tenantId],
     )
@@ -214,6 +295,7 @@ export async function listServicesIncludingInactive(
       `SELECT ${WORKFLOW_COLS}
        FROM workflow_definition
        WHERE tenant_id = $1 AND valid_to IS NULL
+         AND kind_name NOT LIKE 'firm.%'
        ORDER BY kind_name`,
       [ctx.tenantId],
     )
@@ -236,6 +318,12 @@ export interface UpdateServiceMetadataInput {
   route?: WorkflowRoute
   documents?: string[]
   sortOrder?: number
+  // Contract G (WP2.3): how documents are produced, and per-service booking config.
+  // Omit a field to carry the prior version's value forward; pass null to clear
+  // booking/cost. Written into transitions via the upsert handler's merge patch.
+  generationMode?: GenerationMode
+  booking?: ServiceBooking | null
+  cost?: ServiceCost | null
 }
 
 // Create a new service (metadata only — questionnaire/prompt editors are a
@@ -268,6 +356,16 @@ export async function updateServiceMetadata(
   ctx: ActionContext,
   input: UpdateServiceMetadataInput,
 ): Promise<ServiceDefinition> {
+  // Only the operational keys the attorney touched go into the merge patch — an
+  // omitted field carries the prior version's value forward (the handler starts
+  // the merge from the prior row). generation_mode/booking/cost are validated
+  // here so a malformed save is rejected before a new version is written.
+  const transitionsPatch: Record<string, unknown> = {}
+  if (input.generationMode !== undefined)
+    transitionsPatch.generation_mode = parseGenerationMode(input.generationMode)
+  if (input.booking !== undefined) transitionsPatch.booking = normalizeBooking(input.booking)
+  if (input.cost !== undefined) transitionsPatch.cost = normalizeCost(input.cost)
+
   await submitAction(ctx, {
     actionKindName: 'legal.service.upsert',
     intentKind: 'adjustment',
@@ -278,6 +376,7 @@ export async function updateServiceMetadata(
       route: input.route,
       documents: input.documents,
       sort_order: input.sortOrder,
+      ...(Object.keys(transitionsPatch).length > 0 ? { transitions_patch: transitionsPatch } : {}),
     },
   })
   const updated = await getService(ctx, input.serviceKey)
@@ -339,21 +438,7 @@ export async function setServiceCost(
   const existing = await getService(ctx, input.serviceKey)
   if (!existing) throw new Error(`Service not found: ${input.serviceKey}`)
 
-  let costPatch: ServiceCost | null = null
-  if (input.cost) {
-    if (input.cost.type !== 'hourly' && input.cost.type !== 'fixed') {
-      throw new Error("cost.type must be 'hourly' or 'fixed'.")
-    }
-    if (!MONEY_RE.test(input.cost.amount)) {
-      throw new Error('cost.amount must be a decimal string like "350.00" (ADR 0044).')
-    }
-    const hours =
-      input.cost.type === 'hourly' && typeof input.cost.hours === 'number' ? input.cost.hours : null
-    if (hours != null && (hours < 0 || !Number.isFinite(hours))) {
-      throw new Error('cost.hours must be a non-negative number.')
-    }
-    costPatch = { type: input.cost.type, amount: input.cost.amount, hours }
-  }
+  const costPatch = normalizeCost(input.cost)
 
   await submitAction(ctx, {
     actionKindName: 'legal.service.upsert',
@@ -1215,6 +1300,10 @@ export async function submitBooking(
       timeZoneName: 'short',
     }),
     matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
+    // Client account access (S10): magic-link portal sign-in. The prospect
+    // booking confirmation email links here so the client can set up portal
+    // access using the same email they just booked with.
+    portal_url: baseUrl ? `${baseUrl}/portal/login` : null,
   }
   await queueNotification(ctx, {
     routeKindName: 'prospect_intake_confirmation',

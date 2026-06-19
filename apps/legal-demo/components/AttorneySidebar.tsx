@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { FIRM_NAME, PRODUCT_TAGLINE, PRODUCT_STAGE } from '@/lib/brand'
 import {
+  Building2Icon,
   CalendarIcon,
   CheckCircleIcon,
   CopyIcon,
@@ -29,6 +30,7 @@ const NAV: Array<{
   { href: '/attorney', label: 'Dashboard', exact: true, Icon: LayoutGridIcon },
   { href: '/attorney/matters', label: 'Matters', Icon: BriefcaseIcon },
   { href: '/attorney/contacts', label: 'Contacts', Icon: UsersIcon },
+  { href: '/attorney/clients', label: 'Clients', Icon: Building2Icon },
   { href: '/attorney/review', label: 'Review', Icon: CheckCircleIcon },
   { href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
   { href: '/attorney/mail', label: 'Mail', Icon: MailIcon },

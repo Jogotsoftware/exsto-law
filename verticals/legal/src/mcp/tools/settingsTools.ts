@@ -4,13 +4,18 @@ import {
   disconnectGranola,
   disconnectIntegration,
   getFirmSignature,
+  getFirmBookingRules,
+  getFirmDefaultRate,
+  setFirmDefaultRate,
   getTenantSettings,
   listIntegrationStatuses,
   setFirmSignature,
+  updateFirmBookingRules,
   updateTenantSettings,
   type ConnectIntegrationInput,
   type ConnectResult,
   type FirmSignature,
+  type FirmBookingRules,
   type IntegrationProvider,
   type IntegrationStatus,
   type SetFirmSignatureInput,
@@ -69,6 +74,44 @@ registerTool({
     return { signature, sendAsDisplayName: FIRM_SENDER_DISPLAY_NAME }
   },
 } satisfies Tool<SetFirmSignatureInput, SignatureGetResult>)
+
+// ── Firm booking rules (Contract L) ──────────────────────────────────────────
+
+registerTool({
+  name: 'legal.booking_rules.get',
+  description:
+    'Fetch the firm booking rules: bookable days/hours, buffer between calls, minimum lead time, slot granularity, and default consultation duration.',
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ rules: await getFirmBookingRules(ctx) }),
+} satisfies Tool<Record<string, never>, { rules: FirmBookingRules }>)
+
+registerTool({
+  name: 'legal.booking_rules.update',
+  description:
+    'Update the firm booking rules. Undefined fields are left alone; every value is clamped to a safe range before it is saved.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    rules: await updateFirmBookingRules(ctx, input),
+  }),
+} satisfies Tool<Partial<FirmBookingRules>, { rules: FirmBookingRules }>)
+
+// ── Firm default billing rate (Contract K) ───────────────────────────────────
+
+registerTool({
+  name: 'legal.firm.get_default_rate',
+  description:
+    'Fetch the firm-wide default hourly rate — the fallback used on invoices when a client has no explicit billable rate. Null if never set.',
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ rate: await getFirmDefaultRate(ctx) }),
+} satisfies Tool<Record<string, never>, { rate: string | null }>)
+
+registerTool({
+  name: 'legal.firm.set_default_rate',
+  description:
+    'Set the firm-wide default hourly rate. Decimal string (ADR 0044), e.g. "350.00". Appended as a new effective-dated fact; the prior rate stays in history.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => await setFirmDefaultRate(ctx, input.rate),
+} satisfies Tool<{ rate: string }, { rate: string }>)
 
 // ── Integrations ─────────────────────────────────────────────────────────────
 
