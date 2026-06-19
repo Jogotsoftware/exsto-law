@@ -23,7 +23,6 @@ import {
   MailIcon,
   ScaleIcon,
   SettingsIcon,
-  UsersIcon,
   BriefcaseIcon,
   MenuIcon,
   BellIcon,
@@ -38,8 +37,7 @@ const NAV: Array<{
 }> = [
   { href: '/attorney', label: 'Dashboard', exact: true, Icon: LayoutGridIcon },
   { href: '/attorney/matters', label: 'Matters', Icon: BriefcaseIcon },
-  { href: '/attorney/contacts', label: 'Contacts', Icon: UsersIcon },
-  { href: '/attorney/clients', label: 'Clients', Icon: Building2Icon },
+  { href: '/attorney/crm', label: 'CRM', Icon: Building2Icon },
   { href: '/attorney/review', label: 'Review', Icon: CheckCircleIcon },
   { href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
   { href: '/attorney/mail', label: 'Mail', Icon: MailIcon },
