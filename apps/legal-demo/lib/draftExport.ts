@@ -7,10 +7,21 @@ function escapeHtml(s: string): string {
 }
 
 function inlineFormat(text: string): string {
-  return escapeHtml(text)
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
+  return (
+    escapeHtml(text)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code>$1</code>')
+      // Markdown links [label](url). The url is already HTML-escaped; allow only
+      // safe schemes — external http(s) (new tab), in-app relative paths, mailto —
+      // so a javascript:/data: url is left as literal text, never an href.
+      .replace(/\[([^\]]+)\]\(([^)\s"]+)\)/g, (whole, label: string, url: string) => {
+        if (!/^(https?:\/\/|\/|mailto:)/i.test(url)) return whole
+        const external = /^https?:\/\//i.test(url)
+        const attrs = external ? ' target="_blank" rel="noopener noreferrer"' : ''
+        return `<a href="${url}"${attrs}>${label}</a>`
+      })
+  )
 }
 
 export function renderMarkdown(md: string): string {

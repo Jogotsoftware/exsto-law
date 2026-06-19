@@ -110,10 +110,35 @@ const SYSTEM_PROMPT = [
   "You are the AI assistant inside Pacheco Law's practice app — a tool for a solo/small NC business-law firm.",
   'Help the attorney work: explain and use the app (intake, booking, drafting, review, Granola import, settings), summarize and answer questions about the matter or client in context, and draft internal text when asked.',
   'When matter or client context is provided below, ground your answers in it.',
+  // Linking: replies render markdown, so [label](path) becomes a clickable in-app
+  // link. Point the attorney to the right page instead of just naming it.
+  'When you point the attorney to a part of the app, LINK to it with a markdown link they can click. Main pages: Dashboard (/attorney), Matters (/attorney/matters), Clients (/attorney/crm), Contacts (/attorney/crm/contacts), Calendar (/attorney/calendar), Mail (/attorney/mail), Services (/attorney/services), Templates (/attorney/templates), Questionnaires (/attorney/questionnaires), Billing (/attorney/billing), Review queue (/attorney/review), Settings (/attorney/settings). Only link to these paths or links given in the context below; never invent entity ids.',
   "You are a drafting and workflow aid, not the attorney's legal judgment: when asked for a legal conclusion, give your best analysis but remind the attorney to verify it and that they own the legal opinion.",
-  'You also collect product feedback: if the attorney shares a complaint, idea, or praise, acknowledge it warmly and note it has been recorded for the team.',
+  'You also collect product feedback: when the attorney shares a complaint, idea, or praise, acknowledge it warmly — every message here is already recorded for the team. If the feedback is vague or missing actionable detail (which screen, what they expected, the steps to reproduce), ask ONE short clarifying question before wrapping up.',
   'Keep replies focused and concise.',
 ].join(' ')
+
+// Build the Claude system text: the base prompt + the matter/client context, plus
+// the current entity's in-app link so the assistant can refer the attorney back to
+// the page they're on (Claude is the firm's own model, so the link/id is safe; the
+// external research path never receives it).
+function buildClaudeSystem(
+  scope: AssistantScope,
+  primaryEntityId: string | null,
+  context: AssistantContext | null,
+): string {
+  let system = context ? `${SYSTEM_PROMPT}\n\n--- Context ---\n${context.full}` : SYSTEM_PROMPT
+  const path =
+    primaryEntityId && scope === 'matter'
+      ? `/attorney/matters/${primaryEntityId}`
+      : primaryEntityId && scope === 'contact'
+        ? `/attorney/crm/contacts/${primaryEntityId}`
+        : null
+  if (path) {
+    system += `\n\nThe current page is ${path} — link to it with a markdown link when referring the attorney back to this ${scope}.`
+  }
+  return system
+}
 
 // Heuristic feedback sniff (mirrors the legacy assistant). Perplexity turns are
 // always 'research'; an explicit widget intent wins; otherwise a keyword check.
@@ -253,7 +278,7 @@ export async function assistantChat(
     citations = result.citations
   } else {
     // Claude: full matter context is safe (the firm's own model).
-    const system = context ? `${SYSTEM_PROMPT}\n\n--- Context ---\n${context.full}` : SYSTEM_PROMPT
+    const system = buildClaudeSystem(scope, primaryEntityId, context)
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
@@ -327,7 +352,7 @@ export async function* assistantChatStream(
     }
   } else {
     // Claude: full matter context is safe (the firm's own model).
-    const system = context ? `${SYSTEM_PROMPT}\n\n--- Context ---\n${context.full}` : SYSTEM_PROMPT
+    const system = buildClaudeSystem(scope, primaryEntityId, context)
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
