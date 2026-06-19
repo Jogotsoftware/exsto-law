@@ -18,7 +18,8 @@
 --     "not yet billed" derivation and invoice.issue's marker both extend cleanly.
 --
 -- Ids continue the billing block (1014-…0401..0404 = time/expense/invoice billed
--- + invoice issued/sent) at 0405/0406. Configuration-as-data; append-only events
+-- + invoice issued/sent; …0405/0406 already taken by assistant.feedback_resolved
+-- + notification.seen) at 0407/0408. Configuration-as-data; append-only events
 -- (no schema change); idempotent.
 -- =============================================================================
 
@@ -26,11 +27,11 @@ SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', false
 
 INSERT INTO event_kind_definition
   (id, tenant_id, kind_name, display_name, description, is_state_change) VALUES
-  ('00000000-0000-0000-1014-000000000405', '00000000-0000-0000-0000-000000000001',
+  ('00000000-0000-0000-1014-000000000407', '00000000-0000-0000-0000-000000000001',
    'service_fee.recorded', 'Service fee recorded',
    'A matter''s fixed service fee, accrued as billable when its first document is approved. Payload: service_key, amount (decimal string), description. primary_entity_id is the matter. Unbilled until a service_fee.billed event names it.',
    false),
-  ('00000000-0000-0000-1014-000000000406', '00000000-0000-0000-0000-000000000001',
+  ('00000000-0000-0000-1014-000000000408', '00000000-0000-0000-0000-000000000001',
    'service_fee.billed', 'Service fee billed',
    'Marks a service_fee.recorded entry billed onto an invoice line. Payload: source_event_id (the service_fee.recorded event), invoice_id, invoice_line_id, amount. Same shape as time.billed / expense.billed.',
    true)
