@@ -200,7 +200,11 @@ export default function AttorneyHome() {
 
   return (
     <main>
-      <PageHead title="Hi, Juan Carlos" actions={<ShareBookingButton />} />
+      {/* Beta feedback: drop the "Hi, Juan Carlos" greeting and the share-booking
+          button from this row. A neutral title keeps the page's h1 for
+          structure/a11y; the booking link is still shareable from the "This week"
+          row below. */}
+      <PageHead title="Dashboard" />
 
       {error && <div className="alert alert-error">{error}</div>}
 
