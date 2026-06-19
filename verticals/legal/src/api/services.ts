@@ -14,6 +14,7 @@ import {
 } from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
+import type { GenerationMode } from './generateDraft.js'
 
 export interface ServiceField {
   id: string
@@ -58,9 +59,10 @@ export interface ServiceCost {
   hours: number | null
 }
 
-// How a service produces its documents (Contract G, WP2.3). 'template_merge' is
-// the deterministic default (renderTemplate, no AI); 'ai_draft' is opt-in.
-export type GenerationMode = 'template_merge' | 'ai_draft'
+// GenerationMode (how a service produces documents — 'template_merge' = the
+// deterministic renderTemplate path, 'ai_draft' = opt-in AI) has its single
+// definition in the drafting worker; re-use it here (imported above) so the
+// barrel doesn't export the name twice (TS2308).
 
 // Per-service booking config (Contract G, WP2.3). `enabled` offers the service for
 // scheduling; `send_calendar_invite` controls the invite on booking; the slot is

@@ -113,6 +113,10 @@ export default function SettingsPage() {
   const [feedback, setFeedback] = useState<AssistantFeedbackEntry[] | null>(null)
   const [bookingRules, setBookingRules] = useState<BookingRules | null>(null)
   const [savedRules, setSavedRules] = useState(false)
+  // Firm default hourly rate (Contract K) — the invoice fallback. Substrate-native
+  // (append-only, effective-dated, ADR 0044 decimal string), so it has its own
+  // load/save via legal.firm.* rather than the tenant_settings row.
+  const [firmRate, setFirmRate] = useState<string>('')
 
   const refreshIntegrations = useCallback(async () => {
     try {
@@ -173,18 +177,37 @@ export default function SettingsPage() {
     }
   }, [])
 
+  const refreshFirmRate = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ rate: string | null }>({
+        toolName: 'legal.firm.get_default_rate',
+      })
+      setFirmRate(r.rate ?? '')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
   useEffect(() => {
     refreshSettings()
     refreshIntegrations()
     refreshGoogle()
     refreshFeedback()
     refreshBookingRules()
+    refreshFirmRate()
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       const err = params.get('google_error')
       if (err) setError(err)
     }
-  }, [refreshSettings, refreshIntegrations, refreshGoogle, refreshFeedback, refreshBookingRules])
+  }, [
+    refreshSettings,
+    refreshIntegrations,
+    refreshGoogle,
+    refreshFeedback,
+    refreshBookingRules,
+    refreshFirmRate,
+  ])
 
   function updateField<K extends keyof TenantSettings>(key: K, value: TenantSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s))
@@ -238,10 +261,18 @@ export default function SettingsPage() {
           firmEmail: settings.firmEmail,
           firmPhone: settings.firmPhone,
           firmAddress: settings.firmAddress,
-          defaultHourlyRateUsd: settings.defaultHourlyRateUsd,
           defaultLlcFlatFeeUsd: settings.defaultLlcFlatFeeUsd,
         },
       })
+      // The firm default hourly rate is the substrate-native, invoice-backing
+      // value (Contract K) — saved through its own action, not tenant_settings.
+      const rate = firmRate.trim()
+      if (rate) {
+        await callAttorneyMcp({
+          toolName: 'legal.firm.set_default_rate',
+          input: { rate },
+        })
+      }
       setSavedSettings(true)
       setTimeout(() => setSavedSettings(false), 2000)
     } catch (e) {
@@ -485,14 +516,15 @@ export default function SettingsPage() {
               <input
                 type="number"
                 inputMode="decimal"
-                value={settings.defaultHourlyRateUsd ?? ''}
-                onChange={(e) =>
-                  updateField(
-                    'defaultHourlyRateUsd',
-                    e.target.value ? Number(e.target.value) : null,
-                  )
-                }
+                value={firmRate}
+                onChange={(e) => {
+                  setFirmRate(e.target.value)
+                  setSavedSettings(false)
+                }}
               />
+              <small className="text-muted">
+                The fallback hourly rate billed when a client has no explicit rate.
+              </small>
             </label>
             <label>
               <span>Default NC LLC flat fee (USD)</span>

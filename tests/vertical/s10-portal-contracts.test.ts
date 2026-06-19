@@ -14,11 +14,7 @@
 //
 // See docs/workers/S10-client-portal-plan.md.
 import { describe, it, expect } from 'vitest'
-import {
-  CLIENT_PORTAL_TOOLS,
-  CLIENT_PORTAL_AUTHED_TOOLS,
-  isClientPortalAuthedTool,
-} from '@exsto/legal/mcp'
+import { CLIENT_PORTAL_TOOLS, isClientPortalAuthedTool } from '@exsto/legal/mcp'
 import '@exsto/legal/mcp' // register tools (side effect) so the allowlist resolves
 
 // Tool names S10 will introduce (kept here so the seam is one edit away).
@@ -77,11 +73,15 @@ describe('S10 receipts (HELD — enable when S5/S6/S9 land)', () => {
     'a single-use token from a booking creates a tenant-scoped client_account linked to that booking’s client_contact',
   )
   // R10.2 — WP10.2
-  it.todo('a booking transitions to confirmed via a portal action through the core (no direct substrate write)')
+  it.todo(
+    'a booking transitions to confirmed via a portal action through the core (no direct substrate write)',
+  )
   // R10.3 — WP10.3 (released-docs-only)
   it.todo('a signed-in client views one RELEASED document and completes a signature')
   it.todo('an unreleased document is invisible to the client (withheld, never enumerated)')
   // Cross-cutting isolation (extends client-portal-{policy,auth}.test.ts)
-  it.todo('a client cannot see another client’s matters, documents, or signing requests (cross-client RLS)')
+  it.todo(
+    'a client cannot see another client’s matters, documents, or signing requests (cross-client RLS)',
+  )
   it.todo('a client of firm A cannot reach any record of firm B (cross-tenant RLS)')
 })

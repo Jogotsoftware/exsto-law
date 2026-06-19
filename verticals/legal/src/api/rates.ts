@@ -29,7 +29,9 @@ const MONEY_RE = /^-?\d+(\.\d+)?$/
 function assertMoney(label: string, value: string): string {
   const v = (value ?? '').trim()
   if (!MONEY_RE.test(v)) {
-    throw new Error(`${label} must be a decimal string (ADR 0044), e.g. "350.00"; got ${JSON.stringify(value)}.`)
+    throw new Error(
+      `${label} must be a decimal string (ADR 0044), e.g. "350.00"; got ${JSON.stringify(value)}.`,
+    )
   }
   return v
 }
@@ -46,7 +48,10 @@ export async function getFirmDefaultRate(ctx: ActionContext): Promise<string | n
  * otherwise the firm default. This is the fallback the invoice rollup needs and
  * the value the Rates tab shows in the "(firm default)" column.
  */
-export async function getClientRate(ctx: ActionContext, clientEntityId: string): Promise<string | null> {
+export async function getClientRate(
+  ctx: ActionContext,
+  clientEntityId: string,
+): Promise<string | null> {
   return withActionContext(ctx, async (client) => {
     const own = await readClientOwnRate(client, ctx.tenantId, clientEntityId)
     if (own != null) return own
@@ -55,13 +60,19 @@ export async function getClientRate(ctx: ActionContext, clientEntityId: string):
 }
 
 /** A service's fixed fee (its workflow_definition fixed_fee), or null if unpriced. */
-export async function getServiceRate(ctx: ActionContext, serviceKey: string): Promise<string | null> {
+export async function getServiceRate(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<string | null> {
   return withActionContext(ctx, async (client) => readServiceFee(client, ctx.tenantId, serviceKey))
 }
 
 // ── Writes (through the core) ─────────────────────────────────────────────────
 
-export async function setFirmDefaultRate(ctx: ActionContext, rate: string): Promise<{ rate: string }> {
+export async function setFirmDefaultRate(
+  ctx: ActionContext,
+  rate: string,
+): Promise<{ rate: string }> {
   const r = assertMoney('firm default rate', rate)
   await submitAction(ctx, {
     actionKindName: 'legal.firm.set_default_rate',
@@ -110,7 +121,11 @@ export async function setServiceRate(
   await submitAction(ctx, {
     actionKindName: 'legal.service.upsert',
     intentKind: 'adjustment',
-    payload: { service_key: serviceKey, display_name: displayName, transitions_patch: { fixed_fee: fee } },
+    payload: {
+      service_key: serviceKey,
+      display_name: displayName,
+      transitions_patch: { fixed_fee: fee },
+    },
   })
   return { fixedFee: fee }
 }
@@ -169,7 +184,11 @@ export async function getRatesView(ctx: ActionContext): Promise<RatesView> {
       inheritsFirmDefault: r.rate == null,
     }))
 
-    const serviceRows = await client.query<{ kind_name: string; display_name: string; fixed_fee: string | null }>(
+    const serviceRows = await client.query<{
+      kind_name: string
+      display_name: string
+      fixed_fee: string | null
+    }>(
       `SELECT kind_name, display_name, transitions ->> 'fixed_fee' AS fixed_fee
          FROM workflow_definition
         WHERE tenant_id = $1 AND valid_to IS NULL
@@ -188,7 +207,10 @@ export async function getRatesView(ctx: ActionContext): Promise<RatesView> {
 
 // ── shared read helpers (one connection) ──────────────────────────────────────
 
-async function readFirmDefault(client: import('@exsto/shared').DbClient, tenantId: string): Promise<string | null> {
+async function readFirmDefault(
+  client: import('@exsto/shared').DbClient,
+  tenantId: string,
+): Promise<string | null> {
   const res = await client.query<{ rate: string | null }>(
     `SELECT a.value #>> '{}' AS rate
        FROM attribute a
