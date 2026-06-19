@@ -59,7 +59,10 @@ function addMonths(d: Date, n: number): Date {
 // The visible window for a view: what to fetch, which day cells to draw, and the
 // header label. day → one day; week/list → Mon–Sun; month → a 6-week grid that
 // always covers the month regardless of which weekday it starts on.
-function periodFor(anchor: Date, view: View): { start: Date; end: Date; days: Date[]; label: string } {
+function periodFor(
+  anchor: Date,
+  view: View,
+): { start: Date; end: Date; days: Date[]; label: string } {
   if (view === 'day') {
     const start = startOfDay(anchor)
     return {
@@ -232,7 +235,9 @@ export default function CalendarPage() {
         key={e.eventId}
         style={{
           border: '1px solid var(--border)',
-          borderLeft: e.managedByApp ? '3px solid var(--primary, #1e3a5f)' : '3px solid var(--border)',
+          borderLeft: e.managedByApp
+            ? '3px solid var(--primary, #1e3a5f)'
+            : '3px solid var(--border)',
           borderRadius: 6,
           padding: 'var(--space-2)',
           fontSize: '0.85rem',
@@ -402,7 +407,10 @@ export default function CalendarPage() {
       {error && <div className="alert alert-error">{error}</div>}
 
       <section>
-        <div className="row" style={{ gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div
+          className="row"
+          style={{ gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}
+        >
           <button onClick={() => shift(-1)}>← Previous</button>
           <button onClick={() => setAnchor(new Date())}>Today</button>
           <button onClick={() => shift(1)}>Next →</button>
@@ -435,7 +443,10 @@ export default function CalendarPage() {
       {panel && (
         <section>
           <h3>{panel.kind === 'create' ? 'Book a consultation' : 'Reschedule consultation'}</h3>
-          <div className="row" style={{ gap: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'end' }}>
+          <div
+            className="row"
+            style={{ gap: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'end' }}
+          >
             {panel.kind === 'create' && (
               <label>
                 Matter
