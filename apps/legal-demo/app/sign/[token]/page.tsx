@@ -28,14 +28,16 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
   if (error) {
     return (
       <div className="public-draft">
-        <div className="alert alert-error">{error}</div>
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
       </div>
     )
   }
   if (!doc) {
     return (
       <div className="public-draft">
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       </div>

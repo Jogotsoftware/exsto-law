@@ -156,6 +156,9 @@ export function SearchBar() {
         ref={inputRef}
         type="search"
         placeholder="Search matters, clients, contacts…"
+        aria-label="Search matters, clients, contacts"
+        autoComplete="off"
+        spellCheck={false}
         value={query}
         onChange={(e) => {
           setQuery(e.target.value)
@@ -170,7 +173,7 @@ export function SearchBar() {
       />
       <kbd className="search-kbd">/</kbd>
       {open && q && (
-        <div className="search-results">
+        <div className="search-results" aria-live="polite">
           {loading && !loaded ? (
             <div className="search-empty">
               <span className="spinner" /> Loading…

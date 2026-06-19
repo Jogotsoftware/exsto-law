@@ -468,7 +468,14 @@ export function UnifiedAssistantChat({
       )}
 
       {/* ── Message list ──────────────────────────────────────────────────── */}
-      <div ref={scrollRef} className="uac-messages">
+      <div
+        ref={scrollRef}
+        className="uac-messages"
+        role="log"
+        aria-live="polite"
+        aria-atomic="false"
+        aria-label="Conversation"
+      >
         {intro && turns.length === 0 && !streaming && <div className="feedback-intro">{intro}</div>}
         {turns.map((t, i) => (
           <div key={i} className={`feedback-bubble feedback-bubble-${t.role}`}>
@@ -531,7 +538,11 @@ export function UnifiedAssistantChat({
           </div>
         )}
 
-        {error && <div className="alert alert-error">{error}</div>}
+        {error && (
+          <div role="alert" className="alert alert-error">
+            {error}
+          </div>
+        )}
       </div>
 
       {/* ── Composer ──────────────────────────────────────────────────────── */}
@@ -541,6 +552,7 @@ export function UnifiedAssistantChat({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
+          aria-label={placeholder || 'Message the assistant'}
           rows={2}
         />
         <button

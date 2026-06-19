@@ -185,7 +185,12 @@ export function AttorneyTopNav() {
               <BellIcon size={18} />
             </button>
             {open === 'notif' && (
-              <div className="att-pop att-notif" role="menu">
+              <div
+                className="att-pop att-notif"
+                role="region"
+                aria-label="Notifications"
+                aria-live="polite"
+              >
                 <div className="att-pop-head">Notifications</div>
                 <div className="att-notif-empty">
                   <CheckCircleIcon size={22} />

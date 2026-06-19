@@ -24,8 +24,9 @@
   --accent-client: var(--navy); /* one unified accent system; client differs by bg only */
   --accent-client-soft: var(--navy-100);
   --accent: var(--accent-attorney);
-  --warn: #d97706; /* amber, so gold reads as brand not warning */
+  --warn: #d97706; /* amber FILL (white text on it); too light as text on white */
   --warn-soft: #fef3c7;
+  --warn-text: #92400e; /* darker amber for warning TEXT — 7:1 on white (AA) */
   --danger: #dc2626;
   --danger-soft: #fee2e2;
   --ok: #15803d;
@@ -185,6 +186,9 @@ p {
 
 button {
   cursor: pointer;
+  /* Remove the 300ms tap delay and the grey iOS tap flash on every button. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   font-family: inherit;
   font-weight: 500;
   font-size: 0.92rem;
@@ -309,6 +313,25 @@ table {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+}
+/* Tables that host row action menus (.row-menu) must NOT clip, or the menu
+   gets cut off when it overflows the table (e.g. the gear menu on the last
+   row). Override the base `overflow: hidden` and round the corner cells
+   directly so the card keeps its rounded corners. */
+.data-table {
+  overflow: visible;
+}
+.data-table thead th:first-child {
+  border-top-left-radius: var(--radius-lg);
+}
+.data-table thead th:last-child {
+  border-top-right-radius: var(--radius-lg);
+}
+.data-table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: var(--radius-lg);
+}
+.data-table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: var(--radius-lg);
 }
 td,
 th {
@@ -1650,12 +1673,13 @@ pre {
   color: var(--muted);
 }
 
-/* Toggle switch (Services enable/disable) */
+/* Toggle switch (Services enable/disable) — on-brand navy, crisp knob. */
 .switch {
   position: relative;
   display: inline-flex;
-  width: 40px;
-  height: 22px;
+  width: 44px;
+  height: 26px;
+  flex: none;
   cursor: pointer;
 }
 .switch input {
@@ -1669,27 +1693,37 @@ pre {
 .switch-slider {
   position: absolute;
   inset: 0;
-  background: var(--border-strong);
-  border-radius: var(--radius-full);
-  transition: background var(--transition);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  transition:
+    background var(--transition),
+    border-color var(--transition);
 }
 .switch-slider::before {
   content: '';
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 3px;
+  left: 3px;
   width: 18px;
   height: 18px;
   background: #fff;
   border-radius: 50%;
-  box-shadow: var(--shadow-sm);
+  /* Defined two-layer shadow so the knob lifts off the track. */
+  box-shadow:
+    0 1px 1px rgba(15, 23, 42, 0.12),
+    0 2px 4px rgba(15, 23, 42, 0.22);
   transition: transform var(--transition);
 }
 .switch input:checked + .switch-slider {
-  background: var(--ok);
+  background: linear-gradient(135deg, var(--navy-700) 0%, var(--navy) 100%);
+  border-color: transparent;
 }
 .switch input:checked + .switch-slider::before {
   transform: translateX(18px);
+}
+.switch input:disabled {
+  cursor: not-allowed;
 }
 .switch input:disabled + .switch-slider {
   opacity: 0.5;
@@ -3808,7 +3842,7 @@ main.book-main {
   font-size: var(--text-sm);
 }
 .integration-card-warn {
-  color: var(--warn);
+  color: var(--warn-text);
   font-size: var(--text-xs);
   line-height: 1.4;
 }
@@ -3849,7 +3883,7 @@ main.book-main {
 }
 .integration-pill.coming {
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 button.danger.outline {
@@ -4350,7 +4384,7 @@ button.danger.outline:hover:not(:disabled) {
   --bk-blue: var(--navy-500, #2d4da0);
   --bk-ink: var(--fg, #0f172a);
   --bk-slate: var(--muted, #475569);
-  --bk-slate-400: #94a3b8;
+  --bk-slate-400: #64748b; /* darkened from #94a3b8 (was 2.6:1) to slate-500 for AA text contrast */
   --bk-line: var(--border, #e2e8f0);
   --bk-line-soft: var(--surface-2, #eef2f7);
   --bk-paper: var(--surface, #ffffff);
@@ -4491,7 +4525,10 @@ button.danger.outline:hover:not(:disabled) {
   padding: 0.32rem 0.7rem;
   border-radius: 999px;
   cursor: pointer;
-  transition: all 0.2s var(--bk-ease);
+  transition:
+    background 0.2s var(--bk-ease),
+    color 0.2s var(--bk-ease),
+    box-shadow 0.2s var(--bk-ease);
 }
 .bk-shell .lang-toggle-btn.active {
   background: var(--bk-grad);
@@ -4687,7 +4724,9 @@ button.danger.outline:hover:not(:disabled) {
   border-radius: 12px;
   color: var(--bk-navy);
   background: linear-gradient(135deg, #eef2ff, #e0e7ff);
-  transition: all 0.2s var(--bk-ease);
+  transition:
+    color 0.2s var(--bk-ease),
+    background 0.2s var(--bk-ease);
 }
 .bk-service-card.selected .bk-service-icon {
   color: #fff;
@@ -4721,7 +4760,9 @@ button.danger.outline:hover:not(:disabled) {
   background: var(--bk-navy);
   opacity: 0;
   transform: scale(0.5);
-  transition: all 0.2s var(--bk-ease);
+  transition:
+    opacity 0.2s var(--bk-ease),
+    transform 0.2s var(--bk-ease);
 }
 .bk-service-card.selected .bk-service-tick {
   opacity: 1;
@@ -5085,14 +5126,17 @@ button.danger.outline:hover:not(:disabled) {
 .bk-cal-arrow {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 11px;
   border: 1.5px solid var(--bk-line);
   background: #fff;
   color: var(--bk-navy);
   cursor: pointer;
-  transition: all 0.18s var(--bk-ease);
+  transition:
+    border-color 0.18s var(--bk-ease),
+    background 0.18s var(--bk-ease),
+    transform 0.18s var(--bk-ease);
 }
 .bk-cal-arrow:hover:not(:disabled) {
   border-color: var(--bk-navy);
@@ -5220,8 +5264,14 @@ button.danger.outline:hover:not(:disabled) {
   border: 1.5px solid var(--bk-line);
   border-radius: 9px;
   padding: 0.5rem 0.35rem;
+  min-height: 44px; /* primary tap target of the public booking flow */
   cursor: pointer;
-  transition: all 0.16s var(--bk-ease);
+  transition:
+    border-color 0.16s var(--bk-ease),
+    background 0.16s var(--bk-ease),
+    color 0.16s var(--bk-ease),
+    box-shadow 0.16s var(--bk-ease),
+    transform 0.16s var(--bk-ease);
   white-space: nowrap;
 }
 .bk-slot:hover:not(:disabled) {
@@ -5518,7 +5568,11 @@ button.danger.outline:hover:not(:disabled) {
     color: var(--bk-slate-400);
     font-weight: 800;
     font-size: 0.9rem;
-    transition: all 0.3s var(--bk-ease);
+    transition:
+      border-color 0.3s var(--bk-ease),
+      color 0.3s var(--bk-ease),
+      background 0.3s var(--bk-ease),
+      box-shadow 0.3s var(--bk-ease);
   }
   .bk-progress-node.current .bk-progress-dot {
     border-color: var(--bk-navy);
@@ -5841,6 +5895,116 @@ button.danger.outline:hover:not(:disabled) {
   letter-spacing: 0.04em;
   color: var(--muted);
   margin-bottom: 0.3rem;
+}
+
+/* =====================================================================
+   Accessibility & shared utilities (UI/UX review — cross-cutting fixes)
+   ===================================================================== */
+
+/* Screen-reader-only text: visually hidden, still announced by AT. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip-to-content link: off-screen until focused, then slides into view. */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+  z-index: 2000;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-md, 8px);
+  background: var(--navy, #1e3a8a);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(calc(-100% - 0.75rem));
+  transition: transform 0.15s ease;
+}
+.skip-link:focus {
+  transform: translateY(0);
+  outline: 2px solid var(--ring, #1e3a8a);
+  outline-offset: 2px;
+}
+
+/* Skip-link target wrapper — programmatic focus, no focus ring on the box. */
+#main:focus {
+  outline: none;
+}
+
+/* Tabular figures: align digits in number columns, money, times, dates.
+   Opt-in via class; number inputs get it for free. */
+.tabular,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+input[type='number'] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Signature/consent/actions panel (SignDocument) — previously referenced
+   with no rule, so it rendered unstyled on the signing screen. */
+.sign-panel {
+  margin-top: var(--space-4, 1.5rem);
+  padding: var(--space-4, 1.5rem);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.06));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 1rem);
+}
+
+/* Rendered document body (markdown → HTML) — previously referenced in 4
+   components with no rule, so it had no readable measure or rhythm. */
+.doc-rendered {
+  max-width: 70ch;
+  margin-inline: auto;
+  line-height: 1.7;
+  color: var(--fg, #0f172a);
+  overflow-wrap: break-word;
+}
+.doc-rendered > * + * {
+  margin-top: 0.9em;
+}
+.doc-rendered h1,
+.doc-rendered h2,
+.doc-rendered h3 {
+  line-height: 1.3;
+  margin-top: 1.6em;
+  text-wrap: balance;
+}
+.doc-rendered ul,
+.doc-rendered ol {
+  padding-left: 1.5rem;
+}
+.doc-rendered li + li {
+  margin-top: 0.3em;
+}
+.doc-rendered table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.doc-rendered th,
+.doc-rendered td {
+  border: 1px solid var(--border, #e2e8f0);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+.doc-rendered hr {
+  border: 0;
+  border-top: 1px solid var(--border, #e2e8f0);
+  margin: 1.5em 0;
 }
 
 /* ───────────────────────────────────────────────────────────────────────────

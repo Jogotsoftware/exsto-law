@@ -76,7 +76,11 @@ export function SignDocument({
     return (
       <div className="public-draft">
         {head()}
-        <div className={`alert ${done === 'declined' ? 'alert-error' : 'alert-success'}`}>
+        <div
+          role="status"
+          aria-live="polite"
+          className={`alert ${done === 'declined' ? 'alert-error' : 'alert-success'}`}
+        >
           {msg}
         </div>
       </div>
@@ -194,7 +198,7 @@ export function SignDocument({
         </label>
 
         {error && (
-          <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+          <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
             {error}
           </div>
         )}
