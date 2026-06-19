@@ -3771,6 +3771,111 @@ main.book-main {
   pointer-events: none;
 }
 
+/* Editor | preview split (template editor). One column when preview is off (it
+   flexes to full width); two side-by-side when on; stacks on narrow screens. */
+.tpl-split {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-top: 0.5rem;
+}
+.tpl-split-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .tpl-split {
+    flex-wrap: wrap;
+  }
+  .tpl-split-col {
+    flex: 1 1 100%;
+  }
+}
+.tpl-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.tpl-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--rule-soft);
+}
+.tpl-preview-tag {
+  font-size: 0.72rem;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.tpl-preview-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.tpl-preview-page {
+  background: #fff;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--fg);
+  padding: 1.75rem 2rem;
+  min-height: 480px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.tpl-preview-page > * + * {
+  margin-top: 0.75em;
+}
+.tpl-preview-page h1 {
+  font-size: 1.5rem;
+  font-weight: var(--weight-bold);
+}
+.tpl-preview-page h2 {
+  font-size: 1.2rem;
+  font-weight: var(--weight-semibold);
+}
+.tpl-preview-page h3 {
+  font-size: 1.05rem;
+  font-weight: var(--weight-semibold);
+}
+.tpl-preview-page ul,
+.tpl-preview-page ol {
+  padding-left: 1.5rem;
+}
+.tpl-preview-page p {
+  margin: 0;
+}
+/* Inline placeholders in the preview for unfilled/derived bits. */
+.tpl-prev-field,
+.tpl-prev-clause,
+.tpl-prev-sign {
+  border-radius: var(--radius-sm);
+  padding: 0 0.3em;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+.tpl-prev-field {
+  background: var(--warning-soft, #fef3c7);
+  color: var(--warning-strong, #92400e);
+  border: 1px dashed var(--warning, #d97706);
+}
+.tpl-prev-clause {
+  background: var(--info-soft, #e0e7ff);
+  color: var(--info-strong, #3730a3);
+  border: 1px dashed var(--info, #6366f1);
+}
+.tpl-prev-sign {
+  background: var(--accent-soft, #e0f2fe);
+  color: var(--accent, #0369a1);
+  border: 1px dashed var(--accent, #0ea5e9);
+}
+
 /* Service detail — pricing radios */
 .pricing-row {
   display: flex;

@@ -6,10 +6,13 @@
 // and import (paste or upload a text/markdown/HTML file). The body is text with
 // {{tokens}}; CRUD + AI go through the through-core legal.template.* tools.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
-import { SparklesIcon, FileTextIcon } from '@/components/icons'
+import { SparklesIcon, FileTextIcon, EyeIcon } from '@/components/icons'
+import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
+import { TemplatePreview } from '@/components/templates/TemplatePreview'
+import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
 
 type Category = 'document' | 'email'
 
@@ -80,8 +83,13 @@ export default function TemplatesPage() {
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
   const [importing, setImporting] = useState(false)
-  const bodyRef = useRef<HTMLTextAreaElement | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
+  const editorRef = useRef<TemplateEditorHandle | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  // Bumped whenever we replace the WHOLE body (open / new / AI / import) so the
+  // editor re-seeds from the new markdown. Plain typing does NOT bump it, so the
+  // cursor never jumps mid-edit.
+  const [seedKey, setSeedKey] = useState(0)
 
   function load() {
     setError(null)
@@ -100,29 +108,25 @@ export default function TemplatesPage() {
       body: t.body,
       docKind: t.docKind ?? '',
     })
+    setSeedKey((k) => k + 1)
   }
 
   function newDraft() {
     setAiPrompt('')
     setDraft({ ...EMPTY_DRAFT })
+    setSeedKey((k) => k + 1)
   }
 
-  // Insert a {{token}} at the cursor in the document canvas.
+  // The editor emits HTML on change; convert back to the stored markdown body so
+  // draft.body stays the single source of truth. No seedKey bump — a live edit
+  // must not re-seed the editor.
+  function onEditorChange(html: string) {
+    setDraft((d) => (d ? { ...d, body: htmlToMarkdown(html) } : d))
+  }
+
+  // Insert a {{token}} chip at the cursor via the editor's imperative handle.
   function insertToken(id: string) {
-    if (!draft) return
-    const el = bodyRef.current
-    const snippet = `{{${id}}}`
-    const at = el ? el.selectionStart : draft.body.length
-    const end = el ? el.selectionEnd : draft.body.length
-    const next = draft.body.slice(0, at) + snippet + draft.body.slice(end)
-    setDraft({ ...draft, body: next })
-    requestAnimationFrame(() => {
-      if (el) {
-        const pos = at + snippet.length
-        el.focus()
-        el.setSelectionRange(pos, pos)
-      }
-    })
+    editorRef.current?.insertVariable(id)
   }
 
   async function generateWithAi() {
@@ -135,6 +139,7 @@ export default function TemplatesPage() {
         input: { instructions: aiPrompt.trim(), category: draft.category },
       })
       setDraft({ ...draft, body: r.body })
+      setSeedKey((k) => k + 1) // full-body replacement → re-seed the editor
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -172,6 +177,7 @@ export default function TemplatesPage() {
       if (!res.ok || !data.text) throw new Error(data.error || `Import failed (${res.status}).`)
       const text = data.text
       setDraft((d) => (d ? { ...d, body: d.body ? `${d.body}\n\n${text}` : text } : d))
+      setSeedKey((k) => k + 1) // imported content appended → re-seed the editor
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -242,6 +248,14 @@ export default function TemplatesPage() {
     ? extractTokens(draft.body).filter((t) => !STANDARD_TOKENS.some((s) => s.id === t))
     : []
 
+  // HTML the editor mounts with. Recomputed only on a deliberate re-seed
+  // (seedKey), never on every keystroke — so typing doesn't reset the editor.
+  // Intentionally keyed on seedKey, not draft.body (which the editor owns once
+  // mounted); draftBodyRef gives the memo the latest body without re-running it.
+  const draftBodyRef = useRef('')
+  draftBodyRef.current = draft?.body ?? ''
+  const initialHtml = useMemo(() => markdownToHtml(draftBodyRef.current), [seedKey])
+
   return (
     <main>
       <div
@@ -276,6 +290,15 @@ export default function TemplatesPage() {
               {draft.templateEntityId ? 'Edit template' : 'New template'}
             </h2>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem' }}>
+              <button
+                type="button"
+                className={showPreview ? 'primary' : undefined}
+                onClick={() => setShowPreview((v) => !v)}
+                title="Preview the finished document with sample data, side by side"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <EyeIcon size={15} /> Preview
+              </button>
               <button className="primary" onClick={save} disabled={saving}>
                 {saving ? 'Saving…' : draft.templateEntityId ? 'Save changes' : 'Create template'}
               </button>
@@ -385,15 +408,28 @@ export default function TemplatesPage() {
             ))}
           </div>
 
-          {/* Document-styled canvas (a page, not a bare text box). */}
-          <div className="tpl-page">
-            <textarea
-              ref={bodyRef}
-              className="tpl-canvas"
-              value={draft.body}
-              onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-              placeholder={'Dear {{client_name}},\n\n…'}
-            />
+          {/* WYSIWYG canvas + optional live preview. The editor stays in the same
+              DOM slot whether or not the preview column is shown, so toggling
+              preview never re-mounts it. The body is stored as markdown with
+              {{tokens}}, round-tripped via the shared bridge on change. */}
+          <div className="tpl-split">
+            <div className="tpl-split-col">
+              <TemplateEditor
+                initialHtml={initialHtml}
+                placeholder={
+                  draft.category === 'email'
+                    ? 'Write the email… use “Insert a field” to drop a {{token}}.'
+                    : 'Dear {{client_name}}, …  — use “Insert a field” to drop a {{token}}.'
+                }
+                onChange={onEditorChange}
+                editorRef={editorRef}
+              />
+            </div>
+            {showPreview && (
+              <div className="tpl-split-col">
+                <TemplatePreview body={draft.body} />
+              </div>
+            )}
           </div>
         </section>
       )}
