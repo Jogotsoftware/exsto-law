@@ -13,6 +13,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { fetchSession } from '@/lib/auth'
 import { PageHead } from '@/components/PageHead'
 import { MailComposer, type ComposerValue } from '@/components/MailComposer'
+import { SignatureBlock, type FirmSignature } from '@/components/SignatureBlock'
 
 interface ThreadSummary {
   gmailThreadId: string
@@ -100,7 +101,7 @@ export default function MailPage() {
   const [needsMailScope, setNeedsMailScope] = useState(false)
   const [sentNote, setSentNote] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [signature, setSignature] = useState<string | null>(null)
+  const [signature, setSignature] = useState<FirmSignature | null>(null)
   // Bumped after each send/discard so the uncontrolled composer remounts clean.
   const [composerNonce, setComposerNonce] = useState(0)
 
@@ -126,12 +127,12 @@ export default function MailPage() {
 
   useEffect(() => {
     load()
-    // The firm signature the send path will append, shown in the composer so the
-    // attorney sees what gets added (it is appended server-side, not from here).
-    callAttorneyMcp<{ signature: { resolved: string } }>({
+    // The firm signature the send path will append, shown (and editable) in the
+    // composer so the attorney sees what gets added (it is appended server-side).
+    callAttorneyMcp<{ signature: FirmSignature }>({
       toolName: 'legal.settings.signature.get',
     })
-      .then((r) => setSignature(r.signature.resolved || null))
+      .then((r) => setSignature(r.signature))
       .catch(() => setSignature(null))
   }, [])
 
@@ -339,7 +340,7 @@ export default function MailPage() {
             <MailComposer
               key={`compose-${composerNonce}`}
               placeholder="Write your message… Only known client contacts are accepted."
-              signature={signature}
+              footer={<SignatureBlock value={signature} onChange={setSignature} />}
               onChange={(v) => setCompose((c) => (c ? { ...c, body: v } : c))}
             />
             <div className="mail-compose-actions">
@@ -471,7 +472,7 @@ export default function MailPage() {
             <MailComposer
               key={`reply-${open.gmailThreadId}-${composerNonce}`}
               placeholder="Reply to the client…"
-              signature={signature}
+              footer={<SignatureBlock value={signature} onChange={setSignature} />}
               onChange={setReply}
             />
             <button

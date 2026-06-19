@@ -2,14 +2,13 @@
 
 // MailComposer — the rich-text writing surface for the Mail tab (compose + reply).
 // A small dependency-free editor: a contentEditable area driven by the browser's
-// formatting commands (bold/italic/lists) plus a toolbar. It emits BOTH the HTML
-// (what carries the formatting to the recipient) and a derived plaintext fallback,
-// so the send path can ship a proper multipart/alternative message.
+// formatting commands plus a toolbar (bold/italic/underline, font family + size,
+// text colour, lists, links). It emits BOTH the HTML (what carries the formatting
+// to the recipient) and a derived plaintext fallback, so the send path can ship a
+// proper multipart/alternative message.
 //
-// The firm signature is shown as a read-only preview beneath the editor (like the
-// signature block in a real mail client). It is NOT part of the editable body and
-// is NOT sent from here — the central send path appends the signature server-side,
-// so showing it here is purely so the attorney sees what will be added.
+// Anything below the editor (the signature block) is passed in via `footer` — the
+// composer itself stays presentational and never talks to the substrate.
 import { useRef, useState } from 'react'
 
 export interface ComposerValue {
@@ -27,40 +26,40 @@ function htmlToPlain(html: string): string {
   return (tmp.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim()
 }
 
-interface ToolButton {
-  cmd: string
-  label: React.ReactNode
-  title: string
-}
+// Font choices use real CSS stacks so they render in the recipient's mail client.
+const FONTS: Array<{ label: string; value: string }> = [
+  { label: 'Sans-serif', value: 'Arial, Helvetica, sans-serif' },
+  { label: 'Serif', value: 'Georgia, "Times New Roman", serif' },
+  { label: 'Fixed width', value: '"Courier New", monospace' },
+]
 
-const TOOLS: Array<ToolButton | 'sep'> = [
-  { cmd: 'bold', label: <b>B</b>, title: 'Bold (⌘B)' },
-  { cmd: 'italic', label: <i>I</i>, title: 'Italic (⌘I)' },
-  {
-    cmd: 'underline',
-    label: <span style={{ textDecoration: 'underline' }}>U</span>,
-    title: 'Underline (⌘U)',
-  },
-  'sep',
-  { cmd: 'insertUnorderedList', label: '• List', title: 'Bulleted list' },
-  { cmd: 'insertOrderedList', label: '1. List', title: 'Numbered list' },
-  'sep',
-  { cmd: 'removeFormat', label: 'Clear', title: 'Remove formatting' },
+// execCommand('fontSize') takes the legacy 1–7 scale; these are the useful ones.
+const SIZES: Array<{ label: string; value: string }> = [
+  { label: 'Small', value: '2' },
+  { label: 'Normal', value: '3' },
+  { label: 'Large', value: '5' },
+  { label: 'Huge', value: '6' },
 ]
 
 export function MailComposer({
   placeholder,
   onChange,
-  signature,
+  footer,
   minHeight = 150,
 }: {
   placeholder?: string
   onChange: (v: ComposerValue) => void
-  signature?: string | null
+  footer?: React.ReactNode
   minHeight?: number
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  // The editor's selection at the moment a toolbar control that steals focus
+  // (a <select>, the colour picker, the link field) was activated — restored
+  // before the command runs so it lands on the text you had highlighted.
+  const savedRange = useRef<Range | null>(null)
   const [empty, setEmpty] = useState(true)
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkUrl, setLinkUrl] = useState('')
 
   function emit() {
     const el = ref.current
@@ -73,34 +72,243 @@ export function MailComposer({
     onChange({ html: isEmpty ? '' : el.innerHTML, text })
   }
 
-  function run(cmd: string) {
-    document.execCommand(cmd, false)
+  function saveSelection() {
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
+    if (ref.current?.contains(range.commonAncestorContainer)) {
+      savedRange.current = range.cloneRange()
+    }
+  }
+
+  function restoreSelection() {
+    const sel = window.getSelection()
+    const r = savedRange.current
+    if (sel && r) {
+      sel.removeAllRanges()
+      sel.addRange(r)
+    }
+  }
+
+  // For toolbar buttons that keep focus in the editor (onMouseDown preventDefault):
+  // the live selection is intact, so run the command directly.
+  function run(cmd: string, arg?: string) {
     ref.current?.focus()
+    document.execCommand(cmd, false, arg)
+    emit()
+  }
+
+  // For controls that take focus away first (selects, colour, link): restore the
+  // saved selection, then run the command against it.
+  function applyToSaved(cmd: string, arg?: string) {
+    ref.current?.focus()
+    restoreSelection()
+    document.execCommand(cmd, false, arg)
+    saveSelection()
+    emit()
+  }
+
+  function applyLink() {
+    const url = linkUrl.trim()
+    setLinkOpen(false)
+    setLinkUrl('')
+    if (!url) return
+    const href = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`
+    ref.current?.focus()
+    restoreSelection()
+    const sel = window.getSelection()
+    if (sel && sel.toString().trim()) {
+      document.execCommand('createLink', false, href)
+    } else {
+      // No text selected — drop the URL in as its own link.
+      document.execCommand(
+        'insertHTML',
+        false,
+        `<a href="${href}">${href.replace(/</g, '&lt;')}</a>`,
+      )
+    }
+    saveSelection()
     emit()
   }
 
   return (
     <div className="composer">
       <div className="composer-toolbar" role="toolbar" aria-label="Text formatting">
-        {TOOLS.map((t, i) =>
-          t === 'sep' ? (
-            <span key={`sep-${i}`} className="composer-sep" aria-hidden="true" />
-          ) : (
-            <button
-              key={t.cmd}
-              type="button"
-              className="composer-btn"
-              title={t.title}
-              aria-label={t.title}
-              // Keep the editor's selection while clicking a toolbar button.
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => run(t.cmd)}
-            >
-              {t.label}
-            </button>
-          ),
-        )}
+        <button
+          type="button"
+          className="composer-btn"
+          title="Bold (⌘B)"
+          aria-label="Bold"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => run('bold')}
+        >
+          <b>B</b>
+        </button>
+        <button
+          type="button"
+          className="composer-btn"
+          title="Italic (⌘I)"
+          aria-label="Italic"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => run('italic')}
+        >
+          <i>I</i>
+        </button>
+        <button
+          type="button"
+          className="composer-btn"
+          title="Underline (⌘U)"
+          aria-label="Underline"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => run('underline')}
+        >
+          <span style={{ textDecoration: 'underline' }}>U</span>
+        </button>
+
+        <span className="composer-sep" aria-hidden="true" />
+
+        <select
+          className="composer-select"
+          title="Font"
+          aria-label="Font family"
+          defaultValue=""
+          onMouseDown={saveSelection}
+          onChange={(e) => {
+            applyToSaved('fontName', e.target.value)
+            e.target.selectedIndex = 0
+          }}
+        >
+          <option value="" disabled>
+            Font
+          </option>
+          {FONTS.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+        <select
+          className="composer-select"
+          title="Text size"
+          aria-label="Text size"
+          defaultValue=""
+          onMouseDown={saveSelection}
+          onChange={(e) => {
+            applyToSaved('fontSize', e.target.value)
+            e.target.selectedIndex = 0
+          }}
+        >
+          <option value="" disabled>
+            Size
+          </option>
+          {SIZES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+
+        <label className="composer-color" title="Text colour">
+          <span aria-hidden="true">A</span>
+          <input
+            type="color"
+            aria-label="Text colour"
+            defaultValue="#1e3a8a"
+            onMouseDown={saveSelection}
+            onChange={(e) => applyToSaved('foreColor', e.target.value)}
+          />
+        </label>
+
+        <span className="composer-sep" aria-hidden="true" />
+
+        <button
+          type="button"
+          className="composer-btn"
+          title="Bulleted list"
+          aria-label="Bulleted list"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => run('insertUnorderedList')}
+        >
+          • List
+        </button>
+        <button
+          type="button"
+          className="composer-btn"
+          title="Numbered list"
+          aria-label="Numbered list"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => run('insertOrderedList')}
+        >
+          1. List
+        </button>
+        <button
+          type="button"
+          className={`composer-btn ${linkOpen ? 'is-active' : ''}`}
+          title="Insert link"
+          aria-label="Insert link"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            saveSelection()
+            setLinkOpen((v) => !v)
+          }}
+        >
+          🔗 Link
+        </button>
+
+        <span className="composer-sep" aria-hidden="true" />
+
+        <button
+          type="button"
+          className="composer-btn"
+          title="Remove formatting"
+          aria-label="Remove formatting"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => run('removeFormat')}
+        >
+          Clear
+        </button>
       </div>
+
+      {linkOpen && (
+        <div className="composer-link-row">
+          <input
+            type="url"
+            placeholder="https://example.com"
+            value={linkUrl}
+            autoFocus
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                applyLink()
+              } else if (e.key === 'Escape') {
+                setLinkOpen(false)
+                setLinkUrl('')
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="composer-btn"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={applyLink}
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            className="composer-btn"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setLinkOpen(false)
+              setLinkUrl('')
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       <div
         ref={ref}
         className={`composer-area ${empty ? 'is-empty' : ''}`}
@@ -111,14 +319,12 @@ export function MailComposer({
         data-placeholder={placeholder}
         style={{ minHeight }}
         onInput={emit}
+        onKeyUp={saveSelection}
+        onMouseUp={saveSelection}
         suppressContentEditableWarning
       />
-      {signature && signature.trim() ? (
-        <div className="composer-signature">
-          <span className="composer-signature-label">Signature</span>
-          <div className="composer-signature-text">{signature.trim()}</div>
-        </div>
-      ) : null}
+
+      {footer}
     </div>
   )
 }
