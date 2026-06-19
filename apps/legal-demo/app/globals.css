@@ -542,28 +542,47 @@ section h2 {
   display: flex;
 }
 
-/* Round icon buttons on the navy bar (menu, bell) */
+/* Round icon buttons on the navy bar (menu, bell). A faint glass fill + hairline
+   border gives them a deliberate shape at rest instead of reading as invisible
+   boxes that only appear on hover. */
 .att-icon-btn {
   display: grid;
   place-items: center;
   width: 38px;
   height: 38px;
-  border-radius: 9px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: #cdd9ea;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #d7e2f2;
   cursor: pointer;
   transition:
     background 0.16s ease,
-    color 0.16s ease;
+    border-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 .att-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
   color: #fff;
 }
 .att-icon-btn.active {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.22);
   color: #fff;
+}
+
+/* The menu button is the primary nav affordance: hint the brand gold on hover,
+   and make the open state a gold-tinted, softly-lit control that echoes the
+   crest + avatar — so an open menu looks intentional, not a flat blue box. */
+.att-menu-btn:hover {
+  border-color: rgba(231, 182, 103, 0.55);
+}
+.att-menu-btn.active {
+  background: rgba(231, 182, 103, 0.16);
+  border-color: rgba(231, 182, 103, 0.85);
+  color: #f3cd8c;
+  box-shadow: 0 6px 16px -10px rgba(208, 138, 62, 0.9);
 }
 
 /* User avatar button */
