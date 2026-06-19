@@ -174,20 +174,8 @@ export default function ServiceEditorPage() {
         documents,
         sortOrder,
       }
-      if (isNew) {
-        const r = await callAttorneyMcp<{ service: ServiceDefinition }>({
-          toolName: 'legal.service.create',
-          input: base,
-        })
-        // Guided flow: a new service is created disabled with an empty
-        // questionnaire, so send the attorney straight into the questionnaire
-        // editor (step ②) rather than back to a half-built editor page.
-        router.push(`/attorney/services/${r.service.serviceKey}/questionnaire`)
-        return
-      }
-      // Contract G (WP2.3): one save writes a single new immutable version carrying
-      // metadata + generation_mode + the booking block + the inline rate. costType
-      // '' clears the fee (cost: null).
+      // Contract G (WP2.3): metadata + generation_mode + the booking block + the
+      // inline rate. costType '' clears the fee (cost: null).
       const cost: ServiceCost | null =
         form.costType === ''
           ? null
@@ -201,6 +189,39 @@ export default function ServiceEditorPage() {
         enabled: form.bookingEnabled,
         send_calendar_invite: form.bookingSendInvite,
         duration_minutes: form.bookingDuration,
+      }
+      if (isNew) {
+        const r = await callAttorneyMcp<{ service: ServiceDefinition }>({
+          toolName: 'legal.service.create',
+          input: base,
+        })
+        const newKey = r.service.serviceKey
+        // Persist the full config captured in the builder (cost, consultation
+        // length, generation) on the brand-new service before guiding into the
+        // questionnaire — skipped when everything was left at defaults so we don't
+        // write a needless second version.
+        const nonDefault =
+          form.costType !== '' ||
+          form.bookingEnabled ||
+          form.generationMode !== 'template_merge' ||
+          form.bookingDuration !== 30
+        if (nonDefault) {
+          await callAttorneyMcp({
+            toolName: 'legal.service.update',
+            input: {
+              serviceKey: newKey,
+              ...base,
+              generationMode: form.generationMode,
+              booking,
+              cost,
+            },
+          })
+        }
+        // Guided flow: a new service is created disabled with an empty
+        // questionnaire, so send the attorney straight into the questionnaire
+        // builder (step ②) rather than back to a half-built editor page.
+        router.push(`/attorney/services/${newKey}/questionnaire`)
+        return
       }
       await callAttorneyMcp({
         toolName: 'legal.service.update',
@@ -308,110 +329,118 @@ export default function ServiceEditorPage() {
               </select>
             </label>
           </div>
+          <label style={{ display: 'block', marginTop: '0.8rem' }}>
+            <span>Booking page description</span>
+            <textarea
+              value={form.description}
+              onChange={(e) => update('description', e.target.value)}
+              rows={2}
+              placeholder="The plain-language summary clients see when choosing this service on the booking page."
+            />
+          </label>
           <DocumentsPills
             documents={form.documents}
             onChange={(docs) => update('documents', docs)}
           />
 
-          {!isNew && (
-            <>
-              {/* How documents are produced (Contract G). Deterministic merge is
-                  the default; AI drafting is opt-in. */}
-              <fieldset className="svc-fieldset">
-                <legend>Document generation</legend>
-                <label>
-                  <span>How documents are produced</span>
-                  <select
-                    value={form.generationMode}
-                    onChange={(e) => update('generationMode', e.target.value as GenerationMode)}
-                  >
-                    <option value="template_merge">
-                      Template merge — fill the template from the answers (no AI)
-                    </option>
-                    <option value="ai_draft">AI draft — the assistant writes the document</option>
-                  </select>
-                </label>
-              </fieldset>
+          <>
+            {/* Document generation, pricing and booking — shown for new and
+                  existing services so the whole offering is configured in one
+                  place. Deterministic merge is the default; AI drafting is opt-in. */}
+            <fieldset className="svc-fieldset">
+              <legend>Document generation</legend>
+              <label>
+                <span>How documents are produced</span>
+                <select
+                  value={form.generationMode}
+                  onChange={(e) => update('generationMode', e.target.value as GenerationMode)}
+                >
+                  <option value="template_merge">
+                    Template merge — fill the template from the answers (no AI)
+                  </option>
+                  <option value="ai_draft">AI draft — the assistant writes the document</option>
+                </select>
+              </label>
+            </fieldset>
 
-              {/* Inline rate (Contract K surfaces this; the value lives on the
+            {/* Inline rate (Contract K surfaces this; the value lives on the
                   service as transitions.cost). */}
-              <fieldset className="svc-fieldset">
-                <legend>Pricing</legend>
-                <div className="form-grid">
-                  <label>
-                    <span>Fee</span>
-                    <select
-                      value={form.costType}
-                      onChange={(e) => update('costType', e.target.value as FormState['costType'])}
-                    >
-                      <option value="">No fee set</option>
-                      <option value="hourly">Hourly rate</option>
-                      <option value="fixed">Fixed fee</option>
-                    </select>
-                  </label>
-                  {form.costType !== '' && (
-                    <label>
-                      <span>
-                        {form.costType === 'hourly' ? 'Hourly rate (USD)' : 'Flat fee (USD)'}
-                      </span>
-                      <input
-                        inputMode="decimal"
-                        value={form.costAmount}
-                        onChange={(e) => update('costAmount', e.target.value)}
-                        placeholder="350.00"
-                      />
-                    </label>
-                  )}
-                  {form.costType === 'hourly' && (
-                    <label>
-                      <span>Estimated hours (optional)</span>
-                      <input
-                        inputMode="numeric"
-                        value={form.costHours}
-                        onChange={(e) => update('costHours', e.target.value)}
-                        placeholder="e.g. 3"
-                      />
-                    </label>
-                  )}
-                </div>
-              </fieldset>
-
-              {/* Per-service booking (Contract G). S5/S6 read this block. */}
-              <fieldset className="svc-fieldset">
-                <legend>Bookings</legend>
-                <label className="svc-check">
-                  <input
-                    type="checkbox"
-                    checked={form.bookingEnabled}
-                    onChange={(e) => update('bookingEnabled', e.target.checked)}
-                  />
-                  <span>Offer this service for online booking</span>
-                </label>
-                <label className="svc-check">
-                  <input
-                    type="checkbox"
-                    checked={form.bookingSendInvite}
-                    onChange={(e) => update('bookingSendInvite', e.target.checked)}
-                  />
-                  <span>Send a calendar invite when a consultation is booked</span>
-                </label>
-                <label style={{ maxWidth: 240 }}>
-                  <span>Consultation length</span>
+            <fieldset className="svc-fieldset">
+              <legend>Pricing</legend>
+              <div className="form-grid">
+                <label>
+                  <span>Fee</span>
                   <select
-                    value={form.bookingDuration}
-                    onChange={(e) =>
-                      update('bookingDuration', Number(e.target.value) as BookingDuration)
-                    }
+                    value={form.costType}
+                    onChange={(e) => update('costType', e.target.value as FormState['costType'])}
                   >
-                    <option value={15}>15 minutes</option>
-                    <option value={30}>30 minutes</option>
-                    <option value={45}>45 minutes</option>
-                    <option value={60}>60 minutes</option>
+                    <option value="">No fee set</option>
+                    <option value="hourly">Hourly rate</option>
+                    <option value="fixed">Fixed fee</option>
                   </select>
                 </label>
-              </fieldset>
-            </>
-          )}
+                {form.costType !== '' && (
+                  <label>
+                    <span>
+                      {form.costType === 'hourly' ? 'Hourly rate (USD)' : 'Flat fee (USD)'}
+                    </span>
+                    <input
+                      inputMode="decimal"
+                      value={form.costAmount}
+                      onChange={(e) => update('costAmount', e.target.value)}
+                      placeholder="350.00"
+                    />
+                  </label>
+                )}
+                {form.costType === 'hourly' && (
+                  <label>
+                    <span>Estimated hours (optional)</span>
+                    <input
+                      inputMode="numeric"
+                      value={form.costHours}
+                      onChange={(e) => update('costHours', e.target.value)}
+                      placeholder="e.g. 3"
+                    />
+                  </label>
+                )}
+              </div>
+            </fieldset>
+
+            {/* Per-service booking (Contract G). S5/S6 read this block. */}
+            <fieldset className="svc-fieldset">
+              <legend>Bookings</legend>
+              <label className="svc-check">
+                <input
+                  type="checkbox"
+                  checked={form.bookingEnabled}
+                  onChange={(e) => update('bookingEnabled', e.target.checked)}
+                />
+                <span>Offer this service for online booking</span>
+              </label>
+              <label className="svc-check">
+                <input
+                  type="checkbox"
+                  checked={form.bookingSendInvite}
+                  onChange={(e) => update('bookingSendInvite', e.target.checked)}
+                />
+                <span>Send a calendar invite when a consultation is booked</span>
+              </label>
+              <label style={{ maxWidth: 240 }}>
+                <span>Consultation length</span>
+                <select
+                  value={form.bookingDuration}
+                  onChange={(e) =>
+                    update('bookingDuration', Number(e.target.value) as BookingDuration)
+                  }
+                >
+                  <option value={15}>15 minutes</option>
+                  <option value={30}>30 minutes</option>
+                  <option value={45}>45 minutes</option>
+                  <option value={60}>60 minutes</option>
+                </select>
+              </label>
+            </fieldset>
+          </>
 
           {!isNew && (
             <div style={{ marginTop: '0.9rem' }}>
@@ -496,16 +525,42 @@ function DocumentsPills({
   onChange: (d: string[]) => void
 }) {
   const [draft, setDraft] = useState('')
-  const add = () => {
-    const v = draft
+  // Firm document-template library, so a service's documents can be PICKED from
+  // existing templates (searchable dropdown) rather than typed from scratch. A
+  // template's docKind (or a slug of its name) becomes the service's document.
+  const [library, setLibrary] = useState<{ docKind: string; name: string }[]>([])
+  useEffect(() => {
+    callAttorneyMcp<{ templates: { category: string; docKind: string | null; name: string }[] }>({
+      toolName: 'legal.template.list',
+    })
+      .then((r) =>
+        setLibrary(
+          r.templates
+            .filter((t) => t.category === 'document')
+            .map((t) => ({
+              docKind: (t.docKind && t.docKind.trim()) || slug(t.name),
+              name: t.name,
+            }))
+            .filter((t) => t.docKind),
+        ),
+      )
+      .catch(() => setLibrary([]))
+  }, [])
+
+  const slug = (s: string) =>
+    s
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '_')
       .replace(/^_+|_+$/g, '')
+  const add = () => {
+    const v = slug(draft)
     if (!v || documents.includes(v)) return setDraft('')
     onChange([...documents, v])
     setDraft('')
   }
+  const available = library.filter((l) => !documents.includes(l.docKind))
+
   return (
     <div style={{ marginTop: '0.6rem' }}>
       <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Documents this service produces</span>
@@ -527,6 +582,23 @@ function DocumentsPills({
         )}
       </div>
       <div className="qb-pill-add">
+        {library.length > 0 && (
+          <select
+            value=""
+            aria-label="Add a document from the template library"
+            onChange={(e) => {
+              const kind = e.target.value
+              if (kind && !documents.includes(kind)) onChange([...documents, kind])
+            }}
+          >
+            <option value="">Add from template library…</option>
+            {available.map((l) => (
+              <option key={l.docKind} value={l.docKind}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -536,11 +608,14 @@ function DocumentsPills({
               add()
             }
           }}
-          placeholder="e.g. operating agreement"
+          placeholder="or type a new one, e.g. operating agreement"
         />
         <button type="button" onClick={add}>
           Add
         </button>
+        <Link href="/attorney/templates" className="back-link" style={{ marginLeft: 'auto' }}>
+          Open template wizard →
+        </Link>
       </div>
     </div>
   )

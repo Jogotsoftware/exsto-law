@@ -39,6 +39,29 @@ interface ThreadView {
   matters: Array<{ matterEntityId: string; matterNumber: string }>
 }
 
+// Compact sender label for an inbox row: up to two addresses, then "+N".
+function senderLabel(emails: string[]): string {
+  if (emails.length === 0) return '(unknown)'
+  if (emails.length <= 2) return emails.join(', ')
+  return `${emails.slice(0, 2).join(', ')} +${emails.length - 2}`
+}
+
+// Gmail-style date: time if today, "Mon D" this year, else "Mon D, YYYY".
+function relativeDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  if (d.toDateString() === now.toDateString())
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const sameYear = d.getFullYear() === now.getFullYear()
+  return d.toLocaleDateString(
+    undefined,
+    sameYear
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' },
+  )
+}
+
 export default function MailPage() {
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
   const [open, setOpen] = useState<ThreadView | null>(null)
@@ -48,14 +71,15 @@ export default function MailPage() {
   const [error, setError] = useState<string | null>(null)
   const [needsMailScope, setNeedsMailScope] = useState(false)
   const [sentNote, setSentNote] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
 
-  async function load() {
+  async function load(search?: string) {
     setError(null)
     setNeedsMailScope(false)
     try {
       const res = await callAttorneyMcp<{ threads: ThreadSummary[]; clientEmailCount: number }>({
         toolName: 'legal.mail.threads',
-        input: {},
+        input: search && search.trim() ? { query: search.trim() } : {},
       })
       setThreads(res.threads)
     } catch (err) {
@@ -193,9 +217,40 @@ export default function MailPage() {
       {sentNote && <div className="alert">{sentNote}</div>}
 
       <section>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0 }}>Client threads</h2>
-          <button onClick={() => setCompose({ to: '', subject: '', body: '' })}>Compose</button>
+        <div className="mail-toolbar">
+          <form
+            className="mail-search"
+            onSubmit={(e) => {
+              e.preventDefault()
+              setThreads(null)
+              load(query)
+            }}
+          >
+            <input
+              type="search"
+              placeholder="Search client mail — words, subject:…, from:…, after:2026/01/01"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <button type="submit" disabled={busy !== null}>
+              Search
+            </button>
+            {query && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('')
+                  setThreads(null)
+                  load()
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </form>
+          <button className="primary" onClick={() => setCompose({ to: '', subject: '', body: '' })}>
+            Compose
+          </button>
         </div>
 
         {compose && (
@@ -250,51 +305,57 @@ export default function MailPage() {
 
         {threads === null ? (
           <div className="loading-block">
-            <span className="spinner" /> Loading client threads…
+            <span className="spinner" /> Loading client mail…
           </div>
         ) : threads.length === 0 && !needsMailScope ? (
           <p className="text-muted">
-            No client-related threads found (only mail involving known matter contacts is shown).
+            {query
+              ? 'No client mail matches your search.'
+              : 'No client-related threads found (only mail involving known matter contacts is shown).'}
           </p>
         ) : (
-          <div style={{ overflowX: 'auto', marginTop: 'var(--space-3)' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Subject</th>
-                  <th>Matter</th>
-                  <th>Last activity</th>
-                  <th>Messages</th>
-                </tr>
-              </thead>
-              <tbody>
-                {threads.map((t) => (
-                  <tr
-                    key={t.gmailThreadId}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => openThread(t.gmailThreadId)}
-                  >
-                    <td>
-                      <strong>{t.subject}</strong>
-                      <div className="text-muted text-sm">{t.snippet.slice(0, 90)}</div>
-                    </td>
-                    <td>
-                      {t.matters.map((m) => (
-                        <Link
-                          key={m.matterEntityId}
-                          href={`/attorney/matters/${m.matterEntityId}`}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {m.matterNumber}
-                        </Link>
-                      ))}
-                    </td>
-                    <td>{t.lastAt ? new Date(t.lastAt).toLocaleString() : '—'}</td>
-                    <td>{t.messageCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mail-list">
+            {threads.map((t) => (
+              <div
+                key={t.gmailThreadId}
+                className={`mail-row ${open?.gmailThreadId === t.gmailThreadId ? 'active' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => openThread(t.gmailThreadId)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    openThread(t.gmailThreadId)
+                  }
+                }}
+              >
+                <div className="mail-row-top">
+                  <span className="mail-row-people">{senderLabel(t.participantEmails)}</span>
+                  <span className="mail-row-date">{t.lastAt ? relativeDate(t.lastAt) : ''}</span>
+                </div>
+                <div className="mail-row-subject">
+                  {t.subject}
+                  {t.messageCount > 1 && (
+                    <span className="mail-row-count"> ({t.messageCount})</span>
+                  )}
+                </div>
+                <div className="mail-row-snippet">{t.snippet}</div>
+                {t.matters.length > 0 && (
+                  <div className="mail-row-matters">
+                    {t.matters.map((m) => (
+                      <Link
+                        key={m.matterEntityId}
+                        href={`/attorney/matters/${m.matterEntityId}`}
+                        className="badge info"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {m.matterNumber}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </section>

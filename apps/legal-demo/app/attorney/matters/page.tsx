@@ -52,10 +52,16 @@ function timeAgo(iso: string): string {
   return `${Math.round(mo / 12)}y ago`
 }
 
+type SortKey = 'matterNumber' | 'clientName' | 'practiceArea' | 'status' | 'createdAt'
+
 export default function MattersPage() {
   const [matters, setMatters] = useState<MatterSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [serviceFilter, setServiceFilter] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('createdAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   useEffect(() => {
     callAttorneyMcp<{ matters: MatterSummary[] }>({ toolName: 'legal.matter.list' })
@@ -63,16 +69,67 @@ export default function MattersPage() {
       .catch((e) => setError(e.message))
   }, [])
 
-  const filtered = useMemo(() => {
+  // Distinct filter options, derived from the loaded matters.
+  const statusOptions = useMemo(
+    () => Array.from(new Set((matters ?? []).map((m) => m.status).filter(Boolean))).sort(),
+    [matters],
+  )
+  const serviceOptions = useMemo(
+    () => Array.from(new Set((matters ?? []).map((m) => m.practiceArea).filter(Boolean))).sort(),
+    [matters],
+  )
+
+  function toggleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      // Dates default newest-first; text columns default A→Z.
+      setSortDir(key === 'createdAt' ? 'desc' : 'asc')
+    }
+  }
+
+  const view = useMemo(() => {
     if (!matters) return null
     const q = query.trim().toLowerCase()
-    if (!q) return matters
-    return matters.filter((m) =>
-      [m.matterNumber, m.clientName, m.practiceArea, m.summary, m.status].some((f) =>
-        (f ?? '').toLowerCase().includes(q),
-      ),
+    const rows = matters.filter((m) => {
+      if (
+        q &&
+        ![m.matterNumber, m.clientName, m.practiceArea, m.summary, m.status].some((f) =>
+          (f ?? '').toLowerCase().includes(q),
+        )
+      )
+        return false
+      if (statusFilter && m.status !== statusFilter) return false
+      if (serviceFilter && m.practiceArea !== serviceFilter) return false
+      return true
+    })
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      if (sortKey === 'createdAt') {
+        return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir
+      }
+      return (
+        (a[sortKey] ?? '').localeCompare(b[sortKey] ?? '', undefined, { sensitivity: 'base' }) * dir
+      )
+    })
+  }, [matters, query, statusFilter, serviceFilter, sortKey, sortDir])
+
+  function SortHeader({ label, sortKey: key }: { label: string; sortKey: SortKey }) {
+    const active = sortKey === key
+    return (
+      <th
+        className="sortable-th"
+        onClick={() => toggleSort(key)}
+        aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        {label}
+        <span className="sort-arrow">{active ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </th>
     )
-  }, [matters, query])
+  }
+
+  const hasFilters = Boolean(query || statusFilter || serviceFilter)
 
   return (
     <main>
@@ -88,30 +145,66 @@ export default function MattersPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Filter by status"
+          >
+            <option value="">All statuses</option>
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>
+                {humanizeStatus(s)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={serviceFilter}
+            onChange={(e) => setServiceFilter(e.target.value)}
+            aria-label="Filter by service"
+          >
+            <option value="">All services</option>
+            {serviceOptions.map((s) => (
+              <option key={s} value={s}>
+                {humanizeService(s)}
+              </option>
+            ))}
+          </select>
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('')
+                setStatusFilter('')
+                setServiceFilter('')
+              }}
+            >
+              Clear
+            </button>
+          )}
         </div>
-        {filtered === null && !error && (
+        {view === null && !error && (
           <div className="loading-block">
             <span className="spinner" /> Loading…
           </div>
         )}
-        {filtered && filtered.length === 0 && (
+        {view && view.length === 0 && (
           <div className="loading-block text-muted">
             {matters && matters.length === 0 ? 'No matters yet.' : 'No matches.'}
           </div>
         )}
-        {filtered && filtered.length > 0 && (
+        {view && view.length > 0 && (
           <table className="client-table">
             <thead>
               <tr>
-                <th>Matter</th>
-                <th>Client</th>
-                <th>Service</th>
-                <th>Status</th>
-                <th>Opened</th>
+                <SortHeader label="Matter" sortKey="matterNumber" />
+                <SortHeader label="Client" sortKey="clientName" />
+                <SortHeader label="Service" sortKey="practiceArea" />
+                <SortHeader label="Status" sortKey="status" />
+                <SortHeader label="Opened" sortKey="createdAt" />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((m) => (
+              {view.map((m) => (
                 <tr key={m.matterEntityId}>
                   <td>
                     <Link

@@ -94,14 +94,24 @@ const cancelTool: Tool<{ matterEntityId: string; reason?: string }, ActionResult
 // ── Mail tab (REQ-CALMAIL-02/03) ───────────────────────────────────────────
 
 const mailThreadsTool: Tool<
-  Record<string, never>,
+  { query?: string },
   { threads: MailThreadSummary[]; clientEmailCount: number }
 > = {
   name: 'legal.mail.threads',
   description:
-    'Client-related Gmail threads (queries are scoped to known matter-contact addresses only), matter-matched.',
+    'Client-related Gmail threads (queries are scoped to known matter-contact addresses only), matter-matched. An optional `query` is ANDed onto that scope as a Gmail search (e.g. "invoice", "subject:engagement", "after:2026/01/01"), so it filters within client mail without escaping it.',
   mode: 'read',
-  handler: (ctx: ActionContext) => listMailThreads(ctx),
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Optional Gmail search terms, applied within the client-mail scope.',
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: (ctx: ActionContext, input) => listMailThreads(ctx, input.query),
 }
 
 const mailThreadGetTool: Tool<{ gmailThreadId: string }, MailThreadView> = {

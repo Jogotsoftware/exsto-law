@@ -493,15 +493,53 @@ export async function listCalendarEvents(
 ): Promise<WorkspaceEvent[]> {
   const { oauth2, creds } = await authedClient(tenantId, actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
-  const res = await calendar.events.list({
-    calendarId: creds.calendarId,
-    timeMin: fromIso,
-    timeMax: toIso,
-    singleEvents: true,
-    orderBy: 'startTime',
-    maxResults: 250,
-  })
-  return (res.data.items ?? []).filter((e) => e.status !== 'cancelled').map(mapGoogleEvent)
+
+  // Live reflection of the WHOLE account, not just the booking calendar: read
+  // every calendar the attorney keeps selected. freeBusyReader calendars are
+  // skipped (events.list can't read their details). The booking calendar
+  // (creds.calendarId) is always included so matter-linked consultations stay
+  // visible even if the user deselected it. Falls back to the single stored
+  // calendar if the calendar list can't be read.
+  let calendarIds: string[]
+  try {
+    const list = await calendar.calendarList.list({ maxResults: 250, showHidden: false })
+    const ids = (list.data.items ?? [])
+      .filter((c) => c.id && c.selected !== false && c.accessRole !== 'freeBusyReader')
+      .map((c) => c.id as string)
+    calendarIds = [...new Set([creds.calendarId, ...ids])]
+  } catch {
+    calendarIds = [creds.calendarId]
+  }
+
+  const perCalendar = await Promise.all(
+    calendarIds.map(async (calendarId) => {
+      try {
+        const res = await calendar.events.list({
+          calendarId,
+          timeMin: fromIso,
+          timeMax: toIso,
+          singleEvents: true,
+          orderBy: 'startTime',
+          maxResults: 250,
+        })
+        return (res.data.items ?? []).filter((e) => e.status !== 'cancelled').map(mapGoogleEvent)
+      } catch {
+        // One unreadable calendar must not blank out the whole view.
+        return [] as WorkspaceEvent[]
+      }
+    }),
+  )
+
+  // Dedup by event id (an event you're invited to can appear on more than one of
+  // your calendars), then order chronologically across all calendars.
+  const seen = new Set<string>()
+  const merged: WorkspaceEvent[] = []
+  for (const ev of perCalendar.flat()) {
+    if (!ev.eventId || seen.has(ev.eventId)) continue
+    seen.add(ev.eventId)
+    merged.push(ev)
+  }
+  return merged.sort((a, b) => ((a.startIso ?? '') < (b.startIso ?? '') ? -1 : 1))
 }
 
 function mapGoogleEvent(e: {
