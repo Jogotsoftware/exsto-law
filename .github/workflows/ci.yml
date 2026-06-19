@@ -53,7 +53,10 @@ jobs:
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned (not `latest`): resolving `latest` hits the GitHub API rate
+          # limit and intermittently fails the invariants job ("Failed to resolve
+          # latest Supabase CLI release: rate limit exceeded"). Bump deliberately.
+          version: 2.106.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build (tests import built dist)
