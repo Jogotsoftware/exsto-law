@@ -232,15 +232,60 @@ function headerOf(msg: gmail_v1.Schema$Message, name: string): string | null {
   return h?.value ?? null
 }
 
-function extractText(part: gmail_v1.Schema$MessagePart | undefined): string {
+// Decode the HTML entities Gmail emits in snippets and HTML bodies (named +
+// numeric). Without this, an HTML-only email (e.g. an automated confirmation)
+// shows raw "&#39;" / "&amp;" in the Mail tab. `&amp;` is decoded LAST so that
+// e.g. "&amp;lt;" becomes "&lt;", not "<".
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&(?:#39|apos);/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+// Convert an HTML email part to readable plain text: drop script/style, turn
+// block boundaries into newlines, strip remaining tags, decode entities, and
+// collapse runaway blank lines. Intentionally simple — the Mail tab renders
+// plain text, not arbitrary remote HTML (which would need sanitising first).
+function htmlToText(html: string): string {
+  const stripped = html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+  return decodeEntities(stripped)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// Find the first part of a given MIME type anywhere in the (possibly nested)
+// payload tree, decoded from base64url.
+function findPart(part: gmail_v1.Schema$MessagePart | undefined, mime: string): string {
   if (!part) return ''
-  if (part.mimeType === 'text/plain' && part.body?.data) {
+  if (part.mimeType === mime && part.body?.data) {
     return Buffer.from(part.body.data, 'base64url').toString('utf-8')
   }
   for (const p of part.parts ?? []) {
-    const t = extractText(p)
+    const t = findPart(p, mime)
     if (t) return t
   }
+  return ''
+}
+
+// Best readable body for a message: prefer text/plain, fall back to a text/html
+// part converted to text. Empty when neither exists (caller falls back to the
+// entity-decoded snippet).
+function extractText(part: gmail_v1.Schema$MessagePart | undefined): string {
+  const plain = findPart(part, 'text/plain')
+  if (plain.trim()) return plain
+  const html = findPart(part, 'text/html')
+  if (html.trim()) return htmlToText(html)
   return ''
 }
 
@@ -290,7 +335,7 @@ export async function listClientThreads(
     out.push({
       gmailThreadId: t.id,
       subject: (first && headerOf(first, 'Subject')) ?? '(no subject)',
-      snippet: t.snippet ?? '',
+      snippet: decodeEntities(t.snippet ?? ''),
       lastAt: last?.internalDate ? new Date(Number(last.internalDate)).toISOString() : null,
       participantEmails: [...participants],
       messageCount: msgs.length,
@@ -322,7 +367,7 @@ export async function getClientThread(
       from: headerOf(m, 'From') ?? '',
       to: headerOf(m, 'To') ?? '',
       sentAt: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : null,
-      bodyText: extractText(m.payload) || (m.snippet ?? ''),
+      bodyText: extractText(m.payload) || decodeEntities(m.snippet ?? ''),
     }
   })
   const first = msgs[0]

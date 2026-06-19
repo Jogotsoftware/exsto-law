@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { fetchSession } from '@/lib/auth'
 import { PageHead } from '@/components/PageHead'
+import { MailComposer, type ComposerValue } from '@/components/MailComposer'
 
 interface ThreadSummary {
   gmailThreadId: string
@@ -39,11 +40,32 @@ interface ThreadView {
   matters: Array<{ matterEntityId: string; matterNumber: string }>
 }
 
-// Compact sender label for an inbox row: up to two addresses, then "+N".
+// "Name <a@b.com>" → "Name"; bare "a@b.com" → "a@b.com". Used for the reading
+// pane sender line where the From header may carry a display name.
+function displayName(addr: string): string {
+  const m = addr.match(/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/)
+  return (m ? m[1] : addr).trim() || addr.trim()
+}
+
+// Just the address part of "Name <a@b.com>" (or the string itself).
+function bareEmail(addr: string): string {
+  const m = addr.match(/<([^>]+)>/)
+  return (m ? m[1] : addr).trim()
+}
+
+// Two-letter avatar initials from an email's local part ("ecorp.noreply" → "EN").
+function emailInitials(addr: string): string {
+  const local = (bareEmail(addr).split('@')[0] || addr).replace(/[._%+-]+/g, ' ').trim()
+  const parts = local.split(' ').filter(Boolean)
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase()
+  return (local.slice(0, 2) || '·').toUpperCase()
+}
+
+// Compact sender label for an inbox row: first address, then "+N more".
 function senderLabel(emails: string[]): string {
   if (emails.length === 0) return '(unknown)'
-  if (emails.length <= 2) return emails.join(', ')
-  return `${emails.slice(0, 2).join(', ')} +${emails.length - 2}`
+  if (emails.length === 1) return emails[0]!
+  return `${emails[0]} +${emails.length - 1}`
 }
 
 // Gmail-style date: time if today, "Mon D" this year, else "Mon D, YYYY".
@@ -62,16 +84,25 @@ function relativeDate(iso: string): string {
   )
 }
 
+const EMPTY_BODY: ComposerValue = { html: '', text: '' }
+
 export default function MailPage() {
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
   const [open, setOpen] = useState<ThreadView | null>(null)
-  const [reply, setReply] = useState('')
-  const [compose, setCompose] = useState<{ to: string; subject: string; body: string } | null>(null)
+  const [reply, setReply] = useState<ComposerValue>(EMPTY_BODY)
+  const [compose, setCompose] = useState<{
+    to: string
+    subject: string
+    body: ComposerValue
+  } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [needsMailScope, setNeedsMailScope] = useState(false)
   const [sentNote, setSentNote] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [signature, setSignature] = useState<string | null>(null)
+  // Bumped after each send/discard so the uncontrolled composer remounts clean.
+  const [composerNonce, setComposerNonce] = useState(0)
 
   async function load(search?: string) {
     setError(null)
@@ -95,6 +126,13 @@ export default function MailPage() {
 
   useEffect(() => {
     load()
+    // The firm signature the send path will append, shown in the composer so the
+    // attorney sees what gets added (it is appended server-side, not from here).
+    callAttorneyMcp<{ signature: { resolved: string } }>({
+      toolName: 'legal.settings.signature.get',
+    })
+      .then((r) => setSignature(r.signature.resolved || null))
+      .catch(() => setSignature(null))
   }, [])
 
   // Contract D — launchCompose: open the composer pre-wired from query params
@@ -108,15 +146,15 @@ export default function MailPage() {
     const to = params.get('to') ?? ''
     const contactId = params.get('contactId')
     if (to || !contactId) {
-      setCompose({ to, subject, body: '' })
+      setCompose({ to, subject, body: EMPTY_BODY })
       return
     }
     callAttorneyMcp<{ contact: { email?: string } | null }>({
       toolName: 'legal.contact.get',
       input: { contactEntityId: contactId },
     })
-      .then((r) => setCompose({ to: r.contact?.email ?? '', subject, body: '' }))
-      .catch(() => setCompose({ to: '', subject, body: '' }))
+      .then((r) => setCompose({ to: r.contact?.email ?? '', subject, body: EMPTY_BODY }))
+      .catch(() => setCompose({ to: '', subject, body: EMPTY_BODY }))
   }, [])
 
   async function openThread(gmailThreadId: string) {
@@ -128,7 +166,8 @@ export default function MailPage() {
         input: { gmailThreadId },
       })
       setOpen(view)
-      setReply('')
+      setReply(EMPTY_BODY)
+      setComposerNonce((n) => n + 1)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -137,14 +176,20 @@ export default function MailPage() {
   }
 
   async function sendReply() {
-    if (!open || !reply.trim()) return
+    if (!open || !reply.text.trim()) return
     setBusy('reply')
     setError(null)
     try {
       await callAttorneyMcp({
         toolName: 'legal.mail.reply',
-        input: { gmailThreadId: open.gmailThreadId, bodyText: reply },
+        input: {
+          gmailThreadId: open.gmailThreadId,
+          bodyText: reply.text,
+          bodyHtml: reply.html || undefined,
+        },
       })
+      setReply(EMPTY_BODY)
+      setComposerNonce((n) => n + 1)
       setSentNote('Reply sent from your Gmail and recorded on the matter.')
       setTimeout(() => setSentNote(null), 6000)
       await openThread(open.gmailThreadId)
@@ -162,9 +207,15 @@ export default function MailPage() {
     try {
       await callAttorneyMcp({
         toolName: 'legal.mail.compose',
-        input: { to: compose.to, subject: compose.subject, bodyText: compose.body },
+        input: {
+          to: compose.to,
+          subject: compose.subject,
+          bodyText: compose.body.text,
+          bodyHtml: compose.body.html || undefined,
+        },
       })
       setCompose(null)
+      setComposerNonce((n) => n + 1)
       setSentNote('Email sent from your Gmail and recorded.')
       setTimeout(() => setSentNote(null), 6000)
       await load()
@@ -248,52 +299,55 @@ export default function MailPage() {
               </button>
             )}
           </form>
-          <button className="primary" onClick={() => setCompose({ to: '', subject: '', body: '' })}>
+          <button
+            className="primary"
+            onClick={() => setCompose({ to: '', subject: '', body: EMPTY_BODY })}
+          >
             Compose
           </button>
         </div>
 
         {compose && (
-          <div
-            style={{
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              padding: 'var(--space-3)',
-              marginTop: 'var(--space-3)',
-            }}
-          >
-            <div className="row" style={{ gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-              <label>
-                To (client email)
-                <br />
-                <input
-                  type="email"
-                  value={compose.to}
-                  onChange={(e) => setCompose({ ...compose, to: e.target.value })}
-                />
-              </label>
-              <label style={{ flex: 1 }}>
-                Subject
-                <br />
-                <input
-                  type="text"
-                  style={{ width: '100%' }}
-                  value={compose.subject}
-                  onChange={(e) => setCompose({ ...compose, subject: e.target.value })}
-                />
-              </label>
+          <div className="mail-compose-card">
+            <div className="mail-compose-head">
+              <strong>New message</strong>
+              <button
+                className="mail-icon-btn"
+                onClick={() => setCompose(null)}
+                aria-label="Discard"
+              >
+                ✕
+              </button>
             </div>
-            <textarea
-              rows={5}
-              style={{ width: '100%', marginTop: 'var(--space-2)' }}
-              value={compose.body}
-              onChange={(e) => setCompose({ ...compose, body: e.target.value })}
-              placeholder="Only known client contacts are accepted — the send is refused otherwise."
+            <label className="mail-field">
+              <span className="mail-field-label">To</span>
+              <input
+                type="email"
+                placeholder="client@example.com"
+                value={compose.to}
+                onChange={(e) => setCompose({ ...compose, to: e.target.value })}
+              />
+            </label>
+            <label className="mail-field">
+              <span className="mail-field-label">Subject</span>
+              <input
+                type="text"
+                value={compose.subject}
+                onChange={(e) => setCompose({ ...compose, subject: e.target.value })}
+              />
+            </label>
+            <MailComposer
+              key={`compose-${composerNonce}`}
+              placeholder="Write your message… Only known client contacts are accepted."
+              signature={signature}
+              onChange={(v) => setCompose((c) => (c ? { ...c, body: v } : c))}
             />
-            <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+            <div className="mail-compose-actions">
               <button
                 className="primary"
-                disabled={busy !== null || !compose.to || !compose.subject || !compose.body}
+                disabled={
+                  busy !== null || !compose.to || !compose.subject || !compose.body.text.trim()
+                }
                 onClick={sendCompose}
               >
                 {busy === 'compose' ? 'Sending…' : 'Send from my Gmail'}
@@ -329,31 +383,34 @@ export default function MailPage() {
                   }
                 }}
               >
-                <div className="mail-row-top">
-                  <span className="mail-row-people">{senderLabel(t.participantEmails)}</span>
-                  <span className="mail-row-date">{t.lastAt ? relativeDate(t.lastAt) : ''}</span>
-                </div>
-                <div className="mail-row-subject">
-                  {t.subject}
-                  {t.messageCount > 1 && (
-                    <span className="mail-row-count"> ({t.messageCount})</span>
+                <span className="mail-avatar" aria-hidden="true">
+                  {emailInitials(t.participantEmails[0] ?? '?')}
+                </span>
+                <div className="mail-row-main">
+                  <div className="mail-row-top">
+                    <span className="mail-row-people">{senderLabel(t.participantEmails)}</span>
+                    <span className="mail-row-date">{t.lastAt ? relativeDate(t.lastAt) : ''}</span>
+                  </div>
+                  <div className="mail-row-subject">
+                    {t.subject}
+                    {t.messageCount > 1 && <span className="mail-row-count">{t.messageCount}</span>}
+                  </div>
+                  <div className="mail-row-snippet">{t.snippet}</div>
+                  {t.matters.length > 0 && (
+                    <div className="mail-row-matters">
+                      {t.matters.map((m) => (
+                        <Link
+                          key={m.matterEntityId}
+                          href={`/attorney/matters/${m.matterEntityId}`}
+                          className="badge info"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {m.matterNumber}
+                        </Link>
+                      ))}
+                    </div>
                   )}
                 </div>
-                <div className="mail-row-snippet">{t.snippet}</div>
-                {t.matters.length > 0 && (
-                  <div className="mail-row-matters">
-                    {t.matters.map((m) => (
-                      <Link
-                        key={m.matterEntityId}
-                        href={`/attorney/matters/${m.matterEntityId}`}
-                        className="badge info"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {m.matterNumber}
-                      </Link>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -361,68 +418,69 @@ export default function MailPage() {
       </section>
 
       {open && (
-        <section>
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <h2 style={{ margin: 0 }}>{open.subject}</h2>
-            <button onClick={() => setOpen(null)}>Close</button>
+        <section className="mail-thread">
+          <div className="mail-thread-head">
+            <div>
+              <h2 className="mail-thread-subject">{open.subject}</h2>
+              <p className="mail-thread-meta">
+                {open.participantEmails.join(', ')}
+                {open.matters.length > 0 && (
+                  <>
+                    {' · '}
+                    {open.matters.map((m) => (
+                      <Link key={m.matterEntityId} href={`/attorney/matters/${m.matterEntityId}`}>
+                        {m.matterNumber}
+                      </Link>
+                    ))}
+                  </>
+                )}
+              </p>
+            </div>
+            <button className="mail-icon-btn" onClick={() => setOpen(null)} aria-label="Close">
+              ✕
+            </button>
           </div>
-          <p className="text-muted text-sm">
-            {open.participantEmails.join(', ')}
-            {open.matters.length > 0 && (
-              <>
-                {' · '}
-                {open.matters.map((m) => (
-                  <Link key={m.matterEntityId} href={`/attorney/matters/${m.matterEntityId}`}>
-                    {m.matterNumber}
-                  </Link>
-                ))}
-              </>
-            )}
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+
+          <div className="mail-msgs">
             {open.messages.map((m) => (
-              <div
-                key={m.gmailMessageId}
-                style={{
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
-                  padding: 'var(--space-3)',
-                }}
-              >
-                <div className="text-sm">
-                  <strong>{m.from}</strong> → {m.to}
-                  <span className="text-muted">
-                    {' '}
-                    · {m.sentAt ? new Date(m.sentAt).toLocaleString() : ''}
-                  </span>
+              <article key={m.gmailMessageId} className="mail-msg">
+                <span className="mail-avatar" aria-hidden="true">
+                  {emailInitials(m.from)}
+                </span>
+                <div className="mail-msg-main">
+                  <div className="mail-msg-head">
+                    <span className="mail-msg-from" title={m.from}>
+                      {displayName(m.from)}
+                    </span>
+                    <span className="mail-msg-date">
+                      {m.sentAt ? new Date(m.sentAt).toLocaleString() : ''}
+                    </span>
+                  </div>
+                  <div className="mail-msg-to">to {m.to}</div>
+                  <div className="mail-msg-body">{m.bodyText.trim()}</div>
                 </div>
-                <pre
-                  style={{
-                    whiteSpace: 'pre-wrap',
-                    fontFamily: 'inherit',
-                    margin: 'var(--space-2) 0 0',
-                  }}
-                >
-                  {m.bodyText.trim()}
-                </pre>
-              </div>
+              </article>
             ))}
           </div>
-          <div style={{ marginTop: 'var(--space-3)' }}>
-            <textarea
-              rows={4}
-              style={{ width: '100%' }}
+
+          <div className="mail-reply">
+            <div className="mail-reply-label">
+              Reply to{' '}
+              {open.participantEmails.length > 0 ? open.participantEmails[0] : 'the client'}
+            </div>
+            <MailComposer
+              key={`reply-${open.gmailThreadId}-${composerNonce}`}
               placeholder="Reply to the client…"
-              value={reply}
-              onChange={(e) => setReply(e.target.value)}
+              signature={signature}
+              onChange={setReply}
             />
             <button
               className="primary"
               style={{ marginTop: 'var(--space-2)' }}
-              disabled={busy !== null || !reply.trim()}
+              disabled={busy !== null || !reply.text.trim()}
               onClick={sendReply}
             >
-              {busy === 'reply' ? 'Sending…' : 'Reply from my Gmail'}
+              {busy === 'reply' ? 'Sending…' : 'Send reply'}
             </button>
           </div>
         </section>

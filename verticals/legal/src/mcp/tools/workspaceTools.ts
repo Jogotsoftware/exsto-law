@@ -122,18 +122,24 @@ const mailThreadGetTool: Tool<{ gmailThreadId: string }, MailThreadView> = {
   handler: (ctx: ActionContext, input) => openMailThread(ctx, input.gmailThreadId),
 }
 
-const mailReplyTool: Tool<{ gmailThreadId: string; bodyText: string }, ActionResult> = {
+const mailReplyTool: Tool<
+  { gmailThreadId: string; bodyText: string; bodyHtml?: string },
+  ActionResult
+> = {
   name: 'legal.mail.reply',
   description:
-    "Reply in-app through the attorney's real Gmail; recorded as mail.send with provenance integration:gmail.",
+    "Reply in-app through the attorney's real Gmail; recorded as mail.send with provenance integration:gmail. bodyText is the plaintext (and recorded) body; an optional bodyHtml carries rich-text formatting (bold, lists) as the HTML alternative.",
   mode: 'write',
   handler: (ctx: ActionContext, input) => replyToThread(ctx, input),
 }
 
-const mailComposeTool: Tool<{ to: string; subject: string; bodyText: string }, ActionResult> = {
+const mailComposeTool: Tool<
+  { to: string; subject: string; bodyText: string; bodyHtml?: string },
+  ActionResult
+> = {
   name: 'legal.mail.compose',
   description:
-    'Compose to a known client contact (refuses non-client addresses); sends via Gmail and records mail.send.',
+    'Compose to a known client contact (refuses non-client addresses); sends via Gmail and records mail.send. bodyText is the plaintext body; an optional bodyHtml carries rich-text formatting (bold, lists) as the HTML alternative.',
   mode: 'write',
   handler: (ctx: ActionContext, input) => composeToClient(ctx, input),
 }
