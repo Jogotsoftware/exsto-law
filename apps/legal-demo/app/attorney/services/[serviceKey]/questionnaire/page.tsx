@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { PlusIcon, UsersIcon, XIcon } from '@/components/icons'
+import { ChevronLeftIcon, LayersIcon, PlusIcon, UsersIcon, XIcon } from '@/components/icons'
 
 // The exact field types the public booking page (apps/legal-demo/app/book)
 // renders. Keep in lockstep with KNOWN_FIELD_TYPES in the legal API — anything
@@ -362,19 +362,29 @@ export default function QuestionnaireEditorPage() {
   return (
     <>
       <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          gap: '0.5rem',
-          marginBottom: '0.4rem',
-        }}
+        className="attorney-page-head"
+        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
       >
-        <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !doc}>
-          Save to library
-        </button>
-        <button className="primary" onClick={save} disabled={busy || !doc}>
-          {busy ? 'Saving…' : 'Save new version'}
-        </button>
+        <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <LayersIcon size={22} />
+          Edit questionnaire
+        </h1>
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <Link
+            href={`/attorney/services/${serviceKey}`}
+            className="back-link"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+          >
+            <ChevronLeftIcon size={16} />
+            Back to service
+          </Link>
+          <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !doc}>
+            Save to library
+          </button>
+          <button className="primary" onClick={save} disabled={busy || !doc}>
+            {busy ? 'Saving…' : 'Save new version'}
+          </button>
+        </span>
       </div>
 
       <p className="qb-intro">
