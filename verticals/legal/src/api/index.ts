@@ -37,5 +37,10 @@ export * from './billing.js'
 export * from './savedViews.js'
 export * from './meetings.js'
 export * from './esign.js'
-export { getStubAvailability } from '../adapters/googleCalendar.js'
-export type { AvailabilitySlot, CreatedEvent } from '../adapters/googleCalendar.js'
+export { getStubAvailability, mergeBusyIntervals } from '../adapters/googleCalendar.js'
+export type { AvailabilitySlot, CreatedEvent, BusyInterval } from '../adapters/googleCalendar.js'
+// `generateDraft.ts` and `services.ts` both define an identical `GenerationMode`
+// alias, so the wildcard re-exports above leave it ambiguous (TS2308) the moment
+// this barrel's declarations are re-emitted. Pin the canonical source explicitly
+// (TS's own resolution hint); an explicit named re-export wins over the stars.
+export type { GenerationMode } from './generateDraft.js'
