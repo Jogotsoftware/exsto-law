@@ -404,10 +404,13 @@ export async function resolveGenerationMode(
 ): Promise<GenerationMode> {
   const transitions = await loadServiceTransitions(ctx, serviceKey)
   // Contract G may carry per-document config under `document_generation`
-  // (preferred) — read defensively and fall back to the AI path when absent.
+  // (preferred); otherwise honor the service-level `generation_mode` toggle the
+  // Service editor writes. Either explicit choice — including 'template_merge'
+  // (no AI) — takes effect; absent both, the default is the AI path.
   const docGen = (transitions?.document_generation ??
     null) as ServiceGeneration['documentGeneration']
-  const mode = docGen?.[documentKind]?.generation_mode
+  const serviceLevel = (transitions as { generation_mode?: string } | null)?.generation_mode
+  const mode = docGen?.[documentKind]?.generation_mode ?? serviceLevel
   return mode === 'template_merge' ? 'template_merge' : 'ai_draft'
 }
 

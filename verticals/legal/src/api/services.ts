@@ -157,11 +157,12 @@ function parseServiceCost(
 // The four bookable slot lengths (Contract G, WP2.3).
 const BOOKING_DURATIONS: readonly number[] = [15, 30, 45, 60]
 
-// Resolve a stored generation_mode, defaulting to the deterministic merge so a
-// row that predates the field (transitions.generation_mode missing) reads as
-// 'template_merge' — the no-AI default.
+// Resolve a stored generation_mode. Default is 'ai_draft' so the editor's
+// read-out agrees with the drafting worker (which also defaults to AI) for rows
+// that predate the field; an explicit 'template_merge' is the no-AI path. Both
+// explicit values are preserved on write.
 function parseGenerationMode(m: unknown): GenerationMode {
-  return m === 'ai_draft' ? 'ai_draft' : 'template_merge'
+  return m === 'template_merge' ? 'template_merge' : 'ai_draft'
 }
 
 // Resolve a stored booking block into a well-formed ServiceBooking, or null when
