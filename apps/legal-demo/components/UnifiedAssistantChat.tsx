@@ -122,6 +122,10 @@ export function UnifiedAssistantChat({
   const [fbBusy, setFbBusy] = useState(false)
   const [fbDone, setFbDone] = useState(false)
   const [fbError, setFbError] = useState<string | null>(null)
+  // The substrate event id the feedback landed as — shown back as a reference so
+  // the attorney can see it was durably recorded (the "where did it go / no audit
+  // trail" beta asks).
+  const [fbRef, setFbRef] = useState<string | null>(null)
 
   const scoped = Boolean(matterEntityId || contactEntityId)
   const scopeLabel = matterEntityId ? 'this matter' : contactEntityId ? 'this client' : ''
@@ -261,7 +265,7 @@ export function UnifiedAssistantChat({
     setFbBusy(true)
     setFbError(null)
     try {
-      await callAttorneyMcp({
+      const { eventId } = await callAttorneyMcp<{ eventId: string }>({
         toolName: 'legal.assistant.feedback_submit',
         input: {
           message,
@@ -278,6 +282,7 @@ export function UnifiedAssistantChat({
           ...scope,
         },
       })
+      setFbRef(eventId)
       setFbDone(true)
       setFbMessage('')
     } catch (e) {
@@ -317,6 +322,8 @@ export function UnifiedAssistantChat({
             setBetaOpen((o) => !o)
             setSettingsOpen(false)
             setFbDone(false)
+            setFbRef(null)
+            setFbError(null)
           }}
           aria-label="Beta feedback"
           title="Beta feedback — straight to the team"
@@ -421,7 +428,14 @@ export function UnifiedAssistantChat({
         <div className="uac-popover uac-beta">
           {fbDone ? (
             <div className="uac-beta-done">
-              <SparklesIcon size={14} /> Thanks — your feedback went straight to the team.
+              <span>
+                <SparklesIcon size={14} /> Logged to your team ✓
+              </span>
+              {fbRef && (
+                <span className="uac-beta-ref" title={`Recorded as event ${fbRef}`}>
+                  ref {fbRef.slice(0, 8)}
+                </span>
+              )}
             </div>
           ) : (
             <>
