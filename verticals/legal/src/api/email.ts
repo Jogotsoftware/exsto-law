@@ -51,9 +51,6 @@ export async function sendDraftLinkEmail(
     'You can view it in your browser and download a PDF or Word copy from the page.',
     '',
     'Take a look at your convenience and let me know if you have questions.',
-    '',
-    'Best,',
-    'Pacheco Law',
   ].join('\r\n')
 
   // Route through Contract B so the draft-link email is recorded as a mail.send

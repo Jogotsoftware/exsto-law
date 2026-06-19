@@ -29,7 +29,7 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-function withSignature(
+export function withSignature(
   parts: { body: string; html?: string },
   signature: string,
 ): { body: string; html?: string } {
