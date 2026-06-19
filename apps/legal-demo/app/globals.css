@@ -4209,9 +4209,26 @@ button.danger.outline:hover:not(:disabled) {
 .uac-beta-done {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   font-size: 0.85rem;
   color: var(--accent);
+}
+.uac-beta-done > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+/* The substrate event id, shown as a small reference chip ("ref a1b2c3d4"). */
+.uac-beta-ref {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: var(--surface-2, rgba(15, 23, 42, 0.05));
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  cursor: default;
 }
 
 /* Message list + citations */
