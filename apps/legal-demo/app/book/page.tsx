@@ -182,33 +182,39 @@ export default function BookPage() {
   // older one, so a slow earlier response can never overwrite fresher slots.
   const slotsReqSeq = useRef(0)
 
-  const fetchSlots = useCallback(async (daysOut: number, opts: { silent?: boolean } = {}) => {
-    const seq = ++slotsReqSeq.current
-    if (!opts.silent) setSlotsRefreshing(true)
-    try {
-      const r = await callClientMcp<{
-        slots: CalendarSlot[]
-        source: 'google' | 'stub'
-        reason?: string
-      }>({
-        toolName: 'legal.calendar.availability',
-        input: { daysOut },
-      })
-      if (seq !== slotsReqSeq.current) return // superseded by a newer fetch
-      setSlots(r.slots)
-      setSlotsSource(r.source)
-      setSlotsLastUpdated(new Date())
-      if (r.source === 'stub' && r.reason) {
-        // Surface server-side fallback reason in the browser console so we
-        // can diagnose without grepping function logs.
-        console.warn('[availability] Google fallback to stub:', r.reason)
+  const fetchSlots = useCallback(
+    async (daysOut: number, opts: { silent?: boolean; serviceKey?: string } = {}) => {
+      const seq = ++slotsReqSeq.current
+      if (!opts.silent) setSlotsRefreshing(true)
+      try {
+        const r = await callClientMcp<{
+          slots: CalendarSlot[]
+          source: 'google' | 'stub'
+          reason?: string
+        }>({
+          toolName: 'legal.calendar.availability',
+          // serviceKey sizes each slot to the service's configured duration
+          // (Contract G); omitted on the mount prefetch, then supplied once a
+          // service is chosen so the grid matches the booked call length.
+          input: { daysOut, serviceKey: opts.serviceKey },
+        })
+        if (seq !== slotsReqSeq.current) return // superseded by a newer fetch
+        setSlots(r.slots)
+        setSlotsSource(r.source)
+        setSlotsLastUpdated(new Date())
+        if (r.source === 'stub' && r.reason) {
+          // Surface server-side fallback reason in the browser console so we
+          // can diagnose without grepping function logs.
+          console.warn('[availability] Google fallback to stub:', r.reason)
+        }
+      } catch {
+        // leave previous slots in place on transient failure
+      } finally {
+        if (seq === slotsReqSeq.current && !opts.silent) setSlotsRefreshing(false)
       }
-    } catch {
-      // leave previous slots in place on transient failure
-    } finally {
-      if (seq === slotsReqSeq.current && !opts.silent) setSlotsRefreshing(false)
-    }
-  }, [])
+    },
+    [],
+  )
 
   // Initial slot load (mount only). Subsequent windows are fetched explicitly
   // by the "load more" handler and the refresh button; keeping horizonDays out
@@ -217,11 +223,18 @@ export default function BookPage() {
     fetchSlots(INITIAL_HORIZON_DAYS)
   }, [fetchSlots])
 
+  // On the slot step: refetch immediately with the chosen service (so the grid
+  // reflects that service's slot length), then poll so newly-booked times drop
+  // out. Re-runs if the selected service changes while on this step.
   useEffect(() => {
     if (step !== 'slot') return
-    const id = setInterval(() => fetchSlots(horizonDays, { silent: true }), REFRESH_MS)
+    fetchSlots(horizonDays, { silent: true, serviceKey: selectedServiceKey ?? undefined })
+    const id = setInterval(
+      () => fetchSlots(horizonDays, { silent: true, serviceKey: selectedServiceKey ?? undefined }),
+      REFRESH_MS,
+    )
     return () => clearInterval(id)
-  }, [step, horizonDays, fetchSlots])
+  }, [step, horizonDays, fetchSlots, selectedServiceKey])
 
   const selectedService = useMemo(
     () => services?.find((s) => s.serviceKey === selectedServiceKey) ?? null,
@@ -342,7 +355,7 @@ export default function BookPage() {
         // the user has to pick again.
         setError(t('slot.conflict'))
         setSelectedSlot(null)
-        void fetchSlots(horizonDays)
+        void fetchSlots(horizonDays, { serviceKey: selectedServiceKey ?? undefined })
       } else {
         setError(raw)
       }
@@ -603,17 +616,23 @@ export default function BookPage() {
                 ) : (
                   <AvailabilityCalendar
                     slots={slots}
+                    live={slotsSource !== 'stub'}
                     selectedStartIso={selectedSlot?.startIso ?? null}
                     onSelect={setSelectedSlot}
                     lastUpdated={slotsLastUpdated}
                     refreshing={slotsRefreshing}
-                    onRefresh={() => fetchSlots(horizonDays)}
+                    onRefresh={() =>
+                      fetchSlots(horizonDays, { serviceKey: selectedServiceKey ?? undefined })
+                    }
                     loadingMoreWeeks={loadingMoreWeeks}
                     onLoadMoreWeeks={async () => {
                       setLoadingMoreWeeks(true)
                       const next = horizonDays + HORIZON_INCREMENT_DAYS
                       setHorizonDays(next)
-                      await fetchSlots(next, { silent: true })
+                      await fetchSlots(next, {
+                        silent: true,
+                        serviceKey: selectedServiceKey ?? undefined,
+                      })
                       setLoadingMoreWeeks(false)
                     }}
                   />

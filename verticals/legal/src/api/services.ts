@@ -14,8 +14,6 @@ import {
 } from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
-// Reuse the drafting worker's GenerationMode (the single definition) so the
-// package exports exactly one — type-only import, fully erased (no runtime cycle).
 import type { GenerationMode } from './generateDraft.js'
 
 export interface ServiceField {
@@ -60,6 +58,11 @@ export interface ServiceCost {
   amount: string
   hours: number | null
 }
+
+// GenerationMode (how a service produces documents — 'template_merge' = the
+// deterministic renderTemplate path, 'ai_draft' = opt-in AI) has its single
+// definition in the drafting worker; re-use it here (imported above) so the
+// barrel doesn't export the name twice (TS2308).
 
 // Per-service booking config (Contract G, WP2.3). `enabled` offers the service for
 // scheduling; `send_calendar_invite` controls the invite on booking; the slot is
@@ -249,6 +252,7 @@ export async function listServices(ctx: ActionContext): Promise<ServiceDefinitio
       `SELECT ${WORKFLOW_COLS}
        FROM workflow_definition
        WHERE tenant_id = $1 AND status = 'active' AND valid_to IS NULL
+         AND kind_name NOT LIKE 'firm.%'
        ORDER BY kind_name`,
       [ctx.tenantId],
     )
@@ -290,6 +294,7 @@ export async function listServicesIncludingInactive(
       `SELECT ${WORKFLOW_COLS}
        FROM workflow_definition
        WHERE tenant_id = $1 AND valid_to IS NULL
+         AND kind_name NOT LIKE 'firm.%'
        ORDER BY kind_name`,
       [ctx.tenantId],
     )

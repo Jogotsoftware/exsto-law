@@ -4,6 +4,8 @@ import {
   listWorkspaceEvents,
   listCalendarFeed,
   type CalendarFeedItem,
+  getBusyIntervals,
+  type BusyIntervalsResult,
   createConsultation,
   rescheduleBooking,
   cancelBooking,
@@ -44,6 +46,19 @@ const calendarFeedTool: Tool<
     "The attorney's calendar for a window: real live Google events merged with app-booked consultations (deduped). Consultations carry matter context; the attorney's other Google events ride along as read-only. source='disconnected' = Google not connected; source='error' = connected but the live read failed (the cause is in `error`, e.g. the Calendar API is disabled in the Cloud project); both return consultations only.",
   mode: 'read',
   handler: (ctx: ActionContext, input) => listCalendarFeed(ctx, input.fromIso, input.toIso),
+}
+
+// Contract M: busy intervals on the attorney's synced Google calendar. S5's
+// availability engine consumes this; free time is the complement within the
+// queried window. source='disconnected' = Google not connected; source='error'
+// = connected but the read failed (cause in `error`).
+const busyIntervalsTool: Tool<{ fromIso: string; toIso: string }, BusyIntervalsResult> = {
+  name: 'legal.calendar.busy',
+  description:
+    "Busy intervals on the attorney's synced Google calendar for [fromIso, toIso) (Contract M). Free time is the complement within the window. source='disconnected' = Google not connected; source='error' = connected but the read failed (cause in `error`).",
+  mode: 'read',
+  handler: (ctx: ActionContext, input) =>
+    getBusyIntervals(ctx, { fromIso: input.fromIso, toIso: input.toIso }),
 }
 
 const createConsultationTool: Tool<
@@ -128,6 +143,7 @@ const matterCommunicationsTool: Tool<
 
 registerTool(listEventsTool)
 registerTool(calendarFeedTool)
+registerTool(busyIntervalsTool)
 registerTool(createConsultationTool)
 registerTool(rescheduleTool)
 registerTool(cancelTool)

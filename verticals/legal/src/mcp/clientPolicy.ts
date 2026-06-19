@@ -16,8 +16,12 @@ export const CLIENT_PORTAL_TOOLS: ReadonlySet<string> = new Set([
   'legal.service.list', // booking page: list bookable services
   'legal.calendar.availability', // booking page: open consultation slots
   'legal.booking.submit', // booking page: book a consultation (public intake)
-  'legal.draft.get', // /d/[versionId]: view a draft shared with the client
+  'legal.draft.get_shared', // /d/[versionId]: client-safe shared-draft view (body only; no reasoning/model/notes)
 ])
+
+// NOTE: the full-detail `legal.draft.get` is intentionally NOT here — it returns
+// the internal reasoning trace, model identity, confidence, and review notes and
+// is attorney-only. The public path uses the client-safe `legal.draft.get_shared`.
 
 export function isClientPortalTool(toolName: string): boolean {
   return CLIENT_PORTAL_TOOLS.has(toolName)
