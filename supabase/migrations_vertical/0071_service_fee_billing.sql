@@ -1,5 +1,8 @@
 -- =============================================================================
--- Vertical migration 0070: service-fee billing event kinds
+-- Vertical migration 0071: service-fee billing event kinds
+-- (Renumbered from 0070 — #112's 0070_feedback_resolution_notifications landed
+--  concurrently; two files cannot share version 0070. The event kinds were already
+--  applied to prod; the prod ledger is reconciled to 0071 alongside this rename.)
 --
 -- Beta feedback: the Unbilled list should include "documents approved", not just
 -- logged hours and expenses. A fixed-fee service earns its fee when its work is
