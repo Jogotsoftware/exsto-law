@@ -15,6 +15,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
+import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
 
 interface ServiceDefinition {
   serviceKey: string
@@ -376,7 +378,12 @@ function KindEditor({
   const [err, setErr] = useState<string | null>(null)
   const [newLabel, setNewLabel] = useState('')
   const [libNote, setLibNote] = useState<string | null>(null)
-  const ref = useRef<HTMLTextAreaElement | null>(null)
+  const editorRef = useRef<TemplateEditorHandle | null>(null)
+  // HTML seed for the rich editor + a key that remounts it when the body is
+  // replaced wholesale (loading a library template). Normal typing flows through
+  // onChange → text and never re-seeds, so the cursor position is preserved.
+  const [seedHtml, setSeedHtml] = useState(() => markdownToHtml(template.templateText ?? ''))
+  const [editorKey, setEditorKey] = useState(0)
 
   // Save the current body into the firm template library as a reusable document,
   // tagged with this document kind so it shows up as an "add from library" option
@@ -412,19 +419,11 @@ function KindEditor({
   const fieldIds = new Set(fields.map((f) => f.id))
   const orphans = tokens.filter((tok) => !fieldIds.has(tok))
 
-  function insertAtCursor(snippet: string) {
-    const el = ref.current
-    const at = el ? el.selectionStart : text.length
-    const next = text.slice(0, at) + snippet + text.slice(el ? el.selectionEnd : text.length)
-    setText(next)
+  // Insert a bound field as an atomic {{marker}} chip at the cursor. The editor's
+  // onChange then refreshes `text` (the markdown source of truth).
+  function insertField(id: string) {
+    editorRef.current?.insertVariable(id)
     setSaved(false)
-    requestAnimationFrame(() => {
-      if (el) {
-        const pos = at + snippet.length
-        el.focus()
-        el.setSelectionRange(pos, pos)
-      }
-    })
   }
 
   async function addNewField() {
@@ -432,7 +431,7 @@ function KindEditor({
     if (!label) return
     const id = slugify(label)
     await onAddFields([{ id, label }])
-    insertAtCursor(`{{${id}}}`)
+    insertField(id)
     setNewLabel('')
   }
 
@@ -487,6 +486,8 @@ function KindEditor({
               )
                 return
               setText(pick.body)
+              setSeedHtml(markdownToHtml(pick.body))
+              setEditorKey((k) => k + 1)
               setSaved(false)
             }}
           >
@@ -508,12 +509,7 @@ function KindEditor({
         <span className="tpl-insert-label">Insert a field:</span>
         {fields.length === 0 && <span className="text-muted">No questions yet — add one →</span>}
         {fields.map((f) => (
-          <button
-            key={f.id}
-            className="qb-pill"
-            type="button"
-            onClick={() => insertAtCursor(`{{${f.id}}}`)}
-          >
+          <button key={f.id} className="qb-pill" type="button" onClick={() => insertField(f.id)}>
             {f.label}
           </button>
         ))}
@@ -554,21 +550,22 @@ function KindEditor({
         </div>
       )}
 
-      <label>
-        <span>Document</span>
-        <textarea
-          ref={ref}
-          className="tpl-canvas"
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
+      <div style={{ marginTop: '0.6rem' }}>
+        <span className="tpl-insert-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
+          Document
+        </span>
+        <TemplateEditor
+          key={editorKey}
+          initialHtml={seedHtml}
+          editorRef={editorRef}
+          placeholder="Write the document. Click a field above to insert it as a marker…"
+          onChange={(html) => {
+            setText(htmlToMarkdown(html))
             setSaved(false)
             setErr(null)
           }}
-          rows={24}
-          placeholder="Write the document. Click a field above to insert a {{marker}}…"
         />
-      </label>
+      </div>
 
       {err && (
         <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>
