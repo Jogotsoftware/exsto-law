@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { PlusIcon, UsersIcon, XIcon } from '@/components/icons'
 
 // The exact field types the public booking page (apps/legal-demo/app/book)
 // renders. Keep in lockstep with KNOWN_FIELD_TYPES in the legal API — anything
@@ -376,7 +377,7 @@ export default function QuestionnaireEditorPage() {
         </button>
       </div>
 
-      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+      <p className="qb-intro">
         The intake form clients fill out when they book this service. Saving creates a new immutable
         version; the booking page picks it up immediately.
         {empty && ' No saved form yet — this starts from the bound default.'}
@@ -405,8 +406,8 @@ export default function QuestionnaireEditorPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : (
-        <>
-          <section>
+        <div className="qb-builder">
+          <div className="qb-card">
             <div className="form-grid">
               <label>
                 <span>Form title</span>
@@ -425,12 +426,12 @@ export default function QuestionnaireEditorPage() {
                 />
               </label>
             </div>
-          </section>
+          </div>
 
           {doc.sections.map((section, si) => (
             <section
               key={si}
-              style={{ borderLeft: '3px solid var(--border)' }}
+              className="qb-card qb-section-card"
               onDragOver={(e) => {
                 if (drag && drag.fi === null) e.preventDefault()
               }}
@@ -441,14 +442,7 @@ export default function QuestionnaireEditorPage() {
                 setDrag(null)
               }}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  marginBottom: '0.6rem',
-                }}
-              >
+              <div className="qb-card-head">
                 <span
                   className="qb-grip"
                   draggable
@@ -459,44 +453,49 @@ export default function QuestionnaireEditorPage() {
                 >
                   ⠿
                 </span>
-                <strong>Section {si + 1}</strong>
-                <span style={{ marginLeft: 'auto', display: 'flex', gap: '0.35rem' }}>
+                <span className="qb-num">Section {si + 1}</span>
+                <input
+                  className="qb-title-input"
+                  value={section.title}
+                  onChange={(e) => patchSection(si, (s) => ({ ...s, title: e.target.value }))}
+                  placeholder="Section title — e.g. About the company"
+                  aria-label={`Section ${si + 1} title`}
+                />
+                <span className="qb-actions">
                   <button
+                    className="qb-iconbtn"
                     onClick={() =>
                       patch((d) => ({ ...d, sections: moveTo(d.sections, si, si - 1) }))
                     }
                     disabled={si === 0}
-                    title="Move up"
+                    title="Move section up"
+                    aria-label="Move section up"
                   >
                     ↑
                   </button>
                   <button
+                    className="qb-iconbtn"
                     onClick={() =>
                       patch((d) => ({ ...d, sections: moveTo(d.sections, si, si + 1) }))
                     }
                     disabled={si === doc.sections.length - 1}
-                    title="Move down"
+                    title="Move section down"
+                    aria-label="Move section down"
                   >
                     ↓
                   </button>
                   <button
-                    className="danger outline"
+                    className="qb-iconbtn qb-danger"
                     onClick={() =>
                       patch((d) => ({ ...d, sections: d.sections.filter((_, i) => i !== si) }))
                     }
+                    title="Remove section"
+                    aria-label="Remove section"
                   >
-                    Remove section
+                    <XIcon size={15} />
                   </button>
                 </span>
               </div>
-              <label>
-                <span>Section title</span>
-                <input
-                  value={section.title}
-                  onChange={(e) => patchSection(si, (s) => ({ ...s, title: e.target.value }))}
-                  placeholder="e.g. About the company"
-                />
-              </label>
 
               {section.fields.map((field, fi) => (
                 <FieldEditor
@@ -528,21 +527,25 @@ export default function QuestionnaireEditorPage() {
               ))}
 
               <button
+                className="qb-add qb-add-q"
                 onClick={() =>
                   patchSection(si, (s) => ({ ...s, fields: [...s.fields, emptyField()] }))
                 }
               >
-                + Add question
+                <PlusIcon size={16} />
+                Add question
               </button>
             </section>
           ))}
 
           <button
+            className="qb-add"
             onClick={() => patch((d) => ({ ...d, sections: [...d.sections, emptySection()] }))}
           >
-            + Add section
+            <PlusIcon size={16} />
+            Add section
           </button>
-        </>
+        </div>
       )}
     </>
   )
@@ -629,8 +632,7 @@ function FieldEditor({
 }) {
   return (
     <fieldset
-      className="member-row"
-      style={{ marginTop: '0.6rem' }}
+      className="qb-q"
       onDragOver={(e) => {
         if (dragActive) {
           e.preventDefault()
@@ -644,7 +646,7 @@ function FieldEditor({
         }
       }}
     >
-      <legend style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+      <legend className="qb-q-head">
         {draggable && (
           <span
             className="qb-grip"
@@ -660,16 +662,33 @@ function FieldEditor({
             ⠿
           </span>
         )}
-        Question {index + 1}
-        <span style={{ marginLeft: '0.4rem', display: 'inline-flex', gap: '0.3rem' }}>
-          <button onClick={() => onMove(-1)} disabled={index === 0} title="Move up">
+        <span className="qb-q-num">Question {index + 1}</span>
+        <span className="qb-actions">
+          <button
+            className="qb-iconbtn"
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+            title="Move question up"
+            aria-label="Move question up"
+          >
             ↑
           </button>
-          <button onClick={() => onMove(1)} disabled={index === count - 1} title="Move down">
+          <button
+            className="qb-iconbtn"
+            onClick={() => onMove(1)}
+            disabled={index === count - 1}
+            title="Move question down"
+            aria-label="Move question down"
+          >
             ↓
           </button>
-          <button className="danger outline" onClick={onRemove}>
-            Remove
+          <button
+            className="qb-iconbtn qb-danger"
+            onClick={onRemove}
+            title="Remove question"
+            aria-label="Remove question"
+          >
+            <XIcon size={15} />
           </button>
         </span>
       </legend>
@@ -697,8 +716,8 @@ function FieldEditor({
         </label>
       </div>
 
-      <div className="qb-toggles">
-        <label className="qb-toggle">
+      <div className="qb-switches">
+        <label className="qb-switch">
           <input
             type="checkbox"
             checked={field.required}
@@ -706,7 +725,7 @@ function FieldEditor({
           />
           <span>Required</span>
         </label>
-        <label className="qb-toggle">
+        <label className="qb-switch">
           <input
             type="checkbox"
             checked={field.allow_unknown}
@@ -714,7 +733,7 @@ function FieldEditor({
           />
           <span>Allow “I don’t know”</span>
         </label>
-        <label className="qb-toggle">
+        <label className="qb-switch">
           <input
             type="checkbox"
             checked={field.ask_attorney}
@@ -732,8 +751,8 @@ function FieldEditor({
       )}
 
       {field.type === 'members_repeater' && (
-        <div style={{ marginTop: '0.5rem' }}>
-          <label>
+        <div className="qb-sub">
+          <label className="qb-minitems">
             <span>Minimum members</span>
             <input
               type="number"
@@ -743,7 +762,10 @@ function FieldEditor({
               onChange={(e) => onChange((f) => ({ ...f, minItems: Number(e.target.value) || 0 }))}
             />
           </label>
-          <div style={{ fontWeight: 600, margin: '0.5rem 0 0.3rem' }}>Per-member questions</div>
+          <div className="qb-sub-title">
+            <UsersIcon size={15} />
+            Per-member questions
+          </div>
           {field.memberFields.map((mf, mi) => (
             <FieldEditor
               key={mi}
@@ -768,11 +790,13 @@ function FieldEditor({
             />
           ))}
           <button
+            className="qb-add qb-add-q"
             onClick={() =>
               onChange((f) => ({ ...f, memberFields: [...f.memberFields, emptyField()] }))
             }
           >
-            + Add per-member question
+            <PlusIcon size={16} />
+            Add per-member question
           </button>
         </div>
       )}
