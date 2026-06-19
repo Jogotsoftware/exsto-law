@@ -14,6 +14,8 @@ import { sendEmail } from '../adapters/gmail.js'
 import { getConnectionInfo, resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import { renderNotificationTemplate } from './notificationTemplates.js'
 import { renderEmailHtml } from '../email/index.js'
+import { withSignature } from './mailWorkspace.js'
+import { resolveEmailSignature } from './firmSignature.js'
 
 export interface NotificationRoute {
   kindName: string
@@ -125,7 +127,21 @@ export async function deliverNotification(ctx: ActionContext, input: NotifyInput
   // Branded HTML alternative when the kit has a matching template (ref keys mirror
   // the route template_refs); null → plaintext-only, unchanged behaviour.
   const branded = renderEmailHtml(ref, input.variables)
-  const sent = await driver(ctx, { to, subject, bodyText, bodyHtml: branded?.html })
+  // Sign client-facing mail with the configurable firm signature (Contract B
+  // parity, fix #10) so every outbound client email carries ONE signature set in
+  // Settings — templates no longer hardcode a closing. Internal attorney
+  // notifications are left unsigned.
+  let outText = bodyText
+  let outHtml = branded?.html
+  if (route.channel === 'email' && route.recipients.role !== 'attorney') {
+    const signed = withSignature(
+      { body: bodyText, html: branded?.html },
+      await resolveEmailSignature(ctx),
+    )
+    outText = signed.body
+    outHtml = signed.html
+  }
+  const sent = await driver(ctx, { to, subject, bodyText: outText, bodyHtml: outHtml })
 
   await submitAction(ctx, {
     actionKindName: 'notification.send',

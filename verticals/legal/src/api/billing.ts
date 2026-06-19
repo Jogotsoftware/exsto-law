@@ -116,9 +116,6 @@ function renderInvoiceEmail(args: {
     '',
     'Online card payments are coming soon — the link above has the details. In the',
     'meantime, just reply to this email to arrange payment by check or transfer.',
-    '',
-    'Thank you,',
-    'Pacheco Law',
   ].join('\r\n')
   return { subject: `Invoice ${args.number} from Pacheco Law`, body }
 }

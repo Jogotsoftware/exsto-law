@@ -17,6 +17,37 @@ import {
   type GmailThreadDetail,
   type EmailAttachment,
 } from '../adapters/gmail.js'
+import { resolveEmailSignature } from './firmSignature.js'
+
+// ── Signature (fix #10) ──────────────────────────────────────────────────────
+// Append the firm signature to a message body (and its HTML alternative, if
+// present). Applied centrally here so EVERY outbound client send — manual
+// compose, replies, booking confirmations (S5), invoice emails (S7) — inherits
+// it without the caller reimplementing it. Resolution (stored vs firm-derived
+// default vs disabled) lives in resolveEmailSignature; '' means append nothing.
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+export function withSignature(
+  parts: { body: string; html?: string },
+  signature: string,
+): { body: string; html?: string } {
+  const sig = signature.trim()
+  if (!sig) return parts
+  // Standard "-- " delimiter so clients recognise it as a signature block.
+  const body = `${parts.body.replace(/\s+$/, '')}\n\n-- \n${sig}\n`
+  let html = parts.html
+  if (html) {
+    const sigHtml = `<br><br><div class="firm-signature" style="color:#555">--<br>${escapeHtml(
+      sig,
+    ).replace(/\n/g, '<br>')}</div>`
+    html = /<\/body\s*>/i.test(html)
+      ? html.replace(/<\/body\s*>/i, `${sigHtml}</body>`)
+      : html + sigHtml
+  }
+  return { body, html }
+}
 
 // All client_contact emails with their matters (the allow-list that scopes
 // every Gmail query).
@@ -143,12 +174,17 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
     throw new Error('Refusing to reply: thread has no known client participant.')
   }
   const last = detail.messages[detail.messages.length - 1]
+  // Sign centrally — replies carry the firm signature too (fix #10).
+  const { body: signedBody } = withSignature(
+    { body: input.bodyText },
+    await resolveEmailSignature(ctx),
+  )
   const sent = await sendEmail(
     ctx.tenantId,
     {
       to: clientParticipant,
       subject: detail.subject.startsWith('Re:') ? detail.subject : `Re: ${detail.subject}`,
-      body: input.bodyText,
+      body: signedBody,
       gmailThreadId: input.gmailThreadId,
       inReplyToMessageIdHeader: last?.messageIdHeader ?? undefined,
     },
@@ -166,7 +202,7 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
       subject: detail.subject,
       to: clientParticipant,
       from: sent.from,
-      body_text: input.bodyText,
+      body_text: signedBody,
       matter_entity_id: matters[0]?.matterEntityId ?? null,
       participant_emails: detail.participantEmails,
     },
@@ -224,13 +260,18 @@ export async function enqueueClientEmail(
     (input.matterId && matters.find((m) => m.matterEntityId === input.matterId)?.matterEntityId) ||
     matters[0]!.matterEntityId
 
+  // Sign centrally: every Contract B send carries the firm signature (fix #10).
+  const signed = withSignature(
+    { body: input.body, html: input.html },
+    await resolveEmailSignature(ctx),
+  )
   const sent = await sendEmail(
     ctx.tenantId,
     {
       to: input.to,
       subject: input.subject,
-      body: input.body,
-      html: input.html,
+      body: signed.body,
+      html: signed.html,
       attachments: input.attachments,
     },
     ctx.actorId,
@@ -245,7 +286,7 @@ export async function enqueueClientEmail(
       subject: input.subject,
       to: input.to,
       from: sent.from,
-      body_text: input.body,
+      body_text: signed.body,
       matter_entity_id: matterEntityId,
       contact_entity_id: input.contactId ?? null,
       participant_emails: [input.to, sent.from],

@@ -44,8 +44,6 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `Hi ${s(v.client_first_name, s(v.client_full_name, 'there'))},`,
       ``,
       `Thanks for telling us about your matter. Juan Carlos will review your answers before your consultation.`,
-      ``,
-      `— Pacheco Law Firm`,
     ].join('\n'),
   }),
   'client-portal-magic-link': (v) => ({
@@ -59,8 +57,6 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `${s(v.login_url, '(sign-in link unavailable)')}`,
       ``,
       `If you didn't request this, you can safely ignore this email.`,
-      ``,
-      `— Pacheco Law Firm`,
     ].join('\n'),
   }),
   'esign-sign-request': (v) => ({
@@ -74,8 +70,6 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `${s(v.sign_url, '(signing link unavailable)')}`,
       ``,
       `If you weren't expecting this, you can safely ignore this email.`,
-      ``,
-      `— Pacheco Law Firm`,
     ].join('\n'),
   }),
   'esign-sign-request-portal': (v) => ({
@@ -87,8 +81,6 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `your secure client portal to review and sign it.`,
       ``,
       `${s(v.portal_url, '(portal link unavailable)')}`,
-      ``,
-      `— Pacheco Law Firm`,
     ].join('\n'),
   }),
   'attorney-portal-message': (v) => ({
@@ -100,8 +92,6 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       ``,
       // No message body in the email — open the matter to read and reply.
       `Open the matter to read and reply: ${s(v.matter_url, '(set NEXT_PUBLIC_BASE_URL)')}`,
-      ``,
-      `— Pacheco Law Firm`,
     ].join('\n'),
   }),
   'client-portal-message': (v) => ({
@@ -115,8 +105,6 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       ``,
       // No message body in the email — sign in to the portal to read and reply.
       `Sign in to your client portal to read and reply: ${s(v.portal_url, '(portal link unavailable)')}`,
-      ``,
-      `— Pacheco Law Firm`,
     ].join('\n'),
   }),
   'prospect-booking-confirmation': (v) => ({
@@ -138,8 +126,6 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
             `Use the email you just gave us to sign in: ${s(v.portal_url)}`,
           ]
         : []),
-      ``,
-      `— Pacheco Law Firm`,
     ].join('\n'),
   }),
 }

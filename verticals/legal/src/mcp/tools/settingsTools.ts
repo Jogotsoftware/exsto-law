@@ -3,21 +3,26 @@ import {
   connectIntegration,
   disconnectGranola,
   disconnectIntegration,
+  getFirmSignature,
   getFirmBookingRules,
   getFirmDefaultRate,
   setFirmDefaultRate,
   getTenantSettings,
   listIntegrationStatuses,
+  setFirmSignature,
   updateFirmBookingRules,
   updateTenantSettings,
   type ConnectIntegrationInput,
   type ConnectResult,
+  type FirmSignature,
   type FirmBookingRules,
   type IntegrationProvider,
   type IntegrationStatus,
+  type SetFirmSignatureInput,
   type TenantSettings,
   type UpdateTenantSettingsInput,
 } from '../../index.js'
+import { FIRM_SENDER_DISPLAY_NAME } from '../../adapters/gmail.js'
 import type { ActionContext } from '@exsto/substrate'
 
 // ── Tenant settings (firm info + defaults) ───────────────────────────────────
@@ -37,6 +42,38 @@ registerTool({
     settings: await updateTenantSettings(ctx, input),
   }),
 } satisfies Tool<UpdateTenantSettingsInput, { settings: TenantSettings }>)
+
+// ── Email signature (fix #10) ────────────────────────────────────────────────
+// The signature is applied in the central Contract B send path; this is its
+// editor surface. `sendAsDisplayName` is the read-out of the firm sender name
+// every outbound client email goes out under.
+
+interface SignatureGetResult {
+  signature: FirmSignature
+  sendAsDisplayName: string
+}
+
+registerTool({
+  name: 'legal.settings.signature.get',
+  description:
+    'Fetch the firm email signature (stored text, enabled flag, the resolved text the send path would append, whether it is the firm-derived default) plus the outbound sender display name.',
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({
+    signature: await getFirmSignature(ctx),
+    sendAsDisplayName: FIRM_SENDER_DISPLAY_NAME,
+  }),
+} satisfies Tool<Record<string, never>, SignatureGetResult>)
+
+registerTool({
+  name: 'legal.settings.signature.set',
+  description:
+    'Set the firm email signature and/or its enabled flag. Undefined fields are left alone; an empty signature clears it (sends then fall back to the firm-derived default). Applies to every subsequent outbound client email.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => {
+    const { signature } = await setFirmSignature(ctx, input)
+    return { signature, sendAsDisplayName: FIRM_SENDER_DISPLAY_NAME }
+  },
+} satisfies Tool<SetFirmSignatureInput, SignatureGetResult>)
 
 // ── Firm booking rules (Contract L) ──────────────────────────────────────────
 
