@@ -60,6 +60,7 @@ export default function MattersPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [serviceFilter, setServiceFilter] = useState('')
+  const [clientFilter, setClientFilter] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('createdAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -76,6 +77,10 @@ export default function MattersPage() {
   )
   const serviceOptions = useMemo(
     () => Array.from(new Set((matters ?? []).map((m) => m.practiceArea).filter(Boolean))).sort(),
+    [matters],
+  )
+  const clientOptions = useMemo(
+    () => Array.from(new Set((matters ?? []).map((m) => m.clientName).filter(Boolean))).sort(),
     [matters],
   )
 
@@ -102,6 +107,7 @@ export default function MattersPage() {
         return false
       if (statusFilter && m.status !== statusFilter) return false
       if (serviceFilter && m.practiceArea !== serviceFilter) return false
+      if (clientFilter && m.clientName !== clientFilter) return false
       return true
     })
     const dir = sortDir === 'asc' ? 1 : -1
@@ -113,7 +119,7 @@ export default function MattersPage() {
         (a[sortKey] ?? '').localeCompare(b[sortKey] ?? '', undefined, { sensitivity: 'base' }) * dir
       )
     })
-  }, [matters, query, statusFilter, serviceFilter, sortKey, sortDir])
+  }, [matters, query, statusFilter, serviceFilter, clientFilter, sortKey, sortDir])
 
   function SortHeader({ label, sortKey: key }: { label: string; sortKey: SortKey }) {
     const active = sortKey === key
@@ -129,7 +135,7 @@ export default function MattersPage() {
     )
   }
 
-  const hasFilters = Boolean(query || statusFilter || serviceFilter)
+  const hasFilters = Boolean(query || statusFilter || serviceFilter || clientFilter)
 
   return (
     <main>
@@ -169,6 +175,18 @@ export default function MattersPage() {
               </option>
             ))}
           </select>
+          <select
+            value={clientFilter}
+            onChange={(e) => setClientFilter(e.target.value)}
+            aria-label="Filter by client"
+          >
+            <option value="">All clients</option>
+            {clientOptions.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
           {hasFilters && (
             <button
               type="button"
@@ -176,6 +194,7 @@ export default function MattersPage() {
                 setQuery('')
                 setStatusFilter('')
                 setServiceFilter('')
+                setClientFilter('')
               }}
             >
               Clear

@@ -7,6 +7,10 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, renderMarkdown, shareUrlFor } from '@/lib/draftExport'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 
+// Step-through review session (started from the queue's "Begin review"): the ordered
+// draft ids to walk, in sessionStorage, flagged on the URL with ?review=session.
+const REVIEW_SESSION_KEY = 'reviewSession'
+
 interface DraftDetail {
   documentVersionId: string
   documentEntityId: string
@@ -74,6 +78,9 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   const [error, setError] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  // The ordered ids of an in-progress step-through review, or null for a normal
+  // single visit. Loaded only when the URL carries ?review=session.
+  const [sessionIds, setSessionIds] = useState<string[] | null>(null)
 
   async function load() {
     setError(null)
@@ -93,6 +100,34 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     load()
   }, [versionId])
 
+  // Pick up an in-progress step-through session for this draft (queue → Begin review).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const inSession = new URLSearchParams(window.location.search).get('review') === 'session'
+    if (!inSession) {
+      setSessionIds(null)
+      return
+    }
+    try {
+      const raw = window.sessionStorage.getItem(REVIEW_SESSION_KEY)
+      const parsed = raw ? (JSON.parse(raw) as { ids?: unknown }) : null
+      setSessionIds(Array.isArray(parsed?.ids) ? (parsed.ids as string[]) : null)
+    } catch {
+      setSessionIds(null)
+    }
+  }, [versionId])
+
+  const sessionPos = sessionIds ? sessionIds.indexOf(versionId) : -1
+
+  function exitSession() {
+    try {
+      window.sessionStorage.removeItem(REVIEW_SESSION_KEY)
+    } catch {
+      /* ignore */
+    }
+    router.push('/attorney/review')
+  }
+
   async function review(toolName: string, label: string, requireNotes: boolean) {
     if (requireNotes && !notes.trim()) {
       setError('Review notes are required for this action.')
@@ -105,6 +140,22 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         toolName,
         input: { documentVersionId: versionId, reviewNotes: notes.trim() || undefined },
       })
+      // In a step-through session, auto-advance to the next selected draft once this
+      // one is dispositioned; finish back at the queue when the list is exhausted.
+      if (sessionIds && sessionPos >= 0) {
+        const next = sessionPos + 1
+        if (next < sessionIds.length) {
+          window.sessionStorage.setItem(
+            REVIEW_SESSION_KEY,
+            JSON.stringify({ ids: sessionIds, index: next }),
+          )
+          router.push(`/attorney/review/${sessionIds[next]}?review=session`)
+        } else {
+          window.sessionStorage.removeItem(REVIEW_SESSION_KEY)
+          router.push('/attorney/review')
+        }
+        return
+      }
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -175,7 +226,25 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   return (
     <main>
       <p style={{ fontSize: '0.88rem' }}>
-        <Link href="/attorney/review">← Review queue</Link>
+        {sessionPos >= 0 && sessionIds ? (
+          <button
+            type="button"
+            onClick={exitSession}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              font: 'inherit',
+              color: 'var(--accent-attorney, #1e3a5f)',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+            }}
+          >
+            ← Exit review ({sessionPos + 1} of {sessionIds.length})
+          </button>
+        ) : (
+          <Link href="/attorney/review">← Review queue</Link>
+        )}
         {' · '}
         <Link href={`/attorney/matters/${draft.matterEntityId}`}>Matter {draft.matterNumber}</Link>
       </p>
@@ -312,7 +381,15 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       </div>
 
       <section>
-        <h2>Review</h2>
+        <h2>
+          Review
+          {sessionPos >= 0 && sessionIds && (
+            <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: '0.9rem' }}>
+              {' '}
+              · {sessionPos + 1} of {sessionIds.length} — a disposition advances to the next
+            </span>
+          )}
+        </h2>
         {error && <div className="alert alert-error">{error}</div>}
         <label>
           Notes (required for revision; optional otherwise)
