@@ -24,13 +24,15 @@ export default function PortalSignPage({ params }: { params: Promise<{ requestId
   if (error)
     return (
       <div className="page">
-        <div className="alert alert-error">{error}</div>
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
       </div>
     )
   if (!doc)
     return (
       <div className="page">
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       </div>

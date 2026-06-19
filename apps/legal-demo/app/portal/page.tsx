@@ -95,7 +95,9 @@ export default function ClientPortalPage() {
   if (error) {
     return (
       <main className="public-draft">
-        <div className="alert alert-error">{error}</div>
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
       </main>
     )
   }
@@ -103,7 +105,7 @@ export default function ClientPortalPage() {
   if (!me || !matters) {
     return (
       <main className="public-draft">
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       </main>
@@ -152,7 +154,7 @@ export default function ClientPortalPage() {
           )}
 
           {!timeline ? (
-            <div className="loading-block" style={{ marginTop: 'var(--space-4)' }}>
+            <div className="loading-block" role="status" style={{ marginTop: 'var(--space-4)' }}>
               <span className="spinner" /> Loading matter…
             </div>
           ) : (
@@ -248,10 +250,14 @@ function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
         Message your attorney about this matter.
       </p>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
 
       {messages === null ? (
-        <div className="loading-block" style={{ marginTop: 'var(--space-3)' }}>
+        <div className="loading-block" role="status" style={{ marginTop: 'var(--space-3)' }}>
           <span className="spinner" /> Loading messages…
         </div>
       ) : messages.length === 0 ? (
@@ -260,6 +266,9 @@ function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
         </p>
       ) : (
         <div
+          role="log"
+          aria-live="polite"
+          aria-label="Messages"
           style={{
             marginTop: 'var(--space-3)',
             display: 'flex',

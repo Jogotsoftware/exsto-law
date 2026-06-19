@@ -231,7 +231,11 @@ export function WeeklyCalendar({ items, loaded, lastRefreshedAt }: WeeklyCalenda
       </div>
 
       <div className="wcal-meta">
-        <span className="wcal-live" title="Auto-refreshes so newly-booked meetings appear">
+        <span
+          className="wcal-live"
+          aria-live="polite"
+          title="Auto-refreshes so newly-booked meetings appear"
+        >
           <span className="wcal-live-dot" /> Live
           {lastRefreshedAt && (
             <span className="wcal-live-time">
