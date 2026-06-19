@@ -25,13 +25,13 @@
         {
           "id": "registered_agent_address",
           "label": "Registered agent address in NC",
-          "type": "textarea",
+          "type": "address_autocomplete",
           "required": true
         },
         {
           "id": "principal_office_address",
           "label": "Principal office address",
-          "type": "textarea",
+          "type": "address_autocomplete",
           "required": true
         },
         {

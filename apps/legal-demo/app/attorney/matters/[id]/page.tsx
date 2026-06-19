@@ -78,6 +78,12 @@ function humanizeValue(value: unknown): string {
     return value.replace(/_/g, ' ')
   }
   if (typeof value === 'number') return String(value)
+  // Structured address fields (address_autocomplete / member address) store a
+  // StructuredAddress object; show its human-readable line, not the raw JSON.
+  if (typeof value === 'object' && value !== null && 'formatted_address' in value) {
+    const formatted = (value as { formatted_address?: unknown }).formatted_address
+    if (typeof formatted === 'string' && formatted.trim() !== '') return formatted
+  }
   return JSON.stringify(value)
 }
 

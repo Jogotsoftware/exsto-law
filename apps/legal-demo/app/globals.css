@@ -5745,3 +5745,229 @@ button.danger.outline:hover:not(:disabled) {
   color: var(--muted);
   margin-bottom: 0.3rem;
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Questionnaire editor (per-service builder) — card-based redesign.
+   Each section is a surface card; each question is a nested sub-card. Replaces
+   the old bare-fieldset layout. Scoped under .qb-builder so it never touches the
+   booking form's .member-row or the standalone library builder's .qb-section.
+   ─────────────────────────────────────────────────────────────────────────── */
+.qb-builder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+.qb-intro {
+  color: var(--muted);
+  margin: 0;
+  max-width: 60ch;
+}
+
+/* Meta (title/jurisdiction) + section cards share the surface treatment. */
+.qb-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-5);
+}
+.qb-section-card {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border-left: 3px solid var(--accent);
+}
+.qb-section-card.qb-drop {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+.qb-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.qb-num {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.65rem;
+  border-radius: var(--radius-full);
+  background: var(--accent-attorney-soft);
+  color: var(--accent-attorney);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+/* Inline, low-chrome title field — reads as text until hovered/focused. */
+.qb-title-input {
+  flex: 1 1 auto;
+  min-width: 8rem;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--fg);
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+.qb-title-input:hover {
+  background: var(--surface-2);
+}
+.qb-title-input:focus {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+
+/* Icon-button action cluster (reorder, remove). */
+.qb-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+.qb-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.qb-iconbtn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--fg);
+  background: var(--surface-2);
+}
+.qb-iconbtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.qb-iconbtn.qb-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* Question cards nested inside a section. */
+.qb-q {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin: var(--space-3) 0 0;
+}
+.qb-q legend {
+  padding: 0;
+}
+.qb-q-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin-bottom: var(--space-3);
+}
+.qb-q-num {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--muted);
+}
+
+/* Toggle chips (Required / I don't know / Flag for follow-up). */
+.qb-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.qb-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.qb-switch:hover {
+  border-color: var(--border-strong);
+}
+.qb-switch input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.qb-switch:has(input:checked) {
+  background: var(--accent-attorney-soft);
+  border-color: var(--accent);
+  color: var(--accent-attorney);
+  font-weight: var(--weight-medium);
+}
+
+/* Dashed "add" buttons. */
+.qb-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.7rem 1rem;
+  border: 1.5px dashed var(--border-strong);
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  font-weight: var(--weight-medium);
+  box-shadow: none;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.qb-add:hover {
+  background: var(--accent-attorney-soft);
+  border-color: var(--accent);
+}
+.qb-add-q {
+  margin-top: var(--space-3);
+}
+
+/* Per-member sub-builder (members_repeater). */
+.qb-sub {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.qb-sub-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--accent-attorney);
+  margin: var(--space-3) 0 0;
+}
+.qb-minitems {
+  max-width: 12rem;
+}
