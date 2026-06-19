@@ -273,10 +273,6 @@ export function mergeBusyIntervals(
   }))
 }
 
-// Attorney working timezone. TODO: lift to tenant config (currently Pacheco
-// Law only; everything is NY time).
-const ATTORNEY_TZ = 'America/New_York'
-
 // Build a UTC instant for a given calendar date + wall-clock hour in a
 // specific timezone. Uses Intl.DateTimeFormat to figure out the offset for
 // that local moment, then constructs the ISO instant.
