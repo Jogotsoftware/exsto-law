@@ -250,6 +250,7 @@ export async function listServices(ctx: ActionContext): Promise<ServiceDefinitio
       `SELECT ${WORKFLOW_COLS}
        FROM workflow_definition
        WHERE tenant_id = $1 AND status = 'active' AND valid_to IS NULL
+         AND kind_name NOT LIKE 'firm.%'
        ORDER BY kind_name`,
       [ctx.tenantId],
     )
@@ -291,6 +292,7 @@ export async function listServicesIncludingInactive(
       `SELECT ${WORKFLOW_COLS}
        FROM workflow_definition
        WHERE tenant_id = $1 AND valid_to IS NULL
+         AND kind_name NOT LIKE 'firm.%'
        ORDER BY kind_name`,
       [ctx.tenantId],
     )

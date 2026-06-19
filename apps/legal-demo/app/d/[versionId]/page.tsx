@@ -26,7 +26,7 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
 
   useEffect(() => {
     callClientMcp<{ draft: DraftPayload | null }>({
-      toolName: 'legal.draft.get',
+      toolName: 'legal.draft.get_shared',
       input: { documentVersionId: versionId },
     })
       .then((r) => {
