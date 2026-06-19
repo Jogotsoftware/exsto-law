@@ -391,37 +391,260 @@ section h2 {
   margin-bottom: 1.5rem;
 }
 
-/* Header */
-.app-header {
-  border-bottom: 1px solid var(--border-soft);
-  background: white;
+/* ── Attorney top navigation bar ─────────────────────────────────────────── */
+.att-top {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: linear-gradient(180deg, #0e1f3f 0%, #15315f 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 6px 24px -18px rgba(15, 23, 42, 0.8);
 }
-.app-header-inner {
-  max-width: 1240px;
+.att-top-inner {
+  max-width: 1380px;
   margin: 0 auto;
-  padding: 0.85rem 1.25rem;
+  padding: 0.6rem 1.1rem;
   display: flex;
-  gap: 1.5rem;
   align-items: center;
+  gap: 1.25rem;
 }
-.app-brand {
+
+/* Left — menu button + brand */
+.att-top-left {
+  position: relative;
   display: flex;
-  gap: 0.45rem;
-  align-items: baseline;
+  align-items: center;
+  gap: 0.6rem;
+  flex: none;
 }
-.brand-suffix {
-  font-size: 0.78rem;
+.att-top-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #fff;
+}
+.att-top-brand:hover {
+  text-decoration: none;
+}
+.att-top-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #14306b;
+  background: linear-gradient(135deg, #f3cd8c 0%, #d08a3e 100%);
+  box-shadow: 0 5px 14px -5px rgba(208, 138, 62, 0.7);
+  flex: none;
+}
+.att-top-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+}
+.att-top-brand-name {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.12rem;
+  font-weight: 600;
+}
+.att-top-brand-sub {
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  color: #e7b667;
+  margin-top: 3px;
+}
+
+/* Center — global search */
+.att-top-center {
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+/* Right — notifications + user menu */
+.att-top-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: none;
+}
+.att-pop-anchor {
+  position: relative;
+  display: flex;
+}
+
+/* Round icon buttons on the navy bar (menu, bell) */
+.att-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #cdd9ea;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
+}
+.att-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.att-icon-btn.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* User avatar button */
+.att-user-btn {
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.16s ease;
+}
+.att-user-btn:hover,
+.att-user-btn.active {
+  border-color: rgba(231, 182, 103, 0.7);
+}
+.att-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #14306b;
+  background: linear-gradient(135deg, #f3cd8c 0%, #d08a3e 100%);
+}
+
+/* Shared dropdown shell (notifications + user, right-anchored) */
+.att-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: white;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-1);
+  z-index: 100;
+  animation: att-pop-in 0.12s ease;
+}
+@keyframes att-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.att-pop-head {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--muted);
 }
-.signed-in-as {
-  margin-left: auto;
-  font-size: 0.85rem;
+
+/* Nav dropdown — anchored under the menu button, on the left */
+.att-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 220px;
+  background: white;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-1);
+  z-index: 100;
   display: flex;
-  gap: 0.4rem;
+  flex-direction: column;
+  gap: 1px;
+  animation: att-pop-in 0.12s ease;
+}
+.att-menu-link {
+  display: flex;
   align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
+}
+.att-menu-link:hover {
+  background: var(--rule-soft);
+  text-decoration: none;
+}
+.att-menu-link.active {
+  background: var(--accent-attorney-soft);
+  color: var(--accent-attorney);
+  font-weight: 600;
+}
+.att-menu-ico {
+  display: inline-flex;
   color: var(--muted);
+  flex: none;
+}
+.att-menu-link.active .att-menu-ico {
+  color: var(--accent-attorney);
+}
+
+/* Notifications dropdown */
+.att-notif {
+  min-width: 280px;
+}
+.att-notif-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.5rem 1rem;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.att-notif-empty svg {
+  color: var(--ok);
+}
+
+/* User dropdown */
+.att-user-menu {
+  min-width: 220px;
+}
+.att-user-id {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  font-size: 0.9rem;
+  color: var(--fg);
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: var(--space-1);
 }
 .signed-in-dot {
   width: 8px;
@@ -810,12 +1033,14 @@ pre {
   .trace-rail {
     max-height: none;
   }
-  .app-header-inner {
-    flex-wrap: wrap;
-    gap: 0.85rem;
+  .att-top-inner {
+    gap: 0.6rem;
+    padding: 0.55rem 0.8rem;
   }
-  .signed-in-as {
-    margin-left: 0;
+  /* Reclaim width for search on narrow screens — the wordmark folds to the
+     crest, and nav stays reachable through the menu button. */
+  .att-top-brand-text {
+    display: none;
   }
   table {
     font-size: 0.85rem;
@@ -1219,6 +1444,10 @@ pre {
 .search-result-tag.tag-matter {
   background: var(--questionnaire-soft);
   color: var(--questionnaire);
+}
+.search-result-tag.tag-client {
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 .search-result-primary {
   font-weight: var(--weight-medium);
@@ -4327,119 +4556,6 @@ button.danger.outline:hover:not(:disabled) {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
-}
-
-/* ── Attorney sidebar (modern icon nav) ─────────────────────────────────── */
-.att-side {
-  width: 232px;
-  min-width: 232px;
-  min-height: 100vh;
-  height: 100vh;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  display: flex;
-  flex-direction: column;
-  background: linear-gradient(180deg, #0e1f3f 0%, #15315f 100%);
-  box-shadow:
-    1px 0 0 rgba(255, 255, 255, 0.05),
-    6px 0 30px -18px rgba(15, 23, 42, 0.6);
-  padding: 0.55rem;
-}
-.att-side-brand {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.9rem 0.7rem 1.1rem;
-  margin-bottom: 0.35rem;
-  color: #fff;
-  font-family: var(--font-serif, Georgia, serif);
-  font-size: 1.32rem;
-  font-weight: 600;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-.att-side-brand:hover {
-  text-decoration: none;
-}
-.att-side-mark {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  color: #14306b;
-  background: linear-gradient(135deg, #f3cd8c 0%, #d08a3e 100%);
-  box-shadow: 0 5px 14px -5px rgba(208, 138, 62, 0.7);
-  flex: none;
-}
-.att-side-brand-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.04;
-}
-.att-side-brand-name {
-  font-family: var(--font-serif, Georgia, serif);
-  font-size: 1.32rem;
-  font-weight: 600;
-}
-.att-side-brand-sub {
-  font-family: var(--font-sans, system-ui, sans-serif);
-  font-size: 0.64rem;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: #e7b667;
-  margin-top: 4px;
-}
-.att-side-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 0.35rem;
-}
-.att-side-link {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.62rem 0.7rem;
-  border-radius: 9px;
-  color: #aeb9c9;
-  font-size: 0.93rem;
-  font-weight: 500;
-  transition:
-    background 0.16s ease,
-    color 0.16s ease;
-}
-.att-side-link:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
-  text-decoration: none;
-}
-.att-side-link.active {
-  background: rgba(255, 255, 255, 0.11);
-  color: #fff;
-  font-weight: 600;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-}
-.att-side-ico {
-  display: inline-flex;
-  color: #8094ad;
-  flex: none;
-  transition: color 0.16s ease;
-}
-.att-side-link:hover .att-side-ico {
-  color: #cdd9ea;
-}
-.att-side-link.active .att-side-ico {
-  color: #e7a44e;
-}
-.att-side-foot {
-  margin-top: auto;
-  padding: 1rem 0.75rem;
-  font-size: 0.72rem;
-  line-height: 1.5;
-  color: #7e8da0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Questionnaire builder (WP2.4): toggles, choice pills, drag handle. */

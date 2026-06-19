@@ -19,9 +19,17 @@ interface MatterRow {
   summary: string
 }
 
+interface ClientRow {
+  clientEntityId: string
+  name: string | null
+  contactCount: number
+  matterCount: number
+}
+
 type Result =
   | { type: 'contact'; id: string; primary: string; secondary: string }
   | { type: 'matter'; id: string; primary: string; secondary: string }
+  | { type: 'client'; id: string; primary: string; secondary: string }
 
 export function SearchBar() {
   const router = useRouter()
@@ -31,6 +39,7 @@ export function SearchBar() {
   const [open, setOpen] = useState(false)
   const [contacts, setContacts] = useState<ContactRow[]>([])
   const [matters, setMatters] = useState<MatterRow[]>([])
+  const [clients, setClients] = useState<ClientRow[]>([])
   const [loaded, setLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -38,12 +47,14 @@ export function SearchBar() {
     if (loaded || loading) return
     setLoading(true)
     try {
-      const [c, m] = await Promise.all([
+      const [c, m, cl] = await Promise.all([
         callAttorneyMcp<{ contacts: ContactRow[] }>({ toolName: 'legal.contact.list' }),
         callAttorneyMcp<{ matters: MatterRow[] }>({ toolName: 'legal.matter.list' }),
+        callAttorneyMcp<{ clients: ClientRow[] }>({ toolName: 'legal.client.list' }),
       ])
       setContacts(c.contacts)
       setMatters(m.matters)
+      setClients(cl.clients)
       setLoaded(true)
     } catch {
       // Silent — search will just show "No matches"
@@ -102,8 +113,19 @@ export function SearchBar() {
         })
       }
     }
-    for (const m of matters) {
+    for (const cl of clients) {
       if (results.length >= 10) break
+      if ((cl.name ?? '').toLowerCase().includes(q)) {
+        results.push({
+          type: 'client',
+          id: cl.clientEntityId,
+          primary: cl.name || 'Unnamed client',
+          secondary: `${cl.matterCount} matter${cl.matterCount === 1 ? '' : 's'} · ${cl.contactCount} contact${cl.contactCount === 1 ? '' : 's'}`,
+        })
+      }
+    }
+    for (const m of matters) {
+      if (results.length >= 15) break
       if (
         m.matterNumber.toLowerCase().includes(q) ||
         m.clientName.toLowerCase().includes(q) ||
@@ -123,6 +145,7 @@ export function SearchBar() {
     setOpen(false)
     setQuery('')
     if (r.type === 'contact') router.push(`/attorney/contacts/${r.id}`)
+    else if (r.type === 'client') router.push(`/attorney/clients/${r.id}`)
     else router.push(`/attorney/matters/${r.id}`)
   }
 
@@ -132,7 +155,7 @@ export function SearchBar() {
       <input
         ref={inputRef}
         type="search"
-        placeholder="Search contacts and matters…"
+        placeholder="Search matters, clients, contacts…"
         value={query}
         onChange={(e) => {
           setQuery(e.target.value)
