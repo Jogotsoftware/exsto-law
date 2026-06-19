@@ -151,7 +151,6 @@ export default function CalendarPage() {
   // pure re-render with no extra fetch.
   useEffect(() => {
     load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromIso, toIso])
 
   // Contract D — launchScheduler: open the event creator pre-wired from query
