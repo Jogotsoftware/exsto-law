@@ -391,14 +391,37 @@ async function queryBusyBlocks(
 ): Promise<Array<{ start: number; end: number }>> {
   const { oauth2, creds } = await authedClient(tenantId, actorId)
   const calendar = google.calendar({ version: 'v3', auth: oauth2 })
+
+  // Check free/busy across EVERY calendar the attorney keeps selected — the same
+  // set the Calendar tab (listCalendarEvents) shows — not just the booking
+  // calendar. Otherwise a meeting on a secondary or shared calendar appears in
+  // the calendar view but never blocks a booking slot, so the public link offers
+  // a time the attorney is actually busy (a double-book). freebusy reads
+  // freeBusyReader calendars too (that access exists precisely for this), so keep
+  // them. The booking calendar (creds.calendarId) is always included; fall back
+  // to it alone if the list can't be read. freebusy accepts up to 50 items.
+  let calendarIds: string[]
+  try {
+    const list = await calendar.calendarList.list({ maxResults: 250, showHidden: false })
+    const ids = (list.data.items ?? [])
+      .filter((c) => c.id && c.selected !== false)
+      .map((c) => c.id as string)
+    calendarIds = [...new Set([creds.calendarId, ...ids])].slice(0, 50)
+  } catch {
+    calendarIds = [creds.calendarId]
+  }
+
   const busyRes = await calendar.freebusy.query({
     requestBody: {
       timeMin: fromIso,
       timeMax: toIso,
-      items: [{ id: creds.calendarId }],
+      items: calendarIds.map((id) => ({ id })),
     },
   })
-  return (busyRes.data.calendars?.[creds.calendarId]?.busy ?? [])
+  // Union the busy blocks from every queried calendar (mergeBusyIntervals /
+  // the slot-overlap check downstream both tolerate unsorted, overlapping spans).
+  return Object.values(busyRes.data.calendars ?? {})
+    .flatMap((c) => c.busy ?? [])
     .map((b) => ({ start: new Date(b.start!).getTime(), end: new Date(b.end!).getTime() }))
     .filter((b) => Number.isFinite(b.start) && Number.isFinite(b.end))
 }
