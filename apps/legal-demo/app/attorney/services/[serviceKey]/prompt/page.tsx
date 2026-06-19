@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
 // The FIXED mustache-slot contract the drafting worker fills (must mirror
@@ -137,22 +136,8 @@ export default function PromptEditorPage() {
   }
 
   return (
-    <main>
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
-      >
-        <h1 style={{ margin: 0 }}>Drafting prompts</h1>
-        <Link
-          href={`/attorney/services/${serviceKey}`}
-          className="back-link"
-          style={{ marginLeft: 'auto' }}
-        >
-          Back to service
-        </Link>
-      </div>
-
-      <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
+    <>
+      <p style={{ color: 'var(--muted)', marginTop: '-0.2rem' }}>
         The instructions the drafting agent follows when generating each document for{' '}
         <code>{serviceKey}</code>. Saving creates a new immutable version; the drafting worker uses
         it on the next run. Each prompt must contain every required slot — they are filled in with
@@ -289,6 +274,6 @@ export default function PromptEditorPage() {
           )
         })
       )}
-    </main>
+    </>
   )
 }

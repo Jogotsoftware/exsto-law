@@ -333,26 +333,50 @@ export default function QuestionnaireEditorPage() {
     }
   }
 
+  // Promote the current in-editor form into the firm questionnaire library so it
+  // can seed other services (a copy outward — this service is untouched).
+  async function saveToLibrary() {
+    if (!doc) return
+    const name = window.prompt(
+      'Save this questionnaire to the library as:',
+      'Untitled questionnaire',
+    )
+    if (!name || !name.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.questionnaire_template.create',
+        input: { name: name.trim(), schema: editorToWire(doc) },
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <main>
+    <>
       <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: '0.5rem',
+          marginBottom: '0.4rem',
+        }}
       >
-        <h1 style={{ margin: 0 }}>Edit questionnaire</h1>
-        <Link
-          href={`/attorney/services/${serviceKey}`}
-          className="back-link"
-          style={{ marginLeft: 'auto' }}
-        >
-          Back to service
-        </Link>
+        <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !doc}>
+          Save to library
+        </button>
         <button className="primary" onClick={save} disabled={busy || !doc}>
           {busy ? 'Saving…' : 'Save new version'}
         </button>
       </div>
 
-      <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
+      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
         The intake form clients fill out when they book this service. Saving creates a new immutable
         version; the booking page picks it up immediately.
         {empty && ' No saved form yet — this starts from the bound default.'}
@@ -520,7 +544,7 @@ export default function QuestionnaireEditorPage() {
           </button>
         </>
       )}
-    </main>
+    </>
   )
 }
 
