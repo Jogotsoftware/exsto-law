@@ -20,7 +20,9 @@ export function TemplatePreview({ body }: { body: string }) {
           </span>
         )}
       </div>
-      <div className="tpl-preview-page" dangerouslySetInnerHTML={{ __html: html }} />
+      <div className="tpl-preview-desk">
+        <div className="tpl-preview-page" dangerouslySetInnerHTML={{ __html: html }} />
+      </div>
     </div>
   )
 }
