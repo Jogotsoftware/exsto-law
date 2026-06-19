@@ -3850,6 +3850,15 @@ button.danger.outline:hover:not(:disabled) {
   box-shadow: 0 0 0 0 rgba(21, 128, 61, 0.5);
   animation: bkPulse 2s ease-out infinite;
 }
+/* Stub fallback: same layout as the live badge but muted and static — no green
+   pulse — so sample times are never dressed up as a live calendar feed. */
+.bk-cal-sample {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: var(--bk-slate-400);
+}
 .bk-cal-updated {
   color: var(--bk-slate-400);
   font-weight: 400;

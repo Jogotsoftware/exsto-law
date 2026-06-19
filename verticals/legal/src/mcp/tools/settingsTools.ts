@@ -3,11 +3,14 @@ import {
   connectIntegration,
   disconnectGranola,
   disconnectIntegration,
+  getFirmBookingRules,
   getTenantSettings,
   listIntegrationStatuses,
+  updateFirmBookingRules,
   updateTenantSettings,
   type ConnectIntegrationInput,
   type ConnectResult,
+  type FirmBookingRules,
   type IntegrationProvider,
   type IntegrationStatus,
   type TenantSettings,
@@ -32,6 +35,26 @@ registerTool({
     settings: await updateTenantSettings(ctx, input),
   }),
 } satisfies Tool<UpdateTenantSettingsInput, { settings: TenantSettings }>)
+
+// ── Firm booking rules (Contract L) ──────────────────────────────────────────
+
+registerTool({
+  name: 'legal.booking_rules.get',
+  description:
+    'Fetch the firm booking rules: bookable days/hours, buffer between calls, minimum lead time, slot granularity, and default consultation duration.',
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ rules: await getFirmBookingRules(ctx) }),
+} satisfies Tool<Record<string, never>, { rules: FirmBookingRules }>)
+
+registerTool({
+  name: 'legal.booking_rules.update',
+  description:
+    'Update the firm booking rules. Undefined fields are left alone; every value is clamped to a safe range before it is saved.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    rules: await updateFirmBookingRules(ctx, input),
+  }),
+} satisfies Tool<Partial<FirmBookingRules>, { rules: FirmBookingRules }>)
 
 // ── Integrations ─────────────────────────────────────────────────────────────
 

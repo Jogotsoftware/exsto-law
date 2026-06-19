@@ -173,6 +173,7 @@ export async function listServices(ctx: ActionContext): Promise<ServiceDefinitio
       `SELECT ${WORKFLOW_COLS}
        FROM workflow_definition
        WHERE tenant_id = $1 AND status = 'active' AND valid_to IS NULL
+         AND kind_name NOT LIKE 'firm.%'
        ORDER BY kind_name`,
       [ctx.tenantId],
     )
@@ -214,6 +215,7 @@ export async function listServicesIncludingInactive(
       `SELECT ${WORKFLOW_COLS}
        FROM workflow_definition
        WHERE tenant_id = $1 AND valid_to IS NULL
+         AND kind_name NOT LIKE 'firm.%'
        ORDER BY kind_name`,
       [ctx.tenantId],
     )
@@ -1215,6 +1217,10 @@ export async function submitBooking(
       timeZoneName: 'short',
     }),
     matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
+    // Client account access (S10): magic-link portal sign-in. The prospect
+    // booking confirmation email links here so the client can set up portal
+    // access using the same email they just booked with.
+    portal_url: baseUrl ? `${baseUrl}/portal/login` : null,
   }
   await queueNotification(ctx, {
     routeKindName: 'prospect_intake_confirmation',
