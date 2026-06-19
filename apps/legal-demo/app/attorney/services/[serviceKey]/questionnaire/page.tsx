@@ -205,6 +205,62 @@ function moveTo<T>(arr: T[], from: number, to: number): T[] {
   return copy
 }
 
+// Select a reusable questionnaire from the firm library (#4b) to seed this
+// service's form, or jump to the library builder. Applying loads the chosen
+// schema into the editor (in memory) — the attorney reviews and Saves a version.
+function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
+  const [items, setItems] = useState<
+    { questionnaireTemplateId: string; name: string; schema: WireDoc }[]
+  >([])
+  useEffect(() => {
+    callAttorneyMcp<{
+      questionnaires: { questionnaireTemplateId: string; name: string; schema: WireDoc }[]
+    }>({ toolName: 'legal.questionnaire_template.list' })
+      .then((r) => setItems(r.questionnaires))
+      .catch(() => setItems([]))
+  }, [])
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.6rem',
+        flexWrap: 'wrap',
+        margin: '0 0 1rem',
+      }}
+    >
+      {items.length > 0 && (
+        <select
+          value=""
+          aria-label="Start from a library questionnaire"
+          onChange={(e) => {
+            const it = items.find((i) => i.questionnaireTemplateId === e.target.value)
+            e.target.value = ''
+            if (
+              it &&
+              window.confirm(
+                `Replace this service's questionnaire with "${it.name}" from the library? You can edit it before saving.`,
+              )
+            ) {
+              onApply(it.schema)
+            }
+          }}
+        >
+          <option value="">Start from a library questionnaire…</option>
+          {items.map((i) => (
+            <option key={i.questionnaireTemplateId} value={i.questionnaireTemplateId}>
+              {i.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <Link href="/attorney/questionnaires" className="back-link">
+        Manage questionnaire library →
+      </Link>
+    </div>
+  )
+}
+
 export default function QuestionnaireEditorPage() {
   const params = useParams<{ serviceKey: string }>()
   const serviceKey = params.serviceKey
@@ -301,6 +357,14 @@ export default function QuestionnaireEditorPage() {
         version; the booking page picks it up immediately.
         {empty && ' No saved form yet — this starts from the bound default.'}
       </p>
+
+      <StartFromLibrary
+        onApply={(schema) => {
+          setDoc(wireToEditor(schema))
+          setEmpty(false)
+          setSaved(false)
+        }}
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
       {saved && (

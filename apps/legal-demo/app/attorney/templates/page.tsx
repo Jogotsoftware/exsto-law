@@ -1,13 +1,15 @@
 'use client'
 
 // Templates tab — the firm's reusable, NOT-service-bound template library (Obj 9).
-// The standalone-template backend (legal.template.* + queries/templates.ts) was
-// built for "the Templates tab" but never had a surface; this is it. Document and
-// email templates with {{tokens}}, edited as markdown/text (the body is text, not
-// the service editor's rich HTML). CRUD through the through-core legal.template.* tools.
+// Builder UX (UI refresh): a document-styled canvas, a click-to-insert merge-token
+// palette (like Outreach's email tokens), AI-drafting from a plain-language brief,
+// and import (paste or upload a text/markdown/HTML file). The body is text with
+// {{tokens}}; CRUD + AI go through the through-core legal.template.* tools.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { readDevSession } from '@/lib/auth'
+import { SparklesIcon, FileTextIcon } from '@/components/icons'
 
 type Category = 'document' | 'email'
 
@@ -36,11 +38,50 @@ const EMPTY_DRAFT: Draft = {
   docKind: '',
 }
 
+// Standard merge fields offered in every template, click-to-insert. Authors can
+// also type any {{token}} by hand; tokens already in the body are surfaced too.
+const STANDARD_TOKENS: { id: string; label: string }[] = [
+  { id: 'client_name', label: 'Client name' },
+  { id: 'client_email', label: 'Client email' },
+  { id: 'client_address', label: 'Client address' },
+  { id: 'matter_number', label: 'Matter number' },
+  { id: 'firm_name', label: 'Firm name' },
+  { id: 'attorney_name', label: 'Attorney name' },
+  { id: 'effective_date', label: 'Effective date' },
+  { id: 'today', label: "Today's date" },
+]
+
+const TOKEN_RE = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
+
+function extractTokens(body: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const m of body.matchAll(TOKEN_RE)) {
+    const t = m[1]?.toLowerCase()
+    if (t && !seen.has(t)) {
+      seen.add(t)
+      out.push(t)
+    }
+  }
+  return out
+}
+
+function humanize(token: string): string {
+  const s = token.replace(/_/g, ' ').trim()
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : token
+}
+
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
+  // AI drafting panel state.
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
 
   function load() {
     setError(null)
@@ -51,6 +92,7 @@ export default function TemplatesPage() {
   useEffect(load, [])
 
   function edit(t: Template) {
+    setAiPrompt('')
     setDraft({
       templateEntityId: t.templateEntityId,
       name: t.name,
@@ -58,6 +100,83 @@ export default function TemplatesPage() {
       body: t.body,
       docKind: t.docKind ?? '',
     })
+  }
+
+  function newDraft() {
+    setAiPrompt('')
+    setDraft({ ...EMPTY_DRAFT })
+  }
+
+  // Insert a {{token}} at the cursor in the document canvas.
+  function insertToken(id: string) {
+    if (!draft) return
+    const el = bodyRef.current
+    const snippet = `{{${id}}}`
+    const at = el ? el.selectionStart : draft.body.length
+    const end = el ? el.selectionEnd : draft.body.length
+    const next = draft.body.slice(0, at) + snippet + draft.body.slice(end)
+    setDraft({ ...draft, body: next })
+    requestAnimationFrame(() => {
+      if (el) {
+        const pos = at + snippet.length
+        el.focus()
+        el.setSelectionRange(pos, pos)
+      }
+    })
+  }
+
+  async function generateWithAi() {
+    if (!draft || !aiPrompt.trim()) return
+    setAiBusy(true)
+    setError(null)
+    try {
+      const r = await callAttorneyMcp<{ body: string }>({
+        toolName: 'legal.template.ai_draft',
+        input: { instructions: aiPrompt.trim(), category: draft.category },
+      })
+      setDraft({ ...draft, body: r.body })
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
+  // Import a document (PDF / Word / text) into the body. The file is parsed
+  // server-side (/api/attorney/templates/import) to plain text and appended to
+  // the canvas. Dev forwards the demo-session headers exactly like callAttorneyMcp.
+  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-importing the same file
+    if (!file || !draft) return
+    setImporting(true)
+    setError(null)
+    try {
+      const headers: Record<string, string> = {}
+      if (process.env.NODE_ENV !== 'production') {
+        const dev = readDevSession()
+        if (dev) {
+          headers['x-actor-id'] = dev.actorId
+          headers['x-tenant-id'] = dev.tenantId
+        }
+      }
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch('/api/attorney/templates/import', {
+        method: 'POST',
+        headers,
+        credentials: 'same-origin',
+        body: fd,
+      })
+      const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
+      if (!res.ok || !data.text) throw new Error(data.error || `Import failed (${res.status}).`)
+      const text = data.text
+      setDraft((d) => (d ? { ...d, body: d.body ? `${d.body}\n\n${text}` : text } : d))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setImporting(false)
+    }
   }
 
   async function save() {
@@ -119,6 +238,10 @@ export default function TemplatesPage() {
     }
   }
 
+  const bodyTokens = draft
+    ? extractTokens(draft.body).filter((t) => !STANDARD_TOKENS.some((s) => s.id === t))
+    : []
+
   return (
     <main>
       <div
@@ -131,25 +254,44 @@ export default function TemplatesPage() {
       >
         <h1>Templates</h1>
         {!draft && (
-          <button className="primary" onClick={() => setDraft({ ...EMPTY_DRAFT })}>
+          <button className="primary" onClick={newDraft}>
             New template
           </button>
         )}
       </div>
       <p className="muted" style={{ marginTop: '-0.5rem' }}>
-        Reusable document &amp; email templates for the whole firm. Use <code>{'{{tokens}}'}</code>{' '}
-        for merge fields.
+        Reusable document &amp; email templates for the whole firm. Click a field to drop a{' '}
+        <code>{'{{token}}'}</code> merge marker, draft from a brief with AI, or import an existing
+        document.
       </p>
 
-      {error && <pre className="error">{error}</pre>}
+      {error && <div className="alert alert-error">{error}</div>}
 
       {draft && (
         <section style={{ marginBottom: '1.5rem' }}>
-          <h2 style={{ marginTop: 0 }}>
-            {draft.templateEntityId ? 'Edit template' : 'New template'}
-          </h2>
-          <div style={{ display: 'grid', gap: '0.85rem', maxWidth: '52rem' }}>
-            <label>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.7rem',
+              marginBottom: '0.85rem',
+            }}
+          >
+            <h2 style={{ margin: 0 }}>
+              {draft.templateEntityId ? 'Edit template' : 'New template'}
+            </h2>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem' }}>
+              <button className="primary" onClick={save} disabled={saving}>
+                {saving ? 'Saving…' : draft.templateEntityId ? 'Save changes' : 'Create template'}
+              </button>
+              <button onClick={() => setDraft(null)} disabled={saving}>
+                Cancel
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+            <label style={{ flex: '1 1 16rem' }}>
               <span className="field-label">Name</span>
               <input
                 type="text"
@@ -158,52 +300,105 @@ export default function TemplatesPage() {
                 placeholder="e.g. Mutual NDA"
               />
             </label>
-            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-              <label>
-                <span className="field-label">Type</span>
-                <select
-                  value={draft.category}
-                  disabled={!!draft.templateEntityId}
-                  onChange={(e) => setDraft({ ...draft, category: e.target.value as Category })}
-                >
-                  <option value="document">Document</option>
-                  <option value="email">Email</option>
-                </select>
-              </label>
-              {draft.category === 'document' && (
-                <label>
-                  <span className="field-label">Document kind (optional)</span>
-                  <input
-                    type="text"
-                    value={draft.docKind}
-                    onChange={(e) => setDraft({ ...draft, docKind: e.target.value })}
-                    placeholder="e.g. nda"
-                  />
-                </label>
-              )}
-            </div>
             <label>
-              <span className="field-label">Body</span>
-              <textarea
-                rows={16}
-                value={draft.body}
-                onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-                placeholder={'Dear {{client_name}},\n\n…'}
-                style={{
-                  fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-                  fontSize: '0.9rem',
-                  lineHeight: 1.5,
-                }}
-              />
+              <span className="field-label">Type</span>
+              <select
+                value={draft.category}
+                disabled={!!draft.templateEntityId}
+                onChange={(e) => setDraft({ ...draft, category: e.target.value as Category })}
+              >
+                <option value="document">Document</option>
+                <option value="email">Email</option>
+              </select>
             </label>
-            <div style={{ display: 'flex', gap: '0.6rem' }}>
-              <button className="primary" onClick={save} disabled={saving}>
-                {saving ? 'Saving…' : draft.templateEntityId ? 'Save changes' : 'Create template'}
-              </button>
-              <button className="btn-secondary" onClick={() => setDraft(null)} disabled={saving}>
-                Cancel
+            {draft.category === 'document' && (
+              <label>
+                <span className="field-label">Document kind (optional)</span>
+                <input
+                  type="text"
+                  value={draft.docKind}
+                  onChange={(e) => setDraft({ ...draft, docKind: e.target.value })}
+                  placeholder="e.g. nda"
+                />
+              </label>
+            )}
+          </div>
+
+          {/* Build-with-AI + import. */}
+          <div className="tpl-build">
+            <div className="tpl-build-ai">
+              <textarea
+                rows={2}
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder={
+                  draft.category === 'email'
+                    ? 'Describe the email to draft — e.g. “a warm engagement-confirmation email with next steps”'
+                    : 'Describe the document to draft — e.g. “a mutual NDA for a NC LLC, 2-year term”'
+                }
+              />
+              <button
+                className="primary"
+                onClick={generateWithAi}
+                disabled={aiBusy || !aiPrompt.trim()}
+                title="Draft this template with AI (uses your Anthropic key)"
+              >
+                <SparklesIcon size={15} /> {aiBusy ? 'Drafting…' : 'Draft with AI'}
               </button>
             </div>
+            <div className="tpl-build-import">
+              <button onClick={() => fileRef.current?.click()} disabled={importing}>
+                <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                style={{ display: 'none' }}
+                onChange={onImportFile}
+              />
+              <span className="text-muted text-xs">
+                PDF, Word (.docx), or text — parsed into the page (scanned image-only PDFs have no
+                text to extract).
+              </span>
+            </div>
+          </div>
+
+          {/* Click-to-insert token palette. */}
+          <div className="tpl-insert">
+            <span className="tpl-insert-label">Insert a field:</span>
+            {STANDARD_TOKENS.map((t) => (
+              <button
+                key={t.id}
+                className="qb-pill"
+                type="button"
+                onClick={() => insertToken(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+            {bodyTokens.map((t) => (
+              <button
+                key={t}
+                className="qb-pill"
+                type="button"
+                onClick={() => insertToken(t)}
+                title="A custom token already used in this template"
+              >
+                {humanize(t)}
+              </button>
+            ))}
+          </div>
+
+          {/* Document-styled canvas (a page, not a bare text box). */}
+          <div className="tpl-page">
+            <textarea
+              ref={bodyRef}
+              className="tpl-canvas"
+              value={draft.body}
+              onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+              placeholder={'Dear {{client_name}},\n\n…'}
+            />
           </div>
         </section>
       )}
@@ -220,7 +415,7 @@ export default function TemplatesPage() {
       )}
       {templates && templates.length > 0 && (
         <section style={{ padding: 0, overflow: 'hidden' }}>
-          <table>
+          <table className="data-table">
             <thead>
               <tr>
                 <th>Name</th>
@@ -242,12 +437,8 @@ export default function TemplatesPage() {
                   <td>{t.docKind ?? '—'}</td>
                   <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button className="btn-secondary" onClick={() => edit(t)}>
-                      Edit
-                    </button>{' '}
-                    <button className="btn-secondary" onClick={() => archive(t)}>
-                      Archive
-                    </button>
+                    <button onClick={() => edit(t)}>Edit</button>{' '}
+                    <button onClick={() => archive(t)}>Archive</button>
                   </td>
                 </tr>
               ))}

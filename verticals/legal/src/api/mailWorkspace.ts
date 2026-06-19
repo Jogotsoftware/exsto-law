@@ -91,14 +91,17 @@ export interface MailThreadSummary extends GmailThreadSummary {
   matters: Array<{ matterEntityId: string; matterNumber: string }>
 }
 
-export async function listMailThreads(ctx: ActionContext): Promise<{
+export async function listMailThreads(
+  ctx: ActionContext,
+  search?: string,
+): Promise<{
   threads: MailThreadSummary[]
   clientEmailCount: number
 }> {
   const index = await clientEmailIndex(ctx)
   const emails = [...index.keys()].filter((e) => !e.endsWith('@example.test'))
   if (emails.length === 0) return { threads: [], clientEmailCount: 0 }
-  const threads = await listClientThreads(ctx.tenantId, emails, 25, ctx.actorId)
+  const threads = await listClientThreads(ctx.tenantId, emails, 50, ctx.actorId, search)
   return {
     clientEmailCount: emails.length,
     threads: threads.map((t) => ({

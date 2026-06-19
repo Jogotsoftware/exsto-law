@@ -459,25 +459,53 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
   )
 }
 
-// ── Rates tab (read-only mirror) ───────────────────────────────────────────────
+// ── Rates tab ──────────────────────────────────────────────────────────────────
+// The firm default hourly rate (editable, Contract K — substrate-native) sits on
+// top of a read-only mirror of the per-client billable rates set on the Clients
+// screen. This is the billing home for the rate default that used to live under
+// Settings → Defaults.
 function RatesTab() {
   const [clients, setClients] = useState<ClientSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [firmRate, setFirmRate] = useState<string | null>(null)
+  const [rateDraft, setRateDraft] = useState('')
+  const [savingRate, setSavingRate] = useState(false)
+  const [savedRate, setSavedRate] = useState(false)
 
   useEffect(() => {
     ;(async () => {
       try {
-        const r = await callAttorneyMcp<{ clients: ClientSummary[] }>({
-          toolName: 'legal.client.list',
-        })
-        setClients(r.clients)
+        const [c, r] = await Promise.all([
+          callAttorneyMcp<{ clients: ClientSummary[] }>({ toolName: 'legal.client.list' }),
+          callAttorneyMcp<{ rate: string | null }>({ toolName: 'legal.firm.get_default_rate' }),
+        ])
+        setClients(c.clients)
+        setFirmRate(r.rate)
+        setRateDraft(r.rate ?? '')
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
       }
     })()
   }, [])
 
-  if (error) return <div className="alert alert-error">{error}</div>
+  async function saveFirmRate() {
+    const rate = rateDraft.trim()
+    if (!rate) return
+    setSavingRate(true)
+    setError(null)
+    try {
+      await callAttorneyMcp({ toolName: 'legal.firm.set_default_rate', input: { rate } })
+      setFirmRate(rate)
+      setSavedRate(true)
+      setTimeout(() => setSavedRate(false), 2000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSavingRate(false)
+    }
+  }
+
+  if (error && clients === null) return <div className="alert alert-error">{error}</div>
   if (clients === null)
     return (
       <div className="loading-block">
@@ -487,10 +515,36 @@ function RatesTab() {
 
   return (
     <div>
+      {error && <div className="alert alert-error">{error}</div>}
+      <div
+        style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}
+      >
+        <label style={{ flex: '0 0 auto' }}>
+          <span>Firm default hourly rate (USD)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={rateDraft}
+            onChange={(e) => {
+              setRateDraft(e.target.value)
+              setSavedRate(false)
+            }}
+            style={{ maxWidth: '12rem' }}
+          />
+        </label>
+        <button
+          className="primary"
+          onClick={saveFirmRate}
+          disabled={savingRate || !rateDraft.trim() || rateDraft.trim() === (firmRate ?? '')}
+        >
+          {savingRate ? 'Saving…' : savedRate ? 'Saved' : 'Save'}
+        </button>
+      </div>
       <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        Read-only mirror of the client billable rates set on the Clients screen. Per-service pricing
-        is configured under Services. Time entries roll up at the client’s rate (override per line
-        when issuing).
+        The fallback hourly rate billed when a client has no explicit rate. Below is a read-only
+        mirror of the per-client billable rates set on the Clients screen; per-service pricing is
+        configured under Services. Time entries roll up at the client’s rate (override per line when
+        issuing).
       </p>
       <table className="data-table">
         <thead>

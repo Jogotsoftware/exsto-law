@@ -422,6 +422,47 @@ export async function retireService(
   return res.effects[0] as { serviceKey: string; retired: boolean }
 }
 
+// Clone a service: a faithful copy of the source's full transitions config
+// (intake schema, drafting prompts, document templates, cost, booking, route,
+// generation mode) under a brand-new key. The upsert handler slugifies the new
+// display name into a unique kind_name and — like every freshly created service —
+// starts it DISABLED, so the attorney reviews and explicitly enables the copy.
+export async function cloneService(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<ServiceDefinition> {
+  const src = await withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      display_name: string
+      description: string | null
+      transitions: Record<string, unknown>
+    }>(
+      `SELECT display_name, description, transitions
+         FROM workflow_definition
+        WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0] ?? null
+  })
+  if (!src) throw new Error(`Service not found: ${serviceKey}`)
+
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'enforcement',
+    payload: {
+      // No service_key → the handler creates a new one from this name.
+      display_name: `${src.display_name} (copy)`,
+      description: src.description,
+      sort_order: 99, // sink the copy to the bottom of the list
+      transitions_patch: src.transitions,
+    },
+  })
+  const eff = res.effects[0] as { serviceKey: string }
+  const created = await getService(ctx, eff.serviceKey)
+  if (!created) throw new Error('Service clone succeeded but the new row could not be read back.')
+  return created
+}
+
 export interface SetServiceCostInput {
   serviceKey: string
   // Omit or pass null to clear the cost.

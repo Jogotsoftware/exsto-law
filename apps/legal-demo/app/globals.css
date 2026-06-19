@@ -391,6 +391,71 @@ section h2 {
   margin-bottom: 1.5rem;
 }
 
+/* Collapsible settings section — same glass card as `section`, but the header
+   is a clickable <summary> that expands/collapses the body. Collapsed by default
+   (the component omits the `open` attribute), so the page reads as a short stack
+   of headers until one is opened. */
+.settings-section {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: var(--radius-xl);
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.settings-section-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 1.1rem 1.7rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+/* Hide the native disclosure triangle; we draw our own rotating chevron. */
+.settings-section-summary::-webkit-details-marker {
+  display: none;
+}
+.settings-section-summary:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+.settings-section-chevron {
+  color: var(--muted);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  transition: transform var(--transition);
+}
+.settings-section[open] .settings-section-chevron {
+  transform: rotate(90deg);
+}
+.settings-section-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.settings-section-title {
+  font-size: 1.2rem;
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.005em;
+}
+.settings-section-subtitle {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.settings-section-body {
+  padding: 0 1.7rem 1.5rem;
+}
+/* Right-aligned action row for the Edit/Save/Cancel buttons inside a section. */
+.firm-details-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
 /* ── Attorney top navigation bar ─────────────────────────────────────────── */
 .att-top {
   position: sticky;
@@ -1530,8 +1595,12 @@ pre {
   flex-shrink: 0;
 }
 
-/* Clients list */
+/* Clients / Matters list */
 .client-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-3);
   border-bottom: 1px solid var(--border-soft);
 }
@@ -1542,6 +1611,220 @@ pre {
 }
 .client-search-row input:focus {
   background: white;
+}
+.client-search-row select {
+  background: var(--rule-soft);
+  border-color: transparent;
+}
+/* Sortable table headers (Matters) */
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.sortable-th:hover {
+  color: var(--accent-attorney);
+}
+.sort-arrow {
+  margin-left: 0.3rem;
+  font-size: 0.7em;
+  color: var(--muted);
+}
+
+/* Toggle switch (Services enable/disable) */
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+.switch-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+  transition: background var(--transition);
+}
+.switch-slider::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition);
+}
+.switch input:checked + .switch-slider {
+  background: var(--ok);
+}
+.switch input:checked + .switch-slider::before {
+  transform: translateX(18px);
+}
+.switch input:disabled + .switch-slider {
+  opacity: 0.5;
+}
+.switch input:focus-visible + .switch-slider {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Borderless icon button (gear / kebab triggers) */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  box-shadow: none;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+/* Row action dropdown (Services gear menu) */
+.row-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  min-width: 9rem;
+  margin-top: 0.25rem;
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  text-align: left;
+}
+.row-menu button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+.row-menu button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.row-menu .row-menu-danger {
+  color: var(--danger);
+}
+.row-menu .row-menu-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
+/* Mail — Gmail-style inbox */
+.mail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+.mail-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 260px;
+}
+.mail-search input {
+  flex: 1;
+  background: var(--rule-soft);
+  border-color: transparent;
+}
+.mail-search input:focus {
+  background: var(--surface);
+}
+.mail-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface);
+}
+.mail-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.7rem var(--space-4);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+.mail-row + .mail-row {
+  border-top: 1px solid var(--border-soft);
+}
+.mail-row:hover {
+  background: var(--surface-2);
+}
+.mail-row.active {
+  background: var(--navy-50);
+  box-shadow: inset 3px 0 0 var(--navy);
+}
+.mail-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.mail-row-people {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-row-date {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.mail-row-subject {
+  font-size: var(--text-sm);
+  margin-top: 0.1rem;
+}
+.mail-row-count {
+  color: var(--muted);
+}
+.mail-row-snippet {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 0.1rem;
+}
+.mail-row-matters {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
 }
 .client-table tbody tr {
   transition: background var(--transition-fast);
@@ -3113,55 +3396,75 @@ main.book-main {
 }
 
 /* Settings — integration card grid */
+/* Integrations render as a single compact list panel — one row per provider,
+   hairline-divided — rather than six full-width cards, so the section stays
+   small. Row = info on the left (name · pill · short desc), actions on the right. */
 .integration-grid {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
 .integration-card {
   display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: white;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0.7rem var(--space-4);
+}
+.integration-card + .integration-card {
+  border-top: 1px solid var(--border-soft);
 }
 .integration-card.connected {
-  border-color: #a7f3d0;
+  /* Connected state reads from the pill, not a green panel border. A thin
+     left accent keeps it scannable without the bulky bordered card. */
+  box-shadow: inset 2px 0 0 #a7f3d0;
 }
 .integration-card.coming-soon {
-  opacity: 0.7;
-  background: #fafafa;
+  opacity: 0.65;
+}
+.integration-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 }
 .integration-card-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.85rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
 }
 .integration-card-title {
-  font-weight: 600;
-  font-size: 1.05rem;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
 }
-.integration-card-desc {
-  color: var(--muted);
-  font-size: 0.9rem;
+.integration-card-warn {
+  color: var(--warn);
+  font-size: var(--text-xs);
+  line-height: 1.4;
 }
 .integration-card-error {
   background: var(--danger-soft);
   color: var(--danger);
-  padding: 0.4rem 0.65rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
 }
 .integration-card-actions {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.35rem;
+  gap: var(--space-2);
+  flex-shrink: 0;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* Compact action buttons sized to the row height. */
+.integration-card-actions button {
+  padding: 0.35rem 0.7rem;
+  font-size: var(--text-xs);
 }
 
 .integration-pill {
@@ -5027,12 +5330,113 @@ button.danger.outline:hover:not(:disabled) {
 .tpl-newfield input {
   width: 12rem;
 }
+/* Document-styled template canvas — a white page on a soft "desk", so a template
+   reads like a Word document rather than a bare text box. Shared by the standalone
+   Templates builder and the per-service document editor. */
+.tpl-page {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1.5rem;
+  display: flex;
+  justify-content: center;
+}
 .tpl-canvas {
   font-family: var(--font-serif, Georgia, serif);
-  font-size: 0.95rem;
-  line-height: 1.6;
+  font-size: 1rem;
+  line-height: 1.7;
   background: #fff;
-  padding: 1.25rem 1.5rem;
+  color: var(--fg);
+  width: 100%;
+  max-width: 7.5in;
+  min-height: 55vh;
+  padding: 2.5rem 3rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  box-shadow: var(--shadow-md);
+  resize: vertical;
+}
+/* Questionnaire builder (library) — sections of fields. */
+.qb-section legend {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+.qb-section-title {
+  font-weight: var(--weight-semibold);
+  max-width: 22rem;
+}
+.qb-field-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--border-soft);
+}
+.qb-field-row:first-of-type {
+  border-top: none;
+}
+.qb-field-label {
+  flex: 1 1 16rem;
+}
+.qb-req {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.qb-req input {
+  width: auto;
+}
+.qb-options {
+  flex: 1 1 100%;
+  margin-left: 0;
+  font-size: var(--text-sm);
+}
+.qb-remove {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  padding: 0.2rem 0.4rem;
+}
+.qb-remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+/* Build row: AI brief + import, above the canvas. */
+.tpl-build {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+.tpl-build-ai {
+  flex: 1 1 26rem;
+  display: flex;
+  gap: var(--space-2);
+}
+.tpl-build-ai textarea {
+  flex: 1;
+  resize: vertical;
+}
+.tpl-build-ai button,
+.tpl-build-import button {
+  white-space: nowrap;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.tpl-build-import {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 /* Public draft view — the shared-link document page (/d/[versionId]). Salvaged
    from the parallel redesign so this page isn't unstyled on prod. */

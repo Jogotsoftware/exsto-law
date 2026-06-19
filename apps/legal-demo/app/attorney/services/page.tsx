@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { SettingsIcon } from '@/components/icons'
 
 interface ServiceDefinition {
   id: string
@@ -23,6 +24,8 @@ export default function ServicesPage() {
   const [services, setServices] = useState<ServiceDefinition[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  // serviceKey whose gear menu is open (only one at a time).
+  const [menuFor, setMenuFor] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -39,6 +42,23 @@ export default function ServicesPage() {
     refresh()
   }, [refresh])
 
+  // Dismiss the gear menu on any outside click or Escape.
+  useEffect(() => {
+    if (!menuFor) return
+    function onClick() {
+      setMenuFor(null)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuFor(null)
+    }
+    window.addEventListener('click', onClick)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', onClick)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menuFor])
+
   async function toggleActive(svc: ServiceDefinition) {
     setBusy(svc.serviceKey)
     setError(null)
@@ -46,6 +66,47 @@ export default function ServicesPage() {
       await callAttorneyMcp({
         toolName: 'legal.service.set_active',
         input: { serviceKey: svc.serviceKey, active: !svc.isActive },
+      })
+      await refresh()
+    } catch (e) {
+      // Enabling is gated on completeness; surface the "what's missing" message.
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function clone(svc: ServiceDefinition) {
+    setMenuFor(null)
+    setBusy(svc.serviceKey)
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.service.clone',
+        input: { serviceKey: svc.serviceKey },
+      })
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function remove(svc: ServiceDefinition) {
+    setMenuFor(null)
+    if (
+      !window.confirm(
+        `Delete "${svc.displayName}"? It is retired and removed from every listing (its history is kept, but it can't be re-enabled).`,
+      )
+    )
+      return
+    setBusy(svc.serviceKey)
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.service.retire',
+        input: { serviceKey: svc.serviceKey },
       })
       await refresh()
     } catch (e) {
@@ -72,8 +133,8 @@ export default function ServicesPage() {
       </div>
 
       <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
-        The offerings clients can book. Disabled services stay configured but disappear from the
-        booking page. Editing a service saves a new immutable version.
+        The offerings clients can book. Toggle a service off to hide it from the booking page
+        without losing its setup; the gear menu edits, clones, or deletes it.
       </p>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -85,21 +146,23 @@ export default function ServicesPage() {
       ) : services.length === 0 ? (
         <div className="loading-block">No services yet. Create your first offering.</div>
       ) : (
-        <section style={{ padding: 0, overflow: 'hidden' }}>
+        <section style={{ padding: 0, overflow: 'visible' }}>
           <table className="data-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Route</th>
-                <th>Status</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
+                <th>Service</th>
+                <th style={{ width: '7rem' }}>Enabled</th>
+                <th style={{ width: '3rem' }} aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody>
               {services.map((svc) => (
                 <tr key={svc.id}>
                   <td>
-                    <Link href={`/attorney/services/${svc.serviceKey}`}>
+                    <Link
+                      href={`/attorney/services/${svc.serviceKey}`}
+                      className="client-name-link"
+                    >
                       <strong>{svc.displayName}</strong>
                     </Link>
                     {svc.description && (
@@ -109,41 +172,61 @@ export default function ServicesPage() {
                     )}
                   </td>
                   <td>
-                    <span className={`badge ${svc.route === 'auto' ? 'info' : ''}`}>
-                      {svc.route === 'auto' ? 'Auto-draft' : 'Manual'}
-                    </span>
+                    <label
+                      className="switch"
+                      title={
+                        svc.isActive
+                          ? 'Enabled — shown on the booking page'
+                          : 'Disabled — hidden from booking'
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={svc.isActive}
+                        disabled={busy === svc.serviceKey}
+                        onChange={() => toggleActive(svc)}
+                      />
+                      <span className="switch-slider" />
+                    </label>
                   </td>
-                  <td>
-                    <span className={`badge ${svc.isActive ? 'ok' : ''}`}>
-                      {svc.isActive ? 'Enabled' : 'Disabled'}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <Link
-                      href={`/attorney/services/${svc.serviceKey}`}
-                      style={{ marginRight: '0.7rem' }}
-                    >
-                      Edit
-                    </Link>
-                    <Link
-                      href={`/attorney/services/${svc.serviceKey}/questionnaire`}
-                      style={{ marginRight: '0.7rem' }}
-                    >
-                      Questionnaire
-                    </Link>
-                    <Link
-                      href={`/attorney/services/${svc.serviceKey}/prompt`}
-                      style={{ marginRight: '0.7rem' }}
-                    >
-                      Prompt
-                    </Link>
+                  <td style={{ position: 'relative', textAlign: 'right' }}>
                     <button
-                      className={svc.isActive ? 'danger outline' : 'primary'}
-                      onClick={() => toggleActive(svc)}
+                      className="icon-btn"
+                      aria-label="Service actions"
+                      aria-haspopup="menu"
                       disabled={busy === svc.serviceKey}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMenuFor(menuFor === svc.serviceKey ? null : svc.serviceKey)
+                      }}
                     >
-                      {busy === svc.serviceKey ? '…' : svc.isActive ? 'Disable' : 'Enable'}
+                      <SettingsIcon size={18} />
                     </button>
+                    {menuFor === svc.serviceKey && (
+                      <div className="row-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setMenuFor(null)
+                            router.push(`/attorney/services/${svc.serviceKey}`)
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button type="button" role="menuitem" onClick={() => clone(svc)}>
+                          Clone
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="row-menu-danger"
+                          onClick={() => remove(svc)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

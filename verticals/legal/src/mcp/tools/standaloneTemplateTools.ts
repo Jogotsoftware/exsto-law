@@ -5,6 +5,7 @@ import {
   createTemplate,
   updateTemplate,
   archiveTemplate,
+  aiDraftTemplate,
   type StandaloneTemplate,
   type CreateTemplateInput,
   type UpdateTemplateInput,
@@ -95,8 +96,36 @@ const archiveTool: Tool<
   handler: async (ctx: ActionContext, input) => archiveTemplate(ctx, input.templateEntityId),
 }
 
+// AI draft (Templates wizard). Generates a template body from a plain-language
+// description using the firm's Anthropic key. Returns text only — the attorney
+// reviews it in the editor and SAVES via create/update (that's the recorded write),
+// so this is a read-mode generation with no substrate mutation.
+const aiDraftTool: Tool<
+  { instructions: string; category: 'document' | 'email' },
+  { body: string }
+> = {
+  name: 'legal.template.ai_draft',
+  description:
+    'Draft a reusable template body from a plain-language description, using the firm’s Settings-managed Anthropic key. Returns the body text (with {{merge_tokens}} for fill-ins) for the attorney to review and save — it does not persist anything itself.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      instructions: {
+        type: 'string',
+        description: 'Plain-language description of the template to draft.',
+      },
+      category: { type: 'string', enum: ['document', 'email'] },
+    },
+    required: ['instructions', 'category'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => aiDraftTemplate(ctx, input),
+}
+
 registerTool(listTool)
 registerTool(getTool)
 registerTool(createTool)
 registerTool(updateTool)
 registerTool(archiveTool)
+registerTool(aiDraftTool)

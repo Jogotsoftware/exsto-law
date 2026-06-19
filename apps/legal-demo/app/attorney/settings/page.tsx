@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { fetchSession } from '@/lib/auth'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
 
 type Provider = 'google_calendar' | 'anthropic' | 'openai' | 'perplexity' | 'granola' | 'docusign'
 
@@ -69,31 +70,55 @@ interface BookingRules {
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-const PROVIDER_META: Record<Provider, { name: string; desc: string }> = {
-  google_calendar: {
-    name: 'Google (Calendar & Email)',
-    desc: 'One connection covers everything: booking-page availability, Google Calendar invites, reading client email threads, and sending email from your Gmail.',
-  },
-  anthropic: {
-    name: 'Anthropic Claude',
-    desc: 'Your own Anthropic API key for drafting (overrides the platform default).',
-  },
-  openai: {
-    name: 'OpenAI',
-    desc: 'OpenAI API key for ChatGPT-powered features and fallback drafting.',
-  },
-  perplexity: {
-    name: 'Perplexity',
-    desc: 'Perplexity API key for research inside the attorney workspace.',
-  },
-  granola: {
-    name: 'Granola',
-    desc: 'Auto-record and transcribe consultation calls into the matter timeline.',
-  },
-  docusign: {
-    name: 'DocuSign',
-    desc: 'Coming soon — native e-signature is in active development.',
-  },
+// Human 12-hour label for an hour-of-day (0–24). The booking engine still stores
+// 0–23 start / 1–24 end internally; we only present them as real clock times.
+function formatHour(h: number): string {
+  if (h === 0 || h === 24) return '12:00 AM'
+  if (h === 12) return '12:00 PM'
+  return h < 12 ? `${h}:00 AM` : `${h - 12}:00 PM`
+}
+const START_HOURS = Array.from({ length: 24 }, (_, h) => h) // 0–23
+const END_HOURS = Array.from({ length: 24 }, (_, h) => h + 1) // 1–24
+
+// Curated US timezones (this is a US law firm). The stored value is prepended if
+// it falls outside the list, so the select never silently drops a real setting.
+const TIMEZONES: [string, string][] = [
+  ['America/New_York', 'Eastern (New York)'],
+  ['America/Chicago', 'Central (Chicago)'],
+  ['America/Denver', 'Mountain (Denver)'],
+  ['America/Phoenix', 'Mountain — no DST (Phoenix)'],
+  ['America/Los_Angeles', 'Pacific (Los Angeles)'],
+  ['America/Anchorage', 'Alaska (Anchorage)'],
+  ['Pacific/Honolulu', 'Hawaii (Honolulu)'],
+]
+
+const BUFFER_OPTIONS: [number, string][] = [
+  [0, 'No buffer'],
+  [5, '5 minutes'],
+  [10, '10 minutes'],
+  [15, '15 minutes'],
+  [30, '30 minutes'],
+  [45, '45 minutes'],
+  [60, '1 hour'],
+]
+const LEAD_TIME_OPTIONS: [number, string][] = [
+  [0, 'No minimum'],
+  [1, '1 hour'],
+  [2, '2 hours'],
+  [4, '4 hours'],
+  [12, '12 hours'],
+  [24, '1 day'],
+  [48, '2 days'],
+  [72, '3 days'],
+]
+
+const PROVIDER_META: Record<Provider, { name: string }> = {
+  google_calendar: { name: 'Google (Calendar & Email)' },
+  anthropic: { name: 'Anthropic Claude' },
+  openai: { name: 'OpenAI' },
+  perplexity: { name: 'Perplexity' },
+  granola: { name: 'Granola' },
+  docusign: { name: 'DocuSign' },
 }
 
 // Deep links to where each provider issues API keys, surfaced as a
@@ -106,14 +131,6 @@ const API_KEY_HELP: Partial<Record<Provider, string>> = {
   perplexity: 'https://www.perplexity.ai/settings/api',
 }
 
-interface AssistantFeedbackEntry {
-  eventId: string
-  message: string
-  category: string
-  pageContext: Record<string, unknown> | null
-  recordedAt: string
-}
-
 export default function SettingsPage() {
   const [settings, setSettings] = useState<TenantSettings | null>(null)
   const [integrations, setIntegrations] = useState<IntegrationStatus[] | null>(null)
@@ -122,17 +139,15 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [connectingProvider, setConnectingProvider] = useState<ApiKeyProvider | null>(null)
-  const [feedback, setFeedback] = useState<AssistantFeedbackEntry[] | null>(null)
   const [sig, setSig] = useState<SignatureSettings | null>(null)
   const [sigDraft, setSigDraft] = useState<string>('')
   const [sigEnabled, setSigEnabled] = useState<boolean>(true)
   const [savedSig, setSavedSig] = useState(false)
   const [bookingRules, setBookingRules] = useState<BookingRules | null>(null)
   const [savedRules, setSavedRules] = useState(false)
-  // Firm default hourly rate (Contract K) — the invoice fallback. Substrate-native
-  // (append-only, effective-dated, ADR 0044 decimal string), so it has its own
-  // load/save via legal.firm.* rather than the tenant_settings row.
-  const [firmRate, setFirmRate] = useState<string>('')
+  // Firm details edit mode: the section is read-only until the attorney clicks
+  // Edit, which swaps the static values for inputs.
+  const [editingFirm, setEditingFirm] = useState(false)
 
   const refreshIntegrations = useCallback(async () => {
     try {
@@ -171,17 +186,6 @@ export default function SettingsPage() {
     }
   }, [])
 
-  const refreshFeedback = useCallback(async () => {
-    try {
-      const r = await callAttorneyMcp<{ feedback: AssistantFeedbackEntry[] }>({
-        toolName: 'legal.assistant.feedback_list',
-      })
-      setFeedback(r.feedback)
-    } catch {
-      setFeedback([])
-    }
-  }, [])
-
   const refreshSignature = useCallback(async () => {
     try {
       const r = await callAttorneyMcp<SignatureSettings>({
@@ -208,39 +212,18 @@ export default function SettingsPage() {
     }
   }, [])
 
-  const refreshFirmRate = useCallback(async () => {
-    try {
-      const r = await callAttorneyMcp<{ rate: string | null }>({
-        toolName: 'legal.firm.get_default_rate',
-      })
-      setFirmRate(r.rate ?? '')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }, [])
-
   useEffect(() => {
     refreshSettings()
     refreshIntegrations()
     refreshGoogle()
-    refreshFeedback()
     refreshSignature()
     refreshBookingRules()
-    refreshFirmRate()
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       const err = params.get('google_error')
       if (err) setError(err)
     }
-  }, [
-    refreshSettings,
-    refreshIntegrations,
-    refreshGoogle,
-    refreshFeedback,
-    refreshSignature,
-    refreshBookingRules,
-    refreshFirmRate,
-  ])
+  }, [refreshSettings, refreshIntegrations, refreshGoogle, refreshSignature, refreshBookingRules])
 
   function updateField<K extends keyof TenantSettings>(key: K, value: TenantSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s))
@@ -294,18 +277,9 @@ export default function SettingsPage() {
           firmEmail: settings.firmEmail,
           firmPhone: settings.firmPhone,
           firmAddress: settings.firmAddress,
-          defaultLlcFlatFeeUsd: settings.defaultLlcFlatFeeUsd,
         },
       })
-      // The firm default hourly rate is the substrate-native, invoice-backing
-      // value (Contract K) — saved through its own action, not tenant_settings.
-      const rate = firmRate.trim()
-      if (rate) {
-        await callAttorneyMcp({
-          toolName: 'legal.firm.set_default_rate',
-          input: { rate },
-        })
-      }
+      setEditingFirm(false)
       setSavedSettings(true)
       setTimeout(() => setSavedSettings(false), 2000)
     } catch (e) {
@@ -415,6 +389,12 @@ export default function SettingsPage() {
     }
   }
 
+  // Never silently drop a saved timezone that isn't in the curated list.
+  const tzOptions: [string, string][] =
+    bookingRules && !TIMEZONES.some(([tz]) => tz === bookingRules.timezone)
+      ? [[bookingRules.timezone, bookingRules.timezone], ...TIMEZONES]
+      : TIMEZONES
+
   return (
     <main>
       <div className="attorney-page-head">
@@ -423,8 +403,7 @@ export default function SettingsPage() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <section>
-        <h2>Integrations</h2>
+      <CollapsibleSection title="Integrations">
         {integrations === null ? (
           <div className="loading-block">
             <span className="spinner" /> Loading…
@@ -455,132 +434,113 @@ export default function SettingsPage() {
             ))}
           </div>
         )}
-      </section>
+      </CollapsibleSection>
 
-      <section>
-        <h2>AI assistant</h2>
-        <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
-          The in-app assistant answers questions about using the app and records beta feedback. Its
-          model is the Anthropic key above; thumbs and notes are saved through the core and triaged
-          here.
-        </p>
-        {feedback === null ? (
-          <div className="loading-block">
-            <span className="spinner" /> Loading…
-          </div>
-        ) : feedback.length === 0 ? (
-          <p className="text-muted">No feedback yet.</p>
-        ) : (
-          <div className="matter-list">
-            {feedback.map((f) => (
-              <div key={f.eventId} className="matter-row" style={{ cursor: 'default' }}>
-                <div>
-                  <div className="matter-row-title">{f.message || '(no message)'}</div>
-                  <div className="matter-row-sub">
-                    {new Date(f.recordedAt).toLocaleString()}
-                    {typeof f.pageContext?.path === 'string' ? ` · ${f.pageContext.path}` : ''}
-                  </div>
-                </div>
-                <span className="crm-pill">{f.category}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.85rem' }}
-        >
-          <h2 style={{ margin: 0 }}>Firm</h2>
-          <button
-            className="primary"
-            onClick={saveSettings}
-            disabled={busy === 'settings' || !settings}
-            style={{ marginLeft: 'auto' }}
-          >
-            {busy === 'settings' ? 'Saving…' : 'Save firm + defaults'}
-          </button>
-        </div>
-        {savedSettings && (
-          <div
-            className="alert"
-            style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-          >
-            Saved.
-          </div>
-        )}
+      <CollapsibleSection title="Firm details">
         {!settings ? (
           <div className="loading-block">
             <span className="spinner" /> Loading…
           </div>
         ) : (
           <>
-            <div className="form-grid">
-              <label>
-                <span>Firm name</span>
-                <input
-                  value={settings.firmName ?? ''}
-                  onChange={(e) => updateField('firmName', e.target.value || null)}
-                />
-              </label>
-              <label>
-                <span>Lead attorney</span>
-                <input
-                  value={settings.attorneyName ?? ''}
-                  onChange={(e) => updateField('attorneyName', e.target.value || null)}
-                />
-              </label>
-              <label>
-                <span>Firm email</span>
-                <input
-                  type="email"
-                  value={settings.firmEmail ?? ''}
-                  onChange={(e) => updateField('firmEmail', e.target.value || null)}
-                />
-              </label>
-              <label>
-                <span>Firm phone</span>
-                <input
-                  type="tel"
-                  value={settings.firmPhone ?? ''}
-                  onChange={(e) => updateField('firmPhone', e.target.value || null)}
-                />
-              </label>
+            <div className="firm-details-actions">
+              {editingFirm ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setEditingFirm(false)
+                      setError(null)
+                      refreshSettings() // discard unsaved edits
+                    }}
+                    disabled={busy === 'settings'}
+                  >
+                    Cancel
+                  </button>
+                  <button className="primary" onClick={saveSettings} disabled={busy === 'settings'}>
+                    {busy === 'settings' ? 'Saving…' : 'Save'}
+                  </button>
+                </>
+              ) : (
+                <button onClick={() => setEditingFirm(true)}>Edit</button>
+              )}
             </div>
-            <label>
-              <span>Firm address</span>
-              <textarea
-                value={settings.firmAddress ?? ''}
-                onChange={(e) => updateField('firmAddress', e.target.value || null)}
-                rows={2}
-              />
-            </label>
+            {savedSettings && <div className="alert alert-success">Saved.</div>}
+            {editingFirm ? (
+              <>
+                <div className="form-grid">
+                  <label>
+                    <span>Firm name</span>
+                    <input
+                      value={settings.firmName ?? ''}
+                      onChange={(e) => updateField('firmName', e.target.value || null)}
+                    />
+                  </label>
+                  <label>
+                    <span>Lead attorney</span>
+                    <input
+                      value={settings.attorneyName ?? ''}
+                      onChange={(e) => updateField('attorneyName', e.target.value || null)}
+                    />
+                  </label>
+                  <label>
+                    <span>Firm email</span>
+                    <input
+                      type="email"
+                      value={settings.firmEmail ?? ''}
+                      onChange={(e) => updateField('firmEmail', e.target.value || null)}
+                    />
+                  </label>
+                  <label>
+                    <span>Firm phone</span>
+                    <input
+                      type="tel"
+                      value={settings.firmPhone ?? ''}
+                      onChange={(e) => updateField('firmPhone', e.target.value || null)}
+                    />
+                  </label>
+                </div>
+                <label>
+                  <span>Firm address</span>
+                  <textarea
+                    value={settings.firmAddress ?? ''}
+                    onChange={(e) => updateField('firmAddress', e.target.value || null)}
+                    rows={2}
+                  />
+                </label>
+              </>
+            ) : (
+              <div className="kv-grid">
+                <div>
+                  <div className="kv-label">Firm name</div>
+                  <div className="kv-value">{settings.firmName ?? '—'}</div>
+                </div>
+                <div>
+                  <div className="kv-label">Lead attorney</div>
+                  <div className="kv-value">{settings.attorneyName ?? '—'}</div>
+                </div>
+                <div>
+                  <div className="kv-label">Firm email</div>
+                  <div className="kv-value">{settings.firmEmail ?? '—'}</div>
+                </div>
+                <div>
+                  <div className="kv-label">Firm phone</div>
+                  <div className="kv-value">{settings.firmPhone ?? '—'}</div>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div className="kv-label">Firm address</div>
+                  <div className="kv-value" style={{ whiteSpace: 'pre-wrap' }}>
+                    {settings.firmAddress ?? '—'}
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
-      </section>
+      </CollapsibleSection>
 
-      <section>
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.85rem' }}
-        >
-          <h2 style={{ margin: 0 }}>Email signature</h2>
-          <button
-            className="primary"
-            onClick={saveSignature}
-            disabled={busy === 'signature' || !sig}
-            style={{ marginLeft: 'auto' }}
-          >
-            {busy === 'signature' ? 'Saving…' : 'Save signature'}
-          </button>
-        </div>
+      <CollapsibleSection title="Email signature">
         {savedSig && (
-          <div
-            className="alert"
-            style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-          >
-            Saved. New emails will use this signature.
-          </div>
+          <div className="alert alert-success">Saved. New emails will use this signature.</div>
         )}
         {!sig ? (
           <div className="loading-block">
@@ -636,73 +596,21 @@ export default function SettingsPage() {
                 Outbound email will not carry a signature.
               </p>
             )}
+            <div className="firm-details-actions" style={{ marginTop: '1rem' }}>
+              <button className="primary" onClick={saveSignature} disabled={busy === 'signature'}>
+                {busy === 'signature' ? 'Saving…' : 'Save signature'}
+              </button>
+            </div>
           </>
         )}
-      </section>
+      </CollapsibleSection>
 
-      <section>
-        <h2>Defaults</h2>
-        {settings && (
-          <div className="form-grid">
-            <label>
-              <span>Default hourly rate (USD)</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                value={firmRate}
-                onChange={(e) => {
-                  setFirmRate(e.target.value)
-                  setSavedSettings(false)
-                }}
-              />
-              <small className="text-muted">
-                The fallback hourly rate billed when a client has no explicit rate.
-              </small>
-            </label>
-            <label>
-              <span>Default NC LLC flat fee (USD)</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                value={settings.defaultLlcFlatFeeUsd ?? ''}
-                onChange={(e) =>
-                  updateField(
-                    'defaultLlcFlatFeeUsd',
-                    e.target.value ? Number(e.target.value) : null,
-                  )
-                }
-              />
-            </label>
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.35rem' }}
-        >
-          <h2 style={{ margin: 0 }}>Booking rules</h2>
-          <button
-            className="primary"
-            onClick={saveBookingRules}
-            disabled={busy === 'booking_rules' || !bookingRules}
-            style={{ marginLeft: 'auto' }}
-          >
-            {busy === 'booking_rules' ? 'Saving…' : 'Save booking rules'}
-          </button>
-        </div>
+      <CollapsibleSection title="Booking rules">
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           The public booking page offers times that fit these rules and the real Google calendar.
           Per-service durations (set on each service) override the default below.
         </p>
-        {savedRules && (
-          <div
-            className="alert"
-            style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-          >
-            Saved.
-          </div>
-        )}
+        {savedRules && <div className="alert alert-success">Saved.</div>}
         {!bookingRules ? (
           <div className="loading-block">
             <span className="spinner" /> Loading…
@@ -731,11 +639,8 @@ export default function SettingsPage() {
             </label>
             <div className="form-grid">
               <label>
-                <span>Bookable hours — start (0–23)</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
+                <span>Bookable hours — start</span>
+                <select
                   value={bookingRules.bookableHours.start}
                   onChange={(e) =>
                     updateRule('bookableHours', {
@@ -743,14 +648,17 @@ export default function SettingsPage() {
                       start: Number(e.target.value),
                     })
                   }
-                />
+                >
+                  {START_HOURS.map((h) => (
+                    <option key={h} value={h}>
+                      {formatHour(h)}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
-                <span>Bookable hours — end (1–24)</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={24}
+                <span>Bookable hours — end</span>
+                <select
                   value={bookingRules.bookableHours.end}
                   onChange={(e) =>
                     updateRule('bookableHours', {
@@ -758,65 +666,79 @@ export default function SettingsPage() {
                       end: Number(e.target.value),
                     })
                   }
-                />
-              </label>
-              <label>
-                <span>Buffer between calls (minutes)</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={240}
-                  value={bookingRules.bufferMinutes}
-                  onChange={(e) => updateRule('bufferMinutes', Number(e.target.value))}
-                />
-              </label>
-              <label>
-                <span>Minimum notice / lead time (hours)</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={720}
-                  value={bookingRules.minLeadTimeHours}
-                  onChange={(e) => updateRule('minLeadTimeHours', Number(e.target.value))}
-                />
-              </label>
-              <label>
-                <span>Slot granularity (minutes)</span>
-                <select
-                  value={bookingRules.slotGranularityMinutes}
-                  onChange={(e) => updateRule('slotGranularityMinutes', Number(e.target.value))}
                 >
-                  {[15, 20, 30, 45, 60].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
+                  {END_HOURS.map((h) => (
+                    <option key={h} value={h}>
+                      {formatHour(h)}
                     </option>
                   ))}
                 </select>
               </label>
               <label>
-                <span>Default consultation length (minutes)</span>
+                <span>Buffer between calls</span>
+                <select
+                  value={bookingRules.bufferMinutes}
+                  onChange={(e) => updateRule('bufferMinutes', Number(e.target.value))}
+                >
+                  {BUFFER_OPTIONS.map(([n, label]) => (
+                    <option key={n} value={n}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Minimum notice before a booking</span>
+                <select
+                  value={bookingRules.minLeadTimeHours}
+                  onChange={(e) => updateRule('minLeadTimeHours', Number(e.target.value))}
+                >
+                  {LEAD_TIME_OPTIONS.map(([n, label]) => (
+                    <option key={n} value={n}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Default consultation length</span>
                 <select
                   value={bookingRules.defaultDurationMinutes}
                   onChange={(e) => updateRule('defaultDurationMinutes', Number(e.target.value))}
                 >
                   {[15, 30, 45, 60].map((n) => (
                     <option key={n} value={n}>
-                      {n}
+                      {n} minutes
                     </option>
                   ))}
                 </select>
               </label>
               <label>
-                <span>Timezone (IANA)</span>
-                <input
+                <span>Timezone</span>
+                <select
                   value={bookingRules.timezone}
                   onChange={(e) => updateRule('timezone', e.target.value)}
-                />
+                >
+                  {tzOptions.map(([tz, label]) => (
+                    <option key={tz} value={tz}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
               </label>
+            </div>
+            <div className="firm-details-actions" style={{ marginTop: '1rem' }}>
+              <button
+                className="primary"
+                onClick={saveBookingRules}
+                disabled={busy === 'booking_rules'}
+              >
+                {busy === 'booking_rules' ? 'Saving…' : 'Save booking rules'}
+              </button>
             </div>
           </>
         )}
-      </section>
+      </CollapsibleSection>
 
       {connectingProvider && (
         <ConnectKeyModal
@@ -856,53 +778,53 @@ function IntegrationCard({
   const meta = PROVIDER_META[status.provider]
   const isGoogle = status.provider === 'google_calendar'
   const isGranola = status.provider === 'granola'
+  // Surface only the Google scopes that are NOT granted — empty when all live,
+  // so a fully-connected Google account shows no scope noise at all.
+  const scope = google?.scope ?? ''
+  const missingGoogleScopes = isGoogle
+    ? (
+        [
+          ['calendar.events', 'Calendar'],
+          ['gmail.readonly', 'Email read'],
+          ['gmail.send', 'Email send'],
+        ] as const
+      )
+        .filter(([s]) => !scope.includes(s))
+        .map(([, label]) => label)
+    : []
   return (
     <div
       className={`integration-card ${status.connected ? 'connected' : ''} ${status.comingSoon ? 'coming-soon' : ''}`}
     >
-      <div className="integration-card-head">
-        <div className="integration-card-title">{meta.name}</div>
-        <Status status={status} />
+      <div className="integration-card-main">
+        <div className="integration-card-head">
+          <div className="integration-card-title">{meta.name}</div>
+          <Status status={status} />
+        </div>
+
+        {/* Google scope detail — silent when all scopes are granted; only the
+            missing capability is surfaced, with a reconnect hint. */}
+        {isGoogle && status.connected && google?.connected && missingGoogleScopes.length > 0 && (
+          <div className="integration-card-warn">
+            {missingGoogleScopes.join(', ')} not granted — reconnect to enable.
+          </div>
+        )}
+
+        {status.lastVerifyError && (
+          <div className="integration-card-error">{status.lastVerifyError}</div>
+        )}
+
+        {/* Probe-gated freshness (WP1.5): when a connection last passed a real
+            capability check. 'Connected' only ever appears after a probe passes. */}
+        {status.connected && status.lastProbeAt && (
+          <div
+            style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.3rem' }}
+            title={status.lastProbeAt}
+          >
+            Last checked {new Date(status.lastProbeAt).toLocaleString()}
+          </div>
+        )}
       </div>
-      <div className="integration-card-desc">{meta.desc}</div>
-
-      {/* Google scope detail — one connection should show calendar + email read
-          + email send all granted. A legacy connection missing email read shows
-          a reconnect hint. */}
-      {isGoogle && status.connected && google?.connected && (
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
-          {(google.scope ?? '').includes('calendar.events') ? (
-            <span className="badge ok">Calendar ✓</span>
-          ) : (
-            <span className="badge danger">Calendar missing</span>
-          )}
-          {(google.scope ?? '').includes('gmail.readonly') ? (
-            <span className="badge ok">Email read ✓</span>
-          ) : (
-            <span className="badge warn">Email read not granted — reconnect to enable</span>
-          )}
-          {(google.scope ?? '').includes('gmail.send') ? (
-            <span className="badge ok">Email send ✓</span>
-          ) : (
-            <span className="badge warn">Email send not granted — reconnect to enable</span>
-          )}
-        </div>
-      )}
-
-      {status.lastVerifyError && (
-        <div className="integration-card-error">{status.lastVerifyError}</div>
-      )}
-
-      {/* Probe-gated freshness (WP1.5): when a connection last passed a real
-          capability check. 'Connected' only ever appears after a probe passes. */}
-      {status.connected && status.lastProbeAt && (
-        <div
-          style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.3rem' }}
-          title={status.lastProbeAt}
-        >
-          Last checked {new Date(status.lastProbeAt).toLocaleString()}
-        </div>
-      )}
 
       <div className="integration-card-actions">
         {status.comingSoon && <button disabled>Coming soon</button>}

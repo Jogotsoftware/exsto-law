@@ -18,6 +18,7 @@ import {
   CheckCircleIcon,
   CopyIcon,
   FileTextIcon,
+  HelpCircleIcon,
   LayersIcon,
   LayoutGridIcon,
   MailIcon,
@@ -43,6 +44,7 @@ const NAV: Array<{
   { href: '/attorney/mail', label: 'Mail', Icon: MailIcon },
   { href: '/attorney/services', label: 'Services', Icon: LayersIcon },
   { href: '/attorney/templates', label: 'Templates', Icon: CopyIcon },
+  { href: '/attorney/questionnaires', label: 'Questionnaires', Icon: HelpCircleIcon },
   { href: '/attorney/billing', label: 'Billing', Icon: FileTextIcon },
   { href: '/attorney/settings', label: 'Settings', Icon: SettingsIcon },
 ]

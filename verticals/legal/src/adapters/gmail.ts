@@ -258,10 +258,16 @@ export async function listClientThreads(
   clientEmails: string[],
   max = 25,
   actorId?: string | null,
+  search?: string,
 ): Promise<GmailThreadSummary[]> {
   if (clientEmails.length === 0) return []
   const { gmail } = await gmailClient(tenantId, actorId)
-  const q = clientEmails.map((e) => `(from:${e} OR to:${e})`).join(' OR ')
+  // The client-address clause keeps the inbox scoped to client mail; a search
+  // term is ANDed on (Gmail treats space as AND), so search never escapes that
+  // scope — it filters within the client threads, Gmail-search syntax and all.
+  const contactClause = clientEmails.map((e) => `(from:${e} OR to:${e})`).join(' OR ')
+  const term = (search ?? '').trim()
+  const q = term ? `(${contactClause}) ${term}` : contactClause
   const list = await gmail.users.threads.list({ userId: 'me', q, maxResults: max })
   const out: GmailThreadSummary[] = []
   for (const t of list.data.threads ?? []) {

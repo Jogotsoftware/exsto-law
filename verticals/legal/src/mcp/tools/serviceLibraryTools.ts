@@ -6,6 +6,7 @@
 // is sufficient — do not add them there).
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
+  cloneService,
   createService,
   getDocumentTemplate,
   getDraftingPrompt,
@@ -111,6 +112,28 @@ const retireTool: Tool<{ serviceKey: string }, { serviceKey: string; retired: bo
     additionalProperties: false,
   },
   handler: async (ctx: ActionContext, input) => retireService(ctx, input.serviceKey),
+}
+
+// Clone (duplicate) a service offering. Copies the full config — questionnaire,
+// drafting prompts, document templates, cost, booking, route — into a brand-new
+// service named "<name> (copy)". Like every new service it starts DISABLED, so
+// the attorney can tweak the copy before enabling it on the booking page.
+const cloneTool: Tool<{ serviceKey: string }, { service: ServiceDefinition }> = {
+  name: 'legal.service.clone',
+  description:
+    'Duplicate a service offering: a faithful copy of its full configuration (questionnaire, drafting prompts, document templates, cost, booking, route, generation mode) is created under a new key named "<name> (copy)". The copy starts disabled so it can be reviewed and enabled explicitly.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      serviceKey: { type: 'string', description: 'The service kind_name to clone.' },
+    },
+    required: ['serviceKey'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    service: await cloneService(ctx, input.serviceKey),
+  }),
 }
 
 // Completeness check (PR4). READ — lets the attorney UI gate the "Enable service"
@@ -232,6 +255,7 @@ registerTool(updateTool)
 registerTool(setActiveTool)
 registerTool(costSetTool)
 registerTool(retireTool)
+registerTool(cloneTool)
 registerTool(completenessTool)
 registerTool(questionnaireGetTool)
 registerTool(questionnaireUpdateTool)
