@@ -16,7 +16,9 @@ mechanism be folded into the foundation so every clone inherits it.
 
 ## What S9 shipped in this clone (the reference implementation)
 
-- **`supabase/migrations/0073_rbac_scope_enforcement.sql`** — `AS RESTRICTIVE` RLS
+- **`supabase/migrations_vertical/0073_rbac_scope_enforcement.sql`** — a
+  clone-level (vertical) migration, so the foundation core is untouched; runs
+  after the seed via `scripts/migrate-vertical.mjs`. `AS RESTRICTIVE` RLS
   policies that gate **writes** (the `action` INSERT, by `action_kinds`) and
   **reads** (`entity`/`attribute`/`relationship`, by `entity_kinds`) against the
   acting actor's `actor_scope_assignment` rows. Helpers live in the `private`
