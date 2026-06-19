@@ -165,6 +165,11 @@ export async function openMailThread(
 export interface ReplyInput {
   gmailThreadId: string
   bodyText: string
+  // Optional rich-text (HTML) alternative from the in-app composer. When present
+  // the reply goes out multipart/alternative (formatted HTML + plaintext fallback);
+  // bodyText stays the recorded body and the plaintext part. The firm signature is
+  // appended to both centrally.
+  bodyHtml?: string
 }
 
 // Reply in-app: goes out through the attorney's real Gmail, recorded as a
@@ -177,9 +182,10 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
     throw new Error('Refusing to reply: thread has no known client participant.')
   }
   const last = detail.messages[detail.messages.length - 1]
-  // Sign centrally — replies carry the firm signature too (fix #10).
-  const { body: signedBody } = withSignature(
-    { body: input.bodyText },
+  // Sign centrally — replies carry the firm signature too (fix #10). The HTML
+  // alternative (when the composer sent one) is signed alongside the plaintext.
+  const { body: signedBody, html: signedHtml } = withSignature(
+    { body: input.bodyText, html: input.bodyHtml },
     await resolveEmailSignature(ctx),
   )
   const sent = await sendEmail(
@@ -188,6 +194,7 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
       to: clientParticipant,
       subject: detail.subject.startsWith('Re:') ? detail.subject : `Re: ${detail.subject}`,
       body: signedBody,
+      html: signedHtml,
       gmailThreadId: input.gmailThreadId,
       inReplyToMessageIdHeader: last?.messageIdHeader ?? undefined,
     },
@@ -304,6 +311,8 @@ export interface ComposeInput {
   to: string
   subject: string
   bodyText: string
+  // Optional rich-text (HTML) alternative from the in-app composer (see ReplyInput).
+  bodyHtml?: string
 }
 
 // Mail-tab compose, kept as the thin UI-facing wrapper over Contract B.
@@ -315,6 +324,7 @@ export async function composeToClient(
     to: input.to,
     subject: input.subject,
     body: input.bodyText,
+    html: input.bodyHtml,
   })
   return action
 }
