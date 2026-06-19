@@ -3324,17 +3324,25 @@ button.danger.outline:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  /* reset the global `button` padding (0.55rem 1rem) — on a fixed 34px square it
+     overflows the width and squeezes the icon to zero (invisible icons). */
+  padding: 0;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--border);
   background: white;
-  color: var(--muted);
+  color: var(--fg);
   cursor: pointer;
+}
+.uac-iconbtn svg {
+  display: block;
 }
 .uac-iconbtn:hover {
   color: var(--fg);
-  border-color: var(--border);
+  background: var(--surface);
+  border-color: var(--accent);
 }
 .uac-iconbtn.active {
   background: var(--accent-attorney-soft);
@@ -3356,11 +3364,12 @@ button.danger.outline:hover:not(:disabled) {
 }
 .uac-ctx {
   font-size: 0.74rem;
-  padding: 0.2rem 0.55rem;
+  font-weight: 500;
+  padding: 0.25rem 0.6rem;
   border-radius: var(--radius-full);
   border: 1px solid var(--border);
-  background: white;
-  color: var(--muted);
+  background: var(--surface);
+  color: var(--fg);
   cursor: pointer;
   white-space: nowrap;
 }
