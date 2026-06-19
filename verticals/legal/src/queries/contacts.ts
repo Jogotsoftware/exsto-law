@@ -115,11 +115,19 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
          WHERE a.tenant_id = $1
          ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
        ),
-       -- A contact's matters come from two relationship paths: the direct
-       -- matter_has_client (booking) and, post-0020, the client parent
-       -- (contact -contact_of-> client <-matter_of- matter). Union both, dedup on
-       -- (contact, matter), then roll up status + recency for the four-way bucket.
+       -- A contact's matters come from three relationship paths:
+       --   • client_of (the LIVE intake path: contact -client_of-> matter),
+       --   • matter_has_client (legacy booking: matter -> contact),
+       --   • the client parent (contact -contact_of-> client <-matter_of- matter).
+       -- client_of was previously omitted, so intake contacts showed no matters and
+       -- the wrong CRM status. Union all three, dedup on (contact, matter).
        contact_matter AS (
+         SELECT r.source_entity_id AS contact_id, r.target_entity_id AS matter_id
+         FROM relationship r
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+         WHERE r.tenant_id = $1 AND rkd.kind_name = 'client_of'
+           AND (r.valid_to IS NULL OR r.valid_to > now())
+         UNION
          SELECT r.target_entity_id AS contact_id, r.source_entity_id AS matter_id
          FROM relationship r
          JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
@@ -253,11 +261,19 @@ export async function getContact(
          (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'matter_summary') AS summary,
          to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at
        FROM entity e
-       JOIN relationship r ON r.source_entity_id = e.id
-       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-       WHERE r.tenant_id = $1
-         AND r.target_entity_id = $2
-         AND rkd.kind_name = 'matter_has_client'
+       WHERE e.tenant_id = $1
+         AND e.id IN (
+           -- The contact's matters via either live or legacy link, in either
+           -- direction: client_of (contact -> matter) or matter_has_client
+           -- (matter -> contact). client_of was previously missed here too.
+           SELECT CASE WHEN r.source_entity_id = $2 THEN r.target_entity_id ELSE r.source_entity_id END
+           FROM relationship r
+           JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+           WHERE r.tenant_id = $1
+             AND (r.valid_to IS NULL OR r.valid_to > now())
+             AND rkd.kind_name IN ('client_of', 'matter_has_client')
+             AND (r.source_entity_id = $2 OR r.target_entity_id = $2)
+         )
        ORDER BY e.created_at DESC`,
       [ctx.tenantId, contactEntityId],
     )
