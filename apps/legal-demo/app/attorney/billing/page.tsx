@@ -12,7 +12,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
 // ── Shared types (mirror verticals/legal/src/queries/billing.ts) ───────────────
 interface UnbilledEntry {
-  kind: 'time' | 'expense'
+  kind: 'time' | 'expense' | 'service_fee'
   sourceEventId: string
   date: string | null
   description: string
@@ -219,11 +219,19 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
                       </td>
                       <td>{fmtDate(e.date)}</td>
                       <td>
-                        <span className={`badge ${e.kind === 'time' ? 'info' : ''}`}>{e.kind}</span>
+                        <span
+                          className={`badge ${e.kind === 'time' ? 'info' : e.kind === 'service_fee' ? 'ok' : ''}`}
+                        >
+                          {e.kind.replace('_', ' ')}
+                        </span>
                       </td>
                       <td>{e.description}</td>
                       <td style={{ textAlign: 'right' }}>
-                        {e.kind === 'time' ? `${e.quantity}h` : e.quantity}
+                        {e.kind === 'time'
+                          ? `${e.quantity}h`
+                          : e.kind === 'service_fee'
+                            ? '—'
+                            : e.quantity}
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         {e.rate ? (
@@ -429,8 +437,10 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                             {detail.lines.map((l) => (
                               <tr key={l.lineEntityId}>
                                 <td>
-                                  <span className={`badge ${l.kind === 'time' ? 'info' : ''}`}>
-                                    {l.kind}
+                                  <span
+                                    className={`badge ${l.kind === 'time' ? 'info' : l.kind === 'service_fee' ? 'ok' : ''}`}
+                                  >
+                                    {l.kind.replace('_', ' ')}
                                   </span>
                                 </td>
                                 <td>{l.matterNumber ?? '—'}</td>

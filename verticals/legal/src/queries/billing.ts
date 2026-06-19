@@ -35,7 +35,7 @@ function priceTime(minutes: number, rateStr: string): { quantity: string; amount
 }
 
 export interface UnbilledEntry {
-  kind: 'time' | 'expense'
+  kind: 'time' | 'expense' | 'service_fee'
   sourceEventId: string
   date: string | null
   description: string
@@ -82,7 +82,7 @@ export async function listUnbilled(
        billed AS (
          SELECT e.payload->>'source_event_id' AS sid
          FROM event e JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
-         WHERE e.tenant_id = $1 AND ekd.kind_name IN ('time.billed','expense.billed')
+         WHERE e.tenant_id = $1 AND ekd.kind_name IN ('time.billed','expense.billed','service_fee.billed')
            AND e.payload->>'source_event_id' IS NOT NULL
        ),
        matter_of AS (
@@ -110,7 +110,7 @@ export async function listUnbilled(
          AND (r.valid_to IS NULL OR r.valid_to > now())
        LEFT JOIN entity cli ON cli.id = r.target_entity_id AND cli.status = 'active'
        WHERE e.tenant_id = $1
-         AND ekd.kind_name IN ('time.logged','expense.recorded')
+         AND ekd.kind_name IN ('time.logged','expense.recorded','service_fee.recorded')
          AND NOT EXISTS (SELECT 1 FROM billed b WHERE b.sid = e.id::text)
        ORDER BY client_name NULLS LAST, m.name, e.occurred_at`,
       [ctx.tenantId],
@@ -170,6 +170,20 @@ export async function listUnbilled(
             rate: null,
             amount: null,
           }
+        }
+      } else if (r.kind === 'service_fee.recorded') {
+        // An approved document's flat service fee (recorded once per matter on
+        // first approval). Always carries its own amount — no client-rate lookup.
+        const amt = centsToAmount(amountToCents(r.amount ?? '0'))
+        entry = {
+          kind: 'service_fee',
+          sourceEventId: r.event_id,
+          date: r.entry_date,
+          description: r.description ?? 'Service fee',
+          durationMinutes: null,
+          quantity: '1',
+          rate: amt,
+          amount: amt,
         }
       } else {
         const amt = centsToAmount(amountToCents(r.amount ?? '0'))
