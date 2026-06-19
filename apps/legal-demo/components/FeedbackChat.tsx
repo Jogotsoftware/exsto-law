@@ -1,39 +1,69 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { UnifiedAssistantChat } from '@/components/UnifiedAssistantChat'
 import { MessageCircleIcon, XIcon } from '@/components/icons'
 
-const INTRO =
+const INTRO_GLOBAL =
   'Ask anything about using the app — intake, booking, drafting, review, Granola import, settings. Switch the model up top. Or just tell me what you think; your feedback goes straight to the team.'
+const INTRO_MATTER =
+  'Grounded in the matter you’re viewing — ask about it, request a draft, or get help with the app. Switch the model up top.'
+const INTRO_CONTACT =
+  'Grounded in the client you’re viewing — ask about them or get help with the app. Switch the model up top.'
 
-// Floating assistant FAB, mounted in the attorney layout (inside the auth gate,
-// so it only renders for signed-in attorneys). It now hosts the SAME unified
-// assistant chat as the matter page — with the model switcher — in GLOBAL scope
-// (no matter/contact context): app-help questions and beta feedback. Each turn
-// is recorded as an assistant.turn event.
+// Derive the assistant's context from the page you're on, so the one global chat
+// follows you: open it on a matter and it's grounded in that matter; on a contact,
+// that contact; anywhere else it's the general app-help / feedback chat. Client
+// (CRM company) scope isn't a chat scope server-side yet, so those pages get the
+// general chat for now.
+function scopeForPath(pathname: string): {
+  matterEntityId?: string
+  contactEntityId?: string
+} {
+  const m = pathname.match(/^\/attorney\/matters\/([^/]+)/)
+  if (m && m[1] && m[1] !== 'new') return { matterEntityId: m[1] }
+  const c = pathname.match(/^\/attorney\/crm\/contacts\/([^/]+)/)
+  if (c && c[1]) return { contactEntityId: c[1] }
+  return {}
+}
+
+// Floating assistant FAB, mounted once in the attorney layout. It hosts the unified
+// assistant chat and now picks up the CURRENT PAGE's context when opened: a matter
+// or a client/contact, else global app-help + beta feedback. (Replaces the
+// separate per-matter embedded chat — the one assistant follows the attorney.)
 export function FeedbackChat() {
+  const pathname = usePathname()
   const [open, setOpen] = useState(false)
+  // Snapshot the scope when the panel opens, so an in-progress chat doesn't reset
+  // mid-conversation if the attorney navigates while it's open.
+  const [scope, setScope] = useState<{ matterEntityId?: string; contactEntityId?: string }>({})
   const inputFocusRef = useRef<HTMLDivElement>(null)
 
-  // Focus the first focusable control when the panel opens.
   useEffect(() => {
     if (open) inputFocusRef.current?.querySelector('textarea')?.focus()
   }, [open])
 
+  function openChat() {
+    setScope(scopeForPath(pathname))
+    setOpen(true)
+  }
+
   if (!open) {
     return (
-      <button
-        type="button"
-        className="feedback-fab"
-        onClick={() => setOpen(true)}
-        aria-label="Open assistant"
-      >
+      <button type="button" className="feedback-fab" onClick={openChat} aria-label="Open assistant">
         <MessageCircleIcon size={18} />
         Assistant
       </button>
     )
   }
+
+  const scoped = Boolean(scope.matterEntityId || scope.contactEntityId)
+  const intro = scope.matterEntityId
+    ? INTRO_MATTER
+    : scope.contactEntityId
+      ? INTRO_CONTACT
+      : INTRO_GLOBAL
 
   return (
     <div className="feedback-panel" role="dialog" aria-label="Assistant">
@@ -49,8 +79,16 @@ export function FeedbackChat() {
         </button>
       </div>
       <div className="feedback-panel-body" ref={inputFocusRef}>
-        {/* Global scope: no matter/contact, don't load a shared thread. */}
-        <UnifiedAssistantChat intro={INTRO} placeholder="Ask a question or share feedback…" />
+        {/* Keyed by scope so opening on a different page starts a fresh, correctly
+            grounded chat (and loads that matter/contact's thread). */}
+        <UnifiedAssistantChat
+          key={scope.matterEntityId ?? scope.contactEntityId ?? 'global'}
+          matterEntityId={scope.matterEntityId}
+          contactEntityId={scope.contactEntityId}
+          loadThread={scoped}
+          intro={intro}
+          placeholder="Ask a question or share feedback…"
+        />
       </div>
     </div>
   )

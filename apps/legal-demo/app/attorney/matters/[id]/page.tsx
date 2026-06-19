@@ -1,132 +1,22 @@
 'use client'
 
+// Matter › OVERVIEW tab. The case at a glance + the work: client/practice/opened,
+// the workflow actions (record call, generate documents), and the captured intake
+// (questionnaire + transcript). Status, title, Email/Schedule and Back live in the
+// layout header. Activity, Documents and Billing are their own tabs.
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { PageHead } from '@/components/PageHead'
-import { TimeExpensePanel } from '@/components/TimeExpensePanel'
-import { MatterResearchPanel } from '@/components/MatterResearchPanel'
-import { UnifiedAssistantChat } from '@/components/UnifiedAssistantChat'
-import { ChevronLeftIcon } from '@/components/icons'
-import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
-import { launchCompose, launchScheduler } from '@/lib/contractD'
+import { humanizeService, QuestionnaireView, TranscriptView, type MatterDetail } from './shared'
 
-interface MatterDetail {
-  matterEntityId: string
-  matterNumber: string
-  clientName: string
-  clientEmail: string | null
-  practiceArea: string
-  status: string
-  summary: string
-  createdAt: string
-  attributes: Record<string, unknown>
-  questionnaireResponses: Record<string, unknown> | null
-  transcriptText: string | null
-  latestDraftVersionId: string | null
-  latestDraftStatus: string | null
-  clientEntityId: string | null
-}
-
-interface DraftPayload {
-  documentVersionId: string
-  matterEntityId: string
-  matterNumber: string
-  documentKind: string
-  versionNumber: number
-  status: string
-  recordedAt: string
-  bodyMarkdown: string
-}
-
-function humanizeKind(k: string): string {
-  return k.replace(/_/g, ' ')
-}
-
-function humanizeService(key: string): string {
-  if (!key) return '—'
-  if (key === 'llc_formation') return 'NC LLC formation'
-  if (key === 'oa_amendment') return 'OA amendment'
-  if (key === 'business_formation') return 'NC LLC formation'
-  if (key === 'other') return 'Custom'
-  return key.replace(/_/g, ' ')
-}
-
-function humanizeStatus(s: string): string {
-  return s.replace(/_/g, ' ')
-}
-
-function statusBadgeClass(status: string): string {
-  if (['consultation_scheduled', 'consultation_completed'].includes(status)) return 'badge info'
-  if (['drafting', 'review_pending'].includes(status)) return 'badge warn'
-  if (['engagement_signed', 'matter_active'].includes(status)) return 'badge ok'
-  return 'badge'
-}
-
-function humanizeKey(key: string): string {
-  const s = key.replace(/_/g, ' ')
-  return s.charAt(0).toUpperCase() + s.slice(1)
-}
-
-function humanizeValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—'
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
-  if (typeof value === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      return new Date(value + 'T00:00:00').toLocaleDateString()
-    }
-    return value.replace(/_/g, ' ')
-  }
-  if (typeof value === 'number') return String(value)
-  // Structured address fields (address_autocomplete / member address) store a
-  // StructuredAddress object; show its human-readable line, not the raw JSON.
-  if (typeof value === 'object' && value !== null && 'formatted_address' in value) {
-    const formatted = (value as { formatted_address?: unknown }).formatted_address
-    if (typeof formatted === 'string' && formatted.trim() !== '') return formatted
-  }
-  return JSON.stringify(value)
-}
-
-interface SendDraftLinkResult {
-  messageId: string
-  from: string
-  to: string
-}
-
-interface MatterActionEntry {
-  actionId: string
-  kindName: string
-  intentKind: string
-  autonomyTier: string
-  actorName: string
-  actorType: string
-  hasReasoningTrace: boolean
-  recordedAt: string
-}
-
-interface MatterEventEntry {
-  eventId: string
-  kindName: string
-  data: Record<string, unknown>
-  occurredAt: string
-}
-
-interface MatterHistory {
-  actions: MatterActionEntry[]
-  events: MatterEventEntry[]
-}
-
-export default function MatterDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default function MatterOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const [matter, setMatter] = useState<MatterDetail | null>(null)
-  const [latestDraft, setLatestDraft] = useState<DraftPayload | null>(null)
-  const [history, setHistory] = useState<MatterHistory | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [emailStatus, setEmailStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   const [callTranscript, setCallTranscript] = useState('')
 
-  async function load() {
+  const load = useCallback(async () => {
     setError(null)
     try {
       const res = await callAttorneyMcp<{ matter: MatterDetail | null }>({
@@ -134,28 +24,14 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
         input: { matterEntityId: id },
       })
       setMatter(res.matter)
-      if (res.matter?.latestDraftVersionId) {
-        const draftRes = await callAttorneyMcp<{ draft: DraftPayload | null }>({
-          toolName: 'legal.draft.get',
-          input: { documentVersionId: res.matter.latestDraftVersionId },
-        })
-        setLatestDraft(draftRes.draft)
-      } else {
-        setLatestDraft(null)
-      }
-      const hist = await callAttorneyMcp<MatterHistory>({
-        toolName: 'legal.matter.history',
-        input: { matterEntityId: id },
-      })
-      setHistory(hist)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
-  }
+  }, [id])
 
   useEffect(() => {
     load()
-  }, [id])
+  }, [load])
 
   async function action(label: string, toolName: string, input: Record<string, unknown>) {
     setBusy(label)
@@ -170,108 +46,22 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
     }
   }
 
-  async function emailDraftLink() {
-    if (!latestDraft || !matter) return
-    const defaultTo = matter.clientEmail ?? ''
-    const to =
-      defaultTo ||
-      (typeof window !== 'undefined'
-        ? (
-            window.prompt('No client email on file. Send draft link to which email?', '') ?? ''
-          ).trim()
-        : '')
-    if (!to) {
-      setEmailStatus({
-        kind: 'err',
-        msg: 'No recipient. Add a client email to the contact or enter one when prompted.',
-      })
-      return
-    }
-    if (typeof window !== 'undefined' && !window.confirm(`Send draft link to ${to}?`)) return
-    setBusy('email')
-    setEmailStatus(null)
-    try {
-      const result = await callAttorneyMcp<SendDraftLinkResult>({
-        toolName: 'legal.email.send_draft_link',
-        input: {
-          matterEntityId: id,
-          documentVersionId: latestDraft.documentVersionId,
-          shareUrl: shareUrlFor(latestDraft.documentVersionId),
-          to,
-        },
-      })
-      setEmailStatus({ kind: 'ok', msg: `Sent to ${result.to}` })
-      setTimeout(() => setEmailStatus(null), 6000)
-    } catch (err) {
-      setEmailStatus({
-        kind: 'err',
-        msg: err instanceof Error ? err.message : String(err),
-      })
-    } finally {
-      setBusy(null)
-    }
-  }
-
   if (!matter && !error) {
     return (
-      <main>
-        <div className="loading-block">
-          <span className="spinner" /> Loading matter…
-        </div>
-      </main>
-    )
-  }
-  if (error && !matter) {
-    return (
-      <main>
-        <Link href="/attorney/matters" className="back-link">
-          <ChevronLeftIcon size={14} /> All matters
-        </Link>
-        <div className="alert alert-error">{error}</div>
-      </main>
+      <div className="loading-block">
+        <span className="spinner" /> Loading matter…
+      </div>
     )
   }
   if (!matter) {
-    return (
-      <main>
-        <Link href="/attorney/matters" className="back-link">
-          <ChevronLeftIcon size={14} /> All matters
-        </Link>
-        <p className="text-muted">Matter not found.</p>
-      </main>
-    )
+    return <div className="alert alert-error">{error}</div>
   }
 
   const hasQuestionnaire = matter.questionnaireResponses !== null
   const hasTranscript = matter.transcriptText !== null
 
   return (
-    <main>
-      <Link href="/attorney/matters" className="back-link">
-        <ChevronLeftIcon size={14} /> All matters
-      </Link>
-      <PageHead title={matter.matterNumber} description={matter.summary || undefined} />
-
-      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: 'var(--space-3)' }}>
-        <button
-          onClick={() =>
-            launchCompose({
-              matterId: matter.matterEntityId,
-              to: matter.clientEmail ?? undefined,
-            })
-          }
-          title={matter.clientEmail ? `Email ${matter.clientEmail}` : 'Compose an email'}
-        >
-          Email
-        </button>
-        <button
-          onClick={() => launchScheduler({ matterId: matter.matterEntityId })}
-          title="Schedule a meeting"
-        >
-          Schedule
-        </button>
-      </div>
-
+    <>
       <section>
         <h2>Overview</h2>
         <div className="kv-grid">
@@ -290,14 +80,6 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
           <div>
             <div className="kv-label">Practice area</div>
             <div className="kv-value">{humanizeService(matter.practiceArea)}</div>
-          </div>
-          <div>
-            <div className="kv-label">Status</div>
-            <div className="kv-value">
-              <span className={statusBadgeClass(matter.status)}>
-                {humanizeStatus(matter.status)}
-              </span>
-            </div>
           </div>
           <div>
             <div className="kv-label">Opened</div>
@@ -375,98 +157,10 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
             Run the consultation simulation (or attach a real Granola transcript) before generating.
           </p>
         )}
-      </section>
-
-      <section>
-        <h2>Time &amp; expenses</h2>
-        <p className="text-muted text-sm">
-          Log billable time and matter expenses. Each entry is recorded on the matter timeline; the
-          billing module rolls these up into invoices.
+        <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
+          Generated documents appear under the <strong>Documents</strong> tab.
         </p>
-        <TimeExpensePanel matterEntityId={id} />
       </section>
-
-      <section>
-        <h2>Research</h2>
-        <MatterResearchPanel matterEntityId={id} />
-      </section>
-
-      {latestDraft && (
-        <section>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <h2 style={{ margin: 0 }}>Latest draft — {humanizeKind(latestDraft.documentKind)}</h2>
-            <span className="text-sm text-muted">
-              v{latestDraft.versionNumber} · {humanizeStatus(latestDraft.status)} ·{' '}
-              {new Date(latestDraft.recordedAt).toLocaleDateString()}
-            </span>
-          </div>
-          <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-            <button
-              onClick={() =>
-                downloadAsPdf(
-                  latestDraft.bodyMarkdown,
-                  `${humanizeKind(latestDraft.documentKind).replace(/\s+/g, '-').toLowerCase()}-${latestDraft.matterNumber}`,
-                )
-              }
-            >
-              Download PDF
-            </button>
-            <button
-              onClick={() =>
-                downloadAsWord(
-                  latestDraft.bodyMarkdown,
-                  `${humanizeKind(latestDraft.documentKind).replace(/\s+/g, '-').toLowerCase()}-${latestDraft.matterNumber}`,
-                )
-              }
-            >
-              Download Word
-            </button>
-            <button
-              onClick={emailDraftLink}
-              disabled={busy === 'email'}
-              title={
-                matter.clientEmail
-                  ? `Will send to ${matter.clientEmail}`
-                  : "No client email on file — you'll be prompted"
-              }
-            >
-              {busy === 'email' && <span className="spinner" />}
-              {busy === 'email' ? 'Sending…' : 'Email link to client'}
-            </button>
-            <Link
-              href={`/attorney/review/${latestDraft.documentVersionId}`}
-              style={{ marginLeft: 'auto' }}
-            >
-              <button className="primary">Open full review</button>
-            </Link>
-          </div>
-          {emailStatus && (
-            <div
-              className={`alert ${emailStatus.kind === 'ok' ? '' : 'alert-error'}`}
-              style={
-                emailStatus.kind === 'ok'
-                  ? {
-                      background: 'var(--ok-soft)',
-                      color: '#166534',
-                      border: '1px solid #86efac',
-                      marginTop: 'var(--space-3)',
-                    }
-                  : { marginTop: 'var(--space-3)' }
-              }
-            >
-              {emailStatus.msg}
-            </div>
-          )}
-        </section>
-      )}
 
       <section>
         <h2>Questionnaire</h2>
@@ -487,307 +181,6 @@ export default function MatterDetailPage({ params }: { params: Promise<{ id: str
           </p>
         )}
       </section>
-
-      <section>
-        <h2>Assistant</h2>
-        <p className="text-muted text-sm">
-          Chat with any connected AI model about this matter. Claude gets the full matter context;
-          Perplexity does web research with citations (it only receives a non-confidential framing —
-          no client details leave the firm). Every exchange is recorded on the timeline.
-        </p>
-        <UnifiedAssistantChat matterEntityId={id} loadThread />
-      </section>
-
-      <MessagesSection matterEntityId={id} />
-
-      <section>
-        <h2>Action history</h2>
-        <p className="text-muted text-sm">
-          Every change to this matter is an audited action — actor, intent, autonomy tier, and
-          reasoning-trace linkage.
-        </p>
-        {history && history.actions.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Action</th>
-                  <th>Actor</th>
-                  <th>Intent</th>
-                  <th>Autonomy</th>
-                  <th>Trace</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.actions.map((a) => (
-                  <tr key={a.actionId}>
-                    <td>{new Date(a.recordedAt).toLocaleString()}</td>
-                    <td>
-                      <code>{a.kindName}</code>
-                    </td>
-                    <td>
-                      {a.actorName}
-                      {a.actorType === 'agent' && <span className="badge info"> AI</span>}
-                      {a.actorType === 'system' && <span className="badge"> system</span>}
-                    </td>
-                    <td>{humanizeKind(a.intentKind)}</td>
-                    <td>{humanizeKind(a.autonomyTier)}</td>
-                    <td>{a.hasReasoningTrace ? '✓' : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-muted">No actions recorded yet.</p>
-        )}
-        {history && history.events.length > 0 && (
-          <div style={{ marginTop: 'var(--space-4)' }}>
-            <h3>Lifecycle events</h3>
-            <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-              {history.events.map((e) => (
-                <span
-                  key={e.eventId}
-                  className="badge"
-                  title={new Date(e.occurredAt).toLocaleString()}
-                >
-                  {e.kindName}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
-    </main>
-  )
-}
-
-interface PortalMessage {
-  author: 'client' | 'attorney'
-  body: string
-  sentAt: string
-}
-
-// Attorney side of the client↔attorney portal thread. Reads via
-// legal.matter.thread_get and replies via legal.matter.message_post (attorney
-// provenance). Same data the client sees in their portal — one thread per matter.
-function MessagesSection({ matterEntityId }: { matterEntityId: string }) {
-  const [messages, setMessages] = useState<PortalMessage[] | null>(null)
-  const [draft, setDraft] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      const r = await callAttorneyMcp<{ messages: PortalMessage[] }>({
-        toolName: 'legal.matter.thread_get',
-        input: { matterEntityId },
-      })
-      setMessages(r.messages)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setMessages((prev) => prev ?? [])
-    }
-  }, [matterEntityId])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  async function reply() {
-    if (busy || !draft.trim()) return
-    setBusy(true)
-    setError(null)
-    try {
-      await callAttorneyMcp({
-        toolName: 'legal.matter.message_post',
-        input: { matterEntityId, body: draft.trim() },
-      })
-      setDraft('')
-      await load()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <section>
-      <h2>Messages</h2>
-      <p className="text-muted text-sm">
-        The client↔attorney message thread for this matter. Replies are sent to the client and
-        appear in their portal.
-      </p>
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {messages === null ? (
-        <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-          <span className="spinner" /> Loading messages…
-        </p>
-      ) : messages.length === 0 ? (
-        <p className="text-muted" style={{ marginTop: 'var(--space-3)' }}>
-          No messages yet.
-        </p>
-      ) : (
-        <div
-          style={{
-            marginTop: 'var(--space-3)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-2)',
-          }}
-        >
-          {messages.map((m, i) => (
-            <div
-              key={`${m.sentAt}-${i}`}
-              style={{
-                alignSelf: m.author === 'attorney' ? 'flex-end' : 'flex-start',
-                maxWidth: '80%',
-                padding: 'var(--space-2) var(--space-3)',
-                borderRadius: '10px',
-                background:
-                  m.author === 'attorney'
-                    ? 'var(--accent-soft, #e0e7ff)'
-                    : 'var(--surface, #f4f4f5)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              <div className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>
-                {m.body}
-              </div>
-              <div className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
-                {m.author === 'attorney' ? 'You' : 'Client'} · {new Date(m.sentAt).toLocaleString()}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div
-        className="row"
-        style={{ gap: 'var(--space-2)', alignItems: 'flex-start', marginTop: 'var(--space-3)' }}
-      >
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          rows={2}
-          placeholder="Reply to the client…"
-          style={{ flex: 1 }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) reply()
-          }}
-        />
-        <button className="primary" onClick={reply} disabled={busy || !draft.trim()}>
-          {busy ? 'Sending…' : 'Reply'}
-        </button>
-      </div>
-    </section>
-  )
-}
-
-function QuestionnaireView({ data }: { data: Record<string, unknown> }) {
-  const entries = Object.entries(data)
-  const tabular: Array<[string, Array<Record<string, unknown>>]> = []
-  const simple: Array<[string, unknown]> = []
-  for (const [k, v] of entries) {
-    if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'object' && v[0] !== null) {
-      tabular.push([k, v as Array<Record<string, unknown>>])
-    } else {
-      simple.push([k, v])
-    }
-  }
-
-  return (
-    <>
-      {simple.length > 0 && (
-        <div className="kv-grid">
-          {simple.map(([k, v]) => (
-            <div key={k}>
-              <div className="kv-label">{humanizeKey(k)}</div>
-              <div className="kv-value">{humanizeValue(v)}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      {tabular.map(([k, rows]) => (
-        <div key={k} style={{ marginTop: 'var(--space-5)' }}>
-          <h3>{humanizeKey(k)}</h3>
-          <RepeaterTable rows={rows} />
-        </div>
-      ))}
     </>
-  )
-}
-
-function RepeaterTable({ rows }: { rows: Array<Record<string, unknown>> }) {
-  if (rows.length === 0) return <p className="text-muted">None.</p>
-  const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))))
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table>
-        <thead>
-          <tr>
-            {cols.map((c) => (
-              <th key={c}>{humanizeKey(c)}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i}>
-              {cols.map((c) => (
-                <td key={c}>{humanizeValue(row[c])}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function TranscriptView({ text }: { text: string }) {
-  const lines = text.split('\n')
-  return (
-    <div className="transcript">
-      {lines.map((line, i) => {
-        const trimmed = line.trim()
-        if (!trimmed) return <div key={i} className="transcript-spacer" />
-        if (/^\[.*\]$/.test(trimmed)) {
-          return (
-            <div key={i} className="transcript-meta">
-              {trimmed}
-            </div>
-          )
-        }
-        if (/^Summary:/i.test(trimmed)) {
-          return (
-            <div key={i} className="transcript-summary">
-              <strong>Summary</strong>
-              <span>{trimmed.slice('Summary:'.length).trim()}</span>
-            </div>
-          )
-        }
-        const m = trimmed.match(/^([A-Za-z][A-Za-z ()'.-]{0,40}):\s*(.*)$/)
-        if (m) {
-          const speaker = m[1]!
-          const dialogue = m[2]!
-          const isAttorney = /attorney|juan/i.test(speaker)
-          return (
-            <div key={i} className={`transcript-line ${isAttorney ? 'attorney' : 'client'}`}>
-              <div className="transcript-speaker">{speaker}</div>
-              <div className="transcript-text">{dialogue}</div>
-            </div>
-          )
-        }
-        return (
-          <div key={i} className="transcript-continuation">
-            {trimmed}
-          </div>
-        )
-      })}
-    </div>
   )
 }
