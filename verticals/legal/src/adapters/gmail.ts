@@ -5,6 +5,7 @@ import {
   GMAIL_SEND_SCOPE,
   GMAIL_READ_SCOPE,
 } from './googleCalendar.js'
+import { sanitizeEmailHtml } from './sanitizeEmailHtml.js'
 
 // Firm sender identity for all outbound client mail (WP3.1 acceptance). Quoted
 // because the name contains "(beta)" — parentheses are comment delimiters in
@@ -195,6 +196,11 @@ export interface GmailMessage {
   to: string
   sentAt: string | null
   bodyText: string
+  // Sanitized HTML body (formatting preserved), when the message has an HTML
+  // part. Already passed through sanitizeEmailHtml on the server, so it is safe
+  // to render directly; absent for plaintext-only messages. The UI renders this
+  // when present and falls back to bodyText otherwise.
+  bodyHtml?: string
 }
 
 export interface GmailThreadDetail {
@@ -289,6 +295,15 @@ function extractText(part: gmail_v1.Schema$MessagePart | undefined): string {
   return ''
 }
 
+// The message's HTML part, SANITIZED for safe rendering. Returns '' when the
+// message is plaintext-only — callers omit bodyHtml in that case so the UI
+// falls back to bodyText. Untrusted email HTML is dangerous; sanitizeEmailHtml
+// is the single allowlist chokepoint (see sanitizeEmailHtml.ts).
+function extractHtml(part: gmail_v1.Schema$MessagePart | undefined): string {
+  const html = findPart(part, 'text/html')
+  return html.trim() ? sanitizeEmailHtml(html) : ''
+}
+
 const emailsIn = (v: string | null): string[] =>
   (v ?? '')
     .split(',')
@@ -361,6 +376,7 @@ export async function getClientThread(
     for (const e of [...emailsIn(headerOf(m, 'From')), ...emailsIn(headerOf(m, 'To'))]) {
       participants.add(e)
     }
+    const bodyHtml = extractHtml(m.payload)
     return {
       gmailMessageId: m.id ?? '',
       messageIdHeader: headerOf(m, 'Message-ID'),
@@ -368,6 +384,7 @@ export async function getClientThread(
       to: headerOf(m, 'To') ?? '',
       sentAt: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : null,
       bodyText: extractText(m.payload) || decodeEntities(m.snippet ?? ''),
+      ...(bodyHtml ? { bodyHtml } : {}),
     }
   })
   const first = msgs[0]

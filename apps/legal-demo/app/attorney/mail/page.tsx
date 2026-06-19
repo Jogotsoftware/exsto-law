@@ -31,6 +31,10 @@ interface ThreadMessage {
   to: string
   sentAt: string | null
   bodyText: string
+  // Sanitized HTML body (formatting preserved) when the message had an HTML part.
+  // Already allowlist-sanitized server-side (verticals/legal sanitizeEmailHtml),
+  // so it is safe to render; absent for plaintext-only messages.
+  bodyHtml?: string
 }
 
 interface ThreadView {
@@ -458,7 +462,18 @@ export default function MailPage() {
                     </span>
                   </div>
                   <div className="mail-msg-to">to {m.to}</div>
-                  <div className="mail-msg-body">{m.bodyText.trim()}</div>
+                  {/* Render the formatted HTML when present (bold, lists, links).
+                      It is already allowlist-sanitized on the server, so
+                      dangerouslySetInnerHTML is safe here; plaintext-only
+                      messages keep the pre-wrap text rendering. */}
+                  {m.bodyHtml ? (
+                    <div
+                      className="mail-msg-body mail-msg-body-html"
+                      dangerouslySetInnerHTML={{ __html: m.bodyHtml }}
+                    />
+                  ) : (
+                    <div className="mail-msg-body">{m.bodyText.trim()}</div>
+                  )}
                 </div>
               </article>
             ))}

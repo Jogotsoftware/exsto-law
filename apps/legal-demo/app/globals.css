@@ -2203,6 +2203,27 @@ pre {
   color: var(--fg);
   margin-top: var(--space-3);
 }
+/* HTML email bodies bring their own block structure, so drop pre-wrap (it would
+   double newlines) and keep the message readable inside the pane: wrap long
+   content, cap image/table width, and tame the first/last margins. */
+.mail-msg-body-html {
+  white-space: normal;
+}
+.mail-msg-body-html img,
+.mail-msg-body-html table {
+  max-width: 100%;
+  height: auto;
+}
+.mail-msg-body-html :first-child {
+  margin-top: 0;
+}
+.mail-msg-body-html :last-child {
+  margin-bottom: 0;
+}
+.mail-msg-body-html a {
+  color: var(--accent, #1a73e8);
+  text-decoration: underline;
+}
 .mail-reply {
   margin-top: var(--space-4);
 }

@@ -115,11 +115,20 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
          WHERE a.tenant_id = $1
          ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
        ),
-       -- A contact's matters come from two relationship paths: the direct
-       -- matter_has_client (booking) and, post-0020, the client parent
-       -- (contact -contact_of-> client <-matter_of- matter). Union both, dedup on
-       -- (contact, matter), then roll up status + recency for the four-way bucket.
+       -- A contact's matters come from three relationship paths: the direct
+       -- client_of (contact -client_of-> matter) that intake/booking always
+       -- writes, the legacy matter_has_client, and the client-parent chain
+       -- (contact -contact_of-> client <-matter_of- matter) from 0020. Union all
+       -- three, dedup on (contact, matter), then roll up status + recency for the
+       -- four-way bucket. client_of is what makes intake contacts show their
+       -- matters (they had no matter_has_client / client-parent before).
        contact_matter AS (
+         SELECT r.source_entity_id AS contact_id, r.target_entity_id AS matter_id
+         FROM relationship r
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+         WHERE r.tenant_id = $1 AND rkd.kind_name = 'client_of'
+           AND (r.valid_to IS NULL OR r.valid_to > now())
+         UNION
          SELECT r.target_entity_id AS contact_id, r.source_entity_id AS matter_id
          FROM relationship r
          JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
@@ -244,20 +253,45 @@ export async function getContact(
          JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
          WHERE a.tenant_id = $1
          ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
+       ),
+       -- Same three linking paths as listContacts (client_of direct, legacy
+       -- matter_has_client, client-parent chain). client_of is what surfaces
+       -- intake matters here — the detail view read only matter_has_client
+       -- before, so intake contacts showed zero matters.
+       matter_ids AS (
+         SELECT r.target_entity_id AS matter_id
+         FROM relationship r
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+         WHERE r.tenant_id = $1 AND r.source_entity_id = $2 AND rkd.kind_name = 'client_of'
+           AND (r.valid_to IS NULL OR r.valid_to > now())
+         UNION
+         SELECT r.source_entity_id AS matter_id
+         FROM relationship r
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+         WHERE r.tenant_id = $1 AND r.target_entity_id = $2 AND rkd.kind_name = 'matter_has_client'
+         UNION
+         SELECT mo.source_entity_id AS matter_id
+         FROM relationship co
+         JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id AND cok.kind_name = 'contact_of'
+         JOIN relationship mo ON mo.target_entity_id = co.target_entity_id
+         JOIN relationship_kind_definition mok ON mok.id = mo.relationship_kind_id AND mok.kind_name = 'matter_of'
+         WHERE co.tenant_id = $1 AND co.source_entity_id = $2
+           AND (co.valid_to IS NULL OR co.valid_to > now())
+           AND (mo.valid_to IS NULL OR mo.valid_to > now())
        )
        SELECT
          e.id AS matter_entity_id,
          e.name AS matter_number,
-         (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'practice_area') AS service_key,
+         COALESCE(
+           (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'practice_area'),
+           (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'service_key')
+         ) AS service_key,
          (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
          (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'matter_summary') AS summary,
          to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at
        FROM entity e
-       JOIN relationship r ON r.source_entity_id = e.id
-       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-       WHERE r.tenant_id = $1
-         AND r.target_entity_id = $2
-         AND rkd.kind_name = 'matter_has_client'
+       JOIN matter_ids mi ON mi.matter_id = e.id
+       WHERE e.tenant_id = $1
        ORDER BY e.created_at DESC`,
       [ctx.tenantId, contactEntityId],
     )

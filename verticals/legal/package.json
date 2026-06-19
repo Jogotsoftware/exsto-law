@@ -26,18 +26,20 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@exsto/mcp-tools": "workspace:*",
+    "@exsto/primitives": "workspace:*",
     "@exsto/shared": "workspace:*",
     "@exsto/substrate": "workspace:*",
     "@exsto/worker-runtime": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "googleapis": "^144.0.0",
     "marked": "^18.0.4",
     "pdf-parse": "^2.4.5",
-    "turndown": "^7.2.4",
-    "@exsto/primitives": "workspace:*"
+    "sanitize-html": "^2.17.5",
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
+    "@types/sanitize-html": "^2.16.1",
     "@types/turndown": "^5.0.5"
   }
 }
