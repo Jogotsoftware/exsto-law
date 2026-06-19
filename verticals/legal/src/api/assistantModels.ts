@@ -23,17 +23,27 @@ export interface AssistantModel {
   available: boolean
   // The provider integration is connected and healthy (Settings).
   connected: boolean
-  // Perplexity answers carry source citations; Claude answers don't.
+  // Perplexity answers carry source citations; Claude answers don't (unless web
+  // search is on — see supportsWebSearch).
   supportsCitations: boolean
   // True when this is the recommended default for its provider.
   isDefault: boolean
+  // Honours the work-rate knob (effort + adaptive thinking). True on Opus 4.8 /
+  // Sonnet 4.6; false on Haiku (rejects `effort`) and non-Claude providers.
+  supportsWorkRate: boolean
+  // A web-search toggle is meaningful for this model.
+  supportsWebSearch: boolean
+  // This model ALWAYS searches the web (Perplexity) — the toggle shows locked-on
+  // rather than optional.
+  webSearchInherent: boolean
 }
 
 // Static catalog of the models we expose, per provider. Kept here (not env) so
 // the dropdown is stable; the firm default models for drafting/research still
 // come from env in the adapters. Labels use the marketing names.
 const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: AssistantProvider }> = [
-  // Claude (Anthropic) — conversational assistant.
+  // Claude (Anthropic) — conversational assistant. Opus/Sonnet honour the
+  // work-rate knob and Claude's web-search tool; Haiku does neither for effort.
   {
     provider: 'anthropic',
     providerLabel: 'Claude',
@@ -42,6 +52,9 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     available: true,
     supportsCitations: false,
     isDefault: false,
+    supportsWorkRate: true,
+    supportsWebSearch: true,
+    webSearchInherent: false,
   },
   {
     provider: 'anthropic',
@@ -51,6 +64,9 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     available: true,
     supportsCitations: false,
     isDefault: true,
+    supportsWorkRate: true,
+    supportsWebSearch: true,
+    webSearchInherent: false,
   },
   {
     provider: 'anthropic',
@@ -60,8 +76,13 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     available: true,
     supportsCitations: false,
     isDefault: false,
+    // Haiku rejects the `effort` parameter, so the work-rate knob is a no-op.
+    supportsWorkRate: false,
+    supportsWebSearch: true,
+    webSearchInherent: false,
   },
-  // Perplexity — web research with citations.
+  // Perplexity — web research with citations. Always searches the web, so its
+  // web-search toggle is shown locked-on.
   {
     provider: 'perplexity',
     providerLabel: 'Perplexity',
@@ -70,6 +91,9 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     available: true,
     supportsCitations: true,
     isDefault: true,
+    supportsWorkRate: false,
+    supportsWebSearch: true,
+    webSearchInherent: true,
   },
   {
     provider: 'perplexity',
@@ -79,6 +103,9 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     available: true,
     supportsCitations: true,
     isDefault: false,
+    supportsWorkRate: false,
+    supportsWebSearch: true,
+    webSearchInherent: true,
   },
   // OpenAI — listed for visibility; no chat adapter yet (available: false).
   {
@@ -89,6 +116,9 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     available: false,
     supportsCitations: false,
     isDefault: true,
+    supportsWorkRate: false,
+    supportsWebSearch: false,
+    webSearchInherent: false,
   },
 ]
 

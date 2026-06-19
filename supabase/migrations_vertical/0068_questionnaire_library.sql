@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0067: Questionnaire library
+-- Vertical migration 0068: Questionnaire library (renumbered from 0067 — 0067 is the company/CRM migration)
 --
 -- Today a questionnaire lives INSIDE a service (workflow_definition
 -- transitions.intake_schema). This adds a STANDALONE, reusable questionnaire — a

@@ -13,8 +13,13 @@
 // framing — client PII never leaves the firm through a third-party call. See
 // assistantContext.ts.
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
-import { chatWithAssistant, type ChatMessage } from '../adapters/claude.js'
-import { runPerplexityResearch } from '../adapters/perplexity.js'
+import {
+  chatWithAssistantDetailed,
+  streamChatWithAssistant,
+  type ChatMessage,
+  type WorkRate,
+} from '../adapters/claude.js'
+import { runPerplexityResearch, streamPerplexityResearch } from '../adapters/perplexity.js'
 import { resolveAssistantModel, type AssistantProvider } from './assistantModels.js'
 import {
   buildMatterAssistantContext,
@@ -37,12 +42,47 @@ export interface AssistantChatInput {
   // At most one scope; both omitted = a global (feedback / how-do-I) chat.
   matterEntityId?: string
   contactEntityId?: string
+  // The attorney's chat-settings work rate (effort/thinking). Default 'balanced'.
+  workRate?: WorkRate
+  // Web-search toggle from chat settings. Honoured for Claude (adds the native
+  // web_search tool); Perplexity always searches regardless.
+  webSearch?: boolean
+  // Context toggle: when false, the turn is treated as a GENERAL message — not
+  // grounded in (or threaded on) the current matter/client. Default true, so the
+  // assistant is always contextualised to what the attorney is working on.
+  useContext?: boolean
   // Optional widget hint: a "Leave feedback" entry point forces kind='feedback'.
   intent?: 'feedback' | 'question'
   // Beta feedback (Obj 11): the category the attorney tagged + where they were.
   category?: FeedbackCategory
   pageContext?: { path?: string; [k: string]: unknown }
 }
+
+// One event of a streamed assistant turn, sent to the chat UI over SSE. `meta`
+// lands first (so the UI can show the model + a "cites sources" hint), then
+// thinking/text deltas, then a terminal `done` carrying the persisted eventId
+// and the final citation list.
+export type AssistantChatStreamEvent =
+  | {
+      type: 'meta'
+      provider: AssistantProvider
+      model: string
+      kind: AssistantTurnKind
+      scope: AssistantScope
+      webSearch: boolean
+    }
+  | { type: 'thinking'; text: string }
+  | { type: 'text'; text: string }
+  | {
+      type: 'done'
+      eventId: string
+      reply: string
+      citations: string[]
+      provider: AssistantProvider
+      model: string
+      kind: AssistantTurnKind
+      scope: AssistantScope
+    }
 
 export interface AssistantChatReply {
   eventId: string
@@ -96,20 +136,40 @@ function classifyKind(
 async function loadContext(
   ctx: ActionContext,
   input: AssistantChatInput,
-): Promise<{ scope: AssistantScope; context: AssistantContext | null }> {
-  if (input.matterEntityId) {
-    return {
-      scope: 'matter',
-      context: await buildMatterAssistantContext(ctx, input.matterEntityId),
+): Promise<{
+  scope: AssistantScope
+  context: AssistantContext | null
+  primaryEntityId: string | null
+}> {
+  // Context toggle off ⇒ a deliberately GENERAL message: no grounding, and not
+  // threaded on the matter/client (recorded globally), so it doesn't pollute the
+  // entity's timeline. Default (true) keeps the assistant contextualised.
+  if (input.useContext !== false) {
+    if (input.matterEntityId) {
+      return {
+        scope: 'matter',
+        context: await buildMatterAssistantContext(ctx, input.matterEntityId),
+        primaryEntityId: input.matterEntityId,
+      }
+    }
+    if (input.contactEntityId) {
+      return {
+        scope: 'contact',
+        context: await buildContactAssistantContext(ctx, input.contactEntityId),
+        primaryEntityId: input.contactEntityId,
+      }
     }
   }
-  if (input.contactEntityId) {
-    return {
-      scope: 'contact',
-      context: await buildContactAssistantContext(ctx, input.contactEntityId),
-    }
-  }
-  return { scope: 'global', context: null }
+  return { scope: 'global', context: null, primaryEntityId: null }
+}
+
+// Web search is engaged when the toggle is on (for models that support it) or
+// when the model always searches the web (Perplexity).
+function webSearchOn(
+  model: { supportsWebSearch: boolean; webSearchInherent: boolean },
+  toggle: boolean | undefined,
+): boolean {
+  return model.webSearchInherent || (model.supportsWebSearch && !!toggle)
 }
 
 // Substrate recording half — split out so the persistence is testable without a
@@ -175,8 +235,9 @@ export async function assistantChat(
     throw new Error(`${model.providerLabel} chat isn't available yet — pick Claude or Perplexity.`)
   }
 
-  const { scope, context } = await loadContext(ctx, input)
+  const { scope, context, primaryEntityId } = await loadContext(ctx, input)
   const kind = classifyKind(model.provider, message, input.intent)
+  const webSearch = webSearchOn(model, input.webSearch)
 
   let reply: string
   let citations: string[] = []
@@ -198,7 +259,14 @@ export async function assistantChat(
       ...(input.history ?? []),
       { role: 'user', content: message },
     ]
-    reply = await chatWithAssistant(ctx.tenantId, messages, model.model)
+    const result = await chatWithAssistantDetailed(ctx.tenantId, messages, {
+      model: model.model,
+      workRate: input.workRate,
+      supportsWorkRate: model.supportsWorkRate,
+      webSearch,
+    })
+    reply = result.reply
+    citations = result.citations
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -209,12 +277,144 @@ export async function assistantChat(
     kind,
     citations,
     scope,
-    primaryEntityId: input.matterEntityId ?? input.contactEntityId ?? null,
+    primaryEntityId,
     category: input.category ?? null,
     pageContext: input.pageContext ?? null,
   })
 
   return { eventId, reply, citations, provider: model.provider, model: model.model, kind, scope }
+}
+
+// Streaming counterpart of assistantChat: yields meta → thinking/text deltas →
+// done, recording the assistant.turn event (through the action layer) once the
+// model finishes. The reply is assembled here from the deltas, so persistence
+// stays identical to the non-streaming path — the stream is just transport.
+export async function* assistantChatStream(
+  ctx: ActionContext,
+  input: AssistantChatInput,
+): AsyncGenerator<AssistantChatStreamEvent> {
+  const message = input.message.trim()
+  if (!message) throw new Error('Type a message first.')
+
+  const model = resolveAssistantModel(input.modelId)
+  if (!model) throw new Error(`Unknown model: ${input.modelId}`)
+  if (!model.available) {
+    throw new Error(`${model.providerLabel} chat isn't available yet — pick Claude or Perplexity.`)
+  }
+
+  const { scope, context, primaryEntityId } = await loadContext(ctx, input)
+  const kind = classifyKind(model.provider, message, input.intent)
+  const webSearch = webSearchOn(model, input.webSearch)
+
+  yield { type: 'meta', provider: model.provider, model: model.model, kind, scope, webSearch }
+
+  let reply = ''
+  let citations: string[] = []
+
+  if (model.provider === 'perplexity') {
+    // External research: only the non-confidential framing leaves the firm.
+    for await (const chunk of streamPerplexityResearch(ctx.tenantId, {
+      question: message,
+      context: context?.framing,
+      model: model.model,
+    })) {
+      if (chunk.type === 'text') {
+        reply += chunk.text
+        yield { type: 'text', text: chunk.text }
+      } else if (chunk.type === 'citations') {
+        citations = chunk.citations
+      }
+    }
+  } else {
+    // Claude: full matter context is safe (the firm's own model).
+    const system = context ? `${SYSTEM_PROMPT}\n\n--- Context ---\n${context.full}` : SYSTEM_PROMPT
+    const messages: ChatMessage[] = [
+      { role: 'system', content: system },
+      ...(input.history ?? []),
+      { role: 'user', content: message },
+    ]
+    for await (const chunk of streamChatWithAssistant(ctx.tenantId, messages, {
+      model: model.model,
+      workRate: input.workRate,
+      supportsWorkRate: model.supportsWorkRate,
+      webSearch,
+    })) {
+      if (chunk.type === 'text') {
+        reply += chunk.text
+        yield { type: 'text', text: chunk.text }
+      } else if (chunk.type === 'thinking') {
+        yield { type: 'thinking', text: chunk.text }
+      } else if (chunk.type === 'citations') {
+        citations = chunk.citations
+      }
+    }
+  }
+
+  const { eventId } = await recordAssistantTurn(ctx, {
+    message,
+    reply,
+    provider: model.provider,
+    model: model.model,
+    kind,
+    citations,
+    scope,
+    primaryEntityId,
+    category: input.category ?? null,
+    pageContext: input.pageContext ?? null,
+  })
+
+  yield {
+    type: 'done',
+    eventId,
+    reply,
+    citations,
+    provider: model.provider,
+    model: model.model,
+    kind,
+    scope,
+  }
+}
+
+export interface SubmitFeedbackInput {
+  message: string
+  category?: FeedbackCategory
+  // Where the attorney was (path + a section label) when they hit the Beta button.
+  pageContext?: { path?: string; section?: string; [k: string]: unknown }
+  // If the attorney was on a matter/client, thread the feedback there too.
+  matterEntityId?: string
+  contactEntityId?: string
+}
+
+// Dedicated beta-feedback capture (the Beta button). Unlike a chat turn this
+// makes NO model call — it just records the attorney's message as a feedback
+// assistant.turn event (kind='feedback') with its category + the exact page/
+// section they were on, straight onto the substrate via the action layer.
+export async function submitAssistantFeedback(
+  ctx: ActionContext,
+  input: SubmitFeedbackInput,
+): Promise<{ eventId: string }> {
+  const message = input.message.trim()
+  if (!message) throw new Error('Tell us what you think first.')
+  const primaryEntityId = input.matterEntityId ?? input.contactEntityId ?? null
+  const scope: AssistantScope = input.matterEntityId
+    ? 'matter'
+    : input.contactEntityId
+      ? 'contact'
+      : 'global'
+  return recordAssistantTurn(ctx, {
+    message,
+    reply: '',
+    // Feedback is the attorney speaking to their own team — provenance human,
+    // no model involved (recordAssistantTurn keys provenance off provider).
+    provider: 'anthropic',
+    model: '',
+    kind: 'feedback',
+    citations: [],
+    scope,
+    primaryEntityId,
+    category: input.category ?? 'other',
+    pageContext: input.pageContext ?? null,
+  })
 }
 
 // Prior turns for a scope, oldest-first (conversation order), so reopening a

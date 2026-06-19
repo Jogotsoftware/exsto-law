@@ -156,55 +156,267 @@ export interface ChatMessage {
   content: string
 }
 
-// Plain conversational turn against Claude for the in-app assistant. Separate
-// from callClaudeDrafter because this is a lightweight chat (system + history +
-// user) with no structured-trace contract to parse — the assistant just replies
-// in prose. Reuses resolveAnthropicApiKey so the firm's Settings-managed Vault
-// key beats the env default, and mirrors callClaudeDrafter's connection-auth
-// error handling so a rejected key flips the integration card to 'error'.
+// "Work rate" — the attorney's combined effort knob in the chat settings, the
+// same mechanics Claude itself exposes: higher rate = more reasoning (adaptive
+// extended thinking) + a higher `effort` and more output room. Quick keeps it
+// snappy with no thinking.
+export type WorkRate = 'quick' | 'balanced' | 'thorough'
+
+export interface AssistantChatOptions {
+  model?: string
+  workRate?: WorkRate
+  // Whether the chosen model supports the effort/adaptive-thinking controls.
+  // Opus 4.8 / Sonnet 4.6 do; Haiku 4.5 rejects `effort`, so the caller passes
+  // false and we vary only `max_tokens`.
+  supportsWorkRate?: boolean
+  // Turn on Claude's server-side web_search tool so answers cite live sources.
+  webSearch?: boolean
+}
+
+// A single piece of a streamed assistant reply. `thinking` carries the model's
+// summarized reasoning (shown as a live "thinking" trace), `text` the answer
+// itself, and a terminal `citations` chunk the web-search sources (if any).
+export type AssistantStreamChunk =
+  | { type: 'thinking'; text: string }
+  | { type: 'text'; text: string }
+  | { type: 'citations'; citations: string[] }
+
+// Anthropic's web search server tool. When enabled the model searches the web
+// itself and annotates its answer with source URLs (the citation blocks we
+// harvest below), giving Claude the same "cites sources" behaviour Perplexity
+// has so the chat's web-search toggle works whichever model is selected.
+const WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_uses: 5 }
+
+// Map the attorney's work rate to the request knobs. On models that support it
+// (Opus 4.8 / Sonnet 4.6) we use adaptive thinking + the `effort` parameter —
+// the current, non-deprecated controls (a fixed `budget_tokens` is rejected on
+// these models). On Haiku (no `effort`) we only stretch `max_tokens`.
+function workRateParams(
+  rate: WorkRate,
+  supportsWorkRate: boolean,
+): { extra: Record<string, unknown>; maxTokens: number } {
+  if (!supportsWorkRate) {
+    const maxTokens = rate === 'thorough' ? 3072 : rate === 'balanced' ? 2048 : 1024
+    return { extra: {}, maxTokens }
+  }
+  if (rate === 'quick') {
+    // No thinking (omit the field → off on Opus 4.8/4.7) for a fast, direct reply.
+    return { extra: { output_config: { effort: 'low' } }, maxTokens: 1024 }
+  }
+  const effort = rate === 'thorough' ? 'high' : 'medium'
+  return {
+    extra: {
+      output_config: { effort },
+      // display:'summarized' surfaces readable reasoning we can stream as the
+      // "thinking" animation; the default ('omitted') would stream empty blocks.
+      thinking: { type: 'adaptive', display: 'summarized' },
+    },
+    maxTokens: rate === 'thorough' ? 4096 : 2048,
+  }
+}
+
+// Build the Messages API request body for an assistant chat turn. Shared by the
+// streaming and non-streaming paths so the two stay in lock-step.
+//
+// NOTE on typing: the pinned @anthropic-ai/sdk (0.32) predates `output_config`,
+// adaptive thinking, and the web_search tool, so its param types don't list
+// these fields. The SDK forwards the request body verbatim, so we build a plain
+// object and assert the param type — the fields are honoured by the live API.
+function buildChatRequest(
+  messages: ChatMessage[],
+  opts: AssistantChatOptions,
+  // Assistant turns carried over from paused (server-tool) responses, appended
+  // verbatim so the API resumes where it left off — see the continuation loops.
+  carryTurns: Array<{ role: 'assistant'; content: unknown }> = [],
+): Record<string, unknown> {
+  // Lift a leading system turn into the top-level `system` param; everything
+  // else is a user/assistant turn. Anthropic requires the first messages[] entry
+  // to be 'user', which the post-system turns satisfy.
+  const system = messages[0]?.role === 'system' ? messages[0].content : undefined
+  const turns = messages.filter((m) => m.role !== 'system')
+  const { extra, maxTokens } = workRateParams(
+    opts.workRate ?? 'balanced',
+    opts.supportsWorkRate ?? false,
+  )
+  return {
+    // The unified assistant chat passes the attorney's chosen Claude model;
+    // fall back to the firm default when none is specified.
+    model: opts.model ?? DEFAULT_MODEL,
+    // Web search can run several tool rounds before the final answer; give it
+    // headroom on top of the work-rate budget.
+    max_tokens: opts.webSearch ? maxTokens + 1024 : maxTokens,
+    system,
+    messages: [...turns, ...carryTurns],
+    ...(opts.webSearch ? { tools: [WEB_SEARCH_TOOL] } : {}),
+    ...extra,
+  }
+}
+
+// Pull web-search source URLs out of a finished message: text blocks carry
+// `citations` (web_search_result_location), and web_search_tool_result blocks
+// carry the raw results. Defensive about shape since the SDK doesn't type them.
+function collectCitations(content: unknown): string[] {
+  const urls: string[] = []
+  const push = (u: unknown) => {
+    if (typeof u === 'string' && u && !urls.includes(u)) urls.push(u)
+  }
+  if (!Array.isArray(content)) return urls
+  for (const block of content as Array<Record<string, unknown>>) {
+    const citations = block?.citations
+    if (Array.isArray(citations)) {
+      for (const c of citations as Array<Record<string, unknown>>) push(c?.url)
+    }
+    if (block?.type === 'web_search_tool_result' && Array.isArray(block?.content)) {
+      for (const r of block.content as Array<Record<string, unknown>>) push(r?.url)
+    }
+  }
+  return urls
+}
+
+// A web-search turn runs a server-side tool loop; if that loop hits its
+// iteration limit the response comes back with stop_reason 'pause_turn' and a
+// partial answer. We resume by re-sending the assistant's content verbatim —
+// NO extra "continue" user turn, since the trailing server_tool_use block is
+// what tells the API to pick up where it left off. Capped so a pathological
+// case can't loop forever.
+const MAX_PAUSE_CONTINUATIONS = 4
+
+// Concatenate the text blocks of a message's content (ignores thinking /
+// server-tool blocks). Used to assemble the reply across resumed segments.
+function extractText(content: unknown): string {
+  if (!Array.isArray(content)) return ''
+  return (content as Array<{ type?: string; text?: string }>)
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text ?? '')
+    .join('')
+}
+
+function mergeCitations(into: string[], more: string[]): void {
+  for (const c of more) if (!into.includes(c)) into.push(c)
+}
+
+// Translate an SDK error into the error to throw: a rejected Settings-managed
+// key flips the connection to 'error' (so the integration card surfaces it)
+// and reports a clear, actionable message; anything else is rethrown as-is.
+async function assistantAuthError(
+  err: unknown,
+  source: 'connection' | 'env',
+  tenantId: string | null,
+  apiKey: string,
+): Promise<Error> {
+  if (source === 'connection' && tenantId && isAuthError(err)) {
+    const msg = redactSecret(err instanceof Error ? err.message : String(err), apiKey)
+    await markConnectionError(tenantId, 'anthropic', `Assistant chat failed: ${msg}`)
+    return new Error(
+      'Anthropic rejected the connected API key. Replace it in Settings → Integrations.',
+    )
+  }
+  return err instanceof Error ? err : new Error(String(err))
+}
+
+// Non-streaming assistant turn returning the reply plus any web-search citations.
+// Reuses resolveAnthropicApiKey so the firm's Settings-managed Vault key beats
+// the env default. Separate from callClaudeDrafter because this is a lightweight
+// chat with no structured-trace contract to parse — the assistant replies in prose.
+export async function chatWithAssistantDetailed(
+  tenantId: string | null,
+  messages: ChatMessage[],
+  opts: AssistantChatOptions = {},
+): Promise<{ reply: string; citations: string[] }> {
+  const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
+  const anthropic = makeAnthropic(apiKey)
+
+  const carryTurns: Array<{ role: 'assistant'; content: unknown }> = []
+  const citations: string[] = []
+  let reply = ''
+
+  for (let i = 0; ; i++) {
+    const body = buildChatRequest(messages, opts, carryTurns)
+    let response: Anthropic.Message
+    try {
+      response = await anthropic.messages.create(
+        body as unknown as Anthropic.MessageCreateParamsNonStreaming,
+      )
+    } catch (err) {
+      throw await assistantAuthError(err, source, tenantId, apiKey)
+    }
+    reply += extractText(response.content)
+    mergeCitations(citations, collectCitations(response.content))
+
+    // Resume a paused server-tool (web-search) turn until it finishes.
+    const stop = response.stop_reason as string | null
+    if (stop === 'pause_turn' && i < MAX_PAUSE_CONTINUATIONS) {
+      carryTurns.push({ role: 'assistant', content: response.content })
+      continue
+    }
+    break
+  }
+
+  if (!reply) throw new Error('Claude response contained no text block.')
+  return { reply, citations }
+}
+
+// Back-compat thin wrapper: prose reply only. Kept for the legacy assistant and
+// any caller that doesn't need citations or the work-rate knobs.
 export async function chatWithAssistant(
   tenantId: string | null,
   messages: ChatMessage[],
   model?: string,
 ): Promise<string> {
+  const { reply } = await chatWithAssistantDetailed(tenantId, messages, { model })
+  return reply
+}
+
+// Streaming assistant turn: yields thinking/text deltas as the model produces
+// them (token-by-token, the Claude-app feel), then a terminal `citations` chunk.
+// Used by the attorney chat's streaming endpoint.
+export async function* streamChatWithAssistant(
+  tenantId: string | null,
+  messages: ChatMessage[],
+  opts: AssistantChatOptions = {},
+): AsyncGenerator<AssistantStreamChunk> {
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
   const anthropic = makeAnthropic(apiKey)
 
-  // Lift a leading system turn into the top-level `system` param; everything
-  // else is a user/assistant turn. Anthropic requires the first messages[] entry
-  // to be 'user', which the post-system turns satisfy.
-  const system = messages[0]?.role === 'system' ? messages[0].content : undefined
-  const turns = messages.filter((m) => m.role !== 'system') as Array<{
-    role: 'user' | 'assistant'
-    content: string
-  }>
+  const carryTurns: Array<{ role: 'assistant'; content: unknown }> = []
+  const citations: string[] = []
 
-  let response: Anthropic.Message
-  try {
-    response = await anthropic.messages.create({
-      // The unified assistant chat passes the attorney's chosen Claude model;
-      // fall back to the firm default when none is specified.
-      model: model ?? DEFAULT_MODEL,
-      max_tokens: 1024,
-      system,
-      messages: turns,
-    })
-  } catch (err) {
-    if (source === 'connection' && tenantId && isAuthError(err)) {
-      const msg = redactSecret(err instanceof Error ? err.message : String(err), apiKey)
-      await markConnectionError(tenantId, 'anthropic', `Assistant chat failed: ${msg}`)
-      throw new Error(
-        'Anthropic rejected the connected API key. Replace it in Settings → Integrations.',
-      )
+  for (let i = 0; ; i++) {
+    const body = buildChatRequest(messages, opts, carryTurns)
+    const stream = anthropic.messages.stream(
+      body as unknown as Anthropic.MessageCreateParamsStreaming,
+    )
+    let final: Anthropic.Message
+    try {
+      for await (const event of stream) {
+        if (event.type !== 'content_block_delta') continue
+        // SDK 0.32 doesn't type thinking_delta; read defensively.
+        const delta = event.delta as { type?: string; text?: string; thinking?: string }
+        if (delta.type === 'text_delta' && delta.text) {
+          yield { type: 'text', text: delta.text }
+        } else if (delta.type === 'thinking_delta' && delta.thinking) {
+          yield { type: 'thinking', text: delta.thinking }
+        }
+      }
+      final = await stream.finalMessage()
+    } catch (err) {
+      throw await assistantAuthError(err, source, tenantId, apiKey)
     }
-    throw err
+    mergeCitations(citations, collectCitations(final.content))
+
+    // If a web-search turn paused at the server tool-loop limit, resume it: re-
+    // send the partial assistant content (its trailing server_tool_use block
+    // tells the API to continue). The next stream's text deltas pick up exactly
+    // where this one paused, so the UI keeps appending seamlessly.
+    const stop = final.stop_reason as string | null
+    if (stop === 'pause_turn' && i < MAX_PAUSE_CONTINUATIONS) {
+      carryTurns.push({ role: 'assistant', content: final.content })
+      continue
+    }
+    break
   }
 
-  const textBlock = response.content.find((block) => block.type === 'text')
-  if (!textBlock || textBlock.type !== 'text') {
-    throw new Error('Claude response contained no text block.')
-  }
-  return textBlock.text
+  if (citations.length) yield { type: 'citations', citations }
 }
 
 function splitDocumentAndTrace(raw: string): {

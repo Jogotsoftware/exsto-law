@@ -1,11 +1,13 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   assistantChat,
+  submitAssistantFeedback,
   listAssistantThread,
   listAssistantModels,
   listAssistantFeedback,
   type AssistantChatInput,
   type AssistantChatReply,
+  type SubmitFeedbackInput,
   type AssistantThreadEntry,
   type AssistantModel,
   type AssistantFeedbackEntry,
@@ -55,6 +57,22 @@ registerTool({
       },
       matterEntityId: { type: 'string', description: 'Scope the chat to this matter.' },
       contactEntityId: { type: 'string', description: 'Scope the chat to this client contact.' },
+      workRate: {
+        type: 'string',
+        enum: ['quick', 'balanced', 'thorough'],
+        description:
+          "Effort knob (effort + adaptive thinking). Honoured on Opus 4.8 / Sonnet 4.6; ignored on Haiku/Perplexity. Default 'balanced'.",
+      },
+      webSearch: {
+        type: 'boolean',
+        description:
+          'Turn on live web search for Claude (adds citations). Perplexity always searches regardless.',
+      },
+      useContext: {
+        type: 'boolean',
+        description:
+          'When false, treat the message as GENERAL — not grounded in or threaded on the current matter/client. Default true.',
+      },
       intent: {
         type: 'string',
         enum: ['feedback', 'question'],
@@ -97,6 +115,34 @@ registerTool({
   { matterEntityId?: string; contactEntityId?: string },
   { turns: AssistantThreadEntry[] }
 >)
+
+registerTool({
+  name: 'legal.assistant.feedback_submit',
+  description:
+    'Submit beta feedback directly to the team (the Beta button). Records the message with its category and the exact page/section the attorney was on, as a feedback event on the substrate. Makes NO model call and returns no reply — pure capture.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      message: { type: 'string', description: "The attorney's feedback." },
+      category: {
+        type: 'string',
+        enum: ['ui', 'ai', 'workflow', 'other'],
+        description: 'Which area the feedback is about.',
+      },
+      pageContext: {
+        type: 'object',
+        description: 'Where they were, e.g. { path, section }.',
+        additionalProperties: true,
+      },
+      matterEntityId: { type: 'string', description: 'Thread the feedback on this matter too.' },
+      contactEntityId: { type: 'string', description: 'Thread the feedback on this client too.' },
+    },
+    required: ['message'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await submitAssistantFeedback(ctx, input),
+} satisfies Tool<SubmitFeedbackInput, { eventId: string }>)
 
 registerTool({
   name: 'legal.assistant.feedback_list',
