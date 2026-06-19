@@ -6,6 +6,10 @@ import {
   markConnectionError,
 } from './connectionStore.js'
 import { redactSecret } from './redact.js'
+// Type-only: the firm booking rules the availability engine slices slots
+// against. Defined in the api layer (config-as-data); imported here as a type so
+// the adapter stays free of any runtime dependency on it.
+import type { FirmBookingRules } from '../api/firmBookingRules.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // OAuth + token storage
@@ -312,67 +316,71 @@ function isoFromZonedWallTime(
   return new Date(asUtc + correction).toISOString()
 }
 
-// Working hours for the attorney (Mon–Fri, attorney TZ). TODO: lift to
-// tenant config when we onboard the second firm.
-const WORKING_HOUR_START = 9
-const WORKING_HOUR_END = 17
-const SLOT_MINUTES = 30
-
-// Build the candidate slot template: 30-min slots through working hours,
-// Mon–Fri in attorney TZ, starting from now (skipping past times so same-day
-// bookings only show times still in the future).
-function generateCandidateSlots(daysOut: number): AvailabilitySlot[] {
+// Build the candidate slot template from the firm booking rules (Contract L):
+// `durationMinutes`-long slots stepped by `slotGranularityMinutes` through the
+// bookable hours, on the bookable weekdays, in the firm timezone. Slots earlier
+// than now + the minimum lead time are dropped (so same-day bookings respect
+// notice). A slot is only emitted if it ends within the bookable window.
+function generateCandidateSlots(
+  daysOut: number,
+  rules: FirmBookingRules,
+  durationMinutes: number,
+): AvailabilitySlot[] {
   const slots: AvailabilitySlot[] = []
-  const now = new Date()
-  const nowMs = now.getTime()
+  const tz = rules.timezone
+  const earliestMs = Date.now() + rules.minLeadTimeHours * 3600_000
+  const startMin = rules.bookableHours.start * 60
+  const endMin = rules.bookableHours.end * 60
   const todayParts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: ATTORNEY_TZ,
+    timeZone: tz,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   })
-    .format(now)
+    .format(new Date())
     .split('-')
     .map(Number)
 
   for (let dayOffset = 0; dayOffset <= daysOut; dayOffset += 1) {
     const date = new Date(Date.UTC(todayParts[0]!, todayParts[1]! - 1, todayParts[2]! + dayOffset))
-    const dow = date.getUTCDay()
-    if (dow === 0 || dow === 6) continue // Sun, Sat
+    if (!rules.bookableDays.includes(date.getUTCDay())) continue
     const y = date.getUTCFullYear()
     const m = date.getUTCMonth() + 1
     const d = date.getUTCDate()
 
-    for (let hour = WORKING_HOUR_START; hour < WORKING_HOUR_END; hour += 1) {
-      for (const startMinute of [0, 30]) {
-        const startIso = isoFromZonedWallTime(y, m, d, hour, startMinute, ATTORNEY_TZ)
-        const endMinute = startMinute === 0 ? SLOT_MINUTES : 0
-        const endHour = startMinute === 0 ? hour : hour + 1
-        const endIso = isoFromZonedWallTime(y, m, d, endHour, endMinute, ATTORNEY_TZ)
-        if (new Date(startIso).getTime() <= nowMs) continue
-        slots.push({
-          startIso,
-          endIso,
-          available: true,
-          label: new Date(startIso).toLocaleString('en-US', {
-            timeZone: ATTORNEY_TZ,
-            weekday: 'short',
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-          }),
-        })
-      }
+    // Step the grid by granularity; a slot must fit fully inside the window.
+    for (let t = startMin; t + durationMinutes <= endMin; t += rules.slotGranularityMinutes) {
+      const startIso = isoFromZonedWallTime(y, m, d, Math.floor(t / 60), t % 60, tz)
+      const endT = t + durationMinutes
+      const endIso = isoFromZonedWallTime(y, m, d, Math.floor(endT / 60), endT % 60, tz)
+      if (new Date(startIso).getTime() <= earliestMs) continue
+      slots.push({
+        startIso,
+        endIso,
+        available: true,
+        label: new Date(startIso).toLocaleString('en-US', {
+          timeZone: tz,
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        }),
+      })
     }
   }
   return slots
 }
 
-// Returns the working-hour template with every slot marked available. Used as
-// a fallback when Google isn't connected or the freebusy call fails.
-export function getStubAvailability(daysOut = 7): AvailabilitySlot[] {
-  return generateCandidateSlots(daysOut)
+// Returns the rules-shaped template with every slot marked available. Used as a
+// fallback when Google isn't connected or the freebusy call fails — so even the
+// honestly-labeled "sample times" reflect the firm's configured hours/duration.
+export function getStubAvailability(
+  daysOut: number,
+  rules: FirmBookingRules,
+  durationMinutes: number,
+): AvailabilitySlot[] {
+  return generateCandidateSlots(daysOut, rules, durationMinutes)
 }
 
 // Raw busy blocks (epoch ms) from the synced Google calendar's freebusy for a
@@ -401,19 +409,25 @@ async function queryBusyBlocks(
 
 export async function getGoogleAvailability(
   tenantId: string,
-  daysOut = 14,
-  actorId?: string | null,
+  daysOut: number,
+  actorId: string | null | undefined,
+  rules: FirmBookingRules,
+  durationMinutes: number,
 ): Promise<AvailabilitySlot[]> {
   const now = new Date()
   // Pad the horizon by 1 day so freebusy covers the last slot's end time.
   const end = new Date(now.getTime() + (daysOut + 1) * 24 * 3600 * 1000)
   const busy = await queryBusyBlocks(tenantId, now.toISOString(), end.toISOString(), actorId)
 
-  const candidates = generateCandidateSlots(daysOut)
+  // Expand each busy block by the firm buffer on both sides, so a candidate
+  // adjacent to an existing meeting (within the buffer) reads as taken — the
+  // buffer is the required gap between calls.
+  const bufMs = rules.bufferMinutes * 60_000
+  const candidates = generateCandidateSlots(daysOut, rules, durationMinutes)
   return candidates.map((slot) => {
     const s = new Date(slot.startIso).getTime()
     const e = new Date(slot.endIso).getTime()
-    const conflict = busy.some((b) => s < b.end && e > b.start)
+    const conflict = busy.some((b) => s < b.end + bufMs && e > b.start - bufMs)
     return { ...slot, available: !conflict }
   })
 }
@@ -436,11 +450,13 @@ export async function fetchBusyIntervals(
 // problem.
 export async function getAvailability(
   tenantId: string,
-  daysOut = 14,
-  actorId?: string | null,
+  daysOut: number,
+  actorId: string | null | undefined,
+  rules: FirmBookingRules,
+  durationMinutes: number,
 ): Promise<{ slots: AvailabilitySlot[]; source: 'google' | 'stub'; reason?: string }> {
   try {
-    const slots = await getGoogleAvailability(tenantId, daysOut, actorId)
+    const slots = await getGoogleAvailability(tenantId, daysOut, actorId, rules, durationMinutes)
     return { slots, source: 'google' }
   } catch (err) {
     // Defense-in-depth: scrub any bearer/token-like substring before this
@@ -454,7 +470,7 @@ export async function getAvailability(
     // Flip the connection to 'error' so Settings shows the broken sync
     // prominently instead of the UI silently serving stub slots.
     await markConnectionError(tenantId, 'google', reason, actorId).catch(() => {})
-    return { slots: getStubAvailability(daysOut), source: 'stub', reason }
+    return { slots: getStubAvailability(daysOut, rules, durationMinutes), source: 'stub', reason }
   }
 }
 

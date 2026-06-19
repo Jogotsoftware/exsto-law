@@ -45,14 +45,15 @@ const disconnectTool: Tool<Record<string, never>, { disconnected: true }> = {
 // Override the existing calendar.availability tool to use the real Google
 // path when connected (falls back to stub).
 const availabilityTool: Tool<
-  { daysOut?: number },
+  { daysOut?: number; serviceKey?: string },
   { slots: AvailabilitySlot[]; source: 'google' | 'stub' }
 > = {
   name: 'legal.calendar.availability',
   description:
-    'Return upcoming availability slots. Real Google Calendar when connected; stub otherwise.',
+    'Return upcoming availability slots, sliced to the firm booking rules (bookable days/hours, buffer, lead time) and the service duration. Pass serviceKey to size slots to that service; omit for the firm default. Real Google Calendar when connected; stub otherwise.',
   mode: 'read',
-  handler: async (ctx: ActionContext, input) => fetchAvailability(ctx, input?.daysOut ?? 14),
+  handler: async (ctx: ActionContext, input) =>
+    fetchAvailability(ctx, input?.daysOut ?? 14, { serviceKey: input?.serviceKey }),
 }
 
 registerTool(statusTool)

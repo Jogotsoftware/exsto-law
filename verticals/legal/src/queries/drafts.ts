@@ -65,6 +65,71 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
   })
 }
 
+export interface SharedDraftView extends PendingDraftSummary {
+  bodyMarkdown: string
+}
+
+// Client-safe projection for the PUBLIC shared-draft view (/d/[versionId]).
+// Returns ONLY the document body + identifying metadata — NEVER the internal
+// reasoning trace, model identity, confidence, or attorney review notes. Those
+// stay on the authenticated attorney path (getDraftVersion / `legal.draft.get`).
+// Rejected and revision_requested versions are treated as unavailable so a stale
+// share link can't surface a draft the attorney has pulled back.
+export async function getSharedDraftVersion(
+  ctx: ActionContext,
+  documentVersionId: string,
+): Promise<SharedDraftView | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      version_id: string
+      document_entity_id: string
+      matter_entity_id: string
+      matter_number: string
+      document_kind: string
+      version_number: number
+      status: string
+      recorded_at: string
+      body: string
+    }>(
+      `SELECT
+         dv.id AS version_id,
+         dv.document_entity_id,
+         r.target_entity_id AS matter_entity_id,
+         e_matter.name AS matter_number,
+         coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
+         dv.version_number,
+         dv.status,
+         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at,
+         cb.body
+       FROM document_version dv
+       JOIN content_blob cb ON cb.id = dv.content_blob_id
+       JOIN entity e_doc ON e_doc.id = dv.document_entity_id
+       JOIN relationship r ON r.source_entity_id = dv.document_entity_id
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+       JOIN entity e_matter ON e_matter.id = r.target_entity_id
+       WHERE dv.tenant_id = $1
+         AND dv.id = $2
+         AND rkd.kind_name = 'draft_of'
+         AND dv.status NOT IN ('rejected', 'revision_requested')
+       LIMIT 1`,
+      [ctx.tenantId, documentVersionId],
+    )
+    const row = res.rows[0]
+    if (!row) return null
+    return {
+      documentVersionId: row.version_id,
+      documentEntityId: row.document_entity_id,
+      matterEntityId: row.matter_entity_id,
+      matterNumber: row.matter_number,
+      documentKind: row.document_kind,
+      versionNumber: row.version_number,
+      status: row.status,
+      recordedAt: row.recorded_at,
+      bodyMarkdown: row.body,
+    }
+  })
+}
+
 export async function getDraftVersion(
   ctx: ActionContext,
   documentVersionId: string,
