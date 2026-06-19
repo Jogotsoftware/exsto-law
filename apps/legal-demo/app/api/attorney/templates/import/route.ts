@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server'
 import mammoth from 'mammoth'
 import { PDFParse } from 'pdf-parse'
 import { readSessionFromCookieHeader } from '@/lib/session'
+import { htmlToMarkdown } from '@/lib/templateBody'
 
-// Template import: parse an uploaded document to plain text the Templates builder
-// drops into the editor. This is stateless parsing — it touches NO substrate
-// table, so it lives as an app route (not an MCP tool). Attorney-gated exactly
-// like the MCP route: a verified session cookie in prod, dev-only header fallback.
+// Template import: parse an uploaded document into markdown the Templates builder
+// drops into the editor. DOCX and HTML are converted STRUCTURALLY (headings,
+// bold/italic, lists survive) via the same HTML→markdown bridge the editor uses;
+// PDF and plain text come through as text. This is stateless parsing — it touches
+// NO substrate table, so it lives as an app route (not an MCP tool). Attorney-gated
+// exactly like the MCP route: a verified session cookie in prod, dev-only headers.
 export const runtime = 'nodejs'
 
 const MAX_BYTES = 10 * 1024 * 1024 // 10 MB
@@ -43,15 +46,22 @@ export async function POST(request: Request) {
       name.endsWith('.docx') ||
       type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ) {
-      const result = await mammoth.extractRawText({ buffer })
-      text = result.value ?? ''
+      // Structured: convert to HTML (preserving headings/bold/italic/lists), then
+      // to markdown via the editor's bridge so the import matches what the editor
+      // round-trips. (extractRawText would flatten all formatting to bare text.)
+      const result = await mammoth.convertToHtml({ buffer })
+      text = htmlToMarkdown(result.value ?? '')
     } else if (name.endsWith('.doc')) {
       return NextResponse.json(
         { error: 'Legacy .doc isn’t supported — save it as .docx or PDF and try again.' },
         { status: 415 },
       )
+    } else if (name.endsWith('.html') || name.endsWith('.htm') || type === 'text/html') {
+      // Structured HTML → markdown (same bridge), so an exported web/Word HTML
+      // keeps its structure instead of dumping raw tags into the editor.
+      text = htmlToMarkdown(buffer.toString('utf8'))
     } else {
-      // .txt / .md / .html / anything text-like.
+      // .txt / .md / anything else text-like — already plain text or markdown.
       text = buffer.toString('utf8')
     }
     // Normalize line endings and collapse runs of blank lines for a clean paste.

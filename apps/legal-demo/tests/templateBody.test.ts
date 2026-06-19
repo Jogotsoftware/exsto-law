@@ -61,4 +61,19 @@ describe('template body round-trip', () => {
     expect(roundTrip('')).toBe('')
     expect(markdownToHtml('')).toBe('')
   })
+
+  // The DOCX/HTML import route runs mammoth.convertToHtml then htmlToMarkdown, so
+  // an imported Word document keeps its structure instead of flattening to text.
+  it('converts mammoth-style structured HTML to markdown (import path)', () => {
+    const docxHtml =
+      '<h1>Operating Agreement</h1>' +
+      '<p>This agreement is <strong>made</strong> by <em>the parties</em> for form_1099.</p>' +
+      '<ul><li>Member A</li><li>Member B</li></ul>'
+    const md = htmlToMarkdown(docxHtml)
+    expect(md).toMatch(/^#\s*Operating Agreement/m)
+    expect(md).toMatch(/\*\*made\*\*/)
+    expect(md).toMatch(/_the parties_|\*the parties\*/)
+    expect(md).toMatch(/[-*]\s+Member A/)
+    expect(md).toContain('form_1099') // no spurious escaping
+  })
 })
