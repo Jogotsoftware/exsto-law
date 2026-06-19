@@ -6,7 +6,7 @@
 // their matters; events created directly in Google appear here (live read) as
 // read-only. The fetch window follows the active view, so month pulls the whole
 // month grid, day pulls a single day, etc.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
@@ -100,6 +100,38 @@ function periodFor(
   }
 }
 
+// Hourly time-grid metrics. One hour = HOUR_PX tall; the grid is the full 24h and
+// scrolls, opening near the workday.
+const HOUR_PX = 48
+
+function formatHourLabel(h: number): string {
+  if (h === 0) return '12 AM'
+  if (h === 12) return '12 PM'
+  return h < 12 ? `${h} AM` : `${h - 12} PM`
+}
+
+// Position a day's timed events: top/height in px from midnight, plus a small
+// cascading inset for events that overlap an earlier one so concurrent meetings
+// stay individually visible (full lane-splitting is overkill at firm scale).
+function layoutTimed(
+  dayEvents: WorkspaceEvent[],
+): Array<{ e: WorkspaceEvent; top: number; height: number; inset: number }> {
+  const sorted = [...dayEvents].sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1))
+  return sorted.map((e, i) => {
+    const day0 = startOfDay(new Date(e.startIso!)).getTime()
+    const s = new Date(e.startIso!).getTime()
+    const en = e.endIso ? new Date(e.endIso).getTime() : s + 3600_000
+    const top = Math.max(0, ((s - day0) / 3600_000) * HOUR_PX)
+    const height = Math.max(22, ((Math.max(en, s + 600_000) - s) / 3600_000) * HOUR_PX)
+    const inset = sorted.slice(0, i).filter((o) => {
+      const os = new Date(o.startIso!).getTime()
+      const oe = o.endIso ? new Date(o.endIso).getTime() : os + 3600_000
+      return os < en && oe > s
+    }).length
+    return { e, top, height, inset }
+  })
+}
+
 export default function CalendarPage() {
   const [anchor, setAnchor] = useState(() => new Date())
   const [view, setView] = useState<View>('week')
@@ -120,6 +152,8 @@ export default function CalendarPage() {
   const [assignFor, setAssignFor] = useState<{ eventId: string; matterEntityId: string } | null>(
     null,
   )
+  // The hourly grid scrolls the full 24h; open it near the workday.
+  const gridScrollRef = useRef<HTMLDivElement>(null)
 
   const period = useMemo(() => periodFor(anchor, view), [anchor, view])
   const fromIso = period.start.toISOString()
@@ -155,6 +189,14 @@ export default function CalendarPage() {
   useEffect(() => {
     load()
   }, [fromIso, toIso])
+
+  // Open the hourly grid scrolled to ~7:30am so the workday is visible without
+  // scrolling, while the full 24h stays reachable.
+  useEffect(() => {
+    if ((view === 'day' || view === 'week') && gridScrollRef.current) {
+      gridScrollRef.current.scrollTop = 7.5 * HOUR_PX
+    }
+  }, [view, fromIso])
 
   // Contract D — launchScheduler: open the event creator pre-wired from query
   // params (?create=1&matterId=…). Runs once matters are loaded so the matter
@@ -379,6 +421,154 @@ export default function CalendarPage() {
     )
   }
 
+  // A positioned event block in the hourly grid. Matter-linked events deep-link to
+  // the matter; other Google events open in Google; both are color-coded (gold
+  // left border = app-managed). Reschedule/cancel/assign stay on the List view.
+  function renderGridEvent(e: WorkspaceEvent, top: number, height: number, inset: number) {
+    const cls = `cal-event${e.managedByApp ? ' managed' : ''}`
+    const style = { top, height, left: `calc(3px + ${inset * 12}px)`, zIndex: 2 + inset }
+    const inner = (
+      <>
+        <span className="cal-event-time">
+          {new Date(e.startIso!).toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+          })}
+        </span>
+        <span className="cal-event-title">{e.summary || '(no title)'}</span>
+      </>
+    )
+    if (e.matterEntityId) {
+      return (
+        <Link
+          key={e.eventId}
+          href={`/attorney/matters/${e.matterEntityId}`}
+          className={cls}
+          style={style}
+          title={`${e.summary} — ${e.matterNumber}`}
+        >
+          {inner}
+        </Link>
+      )
+    }
+    if (e.htmlLink) {
+      return (
+        <a
+          key={e.eventId}
+          href={e.htmlLink}
+          target="_blank"
+          rel="noreferrer"
+          className={cls}
+          style={style}
+          title={e.summary}
+        >
+          {inner}
+        </a>
+      )
+    }
+    return (
+      <div key={e.eventId} className={cls} style={style} title={e.summary}>
+        {inner}
+      </div>
+    )
+  }
+
+  // All-day / dateless event chip for the strip above the grid.
+  function renderGridChip(e: WorkspaceEvent) {
+    const cls = `cal-allday-chip${e.managedByApp ? ' managed' : ''}`
+    if (e.matterEntityId) {
+      return (
+        <Link key={e.eventId} href={`/attorney/matters/${e.matterEntityId}`} className={cls}>
+          {e.summary || '(no title)'}
+        </Link>
+      )
+    }
+    return (
+      <span key={e.eventId} className={cls}>
+        {e.summary || '(no title)'}
+      </span>
+    )
+  }
+
+  // Hourly time-grid day/week view (beta feedback: "see full calendar with times").
+  // Rows = hours (full 24h, scrollable); events are absolutely positioned by their
+  // start/end. `days` is one day (Day view) or seven (Week view).
+  function renderTimeGrid(days: Date[]) {
+    const hours = Array.from({ length: 24 }, (_, h) => h)
+    const cols = `56px repeat(${days.length}, minmax(110px, 1fr))`
+    const now = new Date()
+    const sameDay = (e: WorkspaceEvent, day: Date) =>
+      Boolean(e.startIso) && new Date(e.startIso!).toDateString() === day.toDateString()
+    const timed = (day: Date) => layoutTimed(events.filter((e) => !e.allDay && sameDay(e, day)))
+    const allDay = (day: Date) => events.filter((e) => e.allDay && sameDay(e, day))
+    const anyAllDay = days.some((d) => allDay(d).length > 0)
+
+    return (
+      <div className="cal-grid">
+        <div className="cal-grid-head" style={{ gridTemplateColumns: cols }}>
+          <div className="cal-grid-corner" />
+          {days.map((day) => {
+            const isToday = day.toDateString() === now.toDateString()
+            return (
+              <div key={day.toISOString()} className={`cal-grid-dayhead${isToday ? ' today' : ''}`}>
+                {days.length === 1
+                  ? day.toLocaleDateString(undefined, {
+                      weekday: 'long',
+                      month: 'long',
+                      day: 'numeric',
+                    })
+                  : day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}
+              </div>
+            )
+          })}
+        </div>
+
+        {anyAllDay && (
+          <div className="cal-grid-allday" style={{ gridTemplateColumns: cols }}>
+            <div className="cal-grid-corner cal-grid-allday-label">all-day</div>
+            {days.map((day) => (
+              <div key={day.toISOString()} className="cal-grid-allday-col">
+                {allDay(day).map((e) => renderGridChip(e))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="cal-grid-scroll" ref={gridScrollRef}>
+          <div
+            className="cal-grid-body"
+            style={{ gridTemplateColumns: cols, height: 24 * HOUR_PX }}
+          >
+            <div className="cal-grid-axis">
+              {hours.map((h) => (
+                <div key={h} className="cal-grid-hour" style={{ height: HOUR_PX }}>
+                  <span>{formatHourLabel(h)}</span>
+                </div>
+              ))}
+            </div>
+            {days.map((day) => {
+              const isToday = day.toDateString() === now.toDateString()
+              const nowTop = isToday
+                ? ((now.getTime() - startOfDay(now).getTime()) / 3600_000) * HOUR_PX
+                : null
+              return (
+                <div key={day.toISOString()} className="cal-grid-col">
+                  {hours.map((h) => (
+                    <div key={h} className="cal-grid-hline" style={{ height: HOUR_PX }} />
+                  ))}
+                  {nowTop !== null && <div className="cal-grid-now" style={{ top: nowTop }} />}
+                  {timed(day).map(({ e, top, height, inset }) =>
+                    renderGridEvent(e, top, height, inset),
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const sortedEvents = useMemo(
     () =>
       [...events].filter((e) => e.startIso).sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1)),
@@ -506,30 +696,40 @@ export default function CalendarPage() {
 
       {view === 'day' && (
         <section>
-          {dayColumn(period.days[0]!)}
+          {renderTimeGrid(period.days)}
+          <h3 style={{ marginTop: 'var(--space-4)' }}>Agenda</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {eventsByDay(period.days[0]!).length === 0 && (
+              <span className="text-muted text-sm">No events this day.</span>
+            )}
+            {eventsByDay(period.days[0]!).map((e) => renderEvent(e))}
+          </div>
           <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-            Consultation events (highlighted) are managed in-app and sync to Google; other Google
-            events are shown read-only.
+            The grid is your real calendar. Use the agenda to reschedule or cancel consultations or
+            assign a Google event to a matter.
           </p>
         </section>
       )}
 
       {view === 'week' && (
         <section>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(7, minmax(120px, 1fr))',
-              gap: 'var(--space-2)',
-              overflowX: 'auto',
-            }}
-          >
-            {period.days.map((day) => dayColumn(day, { headerWeekday: true }))}
-          </div>
-          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-            Consultation events (highlighted) are managed in-app: reschedules and cancellations sync
-            to Google and are recorded as audited actions. Other Google events are shown read-only.
-          </p>
+          {renderTimeGrid(period.days)}
+          <details style={{ marginTop: 'var(--space-4)' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+              Manage events (reschedule, cancel, assign)
+            </summary>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(7, minmax(120px, 1fr))',
+                gap: 'var(--space-2)',
+                overflowX: 'auto',
+                marginTop: 'var(--space-3)',
+              }}
+            >
+              {period.days.map((day) => dayColumn(day, { headerWeekday: true }))}
+            </div>
+          </details>
         </section>
       )}
 
