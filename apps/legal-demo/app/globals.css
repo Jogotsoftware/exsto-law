@@ -2203,6 +2203,17 @@ pre {
   color: var(--fg);
   margin-top: var(--space-3);
 }
+/* Sandboxed HTML email body. Fixed-ish height with internal scroll (the iframe is
+   script-free, so it can't self-report height); white canvas to match how a mail
+   client renders the message. */
+.mail-msg-iframe {
+  width: 100%;
+  height: 380px;
+  margin-top: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  background: #fff;
+}
 .mail-reply {
   margin-top: var(--space-4);
 }

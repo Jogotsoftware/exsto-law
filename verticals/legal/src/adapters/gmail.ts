@@ -195,6 +195,10 @@ export interface GmailMessage {
   to: string
   sentAt: string | null
   bodyText: string
+  // The raw text/html part when the message has one, so the reader can render the
+  // real formatting (sandboxed) instead of the flattened plaintext. Absent for
+  // plaintext-only messages.
+  bodyHtml?: string
 }
 
 export interface GmailThreadDetail {
@@ -289,6 +293,12 @@ function extractText(part: gmail_v1.Schema$MessagePart | undefined): string {
   return ''
 }
 
+// The message's text/html part (raw), for formatted rendering. Empty when the
+// message is plaintext-only.
+function extractHtml(part: gmail_v1.Schema$MessagePart | undefined): string {
+  return findPart(part, 'text/html')
+}
+
 const emailsIn = (v: string | null): string[] =>
   (v ?? '')
     .split(',')
@@ -368,6 +378,7 @@ export async function getClientThread(
       to: headerOf(m, 'To') ?? '',
       sentAt: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : null,
       bodyText: extractText(m.payload) || decodeEntities(m.snippet ?? ''),
+      bodyHtml: extractHtml(m.payload) || undefined,
     }
   })
   const first = msgs[0]

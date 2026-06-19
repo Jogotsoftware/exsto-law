@@ -31,6 +31,9 @@ interface ThreadMessage {
   to: string
   sentAt: string | null
   bodyText: string
+  // The message's HTML part, when present — rendered in a locked-down sandboxed
+  // iframe so formatting (bold, lists, links) shows without trusting the markup.
+  bodyHtml?: string
 }
 
 interface ThreadView {
@@ -86,6 +89,24 @@ function relativeDate(iso: string): string {
 }
 
 const EMPTY_BODY: ComposerValue = { html: '', text: '' }
+
+// An email body. When the message has an HTML part we render it in a LOCKED-DOWN
+// sandboxed iframe: sandbox allows only popups (so links open in a new tab) — no
+// scripts and no same-origin, so untrusted email markup can neither run code nor
+// reach the app/session. Plaintext-only messages fall back to the text div.
+function MailMessageBody({ html, text }: { html?: string; text: string }) {
+  if (html && html.trim()) {
+    return (
+      <iframe
+        title="Email content"
+        className="mail-msg-iframe"
+        sandbox="allow-popups allow-popups-to-escape-sandbox"
+        srcDoc={html}
+      />
+    )
+  }
+  return <div className="mail-msg-body">{text.trim()}</div>
+}
 
 export default function MailPage() {
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
@@ -458,7 +479,7 @@ export default function MailPage() {
                     </span>
                   </div>
                   <div className="mail-msg-to">to {m.to}</div>
-                  <div className="mail-msg-body">{m.bodyText.trim()}</div>
+                  <MailMessageBody html={m.bodyHtml} text={m.bodyText} />
                 </div>
               </article>
             ))}
