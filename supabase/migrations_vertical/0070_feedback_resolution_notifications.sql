@@ -27,6 +27,6 @@ INSERT INTO event_kind_definition
    false),
   ('00000000-0000-0000-1014-000000000406', '00000000-0000-0000-0000-000000000001',
    'notification.seen', 'Notifications seen',
-   'Records that an actor opened their in-app notifications: payload.seen_through is the timestamp through which they have seen resolutions. Unread for an actor = assistant.feedback_resolved events addressed to them (recipient_actor_id) that occurred after their latest seen_through. source_ref is the actor; primary_entity_id is null (it is not about an entity).',
+   'Records that an actor opened their in-app notifications. The event''s own occurred_at is the "seen through" line: unread for an actor = assistant.feedback_resolved events addressed to them (recipient_actor_id) that occurred after their latest notification.seen. source_ref is the actor; primary_entity_id is null (it is not about an entity).',
    false)
 ON CONFLICT (id) DO NOTHING;

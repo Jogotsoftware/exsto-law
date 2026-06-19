@@ -85,7 +85,10 @@ export async function listMyNotifications(
       unread: boolean
     }>(
       `WITH seen AS (
-         SELECT max((e.payload->>'seen_through')::timestamptz) AS seen_through
+         -- The actor's last bell-open. We key off the notification.seen event's
+         -- own occurred_at (DB clock) — the same clock the resolutions are stamped
+         -- on — so the unread comparison never depends on app-vs-DB clock skew.
+         SELECT max(e.occurred_at) AS seen_through
          FROM event e
          JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
          WHERE e.tenant_id = $1 AND ekd.kind_name = 'notification.seen'
@@ -122,8 +125,9 @@ export async function listMyNotifications(
   })
 }
 
-// Mark the actor's notifications seen through now (records a notification.seen).
-// Called when the attorney opens the bell — clears the unread badge.
+// Mark the actor's notifications seen (records a notification.seen). Called when
+// the attorney opens the bell — its occurred_at (DB clock) becomes the "seen
+// through" line listMyNotifications compares against, clearing the unread badge.
 export async function markNotificationsSeen(ctx: ActionContext): Promise<{ eventId: string }> {
   const res = await submitAction(ctx, {
     actionKindName: 'event.record',
@@ -133,7 +137,7 @@ export async function markNotificationsSeen(ctx: ActionContext): Promise<{ event
       primary_entity_id: null,
       source_type: 'human',
       source_ref: ctx.actorId,
-      data: { seen_through: new Date().toISOString() },
+      data: { via: 'bell' },
     },
   })
   const eventId = (res.effects[0] as { eventId: string } | undefined)?.eventId ?? res.actionId
