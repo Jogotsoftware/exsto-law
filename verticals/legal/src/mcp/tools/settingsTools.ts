@@ -51,7 +51,9 @@ registerTool({
   description:
     'Update the firm booking rules. Undefined fields are left alone; every value is clamped to a safe range before it is saved.',
   mode: 'write',
-  handler: async (ctx: ActionContext, input) => ({ rules: await updateFirmBookingRules(ctx, input) }),
+  handler: async (ctx: ActionContext, input) => ({
+    rules: await updateFirmBookingRules(ctx, input),
+  }),
 } satisfies Tool<Partial<FirmBookingRules>, { rules: FirmBookingRules }>)
 
 // ── Integrations ─────────────────────────────────────────────────────────────

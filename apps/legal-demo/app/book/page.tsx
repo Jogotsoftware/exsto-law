@@ -184,34 +184,34 @@ export default function BookPage() {
 
   const fetchSlots = useCallback(
     async (daysOut: number, opts: { silent?: boolean; serviceKey?: string } = {}) => {
-    const seq = ++slotsReqSeq.current
-    if (!opts.silent) setSlotsRefreshing(true)
-    try {
-      const r = await callClientMcp<{
-        slots: CalendarSlot[]
-        source: 'google' | 'stub'
-        reason?: string
-      }>({
-        toolName: 'legal.calendar.availability',
-        // serviceKey sizes each slot to the service's configured duration
-        // (Contract G); omitted on the mount prefetch, then supplied once a
-        // service is chosen so the grid matches the booked call length.
-        input: { daysOut, serviceKey: opts.serviceKey },
-      })
-      if (seq !== slotsReqSeq.current) return // superseded by a newer fetch
-      setSlots(r.slots)
-      setSlotsSource(r.source)
-      setSlotsLastUpdated(new Date())
-      if (r.source === 'stub' && r.reason) {
-        // Surface server-side fallback reason in the browser console so we
-        // can diagnose without grepping function logs.
-        console.warn('[availability] Google fallback to stub:', r.reason)
+      const seq = ++slotsReqSeq.current
+      if (!opts.silent) setSlotsRefreshing(true)
+      try {
+        const r = await callClientMcp<{
+          slots: CalendarSlot[]
+          source: 'google' | 'stub'
+          reason?: string
+        }>({
+          toolName: 'legal.calendar.availability',
+          // serviceKey sizes each slot to the service's configured duration
+          // (Contract G); omitted on the mount prefetch, then supplied once a
+          // service is chosen so the grid matches the booked call length.
+          input: { daysOut, serviceKey: opts.serviceKey },
+        })
+        if (seq !== slotsReqSeq.current) return // superseded by a newer fetch
+        setSlots(r.slots)
+        setSlotsSource(r.source)
+        setSlotsLastUpdated(new Date())
+        if (r.source === 'stub' && r.reason) {
+          // Surface server-side fallback reason in the browser console so we
+          // can diagnose without grepping function logs.
+          console.warn('[availability] Google fallback to stub:', r.reason)
+        }
+      } catch {
+        // leave previous slots in place on transient failure
+      } finally {
+        if (seq === slotsReqSeq.current && !opts.silent) setSlotsRefreshing(false)
       }
-    } catch {
-      // leave previous slots in place on transient failure
-    } finally {
-      if (seq === slotsReqSeq.current && !opts.silent) setSlotsRefreshing(false)
-    }
     },
     [],
   )
