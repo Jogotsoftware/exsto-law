@@ -1,5 +1,13 @@
 'use client'
 
+// Service editor › SETTINGS tab. Owns the service's identity and how it's offered:
+// display name, workflow route, booking-page description, document-generation mode
+// (which also decides whether the Prompt tab appears), and per-service booking —
+// including the live public booking link. Pricing lives on the Billing tab and the
+// document list on the Templates tab; both carry forward untouched on save here
+// (legal.service.update merges, so omitted config is preserved). Also hosts the
+// setup checklist + enable/disable. The page chrome (title, status, Back, tabs)
+// is provided by the [serviceKey] layout, so this renders panel content only.
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -18,7 +26,6 @@ interface ServiceCost {
   amount: string
   hours: number | null
 }
-
 interface ServiceDefinition {
   id: string
   serviceKey: string
@@ -34,62 +41,50 @@ interface ServiceDefinition {
   sortOrder: number
   updatedAt: string
 }
-
-interface FormState {
-  displayName: string
-  // Round-tripped, not shown (WP2.3: no descriptions / no raw sort_order surfaced).
-  description: string
-  route: 'auto' | 'manual'
-  documents: string[]
-  sortOrder: string
-  // Contract G (WP2.3): document generation + per-service booking, flattened for
-  // the form. costType '' means no fee is set.
-  generationMode: GenerationMode
-  bookingEnabled: boolean
-  bookingSendInvite: boolean
-  bookingDuration: BookingDuration
-  costType: '' | 'hourly' | 'fixed'
-  costAmount: string
-  costHours: string
-}
-
 interface Completeness {
   serviceKey: string
   ready: boolean
   missing: string[]
 }
 
+interface FormState {
+  displayName: string
+  description: string
+  route: 'auto' | 'manual'
+  generationMode: GenerationMode
+  bookingEnabled: boolean
+  bookingSendInvite: boolean
+  bookingDuration: BookingDuration
+}
+
 const EMPTY: FormState = {
   displayName: '',
   description: '',
   route: 'manual',
-  documents: [],
-  sortOrder: '',
   generationMode: 'template_merge',
   bookingEnabled: false,
   bookingSendInvite: true,
   bookingDuration: 30,
-  costType: '',
-  costAmount: '',
-  costHours: '',
 }
 
-export default function ServiceEditorPage() {
+export default function ServiceSettingsPage() {
   const params = useParams<{ serviceKey: string }>()
   const router = useRouter()
   const serviceKey = params.serviceKey
   const isNew = serviceKey === 'new'
 
   const [form, setForm] = useState<FormState | null>(isNew ? EMPTY : null)
+  // The loaded service, kept so saves preserve config this tab doesn't edit
+  // (documents, sort order — carried forward explicitly; cost — carried via merge).
   const [meta, setMeta] = useState<ServiceDefinition | null>(null)
   const [completeness, setCompleteness] = useState<Completeness | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [enabling, setEnabling] = useState(false)
   const [saved, setSaved] = useState(false)
-  // Existing services open in a clean read state; the form (the "wizard") shows
-  // only when editing or creating (WP2.3).
-  const [editing, setEditing] = useState(isNew)
+  const [origin, setOrigin] = useState('')
+
+  useEffect(() => setOrigin(window.location.origin), [])
 
   const load = useCallback(async () => {
     if (isNew) return
@@ -107,15 +102,10 @@ export default function ServiceEditorPage() {
         displayName: r.service.displayName,
         description: r.service.description ?? '',
         route: r.service.route,
-        documents: r.service.documents,
-        sortOrder: String(r.service.sortOrder),
         generationMode: r.service.generationMode ?? 'template_merge',
         bookingEnabled: r.service.booking?.enabled ?? false,
         bookingSendInvite: r.service.booking?.send_calendar_invite ?? true,
         bookingDuration: r.service.booking?.duration_minutes ?? 30,
-        costType: r.service.cost?.type ?? '',
-        costAmount: r.service.cost?.amount ?? '',
-        costHours: r.service.cost?.hours != null ? String(r.service.cost.hours) : '',
       })
       const c = await callAttorneyMcp<Completeness>({
         toolName: 'legal.service.completeness',
@@ -135,10 +125,7 @@ export default function ServiceEditorPage() {
     setEnabling(true)
     setError(null)
     try {
-      await callAttorneyMcp({
-        toolName: 'legal.service.set_active',
-        input: { serviceKey, active },
-      })
+      await callAttorneyMcp({ toolName: 'legal.service.set_active', input: { serviceKey, active } })
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -158,79 +145,63 @@ export default function ServiceEditorPage() {
       setError('A display name is required.')
       return
     }
-    if (form.costType !== '' && !/^\d+(\.\d{1,2})?$/.test(form.costAmount.trim())) {
-      setError('Enter the rate as an amount like 350 or 350.00.')
-      return
-    }
     setBusy(true)
     setError(null)
     try {
-      const documents = form.documents.map((d) => d.trim()).filter(Boolean)
-      const sortOrder = form.sortOrder.trim() ? Number(form.sortOrder) : undefined
-      const base = {
-        displayName: form.displayName.trim(),
-        description: form.description.trim() || null,
-        route: form.route,
-        documents,
-        sortOrder,
-      }
-      // Contract G (WP2.3): metadata + generation_mode + the booking block + the
-      // inline rate. costType '' clears the fee (cost: null).
-      const cost: ServiceCost | null =
-        form.costType === ''
-          ? null
-          : {
-              type: form.costType,
-              amount: form.costAmount.trim(),
-              hours:
-                form.costType === 'hourly' && form.costHours.trim() ? Number(form.costHours) : null,
-            }
       const booking: ServiceBooking = {
         enabled: form.bookingEnabled,
         send_calendar_invite: form.bookingSendInvite,
         duration_minutes: form.bookingDuration,
       }
       if (isNew) {
+        // Create with identity + route only; the guided flow then sends the
+        // attorney into the questionnaire. Generation/booking are written in a
+        // second call only if they differ from defaults, to avoid a needless
+        // version. Documents, pricing, questionnaire are configured on their tabs.
         const r = await callAttorneyMcp<{ service: ServiceDefinition }>({
           toolName: 'legal.service.create',
-          input: base,
+          input: {
+            displayName: form.displayName.trim(),
+            description: form.description.trim() || null,
+            route: form.route,
+          },
         })
         const newKey = r.service.serviceKey
-        // Persist the full config captured in the builder (cost, consultation
-        // length, generation) on the brand-new service before guiding into the
-        // questionnaire — skipped when everything was left at defaults so we don't
-        // write a needless second version.
-        const nonDefault =
-          form.costType !== '' ||
-          form.bookingEnabled ||
-          form.generationMode !== 'template_merge' ||
-          form.bookingDuration !== 30
-        if (nonDefault) {
+        if (form.bookingEnabled || form.generationMode !== 'template_merge') {
           await callAttorneyMcp({
             toolName: 'legal.service.update',
             input: {
               serviceKey: newKey,
-              ...base,
+              displayName: form.displayName.trim(),
+              description: form.description.trim() || null,
+              route: form.route,
               generationMode: form.generationMode,
               booking,
-              cost,
             },
           })
         }
-        // Guided flow: a new service is created disabled with an empty
-        // questionnaire, so send the attorney straight into the questionnaire
-        // builder (step ②) rather than back to a half-built editor page.
         router.push(`/attorney/services/${newKey}/questionnaire`)
         return
       }
+      // Existing: send the fields this tab owns plus documents/sortOrder preserved
+      // from the freshly-loaded meta (so they aren't reset); cost is omitted and
+      // carried forward by the merge.
       await callAttorneyMcp({
         toolName: 'legal.service.update',
-        input: { serviceKey, ...base, generationMode: form.generationMode, booking, cost },
+        input: {
+          serviceKey,
+          displayName: form.displayName.trim(),
+          description: form.description.trim() || null,
+          route: form.route,
+          documents: meta?.documents ?? [],
+          sortOrder: meta?.sortOrder,
+          generationMode: form.generationMode,
+          booking,
+        },
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
       await load()
-      setEditing(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -238,50 +209,18 @@ export default function ServiceEditorPage() {
     }
   }
 
-  return (
-    <main>
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
-      >
-        <h1 style={{ margin: 0 }}>{isNew ? 'New service' : (meta?.displayName ?? 'Service')}</h1>
-        <Link href="/attorney/services" className="back-link" style={{ marginLeft: 'auto' }}>
-          Back to services
-        </Link>
-        {!isNew && (
-          <Link href={`/attorney/services/${serviceKey}/questionnaire`} className="back-link">
-            Edit questionnaire
-          </Link>
-        )}
-        {!isNew && (
-          <Link href={`/attorney/services/${serviceKey}/prompt`} className="back-link">
-            Edit prompt
-          </Link>
-        )}
-        {!isNew && (
-          <Link href={`/attorney/services/${serviceKey}/template`} className="back-link">
-            Edit templates
-          </Link>
-        )}
-        {editing || isNew ? (
-          <button className="primary" onClick={save} disabled={busy || !form}>
-            {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
-          </button>
-        ) : (
-          <button className="primary" onClick={() => setEditing(true)}>
-            Edit details
-          </button>
-        )}
-      </div>
+  const bookingUrl = origin ? `${origin}/book?service=${serviceKey}` : ''
 
+  return (
+    <>
       {!isNew && (
         <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
-          Saving creates a new immutable version. The intake form binding and workflow route carry
-          forward unless changed here.
+          Saving creates a new immutable version. Pricing (Billing tab), documents and questionnaire
+          (their tabs) carry forward unless changed there.
         </p>
       )}
 
-      {!isNew && meta && (editing || !meta.isActive) && (
+      {!isNew && meta && (
         <SetupChecklist
           serviceKey={serviceKey}
           route={meta.route}
@@ -307,7 +246,7 @@ export default function ServiceEditorPage() {
         <div className="loading-block">
           <span className="spinner" /> Loading…
         </div>
-      ) : editing || isNew ? (
+      ) : (
         <section>
           <div className="form-grid">
             <label>
@@ -338,294 +277,145 @@ export default function ServiceEditorPage() {
               placeholder="The plain-language summary clients see when choosing this service on the booking page."
             />
           </label>
-          <DocumentsPills
-            documents={form.documents}
-            onChange={(docs) => update('documents', docs)}
-          />
 
-          <>
-            {/* Document generation, pricing and booking — shown for new and
-                  existing services so the whole offering is configured in one
-                  place. Deterministic merge is the default; AI drafting is opt-in. */}
-            <fieldset className="svc-fieldset">
-              <legend>Document generation</legend>
-              <label>
-                <span>How documents are produced</span>
-                <select
-                  value={form.generationMode}
-                  onChange={(e) => update('generationMode', e.target.value as GenerationMode)}
-                >
-                  <option value="template_merge">
-                    Template merge — fill the template from the answers (no AI)
-                  </option>
-                  <option value="ai_draft">AI draft — the assistant writes the document</option>
-                </select>
-              </label>
-            </fieldset>
-
-            {/* Inline rate (Contract K surfaces this; the value lives on the
-                  service as transitions.cost). */}
-            <fieldset className="svc-fieldset">
-              <legend>Pricing</legend>
-              <div className="form-grid">
-                <label>
-                  <span>Fee</span>
-                  <select
-                    value={form.costType}
-                    onChange={(e) => update('costType', e.target.value as FormState['costType'])}
-                  >
-                    <option value="">No fee set</option>
-                    <option value="hourly">Hourly rate</option>
-                    <option value="fixed">Fixed fee</option>
-                  </select>
-                </label>
-                {form.costType !== '' && (
-                  <label>
-                    <span>
-                      {form.costType === 'hourly' ? 'Hourly rate (USD)' : 'Flat fee (USD)'}
-                    </span>
-                    <input
-                      inputMode="decimal"
-                      value={form.costAmount}
-                      onChange={(e) => update('costAmount', e.target.value)}
-                      placeholder="350.00"
-                    />
-                  </label>
-                )}
-                {form.costType === 'hourly' && (
-                  <label>
-                    <span>Estimated hours (optional)</span>
-                    <input
-                      inputMode="numeric"
-                      value={form.costHours}
-                      onChange={(e) => update('costHours', e.target.value)}
-                      placeholder="e.g. 3"
-                    />
-                  </label>
-                )}
-              </div>
-            </fieldset>
-
-            {/* Per-service booking (Contract G). S5/S6 read this block. */}
-            <fieldset className="svc-fieldset">
-              <legend>Bookings</legend>
-              <label className="svc-check">
-                <input
-                  type="checkbox"
-                  checked={form.bookingEnabled}
-                  onChange={(e) => update('bookingEnabled', e.target.checked)}
-                />
-                <span>Offer this service for online booking</span>
-              </label>
-              <label className="svc-check">
-                <input
-                  type="checkbox"
-                  checked={form.bookingSendInvite}
-                  onChange={(e) => update('bookingSendInvite', e.target.checked)}
-                />
-                <span>Send a calendar invite when a consultation is booked</span>
-              </label>
-              <label style={{ maxWidth: 240 }}>
-                <span>Consultation length</span>
-                <select
-                  value={form.bookingDuration}
-                  onChange={(e) =>
-                    update('bookingDuration', Number(e.target.value) as BookingDuration)
-                  }
-                >
-                  <option value={15}>15 minutes</option>
-                  <option value={30}>30 minutes</option>
-                  <option value={45}>45 minutes</option>
-                  <option value={60}>60 minutes</option>
-                </select>
-              </label>
-            </fieldset>
-          </>
-
-          {!isNew && (
-            <div style={{ marginTop: '0.9rem' }}>
-              <button
-                onClick={() => {
-                  setEditing(false)
-                  load()
-                }}
+          <fieldset className="svc-fieldset">
+            <legend>Document generation</legend>
+            <label>
+              <span>How documents are produced</span>
+              <select
+                value={form.generationMode}
+                onChange={(e) => update('generationMode', e.target.value as GenerationMode)}
               >
-                Cancel
-              </button>
-            </div>
-          )}
-        </section>
-      ) : (
-        <section>
-          <div className="kv-grid">
-            <div>
-              <div className="kv-label">Status</div>
-              <div className="kv-value">
-                <span className={`badge ${meta?.isActive ? 'ok' : ''}`}>
-                  {meta?.isActive ? 'Enabled' : 'Disabled'}
-                </span>
-              </div>
-            </div>
-            <div>
-              <div className="kv-label">Workflow</div>
-              <div className="kv-value">
-                {form.route === 'auto' ? 'Auto — drafts on submit' : 'Manual — attorney drafts'}
-              </div>
-            </div>
-            <div>
-              <div className="kv-label">Documents</div>
-              <div className="kv-value">
-                {form.documents.length === 0
-                  ? '—'
-                  : form.documents.map((d) => (
-                      <span key={d} className="qb-pill" style={{ marginRight: '0.3rem' }}>
-                        {d.replace(/_/g, ' ')}
-                      </span>
-                    ))}
-              </div>
-            </div>
-            <div>
-              <div className="kv-label">Generation</div>
-              <div className="kv-value">
-                {form.generationMode === 'ai_draft' ? 'AI draft' : 'Template merge'}
-              </div>
-            </div>
-            <div>
-              <div className="kv-label">Pricing</div>
-              <div className="kv-value">
-                {form.costType === ''
-                  ? '—'
-                  : form.costType === 'hourly'
-                    ? `$${form.costAmount}/hr${form.costHours ? ` · ~${form.costHours}h` : ''}`
-                    : `$${form.costAmount} fixed`}
-              </div>
-            </div>
-            <div>
-              <div className="kv-label">Booking</div>
-              <div className="kv-value">
-                {form.bookingEnabled
-                  ? `${form.bookingDuration} min${form.bookingSendInvite ? ' · sends invite' : ''}`
-                  : 'Off'}
-              </div>
-            </div>
+                <option value="template_merge">
+                  Template merge — fill the template from the answers (no AI)
+                </option>
+                <option value="ai_draft">AI draft — the assistant writes the document</option>
+              </select>
+            </label>
+            <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: '0.4rem 0 0' }}>
+              {form.generationMode === 'ai_draft'
+                ? 'AI draft uses the per-document instructions on the Prompt tab.'
+                : 'Template merge fills the bodies on the Templates tab — no Prompt tab needed.'}
+            </p>
+          </fieldset>
+
+          <fieldset className="svc-fieldset">
+            <legend>Bookings</legend>
+            <label className="svc-check">
+              <input
+                type="checkbox"
+                checked={form.bookingEnabled}
+                onChange={(e) => update('bookingEnabled', e.target.checked)}
+              />
+              <span>Offer this service for online booking</span>
+            </label>
+            <label className="svc-check">
+              <input
+                type="checkbox"
+                checked={form.bookingSendInvite}
+                onChange={(e) => update('bookingSendInvite', e.target.checked)}
+              />
+              <span>Send a calendar invite when a consultation is booked</span>
+            </label>
+            <label style={{ maxWidth: 240 }}>
+              <span>Consultation length</span>
+              <select
+                value={form.bookingDuration}
+                onChange={(e) =>
+                  update('bookingDuration', Number(e.target.value) as BookingDuration)
+                }
+              >
+                <option value={15}>15 minutes</option>
+                <option value={30}>30 minutes</option>
+                <option value={45}>45 minutes</option>
+                <option value={60}>60 minutes</option>
+              </select>
+            </label>
+            {!isNew && (
+              <BookingLink
+                enabled={form.bookingEnabled}
+                isActive={meta?.isActive ?? false}
+                url={bookingUrl}
+              />
+            )}
+            <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: '0.6rem 0 0' }}>
+              Days, hours and buffer are firm-wide —{' '}
+              <Link href="/attorney/settings" className="back-link">
+                edit booking hours in Settings
+              </Link>
+              .
+            </p>
+          </fieldset>
+
+          <div style={{ marginTop: '0.9rem' }}>
+            <button className="primary" onClick={save} disabled={busy || !form.displayName.trim()}>
+              {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
+            </button>
           </div>
         </section>
       )}
-    </main>
+    </>
   )
 }
 
-// Documents this service produces, as add/remove pills (WP2.3) — replaces the raw
-// comma-separated input. Labels are humanized; the stored value is the slug.
-function DocumentsPills({
-  documents,
-  onChange,
+// The live public booking link for this service. Shown once the service exists.
+// Only actually reachable when the service is enabled AND booking is turned on, so
+// we say so plainly rather than handing out a link that 404s/redirects.
+function BookingLink({
+  enabled,
+  isActive,
+  url,
 }: {
-  documents: string[]
-  onChange: (d: string[]) => void
+  enabled: boolean
+  isActive: boolean
+  url: string
 }) {
-  const [draft, setDraft] = useState('')
-  // Firm document-template library, so a service's documents can be PICKED from
-  // existing templates (searchable dropdown) rather than typed from scratch. A
-  // template's docKind (or a slug of its name) becomes the service's document.
-  const [library, setLibrary] = useState<{ docKind: string; name: string }[]>([])
-  useEffect(() => {
-    callAttorneyMcp<{ templates: { category: string; docKind: string | null; name: string }[] }>({
-      toolName: 'legal.template.list',
-    })
-      .then((r) =>
-        setLibrary(
-          r.templates
-            .filter((t) => t.category === 'document')
-            .map((t) => ({
-              docKind: (t.docKind && t.docKind.trim()) || slug(t.name),
-              name: t.name,
-            }))
-            .filter((t) => t.docKind),
-        ),
-      )
-      .catch(() => setLibrary([]))
-  }, [])
-
-  const slug = (s: string) =>
-    s
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-  const add = () => {
-    const v = slug(draft)
-    if (!v || documents.includes(v)) return setDraft('')
-    onChange([...documents, v])
-    setDraft('')
-  }
-  const available = library.filter((l) => !documents.includes(l.docKind))
-
+  const [copied, setCopied] = useState(false)
+  const live = enabled && isActive
   return (
-    <div style={{ marginTop: '0.6rem' }}>
-      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Documents this service produces</span>
-      <div className="qb-pills">
-        {documents.map((d) => (
-          <span key={d} className="qb-pill">
-            {d.replace(/_/g, ' ')}
-            <button
-              type="button"
-              title="Remove"
-              onClick={() => onChange(documents.filter((x) => x !== d))}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-        {documents.length === 0 && (
-          <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>None yet</span>
-        )}
-      </div>
-      <div className="qb-pill-add">
-        {library.length > 0 && (
-          <select
-            value=""
-            aria-label="Add a document from the template library"
-            onChange={(e) => {
-              const kind = e.target.value
-              if (kind && !documents.includes(kind)) onChange([...documents, kind])
-            }}
-          >
-            <option value="">Add from template library…</option>
-            {available.map((l) => (
-              <option key={l.docKind} value={l.docKind}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              add()
+    <div style={{ marginTop: '0.7rem' }}>
+      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Booking link</span>
+      <div className="qb-pill-add" style={{ marginTop: '0.3rem' }}>
+        <input value={url} readOnly onFocus={(e) => e.currentTarget.select()} />
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(url)
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            } catch {
+              /* clipboard blocked — the field is selectable as a fallback */
             }
           }}
-          placeholder="or type a new one, e.g. operating agreement"
-        />
-        <button type="button" onClick={add}>
-          Add
+        >
+          {copied ? 'Copied' : 'Copy'}
         </button>
-        <Link href="/attorney/templates" className="back-link" style={{ marginLeft: 'auto' }}>
-          Open template wizard →
-        </Link>
+        <a href={url} target="_blank" rel="noreferrer" className="back-link">
+          Open ↗
+        </a>
       </div>
+      <p
+        style={{
+          color: live ? '#166534' : 'var(--muted)',
+          fontSize: '0.8rem',
+          margin: '0.3rem 0 0',
+        }}
+      >
+        {live
+          ? 'Live — clients can book this service at the link above.'
+          : !isActive
+            ? 'The service must be enabled (below) before this link accepts bookings.'
+            : 'Turn on “Offer this service for online booking” and save to make this link live.'}
+      </p>
     </div>
   )
 }
 
-// The guided setup checklist + enable gate (PR4). Steps mirror the build flow:
-// ① metadata (done once the row exists) ② questionnaire ③ prompt (auto only)
-// ④ Enable. Steps ②/③ derive their status from the server's completeness check,
-// so the UI and the set_active handler guard never disagree. The Enable button is
-// disabled until completeness.ready; the remaining reasons are listed beneath it.
+// Setup checklist + enable gate. When the service is already enabled it collapses
+// to a single status line + Disable; when disabled it shows the remaining steps
+// (links into the relevant tabs) and gates the Enable button on the server
+// completeness check, so the UI and the set_active handler never disagree.
 function SetupChecklist({
   serviceKey,
   route,
@@ -643,16 +433,33 @@ function SetupChecklist({
   onEnable: () => void
   onDisable: () => void
 }) {
+  if (isActive) {
+    return (
+      <section
+        style={{
+          borderLeft: '3px solid #86efac',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.7rem',
+        }}
+      >
+        <span style={{ color: '#166534' }}>✓ Enabled and bookable.</span>
+        <button className="danger outline" onClick={onDisable} disabled={enabling}>
+          {enabling ? '…' : 'Disable service'}
+        </button>
+      </section>
+    )
+  }
+
   const missing = completeness?.missing ?? []
   const needsQuestionnaire = missing.some((m) => m.toLowerCase().includes('questionnaire'))
   const needsPrompt = missing.some((m) => m.toLowerCase().includes('prompt'))
   const needsTemplate = missing.some((m) => m.toLowerCase().includes('template'))
   const ready = completeness?.ready ?? false
 
-  const steps: { n: string; label: string; done: boolean; href?: string }[] = [
-    { n: '①', label: 'Service details', done: true },
+  const steps: { label: string; done: boolean; href?: string }[] = [
+    { label: 'Service details', done: true },
     {
-      n: '②',
       label: 'Questionnaire',
       done: !needsQuestionnaire,
       href: `/attorney/services/${serviceKey}/questionnaire`,
@@ -660,32 +467,32 @@ function SetupChecklist({
   ]
   if (route === 'auto') {
     steps.push({
-      n: '③',
       label: 'Drafting prompt',
       done: !needsPrompt,
       href: `/attorney/services/${serviceKey}/prompt`,
     })
     steps.push({
-      n: '④',
       label: 'Document template',
       done: !needsTemplate,
-      href: `/attorney/services/${serviceKey}/template`,
+      href: `/attorney/services/${serviceKey}/templates`,
     })
   }
 
   return (
     <section style={{ borderLeft: '3px solid var(--border)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
-        <strong>Setup checklist</strong>
-        <span className={`badge ${isActive ? 'ok' : ''}`} style={{ marginLeft: 'auto' }}>
-          {isActive ? 'Enabled' : 'Disabled'}
-        </span>
-      </div>
-
-      <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '0.4rem' }}>
+      <strong>Setup checklist</strong>
+      <ol
+        style={{
+          listStyle: 'none',
+          margin: '0.6rem 0 0',
+          padding: 0,
+          display: 'grid',
+          gap: '0.4rem',
+        }}
+      >
         {steps.map((s) => (
           <li
-            key={s.n}
+            key={s.label}
             style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}
           >
             <span aria-hidden style={{ color: s.done ? '#166534' : 'var(--muted)' }}>
@@ -699,39 +506,23 @@ function SetupChecklist({
             )}
           </li>
         ))}
-        <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}>
-          <span aria-hidden style={{ color: isActive ? '#166534' : 'var(--muted)' }}>
-            {isActive ? '✓' : '◯'}
-          </span>
-          <span style={{ color: isActive ? 'inherit' : 'var(--muted)' }}>Enable for booking</span>
-        </li>
       </ol>
-
       <div style={{ marginTop: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
-        {isActive ? (
-          <button className="danger outline" onClick={onDisable} disabled={enabling}>
-            {enabling ? '…' : 'Disable service'}
-          </button>
-        ) : (
-          <button
-            className="primary"
-            onClick={onEnable}
-            disabled={enabling || !ready || completeness === null}
-            title={
-              ready ? 'Make this service bookable' : `Finish setup first: ${missing.join('; ')}`
-            }
-          >
-            {enabling ? 'Enabling…' : 'Enable service'}
-          </button>
-        )}
-        {!isActive && !ready && completeness && (
+        <button
+          className="primary"
+          onClick={onEnable}
+          disabled={enabling || !ready || completeness === null}
+          title={ready ? 'Make this service bookable' : `Finish setup first: ${missing.join('; ')}`}
+        >
+          {enabling ? 'Enabling…' : 'Enable service'}
+        </button>
+        {!ready && completeness && (
           <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
             Not bookable yet — complete the steps above.
           </span>
         )}
       </div>
-
-      {!isActive && missing.length > 0 && (
+      {missing.length > 0 && (
         <ul
           style={{
             margin: '0.6rem 0 0',

@@ -19,7 +19,10 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 interface ServiceDefinition {
   serviceKey: string
   displayName: string
+  description: string | null
+  route: 'auto' | 'manual'
   documents: string[]
+  sortOrder: number
 }
 interface TemplateDoc {
   documentKind: string
@@ -30,6 +33,14 @@ interface TemplateDoc {
 interface QField {
   id: string
   label: string
+}
+// A document template from the firm-wide library (legal.template.* / migration
+// 0023): used both to populate the "add document" picker and to seed/save a
+// service document body.
+interface LibraryDoc {
+  docKind: string
+  name: string
+  body: string
 }
 
 const TOKEN_RE = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
@@ -70,8 +81,31 @@ export default function TemplateEditorPage() {
   const [service, setService] = useState<ServiceDefinition | null>(null)
   const [templates, setTemplates] = useState<TemplateDoc[]>([])
   const [fields, setFields] = useState<QField[]>([])
+  const [library, setLibrary] = useState<LibraryDoc[]>([])
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+
+  // The firm document-template library, fetched once: it powers the "add document"
+  // picker and the per-document start-from / save-to-library actions.
+  const loadLibrary = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{
+        templates: { category: string; docKind: string | null; name: string; body: string }[]
+      }>({ toolName: 'legal.template.list' })
+      setLibrary(
+        r.templates
+          .filter((t) => t.category === 'document')
+          .map((t) => ({
+            docKind: (t.docKind && t.docKind.trim()) || slugify(t.name),
+            name: t.name,
+            body: t.body ?? '',
+          }))
+          .filter((t) => t.docKind),
+      )
+    } catch {
+      setLibrary([])
+    }
+  }, [])
 
   const loadQuestionnaire = useCallback(async () => {
     const r = await callAttorneyMcp<{
@@ -119,7 +153,8 @@ export default function TemplateEditorPage() {
 
   useEffect(() => {
     load()
-  }, [load])
+    loadLibrary()
+  }, [load, loadLibrary])
 
   // Add fields to the bound questionnaire through the core, then refresh. Used by
   // "add orphan as a question", inline new-field creation, and "build from template".
@@ -151,24 +186,11 @@ export default function TemplateEditorPage() {
   )
 
   return (
-    <main>
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
-      >
-        <h1 style={{ margin: 0 }}>Document templates</h1>
-        <Link
-          href={`/attorney/services/${serviceKey}`}
-          className="back-link"
-          style={{ marginLeft: 'auto' }}
-        >
-          Back to service
-        </Link>
-      </div>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
-        Write each document the way it should read. Insert a field by clicking a question below —
-        that places a marker bound to the answer. Generating a document fills those markers from the
-        client&rsquo;s answers; no AI is involved.
+    <>
+      <p style={{ color: 'var(--muted)', marginTop: '-0.2rem' }}>
+        Choose which documents this service produces, then write each one. Insert a field by
+        clicking a question below — that places a marker bound to the answer. Generating a document
+        fills those markers from the client&rsquo;s answers; no AI is involved.
       </p>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -185,22 +207,151 @@ export default function TemplateEditorPage() {
         <div className="loading-block">
           <span className="spinner" /> Loading…
         </div>
-      ) : templates.length === 0 ? (
-        <div className="loading-block">
-          This service has no documents yet. Add a document on the service editor first.
-        </div>
       ) : (
-        templates.map((t) => (
-          <KindEditor
-            key={t.documentKind}
+        <>
+          <DocumentsManager
             serviceKey={serviceKey}
-            template={t}
-            fields={fields}
-            onAddFields={addFieldsToQuestionnaire}
+            service={service}
+            library={library}
+            onChanged={load}
           />
-        ))
+          {templates.length === 0 ? (
+            <p className="text-muted" style={{ marginTop: '1rem' }}>
+              No documents yet — add one above to start writing its template.
+            </p>
+          ) : (
+            templates.map((t) => (
+              <KindEditor
+                key={t.documentKind}
+                serviceKey={serviceKey}
+                template={t}
+                fields={fields}
+                library={library}
+                onAddFields={addFieldsToQuestionnaire}
+                onSavedToLibrary={loadLibrary}
+              />
+            ))
+          )}
+        </>
       )}
-    </main>
+    </>
+  )
+}
+
+// Manage which documents this service produces. Adding/removing a document writes
+// a new service version immediately (so its body editor appears/disappears below).
+// Documents can be PICKED from the firm template library (the picker) or typed.
+// Other service config (name, route, pricing, booking, questionnaire) is preserved
+// across the save (name/route/sortOrder sent through; the rest carried by merge).
+function DocumentsManager({
+  serviceKey,
+  service,
+  library,
+  onChanged,
+}: {
+  serviceKey: string
+  service: ServiceDefinition
+  library: LibraryDoc[]
+  onChanged: () => Promise<void>
+}) {
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const docs = service.documents ?? []
+
+  async function persist(next: string[]) {
+    setBusy(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.service.update',
+        input: {
+          serviceKey,
+          displayName: service.displayName,
+          description: service.description,
+          route: service.route,
+          documents: next,
+          sortOrder: service.sortOrder,
+        },
+      })
+      await onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const add = (kind: string) => {
+    const v = slugify(kind)
+    if (!v || docs.includes(v)) return setDraft('')
+    void persist([...docs, v])
+    setDraft('')
+  }
+  const available = library.filter((l) => !docs.includes(l.docKind))
+
+  return (
+    <section style={{ borderLeft: '3px solid var(--border)' }}>
+      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Documents this service produces</span>
+      {err && (
+        <div className="alert alert-error" style={{ marginTop: '0.4rem' }}>
+          {err}
+        </div>
+      )}
+      <div className="qb-pills">
+        {docs.map((d) => (
+          <span key={d} className="qb-pill">
+            {humanKind(d)}
+            <button
+              type="button"
+              title="Remove"
+              disabled={busy}
+              onClick={() => void persist(docs.filter((x) => x !== d))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {docs.length === 0 && (
+          <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>None yet</span>
+        )}
+      </div>
+      <div className="qb-pill-add">
+        {available.length > 0 && (
+          <select
+            value=""
+            aria-label="Add a document from the template library"
+            disabled={busy}
+            onChange={(e) => {
+              if (e.target.value) add(e.target.value)
+            }}
+          >
+            <option value="">Add from template library…</option>
+            {available.map((l) => (
+              <option key={l.docKind} value={l.docKind}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              add(draft)
+            }
+          }}
+          placeholder="or type a new one, e.g. operating agreement"
+        />
+        <button type="button" onClick={() => add(draft)} disabled={busy || !draft.trim()}>
+          Add
+        </button>
+        <Link href="/attorney/templates" className="back-link" style={{ marginLeft: 'auto' }}>
+          Open template library →
+        </Link>
+      </div>
+    </section>
   )
 }
 
@@ -208,19 +359,54 @@ function KindEditor({
   serviceKey,
   template,
   fields,
+  library,
   onAddFields,
+  onSavedToLibrary,
 }: {
   serviceKey: string
   template: TemplateDoc
   fields: QField[]
+  library: LibraryDoc[]
   onAddFields: (f: { id: string; label: string }[]) => Promise<void>
+  onSavedToLibrary: () => Promise<void>
 }) {
   const [text, setText] = useState(template.templateText ?? '')
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [newLabel, setNewLabel] = useState('')
+  const [libNote, setLibNote] = useState<string | null>(null)
   const ref = useRef<HTMLTextAreaElement | null>(null)
+
+  // Save the current body into the firm template library as a reusable document,
+  // tagged with this document kind so it shows up as an "add from library" option
+  // for other services. Does not change this service — it's a copy outward.
+  async function saveToLibrary() {
+    if (!text.trim()) {
+      setErr('Nothing to save — the template is empty.')
+      return
+    }
+    setBusy(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.template.create',
+        input: {
+          name: humanKind(template.documentKind),
+          category: 'document',
+          body: text,
+          docKind: template.documentKind,
+        },
+      })
+      await onSavedToLibrary()
+      setLibNote('Saved to the template library.')
+      setTimeout(() => setLibNote(null), 2500)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const tokens = extractTokens(text)
   const fieldIds = new Set(fields.map((f) => f.id))
@@ -283,6 +469,39 @@ function KindEditor({
         >
           {busy ? 'Saving…' : 'Save new version'}
         </button>
+      </div>
+
+      <div className="tpl-insert" style={{ marginBottom: '0.5rem' }}>
+        <span className="tpl-insert-label">Library:</span>
+        {library.length > 0 && (
+          <select
+            value=""
+            aria-label="Start from a library template"
+            disabled={busy}
+            onChange={(e) => {
+              const pick = library.find((l) => l.docKind === e.target.value)
+              if (!pick) return
+              if (
+                text.trim() &&
+                !window.confirm('Replace this document body with the library template?')
+              )
+                return
+              setText(pick.body)
+              setSaved(false)
+            }}
+          >
+            <option value="">Start from a library template…</option>
+            {library.map((l) => (
+              <option key={l.docKind} value={l.docKind}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !text.trim()}>
+          Save to library
+        </button>
+        {libNote && <span style={{ color: '#166534', fontSize: '0.82rem' }}>{libNote}</span>}
       </div>
 
       <div className="tpl-insert">
