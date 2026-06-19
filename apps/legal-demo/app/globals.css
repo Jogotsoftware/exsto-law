@@ -6252,3 +6252,138 @@ input[type='number'] {
 .qb-minitems {
   max-width: 12rem;
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Hourly time-grid (attorney calendar Day/Week views). A fixed left time axis +
+   one column per day; events are absolutely positioned by start/end time. The
+   body scrolls the full 24h. box-sizing keeps the axis hours and column hour
+   lines the same height so they stay aligned.
+   ─────────────────────────────────────────────────────────────────────────── */
+.cal-grid {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg, #fff);
+}
+.cal-grid-head,
+.cal-grid-allday {
+  display: grid;
+}
+.cal-grid-head {
+  border-bottom: 1px solid var(--border);
+}
+.cal-grid-corner {
+  border-right: 1px solid var(--border);
+}
+.cal-grid-dayhead {
+  padding: 0.45rem 0.5rem;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-left: 1px solid var(--border);
+}
+.cal-grid-dayhead.today {
+  color: var(--accent-attorney, #1e3a5f);
+}
+.cal-grid-allday {
+  border-bottom: 1px solid var(--border);
+  min-height: 30px;
+}
+.cal-grid-allday-label {
+  font-size: 0.64rem;
+  color: var(--muted);
+  padding: 0.25rem 0.35rem;
+  text-align: right;
+  align-self: center;
+}
+.cal-grid-allday-col {
+  border-left: 1px solid var(--border);
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cal-allday-chip {
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface, #f4f4f5);
+  border-left: 3px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  color: var(--fg);
+}
+.cal-allday-chip.managed {
+  border-left-color: var(--primary, #1e3a5f);
+}
+.cal-grid-scroll {
+  max-height: 64vh;
+  overflow: auto;
+}
+.cal-grid-body {
+  display: grid;
+  position: relative;
+}
+.cal-grid-hour {
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border-soft, #eee);
+  font-size: 0.66rem;
+  color: var(--muted);
+  text-align: right;
+  padding-right: 5px;
+}
+.cal-grid-hour span {
+  position: relative;
+  top: -0.55em;
+}
+.cal-grid-col {
+  position: relative;
+  border-left: 1px solid var(--border);
+}
+.cal-grid-hline {
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border-soft, #eee);
+}
+.cal-event {
+  position: absolute;
+  right: 3px;
+  overflow: hidden;
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  line-height: 1.15;
+  background: var(--surface, #eef1f6);
+  border-left: 3px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: var(--fg);
+  cursor: pointer;
+}
+.cal-event:hover {
+  filter: brightness(0.97);
+}
+.cal-event.managed {
+  border-left-color: var(--primary, #1e3a5f);
+  background: rgba(30, 58, 95, 0.08);
+}
+.cal-event-time {
+  font-weight: 600;
+  font-size: 0.66rem;
+}
+.cal-event-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cal-grid-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid #ef4444;
+  z-index: 5;
+  pointer-events: none;
+}
