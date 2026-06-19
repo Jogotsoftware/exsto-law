@@ -144,13 +144,33 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
          LEFT JOIN attrs ms ON ms.entity_id = cm.matter_id AND ms.kind_name = 'matter_status'
          GROUP BY cm.contact_id
        )
+       -- Contact attributes are written under two historical conventions — the
+       -- generic person kinds (full_name/email/phone/company_name, used by the
+       -- intake + identity paths) and the contact_-prefixed kinds (matter.open).
+       -- Coalesce both so a contact shows its name regardless of which path made
+       -- it (the prefixed kind wins when present). Fixes "contacts show no name".
        SELECT
          e.id AS contact_entity_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_full_name')        AS full_name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_email')            AS email,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_phone')            AS phone,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_company_name')     AS company_name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_attribution_source') AS attribution_source,
+         COALESCE(
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_full_name'),
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'full_name')
+         ) AS full_name,
+         COALESCE(
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_email'),
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'email')
+         ) AS email,
+         COALESCE(
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_phone'),
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'phone')
+         ) AS phone,
+         COALESCE(
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_company_name'),
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_name')
+         ) AS company_name,
+         COALESCE(
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_attribution_source'),
+           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'attribution_source')
+         ) AS attribution_source,
          COALESCE(mr.n, 0)::text AS matter_count,
          mr.statuses AS matter_statuses,
          e.created_at AS first_seen_at,
@@ -244,11 +264,13 @@ export async function getContact(
 
     return {
       contactEntityId,
-      fullName: attrs['contact_full_name'] ?? '',
-      email: attrs['contact_email'] ?? '',
-      phone: attrs['contact_phone'] ?? null,
-      companyName: attrs['contact_company_name'] ?? null,
-      attributionSource: attrs['contact_attribution_source'] ?? null,
+      // Coalesce the two attribute-name conventions (see listContacts) so the
+      // contact's details show regardless of which path created it.
+      fullName: attrs['contact_full_name'] ?? attrs['full_name'] ?? '',
+      email: attrs['contact_email'] ?? attrs['email'] ?? '',
+      phone: attrs['contact_phone'] ?? attrs['phone'] ?? null,
+      companyName: attrs['contact_company_name'] ?? attrs['company_name'] ?? null,
+      attributionSource: attrs['contact_attribution_source'] ?? attrs['attribution_source'] ?? null,
       matterCount: matters.rows.length,
       leadStage: deriveLeadStage(matters.rows.map((r) => r.status ?? 'inquiry')),
       crmBucket: deriveCrmBucket(matters.rows.map((r) => r.status ?? 'inquiry')),

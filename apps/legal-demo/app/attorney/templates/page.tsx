@@ -259,11 +259,6 @@ export default function TemplatesPage() {
           </button>
         )}
       </div>
-      <p className="muted" style={{ marginTop: '-0.5rem' }}>
-        Reusable document &amp; email templates for the whole firm. Click a field to drop a{' '}
-        <code>{'{{token}}'}</code> merge marker, draft from a brief with AI, or import an existing
-        document.
-      </p>
 
       {error && <div className="alert alert-error">{error}</div>}
 
