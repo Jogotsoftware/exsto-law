@@ -5,10 +5,19 @@
 // replaced in the UI takes effect immediately.
 import { loadConnection, markConnectionError } from './connectionStore.js'
 import { redactSecret } from './redact.js'
+import type { AssistantStreamChunk } from './claude.js'
 
 type PerplexitySecret = { api_key: string }
 
 const DEFAULT_MODEL = process.env.LEGAL_RESEARCH_MODEL ?? 'sonar'
+
+// Shared system framing for research turns — used by both the one-shot and the
+// streaming calls so they answer identically.
+const RESEARCH_SYSTEM =
+  'You are a legal research assistant for a U.S. law firm. Answer precisely, ' +
+  'cite primary sources (statutes, regulations, case law) where possible, and ' +
+  'flag when something is jurisdiction-specific or uncertain. Do not give a ' +
+  'final legal opinion; support the attorney’s own judgment.'
 
 export interface ResearchRequest {
   question: string
@@ -84,11 +93,7 @@ export async function callPerplexity(
   apiKey: string,
   request: ResearchRequest,
 ): Promise<ResearchResult> {
-  const system =
-    'You are a legal research assistant for a U.S. law firm. Answer precisely, ' +
-    'cite primary sources (statutes, regulations, case law) where possible, and ' +
-    'flag when something is jurisdiction-specific or uncertain. Do not give a ' +
-    'final legal opinion; support the attorney’s own judgment.'
+  const system = RESEARCH_SYSTEM
   const user = request.context ? `${request.context}\n\n${request.question}` : request.question
   const model = request.model ?? DEFAULT_MODEL
 
@@ -141,4 +146,95 @@ export async function runPerplexityResearch(
     }
     throw err
   }
+}
+
+// Streaming research: yields text deltas as Perplexity produces them (so the
+// chat streams Perplexity answers the same way it streams Claude), then a
+// terminal `citations` chunk. Perplexity speaks the OpenAI-style SSE format
+// (`data: {choices:[{delta:{content}}]}` … `data: [DONE]`). Mirrors
+// runPerplexityResearch's connection-auth handling. Falls back to a one-shot
+// call if streaming isn't available or yields no content.
+export async function* streamPerplexityResearch(
+  tenantId: string | null,
+  request: ResearchRequest,
+): AsyncGenerator<AssistantStreamChunk> {
+  const { apiKey, source } = await resolvePerplexityApiKey(tenantId)
+  const user = request.context ? `${request.context}\n\n${request.question}` : request.question
+  const model = request.model ?? DEFAULT_MODEL
+
+  const res = await fetch('https://api.perplexity.ai/chat/completions', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      max_tokens: request.maxTokens ?? 1024,
+      stream: true,
+      messages: [
+        { role: 'system', content: RESEARCH_SYSTEM },
+        { role: 'user', content: user },
+      ],
+    }),
+  })
+
+  if (!res.ok) {
+    const body = redactSecret((await res.text().catch(() => '')).slice(0, 300), apiKey)
+    if (source === 'connection' && tenantId && (res.status === 401 || res.status === 403)) {
+      await markConnectionError(tenantId, 'perplexity', `Research failed: ${res.status}: ${body}`)
+      throw new Error(
+        'Perplexity rejected the connected API key. Replace it in Settings → Integrations.',
+      )
+    }
+    throw new Error(`Perplexity returned ${res.status}: ${body}`)
+  }
+
+  let citations: string[] = []
+  let emitted = false
+
+  if (res.body) {
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let nl: number
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl).trim()
+        buffer = buffer.slice(nl + 1)
+        if (!line.startsWith('data:')) continue
+        const data = line.slice(5).trim()
+        if (!data || data === '[DONE]') continue
+        let json: {
+          choices?: Array<{ delta?: { content?: string } }>
+          citations?: string[]
+          search_results?: Array<{ url?: string }>
+        }
+        try {
+          json = JSON.parse(data)
+        } catch {
+          continue
+        }
+        const piece = json.choices?.[0]?.delta?.content
+        if (typeof piece === 'string' && piece) {
+          emitted = true
+          yield { type: 'text', text: piece }
+        }
+        const c =
+          json.citations ?? json.search_results?.map((s) => s.url).filter((u): u is string => !!u)
+        if (Array.isArray(c) && c.length) citations = c
+      }
+    }
+  }
+
+  // Safety net: if the stream produced no text (no body, or a non-streamed
+  // response), fall back to a single blocking call so the attorney still gets
+  // an answer.
+  if (!emitted) {
+    const result = await callPerplexity(apiKey, request)
+    yield { type: 'text', text: result.answer }
+    if (result.citations.length) citations = result.citations
+  }
+
+  if (citations.length) yield { type: 'citations', citations }
 }
