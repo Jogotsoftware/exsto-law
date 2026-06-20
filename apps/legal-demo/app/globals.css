@@ -577,6 +577,9 @@ section h2 {
   place-items: center;
   width: 38px;
   height: 38px;
+  /* Reset the global button padding (0.55rem 1rem) — these are fixed 38×38
+     icon squares; the asymmetric padding throws the hover box off-center. */
+  padding: 0;
   border-radius: 10px;
   border: 1px solid transparent;
   background: transparent;
@@ -586,12 +589,20 @@ section h2 {
     background 0.16s ease,
     color 0.16s ease;
 }
-.att-icon-btn:hover {
+/* Hover is a gold ICON tint only. Explicitly neutralize the global
+   `button:hover` box (background + border) — it wins on specificity (0,2,1 vs
+   0,2,0) and otherwise paints a light, off-looking square on the navy bar.
+   The `:not(:disabled)` lifts these to 0,3,0 so they win cleanly. */
+.att-icon-btn:hover:not(:disabled) {
   color: #e7b667;
+  background: transparent;
+  border-color: transparent;
 }
-.att-icon-btn.active {
+.att-icon-btn.active,
+.att-icon-btn.active:hover:not(:disabled) {
   color: #f3cd8c;
   background: rgba(231, 182, 103, 0.14);
+  border-color: transparent;
 }
 
 /* User avatar button */
@@ -605,9 +616,12 @@ section h2 {
   cursor: pointer;
   transition: border-color 0.16s ease;
 }
-.att-user-btn:hover,
+.att-user-btn:hover:not(:disabled),
 .att-user-btn.active {
   border-color: rgba(231, 182, 103, 0.7);
+  /* Same fix: keep the avatar background transparent on hover (the global
+     button:hover would otherwise paint a light box behind the round avatar). */
+  background: transparent;
 }
 .att-avatar {
   display: grid;
