@@ -22,6 +22,7 @@
 // Writes go THROUGH THE CORE via submitAction (vertical CLAUDE.md). Reads use
 // withActionContext, tenant-scoped, latest-valid_from (exsto-query-substrate).
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
+import { setServiceCost } from './services.js'
 
 // A decimal-string money value (ADR 0044). Mirrors the handler guard.
 const MONEY_RE = /^-?\d+(\.\d+)?$/
@@ -99,34 +100,18 @@ export async function setClientRate(
   return { rate: r }
 }
 
-/** Set a service's fixed fee. Routes through legal.service.upsert, preserving the
- *  service's other config (the handler merges transitions_patch over the prior
- *  version), so the fee is the service config's fixed_fee — one source. */
+/** Set a service's fixed fee. Writes through the service's COST config
+ *  (transitions.cost, type 'fixed') via setServiceCost — the one convention the
+ *  service editor uses and the approval accrual reads first. (Legacy
+ *  transitions.fixed_fee is still read as a fallback, never written, so a fee set
+ *  in the Rates tab, the service editor, or on approval all resolve to one value.) */
 export async function setServiceRate(
   ctx: ActionContext,
   serviceKey: string,
   fixedFee: string,
 ): Promise<{ fixedFee: string }> {
   const fee = assertMoney('service fee', fixedFee)
-  const displayName = await withActionContext(ctx, async (client) => {
-    const res = await client.query<{ display_name: string }>(
-      `SELECT display_name FROM workflow_definition
-        WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
-        ORDER BY version DESC LIMIT 1`,
-      [ctx.tenantId, serviceKey],
-    )
-    if (!res.rows[0]) throw new Error(`Service not found: ${serviceKey}`)
-    return res.rows[0].display_name
-  })
-  await submitAction(ctx, {
-    actionKindName: 'legal.service.upsert',
-    intentKind: 'adjustment',
-    payload: {
-      service_key: serviceKey,
-      display_name: displayName,
-      transitions_patch: { fixed_fee: fee },
-    },
-  })
+  await setServiceCost(ctx, { serviceKey, cost: { type: 'fixed', amount: fee, hours: null } })
   return { fixedFee: fee }
 }
 
@@ -189,9 +174,16 @@ export async function getRatesView(ctx: ActionContext): Promise<RatesView> {
       display_name: string
       fixed_fee: string | null
     }>(
-      `SELECT kind_name, display_name, transitions ->> 'fixed_fee' AS fixed_fee
+      // Real services only (firm.* workflow_definition rows like booking_rules are
+      // not services). Fee from transitions.cost (type 'fixed') ?? legacy fixed_fee.
+      `SELECT kind_name, display_name,
+              COALESCE(
+                CASE WHEN transitions->'cost'->>'type' = 'fixed'
+                     THEN transitions->'cost'->>'amount' END,
+                transitions ->> 'fixed_fee') AS fixed_fee
          FROM workflow_definition
-        WHERE tenant_id = $1 AND valid_to IS NULL
+        WHERE tenant_id = $1 AND valid_to IS NULL AND status = 'active'
+          AND kind_name NOT LIKE 'firm.%'
         ORDER BY display_name`,
       [ctx.tenantId],
     )
@@ -250,12 +242,17 @@ async function readServiceFee(
   tenantId: string,
   serviceKey: string,
 ): Promise<string | null> {
-  const res = await client.query<{ fixed_fee: string | null }>(
-    `SELECT transitions ->> 'fixed_fee' AS fixed_fee
+  // Source of truth is transitions.cost (type 'fixed'); fall back to the legacy
+  // transitions.fixed_fee. Matches the approval accrual's read order.
+  const res = await client.query<{ fee: string | null }>(
+    `SELECT COALESCE(
+              CASE WHEN transitions->'cost'->>'type' = 'fixed'
+                   THEN transitions->'cost'->>'amount' END,
+              transitions ->> 'fixed_fee') AS fee
        FROM workflow_definition
       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
       ORDER BY version DESC LIMIT 1`,
     [tenantId, serviceKey],
   )
-  return res.rows[0]?.fixed_fee ?? null
+  return res.rows[0]?.fee ?? null
 }
