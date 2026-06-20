@@ -36,7 +36,7 @@ async function setTemplateAttr(
   })
 }
 
-// Typed {{token}} metadata, keyed by token id (see migration 0072). Stored as a
+// Typed {{token}} metadata, keyed by token id (see migration 0076). Stored as a
 // single structured attribute on the template entity.
 type TemplateVariables = Record<string, unknown>
 

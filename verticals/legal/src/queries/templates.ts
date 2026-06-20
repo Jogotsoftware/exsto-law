@@ -8,7 +8,7 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 export type StandaloneTemplateCategory = 'document' | 'email'
 
 // Typed metadata for a single {{token}}. Stored as part of the template_variables
-// JSON attribute, keyed by token id (see migration 0072). Types align 1:1 with
+// JSON attribute, keyed by token id (see migration 0076). Types align 1:1 with
 // the intake questionnaire's field types so a template can generate a typed form.
 export type TemplateVariableType =
   | 'text'
