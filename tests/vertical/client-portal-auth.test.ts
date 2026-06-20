@@ -46,14 +46,21 @@ describe('client portal AUTHED tool allowlist (no DB)', () => {
     await import('@exsto/legal/mcp')
   }, 30_000)
 
-  it('exposes exactly the client portal tools (reads + PR2 messaging)', async () => {
+  it('exposes exactly the client portal tools (reads + messaging + own-document signing)', async () => {
     const { CLIENT_PORTAL_AUTHED_TOOLS } = await import('@exsto/legal/mcp')
     expect([...CLIENT_PORTAL_AUTHED_TOOLS].sort()).toEqual(
       [
+        // PR2 — matters, timeline, two-way messaging
         'legal.client.matter_timeline',
         'legal.client.matters',
         'legal.client.message_post',
         'legal.client.thread_get',
+        // S8 — the client signs their OWN documents (+ list/documents reads)
+        'legal.esign.portal.decline',
+        'legal.esign.portal.documents',
+        'legal.esign.portal.list',
+        'legal.esign.portal.load',
+        'legal.esign.portal.sign',
       ].sort(),
     )
   })
@@ -75,14 +82,20 @@ describe('client portal AUTHED tool allowlist (no DB)', () => {
     }
   })
 
-  it('every authed-allowlisted tool is registered (reads + the one PR2 write)', async () => {
+  it('every authed-allowlisted tool is registered (reads + the client-initiated writes)', async () => {
     await import('@exsto/legal/mcp')
     const { findTool } = await import('@exsto/mcp-tools')
     const { CLIENT_PORTAL_AUTHED_TOOLS } = await import('@exsto/legal/mcp')
-    // PR2 intentionally adds ONE write tool (legal.client.message_post) — clients
-    // post messages. Everything else stays read-mode; the route still gates the
-    // whole set + per-matter authz.
-    const WRITE_OK = new Set(['legal.client.message_post'])
+    // The only writes a client may drive are on their OWN data: posting a message
+    // (PR2) and acting on their OWN signing request (S8 — open/sign/decline).
+    // Everything else stays read-mode; the route still gates the whole set +
+    // per-matter authz.
+    const WRITE_OK = new Set([
+      'legal.client.message_post',
+      'legal.esign.portal.load', // records that the signer opened the document
+      'legal.esign.portal.sign',
+      'legal.esign.portal.decline',
+    ])
     for (const name of CLIENT_PORTAL_AUTHED_TOOLS) {
       const tool = findTool(name) as { mode?: string } | undefined
       expect(tool, `${name} should resolve`).toBeTruthy()
