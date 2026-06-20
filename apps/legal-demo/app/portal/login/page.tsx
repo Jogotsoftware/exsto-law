@@ -177,7 +177,9 @@ export default function ClientPortalLoginPage() {
           id="cauth-pass"
           type="password"
           required
-          minLength={8}
+          // Enforce a minimum only when creating an account; an existing
+          // password may be shorter (don't lock a returning client out).
+          minLength={isSignUp ? 8 : undefined}
           autoComplete={isSignUp ? 'new-password' : 'current-password'}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
