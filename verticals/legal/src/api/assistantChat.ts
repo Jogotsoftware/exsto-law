@@ -26,6 +26,8 @@ import {
   buildContactAssistantContext,
   type AssistantContext,
 } from './assistantContext.js'
+import { getMatter } from '../queries/matters.js'
+import { getContact } from '../queries/contacts.js'
 
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
 export type AssistantScope = 'matter' | 'contact' | 'global'
@@ -531,4 +533,77 @@ export async function listAssistantFeedback(ctx: ActionContext): Promise<Assista
       recordedAt: r.occurred_at,
     }))
   })
+}
+
+export interface AssistantThreadSummary {
+  scope: AssistantScope
+  matterEntityId?: string
+  contactEntityId?: string
+  // Human label for the picker ("Matter 2025-014" / "Acme LLC" / "App help").
+  label: string
+  // First ~100 chars of the most recent question in the thread.
+  snippet: string
+  lastMessageAt: string
+  count: number
+}
+
+// The attorney's prior assistant conversations, grouped by scope (one row per
+// matter/contact, plus the global app-help thread), most-recent-activity first —
+// powers the history picker so they can reopen a chat on a different matter.
+// Feedback turns are excluded (they have their own triage surface). Tenant-scoped;
+// entity labels are resolved best-effort and bounded by the LIMIT.
+export async function listAssistantThreads(ctx: ActionContext): Promise<AssistantThreadSummary[]> {
+  const rows = await withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      entity_id: string | null
+      entity_kind: string | null
+      turn_count: number
+      last_at: string
+      last_message: string | null
+    }>(
+      `SELECT e.primary_entity_id AS entity_id,
+              ekd2.kind_name      AS entity_kind,
+              count(*)::int       AS turn_count,
+              to_char(max(e.occurred_at), 'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_at,
+              (array_agg(e.payload->>'message' ORDER BY e.occurred_at DESC))[1] AS last_message
+       FROM event e
+       JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
+       LEFT JOIN entity ent ON ent.id = e.primary_entity_id
+       LEFT JOIN entity_kind_definition ekd2 ON ekd2.id = ent.entity_kind_id
+       WHERE e.tenant_id = $1 AND ekd.kind_name = 'assistant.turn'
+         AND COALESCE(e.payload->>'kind', '') <> 'feedback'
+       GROUP BY e.primary_entity_id, ekd2.kind_name
+       ORDER BY max(e.occurred_at) DESC
+       LIMIT 30`,
+      [ctx.tenantId],
+    )
+    return res.rows
+  })
+
+  const summaries: AssistantThreadSummary[] = []
+  for (const r of rows) {
+    const snippet = (r.last_message ?? '').replace(/\s+/g, ' ').trim().slice(0, 100)
+    const base = { snippet, lastMessageAt: r.last_at, count: r.turn_count }
+    if (!r.entity_id) {
+      summaries.push({ scope: 'global', label: 'App help', ...base })
+    } else if (r.entity_kind === 'matter') {
+      const m = await getMatter(ctx, r.entity_id).catch(() => null)
+      summaries.push({
+        scope: 'matter',
+        matterEntityId: r.entity_id,
+        label: m ? `Matter ${m.matterNumber}` : 'Matter',
+        ...base,
+      })
+    } else if (r.entity_kind === 'contact') {
+      const c = await getContact(ctx, r.entity_id).catch(() => null)
+      summaries.push({
+        scope: 'contact',
+        contactEntityId: r.entity_id,
+        label: c?.fullName || c?.companyName || 'Client',
+        ...base,
+      })
+    }
+    // Any other entity kind isn't a re-scopable chat target — skip it.
+  }
+  return summaries
 }

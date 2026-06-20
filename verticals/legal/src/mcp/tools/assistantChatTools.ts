@@ -3,12 +3,14 @@ import {
   assistantChat,
   submitAssistantFeedback,
   listAssistantThread,
+  listAssistantThreads,
   listAssistantModels,
   listAssistantFeedback,
   type AssistantChatInput,
   type AssistantChatReply,
   type SubmitFeedbackInput,
   type AssistantThreadEntry,
+  type AssistantThreadSummary,
   type AssistantModel,
   type AssistantFeedbackEntry,
 } from '../../index.js'
@@ -115,6 +117,15 @@ registerTool({
   { matterEntityId?: string; contactEntityId?: string },
   { turns: AssistantThreadEntry[] }
 >)
+
+registerTool({
+  name: 'legal.assistant.threads',
+  description:
+    "The attorney's prior assistant conversations grouped by scope (one per matter/client, plus the global app-help thread), most-recent first — each with a label, a snippet of the latest question, and a turn count. Powers the history picker; excludes beta-feedback turns.",
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ threads: await listAssistantThreads(ctx) }),
+} satisfies Tool<Record<string, never>, { threads: AssistantThreadSummary[] }>)
 
 registerTool({
   name: 'legal.assistant.feedback_submit',
