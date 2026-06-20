@@ -4527,6 +4527,72 @@ button.danger.outline:hover:not(:disabled) {
   cursor: default;
 }
 
+/* Feedback mode — a banner over the chat; the conversation IS the feedback. */
+.uac-fbmode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--gold-400);
+  background: var(--gold-100);
+  border-radius: var(--radius-md);
+}
+.uac-fbmode-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.uac-fbmode-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--gold);
+}
+.uac-fbmode-sub {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.uac-fbmode-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.uac-fbmode-exit {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  color: var(--fg);
+  cursor: pointer;
+}
+.uac-fbmode-exit:hover:not(:disabled) {
+  background: white;
+}
+.uac-fbmode-send {
+  font-size: 0.78rem;
+  padding: 0.32rem 0.7rem;
+}
+.uac-fbmode-done {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+.uac-fbmode-thanks {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: var(--gold);
+}
+.uac-fbmode-done .uac-fbmode-exit {
+  margin-left: auto;
+}
+
 /* Message list + citations */
 .uac-messages {
   display: flex;
