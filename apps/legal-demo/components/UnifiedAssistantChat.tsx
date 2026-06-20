@@ -4,7 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate } from '@/lib/assistantStream'
 import { renderMarkdown } from '@/lib/draftExport'
-import { SendIcon, SettingsIcon, MegaphoneIcon, SparklesIcon, SearchIcon } from '@/components/icons'
+import {
+  SendIcon,
+  SettingsIcon,
+  MegaphoneIcon,
+  SparklesIcon,
+  SearchIcon,
+  ClockIcon,
+} from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
 // matter/client they're on, streams replies token-by-token (with a live thinking
@@ -49,6 +56,17 @@ interface ThreadTurn {
 }
 
 type FeedbackCategory = 'ui' | 'ai' | 'workflow' | 'other'
+
+// One prior conversation in the history picker (from legal.assistant.threads).
+interface ThreadSummary {
+  scope: 'matter' | 'contact' | 'global'
+  matterEntityId?: string
+  contactEntityId?: string
+  label: string
+  snippet: string
+  lastMessageAt: string
+  count: number
+}
 
 export interface UnifiedAssistantChatProps {
   matterEntityId?: string
@@ -108,10 +126,17 @@ export function UnifiedAssistantChat({
   // The in-flight assistant reply, streamed token-by-token.
   const [streaming, setStreaming] = useState<{ thinking: string; text: string } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  // Bumped whenever the conversation is superseded (a new send, or switching to a
+  // prior thread). In-flight stream/load callbacks compare against it and no-op
+  // when stale, so an old reply can never land in a newly-opened thread.
+  const genRef = useRef(0)
 
   // Toolbar panels + settings.
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [betaOpen, setBetaOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
   const [workRate, setWorkRate] = useState<WorkRate>('balanced')
   const [webSearch, setWebSearch] = useState(false)
   const [useContext, setUseContext] = useState(true)
@@ -127,9 +152,20 @@ export function UnifiedAssistantChat({
   // trail" beta asks).
   const [fbRef, setFbRef] = useState<string | null>(null)
 
-  const scoped = Boolean(matterEntityId || contactEntityId)
-  const scopeLabel = matterEntityId ? 'this matter' : contactEntityId ? 'this client' : ''
-  const scope = matterEntityId ? { matterEntityId } : contactEntityId ? { contactEntityId } : {}
+  // The conversation's CURRENT scope — starts from the props (the page the FAB was
+  // opened on); the history picker can re-point it at another matter/client thread
+  // without remounting.
+  const [activeScope, setActiveScope] = useState<{
+    matterEntityId?: string
+    contactEntityId?: string
+  }>(() => (matterEntityId ? { matterEntityId } : contactEntityId ? { contactEntityId } : {}))
+  const scoped = Boolean(activeScope.matterEntityId || activeScope.contactEntityId)
+  const scopeLabel = activeScope.matterEntityId
+    ? 'this matter'
+    : activeScope.contactEntityId
+      ? 'this client'
+      : ''
+  const scope = activeScope
 
   const selected = models?.find((m) => m.id === modelId) ?? null
   const effectiveWebSearch = selected
@@ -156,30 +192,69 @@ export function UnifiedAssistantChat({
     }
   }, [])
 
-  // Seed prior turns for a matter/contact-scoped chat.
-  const loadHistory = useCallback(async () => {
-    if (!loadThread) return
-    try {
-      const r = await callAttorneyMcp<{ turns: ThreadTurn[] }>({
-        toolName: 'legal.assistant.thread',
-        input: scope,
-      })
-      const display: DisplayTurn[] = r.turns.map((t) =>
-        t.role === 'user'
-          ? { role: 'user', content: t.message }
-          : { role: 'assistant', content: t.reply, citations: t.citations, model: t.model },
-      )
-      setTurns(display)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-    // `scope` is derived from matterEntityId/contactEntityId, so depending on the
-    // ids directly is complete.
-  }, [loadThread, matterEntityId, contactEntityId])
+  // Load the persisted thread for a scope into the chat. The history picker calls
+  // this with a different scope to reopen another conversation.
+  const loadHistory = useCallback(
+    async (target: { matterEntityId?: string; contactEntityId?: string }) => {
+      const gen = genRef.current
+      try {
+        const r = await callAttorneyMcp<{ turns: ThreadTurn[] }>({
+          toolName: 'legal.assistant.thread',
+          input: target,
+        })
+        if (genRef.current !== gen) return // a newer send/selection superseded this load
+        const display: DisplayTurn[] = r.turns.map((t) =>
+          t.role === 'user'
+            ? { role: 'user', content: t.message }
+            : { role: 'assistant', content: t.reply, citations: t.citations, model: t.model },
+        )
+        setTurns(display)
+      } catch (e) {
+        if (genRef.current !== gen) return
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [],
+  )
 
+  // Seed the initial scope's thread on mount (matter/contact chats). The picker
+  // loads other scopes explicitly via selectThread.
   useEffect(() => {
-    loadHistory()
-  }, [loadHistory])
+    if (loadThread) void loadHistory(activeScope)
+    // Mount-only: activeScope's initial value is the prop-derived scope; later
+    // scope switches load explicitly via selectThread.
+  }, [])
+
+  // Reopen a prior conversation: re-point the active scope, clear the current
+  // exchange, and load that thread. Re-grounds context in the chosen scope.
+  function selectThread(target: { matterEntityId?: string; contactEntityId?: string }) {
+    genRef.current++ // invalidate any in-flight send so its callbacks no-op
+    setHistoryOpen(false)
+    setActiveScope(target)
+    setTurns([])
+    setStreaming(null)
+    setError(null)
+    setInput('')
+    setBusy(false)
+    setUseContext(true)
+    void loadHistory(target)
+    // The picker button just unmounted; return keyboard focus to the composer.
+    setTimeout(() => composerRef.current?.focus(), 0)
+  }
+
+  // Open the history picker and (re)load the thread list.
+  function openHistory() {
+    const opening = !historyOpen
+    setHistoryOpen(opening)
+    setSettingsOpen(false)
+    setBetaOpen(false)
+    if (opening) {
+      setThreads(null)
+      callAttorneyMcp<{ threads: ThreadSummary[] }>({ toolName: 'legal.assistant.threads' })
+        .then((r) => setThreads(r.threads))
+        .catch(() => setThreads([]))
+    }
+  }
 
   // Keep the latest turn in view as content streams in.
   useEffect(() => {
@@ -189,6 +264,8 @@ export function UnifiedAssistantChat({
   async function send() {
     const message = input.trim()
     if (!message || busy || !modelId) return
+    const gen = ++genRef.current // this exchange's generation; stale callbacks no-op
+    const live = () => genRef.current === gen
     setError(null)
     setBusy(true)
     setSettingsOpen(false)
@@ -219,14 +296,17 @@ export function UnifiedAssistantChat({
         },
         {
           onThinking: (t) => {
+            if (!live()) return
             partial.thinking += t
             setStreaming({ ...partial })
           },
           onText: (t) => {
+            if (!live()) return
             partial.text += t
             setStreaming({ ...partial })
           },
           onDone: (d) => {
+            if (!live()) return
             finished = true
             setTurns((prev) => [
               ...prev,
@@ -235,6 +315,7 @@ export function UnifiedAssistantChat({
             setStreaming(null)
           },
           onError: (m) => {
+            if (!live()) return
             finished = true
             setError(m)
             setStreaming(null)
@@ -242,10 +323,15 @@ export function UnifiedAssistantChat({
         },
       )
     } catch (e) {
+      if (!live()) return
       finished = true
       setError(e instanceof Error ? e.message : String(e))
       setStreaming(null)
     }
+
+    // A newer send or a thread switch superseded this exchange — leave the
+    // reopened conversation's state untouched (its reply must not land here).
+    if (!live()) return
 
     // Reconcile a stream that ended without a terminal event (e.g. a drop):
     // keep whatever streamed rather than losing it.
@@ -273,9 +359,9 @@ export function UnifiedAssistantChat({
           // The exact page + which part of the app they were in when submitting.
           pageContext: {
             path: typeof window !== 'undefined' ? window.location.pathname : undefined,
-            section: matterEntityId
+            section: activeScope.matterEntityId
               ? 'matter assistant'
-              : contactEntityId
+              : activeScope.contactEntityId
                 ? 'client assistant'
                 : 'global assistant',
           },
@@ -309,6 +395,7 @@ export function UnifiedAssistantChat({
           onClick={() => {
             setSettingsOpen((o) => !o)
             setBetaOpen(false)
+            setHistoryOpen(false)
           }}
           aria-label="Assistant settings"
           title="Settings — model, work rate, web search"
@@ -321,6 +408,7 @@ export function UnifiedAssistantChat({
           onClick={() => {
             setBetaOpen((o) => !o)
             setSettingsOpen(false)
+            setHistoryOpen(false)
             setFbDone(false)
             setFbRef(null)
             setFbError(null)
@@ -329,6 +417,17 @@ export function UnifiedAssistantChat({
           title="Beta feedback — straight to the team"
         >
           <MegaphoneIcon size={16} />
+        </button>
+        <button
+          type="button"
+          className={`uac-iconbtn${historyOpen ? ' active' : ''}`}
+          onClick={openHistory}
+          aria-label="Chat history"
+          aria-expanded={historyOpen}
+          aria-haspopup="menu"
+          title="History — reopen a prior conversation"
+        >
+          <ClockIcon size={16} />
         </button>
 
         <div className="uac-toolbar-spacer" />
@@ -354,6 +453,53 @@ export function UnifiedAssistantChat({
           </button>
         )}
       </div>
+
+      {/* ── History popover (reopen a prior conversation) ─────────────────── */}
+      {historyOpen && (
+        <div className="uac-popover uac-history">
+          <div className="uac-history-head">Recent conversations</div>
+          {threads === null ? (
+            <div className="uac-history-empty">
+              <span className="spinner" /> Loading…
+            </div>
+          ) : threads.length === 0 ? (
+            <div className="uac-history-empty">No past conversations yet.</div>
+          ) : (
+            <ul className="uac-history-list">
+              {threads.map((t) => {
+                const target = t.matterEntityId
+                  ? { matterEntityId: t.matterEntityId }
+                  : t.contactEntityId
+                    ? { contactEntityId: t.contactEntityId }
+                    : {}
+                const isActive =
+                  (target.matterEntityId ?? null) === (activeScope.matterEntityId ?? null) &&
+                  (target.contactEntityId ?? null) === (activeScope.contactEntityId ?? null)
+                return (
+                  <li key={`${t.scope}:${t.matterEntityId ?? t.contactEntityId ?? 'global'}`}>
+                    <button
+                      type="button"
+                      className={`uac-history-item${isActive ? ' active' : ''}`}
+                      onClick={() => selectThread(target)}
+                    >
+                      <span className="uac-history-row-top">
+                        <span className="uac-history-label">{t.label}</span>
+                        <span
+                          className="uac-history-count"
+                          title={`${t.count} ${t.count === 1 ? 'turn' : 'turns'}`}
+                        >
+                          {t.count}
+                        </span>
+                      </span>
+                      {t.snippet && <span className="uac-history-snippet">{t.snippet}</span>}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* ── Settings popover ──────────────────────────────────────────────── */}
       {settingsOpen && (
@@ -562,6 +708,7 @@ export function UnifiedAssistantChat({
       {/* ── Composer ──────────────────────────────────────────────────────── */}
       <div className="uac-composer">
         <textarea
+          ref={composerRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}

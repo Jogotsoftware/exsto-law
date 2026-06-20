@@ -4308,6 +4308,81 @@ button.danger.outline:hover:not(:disabled) {
   gap: 0.6rem;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
+
+/* History picker — reopen a prior conversation */
+.uac-history {
+  min-width: 260px;
+  max-width: 320px;
+}
+.uac-history-head {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.uac-history-empty {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--text-sm, 0.85rem);
+  color: var(--muted);
+  padding: 0.3rem 0;
+}
+.uac-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.uac-history-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: inherit;
+}
+.uac-history-item:hover {
+  background: var(--surface-2, rgba(15, 23, 42, 0.04));
+}
+.uac-history-item.active {
+  border-color: var(--accent);
+  background: var(--accent-attorney-soft);
+}
+.uac-history-row-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.uac-history-label {
+  font-weight: 600;
+  font-size: var(--text-sm, 0.85rem);
+}
+.uac-history-count {
+  margin-left: auto;
+  font-size: 0.66rem;
+  color: var(--muted);
+  background: var(--surface-2, rgba(15, 23, 42, 0.06));
+  border-radius: 999px;
+  padding: 0.02rem 0.4rem;
+}
+.uac-history-snippet {
+  font-size: 0.76rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .uac-setting {
   display: flex;
   flex-direction: column;
