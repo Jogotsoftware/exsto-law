@@ -20,7 +20,13 @@ export {
   type RenderOptions,
 } from './lib/templates/render.js'
 export type { ClaudeDraftRequest, ClaudeDraftResult, ClientTool } from './adapters/claude.js'
-export { resolveAnthropicApiKey, clientToolUses, runClientTools } from './adapters/claude.js'
+export {
+  resolveAnthropicApiKey,
+  clientToolUses,
+  runClientTools,
+  buildChatRequest,
+  stripThinkingBlocks,
+} from './adapters/claude.js'
 export { resolvePerplexityApiKey } from './adapters/perplexity.js'
 export type { ResearchRequest, ResearchResult } from './adapters/perplexity.js'
 export { redactSecret } from './adapters/redact.js'

@@ -238,7 +238,7 @@ function workRateParams(
 // adaptive thinking, and the web_search tool, so its param types don't list
 // these fields. The SDK forwards the request body verbatim, so we build a plain
 // object and assert the param type — the fields are honoured by the live API.
-function buildChatRequest(
+export function buildChatRequest(
   messages: ChatMessage[],
   opts: AssistantChatOptions,
   // Turns carried over from paused (server-tool) or tool_use responses: the
@@ -258,6 +258,16 @@ function buildChatRequest(
   const tools: unknown[] = []
   if (opts.webSearch) tools.push(WEB_SEARCH_TOOL)
   for (const t of opts.clientTools ?? []) tools.push(t.definition)
+  // On a CONTINUATION (after a web-search pause or a client tool_use) we must NOT
+  // re-enable adaptive thinking. The carried assistant turn no longer carries a
+  // thinking block (we strip it — see stripThinkingBlocks: the pinned SDK 0.32
+  // can't round-trip a streamed thinking block's signature, so re-sending one is
+  // rejected as "each thinking block must contain thinking"), and with thinking
+  // enabled the API would instead demand a thinking block before the tool_use.
+  // Dropping `thinking` on the resume satisfies both: no block sent, none
+  // expected. The first turn still thinks; only the post-tool wrap-up doesn't.
+  const isContinuation = carryTurns.length > 0
+  const effectiveExtra = isContinuation ? withoutThinking(extra) : extra
   return {
     // The unified assistant chat passes the attorney's chosen Claude model;
     // fall back to the firm default when none is specified.
@@ -268,8 +278,27 @@ function buildChatRequest(
     system,
     messages: [...turns, ...carryTurns],
     ...(tools.length ? { tools } : {}),
-    ...extra,
+    ...effectiveExtra,
   }
+}
+
+// Drop the `thinking` request param (used on continuation turns — see above).
+function withoutThinking(extra: Record<string, unknown>): Record<string, unknown> {
+  if (!('thinking' in extra)) return extra
+  const { thinking, ...rest } = extra
+  void thinking
+  return rest
+}
+
+// Remove thinking / redacted_thinking blocks from a carried assistant turn before
+// re-sending it. Streamed thinking blocks from SDK 0.32 don't round-trip (the
+// signature isn't reconstructed), so re-sending them 400s; the model doesn't need
+// its prior thinking to act on a tool result or resume a web search.
+export function stripThinkingBlocks(content: unknown): unknown {
+  if (!Array.isArray(content)) return content
+  return (content as Array<Record<string, unknown>>).filter(
+    (b) => b?.type !== 'thinking' && b?.type !== 'redacted_thinking',
+  )
 }
 
 // Extract the model's client-tool calls from a finished message's content.
@@ -413,7 +442,7 @@ export async function chatWithAssistantDetailed(
     // Resume a paused server-tool (web-search) turn until it finishes.
     const stop = response.stop_reason as string | null
     if (stop === 'pause_turn' && i < MAX_PAUSE_CONTINUATIONS) {
-      carryTurns.push({ role: 'assistant', content: response.content })
+      carryTurns.push({ role: 'assistant', content: stripThinkingBlocks(response.content) })
       continue
     }
     // The model called a client tool (e.g. log_feedback): run it, feed the
@@ -421,7 +450,7 @@ export async function chatWithAssistantDetailed(
     if (stop === 'tool_use' && i < MAX_PAUSE_CONTINUATIONS && (opts.clientTools?.length ?? 0) > 0) {
       const uses = clientToolUses(response.content)
       if (uses.length) {
-        carryTurns.push({ role: 'assistant', content: response.content })
+        carryTurns.push({ role: 'assistant', content: stripThinkingBlocks(response.content) })
         carryTurns.push(await runClientTools(uses, opts.clientTools!))
         continue
       }
@@ -487,7 +516,7 @@ export async function* streamChatWithAssistant(
     // where this one paused, so the UI keeps appending seamlessly.
     const stop = final.stop_reason as string | null
     if (stop === 'pause_turn' && i < MAX_PAUSE_CONTINUATIONS) {
-      carryTurns.push({ role: 'assistant', content: final.content })
+      carryTurns.push({ role: 'assistant', content: stripThinkingBlocks(final.content) })
       continue
     }
     // The model called a client tool (e.g. log_feedback): run it, feed the result
@@ -496,7 +525,7 @@ export async function* streamChatWithAssistant(
     if (stop === 'tool_use' && i < MAX_PAUSE_CONTINUATIONS && (opts.clientTools?.length ?? 0) > 0) {
       const uses = clientToolUses(final.content)
       if (uses.length) {
-        carryTurns.push({ role: 'assistant', content: final.content })
+        carryTurns.push({ role: 'assistant', content: stripThinkingBlocks(final.content) })
         carryTurns.push(await runClientTools(uses, opts.clientTools!))
         continue
       }
