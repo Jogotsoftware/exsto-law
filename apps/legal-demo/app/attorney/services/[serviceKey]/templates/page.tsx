@@ -466,7 +466,12 @@ function KindEditor({
         <button
           type="button"
           className={showPreview ? 'primary' : undefined}
-          style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+          style={{
+            marginLeft: 'auto',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.35rem',
+          }}
           onClick={() => setShowPreview((v) => !v)}
           title="Preview the finished document with sample data, side by side"
         >
