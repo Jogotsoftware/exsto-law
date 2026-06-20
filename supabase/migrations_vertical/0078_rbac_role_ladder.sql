@@ -1,5 +1,5 @@
 -- =============================================================================
--- Migration 0077: the firm RBAC role ladder (S9 — roles + the P1/P2 fixes)
+-- Migration 0078: the firm RBAC role ladder (S9 — roles + the P1/P2 fixes)
 --
 -- 0073 made scopes BITE (RESTRICTIVE RLS in Postgres); 0074 seeded a 2-tier
 -- starter set (firm.admin / firm.paralegal) for tenant zero. This migration
@@ -298,7 +298,7 @@ BEGIN
     RAISE EXCEPTION 'assign_actor_role: no active scope % in tenant %', p_scope_name, p_tenant;
   END IF;
   -- Idempotent: if the actor already holds exactly this scope (and nothing else)
-  -- active, leave it untouched so re-running 0077 doesn't churn assignment rows.
+  -- active, leave it untouched so re-running 0078 doesn't churn assignment rows.
   IF EXISTS (
     SELECT 1 FROM actor_scope_assignment asa
      WHERE asa.tenant_id = p_tenant AND asa.actor_id = p_actor AND asa.valid_to IS NULL
@@ -324,7 +324,7 @@ SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', false
 INSERT INTO action (id, tenant_id, action_kind_id, actor_id, intent_kind, autonomy_tier,
                     hlc_physical_time, hlc_logical_counter, hlc_source_id, payload)
 VALUES (
-  '00000000-0000-0000-0077-000000000001',
+  '00000000-0000-0000-0078-000000000001',
   '00000000-0000-0000-0000-000000000001',
   '00000000-0000-0000-0013-000000000001',           -- system.bootstrap (tenant zero)
   '00000000-0000-0000-0001-000000000001',           -- system actor (tenant zero)
@@ -334,19 +334,19 @@ ON CONFLICT (id) DO NOTHING;
 
 SELECT private.provision_firm_rbac(
   '00000000-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0077-000000000001'
+  '00000000-0000-0000-0078-000000000001'
 );
 
 -- Backfill every existing human into a role (none may stay zero-scope now that
 -- humans are always restricted). Joe (both sign-in identities) = super_admin;
 -- Juan Carlos = attorney; the legacy "Second User" = paralegal.
-SELECT private.assign_actor_role('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0077-000000000001',
+SELECT private.assign_actor_role('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0078-000000000001',
   '00000000-0000-0000-0001-000000000002', 'firm.super_admin');  -- Joe Pacheco (pachecojoseph824@gmail.com)
-SELECT private.assign_actor_role('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0077-000000000001',
+SELECT private.assign_actor_role('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0078-000000000001',
   'e193d11c-9204-4068-8d01-0613ec1a5095', 'firm.super_admin');  -- Joe Pacheco (joe@revenueinstruments.com)
-SELECT private.assign_actor_role('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0077-000000000001',
+SELECT private.assign_actor_role('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0078-000000000001',
   'a392ee27-08dc-4845-9990-01af013d5dab', 'firm.attorney');     -- Juan Carlos
-SELECT private.assign_actor_role('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0077-000000000001',
+SELECT private.assign_actor_role('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0078-000000000001',
   '00000000-0000-0000-0001-000000000003', 'firm.paralegal');   -- Second User (no email; cannot sign in)
 
 -- =============================================================================
@@ -362,8 +362,8 @@ DECLARE
   tb       uuid := '00000000-0000-0000-0000-000000000002';
   v_kind   uuid;
   v_sys    uuid := '00000000-0000-0000-0002-000000000001';  -- system actor (tenant B)
-  v_action uuid := '00000000-0000-0000-0077-000000000002';
-  v_super  uuid := '00000000-0000-0000-0077-0000000000b1';  -- platform super-admin actor (tenant B)
+  v_action uuid := '00000000-0000-0000-0078-000000000002';
+  v_super  uuid := '00000000-0000-0000-0078-0000000000b1';  -- platform super-admin actor (tenant B)
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM tenant WHERE id = tb) THEN RETURN; END IF;
 

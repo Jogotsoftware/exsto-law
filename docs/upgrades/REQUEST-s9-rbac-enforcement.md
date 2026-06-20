@@ -74,7 +74,7 @@ mechanism be folded into the foundation so every clone inherits it.
 
 The durable receipt is `tests/invariants/rbac-enforcement.test.ts`, run by the CI
 `invariants` job against a real Postgres (full RLS, all migrations applied) — no
-prod writes. Migration 0077 turned the WP9.2 starter set into the role ladder and
+prod writes. Migration 0078 turned the WP9.2 starter set into the role ladder and
 the suite now asserts, under `authenticated`:
 
 - **P1:** a human with no scope can neither act nor read; a non-human (agent) with
@@ -87,4 +87,4 @@ the suite now asserts, under `authenticated`:
 - `get_advisors(security)` → clean after moving helpers to `private`.
 
 (The earlier one-off through-core receipt scripts were removed — they wrote to the
-live DB and asserted the pre-0077 2-tier behaviour; the CI suite supersedes them.)
+live DB and asserted the pre-0078 2-tier behaviour; the CI suite supersedes them.)

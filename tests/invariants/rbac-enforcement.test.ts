@@ -1,5 +1,5 @@
 // S9 invariant — the RBAC ROLE LADDER enforced in Postgres (migrations 0073 +
-// 0077), not just "policies exist". Under the non-owner `authenticated` role
+// 0078), not just "policies exist". Under the non-owner `authenticated` role
 // (RLS applies), this proves the security-critical properties of the ladder:
 //
 //   P1  a HUMAN with no scope can do nothing (no zero-scope self-grant), while a
@@ -13,7 +13,7 @@
 //
 // Self-contained: every fixture is created in a rolled-back transaction using
 // the seeded ladder scopes + CORE seed kinds. DB-gated: needs
-// SUBSTRATE_TEST_DATABASE_URL (or DATABASE_URL) with migrations through 0077.
+// SUBSTRATE_TEST_DATABASE_URL (or DATABASE_URL) with migrations through 0078.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import pg from 'pg'
 import { randomUUID } from 'node:crypto'
@@ -24,7 +24,7 @@ const run = describe.skipIf(!url)
 const TENANT = '00000000-0000-0000-0000-000000000001'
 const AGENT = '00000000-0000-0000-0001-000000000004' // seeded agent actor, no scopes -> unrestricted
 
-run('invariant: RBAC role ladder enforcement (migrations 0073 + 0077)', () => {
+run('invariant: RBAC role ladder enforcement (migrations 0073 + 0078)', () => {
   let pool: pg.Pool
   beforeAll(() => {
     pool = new pg.Pool({ connectionString: url })
