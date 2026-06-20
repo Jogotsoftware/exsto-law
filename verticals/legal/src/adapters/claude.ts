@@ -162,6 +162,20 @@ export interface ChatMessage {
 // snappy with no thinking.
 export type WorkRate = 'quick' | 'balanced' | 'thorough'
 
+// A tool the MODEL can deliberately call, executed by US (not Anthropic's
+// servers, unlike web_search). The adapter advertises `definition` to the model,
+// and when the model calls it, runs `run(input)` and feeds the string result back
+// as a tool_result so the model can finish its turn. Used for the assistant's
+// log_feedback capability (see assistantChat.ts) — kept generic so other client
+// tools can be added later.
+export interface ClientTool {
+  // Anthropic tool definition ({ name, description, input_schema }). Plain object
+  // (the pinned SDK doesn't type custom tools); forwarded verbatim.
+  definition: Record<string, unknown>
+  name: string
+  run: (input: unknown) => Promise<string>
+}
+
 export interface AssistantChatOptions {
   model?: string
   workRate?: WorkRate
@@ -171,6 +185,8 @@ export interface AssistantChatOptions {
   supportsWorkRate?: boolean
   // Turn on Claude's server-side web_search tool so answers cite live sources.
   webSearch?: boolean
+  // Tools the model may call, executed locally via a tool_use → tool_result loop.
+  clientTools?: ClientTool[]
 }
 
 // A single piece of a streamed assistant reply. `thinking` carries the model's
@@ -225,9 +241,10 @@ function workRateParams(
 function buildChatRequest(
   messages: ChatMessage[],
   opts: AssistantChatOptions,
-  // Assistant turns carried over from paused (server-tool) responses, appended
-  // verbatim so the API resumes where it left off — see the continuation loops.
-  carryTurns: Array<{ role: 'assistant'; content: unknown }> = [],
+  // Turns carried over from paused (server-tool) or tool_use responses: the
+  // assistant's tool-bearing turn plus, for client tools, our tool_result user
+  // turn — appended verbatim so the API resumes where it left off.
+  carryTurns: Array<{ role: 'assistant' | 'user'; content: unknown }> = [],
 ): Record<string, unknown> {
   // Lift a leading system turn into the top-level `system` param; everything
   // else is a user/assistant turn. Anthropic requires the first messages[] entry
@@ -238,18 +255,68 @@ function buildChatRequest(
     opts.workRate ?? 'balanced',
     opts.supportsWorkRate ?? false,
   )
+  const tools: unknown[] = []
+  if (opts.webSearch) tools.push(WEB_SEARCH_TOOL)
+  for (const t of opts.clientTools ?? []) tools.push(t.definition)
   return {
     // The unified assistant chat passes the attorney's chosen Claude model;
     // fall back to the firm default when none is specified.
     model: opts.model ?? DEFAULT_MODEL,
-    // Web search can run several tool rounds before the final answer; give it
-    // headroom on top of the work-rate budget.
-    max_tokens: opts.webSearch ? maxTokens + 1024 : maxTokens,
+    // Tool loops (web search / client tools) can run several rounds before the
+    // final answer; give them headroom on top of the work-rate budget.
+    max_tokens: tools.length ? maxTokens + 1024 : maxTokens,
     system,
     messages: [...turns, ...carryTurns],
-    ...(opts.webSearch ? { tools: [WEB_SEARCH_TOOL] } : {}),
+    ...(tools.length ? { tools } : {}),
     ...extra,
   }
+}
+
+// Extract the model's client-tool calls from a finished message's content.
+// Server tools (web_search) surface as `server_tool_use` and are NOT returned
+// here — those are handled by Anthropic and resumed via pause_turn. Exported for
+// unit testing the tool loop without a live model.
+export function clientToolUses(
+  content: unknown,
+): Array<{ id: string; name: string; input: unknown }> {
+  if (!Array.isArray(content)) return []
+  return (content as Array<Record<string, unknown>>)
+    .filter(
+      (b) => b?.type === 'tool_use' && typeof b?.id === 'string' && typeof b?.name === 'string',
+    )
+    .map((b) => ({ id: b.id as string, name: b.name as string, input: b.input }))
+}
+
+// Run the model's client-tool calls and build the tool_result user turn. Every
+// tool_use MUST get a tool_result (Anthropic requirement), so unknown tools and
+// thrown errors still return an is_error result rather than stalling the turn.
+// Exported for unit testing.
+export async function runClientTools(
+  uses: Array<{ id: string; name: string; input: unknown }>,
+  clientTools: ClientTool[],
+): Promise<{ role: 'user'; content: unknown }> {
+  const results = await Promise.all(
+    uses.map(async (u) => {
+      const tool = clientTools.find((t) => t.name === u.name)
+      try {
+        const text = tool ? await tool.run(u.input) : `Unknown tool: ${u.name}`
+        return {
+          type: 'tool_result',
+          tool_use_id: u.id,
+          content: text,
+          ...(tool ? {} : { is_error: true }),
+        }
+      } catch (err) {
+        return {
+          type: 'tool_result',
+          tool_use_id: u.id,
+          content: `Tool failed: ${err instanceof Error ? err.message : String(err)}`,
+          is_error: true,
+        }
+      }
+    }),
+  )
+  return { role: 'user', content: results }
 }
 
 // Pull web-search source URLs out of a finished message: text blocks carry
@@ -326,7 +393,7 @@ export async function chatWithAssistantDetailed(
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
   const anthropic = makeAnthropic(apiKey)
 
-  const carryTurns: Array<{ role: 'assistant'; content: unknown }> = []
+  const carryTurns: Array<{ role: 'assistant' | 'user'; content: unknown }> = []
   const citations: string[] = []
   let reply = ''
 
@@ -348,6 +415,16 @@ export async function chatWithAssistantDetailed(
     if (stop === 'pause_turn' && i < MAX_PAUSE_CONTINUATIONS) {
       carryTurns.push({ role: 'assistant', content: response.content })
       continue
+    }
+    // The model called a client tool (e.g. log_feedback): run it, feed the
+    // result back, and let the model finish its turn.
+    if (stop === 'tool_use' && i < MAX_PAUSE_CONTINUATIONS && (opts.clientTools?.length ?? 0) > 0) {
+      const uses = clientToolUses(response.content)
+      if (uses.length) {
+        carryTurns.push({ role: 'assistant', content: response.content })
+        carryTurns.push(await runClientTools(uses, opts.clientTools!))
+        continue
+      }
     }
     break
   }
@@ -378,7 +455,7 @@ export async function* streamChatWithAssistant(
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
   const anthropic = makeAnthropic(apiKey)
 
-  const carryTurns: Array<{ role: 'assistant'; content: unknown }> = []
+  const carryTurns: Array<{ role: 'assistant' | 'user'; content: unknown }> = []
   const citations: string[] = []
 
   for (let i = 0; ; i++) {
@@ -412,6 +489,17 @@ export async function* streamChatWithAssistant(
     if (stop === 'pause_turn' && i < MAX_PAUSE_CONTINUATIONS) {
       carryTurns.push({ role: 'assistant', content: final.content })
       continue
+    }
+    // The model called a client tool (e.g. log_feedback): run it, feed the result
+    // back, and continue — the next stream is the model's post-tool reply, whose
+    // text deltas keep flowing to the UI seamlessly.
+    if (stop === 'tool_use' && i < MAX_PAUSE_CONTINUATIONS && (opts.clientTools?.length ?? 0) > 0) {
+      const uses = clientToolUses(final.content)
+      if (uses.length) {
+        carryTurns.push({ role: 'assistant', content: final.content })
+        carryTurns.push(await runClientTools(uses, opts.clientTools!))
+        continue
+      }
     }
     break
   }

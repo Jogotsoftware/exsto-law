@@ -17,6 +17,7 @@ import {
   chatWithAssistantDetailed,
   streamChatWithAssistant,
   type ChatMessage,
+  type ClientTool,
   type WorkRate,
 } from '../adapters/claude.js'
 import { runPerplexityResearch, streamPerplexityResearch } from '../adapters/perplexity.js'
@@ -24,7 +25,9 @@ import { resolveAssistantModel, type AssistantProvider } from './assistantModels
 import {
   buildMatterAssistantContext,
   buildContactAssistantContext,
+  parseContextDepth,
   type AssistantContext,
+  type ContextDepth,
 } from './assistantContext.js'
 import { getMatter } from '../queries/matters.js'
 import { getContact } from '../queries/contacts.js'
@@ -53,6 +56,9 @@ export interface AssistantChatInput {
   // grounded in (or threaded on) the current matter/client. Default true, so the
   // assistant is always contextualised to what the attorney is working on.
   useContext?: boolean
+  // How much matter/client history to feed the model (chat settings). More depth
+  // = richer grounding but a larger, slower, pricier prompt. Default 'balanced'.
+  contextDepth?: ContextDepth
   // Optional widget hint: a "Leave feedback" entry point forces kind='feedback'.
   intent?: 'feedback' | 'question'
   // Beta feedback (Obj 11): the category the attorney tagged + where they were.
@@ -116,9 +122,59 @@ const SYSTEM_PROMPT = [
   // link. Point the attorney to the right page instead of just naming it.
   'When you point the attorney to a part of the app, LINK to it with a markdown link they can click. Main pages: Dashboard (/attorney), Matters (/attorney/matters), Clients (/attorney/crm), Contacts (/attorney/crm/contacts), Calendar (/attorney/calendar), Mail (/attorney/mail), Services (/attorney/services), Templates (/attorney/templates), Questionnaires (/attorney/questionnaires), Billing (/attorney/billing), Review queue (/attorney/review), Settings (/attorney/settings). Only link to these paths or links given in the context below; never invent entity ids.',
   "You are a drafting and workflow aid, not the attorney's legal judgment: when asked for a legal conclusion, give your best analysis but remind the attorney to verify it and that they own the legal opinion.",
-  'You also collect product feedback: when the attorney shares a complaint, idea, or praise, acknowledge it warmly — every message here is already recorded for the team. If the feedback is vague or missing actionable detail (which screen, what they expected, the steps to reproduce), ask ONE short clarifying question before wrapping up.',
+  'You also collect product feedback. When the attorney shares a complaint, idea, or praise: if it is vague or missing actionable detail (which screen, what they expected, the steps to reproduce), ask ONE short clarifying question first. Once you have a clear, specific item, CALL the log_feedback tool to file it with the right category, then tell the attorney it is logged and share the reference id the tool returns. Use the tool only for genuine product feedback, not for ordinary questions.',
   'Keep replies focused and concise.',
 ].join(' ')
+
+// Definition advertised to the model for the log_feedback client tool. The
+// assistant calls it to file a clean, triageable feedback item (vs. the passive
+// keyword capture of every turn). Executed by buildFeedbackTool below.
+const LOG_FEEDBACK_TOOL_DEF = {
+  name: 'log_feedback',
+  description:
+    'Record a piece of product feedback (a bug, complaint, idea, or praise about THIS app) so the product team sees it as a clean item. Only call once you have a specific, actionable summary — if the attorney was vague, ask one clarifying question first. Returns a reference id to share back.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      summary: {
+        type: 'string',
+        description:
+          'The feedback as a clear standalone item: what, where (which screen), and expected vs actual when relevant.',
+      },
+      category: {
+        type: 'string',
+        enum: ['ui', 'ai', 'workflow', 'other'],
+        description: 'Which area the feedback concerns.',
+      },
+    },
+    required: ['summary'],
+    additionalProperties: false,
+  },
+}
+
+// Build the log_feedback ClientTool for this turn. Its run() records the feedback
+// through the SAME action-layer path as the Beta button (submitAssistantFeedback),
+// threaded on the current matter/contact, and returns the reference id to the
+// model. No direct substrate writes — everything via the action layer.
+function buildFeedbackTool(ctx: ActionContext, input: AssistantChatInput): ClientTool {
+  return {
+    definition: LOG_FEEDBACK_TOOL_DEF,
+    name: 'log_feedback',
+    run: async (raw) => {
+      const args = (raw ?? {}) as { summary?: string; category?: FeedbackCategory }
+      const summary = (args.summary ?? '').trim()
+      if (!summary) return 'No feedback summary was provided, so nothing was logged.'
+      const { eventId } = await submitAssistantFeedback(ctx, {
+        message: summary,
+        category: args.category,
+        matterEntityId: input.matterEntityId,
+        contactEntityId: input.contactEntityId,
+        pageContext: input.pageContext,
+      })
+      return `Feedback logged for the team. Reference id: ${eventId}.`
+    },
+  }
+}
 
 // Build the Claude system text: the base prompt + the matter/client context, plus
 // the current entity's in-app link so the assistant can refer the attorney back to
@@ -172,17 +228,20 @@ async function loadContext(
   // threaded on the matter/client (recorded globally), so it doesn't pollute the
   // entity's timeline. Default (true) keeps the assistant contextualised.
   if (input.useContext !== false) {
+    // Normalize the depth from (untrusted) chat settings before it reaches the
+    // budget lookup.
+    const depth = parseContextDepth(input.contextDepth)
     if (input.matterEntityId) {
       return {
         scope: 'matter',
-        context: await buildMatterAssistantContext(ctx, input.matterEntityId),
+        context: await buildMatterAssistantContext(ctx, input.matterEntityId, depth),
         primaryEntityId: input.matterEntityId,
       }
     }
     if (input.contactEntityId) {
       return {
         scope: 'contact',
-        context: await buildContactAssistantContext(ctx, input.contactEntityId),
+        context: await buildContactAssistantContext(ctx, input.contactEntityId, depth),
         primaryEntityId: input.contactEntityId,
       }
     }
@@ -192,11 +251,22 @@ async function loadContext(
 
 // Web search is engaged when the toggle is on (for models that support it) or
 // when the model always searches the web (Perplexity).
-function webSearchOn(
+//
+// SECURITY GATE: a grounded turn injects the FULL matter/client context — client
+// names, emails, and (at higher depths) email bodies and call transcripts — into
+// Claude's prompt. Anthropic's server-side web_search could put that privileged
+// content into outbound search queries, so web_search is NEVER enabled on a
+// grounded Claude turn. Perplexity is unaffected: it only ever receives the
+// non-confidential framing, so its inherent search stays on. The attorney can turn
+// the context toggle off (ask a general question) to use web search.
+export function webSearchOn(
   model: { supportsWebSearch: boolean; webSearchInherent: boolean },
   toggle: boolean | undefined,
+  grounded: boolean,
 ): boolean {
-  return model.webSearchInherent || (model.supportsWebSearch && !!toggle)
+  if (model.webSearchInherent) return true
+  if (grounded) return false
+  return model.supportsWebSearch && !!toggle
 }
 
 // Substrate recording half — split out so the persistence is testable without a
@@ -264,7 +334,7 @@ export async function assistantChat(
 
   const { scope, context, primaryEntityId } = await loadContext(ctx, input)
   const kind = classifyKind(model.provider, message, input.intent)
-  const webSearch = webSearchOn(model, input.webSearch)
+  const webSearch = webSearchOn(model, input.webSearch, Boolean(context))
 
   let reply: string
   let citations: string[] = []
@@ -291,6 +361,7 @@ export async function assistantChat(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
+      clientTools: [buildFeedbackTool(ctx, input)],
     })
     reply = result.reply
     citations = result.citations
@@ -331,7 +402,7 @@ export async function* assistantChatStream(
 
   const { scope, context, primaryEntityId } = await loadContext(ctx, input)
   const kind = classifyKind(model.provider, message, input.intent)
-  const webSearch = webSearchOn(model, input.webSearch)
+  const webSearch = webSearchOn(model, input.webSearch, Boolean(context))
 
   yield { type: 'meta', provider: model.provider, model: model.model, kind, scope, webSearch }
 
@@ -365,6 +436,7 @@ export async function* assistantChatStream(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
+      clientTools: [buildFeedbackTool(ctx, input)],
     })) {
       if (chunk.type === 'text') {
         reply += chunk.text
