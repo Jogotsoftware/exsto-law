@@ -1,15 +1,15 @@
 'use client'
 
 // Browser-only Supabase client, used SOLELY as the client-portal sign-in front
-// door (email+password and Google via Supabase Auth). Once Supabase verifies the
+// door (email + password via Supabase Auth). Once Supabase verifies the
 // identity, we exchange its access token for our own httpOnly portal session
 // (/api/client/auth/supabase) and sign the Supabase session back out — so the
 // substrate-side authorization (the exsto_client_session cookie) is the single
 // source of truth, unchanged. Supabase Auth only proves "this person controls
 // this email".
 //
-// Returns null when the public env isn't configured, so the login page degrades
-// to magic-link-only without crashing (dev/demo with no Supabase Auth set up).
+// Returns null when the public env isn't configured, so the login page can show
+// a clear "not configured" notice instead of crashing.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL

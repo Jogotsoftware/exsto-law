@@ -5,23 +5,16 @@ import { useRouter } from 'next/navigation'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
 
-// The client-portal sign-in page. Four entry points, all ending at the SAME
-// httpOnly portal session:
-//   1. Email + password (Supabase Auth) → POST the verified token to
-//      /api/client/auth/supabase, which mints our session cookie.
-//   2. Google (Supabase OAuth) → returns here with ?code=, we exchange it and
-//      bridge the same way.
-//   3. Magic link (?token=) → /api/client/auth/consume (the original flow).
-//   4. "Email me a link" → /api/client/auth/request (neutral, anti-enumeration).
-// When Supabase isn't configured, 1–2 hide and the page is magic-link only.
+// The client-portal sign-in page — email + password (Supabase Auth). On sign in
+// or a confirmed sign-up we POST the verified token to /api/client/auth/supabase,
+// which maps the verified email to the firm's client_contact and mints our own
+// httpOnly portal session (the substrate-side authorization is unchanged).
 
-type Phase = 'form' | 'sent' | 'working' | 'error' | 'check-email'
-type Mode = 'password' | 'magic'
+type Phase = 'form' | 'working' | 'error' | 'check-email'
 
 export default function ClientPortalLoginPage() {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('form')
-  const [mode, setMode] = useState<Mode>(supabaseAuthConfigured ? 'password' : 'magic')
   const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -45,37 +38,13 @@ export default function ClientPortalLoginPage() {
     router.replace(safeInternalPath(data?.path, '/portal'))
   }
 
-  // On mount: resolve which return flow we're in (magic-link consume, OAuth
-  // return, or a fresh visit) exactly once.
+  // On mount: handle an email-confirmation return (?code=) and pre-fill ?email=.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     const cont = safeInternalPath(params.get('continue'), '/portal')
     setContinueParam(cont)
 
-    // (3) Magic-link landing.
-    const token = params.get('token')
-    if (token) {
-      setPhase('working')
-      fetch('/api/client/auth/consume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ token, continue: cont }),
-      })
-        .then(async (res) => {
-          const body = (await res.json().catch(() => null)) as { error?: string; path?: string } | null
-          if (!res.ok) throw new Error(body?.error ?? 'This sign-in link is invalid or has expired.')
-          router.replace(safeInternalPath(body?.path, '/portal'))
-        })
-        .catch((e) => {
-          setError(e instanceof Error ? e.message : String(e))
-          setPhase('error')
-        })
-      return
-    }
-
-    // (2) OAuth / email-confirmation return (Supabase PKCE ?code=).
     const code = params.get('code')
     const sb = getSupabaseBrowser()
     if (code && sb) {
@@ -93,14 +62,12 @@ export default function ClientPortalLoginPage() {
       return
     }
 
-    // (fresh visit) Pre-fill the email from the booking "Create your account" link.
     const prefill = params.get('email')
     if (prefill) setEmail(prefill)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Email + password (Supabase Auth).
-  async function submitPassword(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault()
     const sb = getSupabaseBrowser()
     if (!sb) return
@@ -134,41 +101,6 @@ export default function ClientPortalLoginPage() {
     }
   }
 
-  // Google (Supabase OAuth) — redirects to Google, returns to this page w/ ?code.
-  async function signInWithGoogle() {
-    const sb = getSupabaseBrowser()
-    if (!sb) return
-    setError(null)
-    const redirectTo = `${window.location.origin}/portal/login${
-      continueParam !== '/portal' ? `?continue=${encodeURIComponent(continueParam)}` : ''
-    }`
-    const { error: oErr } = await sb.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo },
-    })
-    if (oErr) setError(oErr.message)
-  }
-
-  // Magic link — neutral by design (never reveals whether the email is on file).
-  async function requestLink(e: React.FormEvent) {
-    e.preventDefault()
-    setSubmitting(true)
-    setError(null)
-    try {
-      await fetch('/api/client/auth/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      })
-      setPhase('sent')
-    } catch {
-      setPhase('sent') // even a network error: stay neutral
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  // ---- Terminal / transitional states ----
   if (phase === 'working') {
     return (
       <Shell>
@@ -190,20 +122,6 @@ export default function ClientPortalLoginPage() {
       </Shell>
     )
   }
-  if (phase === 'sent') {
-    return (
-      <Shell title="Check your email">
-        <p className="cauth-lead">
-          If that email is on file, we&apos;ve sent a secure sign-in link. It expires in 30 minutes.
-        </p>
-        <p style={{ marginTop: 'var(--space-3)' }}>
-          <button className="cauth-link" onClick={() => setPhase('form')}>
-            ← Back to sign in
-          </button>
-        </p>
-      </Shell>
-    )
-  }
   if (phase === 'check-email') {
     return (
       <Shell title="Confirm your email">
@@ -220,7 +138,16 @@ export default function ClientPortalLoginPage() {
     )
   }
 
-  // ---- Main form ----
+  if (!supabaseAuthConfigured) {
+    return (
+      <Shell>
+        <p className="cauth-lead">
+          Sign-in isn&apos;t configured for this environment yet. Please contact the firm.
+        </p>
+      </Shell>
+    )
+  }
+
   return (
     <Shell>
       <p className="cauth-lead">
@@ -233,86 +160,41 @@ export default function ClientPortalLoginPage() {
         </div>
       )}
 
-      {mode === 'password' && supabaseAuthConfigured ? (
-        <>
-          <button className="cauth-google" onClick={signInWithGoogle} type="button">
-            <GoogleGlyph /> Continue with Google
-          </button>
+      <form onSubmit={submit} className="cauth-form">
+        <label className="cauth-label" htmlFor="cauth-email">Email</label>
+        <input
+          id="cauth-email"
+          type="email"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          className="cauth-input"
+        />
+        <label className="cauth-label" htmlFor="cauth-pass">Password</label>
+        <input
+          id="cauth-pass"
+          type="password"
+          required
+          minLength={8}
+          autoComplete={isSignUp ? 'new-password' : 'current-password'}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={isSignUp ? 'At least 8 characters' : 'Your password'}
+          className="cauth-input"
+        />
+        <button type="submit" className="cauth-primary" disabled={submitting}>
+          {submitting ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
+        </button>
+      </form>
 
-          <div className="cauth-divider"><span>or</span></div>
-
-          <form onSubmit={submitPassword} className="cauth-form">
-            <label className="cauth-label" htmlFor="cauth-email">Email</label>
-            <input
-              id="cauth-email"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="cauth-input"
-            />
-            <label className="cauth-label" htmlFor="cauth-pass">Password</label>
-            <input
-              id="cauth-pass"
-              type="password"
-              required
-              minLength={8}
-              autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={isSignUp ? 'At least 8 characters' : 'Your password'}
-              className="cauth-input"
-            />
-            <button type="submit" className="cauth-primary" disabled={submitting}>
-              {submitting ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
-            </button>
-          </form>
-
-          <p className="cauth-foot">
-            {isSignUp ? 'Already have an account?' : 'New here?'}{' '}
-            <button className="cauth-link" onClick={() => { setIsSignUp(!isSignUp); setError(null) }}>
-              {isSignUp ? 'Sign in' : 'Create an account'}
-            </button>
-          </p>
-          <p className="cauth-foot">
-            <button className="cauth-link" onClick={() => { setMode('magic'); setError(null) }}>
-              Email me a sign-in link instead
-            </button>
-          </p>
-        </>
-      ) : (
-        // Magic-link mode (also the only mode when Supabase isn't configured).
-        <>
-          <form onSubmit={requestLink} className="cauth-form">
-            <label className="cauth-label" htmlFor="cauth-email-magic">Email</label>
-            <input
-              id="cauth-email-magic"
-              type="email"
-              required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="cauth-input"
-            />
-            <button type="submit" className="cauth-primary" disabled={submitting}>
-              {submitting ? 'Sending…' : 'Send me a sign-in link'}
-            </button>
-          </form>
-          <p className="cauth-lead" style={{ fontSize: '0.85rem', marginTop: 'var(--space-3)' }}>
-            We&apos;ll email you a secure link — no password needed.
-          </p>
-          {supabaseAuthConfigured && (
-            <p className="cauth-foot">
-              <button className="cauth-link" onClick={() => { setMode('password'); setError(null) }}>
-                ← Sign in with a password or Google
-              </button>
-            </p>
-          )}
-        </>
-      )}
+      <p className="cauth-foot">
+        {isSignUp ? 'Already have an account?' : 'New here?'}{' '}
+        <button className="cauth-link" onClick={() => { setIsSignUp(!isSignUp); setError(null) }}>
+          {isSignUp ? 'Sign in' : 'Create an account'}
+        </button>
+      </p>
     </Shell>
   )
 }
@@ -326,16 +208,5 @@ function Shell({ title = 'Client Portal', children }: { title?: string; children
         {children}
       </div>
     </main>
-  )
-}
-
-function GoogleGlyph() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z" />
-      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.34A9 9 0 0 0 9 18z" />
-      <path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.94H.96a9 9 0 0 0 0 8.12l3.01-2.34z" />
-      <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 9 0 9 9 0 0 0 .96 4.94l3.01 2.34C4.68 5.16 6.66 3.58 9 3.58z" />
-    </svg>
   )
 }

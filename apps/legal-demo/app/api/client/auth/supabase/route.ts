@@ -1,7 +1,7 @@
 // Bridge: Supabase Auth session  →  our httpOnly client-portal session.
 //
-// The browser signs in with email+password or Google via Supabase Auth, then
-// POSTs the resulting access token here. We VERIFY that token against Supabase
+// The browser signs in with email + password via Supabase Auth, then POSTs the
+// resulting access token here. We VERIFY that token against Supabase
 // (auth.getUser is authoritative — it validates the JWT server-side), take the
 // VERIFIED email, resolve the firm's client_contact for it, and mint the same
 // exsto_client_session the magic-link flow does. Supabase only proves "this
