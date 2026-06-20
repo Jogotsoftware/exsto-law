@@ -98,11 +98,15 @@ run('booking flow (live DB)', { timeout: 60_000 }, () => {
     expect(relKinds).toContain('client_of')
     expect(relKinds).toContain('response_of')
 
-    // Lifecycle events.
+    // Lifecycle events. Exclude draft.* — auto-route services (this one) draft at
+    // submit, so enqueueAutoDrafts emits draft.requested (and later draft.completed)
+    // against the matter; those are the auto-draft feature's concern, covered by its
+    // own tests. Here we pin the booking lifecycle chain only.
     const events = await db.query<{ kind_name: string }>(
       `SELECT ekd.kind_name FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
        WHERE e.tenant_id=$1 AND e.primary_entity_id=$2
+         AND ekd.kind_name NOT LIKE 'draft.%'
        ORDER BY e.recorded_at`,
       [TENANT, matterId],
     )
