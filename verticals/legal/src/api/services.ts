@@ -1294,6 +1294,9 @@ export async function submitBooking(
       client_entity_id: intakeEffects.clientEntityId,
       questionnaire_entity_id: intakeEffects.questionnaireEntityId,
       intake_action_id: intake.actionId,
+      // Name the auto-created client-parent account after the company (when given)
+      // else the person, so it reads sensibly in the CRM (intake linking salvage).
+      client_display_name: input.clientCompanyName ?? input.clientFullName,
     },
   })
 
