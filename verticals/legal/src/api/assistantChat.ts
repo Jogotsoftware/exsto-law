@@ -249,11 +249,22 @@ async function loadContext(
 
 // Web search is engaged when the toggle is on (for models that support it) or
 // when the model always searches the web (Perplexity).
-function webSearchOn(
+//
+// SECURITY GATE: a grounded turn injects the FULL matter/client context — client
+// names, emails, and (at higher depths) email bodies and call transcripts — into
+// Claude's prompt. Anthropic's server-side web_search could put that privileged
+// content into outbound search queries, so web_search is NEVER enabled on a
+// grounded Claude turn. Perplexity is unaffected: it only ever receives the
+// non-confidential framing, so its inherent search stays on. The attorney can turn
+// the context toggle off (ask a general question) to use web search.
+export function webSearchOn(
   model: { supportsWebSearch: boolean; webSearchInherent: boolean },
   toggle: boolean | undefined,
+  grounded: boolean,
 ): boolean {
-  return model.webSearchInherent || (model.supportsWebSearch && !!toggle)
+  if (model.webSearchInherent) return true
+  if (grounded) return false
+  return model.supportsWebSearch && !!toggle
 }
 
 // Substrate recording half — split out so the persistence is testable without a
@@ -321,7 +332,7 @@ export async function assistantChat(
 
   const { scope, context, primaryEntityId } = await loadContext(ctx, input)
   const kind = classifyKind(model.provider, message, input.intent)
-  const webSearch = webSearchOn(model, input.webSearch)
+  const webSearch = webSearchOn(model, input.webSearch, Boolean(context))
 
   let reply: string
   let citations: string[] = []
@@ -389,7 +400,7 @@ export async function* assistantChatStream(
 
   const { scope, context, primaryEntityId } = await loadContext(ctx, input)
   const kind = classifyKind(model.provider, message, input.intent)
-  const webSearch = webSearchOn(model, input.webSearch)
+  const webSearch = webSearchOn(model, input.webSearch, Boolean(context))
 
   yield { type: 'meta', provider: model.provider, model: model.model, kind, scope, webSearch }
 
