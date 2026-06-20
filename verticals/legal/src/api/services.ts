@@ -659,6 +659,13 @@ export const KNOWN_FIELD_TYPES = [
   'text',
   'textarea',
   'select',
+  // Boolean answers. yes_no / true_false render as a two-choice control; the
+  // stored answer is the chosen label ("Yes"/"No", "True"/"False").
+  'yes_no',
+  'true_false',
+  // Multi-select from a choice list, rendered as toggle pills; the stored answer
+  // is a string[] (template merge joins it per the template's format option).
+  'checkbox',
   'date',
   'number',
   'address_autocomplete',
@@ -796,12 +803,12 @@ function validateField(rawField: unknown, sectionId: string): void {
         `Allowed: ${KNOWN_FIELD_TYPES.join(', ')}.`,
     )
   }
-  if (field.type === 'select') {
+  if (field.type === 'select' || field.type === 'checkbox') {
     if (!Array.isArray(field.options) || field.options.length === 0) {
-      throw new Error(`Select field ${field.id} needs a non-empty options array.`)
+      throw new Error(`${field.type} field ${field.id} needs a non-empty options array.`)
     }
     if (!(field.options as unknown[]).every((o) => typeof o === 'string')) {
-      throw new Error(`Select field ${field.id} options must all be strings.`)
+      throw new Error(`${field.type} field ${field.id} options must all be strings.`)
     }
   }
   if (field.type === 'members_repeater') {
