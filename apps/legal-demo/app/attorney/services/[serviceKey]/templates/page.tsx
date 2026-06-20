@@ -16,6 +16,8 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
+import { TemplatePreview } from '@/components/templates/TemplatePreview'
+import { EyeIcon } from '@/components/icons'
 import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
 
 interface ServiceDefinition {
@@ -378,6 +380,7 @@ function KindEditor({
   const [err, setErr] = useState<string | null>(null)
   const [newLabel, setNewLabel] = useState('')
   const [libNote, setLibNote] = useState<string | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
   const editorRef = useRef<TemplateEditorHandle | null>(null)
   // HTML seed for the rich editor + a key that remounts it when the body is
   // replaced wholesale (loading a library template). Normal typing flows through
@@ -461,11 +464,20 @@ function KindEditor({
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
         <strong>{humanKind(template.documentKind)}</strong>
         <button
-          className="primary"
-          style={{ marginLeft: 'auto' }}
-          onClick={save}
-          disabled={busy || !text.trim()}
+          type="button"
+          className={showPreview ? 'primary' : undefined}
+          style={{
+            marginLeft: 'auto',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.35rem',
+          }}
+          onClick={() => setShowPreview((v) => !v)}
+          title="Preview the finished document with sample data, side by side"
         >
+          <EyeIcon size={15} /> Preview
+        </button>
+        <button className="primary" onClick={save} disabled={busy || !text.trim()}>
           {busy ? 'Saving…' : 'Save new version'}
         </button>
       </div>
@@ -554,17 +566,26 @@ function KindEditor({
         <span className="tpl-insert-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
           Document
         </span>
-        <TemplateEditor
-          key={editorKey}
-          initialHtml={seedHtml}
-          editorRef={editorRef}
-          placeholder="Write the document. Click a field above to insert it as a marker…"
-          onChange={(html) => {
-            setText(htmlToMarkdown(html))
-            setSaved(false)
-            setErr(null)
-          }}
-        />
+        <div className="tpl-split">
+          <div className="tpl-split-col">
+            <TemplateEditor
+              key={editorKey}
+              initialHtml={seedHtml}
+              editorRef={editorRef}
+              placeholder="Write the document. Click a field above to insert it as a marker…"
+              onChange={(html) => {
+                setText(htmlToMarkdown(html))
+                setSaved(false)
+                setErr(null)
+              }}
+            />
+          </div>
+          {showPreview && (
+            <div className="tpl-split-col">
+              <TemplatePreview body={text} />
+            </div>
+          )}
+        </div>
       </div>
 
       {err && (

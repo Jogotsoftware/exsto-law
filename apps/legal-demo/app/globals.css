@@ -3735,17 +3735,19 @@ main.book-main {
 
 /* Variable chip */
 .tpl-var-chip {
-  display: inline-block;
-  padding: 0.05rem 0.45rem;
+  display: inline;
+  padding: 0.05em 0.4em;
   margin: 0 1px;
-  font-family: 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.85em;
-  background: var(--accent-attorney-soft);
-  color: var(--accent);
+  font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+  font-size: 0.82em;
+  font-weight: var(--weight-medium, 500);
+  background: var(--accent-attorney-soft, #e8efff);
+  color: var(--accent, #1e3a8a);
   border: 1px solid #c7d7ff;
-  border-radius: var(--radius-sm);
-  line-height: 1.3;
+  border-radius: 4px;
+  line-height: 1.2;
   white-space: nowrap;
+  vertical-align: baseline;
 }
 .tpl-var-chip-inline {
   margin: 0 0.25rem;
@@ -3810,45 +3812,79 @@ main.book-main {
   background: var(--border-soft);
   margin: 0 0.3rem;
 }
+/* The "desk" — a soft grey surround the page floats on; scrolls long documents
+   while the toolbar stays put above it. */
 .tpl-editor-content-wrap {
-  background: white;
+  background: var(--surface-2);
+  padding: 1.5rem 1.25rem 2rem;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+/* The "page" — a letter-width white sheet in EB Garamond with ~1in margins,
+   lifted off the desk. Shared verbatim with the preview so the editing surface
+   looks like the finished document (WYSIWYG, Outreach-style). */
+.tpl-editor-content,
+.tpl-preview-page {
+  width: 100%;
+  max-width: 7.75in;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  box-shadow:
+    0 1px 3px rgba(15, 23, 42, 0.08),
+    0 10px 28px -8px rgba(15, 23, 42, 0.16);
+  min-height: 560px;
+  padding: 3.25rem 3.5rem;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, 'Times New Roman', serif);
+  font-size: 1.12rem;
+  line-height: 1.85;
+  color: #1b1b1b;
 }
 .tpl-editor-content {
-  min-height: 480px;
-  padding: 1.25rem 1.5rem;
-  font-size: 0.95rem;
-  line-height: 1.6;
   outline: none;
 }
-.tpl-editor-content > * + * {
-  margin-top: 0.75em;
+/* Document typography (editor + preview). The title is centered, like a filing. */
+.tpl-editor-content > * + *,
+.tpl-preview-page > * + * {
+  margin-top: 0.95em;
 }
-.tpl-editor-content h1 {
-  font-size: 1.5rem;
-  font-weight: var(--weight-bold);
-  margin-top: 1.25em;
-}
-.tpl-editor-content h2 {
-  font-size: 1.2rem;
+.tpl-editor-content h1,
+.tpl-preview-page h1 {
+  font-size: 1.55rem;
   font-weight: var(--weight-semibold);
-  margin-top: 1em;
+  text-align: center;
+  margin: 0.2em 0 0.55em;
+  letter-spacing: 0.01em;
 }
-.tpl-editor-content h3 {
-  font-size: 1.05rem;
+.tpl-editor-content h2,
+.tpl-preview-page h2 {
+  font-size: 1.24rem;
   font-weight: var(--weight-semibold);
-  margin-top: 0.85em;
+  margin-top: 1.15em;
 }
-.tpl-editor-content p {
+.tpl-editor-content h3,
+.tpl-preview-page h3 {
+  font-size: 1.08rem;
+  font-weight: var(--weight-semibold);
+  margin-top: 0.95em;
+}
+.tpl-editor-content p,
+.tpl-preview-page p {
   margin: 0;
 }
 .tpl-editor-content ul,
-.tpl-editor-content ol {
-  padding-left: 1.5rem;
+.tpl-editor-content ol,
+.tpl-preview-page ul,
+.tpl-preview-page ol {
+  padding-left: 1.6rem;
 }
-.tpl-editor-content blockquote {
+.tpl-editor-content blockquote,
+.tpl-preview-page blockquote {
   border-left: 3px solid var(--border);
-  padding-left: 0.85rem;
+  padding-left: 0.9rem;
   color: var(--muted);
+  font-style: italic;
 }
 .tpl-editor-content p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
@@ -3856,6 +3892,86 @@ main.book-main {
   float: left;
   height: 0;
   pointer-events: none;
+}
+
+/* Editor | preview split (template editor). One column when preview is off (it
+   flexes to full width); two side-by-side when on; stacks on narrow screens. */
+.tpl-split {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-top: 0.5rem;
+}
+.tpl-split-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .tpl-split {
+    flex-wrap: wrap;
+  }
+  .tpl-split-col {
+    flex: 1 1 100%;
+  }
+}
+.tpl-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.tpl-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--rule-soft);
+}
+.tpl-preview-tag {
+  font-size: 0.72rem;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.tpl-preview-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+/* Preview desk — the page (shares the .tpl-editor-content sheet styling above)
+   floats here, matching the editor exactly. */
+.tpl-preview-desk {
+  background: var(--surface-2);
+  padding: 1.5rem 1.25rem 2rem;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+/* Inline placeholders in the preview for unfilled/derived bits. */
+.tpl-prev-field,
+.tpl-prev-clause,
+.tpl-prev-sign {
+  border-radius: var(--radius-sm);
+  padding: 0 0.3em;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+.tpl-prev-field {
+  background: var(--warning-soft, #fef3c7);
+  color: var(--warning-strong, #92400e);
+  border: 1px dashed var(--warning, #d97706);
+}
+.tpl-prev-clause {
+  background: var(--info-soft, #e0e7ff);
+  color: var(--info-strong, #3730a3);
+  border: 1px dashed var(--info, #6366f1);
+}
+.tpl-prev-sign {
+  background: var(--accent-soft, #e0f2fe);
+  color: var(--accent, #0369a1);
+  border: 1px dashed var(--accent, #0ea5e9);
 }
 
 /* Service detail — pricing radios */
