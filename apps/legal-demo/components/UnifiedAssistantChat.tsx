@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { streamAssistant, type WorkRate } from '@/lib/assistantStream'
+import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
 import { renderMarkdown } from '@/lib/draftExport'
 import { SendIcon, SettingsIcon, MegaphoneIcon, SparklesIcon, SearchIcon } from '@/components/icons'
 
@@ -66,6 +66,14 @@ const WORK_RATES: Array<{ value: WorkRate; label: string; hint: string }> = [
   { value: 'thorough', label: 'Thorough', hint: 'Deeper thinking, slower' },
 ]
 
+// How much matter/client history the assistant reads each turn. More = better
+// grounded answers, but a larger, slower, pricier prompt.
+const CONTEXT_DEPTHS: Array<{ value: ContextDepth; label: string; hint: string }> = [
+  { value: 'lean', label: 'Lean', hint: 'Less history — fastest, cheapest' },
+  { value: 'balanced', label: 'Balanced', hint: 'Default — recent emails, transcript, intake' },
+  { value: 'generous', label: 'Generous', hint: 'Most history + draft — slower, pricier' },
+]
+
 const FEEDBACK_CATEGORIES: Array<{ value: FeedbackCategory; label: string }> = [
   { value: 'ui', label: 'UI / design' },
   { value: 'ai', label: 'AI / answers' },
@@ -115,6 +123,7 @@ export function UnifiedAssistantChat({
   const [workRate, setWorkRate] = useState<WorkRate>('balanced')
   const [webSearch, setWebSearch] = useState(false)
   const [useContext, setUseContext] = useState(true)
+  const [contextDepth, setContextDepth] = useState<ContextDepth>('balanced')
 
   // Beta-feedback form.
   const [fbMessage, setFbMessage] = useState('')
@@ -214,6 +223,8 @@ export function UnifiedAssistantChat({
           webSearch,
           // Only meaningful when scoped; the toggle is hidden otherwise.
           useContext: scoped ? useContext : undefined,
+          // Depth only matters when grounded in a matter/client.
+          contextDepth: scoped && useContext ? contextDepth : undefined,
           pageContext:
             typeof window !== 'undefined' ? { path: window.location.pathname } : undefined,
         },
@@ -400,6 +411,31 @@ export function UnifiedAssistantChat({
               </p>
             )}
           </div>
+
+          {scoped && (
+            <div className="uac-setting">
+              <label className="uac-setting-label">Context depth</label>
+              <div className="uac-segmented" role="group" aria-label="Context depth">
+                {CONTEXT_DEPTHS.map((d) => (
+                  <button
+                    key={d.value}
+                    type="button"
+                    className={`uac-seg${contextDepth === d.value ? ' active' : ''}`}
+                    disabled={!useContext}
+                    title={d.hint}
+                    onClick={() => setContextDepth(d.value)}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              <p className="uac-hint">
+                {useContext
+                  ? 'How much of the current matter/client the assistant reads each message.'
+                  : 'Turn the context toggle on to ground the assistant in this matter/client.'}
+              </p>
+            </div>
+          )}
 
           <div className="uac-setting uac-setting-row">
             <label className="uac-setting-label">Web search</label>

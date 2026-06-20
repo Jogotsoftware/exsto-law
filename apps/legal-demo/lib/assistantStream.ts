@@ -4,6 +4,8 @@ import { SessionExpiredError } from './mcpAttorney'
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
 export type WorkRate = 'quick' | 'balanced' | 'thorough'
+// How much matter/client history the assistant is fed per turn (chat setting).
+export type ContextDepth = 'lean' | 'balanced' | 'generous'
 
 export interface AssistantStreamInput {
   message: string
@@ -14,6 +16,7 @@ export interface AssistantStreamInput {
   workRate?: WorkRate
   webSearch?: boolean
   useContext?: boolean
+  contextDepth?: ContextDepth
   pageContext?: { path?: string; [k: string]: unknown }
 }
 

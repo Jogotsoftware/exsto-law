@@ -374,3 +374,69 @@ export async function matterCommunications(
     }))
   })
 }
+
+export interface MatterMessageBody {
+  threadId: string
+  subject: string
+  direction: 'inbound' | 'outbound' | null
+  from: string | null
+  to: string | null
+  sentAt: string | null
+  body: string
+  // True when the stored body was longer than the per-message cap and got cut.
+  truncated: boolean
+}
+
+// Full message BODIES for a matter's threads, newest-first — for grounding the
+// in-app assistant (matterCommunications gives only subjects + a 280-char
+// preview). JOINs the stored full body (content_blob.body via body_blob_id) so
+// the model can read what was actually said. Capped on BOTH message count and
+// per-body length here so a caller can never pull megabytes into a prompt; falls
+// back to the preview when a message has no stored blob. Tenant-scoped via
+// withActionContext (RLS). The bodies are CLIENT-AUTHORED / untrusted — callers
+// that put them in a prompt must delimit them as data (see assistantContext.ts).
+export async function matterCommunicationBodies(
+  ctx: ActionContext,
+  matterEntityId: string,
+  opts: { maxMessages?: number; maxBodyChars?: number } = {},
+): Promise<MatterMessageBody[]> {
+  const maxMessages = Math.max(1, Math.min(opts.maxMessages ?? 8, 50))
+  const maxBodyChars = Math.max(200, Math.min(opts.maxBodyChars ?? 2000, 20000))
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      thread_id: string
+      subject: string | null
+      direction: string | null
+      sender: string | null
+      recipient: string | null
+      occurred_at: string | null
+      body: string | null
+      truncated: boolean
+    }>(
+      `SELECT t.id AS thread_id, t.subject,
+              m.payload->>'direction' AS direction,
+              m.payload->>'from' AS sender,
+              m.payload->>'to' AS recipient,
+              to_char(m.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS occurred_at,
+              left(COALESCE(b.body, m.body_preview, ''), $3) AS body,
+              (length(COALESCE(b.body, m.body_preview, '')) > $3) AS truncated
+         FROM communication_thread t
+         JOIN communication_message m ON m.tenant_id = t.tenant_id AND m.thread_id = t.id
+         LEFT JOIN content_blob b ON b.id = m.body_blob_id
+        WHERE t.tenant_id = $1 AND $2::uuid = ANY(t.related_entity_ids)
+        ORDER BY m.occurred_at DESC
+        LIMIT $4`,
+      [ctx.tenantId, matterEntityId, maxBodyChars, maxMessages],
+    )
+    return res.rows.map((r) => ({
+      threadId: r.thread_id,
+      subject: r.subject ?? '(no subject)',
+      direction: (r.direction as 'inbound' | 'outbound' | null) ?? null,
+      from: r.sender,
+      to: r.recipient,
+      sentAt: r.occurred_at,
+      body: r.body ?? '',
+      truncated: r.truncated ?? false,
+    }))
+  })
+}

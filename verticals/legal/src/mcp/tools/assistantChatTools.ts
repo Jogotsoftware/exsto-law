@@ -73,6 +73,12 @@ registerTool({
         description:
           'When false, treat the message as GENERAL — not grounded in or threaded on the current matter/client. Default true.',
       },
+      contextDepth: {
+        type: 'string',
+        enum: ['lean', 'balanced', 'generous'],
+        description:
+          'How much matter/client history to feed the model (emails, transcript, intake, draft). More = richer grounding but a larger, slower, pricier prompt. Default balanced.',
+      },
       intent: {
         type: 'string',
         enum: ['feedback', 'question'],
