@@ -472,6 +472,7 @@ export async function listAssistantThread(
        WHERE e.tenant_id = $1
          AND ekd.kind_name = 'assistant.turn'
          AND e.primary_entity_id IS NOT DISTINCT FROM $2::uuid
+         AND COALESCE(e.payload->>'kind', '') <> 'feedback'
        ORDER BY e.occurred_at ASC`,
       [ctx.tenantId, primary],
     )
@@ -594,7 +595,7 @@ export async function listAssistantThreads(ctx: ActionContext): Promise<Assistan
         label: m ? `Matter ${m.matterNumber}` : 'Matter',
         ...base,
       })
-    } else if (r.entity_kind === 'contact') {
+    } else if (r.entity_kind === 'client_contact') {
       const c = await getContact(ctx, r.entity_id).catch(() => null)
       summaries.push({
         scope: 'contact',

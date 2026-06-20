@@ -126,6 +126,11 @@ export function UnifiedAssistantChat({
   // The in-flight assistant reply, streamed token-by-token.
   const [streaming, setStreaming] = useState<{ thinking: string; text: string } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  // Bumped whenever the conversation is superseded (a new send, or switching to a
+  // prior thread). In-flight stream/load callbacks compare against it and no-op
+  // when stale, so an old reply can never land in a newly-opened thread.
+  const genRef = useRef(0)
 
   // Toolbar panels + settings.
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -191,11 +196,13 @@ export function UnifiedAssistantChat({
   // this with a different scope to reopen another conversation.
   const loadHistory = useCallback(
     async (target: { matterEntityId?: string; contactEntityId?: string }) => {
+      const gen = genRef.current
       try {
         const r = await callAttorneyMcp<{ turns: ThreadTurn[] }>({
           toolName: 'legal.assistant.thread',
           input: target,
         })
+        if (genRef.current !== gen) return // a newer send/selection superseded this load
         const display: DisplayTurn[] = r.turns.map((t) =>
           t.role === 'user'
             ? { role: 'user', content: t.message }
@@ -203,6 +210,7 @@ export function UnifiedAssistantChat({
         )
         setTurns(display)
       } catch (e) {
+        if (genRef.current !== gen) return
         setError(e instanceof Error ? e.message : String(e))
       }
     },
@@ -220,14 +228,18 @@ export function UnifiedAssistantChat({
   // Reopen a prior conversation: re-point the active scope, clear the current
   // exchange, and load that thread. Re-grounds context in the chosen scope.
   function selectThread(target: { matterEntityId?: string; contactEntityId?: string }) {
+    genRef.current++ // invalidate any in-flight send so its callbacks no-op
     setHistoryOpen(false)
     setActiveScope(target)
     setTurns([])
     setStreaming(null)
     setError(null)
     setInput('')
+    setBusy(false)
     setUseContext(true)
     void loadHistory(target)
+    // The picker button just unmounted; return keyboard focus to the composer.
+    setTimeout(() => composerRef.current?.focus(), 0)
   }
 
   // Open the history picker and (re)load the thread list.
@@ -252,6 +264,8 @@ export function UnifiedAssistantChat({
   async function send() {
     const message = input.trim()
     if (!message || busy || !modelId) return
+    const gen = ++genRef.current // this exchange's generation; stale callbacks no-op
+    const live = () => genRef.current === gen
     setError(null)
     setBusy(true)
     setSettingsOpen(false)
@@ -282,14 +296,17 @@ export function UnifiedAssistantChat({
         },
         {
           onThinking: (t) => {
+            if (!live()) return
             partial.thinking += t
             setStreaming({ ...partial })
           },
           onText: (t) => {
+            if (!live()) return
             partial.text += t
             setStreaming({ ...partial })
           },
           onDone: (d) => {
+            if (!live()) return
             finished = true
             setTurns((prev) => [
               ...prev,
@@ -298,6 +315,7 @@ export function UnifiedAssistantChat({
             setStreaming(null)
           },
           onError: (m) => {
+            if (!live()) return
             finished = true
             setError(m)
             setStreaming(null)
@@ -305,10 +323,15 @@ export function UnifiedAssistantChat({
         },
       )
     } catch (e) {
+      if (!live()) return
       finished = true
       setError(e instanceof Error ? e.message : String(e))
       setStreaming(null)
     }
+
+    // A newer send or a thread switch superseded this exchange — leave the
+    // reopened conversation's state untouched (its reply must not land here).
+    if (!live()) return
 
     // Reconcile a stream that ended without a terminal event (e.g. a drop):
     // keep whatever streamed rather than losing it.
@@ -400,6 +423,8 @@ export function UnifiedAssistantChat({
           className={`uac-iconbtn${historyOpen ? ' active' : ''}`}
           onClick={openHistory}
           aria-label="Chat history"
+          aria-expanded={historyOpen}
+          aria-haspopup="menu"
           title="History — reopen a prior conversation"
         >
           <ClockIcon size={16} />
@@ -459,7 +484,12 @@ export function UnifiedAssistantChat({
                     >
                       <span className="uac-history-row-top">
                         <span className="uac-history-label">{t.label}</span>
-                        <span className="uac-history-count">{t.count}</span>
+                        <span
+                          className="uac-history-count"
+                          title={`${t.count} ${t.count === 1 ? 'turn' : 'turns'}`}
+                        >
+                          {t.count}
+                        </span>
                       </span>
                       {t.snippet && <span className="uac-history-snippet">{t.snippet}</span>}
                     </button>
@@ -678,6 +708,7 @@ export function UnifiedAssistantChat({
       {/* ── Composer ──────────────────────────────────────────────────────── */}
       <div className="uac-composer">
         <textarea
+          ref={composerRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}

@@ -4347,8 +4347,8 @@ button.danger.outline:hover:not(:disabled) {
   background: var(--surface-2, rgba(15, 23, 42, 0.04));
 }
 .uac-history-item.active {
-  border-color: var(--accent, #b8860b);
-  background: var(--accent-soft, rgba(184, 134, 11, 0.06));
+  border-color: var(--accent);
+  background: var(--accent-attorney-soft);
 }
 .uac-history-row-top {
   display: flex;
