@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { readFirmDefault } from '../api/rates.js'
 
 // Billing read-path (Session 4). Bitemporal discipline (exsto-query-substrate):
 // current attribute = latest valid_from; relationships current via valid_to open.
@@ -48,6 +49,10 @@ export interface UnbilledEntry {
 export interface UnbilledMatter {
   matterEntityId: string
   matterNumber: string
+  // The matter's contact (client_of). Present even when the matter has no client
+  // parent — the Unbilled UI uses it to one-click set up billing for an orphan.
+  contactEntityId: string | null
+  contactName: string | null
   entries: UnbilledEntry[]
   total: string
 }
@@ -64,6 +69,11 @@ export async function listUnbilled(
   ctx: ActionContext,
 ): Promise<{ clients: UnbilledClient[]; currency: string }> {
   return withActionContext(ctx, async (client) => {
+    // The firm default hourly rate is the fallback when a client has no explicit
+    // rate (Contract K, rates.ts is the source of truth). The invoice handler
+    // already falls back to it; the Unbilled PREVIEW must too, or logged time
+    // shows a blank amount even though it would invoice fine.
+    const firmDefaultRate = await readFirmDefault(client, ctx.tenantId)
     const res = await client.query<{
       event_id: string
       kind: string
@@ -73,6 +83,8 @@ export async function listUnbilled(
       client_name: string | null
       billable_rate: string | null
       billing_type: string | null
+      contact_id: string | null
+      contact_name: string | null
       description: string | null
       duration_minutes: string | null
       amount: string | null
@@ -98,6 +110,21 @@ export async function listUnbilled(
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_name')          AS client_name,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billable_rate') AS billable_rate,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billing_type')  AS billing_type,
+         -- The matter's contact (client_of: contact -> matter). For an ORPHANED
+         -- matter (no client parent), this lets the UI offer a one-click "set up
+         -- billing" that creates the client from this contact. LIMIT 1 keeps the
+         -- ledger row from multiplying when a matter has more than one contact.
+         (SELECT co.source_entity_id FROM relationship co
+            JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id
+           WHERE co.tenant_id = $1 AND co.target_entity_id = m.id AND cok.kind_name = 'client_of'
+             AND (co.valid_to IS NULL OR co.valid_to > now()) LIMIT 1) AS contact_id,
+         (SELECT COALESCE(
+            (SELECT value #>> '{}' FROM attrs WHERE entity_id = c2.cid AND kind_name = 'contact_full_name'),
+            (SELECT value #>> '{}' FROM attrs WHERE entity_id = c2.cid AND kind_name = 'full_name'))
+          FROM (SELECT co.source_entity_id AS cid FROM relationship co
+                  JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id
+                 WHERE co.tenant_id = $1 AND co.target_entity_id = m.id AND cok.kind_name = 'client_of'
+                   AND (co.valid_to IS NULL OR co.valid_to > now()) LIMIT 1) c2) AS contact_name,
          e.payload->>'description'      AS description,
          e.payload->>'duration_minutes' AS duration_minutes,
          e.payload->>'amount'           AS amount,
@@ -137,6 +164,8 @@ export async function listUnbilled(
         m = {
           matterEntityId: r.matter_id,
           matterNumber: r.matter_number,
+          contactEntityId: r.contact_id,
+          contactName: r.contact_name,
           entries: [],
           total: '0.00',
         }
@@ -146,7 +175,9 @@ export async function listUnbilled(
       let entry: UnbilledEntry
       if (r.kind === 'time.logged') {
         const minutes = Number(r.duration_minutes ?? '0')
-        const rate = r.billable_rate
+        // Client rate first, then the firm default fallback (matches the invoice
+        // handler). null only when neither is set — the UI then prompts per line.
+        const rate = r.billable_rate ?? firmDefaultRate
         if (rate) {
           const { quantity, amountCents } = priceTime(minutes, rate)
           entry = {

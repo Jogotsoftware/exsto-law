@@ -24,6 +24,8 @@ interface UnbilledEntry {
 interface UnbilledMatter {
   matterEntityId: string
   matterNumber: string
+  contactEntityId: string | null
+  contactName: string | null
   entries: UnbilledEntry[]
   total: string
 }
@@ -90,6 +92,7 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [rateOverrides, setRateOverrides] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<string | null>(null)
+  const [setupBusy, setSetupBusy] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setError(null)
@@ -146,6 +149,36 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
+    }
+  }
+
+  // Make an orphaned matter invoiceable in one click: create a client from the
+  // matter's contact and attach both (the link intake now makes automatically;
+  // this rescues matters opened before that). Reuses legal.client.create.
+  async function setupBilling(m: UnbilledMatter) {
+    if (!m.contactEntityId) return
+    setSetupBusy(m.matterEntityId)
+    setError(null)
+    setNotice(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.client.create',
+        input: {
+          client_name: m.contactName || m.matterNumber,
+          main_contact_id: m.contactEntityId,
+          contact_ids: [m.contactEntityId],
+          matter_ids: [m.matterEntityId],
+        },
+      })
+      setNotice(
+        `Set up billing for ${m.contactName || m.matterNumber} — ${m.matterNumber} is now invoiceable.`,
+      )
+      await refresh()
+      onIssued()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSetupBusy(null)
     }
   }
 
@@ -265,12 +298,45 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
       ))}
 
       {orphans.map((c) => (
-        <section key="__none__" style={{ marginBottom: '1.4rem', padding: '1rem', opacity: 0.85 }}>
+        <section key="__none__" style={{ marginBottom: '1.4rem', padding: '1rem', opacity: 0.9 }}>
           <h3 style={{ marginTop: 0 }}>{c.clientName}</h3>
-          <p style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-            These matters aren’t linked to a client yet, so they can’t be invoiced. Attach the
-            matter to a client (Clients screen) first. Unbilled {money(c.total, currency)}.
+          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: 0 }}>
+            These matters aren’t linked to a client yet, so they can’t be invoiced. Set up billing
+            to create the client from the matter’s contact and make it invoiceable. Unbilled{' '}
+            {money(c.total, currency)}.
           </p>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Matter</th>
+                <th>Contact</th>
+                <th style={{ textAlign: 'right' }}>Unbilled</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {c.matters.map((m) => (
+                <tr key={m.matterEntityId}>
+                  <td>{m.matterNumber}</td>
+                  <td>{m.contactName ?? '—'}</td>
+                  <td style={{ textAlign: 'right' }}>{money(m.total, currency)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {m.contactEntityId ? (
+                      <button
+                        className="primary"
+                        disabled={setupBusy === m.matterEntityId}
+                        onClick={() => setupBilling(m)}
+                      >
+                        {setupBusy === m.matterEntityId ? '…' : 'Set up billing'}
+                      </button>
+                    ) : (
+                      <span style={{ color: 'var(--muted)' }}>no contact</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       ))}
     </div>

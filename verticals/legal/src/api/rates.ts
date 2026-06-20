@@ -207,7 +207,7 @@ export async function getRatesView(ctx: ActionContext): Promise<RatesView> {
 
 // ── shared read helpers (one connection) ──────────────────────────────────────
 
-async function readFirmDefault(
+export async function readFirmDefault(
   client: import('@exsto/shared').DbClient,
   tenantId: string,
 ): Promise<string | null> {
