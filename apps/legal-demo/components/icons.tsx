@@ -33,6 +33,67 @@ export const CalendarIcon = (p: IconProps) => (
   </Svg>
 )
 
+// Rich-text formatting icons (Word-style) for the template editor toolbar.
+// Bold is a filled glyph (the open-stroke default would render a hollow "B").
+export const BoldIcon = (p: IconProps) => (
+  <Svg fill="currentColor" stroke="none" {...p}>
+    <path d="M7 5a1 1 0 0 1 1-1h5.5a4 4 0 0 1 2.9 6.75A4.25 4.25 0 0 1 14 18.5H8a1 1 0 0 1-1-1zm2.4 1.3v3.6h3.6a1.8 1.8 0 0 0 0-3.6zm0 5.5v4h3.7a2 2 0 0 0 0-4z" />
+  </Svg>
+)
+
+export const ItalicIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="19" x2="10" y1="4" y2="4" />
+    <line x1="14" x2="5" y1="20" y2="20" />
+    <line x1="15" x2="9" y1="4" y2="20" />
+  </Svg>
+)
+
+export const ListIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="8" x2="21" y1="6" y2="6" />
+    <line x1="8" x2="21" y1="12" y2="12" />
+    <line x1="8" x2="21" y1="18" y2="18" />
+    <line x1="3" x2="3.01" y1="6" y2="6" />
+    <line x1="3" x2="3.01" y1="12" y2="12" />
+    <line x1="3" x2="3.01" y1="18" y2="18" />
+  </Svg>
+)
+
+export const ListOrderedIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="10" x2="21" y1="6" y2="6" />
+    <line x1="10" x2="21" y1="12" y2="12" />
+    <line x1="10" x2="21" y1="18" y2="18" />
+    <path d="M4 6h1v4" />
+    <path d="M4 10h2" />
+    <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
+  </Svg>
+)
+
+export const QuoteIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M17 6H3" />
+    <path d="M21 12H8" />
+    <path d="M21 18H8" />
+    <path d="M3 12v6" />
+  </Svg>
+)
+
+export const UndoIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 7v6h6" />
+    <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+  </Svg>
+)
+
+export const RedoIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M21 7v6h-6" />
+    <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+  </Svg>
+)
+
 export const ClockIcon = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="10" />
