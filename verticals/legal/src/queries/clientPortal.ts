@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { signBookingManageToken } from '../api/bookingManageToken.js'
 
 // Client-portal READ projection. This is DELIBERATELY a separate, narrow surface
 // from queries/history.ts (getMatterHistory): that one exposes internal actions,
@@ -56,6 +57,10 @@ export interface ClientMatterTimeline {
   statusKey: string
   statusLabel: string
   scheduledAt: string | null
+  /** True when there's an upcoming, non-cancelled consultation to manage. */
+  canManageEvent: boolean
+  /** Token-gated /book/manage link to reschedule or cancel (when manageable). */
+  manageUrl: string | null
   milestones: ClientMatterMilestone[]
 }
 
@@ -124,11 +129,32 @@ export async function getClientMatterTimeline(
       occurredAt: r.occurred_at,
     }))
 
+    // Upcoming, non-cancelled consultation → offer a token-gated manage link
+    // (the same self-service /book/manage page the confirmation email uses).
+    const upcoming =
+      Boolean(base.scheduled_at) &&
+      Date.parse(base.scheduled_at as string) > Date.now() &&
+      statusKey !== 'consultation_cancelled'
+    let manageUrl: string | null = null
+    if (upcoming) {
+      const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? '').replace(/\/$/, '')
+      if (baseUrl) {
+        try {
+          const tok = signBookingManageToken({ matterEntityId, tenantId: ctx.tenantId })
+          manageUrl = `${baseUrl}/book/manage/${tok}`
+        } catch {
+          manageUrl = null // signing secret unset — degrade to no manage link
+        }
+      }
+    }
+
     return {
       matterNumber: base.name,
       statusKey,
       statusLabel: statusLabel(statusKey),
       scheduledAt: base.scheduled_at,
+      canManageEvent: upcoming,
+      manageUrl,
       milestones,
     }
   })
