@@ -45,6 +45,17 @@ export default function ClientPortalLoginPage() {
       })
   }, [router])
 
+  // Pre-fill the email when arriving from the booking-confirmation "Create your
+  // account" link (/portal/login?email=…), so the client is one click from a
+  // magic link. Ignored when landing with a ?token= (that path auto-consumes).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('token')) return
+    const prefill = params.get('email')
+    if (prefill) setEmail(prefill)
+  }, [])
+
   async function requestLink(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)

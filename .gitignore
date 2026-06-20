@@ -7,6 +7,8 @@ node_modules/
 dist/
 build/
 out/
+# Generated email design previews (run `tsx verticals/legal/src/email/preview.ts`)
+verticals/legal/src/email/previews/
 *.tsbuildinfo
 .tsbuildinfo
 

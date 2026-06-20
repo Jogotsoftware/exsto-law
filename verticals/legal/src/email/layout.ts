@@ -65,6 +65,20 @@ export function button(label: string, href: string, tone: 'navy' | 'gold' = 'nav
   </table>`
 }
 
+/** A small uppercase section label with a hairline rule above — separates the
+ *  body into scannable groups (e.g. "Manage your appointment"). */
+export function sectionLabel(text: string): string {
+  return `<p style="margin:26px 0 12px;padding-top:18px;border-top:1px solid ${COLORS.border};font-family:${FONTS.sans};font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${COLORS.muted};">${esc(text)}</p>`
+}
+
+/** A quiet, underlined text link for a secondary/destructive action (e.g.
+ *  "Cancel instead") — present but visually subordinate to the primary button. */
+export function mutedLink(label: string, href: string): string {
+  return `<p style="margin:6px 0 0;font-family:${FONTS.sans};font-size:14px;color:${COLORS.muted};">
+    <a href="${href}" target="_blank" style="color:${COLORS.muted};text-decoration:underline;">${esc(label)}</a>
+  </p>`
+}
+
 /** A tinted callout box (e.g. an invoice total, or a "needs signature" notice). */
 export function callout(html: string, tone: 'navy' | 'gold' | 'ok' = 'navy'): string {
   const map = {

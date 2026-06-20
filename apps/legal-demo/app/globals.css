@@ -5652,6 +5652,18 @@ button.danger.outline:hover:not(:disabled) {
 .bk-btn-soft:hover {
   background: #e0e7ff;
 }
+/* Destructive action (cancel a consultation). Subdued by default, firm on hover
+   — present without competing with the primary path. */
+.bk-btn-danger {
+  color: #b42318;
+  background: #fff;
+  border-color: #fecdca;
+}
+.bk-btn-danger:hover:not(:disabled) {
+  background: #b42318;
+  border-color: #b42318;
+  color: #fff;
+}
 .bk-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
