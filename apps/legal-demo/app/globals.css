@@ -5491,6 +5491,38 @@ button.danger.outline:hover:not(:disabled) {
   border-color: var(--bk-slate-400);
   color: var(--bk-ink);
 }
+/* Choice pills — yes/no, true/false, and multi-select (checkbox) answers.
+   One control set, used on the public intake and reused in the attorney builder
+   preview. A pill toggles on/off; the "on" state fills with the firm gold. */
+.bk-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.bk-pill {
+  appearance: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--bk-line);
+  background: #fff;
+  color: var(--bk-ink);
+}
+.bk-pill:hover {
+  border-color: var(--bk-gold);
+}
+.bk-pill-on {
+  background: var(--bk-gold-soft);
+  border-color: var(--bk-gold);
+  color: var(--bk-gold-700);
+  font-weight: 600;
+}
+.bk-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .bk-btn-soft {
   color: var(--bk-navy);
   background: #eef2ff;
@@ -6669,6 +6701,102 @@ input[type='number'] {
 }
 .qb-add-q {
   margin-top: var(--space-3);
+}
+
+/* Section footer: "Add question" (grows) beside the library picker. */
+.qb-add-row {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  align-items: stretch;
+}
+.qb-add-row .qb-add-q {
+  margin-top: 0;
+  flex: 1;
+}
+.qb-add-lib {
+  width: auto;
+  white-space: nowrap;
+}
+
+/* Question-library picker — a searchable popover of reusable questions. */
+.qlib-picker {
+  position: relative;
+}
+.qlib-pop {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  top: calc(100% + 6px);
+  width: min(420px, 88vw);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  overflow: hidden;
+}
+.qlib-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  color: var(--muted);
+}
+.qlib-search input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 0.92rem;
+  color: var(--fg);
+}
+.qlib-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 0.3rem;
+}
+.qlib-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.qlib-item:hover {
+  background: var(--accent-attorney-soft, #fdf2e3);
+}
+.qlib-item-label {
+  font-weight: var(--weight-medium);
+  color: var(--fg);
+  font-size: 0.92rem;
+}
+.qlib-item-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+}
+.qlib-empty {
+  padding: 0.9rem 0.75rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.qlib-manage {
+  display: block;
+  padding: 0.55rem 0.75rem;
+  border-top: 1px solid var(--border, #e2e8f0);
+  font-size: 0.84rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+.qlib-manage:hover {
+  background: var(--accent-attorney-soft, #fdf2e3);
 }
 
 /* Per-member sub-builder (members_repeater). */

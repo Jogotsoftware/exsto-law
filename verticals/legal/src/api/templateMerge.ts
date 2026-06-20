@@ -71,6 +71,37 @@ function pick(responses: Record<string, unknown>, keys: string[]): string | unde
   return undefined
 }
 
+// The WP2.4 "I don't know" sentinel — treated as unanswered (renders MISSING).
+const UNKNOWN_ANSWER = '__unknown__'
+
+// Flatten every questionnaire answer into a {{field_id}} → string map, so any
+// question (including reusable library questions, migration 0077) fills its
+// {{answer}} token by id. Curated slots from buildMergeData override these.
+//  • multi-select (checkbox) → comma-joined
+//  • structured address → formatted_address
+//  • "I don't know" / empty / nested objects → omitted (render as MISSING)
+function flattenAnswers(responses: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, v] of Object.entries(responses)) {
+    if (v == null || v === '' || v === UNKNOWN_ANSWER) continue
+    if (Array.isArray(v)) {
+      // Multi-select (checkbox) → comma-joined scalars. Object elements (e.g. the
+      // members_repeater rows) are NOT stringifiable to a token — skip them so a
+      // {{members}} token honestly renders MISSING rather than "[object Object]".
+      const joined = v
+        .filter((x) => x != null && typeof x !== 'object' && String(x).trim() !== '')
+        .join(', ')
+      if (joined) out[key] = joined
+    } else if (typeof v === 'object') {
+      const addr = (v as { formatted_address?: unknown }).formatted_address
+      if (typeof addr === 'string' && addr.trim()) out[key] = addr
+    } else {
+      out[key] = String(v)
+    }
+  }
+  return out
+}
+
 function firstName(fullName: string | null | undefined): string | undefined {
   const n = (fullName ?? '').trim()
   if (!n) return undefined
@@ -110,7 +141,8 @@ export function buildMergeData(
   const clientName =
     matter.clientName?.trim() || pick(q, ['primary_client_name', 'client_name', 'member_name'])
 
-  return {
+  // Curated/derived slots — matter facts, fee block, deterministic clauses.
+  const curated: Record<string, string | undefined> = {
     // Identity / matter facts
     company_name: companyName,
     matter_number: matter.matterNumber,
@@ -131,4 +163,13 @@ export function buildMergeData(
     ambiguities_section:
       '_This document was assembled deterministically from your intake answers. Any slot shown as `[[MISSING: …]]` needs attorney input before sending._',
   }
+
+  // Base: every raw questionnaire answer by field id (so any library/custom
+  // question token fills). A curated slot overrides a raw answer only when it
+  // actually resolved — an undefined curated value never clobbers a real answer.
+  const merged: Record<string, string | undefined> = { ...flattenAnswers(q) }
+  for (const [k, v] of Object.entries(curated)) {
+    if (v !== undefined) merged[k] = v
+  }
+  return merged
 }

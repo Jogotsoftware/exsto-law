@@ -83,4 +83,75 @@ describe('buildMergeData', () => {
     // fee not supplied here → flagged, not invented
     expect(missingFields).not.toContain('company_name')
   })
+
+  // PR1: any questionnaire answer (incl. reusable library questions) fills its
+  // {{token}} by field id, not just the dozen curated slots.
+  it('exposes every raw questionnaire answer by field id as a merge token', () => {
+    const matter = {
+      ...baseMatter,
+      questionnaireResponses: {
+        company_name: 'Sunrise Ventures',
+        favorite_state: 'North Carolina', // a custom/library question token
+        registered_agent: 'Jane Roe',
+      },
+    } satisfies MatterDetail
+    const data = buildMergeData(matter, { effectiveDateIso: '2026-06-18T00:00:00Z' })
+    expect(data.favorite_state).toBe('North Carolina')
+    expect(data.registered_agent).toBe('Jane Roe')
+    const { markdown, missingFields } = renderTemplate(
+      'Agent {{registered_agent}} in {{favorite_state}}.',
+      data,
+    )
+    expect(markdown).toBe('Agent Jane Roe in North Carolina.')
+    expect(missingFields).toEqual([])
+  })
+
+  it('joins a multi-select (checkbox) answer with ", " and omits empty/__unknown__ answers', () => {
+    const matter = {
+      ...baseMatter,
+      questionnaireResponses: {
+        practice_areas: ['Corporate', 'Real Estate'], // checkbox
+        empty_pick: [], // empty multi-select → unanswered
+        skipped: '__unknown__', // "I don't know" → unanswered
+      },
+    } satisfies MatterDetail
+    const data = buildMergeData(matter, { effectiveDateIso: '2026-06-18T00:00:00Z' })
+    expect(data.practice_areas).toBe('Corporate, Real Estate')
+    const { markdown, missingFields } = renderTemplate(
+      '{{practice_areas}} / {{empty_pick}} / {{skipped}}',
+      data,
+    )
+    expect(markdown).toBe('Corporate, Real Estate / [[MISSING: empty_pick]] / [[MISSING: skipped]]')
+    expect(missingFields.sort()).toEqual(['empty_pick', 'skipped'])
+  })
+
+  it('does not stringify a members_repeater array into a junk token — renders MISSING honestly', () => {
+    const matter = {
+      ...baseMatter,
+      questionnaireResponses: {
+        company_name: 'Sunrise Ventures',
+        members: [
+          { name: 'Ada', ownership_percentage: '50' },
+          { name: 'Grace', ownership_percentage: '50' },
+        ],
+      },
+    } satisfies MatterDetail
+    const data = buildMergeData(matter, { effectiveDateIso: '2026-06-18T00:00:00Z' })
+    expect(data.members).toBeUndefined() // not "[object Object], [object Object]"
+    const { markdown, missingFields } = renderTemplate('Members: {{members}}.', data)
+    expect(markdown).toBe('Members: [[MISSING: members]].')
+    expect(missingFields).toContain('members')
+  })
+
+  it('a curated slot never clobbers a real raw answer with undefined', () => {
+    // client_email is a curated slot; when the matter has no email, a raw answer
+    // of the same field id must survive (not be overwritten with undefined).
+    const matter = {
+      ...baseMatter,
+      clientEmail: null,
+      questionnaireResponses: { client_email: 'raw@intake.com' },
+    } satisfies MatterDetail
+    const data = buildMergeData(matter, { effectiveDateIso: '2026-06-18T00:00:00Z' })
+    expect(data.client_email).toBe('raw@intake.com')
+  })
 })

@@ -8,7 +8,16 @@
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
-type FieldType = 'text' | 'textarea' | 'select' | 'date' | 'number' | 'address_autocomplete'
+type FieldType =
+  | 'text'
+  | 'textarea'
+  | 'select'
+  | 'yes_no'
+  | 'true_false'
+  | 'checkbox'
+  | 'date'
+  | 'number'
+  | 'address_autocomplete'
 
 // Keep in lockstep with the service questionnaire editor's KNOWN_FIELD_TYPES so a
 // library questionnaire renders identically once attached to a service.
@@ -16,10 +25,16 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: 'text', label: 'Short text' },
   { value: 'textarea', label: 'Long text' },
   { value: 'select', label: 'Dropdown' },
+  { value: 'yes_no', label: 'Yes / No' },
+  { value: 'true_false', label: 'True / False' },
+  { value: 'checkbox', label: 'Checkboxes (select many)' },
   { value: 'date', label: 'Date' },
   { value: 'number', label: 'Number' },
   { value: 'address_autocomplete', label: 'Address' },
 ]
+
+// Answer types that carry a choice list.
+const OPTION_TYPES = new Set<FieldType>(['select', 'checkbox'])
 
 interface SchemaField {
   id: string
@@ -126,7 +141,7 @@ export default function QuestionnaireLibraryPage() {
             label: f.label.trim(),
             type: f.type,
             required: f.required,
-            ...(f.type === 'select'
+            ...(OPTION_TYPES.has(f.type)
               ? {
                   options: f.options
                     .split('\n')
@@ -235,7 +250,8 @@ export default function QuestionnaireLibraryPage() {
       </div>
       <p className="muted" style={{ marginTop: '-0.5rem' }}>
         Reusable intake forms for the whole firm. Build one here, then attach it to any service from
-        the service builder.
+        the service builder. Manage the reusable single questions in the{' '}
+        <a href="/attorney/questions">question library →</a>
       </p>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -340,7 +356,7 @@ export default function QuestionnaireLibraryPage() {
                   >
                     ×
                   </button>
-                  {field.type === 'select' && (
+                  {OPTION_TYPES.has(field.type) && (
                     <textarea
                       className="qb-options"
                       value={field.options}

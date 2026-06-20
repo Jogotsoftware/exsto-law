@@ -280,7 +280,12 @@ export default function BookPage() {
         }
         const val = intakeResponses[field.id]
         if (val === UNKNOWN_ANSWER) continue
-        if (val === undefined || val === null || (typeof val === 'string' && val.trim() === '')) {
+        if (
+          val === undefined ||
+          val === null ||
+          (typeof val === 'string' && val.trim() === '') ||
+          (Array.isArray(val) && val.length === 0)
+        ) {
           return t('error.fill_field', { field: label })
         }
       }
@@ -974,6 +979,67 @@ function FieldRenderer({
             </option>
           ))}
         </select>
+        {unknownToggle}
+      </div>
+    )
+  }
+
+  // Boolean answers (yes_no / true_false) — a two-choice pill set. The stored
+  // answer is the chosen label, so {{token}} merges cleanly ("Yes" / "True").
+  if (field.type === 'yes_no' || field.type === 'true_false') {
+    const choices = field.type === 'yes_no' ? ['Yes', 'No'] : ['True', 'False']
+    const current = typeof value === 'string' && !isUnknown ? value : ''
+    return (
+      <div className="bk-field">
+        <span className="bk-label">
+          {fieldLabel}
+          {field.required ? <em className="bk-req">*</em> : ''}
+        </span>
+        <div className="bk-pills" role="radiogroup" aria-label={fieldLabel}>
+          {choices.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              role="radio"
+              aria-checked={current === opt}
+              className={`bk-pill${current === opt ? ' bk-pill-on' : ''}`}
+              disabled={isUnknown}
+              onClick={() => set(current === opt ? '' : opt)}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+        {unknownToggle}
+      </div>
+    )
+  }
+
+  // Multi-select (checkbox) — toggle pills; the stored answer is a string[].
+  if (field.type === 'checkbox' && field.options) {
+    const selected = Array.isArray(value) ? (value as string[]) : []
+    const toggle = (opt: string) =>
+      set(selected.includes(opt) ? selected.filter((x) => x !== opt) : [...selected, opt])
+    return (
+      <div className="bk-field bk-field-wide">
+        <span className="bk-label">
+          {fieldLabel}
+          {field.required ? <em className="bk-req">*</em> : ''}
+        </span>
+        <div className="bk-pills" role="group" aria-label={fieldLabel}>
+          {field.options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              aria-pressed={selected.includes(opt)}
+              className={`bk-pill${selected.includes(opt) ? ' bk-pill-on' : ''}`}
+              disabled={isUnknown}
+              onClick={() => toggle(opt)}
+            >
+              {t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))}
+            </button>
+          ))}
+        </div>
         {unknownToggle}
       </div>
     )
