@@ -65,14 +65,6 @@ interface InvoiceDetail extends InvoiceSummary {
   notes: string | null
   lines: InvoiceLine[]
 }
-interface ClientSummary {
-  clientEntityId: string
-  name: string
-  billableRate: string | null
-  billingType: string | null
-  matterCount: number
-}
-
 function money(amount: string | null, currency = 'USD'): string {
   if (amount === null) return '—'
   return `${currency === 'USD' ? '$' : currency + ' '}${amount}`
@@ -536,114 +528,244 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
 }
 
 // ── Rates tab ──────────────────────────────────────────────────────────────────
-// The firm default hourly rate (editable, Contract K — substrate-native) sits on
-// top of a read-only mirror of the per-client billable rates set on the Clients
-// screen. This is the billing home for the rate default that used to live under
-// Settings → Defaults.
+// Contract K rate management: the firm default hourly rate, per-client hourly
+// rates, and per-service fixed fees — ALL editable here, all resolving to the one
+// source of truth (rates.ts), so a rate set here shows everywhere (Clients,
+// Services, invoices).
+interface RateClientRow {
+  clientEntityId: string
+  name: string
+  ownRate: string | null
+  effectiveRate: string | null
+  inheritsFirmDefault: boolean
+}
+interface RateServiceRow {
+  serviceKey: string
+  displayName: string
+  fixedFee: string | null
+}
+interface RatesView {
+  firmDefaultRate: string | null
+  clients: RateClientRow[]
+  services: RateServiceRow[]
+}
+
 function RatesTab() {
-  const [clients, setClients] = useState<ClientSummary[] | null>(null)
+  const [view, setView] = useState<RatesView | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [firmRate, setFirmRate] = useState<string | null>(null)
-  const [rateDraft, setRateDraft] = useState('')
-  const [savingRate, setSavingRate] = useState(false)
-  const [savedRate, setSavedRate] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [firmDraft, setFirmDraft] = useState('')
+  const [clientDraft, setClientDraft] = useState<Record<string, string>>({})
+  const [serviceDraft, setServiceDraft] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState<string | null>(null)
 
-  useEffect(() => {
-    ;(async () => {
-      try {
-        const [c, r] = await Promise.all([
-          callAttorneyMcp<{ clients: ClientSummary[] }>({ toolName: 'legal.client.list' }),
-          callAttorneyMcp<{ rate: string | null }>({ toolName: 'legal.firm.get_default_rate' }),
-        ])
-        setClients(c.clients)
-        setFirmRate(r.rate)
-        setRateDraft(r.rate ?? '')
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
-      }
-    })()
-  }, [])
-
-  async function saveFirmRate() {
-    const rate = rateDraft.trim()
-    if (!rate) return
-    setSavingRate(true)
+  const refresh = useCallback(async () => {
     setError(null)
     try {
-      await callAttorneyMcp({ toolName: 'legal.firm.set_default_rate', input: { rate } })
-      setFirmRate(rate)
-      setSavedRate(true)
-      setTimeout(() => setSavedRate(false), 2000)
+      const v = await callAttorneyMcp<RatesView>({ toolName: 'legal.rates.view' })
+      setView(v)
+      setFirmDraft(v.firmDefaultRate ?? '')
+      setClientDraft({})
+      setServiceDraft({})
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  // One save runner: marks the row busy, calls the tool, then re-pulls the view.
+  async function run(key: string, call: () => Promise<unknown>, ok: string) {
+    setBusy(key)
+    setError(null)
+    setNotice(null)
+    try {
+      await call()
+      setNotice(ok)
+      await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setSavingRate(false)
+      setBusy(null)
     }
   }
 
-  if (error && clients === null) return <div className="alert alert-error">{error}</div>
-  if (clients === null)
+  if (error && view === null) return <div className="alert alert-error">{error}</div>
+  if (view === null)
     return (
       <div className="loading-block">
         <span className="spinner" /> Loading…
       </div>
     )
 
+  const firmDirty = firmDraft.trim() !== '' && firmDraft.trim() !== (view.firmDefaultRate ?? '')
+
   return (
     <div>
       {error && <div className="alert alert-error">{error}</div>}
+      {notice && <div className="alert">{notice}</div>}
+
       <div
-        style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}
+        style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '0.5rem' }}
       >
         <label style={{ flex: '0 0 auto' }}>
           <span>Firm default hourly rate (USD)</span>
           <input
             type="number"
             inputMode="decimal"
-            value={rateDraft}
-            onChange={(e) => {
-              setRateDraft(e.target.value)
-              setSavedRate(false)
-            }}
+            value={firmDraft}
+            onChange={(e) => setFirmDraft(e.target.value)}
             style={{ maxWidth: '12rem' }}
           />
         </label>
         <button
           className="primary"
-          onClick={saveFirmRate}
-          disabled={savingRate || !rateDraft.trim() || rateDraft.trim() === (firmRate ?? '')}
+          disabled={busy === 'firm' || !firmDirty}
+          onClick={() =>
+            run(
+              'firm',
+              () =>
+                callAttorneyMcp({
+                  toolName: 'legal.firm.set_default_rate',
+                  input: { rate: firmDraft.trim() },
+                }),
+              'Firm default rate saved.',
+            )
+          }
         >
-          {savingRate ? 'Saving…' : savedRate ? 'Saved' : 'Save'}
+          {busy === 'firm' ? 'Saving…' : 'Save'}
         </button>
       </div>
       <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        The fallback hourly rate billed when a client has no explicit rate. Below is a read-only
-        mirror of the per-client billable rates set on the Clients screen; per-service pricing is
-        configured under Services. Time entries roll up at the client’s rate (override per line when
-        issuing).
+        The fallback hourly rate billed when a client has no explicit rate. Set per-client rates and
+        per-service fixed fees below — every edit here is the single source of truth and applies
+        everywhere.
       </p>
+
+      <h3 style={{ marginBottom: '0.4rem' }}>Client hourly rates</h3>
       <table className="data-table">
         <thead>
           <tr>
             <th>Client</th>
-            <th>Billing type</th>
-            <th style={{ textAlign: 'right' }}>Billable rate</th>
-            <th style={{ textAlign: 'right' }}>Matters</th>
+            <th style={{ textAlign: 'right' }}>Rate (USD/hr)</th>
+            <th style={{ textAlign: 'right', width: '8rem' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {clients.map((c) => (
-            <tr key={c.clientEntityId}>
-              <td>
-                <strong>{c.name}</strong>
+          {view.clients.length === 0 && (
+            <tr>
+              <td colSpan={3} style={{ color: 'var(--muted)' }}>
+                No clients yet.
               </td>
-              <td>{c.billingType ?? '—'}</td>
-              <td style={{ textAlign: 'right' }}>
-                {c.billableRate ? `${money(c.billableRate)}/hr` : '—'}
-              </td>
-              <td style={{ textAlign: 'right' }}>{c.matterCount}</td>
             </tr>
-          ))}
+          )}
+          {view.clients.map((c) => {
+            const current = c.ownRate ?? ''
+            const val = clientDraft[c.clientEntityId] ?? current
+            const dirty = val.trim() !== current && val.trim() !== ''
+            return (
+              <tr key={c.clientEntityId}>
+                <td>
+                  <strong>{c.name}</strong>
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder={
+                      c.inheritsFirmDefault ? `${view.firmDefaultRate ?? '—'} (firm default)` : ''
+                    }
+                    value={val}
+                    onChange={(e) =>
+                      setClientDraft((s) => ({ ...s, [c.clientEntityId]: e.target.value }))
+                    }
+                    style={{ width: '8rem', textAlign: 'right' }}
+                  />
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  <button
+                    disabled={busy === `c:${c.clientEntityId}` || !dirty}
+                    onClick={() =>
+                      run(
+                        `c:${c.clientEntityId}`,
+                        () =>
+                          callAttorneyMcp({
+                            toolName: 'legal.rates.set_client',
+                            input: { clientEntityId: c.clientEntityId, rate: val.trim() },
+                          }),
+                        `Saved rate for ${c.name}.`,
+                      )
+                    }
+                  >
+                    {busy === `c:${c.clientEntityId}` ? '…' : 'Save'}
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      <h3 style={{ marginTop: '1.2rem', marginBottom: '0.4rem' }}>Service fixed fees</h3>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th style={{ textAlign: 'right' }}>Fixed fee (USD)</th>
+            <th style={{ textAlign: 'right', width: '8rem' }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {view.services.length === 0 && (
+            <tr>
+              <td colSpan={3} style={{ color: 'var(--muted)' }}>
+                No services configured.
+              </td>
+            </tr>
+          )}
+          {view.services.map((s) => {
+            const current = s.fixedFee ?? ''
+            const val = serviceDraft[s.serviceKey] ?? current
+            const dirty = val.trim() !== current && val.trim() !== ''
+            return (
+              <tr key={s.serviceKey}>
+                <td>
+                  <strong>{s.displayName}</strong>
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="—"
+                    value={val}
+                    onChange={(e) =>
+                      setServiceDraft((st) => ({ ...st, [s.serviceKey]: e.target.value }))
+                    }
+                    style={{ width: '8rem', textAlign: 'right' }}
+                  />
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  <button
+                    disabled={busy === `s:${s.serviceKey}` || !dirty}
+                    onClick={() =>
+                      run(
+                        `s:${s.serviceKey}`,
+                        () =>
+                          callAttorneyMcp({
+                            toolName: 'legal.rates.set_service',
+                            input: { serviceKey: s.serviceKey, fixedFee: val.trim() },
+                          }),
+                        `Saved fee for ${s.displayName}.`,
+                      )
+                    }
+                  >
+                    {busy === `s:${s.serviceKey}` ? '…' : 'Save'}
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>

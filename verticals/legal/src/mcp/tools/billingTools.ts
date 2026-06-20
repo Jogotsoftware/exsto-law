@@ -5,6 +5,9 @@ import {
   listUnbilled,
   listInvoices,
   getInvoice,
+  getRatesView,
+  setClientRate,
+  setServiceRate,
   type IssueInvoiceInput,
   type IssuedInvoice,
   type SendInvoiceInput,
@@ -12,6 +15,7 @@ import {
   type UnbilledClient,
   type InvoiceSummary,
   type InvoiceDetail,
+  type RatesView,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -119,3 +123,53 @@ registerTool({
   },
   handler: async (ctx: ActionContext, input) => await sendInvoice(ctx, input),
 } satisfies Tool<SendInvoiceInput, SentInvoice>)
+
+// ── Rates management (Contract K) ─────────────────────────────────────────────
+// One source of truth for the three rate scopes (rates.ts). The Rates tab reads
+// the view and writes per-client / per-service rates; the firm default has its
+// own pair (legal.firm.get/set_default_rate in settingsTools).
+
+registerTool({
+  name: 'legal.rates.view',
+  description:
+    'The billing Rates view: the firm default hourly rate, every client with its own rate + effective rate (own ?? firm default), and every service with its fixed fee. Powers the Rates tab.',
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => await getRatesView(ctx),
+} satisfies Tool<Record<string, never>, RatesView>)
+
+registerTool({
+  name: 'legal.rates.set_client',
+  description:
+    'Set a client\'s billable hourly rate (decimal string, ADR 0044, e.g. "350.00"). Routes through legal.client.update so the rate has one writer; appended effective-dated.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      clientEntityId: { type: 'string' },
+      rate: { type: 'string', description: 'Decimal string, e.g. "350.00".' },
+    },
+    required: ['clientEntityId', 'rate'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) =>
+    await setClientRate(ctx, input.clientEntityId, input.rate),
+} satisfies Tool<{ clientEntityId: string; rate: string }, { rate: string }>)
+
+registerTool({
+  name: 'legal.rates.set_service',
+  description:
+    "Set a service's fixed fee (decimal string, ADR 0044). Routes through legal.service.upsert so the fee is the service config's fixed_fee — one source; the service's other config is preserved.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      serviceKey: { type: 'string' },
+      fixedFee: { type: 'string', description: 'Decimal string, e.g. "1500.00".' },
+    },
+    required: ['serviceKey', 'fixedFee'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) =>
+    await setServiceRate(ctx, input.serviceKey, input.fixedFee),
+} satisfies Tool<{ serviceKey: string; fixedFee: string }, { fixedFee: string }>)
