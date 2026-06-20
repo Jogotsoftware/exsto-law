@@ -5,10 +5,20 @@
 // against sample data and data-driven fields flagged. Updates as the body changes.
 
 import { useMemo } from 'react'
+import type { TemplateVariables } from '@exsto/legal'
 import { buildPreview } from '@/lib/templatePreview'
 
-export function TemplatePreview({ body }: { body: string }) {
-  const { html, gapCount } = useMemo(() => buildPreview(body), [body])
+export function TemplatePreview({
+  body,
+  variables,
+}: {
+  body: string
+  variables?: TemplateVariables
+}) {
+  const { html, gapCount } = useMemo(
+    () => buildPreview(body, undefined, variables),
+    [body, variables],
+  )
 
   return (
     <div className="tpl-preview">

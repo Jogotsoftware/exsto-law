@@ -5,6 +5,7 @@ import {
   getStandaloneTemplate,
   type StandaloneTemplate,
   type StandaloneTemplateCategory,
+  type TemplateVariables,
 } from '../queries/templates.js'
 
 // Write API for standalone templates (beta sprint Obj 9). Create/update go through
@@ -16,6 +17,7 @@ export interface CreateTemplateInput {
   category: StandaloneTemplateCategory
   body: string
   docKind?: string | null
+  variables?: TemplateVariables
 }
 
 export async function createTemplate(
@@ -30,6 +32,7 @@ export async function createTemplate(
       category: input.category,
       body: input.body,
       doc_kind: input.docKind ?? null,
+      variables: input.variables,
     },
   })
   const { templateEntityId } = res.effects[0] as { templateEntityId: string }
@@ -43,6 +46,7 @@ export interface UpdateTemplateInput {
   name?: string
   body?: string
   docKind?: string | null
+  variables?: TemplateVariables
 }
 
 export async function updateTemplate(
@@ -57,6 +61,7 @@ export async function updateTemplate(
       name: input.name,
       body: input.body,
       doc_kind: input.docKind,
+      variables: input.variables,
     },
   })
   const updated = await getStandaloneTemplate(ctx, input.templateEntityId)

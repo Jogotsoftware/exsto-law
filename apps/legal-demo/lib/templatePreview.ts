@@ -14,6 +14,7 @@
 // Previews against SAMPLE data. buildPreview takes an optional values map so a
 // real matter's answers can drive it later.
 
+import type { TemplateVariables, TemplateVariableSpec } from '@exsto/legal'
 import { renderMarkdown } from './draftExport'
 
 // Any {{ ... }} run. We classify the inner text ourselves so includes/e-sign
@@ -60,6 +61,28 @@ function sampleFor(token: string): string | null {
   return null
 }
 
+// A sample derived from a declared variable type. A default wins (with 'today'
+// resolved to the date); otherwise a representative value per type. Free-text
+// types return null so they fall through to the name heuristic / a flagged gap.
+function typedSample(spec: TemplateVariableSpec): string | null {
+  const def = spec.default?.trim()
+  if (def) return def.toLowerCase() === 'today' ? todayLong() : def
+  switch (spec.type) {
+    case 'date':
+      return todayLong()
+    case 'number':
+      return '42'
+    case 'currency':
+      return '$2,500'
+    case 'boolean':
+      return 'Yes'
+    case 'choice':
+      return spec.options && spec.options.length > 0 ? spec.options[0]! : null
+    default:
+      return null // text / textarea → name heuristic or flagged gap
+  }
+}
+
 export interface PreviewResult {
   html: string
   // # of {{tokens}} shown as gaps (no sample / no provided value) — i.e. fields
@@ -69,9 +92,16 @@ export interface PreviewResult {
   filledCount: number
 }
 
-// Build the preview HTML for a template body. `values` (optional) overrides the
-// sample source — pass a real matter's answers to preview against live data.
-export function buildPreview(body: string, values?: Record<string, string>): PreviewResult {
+// Build the preview HTML for a template body.
+//   values    — overrides the sample source per token (e.g. a real matter's
+//               answers). Wins over everything.
+//   variables — declared typed metadata per token; drives a type-appropriate
+//               sample (currency, date, choice…) when no explicit value is given.
+export function buildPreview(
+  body: string,
+  values?: Record<string, string>,
+  variables?: TemplateVariables,
+): PreviewResult {
   let gapCount = 0
   let filledCount = 0
 
@@ -87,10 +117,14 @@ export function buildPreview(body: string, values?: Record<string, string>): Pre
     if (colon > -1) {
       return `${S0}SIGN${S0}${humanize(inner.slice(colon + 1).trim())}${S1}`
     }
-    // {{plain_token}} — a field binding.
+    // {{plain_token}} — a field binding. Precedence: explicit value → declared
+    // type → name-based heuristic → flagged gap.
     if (PLAIN_RE.test(inner)) {
-      const provided = values?.[inner.toLowerCase()]
-      const value = provided != null && provided !== '' ? provided : sampleFor(inner)
+      const lower = inner.toLowerCase()
+      const provided = values?.[lower]
+      const spec = variables?.[lower]
+      const typed = spec ? typedSample(spec) : null
+      const value = provided != null && provided !== '' ? provided : (typed ?? sampleFor(inner))
       if (value != null) {
         filledCount++
         return value

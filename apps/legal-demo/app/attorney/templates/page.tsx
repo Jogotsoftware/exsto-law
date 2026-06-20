@@ -9,10 +9,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
-import { SparklesIcon, FileTextIcon, EyeIcon } from '@/components/icons'
+import { SparklesIcon, FileTextIcon, EyeIcon, LayersIcon } from '@/components/icons'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
+import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
+import type { TemplateVariables } from '@exsto/legal'
 
 type Category = 'document' | 'email'
 
@@ -22,6 +24,7 @@ interface Template {
   category: Category
   body: string
   docKind: string | null
+  variables: TemplateVariables
   updatedAt: string
 }
 
@@ -31,6 +34,7 @@ interface Draft {
   category: Category
   body: string
   docKind: string
+  variables: TemplateVariables
 }
 
 const EMPTY_DRAFT: Draft = {
@@ -39,6 +43,7 @@ const EMPTY_DRAFT: Draft = {
   category: 'document',
   body: '',
   docKind: '',
+  variables: {},
 }
 
 // Standard merge fields offered in every template, click-to-insert. Authors can
@@ -84,6 +89,7 @@ export default function TemplatesPage() {
   const [aiBusy, setAiBusy] = useState(false)
   const [importing, setImporting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  const [showFields, setShowFields] = useState(false)
   const editorRef = useRef<TemplateEditorHandle | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
   // Bumped whenever we replace the WHOLE body (open / new / AI / import) so the
@@ -107,6 +113,7 @@ export default function TemplatesPage() {
       category: t.category,
       body: t.body,
       docKind: t.docKind ?? '',
+      variables: t.variables ?? {},
     })
     setSeedKey((k) => k + 1)
   }
@@ -115,6 +122,11 @@ export default function TemplatesPage() {
     setAiPrompt('')
     setDraft({ ...EMPTY_DRAFT })
     setSeedKey((k) => k + 1)
+  }
+
+  // Field metadata edits from the Fields panel.
+  function onVariablesChange(next: TemplateVariables) {
+    setDraft((d) => (d ? { ...d, variables: next } : d))
   }
 
   // The editor emits HTML on change; convert back to the stored markdown body so
@@ -191,6 +203,17 @@ export default function TemplatesPage() {
       setError('Give the template a name.')
       return
     }
+    // Persist only field metadata for tokens still in the body, and drop trivial
+    // specs (plain text, nothing configured) so the stored map stays lean.
+    const bodyTokens = new Set(extractTokens(draft.body))
+    const variables: TemplateVariables = {}
+    for (const [tok, spec] of Object.entries(draft.variables)) {
+      if (!bodyTokens.has(tok)) continue
+      const trivial =
+        spec.type === 'text' && !spec.required && !spec.default && !spec.options?.length
+      if (!trivial) variables[tok] = spec
+    }
+
     setSaving(true)
     setError(null)
     try {
@@ -202,6 +225,7 @@ export default function TemplatesPage() {
             name: draft.name.trim(),
             body: draft.body,
             docKind: draft.category === 'document' ? draft.docKind.trim() || null : null,
+            variables,
           },
         })
       } else {
@@ -212,6 +236,7 @@ export default function TemplatesPage() {
             category: draft.category,
             body: draft.body,
             docKind: draft.category === 'document' ? draft.docKind.trim() || undefined : undefined,
+            variables,
           },
         })
       }
@@ -290,6 +315,15 @@ export default function TemplatesPage() {
               {draft.templateEntityId ? 'Edit template' : 'New template'}
             </h2>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem' }}>
+              <button
+                type="button"
+                className={showFields ? 'primary' : undefined}
+                onClick={() => setShowFields((v) => !v)}
+                title="Configure each field's type, default, and whether it's required"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <LayersIcon size={15} /> Fields
+              </button>
               <button
                 type="button"
                 className={showPreview ? 'primary' : undefined}
@@ -408,6 +442,18 @@ export default function TemplatesPage() {
             ))}
           </div>
 
+          {/* Fields panel — typed metadata per {{token}}, toggled from the header. */}
+          {showFields && (
+            <section className="tpl-fields-section">
+              <h3 className="tpl-fields-heading">Fields</h3>
+              <TemplateFieldsPanel
+                tokens={extractTokens(draft.body)}
+                variables={draft.variables}
+                onChange={onVariablesChange}
+              />
+            </section>
+          )}
+
           {/* WYSIWYG canvas + optional live preview. The editor stays in the same
               DOM slot whether or not the preview column is shown, so toggling
               preview never re-mounts it. The body is stored as markdown with
@@ -427,7 +473,7 @@ export default function TemplatesPage() {
             </div>
             {showPreview && (
               <div className="tpl-split-col">
-                <TemplatePreview body={draft.body} />
+                <TemplatePreview body={draft.body} variables={draft.variables} />
               </div>
             )}
           </div>

@@ -53,6 +53,12 @@ const createTool: Tool<CreateTemplateInput, { template: StandaloneTemplate }> = 
       category: { type: 'string', enum: ['document', 'email'] },
       body: { type: 'string' },
       docKind: { type: 'string', description: 'Optional document-kind tag (document only).' },
+      variables: {
+        type: 'object',
+        description:
+          'Optional typed metadata per {{token}}, keyed by token id: { type, required, default, options }.',
+        additionalProperties: true,
+      },
     },
     required: ['name', 'category', 'body'],
     additionalProperties: false,
@@ -72,6 +78,12 @@ const updateTool: Tool<UpdateTemplateInput, { template: StandaloneTemplate }> = 
       name: { type: 'string' },
       body: { type: 'string' },
       docKind: { type: 'string' },
+      variables: {
+        type: 'object',
+        description:
+          'Optional typed metadata per {{token}}, keyed by token id: { type, required, default, options }. A provided map (including {}) supersedes the prior.',
+        additionalProperties: true,
+      },
     },
     required: ['templateEntityId'],
     additionalProperties: false,

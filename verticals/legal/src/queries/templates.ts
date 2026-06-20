@@ -7,12 +7,35 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 
 export type StandaloneTemplateCategory = 'document' | 'email'
 
+// Typed metadata for a single {{token}}. Stored as part of the template_variables
+// JSON attribute, keyed by token id (see migration 0072). Types align 1:1 with
+// the intake questionnaire's field types so a template can generate a typed form.
+export type TemplateVariableType =
+  | 'text'
+  | 'textarea'
+  | 'date'
+  | 'number'
+  | 'currency'
+  | 'boolean'
+  | 'choice'
+
+export interface TemplateVariableSpec {
+  type: TemplateVariableType
+  required?: boolean
+  default?: string
+  options?: string[] // for type 'choice'
+}
+
+// Keyed by lowercased token id, e.g. { client_name: { type: 'text', required: true } }.
+export type TemplateVariables = Record<string, TemplateVariableSpec>
+
 export interface StandaloneTemplate {
   templateEntityId: string
   name: string
   category: StandaloneTemplateCategory
   body: string
   docKind: string | null
+  variables: TemplateVariables
   updatedAt: string
 }
 
@@ -22,6 +45,7 @@ type TemplateRow = {
   category: string | null
   body: string | null
   doc_kind: string | null
+  variables: TemplateVariables | null
   updated_at: Date
 }
 
@@ -37,6 +61,8 @@ const TEMPLATE_SELECT = `
     (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'template_category') AS category,
     (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'template_body')     AS body,
     (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'template_doc_kind') AS doc_kind,
+    -- json attribute: take the value as-is (the pg driver parses jsonb to an object).
+    (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'template_variables')         AS variables,
     e.created_at AS updated_at
   FROM entity e
   JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'template'
@@ -49,6 +75,7 @@ function mapTemplate(r: TemplateRow): StandaloneTemplate {
     category: r.category === 'email' ? 'email' : 'document',
     body: r.body ?? '',
     docKind: r.doc_kind,
+    variables: r.variables ?? {},
     updatedAt: r.updated_at.toISOString(),
   }
 }
