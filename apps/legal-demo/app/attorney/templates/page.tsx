@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
-import { SparklesIcon, FileTextIcon, EyeIcon, LayersIcon } from '@/components/icons'
+import { SparklesIcon, FileTextIcon, EyeIcon, LayersIcon, XIcon } from '@/components/icons'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
@@ -59,6 +59,10 @@ const STANDARD_TOKENS: { id: string; label: string }[] = [
   { id: 'today', label: "Today's date" },
 ]
 
+// The font-scale options offered in the Font size select. loadPageSetup whitelists
+// against this so a stray stored value can never de-sync the controlled select.
+const FONT_SCALES = [0.9, 1, 1.1, 1.2] as const
+
 const TOKEN_RE = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
 
 function extractTokens(body: string): string[] {
@@ -84,14 +88,27 @@ export default function TemplatesPage() {
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
-  // AI drafting panel state.
+  // AI drafting state — the brief is entered in a modal "Draft with AI" window.
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
+  const [showAi, setShowAi] = useState(false)
   const [importing, setImporting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [showFields, setShowFields] = useState(false)
+  // Page setup (paper size + font scale) — a per-template VIEW/print preference,
+  // persisted client-side (localStorage), so the canvas + preview render true to
+  // the chosen page. Not substrate state (it never affects what's stored).
+  const [paper, setPaper] = useState<'letter' | 'legal'>('letter')
+  const [fontScale, setFontScale] = useState(1)
   const editorRef = useRef<TemplateEditorHandle | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  // The "Draft with AI" trigger, so closing the modal restores focus to it.
+  const aiTriggerRef = useRef<HTMLButtonElement | null>(null)
+
+  function closeAi() {
+    setShowAi(false)
+    aiTriggerRef.current?.focus()
+  }
   // Bumped whenever we replace the WHOLE body (open / new / AI / import) so the
   // editor re-seeds from the new markdown. Plain typing does NOT bump it, so the
   // cursor never jumps mid-edit.
@@ -105,8 +122,60 @@ export default function TemplatesPage() {
   }
   useEffect(load, [])
 
+  // Escape closes the "Draft with AI" modal (and restores focus to its trigger).
+  useEffect(() => {
+    if (!showAi) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !aiBusy) {
+        setShowAi(false)
+        aiTriggerRef.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [showAi, aiBusy])
+
+  // Per-template page setup (paper + font), persisted client-side only.
+  function loadPageSetup(id: string | null) {
+    let paperV: 'letter' | 'legal' = 'letter'
+    let fontV = 1
+    try {
+      const raw = localStorage.getItem(`tpl-pagesetup:${id ?? 'new'}`)
+      if (raw) {
+        const v = JSON.parse(raw) as { paper?: string; fontScale?: number }
+        if (v.paper === 'legal') paperV = 'legal'
+        if (
+          typeof v.fontScale === 'number' &&
+          (FONT_SCALES as readonly number[]).includes(v.fontScale)
+        )
+          fontV = v.fontScale
+      }
+    } catch {
+      /* ignore malformed/absent storage */
+    }
+    setPaper(paperV)
+    setFontScale(fontV)
+  }
+
+  // The storage key for the open draft's page setup ('new' until first save).
+  // null when no draft is open. A primitive, so the persist effect below fires on
+  // paper/font/identity changes only — NOT on every keystroke (which replaces the
+  // whole draft object).
+  const activeSetupId = draft ? (draft.templateEntityId ?? 'new') : null
+
+  // Persist page setup whenever it changes for the open draft.
+  useEffect(() => {
+    if (!activeSetupId) return
+    try {
+      localStorage.setItem(`tpl-pagesetup:${activeSetupId}`, JSON.stringify({ paper, fontScale }))
+    } catch {
+      /* storage unavailable — view-only preference, safe to drop */
+    }
+  }, [paper, fontScale, activeSetupId])
+
   function edit(t: Template) {
     setAiPrompt('')
+    loadPageSetup(t.templateEntityId)
     setDraft({
       templateEntityId: t.templateEntityId,
       name: t.name,
@@ -120,6 +189,7 @@ export default function TemplatesPage() {
 
   function newDraft() {
     setAiPrompt('')
+    loadPageSetup(null)
     setDraft({ ...EMPTY_DRAFT })
     setSeedKey((k) => k + 1)
   }
@@ -141,8 +211,8 @@ export default function TemplatesPage() {
     editorRef.current?.insertVariable(id)
   }
 
-  async function generateWithAi() {
-    if (!draft || !aiPrompt.trim()) return
+  async function generateWithAi(): Promise<boolean> {
+    if (!draft || !aiPrompt.trim()) return false
     setAiBusy(true)
     setError(null)
     try {
@@ -152,8 +222,10 @@ export default function TemplatesPage() {
       })
       setDraft({ ...draft, body: r.body })
       setSeedKey((k) => k + 1) // full-body replacement → re-seed the editor
+      return true
     } catch (err) {
       setError((err as Error).message)
+      return false
     } finally {
       setAiBusy(false)
     }
@@ -229,7 +301,7 @@ export default function TemplatesPage() {
           },
         })
       } else {
-        await callAttorneyMcp({
+        const res = await callAttorneyMcp<{ template: { templateEntityId: string } }>({
           toolName: 'legal.template.create',
           input: {
             name: draft.name.trim(),
@@ -239,6 +311,15 @@ export default function TemplatesPage() {
             variables,
           },
         })
+        // Carry the page setup chosen during creation onto the saved template id
+        // so reopening it keeps the same paper/font (the create-time key is 'new').
+        try {
+          const raw = localStorage.getItem('tpl-pagesetup:new')
+          const newId = res?.template?.templateEntityId
+          if (raw && newId) localStorage.setItem(`tpl-pagesetup:${newId}`, raw)
+        } catch {
+          /* view-only preference — safe to drop */
+        }
       }
       setDraft(null)
       load()
@@ -314,6 +395,32 @@ export default function TemplatesPage() {
             <h2 style={{ margin: 0 }}>
               {draft.templateEntityId ? 'Edit template' : 'New template'}
             </h2>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                ref={aiTriggerRef}
+                type="button"
+                className="tpl-ai-btn"
+                onClick={() => setShowAi(true)}
+                title="Draft this template with AI (uses your Anthropic key)"
+              >
+                <SparklesIcon size={15} /> Draft with AI
+              </button>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={importing}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                style={{ display: 'none' }}
+                onChange={onImportFile}
+              />
+            </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem' }}>
               <button
                 type="button"
@@ -374,46 +481,29 @@ export default function TemplatesPage() {
                 />
               </label>
             )}
-          </div>
-
-          {/* Build-with-AI + import. */}
-          <div className="tpl-build">
-            <div className="tpl-build-ai">
-              <textarea
-                rows={2}
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder={
-                  draft.category === 'email'
-                    ? 'Describe the email to draft — e.g. “a warm engagement-confirmation email with next steps”'
-                    : 'Describe the document to draft — e.g. “a mutual NDA for a NC LLC, 2-year term”'
-                }
-              />
-              <button
-                className="primary"
-                onClick={generateWithAi}
-                disabled={aiBusy || !aiPrompt.trim()}
-                title="Draft this template with AI (uses your Anthropic key)"
-              >
-                <SparklesIcon size={15} /> {aiBusy ? 'Drafting…' : 'Draft with AI'}
-              </button>
-            </div>
-            <div className="tpl-build-import">
-              <button onClick={() => fileRef.current?.click()} disabled={importing}>
-                <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                style={{ display: 'none' }}
-                onChange={onImportFile}
-              />
-              <span className="text-muted text-xs">
-                PDF, Word (.docx), or text — parsed into the page (scanned image-only PDFs have no
-                text to extract).
-              </span>
-            </div>
+            {draft.category === 'document' && (
+              <>
+                <label>
+                  <span className="field-label">Paper</span>
+                  <select
+                    value={paper}
+                    onChange={(e) => setPaper(e.target.value as 'letter' | 'legal')}
+                  >
+                    <option value="letter">Letter (8.5 × 11)</option>
+                    <option value="legal">Legal (8.5 × 14)</option>
+                  </select>
+                </label>
+                <label>
+                  <span className="field-label">Font size</span>
+                  <select value={fontScale} onChange={(e) => setFontScale(Number(e.target.value))}>
+                    <option value={0.9}>Small</option>
+                    <option value={1}>Normal</option>
+                    <option value={1.1}>Large</option>
+                    <option value={1.2}>Extra large</option>
+                  </select>
+                </label>
+              </>
+            )}
           </div>
 
           {/* Click-to-insert token palette. */}
@@ -458,7 +548,20 @@ export default function TemplatesPage() {
               DOM slot whether or not the preview column is shown, so toggling
               preview never re-mounts it. The body is stored as markdown with
               {{tokens}}, round-tripped via the shared bridge on change. */}
-          <div className="tpl-split">
+          <div
+            className="tpl-split"
+            // Page setup only applies to documents; emails fall back to the CSS
+            // defaults (so a document's legal/large choice never bleeds into an
+            // email draft, which has no controls to undo it).
+            style={
+              draft.category === 'document'
+                ? ({
+                    '--tpl-font-scale': fontScale,
+                    '--tpl-page-aspect': paper === 'legal' ? 1.647 : 1.294,
+                  } as React.CSSProperties)
+                : undefined
+            }
+          >
             <div className="tpl-split-col">
               <TemplateEditor
                 initialHtml={initialHtml}
@@ -477,6 +580,63 @@ export default function TemplatesPage() {
               </div>
             )}
           </div>
+
+          {showAi && (
+            <div
+              className="tpl-modal-backdrop"
+              onClick={() => {
+                if (!aiBusy) closeAi()
+              }}
+            >
+              <div
+                className="tpl-modal"
+                role="dialog"
+                aria-label="Draft with AI"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="tpl-modal-head">
+                  <SparklesIcon size={16} />
+                  <span>Draft with AI</span>
+                  <button
+                    type="button"
+                    className="tpl-modal-x"
+                    onClick={closeAi}
+                    disabled={aiBusy}
+                    aria-label="Close"
+                  >
+                    <XIcon size={16} />
+                  </button>
+                </div>
+                <textarea
+                  autoFocus
+                  className="tpl-modal-input"
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  placeholder={
+                    draft.category === 'email'
+                      ? 'Describe the email to draft — e.g. “a warm engagement-confirmation email with next steps”. The draft will use {{tokens}} for anything filled in per client.'
+                      : 'Describe the document to draft — e.g. “a mutual NDA for a NC LLC, 2-year term”. The draft will use {{tokens}} for anything filled in per client or matter.'
+                  }
+                />
+                <div className="tpl-modal-actions">
+                  <button
+                    type="button"
+                    className="tpl-ai-btn"
+                    disabled={aiBusy || !aiPrompt.trim()}
+                    onClick={async () => {
+                      const ok = await generateWithAi()
+                      if (ok) closeAi()
+                    }}
+                  >
+                    <SparklesIcon size={15} /> {aiBusy ? 'Drafting…' : 'Generate'}
+                  </button>
+                  <button type="button" onClick={closeAi} disabled={aiBusy}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
       )}
 

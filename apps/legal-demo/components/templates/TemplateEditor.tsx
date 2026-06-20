@@ -3,8 +3,17 @@
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { useEffect, useRef, type MutableRefObject } from 'react'
+import { useEffect, useRef, type MutableRefObject, type ReactNode } from 'react'
 import { TemplateVariable } from './TemplateVariableNode'
+import {
+  BoldIcon,
+  ItalicIcon,
+  ListIcon,
+  ListOrderedIcon,
+  QuoteIcon,
+  RedoIcon,
+  UndoIcon,
+} from '@/components/icons'
 
 export interface TemplateEditorHandle {
   getHTML: () => string
@@ -93,11 +102,12 @@ export function TemplateEditor({ initialHtml, placeholder, onChange, editorRef }
 }
 
 function Toolbar({ editor }: { editor: Editor }) {
-  // `aria` is the accessible name (the visible label is glyph-only, e.g. "B").
-  // Toggle buttons expose aria-pressed; one-shot actions (undo/redo) opt out.
+  // `aria` is the accessible name; the visible label is an icon (Word-style) or a
+  // short text style name (H1/H2/H3). Toggle buttons expose aria-pressed; one-shot
+  // actions (undo/redo) opt out.
   const btn = (
     active: boolean,
-    label: string,
+    label: ReactNode,
     aria: string,
     onClick: () => void,
     opts: { title?: string; toggle?: boolean } = {},
@@ -126,30 +136,38 @@ function Toolbar({ editor }: { editor: Editor }) {
         editor.chain().focus().toggleHeading({ level: 3 }).run(),
       )}
       <div className="tpl-tb-sep" aria-hidden="true" />
-      {btn(editor.isActive('bold'), 'B', 'Bold', () => editor.chain().focus().toggleBold().run(), {
-        title: 'Bold (Ctrl+B)',
-      })}
+      {btn(
+        editor.isActive('bold'),
+        <BoldIcon size={15} />,
+        'Bold',
+        () => editor.chain().focus().toggleBold().run(),
+        { title: 'Bold (Ctrl+B)' },
+      )}
       {btn(
         editor.isActive('italic'),
-        'I',
+        <ItalicIcon size={15} />,
         'Italic',
         () => editor.chain().focus().toggleItalic().run(),
         { title: 'Italic (Ctrl+I)' },
       )}
       <div className="tpl-tb-sep" aria-hidden="true" />
-      {btn(editor.isActive('bulletList'), '• List', 'Bulleted list', () =>
+      {btn(editor.isActive('bulletList'), <ListIcon size={15} />, 'Bulleted list', () =>
         editor.chain().focus().toggleBulletList().run(),
       )}
-      {btn(editor.isActive('orderedList'), '1. List', 'Numbered list', () =>
+      {btn(editor.isActive('orderedList'), <ListOrderedIcon size={15} />, 'Numbered list', () =>
         editor.chain().focus().toggleOrderedList().run(),
       )}
       <div className="tpl-tb-sep" aria-hidden="true" />
-      {btn(editor.isActive('blockquote'), '“ Quote', 'Block quote', () =>
+      {btn(editor.isActive('blockquote'), <QuoteIcon size={15} />, 'Block quote', () =>
         editor.chain().focus().toggleBlockquote().run(),
       )}
       <div className="tpl-tb-sep" aria-hidden="true" />
-      {btn(false, '↶ Undo', 'Undo', () => editor.chain().focus().undo().run(), { toggle: false })}
-      {btn(false, '↷ Redo', 'Redo', () => editor.chain().focus().redo().run(), { toggle: false })}
+      {btn(false, <UndoIcon size={15} />, 'Undo', () => editor.chain().focus().undo().run(), {
+        toggle: false,
+      })}
+      {btn(false, <RedoIcon size={15} />, 'Redo', () => editor.chain().focus().redo().run(), {
+        toggle: false,
+      })}
     </div>
   )
 }
