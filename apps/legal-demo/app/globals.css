@@ -2296,16 +2296,25 @@ pre {
   color: var(--fg);
   margin-top: var(--space-3);
 }
-/* Sandboxed HTML email body. Fixed-ish height with internal scroll (the iframe is
-   script-free, so it can't self-report height); white canvas to match how a mail
-   client renders the message. */
-.mail-msg-iframe {
-  width: 100%;
-  height: 380px;
-  margin-top: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 8px);
-  background: #fff;
+/* Rendered HTML email body (already allowlist-sanitized server-side). Natural
+   height; constrain media + tables to the column and trim leading/trailing margins. */
+.mail-msg-body-html {
+  white-space: normal;
+}
+.mail-msg-body-html img,
+.mail-msg-body-html table {
+  max-width: 100%;
+  height: auto;
+}
+.mail-msg-body-html :first-child {
+  margin-top: 0;
+}
+.mail-msg-body-html :last-child {
+  margin-bottom: 0;
+}
+.mail-msg-body-html a {
+  color: var(--accent, #1a73e8);
+  text-decoration: underline;
 }
 .mail-reply {
   margin-top: var(--space-4);

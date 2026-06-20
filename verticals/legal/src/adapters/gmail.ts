@@ -5,6 +5,7 @@ import {
   GMAIL_SEND_SCOPE,
   GMAIL_READ_SCOPE,
 } from './googleCalendar.js'
+import { sanitizeEmailHtml } from './sanitizeEmailHtml.js'
 
 // Firm sender identity for all outbound client mail (WP3.1 acceptance). Quoted
 // because the name contains "(beta)" — parentheses are comment delimiters in
@@ -293,10 +294,13 @@ function extractText(part: gmail_v1.Schema$MessagePart | undefined): string {
   return ''
 }
 
-// The message's text/html part (raw), for formatted rendering. Empty when the
-// message is plaintext-only.
+// The message's HTML part, SANITIZED for safe rendering (allowlist chokepoint in
+// sanitizeEmailHtml). Empty when the message is plaintext-only; callers omit
+// bodyHtml in that case so the UI falls back to bodyText. Untrusted inbound email
+// HTML must never reach the browser unsanitized.
 function extractHtml(part: gmail_v1.Schema$MessagePart | undefined): string {
-  return findPart(part, 'text/html')
+  const html = findPart(part, 'text/html')
+  return html.trim() ? sanitizeEmailHtml(html) : ''
 }
 
 const emailsIn = (v: string | null): string[] =>

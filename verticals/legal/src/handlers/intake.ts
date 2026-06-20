@@ -135,7 +135,8 @@ registerActionHandler('intake.submit', async (ctx, client, payload, actionId) =>
 
 // ───────────────────────────────────────────────────────────────────────────
 // matter.open — opens the matter from a completed intake and wires the
-// client_of / response_of relationships. Emits matter.opened.
+// client_of / response_of relationships, plus the client-parent grouping
+// (contact_of / matter_of). Emits matter.opened.
 // ───────────────────────────────────────────────────────────────────────────
 
 interface MatterOpenPayload {
@@ -148,6 +149,100 @@ interface MatterOpenPayload {
   questionnaire_entity_id: string
   intake_action_id?: string
   summary?: string
+  // Name for the client-parent account when one must be created (company name
+  // when the intake had one, else the person's full name). Optional: callers
+  // that omit it fall back to the contact entity's own name.
+  client_display_name?: string | null
+}
+
+// Find the client-parent account this contact already belongs to (contact_of),
+// or create one and attach the contact. Returns the client entity id. This is
+// what makes an intake produce a fully-linked contact + client + matter: the
+// CRM's Clients tab and matter↔client grouping read this account via contact_of
+// / matter_of (queries/client.ts, matters.ts). A returning client (same
+// contact) reuses their existing account instead of forking a new one per
+// matter. All writes stay inside this action's transaction.
+async function findOrCreateClientParent(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    contactEntityId: string
+    displayName?: string | null
+  },
+): Promise<string> {
+  const existing = await client.query<{ client_id: string }>(
+    `SELECT r.target_entity_id AS client_id
+     FROM relationship r
+     JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+     JOIN entity ce ON ce.id = r.target_entity_id
+     JOIN entity_kind_definition cekd ON cekd.id = ce.entity_kind_id
+     WHERE r.tenant_id = $1
+       AND r.source_entity_id = $2
+       AND rkd.kind_name = 'contact_of'
+       AND cekd.kind_name = 'client'
+       AND ce.status = 'active'
+       AND (r.valid_to IS NULL OR r.valid_to > now())
+     ORDER BY r.valid_from DESC
+     LIMIT 1`,
+    [args.tenantId, args.contactEntityId],
+  )
+  if (existing.rows[0]) return existing.rows[0].client_id
+
+  // Name the account after the contact: the provided display name (company or
+  // person), else the contact entity's own name. Never empty.
+  let name = (args.displayName ?? '').trim()
+  if (!name) {
+    const c = await client.query<{ name: string | null }>(
+      `SELECT name FROM entity WHERE tenant_id = $1 AND id = $2`,
+      [args.tenantId, args.contactEntityId],
+    )
+    name = (c.rows[0]?.name ?? '').trim() || 'Client'
+  }
+
+  const clientKindId = await lookupKindId(client, 'entity_kind_definition', args.tenantId, 'client')
+  const clientEntityId = await insertEntity(
+    client,
+    args.tenantId,
+    args.actionId,
+    clientKindId,
+    name,
+    {},
+  )
+
+  const clientNameAk = await lookupKindId(
+    client,
+    'attribute_kind_definition',
+    args.tenantId,
+    'client_name',
+  )
+  await insertAttribute(client, {
+    tenantId: args.tenantId,
+    actionId: args.actionId,
+    entityId: clientEntityId,
+    attributeKindId: clientNameAk,
+    value: name,
+    confidence: 1.0,
+    sourceType: 'human',
+    sourceRef: args.actorId,
+  })
+
+  const contactOfId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    args.tenantId,
+    'contact_of',
+  )
+  await insertRelationship(client, {
+    tenantId: args.tenantId,
+    actionId: args.actionId,
+    sourceEntityId: args.contactEntityId,
+    targetEntityId: clientEntityId,
+    relationshipKindId: contactOfId,
+  })
+
+  return clientEntityId
 }
 
 registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
@@ -220,6 +315,32 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
     sourceEntityId: p.questionnaire_entity_id,
     targetEntityId: matterEntityId,
     relationshipKindId: responseOfId,
+  })
+
+  // Beta feedback (intake linking): attach this matter — and, the first time,
+  // the contact — to a client-parent account so intake produces a fully-linked
+  // contact + client + matter, not an orphaned contact↔matter pair. The direct
+  // client_of link above stays the contact↔matter source of truth; matter_of /
+  // contact_of give the CRM its Clients tab and grouping.
+  const clientParentId = await findOrCreateClientParent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    contactEntityId: p.client_entity_id,
+    displayName: p.client_display_name,
+  })
+  const matterOfId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    ctx.tenantId,
+    'matter_of',
+  )
+  await insertRelationship(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    sourceEntityId: matterEntityId,
+    targetEntityId: clientParentId,
+    relationshipKindId: matterOfId,
   })
 
   await insertEvent(client, {
