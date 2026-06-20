@@ -135,7 +135,7 @@ export function UnifiedAssistantChat({
 
   // Toolbar panels + settings.
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [betaOpen, setBetaOpen] = useState(false)
+  const [feedbackMode, setFeedbackMode] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
   const [workRate, setWorkRate] = useState<WorkRate>('balanced')
@@ -143,7 +143,6 @@ export function UnifiedAssistantChat({
   const [useContext, setUseContext] = useState(true)
 
   // Beta-feedback form.
-  const [fbMessage, setFbMessage] = useState('')
   const [fbCategory, setFbCategory] = useState<FeedbackCategory>('other')
   const [fbBusy, setFbBusy] = useState(false)
   const [fbDone, setFbDone] = useState(false)
@@ -238,6 +237,10 @@ export function UnifiedAssistantChat({
     setInput('')
     setBusy(false)
     setUseContext(true)
+    setFeedbackMode(false)
+    setFbDone(false)
+    setFbRef(null)
+    setFbError(null)
     void loadHistory(target)
     // The picker button just unmounted; return keyboard focus to the composer.
     setTimeout(() => composerRef.current?.focus(), 0)
@@ -248,7 +251,6 @@ export function UnifiedAssistantChat({
     const opening = !historyOpen
     setHistoryOpen(opening)
     setSettingsOpen(false)
-    setBetaOpen(false)
     if (opening) {
       setThreads(null)
       callAttorneyMcp<{ threads: ThreadSummary[] }>({ toolName: 'legal.assistant.threads' })
@@ -267,6 +269,10 @@ export function UnifiedAssistantChat({
     setInput('')
     setBusy(false)
     setHistoryOpen(false)
+    setFeedbackMode(false)
+    setFbDone(false)
+    setFbRef(null)
+    setFbError(null)
     setTimeout(() => composerRef.current?.focus(), 0)
   }
 
@@ -283,7 +289,6 @@ export function UnifiedAssistantChat({
     setError(null)
     setBusy(true)
     setSettingsOpen(false)
-    setBetaOpen(false)
     // The model history the server expects: prior user/assistant turns as text.
     const history = turns.map((t) => ({ role: t.role, content: t.content }))
     setTurns((t) => [...t, { role: 'user', content: message }])
@@ -359,16 +364,20 @@ export function UnifiedAssistantChat({
     setBusy(false)
   }
 
+  // Log the whole feedback-mode conversation as ONE feedback record (the attorney
+  // and the assistant fleshed it out together), with the page + scope context.
   async function submitFeedback() {
-    const message = fbMessage.trim()
-    if (!message || fbBusy) return
+    if (fbBusy || turns.length === 0) return
     setFbBusy(true)
     setFbError(null)
+    const transcript = turns
+      .map((t) => `${t.role === 'user' ? 'Attorney' : 'Assistant'}: ${t.content}`)
+      .join('\n\n')
     try {
       const { eventId } = await callAttorneyMcp<{ eventId: string }>({
         toolName: 'legal.assistant.feedback_submit',
         input: {
-          message,
+          message: transcript,
           category: fbCategory,
           // The exact page + which part of the app they were in when submitting.
           pageContext: {
@@ -384,12 +393,22 @@ export function UnifiedAssistantChat({
       })
       setFbRef(eventId)
       setFbDone(true)
-      setFbMessage('')
     } catch (e) {
       setFbError(e instanceof Error ? e.message : String(e))
     } finally {
       setFbBusy(false)
     }
+  }
+
+  // Leave feedback mode. After a submitted thread, start a fresh regular chat;
+  // otherwise just drop the banner and keep whatever was said.
+  function exitFeedbackMode() {
+    if (fbDone) {
+      newChat()
+      return
+    }
+    setFeedbackMode(false)
+    setFbError(null)
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -408,7 +427,6 @@ export function UnifiedAssistantChat({
           className={`uac-iconbtn${settingsOpen ? ' active' : ''}`}
           onClick={() => {
             setSettingsOpen((o) => !o)
-            setBetaOpen(false)
             setHistoryOpen(false)
           }}
           aria-label="Assistant settings"
@@ -418,17 +436,18 @@ export function UnifiedAssistantChat({
         </button>
         <button
           type="button"
-          className={`uac-iconbtn${betaOpen ? ' active' : ''}`}
+          className={`uac-iconbtn${feedbackMode ? ' active' : ''}`}
           onClick={() => {
-            setBetaOpen((o) => !o)
+            setFeedbackMode((m) => !m)
             setSettingsOpen(false)
             setHistoryOpen(false)
             setFbDone(false)
             setFbRef(null)
             setFbError(null)
           }}
-          aria-label="Beta feedback"
-          title="Beta feedback — straight to the team"
+          aria-label="Feedback mode"
+          aria-pressed={feedbackMode}
+          title="Feedback mode — talk it through, then log the whole thread"
         >
           <MegaphoneIcon size={16} />
         </button>
@@ -594,33 +613,37 @@ export function UnifiedAssistantChat({
         </div>
       )}
 
-      {/* ── Beta feedback popover ─────────────────────────────────────────── */}
-      {betaOpen && (
-        <div className="uac-popover uac-beta">
+      {/* ── Feedback mode banner ──────────────────────────────────────────── */}
+      {feedbackMode && (
+        <div className="uac-fbmode" role="region" aria-label="Feedback mode">
           {fbDone ? (
-            <div className="uac-beta-done">
-              <span>
-                <SparklesIcon size={14} /> Logged to your team ✓
+            <div className="uac-fbmode-done">
+              <span className="uac-fbmode-thanks">
+                <SparklesIcon size={14} /> Thank you for your feedback
               </span>
               {fbRef && (
                 <span className="uac-beta-ref" title={`Recorded as event ${fbRef}`}>
                   ref {fbRef.slice(0, 8)}
                 </span>
               )}
+              <button type="button" className="uac-fbmode-exit" onClick={exitFeedbackMode}>
+                Back to chat
+              </button>
             </div>
           ) : (
             <>
-              <div className="uac-beta-head">
-                <span className="uac-beta-title">
-                  <MegaphoneIcon size={13} /> Beta feedback
+              <div className="uac-fbmode-head">
+                <span className="uac-fbmode-title">
+                  <MegaphoneIcon size={13} /> Feedback mode
                 </span>
-                <span className="uac-beta-sub">
-                  Captured with the exact page you’re on — straight to the team.
+                <span className="uac-fbmode-sub">
+                  Tell me what’s working, broken, or missing — I’ll ask a follow-up or two, then log
+                  the whole thread to the team.
                 </span>
               </div>
-              <div className="uac-setting">
-                <label className="uac-setting-label">About</label>
+              <div className="uac-fbmode-controls">
                 <select
+                  aria-label="Feedback category"
                   value={fbCategory}
                   onChange={(e) => setFbCategory(e.target.value as FeedbackCategory)}
                 >
@@ -630,23 +653,28 @@ export function UnifiedAssistantChat({
                     </option>
                   ))}
                 </select>
+                <span className="uac-toolbar-spacer" />
+                <button
+                  type="button"
+                  className="uac-fbmode-exit"
+                  onClick={exitFeedbackMode}
+                  disabled={fbBusy}
+                >
+                  Exit
+                </button>
+                <button
+                  type="button"
+                  className="primary uac-fbmode-send"
+                  disabled={fbBusy || turns.length === 0}
+                  onClick={() => void submitFeedback()}
+                  title={
+                    turns.length === 0 ? 'Describe your feedback in the chat first' : undefined
+                  }
+                >
+                  {fbBusy ? 'Submitting…' : 'Submit feedback'}
+                </button>
               </div>
-              <textarea
-                className="uac-beta-text"
-                rows={3}
-                placeholder="What’s working, what’s broken, what you wish it did…"
-                value={fbMessage}
-                onChange={(e) => setFbMessage(e.target.value)}
-              />
               {fbError && <div className="alert alert-error">{fbError}</div>}
-              <button
-                type="button"
-                className="primary uac-beta-send"
-                disabled={fbBusy || !fbMessage.trim()}
-                onClick={() => void submitFeedback()}
-              >
-                {fbBusy ? 'Sending…' : 'Send feedback'}
-              </button>
             </>
           )}
         </div>
