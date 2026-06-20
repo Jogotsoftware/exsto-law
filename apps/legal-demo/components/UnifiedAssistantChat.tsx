@@ -11,6 +11,7 @@ import {
   SparklesIcon,
   SearchIcon,
   ClockIcon,
+  PlusIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -256,6 +257,19 @@ export function UnifiedAssistantChat({
     }
   }
 
+  // Start a fresh conversation in the current scope. The persisted thread is
+  // untouched (append-only) — it stays reachable from the history picker.
+  function newChat() {
+    genRef.current++ // abandon any in-flight stream
+    setTurns([])
+    setStreaming(null)
+    setError(null)
+    setInput('')
+    setBusy(false)
+    setHistoryOpen(false)
+    setTimeout(() => composerRef.current?.focus(), 0)
+  }
+
   // Keep the latest turn in view as content streams in.
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -429,6 +443,17 @@ export function UnifiedAssistantChat({
         >
           <ClockIcon size={16} />
         </button>
+        {turns.length > 0 && (
+          <button
+            type="button"
+            className="uac-iconbtn"
+            onClick={newChat}
+            aria-label="New chat"
+            title="New chat — clear this conversation"
+          >
+            <PlusIcon size={16} />
+          </button>
+        )}
 
         <div className="uac-toolbar-spacer" />
 
@@ -718,7 +743,7 @@ export function UnifiedAssistantChat({
         />
         <button
           type="button"
-          className="primary uac-send"
+          className="uac-send"
           onClick={() => void send()}
           disabled={busy || !input.trim() || !modelId}
           aria-label="Send"

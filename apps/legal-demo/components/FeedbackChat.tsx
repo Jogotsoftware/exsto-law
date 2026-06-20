@@ -5,12 +5,9 @@ import { usePathname } from 'next/navigation'
 import { UnifiedAssistantChat } from '@/components/UnifiedAssistantChat'
 import { MessageCircleIcon, XIcon } from '@/components/icons'
 
-const INTRO_GLOBAL =
-  'Ask anything about using the app — intake, booking, drafting, review, Granola import, settings. Switch the model up top. Or just tell me what you think; your feedback goes straight to the team.'
-const INTRO_MATTER =
-  'Grounded in the matter you’re viewing — ask about it, request a draft, or get help with the app. Switch the model up top.'
-const INTRO_CONTACT =
-  'Grounded in the client you’re viewing — ask about them or get help with the app. Switch the model up top.'
+const INTRO_GLOBAL = 'How can I serve you, Counselor?'
+const INTRO_MATTER = 'How can I serve you, Counselor? Grounded in the matter you’re viewing.'
+const INTRO_CONTACT = 'How can I serve you, Counselor? Grounded in the client you’re viewing.'
 
 // Derive the assistant's context from the page you're on, so the one global chat
 // follows you: open it on a matter and it's grounded in that matter; on a contact,
@@ -51,9 +48,14 @@ export function FeedbackChat() {
 
   if (!open) {
     return (
-      <button type="button" className="feedback-fab" onClick={openChat} aria-label="Open assistant">
-        <MessageCircleIcon size={18} />
-        Assistant
+      <button
+        type="button"
+        className="feedback-fab"
+        onClick={openChat}
+        aria-label="Open assistant"
+        title="Assistant"
+      >
+        <MessageCircleIcon size={24} />
       </button>
     )
   }

@@ -4116,21 +4116,24 @@ button.danger.outline:hover:not(:disabled) {
   right: 1.25rem;
   bottom: 1.25rem;
   z-index: 50;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.6rem 1rem;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
   background: var(--accent);
-  color: white;
+  color: var(--gold-400);
   border: none;
   border-radius: var(--radius-full);
-  font-size: 0.9rem;
-  font-weight: 600;
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.18);
   cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
 }
 .feedback-fab:hover {
-  filter: brightness(1.05);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.24);
 }
 
 .feedback-panel {
@@ -4623,19 +4626,42 @@ button.danger.outline:hover:not(:disabled) {
 
 /* Composer */
 .uac-composer {
+  position: relative;
   display: flex;
-  gap: 0.5rem;
-  align-items: flex-end;
 }
 .uac-composer textarea {
   flex: 1;
   resize: none;
   font-family: inherit;
   font-size: 0.88rem;
-  padding: 0.5rem 0.6rem;
+  padding: 0.5rem 2.6rem 0.5rem 0.6rem;
 }
+/* Gold send glyph that sits INSIDE the composer's bottom-right corner. */
 .uac-send {
-  flex: 0 0 auto;
+  position: absolute;
+  right: 0.4rem;
+  bottom: 0.4rem;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gold);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.uac-send:hover:not(:disabled) {
+  background: var(--gold-100);
+}
+.uac-send:disabled {
+  color: var(--muted);
+  opacity: 0.55;
+  cursor: default;
 }
 
 @media (prefers-reduced-motion: reduce) {
