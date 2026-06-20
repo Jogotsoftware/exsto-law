@@ -75,4 +75,60 @@ describe('template preview', () => {
     expect(html).toContain('Pat Real')
     expect(html).not.toContain('Jordan Avery')
   })
+
+  describe('typed variables drive sample values', () => {
+    it('fills by declared type (currency / number / boolean)', () => {
+      const html = buildPreview(
+        'Fee {{retainer}}, count {{seats}}, agree {{consents}}.',
+        undefined,
+        {
+          retainer: { type: 'currency' },
+          seats: { type: 'number' },
+          consents: { type: 'boolean' },
+        },
+      ).html
+      expect(html).toContain('$2,500')
+      expect(html).toContain('42')
+      expect(html).toContain('Yes')
+      expect(html).not.toContain('tpl-prev-field') // all three resolved, no gaps
+    })
+
+    it('uses the first option for a choice type', () => {
+      const html = buildPreview('Plan: {{plan_tier}}.', undefined, {
+        plan_tier: { type: 'choice', options: ['Standard', 'Premium'] },
+      }).html
+      expect(html).toContain('Standard')
+    })
+
+    it('honors an explicit default (and resolves "today")', () => {
+      const a = buildPreview('Term {{term}}.', undefined, {
+        term: { type: 'text', default: '24 months' },
+      }).html
+      expect(a).toContain('24 months')
+      const b = buildPreview('As of {{start}}.', undefined, {
+        start: { type: 'date', default: 'today' },
+      }).html
+      expect(b).toMatch(/\b\d{4}\b/) // a year — the date resolved
+    })
+
+    it('a text-typed token still falls back to the curated sample', () => {
+      const html = buildPreview('Dear {{client_name}}.', undefined, {
+        client_name: { type: 'text' },
+      }).html
+      expect(html).toContain('Jordan Avery')
+      expect(html).not.toContain('tpl-prev-field')
+    })
+
+    it('an explicit value still wins over a declared type', () => {
+      const html = buildPreview(
+        'Fee {{retainer}}.',
+        { retainer: '$10,000' },
+        {
+          retainer: { type: 'currency' },
+        },
+      ).html
+      expect(html).toContain('$10,000')
+      expect(html).not.toContain('$2,500')
+    })
+  })
 })

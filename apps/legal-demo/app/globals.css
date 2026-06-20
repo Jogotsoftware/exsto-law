@@ -3983,6 +3983,52 @@ main.book-main {
   border: 1px dashed var(--accent, #0ea5e9);
 }
 
+/* Fields panel — typed metadata per {{token}}. */
+.tpl-fields-section {
+  margin: 0.5rem 0 0.85rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.tpl-fields-heading {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+}
+.tpl-fields-empty {
+  margin: 0;
+}
+.tpl-fields-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.tpl-fields-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+.tpl-fields-table td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: middle;
+}
+.tpl-fields-table tr:last-child td {
+  border-bottom: none;
+}
+.tpl-fields-table code {
+  font-size: 0.85rem;
+}
+.tpl-fields-table select,
+.tpl-fields-table input[type='text'] {
+  width: 100%;
+  max-width: 16rem;
+}
+
 /* Service detail — pricing radios */
 .pricing-row {
   display: flex;

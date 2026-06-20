@@ -36,11 +36,16 @@ async function setTemplateAttr(
   })
 }
 
+// Typed {{token}} metadata, keyed by token id (see migration 0076). Stored as a
+// single structured attribute on the template entity.
+type TemplateVariables = Record<string, unknown>
+
 interface TemplateCreatePayload {
   name: string
   category: TemplateCategory
   body: string
   doc_kind?: string | null
+  variables?: TemplateVariables
 }
 
 registerActionHandler('legal.template.create', async (ctx, client, payload, actionId) => {
@@ -68,6 +73,9 @@ registerActionHandler('legal.template.create', async (ctx, client, payload, acti
   if (p.category === 'document' && p.doc_kind) {
     attrs.push({ kind: 'template_doc_kind', value: p.doc_kind })
   }
+  if (p.variables && typeof p.variables === 'object' && Object.keys(p.variables).length > 0) {
+    attrs.push({ kind: 'template_variables', value: p.variables })
+  }
   for (const a of attrs) {
     await setTemplateAttr(client, {
       tenantId: ctx.tenantId,
@@ -87,6 +95,7 @@ interface TemplateUpdatePayload {
   name?: string
   body?: string
   doc_kind?: string | null
+  variables?: TemplateVariables
 }
 
 registerActionHandler('legal.template.update', async (ctx, client, payload, actionId) => {
@@ -104,6 +113,11 @@ registerActionHandler('legal.template.update', async (ctx, client, payload, acti
     updates.push({ kind: 'template_body', value: p.body })
   }
   if (p.doc_kind != null) updates.push({ kind: 'template_doc_kind', value: p.doc_kind })
+  // A non-null variables map (including {}) supersedes the prior — lets the editor
+  // clear all field metadata as well as set it.
+  if (p.variables != null && typeof p.variables === 'object') {
+    updates.push({ kind: 'template_variables', value: p.variables })
+  }
 
   for (const u of updates) {
     await setTemplateAttr(client, {
