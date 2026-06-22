@@ -17,12 +17,15 @@ import {
   Building2Icon,
   CalendarIcon,
   CheckCircleIcon,
+  ChevronRightIcon,
   CopyIcon,
   FileTextIcon,
   HelpCircleIcon,
   LayersIcon,
   LayoutGridIcon,
+  ListIcon,
   MailIcon,
+  MessageCircleIcon,
   ScaleIcon,
   SettingsIcon,
   BriefcaseIcon,
@@ -31,21 +34,48 @@ import {
   LogOutIcon,
 } from '@/components/icons'
 
-const NAV: Array<{
+type IconCmp = (props: { size?: number }) => React.JSX.Element
+
+type NavLeaf = {
   href: string
   label: string
   exact?: boolean
-  Icon: (props: { size?: number }) => React.JSX.Element
-}> = [
+  Icon: IconCmp
+}
+
+// A collapsible group of leaves in the dropdown (e.g. "Libraries"). Clicking the
+// header expands/collapses its children rather than navigating anywhere.
+type NavGroup = {
+  group: string
+  Icon: IconCmp
+  children: NavLeaf[]
+}
+
+type NavNode = NavLeaf | NavGroup
+
+const isGroup = (n: NavNode): n is NavGroup => 'group' in n
+
+const NAV: NavNode[] = [
   { href: '/attorney', label: 'Dashboard', exact: true, Icon: LayoutGridIcon },
   { href: '/attorney/matters', label: 'Matters', Icon: BriefcaseIcon },
   { href: '/attorney/crm', label: 'CRM', Icon: Building2Icon },
   { href: '/attorney/review', label: 'Review', Icon: CheckCircleIcon },
   { href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
   { href: '/attorney/mail', label: 'Mail', Icon: MailIcon },
-  { href: '/attorney/services', label: 'Services', Icon: LayersIcon },
-  { href: '/attorney/templates', label: 'Templates', Icon: CopyIcon },
-  { href: '/attorney/questionnaires', label: 'Questionnaires', Icon: HelpCircleIcon },
+  {
+    // Beta feedback (9947ed33): consolidate the reusable libraries the attorney
+    // composes services from — Services, Templates, Questionnaires, Questions —
+    // under one "Libraries" tab so the top nav isn't a flat 11-item list. A
+    // Tasks library is planned and slots in here once that page exists.
+    group: 'Libraries',
+    Icon: LayersIcon,
+    children: [
+      { href: '/attorney/services', label: 'Services', Icon: ListIcon },
+      { href: '/attorney/templates', label: 'Templates', Icon: CopyIcon },
+      { href: '/attorney/questionnaires', label: 'Questionnaires', Icon: HelpCircleIcon },
+      { href: '/attorney/questions', label: 'Questions', Icon: MessageCircleIcon },
+    ],
+  },
   { href: '/attorney/billing', label: 'Billing', Icon: FileTextIcon },
   { href: '/attorney/settings', label: 'Settings', Icon: SettingsIcon },
 ]
@@ -77,6 +107,10 @@ export function AttorneyTopNav() {
   const pathname = usePathname()
   const [session, setSession] = useState<DemoSession | null>(null)
   const [open, setOpen] = useState<OpenMenu>(null)
+  // Per-group expand override. Unset → the group falls back to "open when it
+  // contains the active route" (see the render below); a stored boolean lets the
+  // user expand/collapse it regardless.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const navRef = useRef<HTMLDivElement>(null)
   const notifRef = useRef<HTMLDivElement>(null)
   const userRef = useRef<HTMLDivElement>(null)
@@ -150,7 +184,7 @@ export function AttorneyTopNav() {
     window.location.href = '/api/auth/logout'
   }
 
-  const isActive = (item: (typeof NAV)[number]) =>
+  const leafActive = (item: NavLeaf) =>
     item.exact ? pathname === item.href : pathname.startsWith(item.href)
 
   return (
@@ -181,21 +215,69 @@ export function AttorneyTopNav() {
           </Link>
           {open === 'nav' && (
             <nav className="att-menu" aria-label="Primary">
-              {NAV.map((item) => {
-                const active = isActive(item)
-                const { Icon } = item
+              {NAV.map((node) => {
+                if (!isGroup(node)) {
+                  const active = leafActive(node)
+                  const { Icon } = node
+                  return (
+                    <Link
+                      key={node.href}
+                      href={node.href}
+                      className={`att-menu-link ${active ? 'active' : ''}`}
+                      aria-current={active ? 'page' : undefined}
+                    >
+                      <span className="att-menu-ico">
+                        <Icon size={18} />
+                      </span>
+                      <span>{node.label}</span>
+                    </Link>
+                  )
+                }
+                // Collapsible group: default to open when the active page lives
+                // inside it, but let an explicit toggle win.
+                const containsActive = node.children.some(leafActive)
+                const isOpen = openGroups[node.group] ?? containsActive
+                const { Icon } = node
                 return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`att-menu-link ${active ? 'active' : ''}`}
-                    aria-current={active ? 'page' : undefined}
-                  >
-                    <span className="att-menu-ico">
-                      <Icon size={18} />
-                    </span>
-                    <span>{item.label}</span>
-                  </Link>
+                  <div key={node.group} className="att-menu-group">
+                    <button
+                      type="button"
+                      className={`att-menu-link att-menu-group-btn ${
+                        containsActive ? 'within' : ''
+                      }`}
+                      aria-expanded={isOpen}
+                      onClick={() => setOpenGroups((s) => ({ ...s, [node.group]: !isOpen }))}
+                    >
+                      <span className="att-menu-ico">
+                        <Icon size={18} />
+                      </span>
+                      <span>{node.group}</span>
+                      <span className={`att-menu-caret ${isOpen ? 'open' : ''}`} aria-hidden="true">
+                        <ChevronRightIcon size={16} />
+                      </span>
+                    </button>
+                    {isOpen && (
+                      <div className="att-menu-sub" role="group" aria-label={node.group}>
+                        {node.children.map((leaf) => {
+                          const active = leafActive(leaf)
+                          const { Icon: LeafIcon } = leaf
+                          return (
+                            <Link
+                              key={leaf.href}
+                              href={leaf.href}
+                              className={`att-menu-link att-menu-sublink ${active ? 'active' : ''}`}
+                              aria-current={active ? 'page' : undefined}
+                            >
+                              <span className="att-menu-ico">
+                                <LeafIcon size={18} />
+                              </span>
+                              <span>{leaf.label}</span>
+                            </Link>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </nav>
