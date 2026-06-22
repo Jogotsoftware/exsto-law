@@ -14,11 +14,14 @@ import {
   replyToThread,
   composeToClient,
   matterCommunications,
+  recipientMatters,
+  attachableDocuments,
   type WorkspaceCalendarEvent,
   type CalendarSource,
   type MailThreadSummary,
   type MailThreadView,
   type MatterCommunication,
+  type AttachableDocuments,
 } from '../../index.js'
 
 // ── Calendar tab (REQ-CALMAIL-01) ──────────────────────────────────────────
@@ -144,6 +147,41 @@ const mailComposeTool: Tool<
   handler: (ctx: ActionContext, input) => composeToClient(ctx, input),
 }
 
+// Mail attachment picker (reads): which matters a recipient is a client of (compose),
+// and the documents attachable for a matter (uploads + latest draft per document).
+const recipientMattersTool: Tool<
+  { email: string },
+  { matters: Array<{ matterEntityId: string; matterNumber: string }> }
+> = {
+  name: 'legal.mail.recipient_matters',
+  description:
+    'The matters a recipient email address is a client of — used to scope which documents may be attached when composing to that client. Empty if not a known client contact.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { email: { type: 'string' } },
+    required: ['email'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    matters: await recipientMatters(ctx, input.email),
+  }),
+}
+
+const attachableDocumentsTool: Tool<{ matterEntityId: string }, AttachableDocuments> = {
+  name: 'legal.mail.attachable_documents',
+  description:
+    "A matter's documents available to attach to client email: uploaded files and the latest version of each generated draft. Metadata only; the chosen document_version ids are resolved to bytes server-side at send time.",
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { matterEntityId: { type: 'string' } },
+    required: ['matterEntityId'],
+    additionalProperties: false,
+  },
+  handler: (ctx: ActionContext, input) => attachableDocuments(ctx, input.matterEntityId),
+}
+
 const matterCommunicationsTool: Tool<
   { matterEntityId: string },
   { threads: MatterCommunication[] }
@@ -167,4 +205,6 @@ registerTool(mailThreadsTool)
 registerTool(mailThreadGetTool)
 registerTool(mailReplyTool)
 registerTool(mailComposeTool)
+registerTool(recipientMattersTool)
+registerTool(attachableDocumentsTool)
 registerTool(matterCommunicationsTool)

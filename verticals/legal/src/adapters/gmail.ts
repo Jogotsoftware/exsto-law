@@ -100,11 +100,14 @@ function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
     const mixB = `=_exsto_mix_${seed}`
     const parts: string[] = [`--${mixB}`, ...body.typeLines, '', ...body.lines]
     for (const att of args.attachments) {
+      // Sanitize at the MIME boundary regardless of upstream: strip CR/LF/quote so a
+      // crafted filename can't break out of the header (smuggling / Bcc injection).
+      const name = att.filename.replace(/[\r\n"]/g, '_')
       parts.push(
         `--${mixB}`,
-        `Content-Type: ${att.contentType}; name="${att.filename}"`,
+        `Content-Type: ${att.contentType}; name="${name}"`,
         'Content-Transfer-Encoding: base64',
-        `Content-Disposition: attachment; filename="${att.filename}"`,
+        `Content-Disposition: attachment; filename="${name}"`,
         '',
         wrap76(att.contentBase64),
       )
@@ -144,6 +147,24 @@ export async function sendEmail(
     throw new Error(
       'Gmail send permission was not granted. Reconnect Google in Settings to enable email.',
     )
+  }
+
+  // Size guard: the whole MIME (attachments already base64 inside) is base64url-
+  // re-encoded for requestBody.raw, which Gmail caps near 35 MB. base64 inflates
+  // ~33% and the re-encode again, so cap total RAW attachment bytes at ~18 MB to
+  // stay under the limit and fail with a clear message instead of an opaque API
+  // error. (contentBase64.length * 3/4 ≈ raw bytes.)
+  if (args.attachments?.length) {
+    const MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024
+    const totalRaw = args.attachments.reduce(
+      (n, a) => n + Math.ceil((a.contentBase64.length * 3) / 4),
+      0,
+    )
+    if (totalRaw > MAX_ATTACHMENT_BYTES) {
+      throw new Error(
+        `Attachments are too large to email (${(totalRaw / 1024 / 1024).toFixed(1)} MB; the limit is about 18 MB total).`,
+      )
+    }
   }
 
   const oauth2 = buildOAuthClient()

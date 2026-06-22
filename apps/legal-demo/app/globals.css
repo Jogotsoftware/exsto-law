@@ -2156,6 +2156,94 @@ pre {
   gap: var(--space-2);
   margin-top: var(--space-3);
 }
+
+/* Attachment picker (compose + reply) */
+.mail-attach {
+  position: relative;
+  margin-top: var(--space-2);
+}
+.mail-attach-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.mail-attach-btn {
+  border: 1px solid var(--border);
+  background: var(--bg, #fff);
+  border-radius: var(--radius-md, 0.5rem);
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.mail-attach-btn:hover {
+  border-color: var(--muted);
+}
+.mail-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--accent-attorney-soft, #eef2ff);
+  color: #1e293b;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.8rem;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-attach-chip button {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+}
+.mail-attach-pop {
+  position: absolute;
+  z-index: 30;
+  margin-top: 0.35rem;
+  width: min(28rem, 90vw);
+  max-height: 22rem;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.5rem);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0, 0, 0, 0.12));
+  padding: 0.6rem 0.75rem;
+}
+.mail-attach-matter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-soft, #eee);
+}
+.mail-attach-matter select {
+  flex: 1;
+}
+.mail-attach-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.mail-attach-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.3rem;
+  border-radius: var(--radius-sm, 0.35rem);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.mail-attach-item:hover {
+  background: var(--rule-soft, #f5f6f8);
+}
 .mail-icon-btn {
   border: none;
   background: transparent;

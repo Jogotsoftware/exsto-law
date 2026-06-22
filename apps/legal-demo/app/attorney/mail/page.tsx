@@ -14,6 +14,21 @@ import { fetchSession } from '@/lib/auth'
 import { PageHead } from '@/components/PageHead'
 import { MailComposer, type ComposerValue } from '@/components/MailComposer'
 import { SignatureBlock, type FirmSignature } from '@/components/SignatureBlock'
+import { AttachmentPicker, type PickedAttachment } from '@/components/mail/AttachmentPicker'
+
+type MatterRef = { matterEntityId: string; matterNumber: string }
+
+// Send a client email WITH attachments through the dedicated route (attachments
+// can't ride the JSON MCP transport; the server resolves refs → bytes + scope).
+async function sendWithAttachments(payload: Record<string, unknown>): Promise<void> {
+  const res = await fetch('/api/attorney/mail/send', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const data = (await res.json().catch(() => ({}))) as { error?: string }
+  if (!res.ok) throw new Error(data?.error ?? 'Failed to send.')
+}
 
 interface ThreadSummary {
   gmailThreadId: string
@@ -119,6 +134,13 @@ export default function MailPage() {
   const [signature, setSignature] = useState<FirmSignature | null>(null)
   // Bumped after each send/discard so the uncontrolled composer remounts clean.
   const [composerNonce, setComposerNonce] = useState(0)
+  // Attachment state (reply + compose). The matter is the attachment scope: for a
+  // reply it's the thread's matter; for compose it's resolved from the recipient.
+  const [replyAttach, setReplyAttach] = useState<PickedAttachment[]>([])
+  const [replyMatterId, setReplyMatterId] = useState<string | null>(null)
+  const [composeAttach, setComposeAttach] = useState<PickedAttachment[]>([])
+  const [composeMatters, setComposeMatters] = useState<MatterRef[]>([])
+  const [composeMatterId, setComposeMatterId] = useState<string | null>(null)
 
   async function load(search?: string) {
     setError(null)
@@ -173,6 +195,41 @@ export default function MailPage() {
       .catch(() => setCompose({ to: '', subject, body: EMPTY_BODY }))
   }, [])
 
+  // Resolve which matters the compose recipient is a client of, so the attachment
+  // picker can scope to one of them. Debounced lightly on the typed address.
+  const composeTo = compose?.to ?? ''
+  useEffect(() => {
+    const email = composeTo.trim()
+    if (!email.includes('@')) {
+      setComposeMatters([])
+      setComposeMatterId(null)
+      return
+    }
+    let cancelled = false
+    const t = setTimeout(() => {
+      callAttorneyMcp<{ matters: MatterRef[] }>({
+        toolName: 'legal.mail.recipient_matters',
+        input: { email },
+      })
+        .then((r) => {
+          if (cancelled) return
+          setComposeMatters(r.matters)
+          setComposeMatterId((prev) =>
+            prev && r.matters.some((m) => m.matterEntityId === prev)
+              ? prev
+              : (r.matters[0]?.matterEntityId ?? null),
+          )
+        })
+        .catch(() => {
+          if (!cancelled) setComposeMatters([])
+        })
+    }, 350)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [composeTo])
+
   async function openThread(gmailThreadId: string) {
     setBusy('open')
     setError(null)
@@ -183,6 +240,8 @@ export default function MailPage() {
       })
       setOpen(view)
       setReply(EMPTY_BODY)
+      setReplyAttach([])
+      setReplyMatterId(view.matters[0]?.matterEntityId ?? null)
       setComposerNonce((n) => n + 1)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -196,15 +255,28 @@ export default function MailPage() {
     setBusy('reply')
     setError(null)
     try {
-      await callAttorneyMcp({
-        toolName: 'legal.mail.reply',
-        input: {
+      if (replyAttach.length > 0) {
+        if (!replyMatterId) throw new Error('Pick a matter for the attachments.')
+        await sendWithAttachments({
+          mode: 'reply',
           gmailThreadId: open.gmailThreadId,
           bodyText: reply.text,
           bodyHtml: reply.html || undefined,
-        },
-      })
+          matterId: replyMatterId,
+          attachments: replyAttach.map(({ kind, id }) => ({ kind, id })),
+        })
+      } else {
+        await callAttorneyMcp({
+          toolName: 'legal.mail.reply',
+          input: {
+            gmailThreadId: open.gmailThreadId,
+            bodyText: reply.text,
+            bodyHtml: reply.html || undefined,
+          },
+        })
+      }
       setReply(EMPTY_BODY)
+      setReplyAttach([])
       setComposerNonce((n) => n + 1)
       setSentNote('Reply sent from your Gmail and recorded on the matter.')
       setTimeout(() => setSentNote(null), 6000)
@@ -221,16 +293,30 @@ export default function MailPage() {
     setBusy('compose')
     setError(null)
     try {
-      await callAttorneyMcp({
-        toolName: 'legal.mail.compose',
-        input: {
+      if (composeAttach.length > 0) {
+        if (!composeMatterId) throw new Error('Pick a matter for the attachments.')
+        await sendWithAttachments({
+          mode: 'compose',
           to: compose.to,
           subject: compose.subject,
           bodyText: compose.body.text,
           bodyHtml: compose.body.html || undefined,
-        },
-      })
+          matterId: composeMatterId,
+          attachments: composeAttach.map(({ kind, id }) => ({ kind, id })),
+        })
+      } else {
+        await callAttorneyMcp({
+          toolName: 'legal.mail.compose',
+          input: {
+            to: compose.to,
+            subject: compose.subject,
+            bodyText: compose.body.text,
+            bodyHtml: compose.body.html || undefined,
+          },
+        })
+      }
       setCompose(null)
+      setComposeAttach([])
       setComposerNonce((n) => n + 1)
       setSentNote('Email sent from your Gmail and recorded.')
       setTimeout(() => setSentNote(null), 6000)
@@ -358,6 +444,18 @@ export default function MailPage() {
               footer={<SignatureBlock value={signature} onChange={setSignature} />}
               onChange={(v) => setCompose((c) => (c ? { ...c, body: v } : c))}
             />
+            {composeMatters.length > 0 && (
+              <AttachmentPicker
+                matterId={composeMatterId}
+                matterOptions={composeMatters}
+                value={composeAttach}
+                onChange={setComposeAttach}
+                onMatterChange={(id) => {
+                  setComposeMatterId(id)
+                  setComposeAttach([]) // documents are matter-scoped; reset on switch
+                }}
+              />
+            )}
             <div className="mail-compose-actions">
               <button
                 className="primary"
@@ -508,6 +606,18 @@ export default function MailPage() {
               footer={<SignatureBlock value={signature} onChange={setSignature} />}
               onChange={setReply}
             />
+            {open.matters.length > 0 && (
+              <AttachmentPicker
+                matterId={replyMatterId}
+                matterOptions={open.matters}
+                value={replyAttach}
+                onChange={setReplyAttach}
+                onMatterChange={(id) => {
+                  setReplyMatterId(id)
+                  setReplyAttach([])
+                }}
+              />
+            )}
             <button
               className="primary"
               style={{ marginTop: 'var(--space-2)' }}

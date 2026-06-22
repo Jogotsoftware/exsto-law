@@ -61,3 +61,6 @@ export type {
   ProviderCredential,
   ConnectionStatusResult,
 } from './adapters/providerCredentials.js'
+// Server-side markdown → PDF renderer for emailing a generated draft as a PDF
+// attachment (no headless browser; @react-pdf/renderer). Pure + deterministic.
+export { renderDraftPdf } from './render/draftPdf.js'
