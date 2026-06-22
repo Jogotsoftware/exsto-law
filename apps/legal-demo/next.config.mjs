@@ -22,7 +22,12 @@ const nextConfig = {
     '@exsto/shared',
     '@exsto/substrate',
   ],
-  serverExternalPackages: ['pg', '@anthropic-ai/sdk'],
+  // pdf-parse pulls in pdfjs-dist, whose ESM throws "Object.defineProperty called
+  // on non-object" when webpack bundles it into the server runtime. Externalize it
+  // (and mammoth) so they're require()'d natively at runtime — the documented fix,
+  // and the same approach used for pg / the Anthropic SDK. Powers the document
+  // upload in the Templates importer and the assistant chat's attach-a-file.
+  serverExternalPackages: ['pg', '@anthropic-ai/sdk', 'pdf-parse', 'pdfjs-dist', 'mammoth'],
   eslint: { ignoreDuringBuilds: true },
 }
 

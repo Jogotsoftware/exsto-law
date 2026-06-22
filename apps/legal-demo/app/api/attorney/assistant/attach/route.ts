@@ -2,12 +2,11 @@ import { NextResponse } from 'next/server'
 import { readSessionFromCookieHeader } from '@/lib/session'
 import { DocumentParseError, parseUploadedDocument } from '@/lib/parseDocument'
 
-// Template import: parse an uploaded document into markdown the Templates builder
-// drops into the editor, via the shared parseUploadedDocument helper (the same
-// parser the assistant chat's attach-a-document upload uses). This is stateless
-// parsing — it touches NO substrate table, so it lives as an app route (not an MCP
-// tool). Attorney-gated exactly like the MCP route: a verified session cookie in
-// prod, dev-only headers.
+// Assistant chat "attach a document": parse an uploaded file (PDF / Word / text)
+// to plain text the chat sends to Claude as extra context. Stateless parsing —
+// touches NO substrate table (the attached text rides along in the next chat turn
+// and is recorded there) — so it's an app route, not an MCP tool. Attorney-gated
+// like the other parse route: a verified session cookie in prod, dev headers locally.
 export const runtime = 'nodejs'
 
 export async function POST(request: Request) {
@@ -27,7 +26,7 @@ export async function POST(request: Request) {
 
   try {
     const text = await parseUploadedDocument(file)
-    return NextResponse.json({ text })
+    return NextResponse.json({ name: file.name || 'document', text })
   } catch (err) {
     if (err instanceof DocumentParseError) {
       return NextResponse.json({ error: err.message }, { status: err.status })

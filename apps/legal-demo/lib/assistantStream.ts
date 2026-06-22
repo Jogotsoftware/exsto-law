@@ -17,6 +17,8 @@ export interface AssistantStreamInput {
   webSearch?: boolean
   useContext?: boolean
   contextDepth?: ContextDepth
+  // Documents attached to this message (Claude only): each { name, text }.
+  attachments?: Array<{ name: string; text: string }>
   pageContext?: { path?: string; [k: string]: unknown }
 }
 
