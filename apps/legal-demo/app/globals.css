@@ -722,6 +722,32 @@ section h2 {
   color: var(--accent-attorney);
 }
 
+/* Actions menu — a normal pill button (inherits the global button style) that
+   drops a right-anchored mini menu of entity actions. The chevron flips when open. */
+.att-actions-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.att-actions-btn svg {
+  transition: transform 0.16s ease;
+}
+.att-actions-btn.active svg {
+  transform: rotate(180deg);
+}
+/* The menu panel reuses the right-anchored .att-pop shell; this just lays the
+   items out as a list. `.align-left` hangs it from the left edge instead. */
+.att-menu-pop {
+  min-width: 184px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.att-menu-pop.align-left {
+  right: auto;
+  left: 0;
+}
+
 /* Notifications dropdown */
 .att-notif {
   min-width: 280px;
