@@ -187,23 +187,32 @@ function buildFeedbackTool(ctx: ActionContext, input: AssistantChatInput): Clien
 }
 
 // Build the Claude system text: the base prompt + the matter/client context, plus
-// the current entity's in-app link so the assistant can refer the attorney back to
-// the page they're on (Claude is the firm's own model, so the link/id is safe; the
-// external research path never receives it).
+// where the attorney is in the app — the exact route they're on (so "this page",
+// "here", "this screen" resolve), and the current entity's in-app link so the
+// assistant can refer them back to it. The route names map to the page list in
+// SYSTEM_PROMPT, so the model can speak about the screen naturally. Claude is the
+// firm's own model, so the route/id is safe; the external research path never
+// receives it.
 function buildClaudeSystem(
   scope: AssistantScope,
   primaryEntityId: string | null,
   context: AssistantContext | null,
+  pageContext?: { path?: string; [k: string]: unknown } | null,
 ): string {
   let system = context ? `${SYSTEM_PROMPT}\n\n--- Context ---\n${context.full}` : SYSTEM_PROMPT
-  const path =
+  const currentPath =
+    typeof pageContext?.path === 'string' && pageContext.path ? pageContext.path : null
+  if (currentPath) {
+    system += `\n\nThe attorney is currently on ${currentPath}. When they say "this page", "here", or "this screen", they mean that route — ground your answer in it and link back to it with a markdown link when relevant.`
+  }
+  const entityPath =
     primaryEntityId && scope === 'matter'
       ? `/attorney/matters/${primaryEntityId}`
       : primaryEntityId && scope === 'contact'
         ? `/attorney/crm/contacts/${primaryEntityId}`
         : null
-  if (path) {
-    system += `\n\nThe current page is ${path} — link to it with a markdown link when referring the attorney back to this ${scope}.`
+  if (entityPath && entityPath !== currentPath) {
+    system += `\n\nThis conversation is about the ${scope} at ${entityPath} — link to it with a markdown link when referring the attorney back to it.`
   }
   return system
 }
@@ -404,7 +413,7 @@ export async function assistantChat(
   } else {
     // Claude: full matter context is safe (the firm's own model), as are any
     // attached documents — appended to the user message.
-    const system = buildClaudeSystem(scope, primaryEntityId, context)
+    const system = buildClaudeSystem(scope, primaryEntityId, context, input.pageContext)
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
@@ -484,7 +493,7 @@ export async function* assistantChatStream(
   } else {
     // Claude: full matter context is safe (the firm's own model), as are any
     // attached documents — appended to the user message.
-    const system = buildClaudeSystem(scope, primaryEntityId, context)
+    const system = buildClaudeSystem(scope, primaryEntityId, context, input.pageContext)
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
