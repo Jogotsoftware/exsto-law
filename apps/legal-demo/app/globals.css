@@ -4573,12 +4573,13 @@ button.danger.outline:hover:not(:disabled) {
 .feedback-bubble-pending {
   color: var(--muted);
 }
-/* Copy affordance on an assistant reply — floats at the bubble's top-right,
-   hidden until the bubble is hovered or its button is focused (keyboard). Has
-   its own surface fill so it cleanly masks any text it overlaps. */
+/* Copy affordance on an assistant reply — floats at the bubble's bottom-right
+   (clear of the tail, which sits bottom-left), hidden until the bubble is
+   hovered or its button is focused (keyboard). Has its own surface fill so it
+   cleanly masks any text it overlaps. */
 .uac-copy-btn {
   position: absolute;
-  top: 4px;
+  bottom: 4px;
   right: 4px;
   display: inline-flex;
   align-items: center;
