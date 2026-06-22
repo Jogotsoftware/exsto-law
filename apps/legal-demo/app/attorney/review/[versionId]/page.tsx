@@ -79,6 +79,9 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   const [error, setError] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  // Reasoning trace lives in a drawer now (it's attorney context, not part of the
+  // document) — opened from a toolbar button instead of crowding the page.
+  const [traceOpen, setTraceOpen] = useState(false)
   // The ordered ids of an in-progress step-through review, or null for a normal
   // single visit. Loaded only when the URL carries ?review=session.
   const [sessionIds, setSessionIds] = useState<string[] | null>(null)
@@ -117,6 +120,16 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       setSessionIds(null)
     }
   }, [versionId])
+
+  // Esc closes the reasoning-trace drawer.
+  useEffect(() => {
+    if (!traceOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTraceOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [traceOpen])
 
   const sessionPos = sessionIds ? sessionIds.indexOf(versionId) : -1
 
@@ -224,8 +237,18 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     )
   }
 
+  const hasTrace = Boolean(
+    draft.reasoningTrace ||
+    draft.modelIdentity ||
+    draft.confidence !== null ||
+    evidence.length ||
+    alternatives.length ||
+    ambiguities.length,
+  )
+  const docFileBase = `${humanizeKind(draft.documentKind).replace(/\s+/g, '-').toLowerCase()}-${draft.matterNumber}`
+
   return (
-    <main>
+    <main className="review-page">
       <div className="review-topbar">
         {sessionPos >= 0 && sessionIds ? (
           <button type="button" className="review-back" onClick={exitSession}>
@@ -240,43 +263,19 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           Matter {draft.matterNumber}
         </Link>
       </div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.7rem',
-          flexWrap: 'wrap',
-          marginBottom: '1rem',
-        }}
-      >
-        <h1 style={{ margin: 0 }}>
-          {humanizeKind(draft.documentKind)} · v{draft.versionNumber}
-        </h1>
-        <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
-        <span style={{ color: 'var(--muted)', fontSize: '0.88rem', marginLeft: 'auto' }}>
-          generated {new Date(draft.recordedAt).toLocaleString()}
-        </span>
-      </div>
 
-      <div className="row" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-4)' }}>
-        <button
-          onClick={() =>
-            downloadAsPdf(
-              draft.bodyMarkdown,
-              `${humanizeKind(draft.documentKind).replace(/\s+/g, '-').toLowerCase()}-${draft.matterNumber}`,
-            )
-          }
-        >
-          Download PDF
-        </button>
-        <button
-          onClick={() =>
-            downloadAsWord(
-              draft.bodyMarkdown,
-              `${humanizeKind(draft.documentKind).replace(/\s+/g, '-').toLowerCase()}-${draft.matterNumber}`,
-            )
-          }
-        >
+      <header className="review-header">
+        <div className="review-header-main">
+          <h1>{humanizeKind(draft.documentKind)}</h1>
+          <span className="review-version">v{draft.versionNumber}</span>
+          <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
+        </div>
+        <span className="review-meta">Generated {new Date(draft.recordedAt).toLocaleString()}</span>
+      </header>
+
+      <div className="review-toolbar">
+        <button onClick={() => downloadAsPdf(draft.bodyMarkdown, docFileBase)}>Download PDF</button>
+        <button onClick={() => downloadAsWord(draft.bodyMarkdown, docFileBase)}>
           Download Word
         </button>
         {/* Contract J: auto-discovered document actions (Send via email; the
@@ -291,92 +290,39 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             shareUrl: shareUrlFor(draft.documentVersionId),
           }}
         />
+        {hasTrace && (
+          <button
+            type="button"
+            className="review-trace-btn"
+            onClick={() => setTraceOpen(true)}
+            title="How the AI drafted this — your context, not part of the document."
+          >
+            ✦ Reasoning trace
+          </button>
+        )}
         <a
           href={shareUrlFor(draft.documentVersionId)}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ marginLeft: 'auto' }}
+          className="review-toolbar-end"
         >
           <button>Open client view ↗</button>
         </a>
       </div>
 
-      <div className="split-review">
-        <div
+      {/* The document, as a page. */}
+      <div className="review-canvas">
+        <article
           className="doc-rendered doc-paper"
           dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
         />
-
-        <div className="trace-rail">
-          <div className="trace-summary">
-            <h2 style={{ marginTop: 0 }}>Reasoning trace</h2>
-            <div className="trace-summary-row">
-              <span>
-                <strong>Model:</strong> {draft.modelIdentity ?? '(unknown)'}
-              </span>
-            </div>
-            {draft.confidence !== null && (
-              <>
-                <div className="trace-summary-row">
-                  <span>
-                    <strong>Overall confidence:</strong> {(draft.confidence * 100).toFixed(0)}%
-                  </span>
-                </div>
-                <div className="trace-confidence-bar">
-                  <div
-                    className="trace-confidence-fill"
-                    style={{ width: `${draft.confidence * 100}%` }}
-                  />
-                </div>
-              </>
-            )}
-            {draft.conclusion && (
-              <p style={{ margin: '0.8rem 0 0', fontSize: '0.88rem', color: '#374151' }}>
-                {draft.conclusion}
-              </p>
-            )}
-          </div>
-
-          {evidence.length > 0 && (
-            <div className="trace-group">
-              <h3>Evidence ({evidence.length})</h3>
-              <div className="trace-cards">
-                {evidence.map((e, i) => (
-                  <EvidenceCardView key={i} item={e} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {alternatives.length > 0 && (
-            <div className="trace-group">
-              <h3>Alternatives considered ({alternatives.length})</h3>
-              <div className="trace-cards">
-                {alternatives.map((a, i) => (
-                  <AlternativeCardView key={i} item={a} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {ambiguities.length > 0 && (
-            <div className="trace-group">
-              <h3>Ambiguities flagged ({ambiguities.length})</h3>
-              <div className="trace-cards">
-                {ambiguities.map((a, i) => (
-                  <AmbiguityCardView key={i} item={a} />
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
-      <section>
+      <section className="review-decision">
         <h2>
           Review
           {sessionPos >= 0 && sessionIds && (
-            <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: '0.9rem' }}>
+            <span className="review-decision-sub">
               {' '}
               · {sessionPos + 1} of {sessionIds.length} — a disposition advances to the next
             </span>
@@ -386,7 +332,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         <label>
           Notes (required for revision; optional otherwise)
           <textarea
-            rows={4}
+            rows={3}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="What needs to change, or anything to flag for the client?"
@@ -429,6 +375,93 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           </button>
         </div>
       </section>
+
+      {/* Reasoning trace — a drawer, not part of the page. */}
+      {traceOpen && (
+        <div
+          className="trace-drawer-backdrop"
+          onClick={() => setTraceOpen(false)}
+          role="presentation"
+        >
+          <aside
+            className="trace-drawer"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Reasoning trace"
+          >
+            <div className="trace-drawer-head">
+              <h2>Reasoning trace</h2>
+              <button
+                type="button"
+                className="trace-drawer-close"
+                onClick={() => setTraceOpen(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <p className="trace-drawer-intro">
+              How the assistant drafted this — the inputs it used, the choices it made, and anything
+              it flagged. This is your context for the review; the client never sees it.
+            </p>
+
+            <div className="trace-summary">
+              <div className="trace-summary-row">
+                <span>
+                  <strong>Model</strong> {draft.modelIdentity ?? '(unknown)'}
+                </span>
+              </div>
+              {draft.confidence !== null && (
+                <>
+                  <div className="trace-summary-row">
+                    <span>
+                      <strong>Overall confidence</strong> {(draft.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="trace-confidence-bar">
+                    <div
+                      className="trace-confidence-fill"
+                      style={{ width: `${draft.confidence * 100}%` }}
+                    />
+                  </div>
+                </>
+              )}
+              {draft.conclusion && <p className="trace-conclusion">{draft.conclusion}</p>}
+            </div>
+
+            {evidence.length > 0 && (
+              <div className="trace-group">
+                <h3>Evidence ({evidence.length})</h3>
+                <div className="trace-cards">
+                  {evidence.map((e, i) => (
+                    <EvidenceCardView key={i} item={e} />
+                  ))}
+                </div>
+              </div>
+            )}
+            {alternatives.length > 0 && (
+              <div className="trace-group">
+                <h3>Alternatives considered ({alternatives.length})</h3>
+                <div className="trace-cards">
+                  {alternatives.map((a, i) => (
+                    <AlternativeCardView key={i} item={a} />
+                  ))}
+                </div>
+              </div>
+            )}
+            {ambiguities.length > 0 && (
+              <div className="trace-group">
+                <h3>Ambiguities flagged ({ambiguities.length})</h3>
+                <div className="trace-cards">
+                  {ambiguities.map((a, i) => (
+                    <AmbiguityCardView key={i} item={a} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
     </main>
   )
 }
