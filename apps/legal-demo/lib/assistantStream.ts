@@ -17,6 +17,8 @@ export interface AssistantStreamInput {
   webSearch?: boolean
   useContext?: boolean
   contextDepth?: ContextDepth
+  // Skills the attorney picked from the /skills menu — force-loaded this turn.
+  skillSlugs?: string[]
   pageContext?: { path?: string; [k: string]: unknown }
 }
 
@@ -39,6 +41,8 @@ export interface AssistantStreamHandlers {
   onMeta?: (meta: StreamMeta) => void
   onThinking?: (text: string) => void
   onText?: (text: string) => void
+  // The assistant loaded a specialized skill (playbook) for this turn.
+  onSkill?: (skill: { slug: string; name: string }) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -109,6 +113,9 @@ export async function streamAssistant(
         break
       case 'text':
         handlers.onText?.(String(evt.text ?? ''))
+        break
+      case 'skill':
+        handlers.onSkill?.({ slug: String(evt.slug ?? ''), name: String(evt.name ?? '') })
         break
       case 'done':
         handlers.onDone?.(evt as unknown as StreamDone)

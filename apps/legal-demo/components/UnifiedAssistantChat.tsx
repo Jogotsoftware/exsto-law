@@ -48,6 +48,15 @@ interface DisplayTurn {
   model?: string
 }
 
+// One legal skill (playbook) the attorney can pick from the /skills menu.
+interface SkillCatalogItem {
+  slug: string
+  name: string
+  practiceArea: string
+  description: string
+  whenToUse: string
+}
+
 interface ThreadTurn {
   role: 'user' | 'assistant'
   message: string
@@ -132,14 +141,25 @@ export function UnifiedAssistantChat({
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // The in-flight assistant reply, streamed token-by-token.
-  const [streaming, setStreaming] = useState<{ thinking: string; text: string } | null>(null)
+  // The in-flight assistant reply, streamed token-by-token. `skills` holds any
+  // specialized playbooks the model loaded for this turn (shown as "using …").
+  const [streaming, setStreaming] = useState<{
+    thinking: string
+    text: string
+    skills: { slug: string; name: string }[]
+  } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   // Bumped whenever the conversation is superseded (a new send, or switching to a
   // prior thread). In-flight stream/load callbacks compare against it and no-op
   // when stale, so an old reply can never land in a newly-opened thread.
   const genRef = useRef(0)
+
+  // /skills picker — the firm's legal playbooks the attorney can force-load.
+  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[] | null>(null)
+  const [selectedSkills, setSelectedSkills] = useState<{ slug: string; name: string }[]>([])
+  const [skillMenuOpen, setSkillMenuOpen] = useState(false)
+  const [skillQuery, setSkillQuery] = useState('')
 
   // Toolbar panels + settings.
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -177,6 +197,9 @@ export function UnifiedAssistantChat({
   const scope = activeScope
 
   const selected = models?.find((m) => m.id === modelId) ?? null
+  // Skills run on the Claude path only (the catalog + load_skill tool); the
+  // /skills affordance and any picked skills are hidden/ignored for Perplexity.
+  const isClaude = selected?.provider === 'anthropic'
   const effectiveWebSearch = selected
     ? selected.webSearchInherent || (selected.supportsWebSearch && webSearch)
     : false
@@ -200,6 +223,27 @@ export function UnifiedAssistantChat({
       cancelled = true
     }
   }, [])
+
+  // Load the firm's legal skills catalog once (for the /skills picker). Excludes
+  // the academic law-school skills server-side; only fetched when Claude is in use.
+  useEffect(() => {
+    if (!isClaude || skillCatalog) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const r = await callAttorneyMcp<{ skills: SkillCatalogItem[] }>({
+          toolName: 'legal.skill.list',
+        })
+        if (!cancelled) setSkillCatalog(r.skills)
+      } catch {
+        // Non-fatal: the picker just stays empty if the catalog can't load.
+        if (!cancelled) setSkillCatalog([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isClaude, skillCatalog])
 
   // Load the persisted thread for a scope into the chat. The history picker calls
   // this with a different scope to reopen another conversation.
@@ -270,6 +314,14 @@ export function UnifiedAssistantChat({
 
   // Start a fresh conversation in the current scope. The persisted thread is
   // untouched (append-only) — it stays reachable from the history picker.
+  function toggleSkill(s: SkillCatalogItem) {
+    setSelectedSkills((prev) =>
+      prev.some((x) => x.slug === s.slug)
+        ? prev.filter((x) => x.slug !== s.slug)
+        : [...prev, { slug: s.slug, name: s.name }],
+    )
+  }
+
   function newChat() {
     genRef.current++ // abandon any in-flight stream
     setTurns([])
@@ -278,6 +330,8 @@ export function UnifiedAssistantChat({
     setInput('')
     setBusy(false)
     setHistoryOpen(false)
+    setSkillMenuOpen(false)
+    setSelectedSkills([])
     setFeedbackMode(false)
     setFbDone(false)
     setFbRef(null)
@@ -304,7 +358,7 @@ export function UnifiedAssistantChat({
     setInput('')
 
     // Accumulate deltas locally; each handler hands React a fresh object.
-    const partial = { thinking: '', text: '' }
+    const partial = { thinking: '', text: '', skills: [] as { slug: string; name: string }[] }
     setStreaming({ ...partial })
     let finished = false
 
@@ -321,6 +375,8 @@ export function UnifiedAssistantChat({
           useContext: scoped ? useContext : undefined,
           // Depth only matters when grounded in a matter/client.
           contextDepth: scoped && useContext ? contextDepth : undefined,
+          // Attorney-picked skills (Claude only) — force-loaded this turn.
+          skillSlugs: isClaude && selectedSkills.length ? selectedSkills.map((s) => s.slug) : undefined,
           pageContext:
             typeof window !== 'undefined' ? { path: window.location.pathname } : undefined,
         },
@@ -334,6 +390,11 @@ export function UnifiedAssistantChat({
             if (!live()) return
             partial.text += t
             setStreaming({ ...partial })
+          },
+          onSkill: (s) => {
+            if (!live()) return
+            if (s.slug && !partial.skills.some((x) => x.slug === s.slug)) partial.skills.push(s)
+            setStreaming({ ...partial, skills: [...partial.skills] })
           },
           onDone: (d) => {
             if (!live()) return
@@ -423,6 +484,12 @@ export function UnifiedAssistantChat({
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Type "/" on an empty composer to open the skills menu (Claude only).
+    if (e.key === '/' && !input && isClaude) {
+      e.preventDefault()
+      setSkillMenuOpen(true)
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       void send()
@@ -761,6 +828,15 @@ export function UnifiedAssistantChat({
         {/* The in-flight reply: thinking animation → streamed markdown w/ caret. */}
         {streaming && (
           <div className="feedback-bubble feedback-bubble-assistant">
+            {streaming.skills.length > 0 && (
+              <div className="uac-skill-chips">
+                {streaming.skills.map((s) => (
+                  <span key={s.slug} className="uac-skill-chip">
+                    <SparklesIcon size={11} /> Using {s.name}
+                  </span>
+                ))}
+              </div>
+            )}
             {!streaming.text && streaming.thinking && (
               <div className="uac-thinking">
                 <div className="uac-thinking-head">
@@ -795,25 +871,130 @@ export function UnifiedAssistantChat({
       </div>
 
       {/* ── Composer ──────────────────────────────────────────────────────── */}
-      <div className="uac-composer">
-        <textarea
-          ref={composerRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={placeholder}
-          aria-label={placeholder || 'Message the assistant'}
-          rows={2}
-        />
-        <button
-          type="button"
-          className="uac-send"
-          onClick={() => void send()}
-          disabled={busy || !input.trim() || !modelId}
-          aria-label="Send"
-        >
-          <SendIcon size={16} />
-        </button>
+      <div className="uac-composer-wrap">
+        {/* Legal-skills menu (Claude only) — opens above the composer. */}
+        {isClaude && skillMenuOpen && (
+          <div className="uac-skillmenu" role="dialog" aria-label="Legal skills">
+            <div className="uac-skillmenu-head">
+              <SparklesIcon size={13} />
+              <input
+                autoFocus
+                className="uac-skillmenu-search"
+                value={skillQuery}
+                onChange={(e) => setSkillQuery(e.target.value)}
+                placeholder="Search legal skills…"
+                aria-label="Search legal skills"
+              />
+              <button
+                type="button"
+                className="uac-skillmenu-close"
+                onClick={() => {
+                  setSkillMenuOpen(false)
+                  setSkillQuery('')
+                }}
+                aria-label="Close skills menu"
+              >
+                ×
+              </button>
+            </div>
+            <div className="uac-skillmenu-list">
+              {skillCatalog === null && <div className="uac-skillmenu-empty">Loading skills…</div>}
+              {skillCatalog !== null &&
+                (() => {
+                  const q = skillQuery.trim().toLowerCase()
+                  const matches = skillCatalog.filter(
+                    (s) =>
+                      !q ||
+                      s.name.toLowerCase().includes(q) ||
+                      s.slug.toLowerCase().includes(q) ||
+                      s.practiceArea.toLowerCase().includes(q) ||
+                      s.whenToUse.toLowerCase().includes(q),
+                  )
+                  if (!matches.length)
+                    return <div className="uac-skillmenu-empty">No skills match.</div>
+                  const groups = new Map<string, SkillCatalogItem[]>()
+                  for (const s of matches) {
+                    const a = groups.get(s.practiceArea) ?? []
+                    a.push(s)
+                    groups.set(s.practiceArea, a)
+                  }
+                  return [...groups.entries()].map(([area, list]) => (
+                    <div key={area} className="uac-skillmenu-group">
+                      <div className="uac-skillmenu-area">{area}</div>
+                      {list.map((s) => {
+                        const on = selectedSkills.some((x) => x.slug === s.slug)
+                        return (
+                          <button
+                            key={s.slug}
+                            type="button"
+                            className={`uac-skillmenu-item${on ? ' is-on' : ''}`}
+                            onClick={() => toggleSkill(s)}
+                            title={s.whenToUse}
+                          >
+                            <span className="uac-skillmenu-name">
+                              {on ? '✓ ' : ''}
+                              {s.name}
+                            </span>
+                            {s.description && (
+                              <span className="uac-skillmenu-desc">{s.description}</span>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ))
+                })()}
+            </div>
+          </div>
+        )}
+
+        <div className="uac-composer">
+          <textarea
+            ref={composerRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={placeholder}
+            aria-label={placeholder || 'Message the assistant'}
+            rows={2}
+          />
+          <button
+            type="button"
+            className="uac-send"
+            onClick={() => void send()}
+            disabled={busy || !input.trim() || !modelId}
+            aria-label="Send"
+          >
+            <SendIcon size={16} />
+          </button>
+        </div>
+
+        {/* Skills affordance (Claude only): the /skills trigger + picked-skill pills. */}
+        {isClaude && (
+          <div className="uac-skillbar">
+            <button
+              type="button"
+              className={`uac-skilltrigger${skillMenuOpen ? ' is-open' : ''}`}
+              onClick={() => setSkillMenuOpen((o) => !o)}
+              title="Add a legal skill (or type / in an empty message)"
+            >
+              <SparklesIcon size={13} /> /skills
+            </button>
+            {selectedSkills.map((s) => (
+              <span key={s.slug} className="uac-skill-pill">
+                {s.name}
+                <button
+                  type="button"
+                  className="uac-skill-pill-x"
+                  onClick={() => setSelectedSkills((prev) => prev.filter((x) => x.slug !== s.slug))}
+                  aria-label={`Remove ${s.name}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
