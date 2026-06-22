@@ -31,12 +31,13 @@ import {
 } from './assistantContext.js'
 import { getMatter } from '../queries/matters.js'
 import { getContact } from '../queries/contacts.js'
+import { listSkillCatalog } from '../queries/skills.js'
 import {
-  listSkillCatalog,
-  getSkillBySlug,
-  type SkillCatalogEntry,
-  type Skill,
-} from '../queries/skills.js'
+  buildSkillCatalogText,
+  buildSkillTool,
+  buildActiveSkillsText,
+  loadForcedSkills,
+} from './skillContext.js'
 
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
 export type AssistantScope = 'matter' | 'contact' | 'global'
@@ -207,93 +208,10 @@ function buildFeedbackTool(ctx: ActionContext, input: AssistantChatInput): Clien
   }
 }
 
-// Definition advertised to the model for the load_skill client tool. Skills are
-// reusable legal playbooks stored as substrate data (ported from claude-for-legal).
-// The model calls this with a slug from the catalog to pull the full instructions
-// into context (progressive disclosure), then follows them. Executed by
-// buildSkillTool below.
-const LOAD_SKILL_TOOL_DEF = {
-  name: 'load_skill',
-  description:
-    "Load a specialized legal skill's full instructions before answering. When the attorney's request matches one of the skills listed under '--- Skills ---' in the system prompt (e.g. they paste an NDA, ask to review a vendor MSA, want a termination checked, ask for a demand letter), CALL this FIRST with the skill's slug, then follow the loaded playbook. You may load more than one. Every skill output is a draft for the attorney to review, never a final legal opinion.",
-  input_schema: {
-    type: 'object',
-    properties: {
-      slug: {
-        type: 'string',
-        description: 'The slug of the skill to load, exactly as listed in the Skills catalog.',
-      },
-    },
-    required: ['slug'],
-    additionalProperties: false,
-  },
-}
-
-// Build the load_skill ClientTool for this turn. run() fetches the skill body from
-// the substrate (tenant-scoped read) and returns it verbatim for the model to
-// follow. Read-only — loading a skill writes nothing; the model's resulting draft
-// is what (optionally) gets recorded downstream.
-function buildSkillTool(ctx: ActionContext): ClientTool {
-  return {
-    definition: LOAD_SKILL_TOOL_DEF,
-    name: 'load_skill',
-    run: async (raw) => {
-      const args = (raw ?? {}) as { slug?: string }
-      const slug = (args.slug ?? '').trim()
-      if (!slug) return 'No skill slug was provided, so no skill was loaded.'
-      const skill = await getSkillBySlug(ctx, slug)
-      if (!skill) {
-        return `No skill found with slug "${slug}". Answer from general knowledge and remind the attorney to verify.`
-      }
-      return `LOADED SKILL — ${skill.name}\nFollow these instructions for this request. The result is a draft for the attorney to review, not a final legal opinion.\n\n${skill.body}`
-    },
-  }
-}
-
-// Render the skill catalog the model sees every Claude turn: practice-area
-// groupings of `slug — name: when-to-use`. Only the short routing fields go in the
-// prompt; the (long) bodies load on demand via load_skill. Helper skills
-// (user_invocable = false) are reachable by slug but kept out of the routed list.
-export function buildSkillCatalogText(catalog: SkillCatalogEntry[]): string {
-  const invocable = catalog.filter((s) => s.userInvocable && s.slug)
-  if (!invocable.length) return ''
-  const byArea = new Map<string, SkillCatalogEntry[]>()
-  for (const s of invocable) {
-    const arr = byArea.get(s.practiceArea) ?? []
-    arr.push(s)
-    byArea.set(s.practiceArea, arr)
-  }
-  const lines: string[] = [
-    '--- Skills ---',
-    "You have specialized legal skills (playbooks ported from Anthropic's claude-for-legal). When the attorney's request matches one, CALL the load_skill tool with its slug BEFORE answering, then follow the loaded instructions. You may load more than one. Every skill output is a draft for the attorney to review — never a final legal opinion. If nothing matches, answer normally.",
-  ]
-  for (const [area, skills] of byArea) {
-    lines.push(`### ${area || 'general'}`)
-    for (const s of skills) lines.push(`- ${s.slug} — ${s.name}: ${s.whenToUse}`)
-  }
-  return lines.join('\n')
-}
-
-// Render the bodies of the attorney-selected skills (the /skills picker) as an
-// "active skills" block injected directly into the system prompt — so a picked
-// skill is GUARANTEED to apply this turn, vs. the model deciding via load_skill.
-function buildActiveSkillsText(skills: Skill[]): string {
-  if (!skills.length) return ''
-  const parts = [
-    '--- Active skills (the attorney selected these — follow them for this request) ---',
-    'Each output remains a draft for the attorney to review, never a final legal opinion.',
-  ]
-  for (const s of skills) parts.push(`\n## ${s.name}\n${s.body}`)
-  return parts.join('\n')
-}
-
-// Resolve the attorney-selected skill slugs to full skills (bodies), in order,
-// dropping any that no longer exist.
-async function loadForcedSkills(ctx: ActionContext, slugs: string[] | undefined): Promise<Skill[]> {
-  if (!slugs?.length) return []
-  const loaded = await Promise.all(slugs.map((s) => getSkillBySlug(ctx, s)))
-  return loaded.filter((s): s is Skill => s != null)
-}
+// The skill-awareness helpers (catalog text, the load_skill tool, active-skills
+// block, forced loading) now live in ./skillContext.js so EVERY AI feature can
+// reuse them — not just the chatbot (beta ask: skills everywhere generative AI is
+// used). Imported above.
 
 // Build the Claude system text: the base prompt + the matter/client context, plus
 // where the attorney is in the app — the exact route they're on (so "this page",
