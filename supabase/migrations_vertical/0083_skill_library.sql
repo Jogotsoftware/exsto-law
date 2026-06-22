@@ -76,3 +76,58 @@ INSERT INTO action_kind_definition
    'Update a skill (append-only attribute supersession).',
    'notify', 'fully_reversible', NULL, false)
 ON CONFLICT (id) DO NOTHING;
+
+-- ── make the skill kind available to EVERY tenant, not just tenant zero ───────
+-- New tenants clone tenant zero's registries at provision time (migration 0072),
+-- but kinds ADDED after a tenant was provisioned never reach it (this is why
+-- Liberty Legal has `template` but not `questionnaire_template`). Backfill the
+-- skill entity/attribute/action kinds into every existing non-zero tenant from
+-- tenant zero's definitions. Idempotent: NOT EXISTS on (tenant_id, kind_name);
+-- fresh UUIDs per tenant; on_entity_kind_id is remapped to the tenant's own skill
+-- entity kind (more correct than the verbatim clone in 0072). Future tenants get
+-- it for free via the standard tenant-zero clone.
+DO $$
+DECLARE
+  zero uuid := '00000000-0000-0000-0000-000000000001';
+  t    uuid;
+  k    uuid;
+BEGIN
+  FOR t IN SELECT id FROM tenant WHERE id <> zero LOOP
+    -- entity kind 'skill'
+    INSERT INTO entity_kind_definition
+      (id, tenant_id, kind_name, display_name, description, parent_kind_id,
+       supports_temporal_state, supports_judgment, supports_outcomes, requires_period)
+    SELECT gen_random_uuid(), t, z.kind_name, z.display_name, z.description, z.parent_kind_id,
+           z.supports_temporal_state, z.supports_judgment, z.supports_outcomes, z.requires_period
+    FROM entity_kind_definition z
+    WHERE z.tenant_id = zero AND z.kind_name = 'skill'
+      AND NOT EXISTS (SELECT 1 FROM entity_kind_definition b
+                      WHERE b.tenant_id = t AND b.kind_name = 'skill');
+
+    SELECT id INTO k FROM entity_kind_definition
+    WHERE tenant_id = t AND kind_name = 'skill' AND status = 'active'
+    ORDER BY valid_from DESC LIMIT 1;
+
+    -- skill attributes (on_entity_kind_id remapped to this tenant's skill kind)
+    INSERT INTO attribute_kind_definition
+      (id, tenant_id, kind_name, display_name, description, on_entity_kind_id, value_type, is_pii)
+    SELECT gen_random_uuid(), t, z.kind_name, z.display_name, z.description, k, z.value_type, z.is_pii
+    FROM attribute_kind_definition z
+    WHERE z.tenant_id = zero
+      AND z.on_entity_kind_id = (SELECT id FROM entity_kind_definition
+                                 WHERE tenant_id = zero AND kind_name = 'skill' LIMIT 1)
+      AND NOT EXISTS (SELECT 1 FROM attribute_kind_definition b
+                      WHERE b.tenant_id = t AND b.kind_name = z.kind_name);
+
+    -- skill lifecycle actions
+    INSERT INTO action_kind_definition
+      (id, tenant_id, kind_name, display_name, description, default_autonomy_tier,
+       reversibility, reverse_action_kind_name, requires_reasoning_trace)
+    SELECT gen_random_uuid(), t, z.kind_name, z.display_name, z.description, z.default_autonomy_tier,
+           z.reversibility, z.reverse_action_kind_name, z.requires_reasoning_trace
+    FROM action_kind_definition z
+    WHERE z.tenant_id = zero AND z.kind_name LIKE 'legal.skill.%'
+      AND NOT EXISTS (SELECT 1 FROM action_kind_definition b
+                      WHERE b.tenant_id = t AND b.kind_name = z.kind_name);
+  END LOOP;
+END $$;
