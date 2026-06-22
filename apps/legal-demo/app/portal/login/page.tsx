@@ -75,17 +75,21 @@ export default function ClientPortalLoginPage() {
     setError(null)
     try {
       if (isSignUp) {
-        const { data, error: upErr } = await sb.auth.signUp({
+        const { error: upErr } = await sb.auth.signUp({
           email: email.trim(),
           password,
           options: { emailRedirectTo: `${window.location.origin}/portal/login` },
         })
         if (upErr) throw upErr
-        if (data.session) {
-          await bridge(data.session.access_token, continueParam) // confirmations off → straight in
-        } else {
-          setPhase('check-email') // confirmation required
-        }
+        // ALWAYS require the email-confirmation click — never bridge a fresh
+        // sign-up session. If the Supabase project has "Confirm email" turned off
+        // it auto-issues a confirmed session here, which would let anyone sign up
+        // AS another client's email and take over their portal. Drop any such
+        // session; the ?code= confirmation return (handled on mount) is the only
+        // path that bridges a newly-created account.
+        await sb.auth.signOut().catch(() => {})
+        setSubmitting(false)
+        setPhase('check-email')
       } else {
         const { data, error: inErr } = await sb.auth.signInWithPassword({
           email: email.trim(),
