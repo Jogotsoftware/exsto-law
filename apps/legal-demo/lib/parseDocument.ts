@@ -1,6 +1,11 @@
-import mammoth from 'mammoth'
-import { PDFParse } from 'pdf-parse'
 import { htmlToMarkdown } from '@/lib/templateBody'
+
+// pdf-parse (pulls in pdfjs-dist) and mammoth are heavy Node libs that some
+// serverless bundlers mishandle at MODULE LOAD — a static top-level import of one
+// can crash the whole route, taking the other file types down with it (that's why
+// "neither PDF nor Word imports"). So we LAZY-import each, per file type, INSIDE the
+// try below: a load failure then surfaces as a clean per-file parse error (422)
+// instead of a dead route, and Word never depends on the PDF lib loading.
 
 // Shared, stateless document → text parser used by BOTH the Templates importer
 // and the assistant chat's "attach a document" upload. PDF and plain text come
@@ -37,6 +42,7 @@ export async function parseUploadedDocument(file: File): Promise<string> {
   let text: string
   try {
     if (name.endsWith('.pdf') || type === 'application/pdf') {
+      const { PDFParse } = await import('pdf-parse')
       const parser = new PDFParse({ data: new Uint8Array(buffer) })
       const result = await parser.getText()
       text = result.text ?? ''
@@ -47,6 +53,8 @@ export async function parseUploadedDocument(file: File): Promise<string> {
       // Structured: convert to HTML (preserving headings/bold/italic/lists), then
       // to markdown via the editor's bridge so the import matches what the editor
       // round-trips. (extractRawText would flatten all formatting to bare text.)
+      const mammothMod = await import('mammoth')
+      const mammoth = mammothMod.default ?? mammothMod
       const result = await mammoth.convertToHtml({ buffer })
       text = htmlToMarkdown(result.value ?? '')
     } else if (name.endsWith('.doc')) {
