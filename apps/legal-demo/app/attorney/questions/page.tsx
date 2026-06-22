@@ -38,6 +38,18 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
 const OPTION_TYPES = new Set<FieldType>(['select', 'checkbox'])
 const TYPE_LABEL = (t: string) => FIELD_TYPES.find((f) => f.value === t)?.label ?? t
 
+// Normalize a typed VARIABLE to a valid {{token}} (keeps a trailing "_" so
+// "company_" → "company_name" types cleanly). The backend re-normalizes + uniquifies.
+function normToken(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .slice(0, 60)
+}
+function slug(s: string): string {
+  return normToken(s).replace(/^_+|_+$/g, '')
+}
+
 interface LibQuestion {
   questionTemplateId: string
   label: string
@@ -52,6 +64,9 @@ interface Draft {
   label: string
   type: FieldType
   options: string // one per line
+  // The {{answer}} variable. Editable when creating; the stable binding key once
+  // saved, so existing questions show it read-only.
+  token: string
 }
 
 function toDraft(q: LibQuestion): Draft {
@@ -60,6 +75,7 @@ function toDraft(q: LibQuestion): Draft {
     label: q.label,
     type: (FIELD_TYPES.some((f) => f.value === q.type) ? q.type : 'text') as FieldType,
     options: (q.options ?? []).join('\n'),
+    token: q.token,
   }
 }
 
@@ -92,7 +108,7 @@ export default function QuestionLibraryPage() {
   function startNew() {
     setEdit((m) => ({
       ...m,
-      new: { questionTemplateId: null, label: '', type: 'text', options: '' },
+      new: { questionTemplateId: null, label: '', type: 'text', options: '', token: '' },
     }))
   }
   function patch(key: string, d: Partial<Draft>) {
@@ -137,7 +153,12 @@ export default function QuestionLibraryPage() {
       } else {
         await callAttorneyMcp({
           toolName: 'legal.question_template.create',
-          input: { label: d.label.trim(), type: d.type, ...(options ? { options } : {}) },
+          input: {
+            label: d.label.trim(),
+            type: d.type,
+            ...(d.token.trim() ? { token: d.token.trim() } : {}),
+            ...(options ? { options } : {}),
+          },
         })
       }
       cancel(key)
@@ -288,6 +309,30 @@ function QuestionRow({
             value={draft.label}
             onChange={(e) => onPatch({ label: e.target.value })}
             placeholder="e.g. Registered agent name"
+          />
+        </label>
+        <label>
+          <span>
+            Variable{' '}
+            <span className="text-muted" style={{ fontWeight: 400 }}>
+              — the <code>{'{{token}}'}</code> templates bind to
+            </span>
+          </span>
+          <input
+            value={draft.token}
+            onChange={(e) => onPatch({ token: normToken(e.target.value) })}
+            placeholder={slug(draft.label) || 'variable'}
+            spellCheck={false}
+            readOnly={draft.questionTemplateId !== null}
+            title={
+              draft.questionTemplateId !== null
+                ? 'The variable is the stable binding key and cannot be changed after a question is created.'
+                : 'Defaults to a slug of the question label if left blank.'
+            }
+            style={{
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              opacity: draft.questionTemplateId !== null ? 0.6 : 1,
+            }}
           />
         </label>
         <label>
