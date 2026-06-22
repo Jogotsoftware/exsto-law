@@ -24,11 +24,16 @@ export function getSupabaseBrowser(): SupabaseClient | null {
   if (!client) {
     client = createClient(URL as string, ANON as string, {
       auth: {
-        // Persist briefly so the OAuth redirect round-trip can recover the
-        // session on return; we sign out right after bridging to our cookie.
+        // Persist briefly so the confirmation round-trip can recover the session
+        // on return; we sign out right after bridging to our own cookie.
         persistSession: true,
         autoRefreshToken: false,
-        detectSessionInUrl: true,
+        // The login page handles the ?code= confirmation return EXPLICITLY
+        // (exchangeCodeForSession). Leaving auto-detection on would race that
+        // call for the single-use PKCE code and intermittently break the
+        // confirm-click sign-in — which is the only path that bridges a freshly
+        // created account, so it must be reliable.
+        detectSessionInUrl: false,
         flowType: 'pkce',
       },
     })

@@ -16,6 +16,7 @@ import { findClientContactByEmail } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
+import { emailConfirmationGate } from '@/lib/supabaseConfirmGuard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -52,6 +53,20 @@ export async function POST(request: Request) {
   )
   if (!accessToken) {
     return NextResponse.json({ error: 'Missing sign-in token.' }, { status: 400 })
+  }
+
+  // Defense-in-depth: the email_confirmed_at gate below is only meaningful when
+  // the project requires email confirmation. If "Confirm email" is OFF Supabase
+  // auto-confirms every sign-up, so anyone could sign up AS a client's email and
+  // bridge in. Verify auto-confirm is OFF against GoTrue itself; fail closed
+  // (loud outage, never a silent takeover) if it is on or unverifiable. See
+  // lib/supabaseConfirmGuard.ts.
+  const gate = await emailConfirmationGate({ settingsUrl: SUPABASE_URL, anonKey: SUPABASE_ANON })
+  if (gate !== 'ok') {
+    return NextResponse.json(
+      { error: 'Portal sign-in is temporarily unavailable. Please contact the firm.' },
+      { status: 503 },
+    )
   }
 
   // Authoritative verification: ask Supabase who this token belongs to.
