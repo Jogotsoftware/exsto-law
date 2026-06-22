@@ -153,6 +153,9 @@ export interface CalendarFeedItem {
   clientName: string | null
   serviceKey: string | null
   category: BookingCategory | null
+  // Attorney-chosen palette key (consultation_category); takes precedence over
+  // `category` for color-coding. Null for external events / uncategorized.
+  categoryKey: string | null
   status: string | null
   htmlLink: string | null
 }
@@ -174,6 +177,7 @@ export function mergeCalendarFeed(
     clientName: c.clientName || null,
     serviceKey: c.serviceKey || null,
     category: c.category,
+    categoryKey: c.categoryKey,
     status: c.status || null,
     htmlLink: null,
   }))
@@ -194,6 +198,7 @@ export function mergeCalendarFeed(
       clientName: null,
       serviceKey: null,
       category: null,
+      categoryKey: null,
       status: e.status || null,
       htmlLink: e.htmlLink,
     })

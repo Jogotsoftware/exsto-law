@@ -24,11 +24,20 @@ export function ActionsMenu({
   label = 'Actions',
   items,
   align = 'right',
+  triggerContent,
+  triggerClassName,
+  triggerTitle,
 }: {
   label?: string
   items: ActionItem[]
   // Which edge the menu hangs from (default right, for header/right-aligned use).
   align?: 'left' | 'right'
+  // Optional COMPACT trigger (e.g. a small edit icon on a calendar event). When
+  // set it replaces the default "Actions ▾" pill; clicks are stopped from
+  // bubbling so the menu opens without also firing the surrounding element.
+  triggerContent?: React.ReactNode
+  triggerClassName?: string
+  triggerTitle?: string
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -54,13 +63,26 @@ export function ActionsMenu({
     <div className="att-pop-anchor" ref={ref}>
       <button
         type="button"
-        className={`att-actions-btn ${open ? 'active' : ''}`}
+        className={
+          triggerContent
+            ? `${triggerClassName ?? ''} ${open ? 'active' : ''}`.trim()
+            : `att-actions-btn ${open ? 'active' : ''}`
+        }
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        aria-label={triggerContent ? (triggerTitle ?? 'Actions') : undefined}
+        title={triggerTitle}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
       >
-        {label}
-        <ChevronDownIcon size={15} />
+        {triggerContent ?? (
+          <>
+            {label}
+            <ChevronDownIcon size={15} />
+          </>
+        )}
       </button>
       {open && (
         <div className={`att-pop att-menu-pop ${align === 'left' ? 'align-left' : ''}`} role="menu">

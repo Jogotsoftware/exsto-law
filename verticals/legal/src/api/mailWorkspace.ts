@@ -87,8 +87,69 @@ async function clientEmailIndex(
   })
 }
 
+// All client_contact emails → display name (latest full_name). Lets the inbox
+// label rows with the person's name instead of a raw address. Scope-matched to
+// the same client_contact allow-list as clientEmailIndex.
+async function clientNameIndex(ctx: ActionContext): Promise<Map<string, string>> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ email: string; full_name: string | null }>(
+      `WITH latest_emails AS (
+         SELECT DISTINCT ON (a.entity_id) a.entity_id, lower(a.value #>> '{}') AS email
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+         JOIN entity e ON e.id = a.entity_id
+         JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+         WHERE a.tenant_id = $1 AND akd.kind_name = 'email' AND ekd.kind_name = 'client_contact'
+           AND e.status = 'active'
+         ORDER BY a.entity_id, a.valid_from DESC
+       ),
+       latest_names AS (
+         SELECT DISTINCT ON (a.entity_id) a.entity_id, a.value #>> '{}' AS full_name
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+         WHERE a.tenant_id = $1 AND akd.kind_name = 'full_name'
+         ORDER BY a.entity_id, a.valid_from DESC
+       )
+       SELECT le.email, ln.full_name
+       FROM latest_emails le
+       LEFT JOIN latest_names ln ON ln.entity_id = le.entity_id`,
+      [ctx.tenantId],
+    )
+    const map = new Map<string, string>()
+    for (const row of res.rows) {
+      const name = row.full_name?.trim()
+      if (name) map.set(row.email, name)
+    }
+    return map
+  })
+}
+
+// Bare address out of "Name <a@b.com>" (or the string itself), lowercased — the
+// key the name index uses.
+function bareEmailKey(addr: string): string {
+  const m = addr.match(/<([^>]+)>/)
+  return (m ? m[1]! : addr).trim().toLowerCase()
+}
+
+// The subset of the name index that applies to this thread's participants, keyed
+// by lowercased bare address. Kept per-thread so we never ship the firm's whole
+// contact list to the client.
+function namesForParticipants(
+  participants: string[],
+  names: Map<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const p of participants) {
+    const name = names.get(bareEmailKey(p))
+    if (name) out[bareEmailKey(p)] = name
+  }
+  return out
+}
+
 export interface MailThreadSummary extends GmailThreadSummary {
   matters: Array<{ matterEntityId: string; matterNumber: string }>
+  // email (lowercased, bare) → client contact display name, for known contacts.
+  participantNames: Record<string, string>
 }
 
 export async function listMailThreads(
@@ -101,12 +162,16 @@ export async function listMailThreads(
   const index = await clientEmailIndex(ctx)
   const emails = [...index.keys()].filter((e) => !e.endsWith('@example.test'))
   if (emails.length === 0) return { threads: [], clientEmailCount: 0 }
-  const threads = await listClientThreads(ctx.tenantId, emails, 50, ctx.actorId, search)
+  const [threads, names] = await Promise.all([
+    listClientThreads(ctx.tenantId, emails, 50, ctx.actorId, search),
+    clientNameIndex(ctx),
+  ])
   return {
     clientEmailCount: emails.length,
     threads: threads.map((t) => ({
       ...t,
       matters: dedupeMatters(t.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? [])),
+      participantNames: namesForParticipants(t.participantEmails, names),
     })),
   }
 }
@@ -121,6 +186,8 @@ function dedupeMatters(
 
 export interface MailThreadView extends GmailThreadDetail {
   matters: Array<{ matterEntityId: string; matterNumber: string }>
+  // email (lowercased, bare) → client contact display name, for known contacts.
+  participantNames: Record<string, string>
 }
 
 // Open a thread: live read from Gmail + idempotent ingestion into the
@@ -130,7 +197,7 @@ export async function openMailThread(
   gmailThreadId: string,
 ): Promise<MailThreadView> {
   const detail = await getClientThread(ctx.tenantId, gmailThreadId, ctx.actorId)
-  const index = await clientEmailIndex(ctx)
+  const [index, names] = await Promise.all([clientEmailIndex(ctx), clientNameIndex(ctx)])
   const matters = dedupeMatters(
     detail.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? []),
   )
@@ -159,7 +226,11 @@ export async function openMailThread(
     },
   })
 
-  return { ...detail, matters }
+  return {
+    ...detail,
+    matters,
+    participantNames: namesForParticipants(detail.participantEmails, names),
+  }
 }
 
 export interface ReplyInput {

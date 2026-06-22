@@ -23,6 +23,8 @@ interface ThreadSummary {
   participantEmails: string[]
   messageCount: number
   matters: Array<{ matterEntityId: string; matterNumber: string }>
+  // email (lowercased, bare) → known client contact name.
+  participantNames: Record<string, string>
 }
 
 interface ThreadMessage {
@@ -43,6 +45,7 @@ interface ThreadView {
   participantEmails: string[]
   messages: ThreadMessage[]
   matters: Array<{ matterEntityId: string; matterNumber: string }>
+  participantNames: Record<string, string>
 }
 
 // "Name <a@b.com>" → "Name"; bare "a@b.com" → "a@b.com". Used for the reading
@@ -66,11 +69,19 @@ function emailInitials(addr: string): string {
   return (local.slice(0, 2) || '·').toUpperCase()
 }
 
-// Compact sender label for an inbox row: first address, then "+N more".
-function senderLabel(emails: string[]): string {
+// Resolve an address to a known client contact name, falling back to the display
+// name in the header, then the bare address.
+function personLabel(addr: string, names: Record<string, string>): string {
+  return names[bareEmail(addr).toLowerCase()] ?? displayName(addr)
+}
+
+// Compact sender label for an inbox row: first participant (name when known),
+// then "+N more".
+function senderLabel(emails: string[], names: Record<string, string>): string {
   if (emails.length === 0) return '(unknown)'
-  if (emails.length === 1) return emails[0]!
-  return `${emails[0]} +${emails.length - 1}`
+  const first = personLabel(emails[0]!, names)
+  if (emails.length === 1) return first
+  return `${first} +${emails.length - 1}`
 }
 
 // Gmail-style date: time if today, "Mon D" this year, else "Mon D, YYYY".
@@ -393,7 +404,9 @@ export default function MailPage() {
                 </span>
                 <div className="mail-row-main">
                   <div className="mail-row-top">
-                    <span className="mail-row-people">{senderLabel(t.participantEmails)}</span>
+                    <span className="mail-row-people">
+                      {senderLabel(t.participantEmails, t.participantNames)}
+                    </span>
                     <span className="mail-row-date">{t.lastAt ? relativeDate(t.lastAt) : ''}</span>
                   </div>
                   <div className="mail-row-subject">
@@ -428,7 +441,9 @@ export default function MailPage() {
             <div>
               <h2 className="mail-thread-subject">{open.subject}</h2>
               <p className="mail-thread-meta">
-                {open.participantEmails.join(', ')}
+                {open.participantEmails
+                  .map((e) => personLabel(e, open.participantNames))
+                  .join(', ')}
                 {open.matters.length > 0 && (
                   <>
                     {' · '}
@@ -455,13 +470,15 @@ export default function MailPage() {
                 <div className="mail-msg-main">
                   <div className="mail-msg-head">
                     <span className="mail-msg-from" title={m.from}>
-                      {displayName(m.from)}
+                      {personLabel(m.from, open.participantNames)}
                     </span>
                     <span className="mail-msg-date">
                       {m.sentAt ? new Date(m.sentAt).toLocaleString() : ''}
                     </span>
                   </div>
-                  <div className="mail-msg-to">to {m.to}</div>
+                  <div className="mail-msg-to" title={m.to}>
+                    to {personLabel(m.to, open.participantNames)}
+                  </div>
                   {/* The HTML body is already allowlist-sanitized server-side
                       (sanitizeEmailHtml), so rendering it directly is safe and
                       keeps natural height; plaintext-only messages fall back. */}
@@ -481,7 +498,9 @@ export default function MailPage() {
           <div className="mail-reply">
             <div className="mail-reply-label">
               Reply to{' '}
-              {open.participantEmails.length > 0 ? open.participantEmails[0] : 'the client'}
+              {open.participantEmails.length > 0
+                ? personLabel(open.participantEmails[0]!, open.participantNames)
+                : 'the client'}
             </div>
             <MailComposer
               key={`reply-${open.gmailThreadId}-${composerNonce}`}
