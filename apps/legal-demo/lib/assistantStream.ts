@@ -19,6 +19,8 @@ export interface AssistantStreamInput {
   contextDepth?: ContextDepth
   // Skills the attorney picked from the /skills menu — force-loaded this turn.
   skillSlugs?: string[]
+  // Documents attached to this message (Claude only): each { name, text }.
+  attachments?: Array<{ name: string; text: string }>
   pageContext?: { path?: string; [k: string]: unknown }
 }
 

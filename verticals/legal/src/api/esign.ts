@@ -530,6 +530,73 @@ export async function listClientSignatures(p: ClientPrincipal): Promise<PendingS
   })
 }
 
+export interface ClientDocument {
+  requestId: string
+  envelopeId: string
+  documentTitle: string | null
+  /** Client-facing state derived from signer_status (never the raw key). */
+  state: 'awaiting_you' | 'signed' | 'declined' | 'in_progress'
+  /** Raw signer_status (for the portal to pick the right action link). */
+  rawStatus: string
+}
+
+// Every document the signed-in client is a signer on, across their matters and
+// ALL statuses (to-sign AND already-signed/declined). Same relationship graph
+// and email-binding as listClientSignatures — these are documents explicitly
+// sent to THIS client's email, so they are client-visible by construction. The
+// portal "Documents" surface renders this; the to-sign subset still drives the
+// dedicated /portal/sign page.
+export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDocument[]> {
+  const ctx = signingCtx(p.tenantId)
+  if (p.matterIds.length === 0) return []
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ request_id: string; envelope_id: string; status: string }>(
+      `SELECT req.source_entity_id AS request_id, env.id AS envelope_id,
+              (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
+                 ON akd.id=a.attribute_kind_id AND akd.kind_name='signer_status'
+                 WHERE a.entity_id=req.source_entity_id AND a.tenant_id=$1
+                 ORDER BY a.valid_from DESC LIMIT 1) AS status
+       FROM relationship req
+       JOIN relationship_kind_definition reqk ON reqk.id=req.relationship_kind_id AND reqk.kind_name='request_of'
+       JOIN entity env ON env.id=req.target_entity_id
+       JOIN relationship eo ON eo.source_entity_id=env.id AND eo.tenant_id=env.tenant_id
+       JOIN relationship_kind_definition eok ON eok.id=eo.relationship_kind_id AND eok.kind_name='envelope_of'
+       JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=env.tenant_id
+       JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
+       JOIN attribute em ON em.entity_id=req.source_entity_id AND em.tenant_id=$1
+       JOIN attribute_kind_definition emk ON emk.id=em.attribute_kind_id AND emk.kind_name='signer_email'
+       WHERE req.tenant_id=$1 AND df.target_entity_id = ANY($2)
+         AND lower(em.value #>> '{}') = lower($3)
+         AND (em.valid_to IS NULL OR em.valid_to > now())
+         AND (eo.valid_to IS NULL OR eo.valid_to > now())`,
+      [p.tenantId, p.matterIds, p.email],
+    )
+    const out: ClientDocument[] = []
+    for (const row of res.rows) {
+      const raw = row.status ?? ''
+      const state: ClientDocument['state'] =
+        raw === 'delivered' || raw === 'opened'
+          ? 'awaiting_you'
+          : raw === 'signed' || raw === 'completed'
+            ? 'signed'
+            : raw === 'declined'
+              ? 'declined'
+              : 'in_progress'
+      const title = await withActionContext(ctx, (c) =>
+        latestAttr(c, p.tenantId, row.envelope_id, 'envelope_subject'),
+      )
+      out.push({
+        requestId: row.request_id,
+        envelopeId: row.envelope_id,
+        documentTitle: title,
+        state,
+        rawStatus: raw,
+      })
+    }
+    return out
+  })
+}
+
 async function assertClientOwnsRequest(p: ClientPrincipal, requestId: string): Promise<string> {
   const ctx = signingCtx(p.tenantId)
   const ok = await withActionContext(ctx, async (client) => {

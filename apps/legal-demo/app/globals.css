@@ -722,6 +722,134 @@ section h2 {
   color: var(--accent-attorney);
 }
 
+/* Actions menu — a normal pill button (inherits the global button style) that
+   drops a right-anchored mini menu of entity actions. The chevron flips when open. */
+.att-actions-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.att-actions-btn svg {
+  transition: transform 0.16s ease;
+}
+.att-actions-btn.active svg {
+  transform: rotate(180deg);
+}
+/* The menu panel reuses the right-anchored .att-pop shell; this just lays the
+   items out as a list. `.align-left` hangs it from the left edge instead. */
+.att-menu-pop {
+  min-width: 184px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.att-menu-pop.align-left {
+  right: auto;
+  left: 0;
+}
+
+/* Matter workflow step list — clickable rows (Intake / Consultation / Document),
+   each opening a detail modal. Status drives the icon tint + the right-side pill. */
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface, #fff);
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    background 0.14s ease;
+}
+.step-row:hover {
+  border-color: var(--accent-attorney, #c08a3e);
+  box-shadow: var(--shadow-sm);
+}
+.step-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+.step-row.step-done .step-ico {
+  color: #2e7d52;
+}
+.step-row.step-current .step-ico {
+  color: #c08a3e;
+}
+.step-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.step-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+.step-subtitle {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.step-state-pill {
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--rule-soft);
+}
+.step-row.step-done .step-state-pill {
+  color: #2e7d52;
+  background: rgba(46, 125, 82, 0.12);
+}
+.step-row.step-current .step-state-pill {
+  color: #92400e;
+  background: rgba(231, 182, 103, 0.18);
+}
+.step-chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+
+/* A Next <Link> styled as a button (e.g. "Open full review" in a modal footer),
+   mirroring the base button rule so it sits cleanly beside real buttons. */
+a.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: 500;
+  font-size: 0.92rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    border-color var(--transition),
+    background var(--transition);
+}
+a.button:hover {
+  border-color: var(--accent-attorney);
+  text-decoration: none;
+}
+
 /* Notifications dropdown */
 .att-notif {
   min-width: 280px;
@@ -774,23 +902,20 @@ section h2 {
 }
 .att-notif-link {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.6rem 0.75rem;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.75rem;
   color: inherit;
   text-decoration: none;
+  font-size: var(--text-sm, 0.85rem);
+  white-space: nowrap;
+  overflow: hidden;
 }
 a.att-notif-link:hover {
   background: var(--surface-2, rgba(15, 23, 42, 0.04));
 }
 .att-notif-item.unread .att-notif-link {
   background: var(--accent-soft, rgba(184, 134, 11, 0.06));
-}
-.att-notif-row-top {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: var(--text-sm, 0.85rem);
 }
 .att-notif-dot {
   width: 7px;
@@ -799,42 +924,15 @@ a.att-notif-link:hover {
   background: var(--accent, #b8860b);
   flex: none;
 }
-.att-notif-title {
+.att-notif-label {
   font-weight: 600;
-}
-.att-notif-cat {
-  margin-left: auto;
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: 999px;
-  padding: 0.02rem 0.4rem;
-}
-.att-notif-summary {
-  font-size: var(--text-sm, 0.85rem);
-  font-weight: 500;
   color: var(--fg, #0f172a);
+  flex: none;
+}
+.att-notif-text {
+  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.att-notif-note {
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-.att-notif-excerpt {
-  font-size: 0.76rem;
-  color: var(--muted);
-  font-style: italic;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 /* User dropdown */
@@ -1778,9 +1876,22 @@ pre {
 }
 
 /* Toggle switch (Services enable/disable) — on-brand navy, crisp knob. */
+/* Pill toggle (Services status): a plain iOS-style switch — a solid pill track
+   (green when active, gray when inactive) and a centered circular white knob.
+   No label or glyph. Track 44×26, knob a fixed 20px circle with a 3px margin
+   (26 − 20 = 6 = 3 + 3, vertically centered). The active position is pinned with
+   `left: calc(100% − 23px)` (knob 20 + 3px margin) instead of a fixed translate,
+   so the knob always lands 3px from the right edge no matter how wide the table
+   cell renders the track — and it animates smoothly because `left` is tweened. */
 .switch {
   position: relative;
+  /* inline-flex + vertical-align:middle matches the gear button exactly (also
+     inline-flex), so the two line up with each other in the row. margin:0
+     overrides the global `label { margin-bottom }` that used to push it high. */
   display: inline-flex;
+  vertical-align: middle;
+  box-sizing: border-box;
+  margin: 0;
   width: 44px;
   height: 26px;
   flex: none;
@@ -1797,40 +1908,33 @@ pre {
 .switch-slider {
   position: absolute;
   inset: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
+  background: #cbd5e1;
   border-radius: 999px;
-  transition:
-    background var(--transition),
-    border-color var(--transition);
+  transition: background var(--transition);
 }
 .switch-slider::before {
   content: '';
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   background: #fff;
   border-radius: 50%;
-  /* Defined two-layer shadow so the knob lifts off the track. */
-  box-shadow:
-    0 1px 1px rgba(15, 23, 42, 0.12),
-    0 2px 4px rgba(15, 23, 42, 0.22);
-  transition: transform var(--transition);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.3);
+  transition: left var(--transition);
 }
 .switch input:checked + .switch-slider {
-  background: linear-gradient(135deg, var(--navy-700) 0%, var(--navy) 100%);
-  border-color: transparent;
+  background: #16a34a;
 }
 .switch input:checked + .switch-slider::before {
-  transform: translateX(18px);
+  left: calc(100% - 23px);
 }
 .switch input:disabled {
   cursor: not-allowed;
 }
 .switch input:disabled + .switch-slider {
-  opacity: 0.5;
+  opacity: 0.6;
 }
 .switch input:focus-visible + .switch-slider {
   outline: 2px solid var(--ring);
@@ -4295,13 +4399,63 @@ button.danger.outline:hover:not(:disabled) {
   z-index: 50;
   display: flex;
   flex-direction: column;
-  width: min(380px, calc(100vw - 2rem));
-  height: min(540px, calc(100vh - 2.5rem));
+  /* Larger default (beta ask). An inline width/height from the drag-to-resize
+     handle overrides these; the min() keeps it from ever exceeding the viewport. */
+  width: min(440px, calc(100vw - 2rem));
+  height: min(660px, calc(100vh - 2.5rem));
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2.5rem);
   background: white;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.22);
   overflow: hidden;
+}
+
+/* Drag handle in the panel's top-left corner (its only free corner — it's
+   pinned bottom-right). The bracket glyph cues a resize grip. */
+.feedback-panel-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  z-index: 3;
+  cursor: nwse-resize;
+  touch-action: none;
+  border-top-left-radius: var(--radius-xl);
+}
+.feedback-panel-resize::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid var(--muted);
+  border-left: 2px solid var(--muted);
+  border-top-left-radius: 3px;
+  opacity: 0.5;
+  transition: opacity 0.12s ease;
+}
+.feedback-panel-resize:hover::before {
+  opacity: 1;
+}
+
+/* In the floating panel the message list fills the available height (so a taller,
+   resized panel actually shows more), and is the single scroll region — the body
+   itself doesn't scroll. The embedded chat (outside .feedback-panel) keeps its
+   own 52vh cap. */
+.feedback-panel .feedback-panel-body {
+  overflow: hidden;
+}
+.feedback-panel .uac {
+  flex: 1;
+  min-height: 0;
+}
+.feedback-panel .uac-messages {
+  flex: 1;
+  max-height: none;
 }
 
 .feedback-panel-head {
@@ -4338,14 +4492,6 @@ button.danger.outline:hover:not(:disabled) {
   flex-direction: column;
   gap: 0.55rem;
 }
-.feedback-intro {
-  font-size: 0.85rem;
-  color: var(--muted);
-  background: var(--border-soft);
-  padding: 0.6rem 0.75rem;
-  border-radius: var(--radius-md);
-}
-
 .feedback-bubble {
   position: relative;
   max-width: 85%;
@@ -4734,42 +4880,90 @@ button.danger.outline:hover:not(:disabled) {
   font-size: 0.76rem;
   color: var(--muted);
 }
+/* Category on its own labelled row, actions right-aligned below — so a long
+   label ("Feature / workflow request") and both buttons never squeeze into one
+   line on the narrow panel. */
 .uac-fbmode-controls {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.uac-fbmode-catlabel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.uac-fbmode-catlabel select {
+  width: 100%;
+  font-size: 0.82rem;
+}
+.uac-fbmode-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
 }
 .uac-fbmode-exit {
-  background: transparent;
+  background: white;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 6px);
-  padding: 0.3rem 0.6rem;
-  font-size: 0.78rem;
+  border-radius: var(--radius-md, 8px);
+  padding: 0.36rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 500;
   color: var(--fg);
   cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 .uac-fbmode-exit:hover:not(:disabled) {
-  background: white;
+  background: var(--surface);
+  border-color: var(--accent);
+}
+.uac-fbmode-exit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .uac-fbmode-send {
-  font-size: 0.78rem;
-  padding: 0.32rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.36rem 0.9rem;
+  border-radius: var(--radius-md, 8px);
 }
+
+/* Post-submit confirmation: stacked + centred so the reference chip gets its own
+   line (was squished beside the thank-you text + button on one row). */
 .uac-fbmode-done {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
+  text-align: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0.25rem 0.1rem;
   font-size: 0.85rem;
 }
 .uac-fbmode-thanks {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
   font-weight: 600;
   color: var(--gold);
 }
-.uac-fbmode-done .uac-fbmode-exit {
-  margin-left: auto;
+.uac-fbmode-refrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.uac-fbmode-reflabel {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.uac-fbmode-backbtn {
+  margin-top: 0.1rem;
 }
 
 /* Message list + citations */
@@ -4786,6 +4980,43 @@ button.danger.outline:hover:not(:disabled) {
   margin: 0.4rem 0 0;
   padding-left: 1.2rem;
   font-size: 0.82em;
+}
+
+/* Links the assistant emits (e.g. [Templates](/attorney/templates)) render as
+   compact "open" buttons so calls-to-action read as clickable, not as plain
+   underlined text. Scoped to .assistant-md so draft previews keep plain links. */
+.assistant-md a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.1rem 0.55rem;
+  margin: 0.06rem 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+  color: var(--accent);
+  background: var(--accent-attorney-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.assistant-md a:hover {
+  background: var(--accent);
+  color: white;
+}
+/* An arrow cues the action: in-app links navigate (→), external links open in a
+   new tab (↗). The href scheme is set by renderMarkdown (target=_blank ⇒ external). */
+.assistant-md a::after {
+  content: '→';
+  font-size: 0.9em;
+  line-height: 1;
+}
+.assistant-md a[target='_blank']::after {
+  content: '↗';
 }
 
 /* Live "thinking" trace (streamed reasoning before the answer) */
@@ -5070,6 +5301,132 @@ button.danger.outline:hover:not(:disabled) {
   color: var(--muted);
   opacity: 0.55;
   cursor: default;
+}
+
+/* ── Attachments (composer + bubbles) ──────────────────────────────────────── */
+.uac-composer-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+/* Reserve room for the paperclip at bottom-left when it's shown (Claude only). */
+.uac-composer.has-attach textarea {
+  padding-left: 2.6rem;
+}
+/* Paperclip mirrors the send glyph, in the composer's bottom-left corner. */
+.uac-attach-btn {
+  position: absolute;
+  left: 0.4rem;
+  bottom: 0.4rem;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.uac-attach-btn:hover:not(:disabled),
+.uac-attach-btn.active {
+  background: var(--surface);
+  color: var(--fg);
+}
+.uac-attach-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Source menu (upload / matter document) above the paperclip. */
+.uac-attach-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 0.25rem;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+.uac-attach-menu-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+.uac-attach-menu-item:hover {
+  background: var(--surface);
+}
+
+/* Staged attachments above the composer, and the read-only chips on a bubble. */
+.uac-staged-attachments,
+.uac-bubble-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.uac-bubble-attachments {
+  margin-top: 0.4rem;
+}
+.uac-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  padding: 0.18rem 0.3rem 0.18rem 0.45rem;
+  font-size: 0.74rem;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+}
+.uac-attach-chip-static {
+  padding: 0.18rem 0.5rem;
+}
+.uac-attach-chip svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.uac-attach-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.uac-attach-remove {
+  display: inline-flex;
+  padding: 0.12rem;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 0;
+  border-radius: 50%;
+}
+.uac-attach-remove:hover {
+  color: var(--fg);
+  background: var(--border-soft);
+}
+.uac-attach-error {
+  font-size: 0.76rem;
+  color: var(--danger, #b42318);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5814,6 +6171,18 @@ button.danger.outline:hover:not(:disabled) {
 }
 .bk-btn-soft:hover {
   background: #e0e7ff;
+}
+/* Destructive action (cancel a consultation). Subdued by default, firm on hover
+   — present without competing with the primary path. */
+.bk-btn-danger {
+  color: #b42318;
+  background: #fff;
+  border-color: #fecdca;
+}
+.bk-btn-danger:hover:not(:disabled) {
+  background: #b42318;
+  border-color: #b42318;
+  color: #fff;
 }
 .bk-btn:disabled {
   opacity: 0.5;
@@ -7206,4 +7575,324 @@ input[type='number'] {
   border-top: 2px solid #ef4444;
   z-index: 5;
   pointer-events: none;
+}
+/* ── Client portal sign-in (email+password / Google / magic-link) ──────────── */
+.cauth-shell {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: clamp(2rem, 8vh, 6rem);
+}
+.cauth-card {
+  width: 100%;
+  max-width: 26rem;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl, 16px);
+  padding: var(--space-5, 2rem);
+  box-shadow: 0 10px 40px -16px rgba(11, 27, 58, 0.25);
+}
+.cauth-title {
+  margin: var(--space-1) 0 0;
+  font-size: 1.5rem;
+}
+.cauth-lead {
+  color: var(--muted);
+  margin-top: var(--space-2);
+  line-height: 1.5;
+}
+.cauth-form {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+}
+.cauth-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.cauth-label:not(:first-child) {
+  margin-top: var(--space-3);
+}
+.cauth-input {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius-md, 10px);
+  font-size: 0.95rem;
+  background: #fff;
+}
+.cauth-input:focus {
+  outline: none;
+  border-color: var(--navy-500, #1e3a8a);
+  box-shadow: 0 0 0 3px var(--navy-50, #f2f5fc);
+}
+.cauth-primary {
+  margin-top: var(--space-4);
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  background: var(--navy-900, #0b1b3a);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cauth-primary:hover:not(:disabled) {
+  background: var(--navy-700, #14306b);
+}
+.cauth-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.cauth-foot {
+  margin-top: var(--space-3);
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+.cauth-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--navy, #1e3a8a);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.cauth-link:hover {
+  color: var(--navy-900, #0b1b3a);
+}
+
+/* ── Client portal dashboard ───────────────────────────────────────────────── */
+.pdash {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: clamp(1.25rem, 4vw, 2.5rem) var(--space-3) 4rem;
+}
+.pdash-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.pdash-firm {
+  font-family: var(--font-serif, Georgia, serif);
+  font-weight: 700;
+  color: var(--navy-900, #0b1b3a);
+  letter-spacing: 0.01em;
+}
+.pdash-title {
+  margin: 0.15rem 0 0;
+  font-size: clamp(1.4rem, 3vw, 1.8rem);
+}
+.pdash-who {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+.pdash-signout {
+  font-size: 0.88rem;
+  color: var(--navy, #1e3a8a);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pdash-switch {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.pdash-switch label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pdash-switch select {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius-md, 10px);
+  max-width: 28rem;
+}
+.pdash-card {
+  margin-top: var(--space-4);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  padding: var(--space-4);
+  box-shadow: 0 4px 18px -14px rgba(11, 27, 58, 0.3);
+}
+.pdash-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pdash-card-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.pdash-subhead {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pdash-empty {
+  color: var(--muted);
+}
+.pdash-upcoming {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  border-left: 4px solid var(--gold, #b45309);
+}
+.pdash-when {
+  font-weight: 600;
+  color: var(--ink, #0f172a);
+}
+.pdash-badge {
+  background: var(--navy-50, #f2f5fc);
+  color: var(--navy-700, #14306b);
+  border: 1px solid var(--navy-100, #e5ebf7);
+  border-radius: var(--radius-full, 999px);
+  padding: 0.25rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pdash-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pdash-timeline li {
+  display: flex;
+  gap: 0.7rem;
+  padding: 0.4rem 0;
+}
+.pdash-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 0.4rem;
+  border-radius: 50%;
+  background: var(--navy, #1e3a8a);
+  flex: 0 0 auto;
+}
+.pdash-docs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pdash-doc {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface-2, #f8fafc);
+}
+.pdash-doc-title {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.pdash-badge-sm {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.12rem 0.5rem;
+  border-radius: var(--radius-full, 999px);
+}
+.pdash-badge-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+.pdash-badge-ok {
+  background: #dcfce7;
+  color: #15803d;
+}
+.pdash-badge-muted {
+  background: var(--surface-2, #f1f5f9);
+  color: var(--muted);
+}
+.pdash-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 1rem;
+  background: var(--navy-900, #0b1b3a);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.pdash-btn:hover:not(:disabled) {
+  background: var(--navy-700, #14306b);
+}
+.pdash-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pdash-btn-sm {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.85rem;
+}
+.pdash-thread {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pdash-msg {
+  align-self: flex-start;
+  max-width: 80%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 12px;
+  background: var(--surface-2, #f4f4f5);
+  border: 1px solid var(--border);
+}
+.pdash-msg-me {
+  align-self: flex-end;
+  background: var(--navy-50, #e0e7ff);
+  border-color: var(--navy-100, #e5ebf7);
+}
+.pdash-msg-body {
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+}
+.pdash-msg-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+}
+.pdash-compose {
+  margin-top: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+.pdash-compose textarea {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius-md, 10px);
+  font: inherit;
+  resize: vertical;
 }

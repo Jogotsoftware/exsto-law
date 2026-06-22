@@ -30,7 +30,7 @@ describe('client portal tool allowlist (no DB)', () => {
       [
         'legal.booking.submit',
         'legal.calendar.availability',
-        'legal.draft.get',
+        'legal.draft.get_shared', // client-safe shared-draft view (full-detail legal.draft.get is attorney-only)
         'legal.service.list',
       ].sort(),
     )

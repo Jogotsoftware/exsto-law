@@ -9,6 +9,12 @@ const INTRO_GLOBAL = 'How can I serve you, Counselor?'
 const INTRO_MATTER = 'How can I serve you, Counselor? Grounded in the matter you’re viewing.'
 const INTRO_CONTACT = 'How can I serve you, Counselor? Grounded in the client you’re viewing.'
 
+// The attorney's preferred panel size, remembered across sessions (beta ask:
+// "resizable, larger default"). Per-browser UI state, so localStorage.
+const PANEL_SIZE_KEY = 'exsto.assistant.panelSize'
+const MIN_W = 320
+const MIN_H = 380
+
 // Derive the assistant's context from the page you're on, so the one global chat
 // follows you: open it on a matter and it's grounded in that matter; on a contact,
 // that contact; anywhere else it's the general app-help / feedback chat. Client
@@ -36,14 +42,67 @@ export function FeedbackChat() {
   // mid-conversation if the attorney navigates while it's open.
   const [scope, setScope] = useState<{ matterEntityId?: string; contactEntityId?: string }>({})
   const inputFocusRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // Custom panel size (px). null ⇒ use the CSS default. Stays null on the server
+  // and first client render so SSR markup matches; a persisted size is applied in
+  // an effect after mount (no hydration mismatch).
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
 
   useEffect(() => {
     if (open) inputFocusRef.current?.querySelector('textarea')?.focus()
   }, [open])
 
+  // Restore the remembered size once, client-side.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(PANEL_SIZE_KEY)
+      if (!raw) return
+      const v = JSON.parse(raw) as { w?: unknown; h?: unknown }
+      if (typeof v.w === 'number' && typeof v.h === 'number') setSize({ w: v.w, h: v.h })
+    } catch {
+      // ignore — falls back to the CSS default
+    }
+  }, [])
+
   function openChat() {
     setScope(scopeForPath(pathname))
     setOpen(true)
+  }
+
+  // Drag the top-left corner to resize. The panel is anchored bottom-right, so
+  // growing width/height expands it up and to the left — toward the handle. We
+  // listen on window (not pointer-capture) so a fast drag never drops the grab.
+  function startResize(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    const rect = panelRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const startX = e.clientX
+    const startY = e.clientY
+    const startW = rect.width
+    const startH = rect.height
+    const maxW = window.innerWidth - 24
+    const maxH = window.innerHeight - 24
+    const onMove = (ev: PointerEvent) => {
+      const w = Math.min(maxW, Math.max(MIN_W, startW + (startX - ev.clientX)))
+      const h = Math.min(maxH, Math.max(MIN_H, startH + (startY - ev.clientY)))
+      setSize({ w, h })
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      setSize((cur) => {
+        if (cur) {
+          try {
+            window.localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify(cur))
+          } catch {
+            // ignore — remembering the size is a nicety
+          }
+        }
+        return cur
+      })
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
   }
 
   if (!open) {
@@ -68,7 +127,20 @@ export function FeedbackChat() {
       : INTRO_GLOBAL
 
   return (
-    <div className="feedback-panel" role="dialog" aria-label="Assistant">
+    <div
+      ref={panelRef}
+      className="feedback-panel"
+      role="dialog"
+      aria-label="Assistant"
+      style={size ? { width: `${size.w}px`, height: `${size.h}px` } : undefined}
+    >
+      <div
+        className="feedback-panel-resize"
+        onPointerDown={startResize}
+        role="separator"
+        aria-label="Resize chat (drag the top-left corner)"
+        title="Drag to resize"
+      />
       <div className="feedback-panel-head">
         <div className="feedback-panel-title">Assistant</div>
         <button

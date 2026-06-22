@@ -16,6 +16,8 @@ import {
   detailRows,
   button,
   callout,
+  sectionLabel,
+  mutedLink,
   signoff,
 } from './layout.js'
 
@@ -50,6 +52,7 @@ const BUILDERS: Record<string, (v: Vars) => BuiltEmail> = {
   'prospect-booking-confirmation': (v) => {
     const when = val(v.scheduled_at_label, val(v.scheduled_at, 'the selected time'))
     const rows = [{ label: 'When', value: esc(when) }]
+    if (v.service_label) rows.push({ label: 'Service', value: esc(val(v.service_label)) })
     if (v.location || v.video_url) {
       rows.push({
         label: v.video_url ? 'Video link' : 'Location',
@@ -58,6 +61,30 @@ const BUILDERS: Record<string, (v: Vars) => BuiltEmail> = {
           : esc(val(v.location)),
       })
     }
+
+    // "Manage your appointment": Reschedule is the primary action; Cancel is a
+    // present-but-quiet secondary link (a destructive action shouldn't shout).
+    // Both links are token-gated (one /book/manage page). When no manage URL is
+    // available (e.g. base URL unset), degrade to the calendar-invite hint.
+    const manageBlock = v.reschedule_url
+      ? sectionLabel('Manage your appointment') +
+        paragraph(
+          'Need to make a change? You can reschedule or cancel any time before your consultation.',
+        ) +
+        button('Reschedule', val(v.reschedule_url), 'gold') +
+        (v.cancel_url ? mutedLink('Cancel this consultation instead', val(v.cancel_url)) : '')
+      : finePrint('Need to change it? Use the reschedule link in the calendar invitation.')
+
+    // "Create your account": opens the portal sign-in pre-filled with the email
+    // they booked with, one click from a magic link. Omitted if no portal URL.
+    const accountBlock = v.account_url
+      ? sectionLabel('Your client portal') +
+        paragraph(
+          'Create your account to message your attorney, follow your matter, and view documents — all in one secure place.',
+        ) +
+        button('Create your account', val(v.account_url), 'navy')
+      : ''
+
     return {
       subject: 'Your consultation is booked — Pacheco Law',
       preheader: `Confirmed for ${when} with ${FIRM.attorney}.`,
@@ -71,14 +98,16 @@ const BUILDERS: Record<string, (v: Vars) => BuiltEmail> = {
             `Your consultation with <strong>${esc(FIRM.attorney)}</strong> is confirmed. A calendar invitation is on its way to your inbox.`,
           ) +
           detailRows(rows) +
-          (v.reschedule_url
-            ? button('Reschedule or cancel', val(v.reschedule_url), 'gold')
-            : finePrint('Need to change it? Use the reschedule link in the calendar invitation.')) +
+          manageBlock +
+          accountBlock +
           signoff(),
       }),
       text:
         `${val(v.client_first_name, 'Hi')},\n\nYour consultation with ${FIRM.attorney} is confirmed for ${when}. ` +
-        `A calendar invitation is on its way to your inbox.${BASE_FALLBACK}`,
+        `A calendar invitation is on its way to your inbox.` +
+        (v.reschedule_url ? `\n\nReschedule or cancel: ${val(v.reschedule_url)}` : '') +
+        (v.account_url ? `\n\nCreate your client portal account: ${val(v.account_url)}` : '') +
+        BASE_FALLBACK,
     }
   },
 

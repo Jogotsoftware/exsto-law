@@ -60,9 +60,15 @@ export async function findClientContactByEmail(
        LEFT JOIN latest_names ln ON ln.entity_id = le.entity_id
        WHERE lower(le.value #>> '{}') = lower($1)
        ORDER BY le.entity_id
-       LIMIT 1`,
+       LIMIT 2`,
       [email],
     )
+    // Fail CLOSED on cross-tenant ambiguity: if the same email is an active
+    // client_contact in more than one tenant we cannot tell which firm's portal
+    // the user means, so return null (caller shows a generic "contact the firm")
+    // rather than silently first-winning a tenant by entity_id ordering, which
+    // could land them in the wrong firm's portal.
+    if (res.rows.length > 1) return null
     const row = res.rows[0]
     if (!row) return null
     return {

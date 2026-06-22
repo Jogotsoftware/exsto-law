@@ -1,5 +1,7 @@
 -- =============================================================================
--- Vertical migration 0082: Skill library (schema-as-data)
+-- Vertical migration 0083: Skill library (schema-as-data)
+-- (Renumbered 0082→0083: #138 document-upload took 0082 on main/prod; billing
+--  owns 0080/0081. Skill id block 0800–0806 is clear of all of them.)
 --
 -- A "skill" is a reusable, tenant-scoped instruction asset the attorney chatbot
 -- loads on demand — the legal know-how ported from anthropics/claude-for-legal

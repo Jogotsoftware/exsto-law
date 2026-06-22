@@ -16,8 +16,11 @@ const outDir = join(here, 'previews')
 const SAMPLES: Record<string, Record<string, unknown>> = {
   'prospect-booking-confirmation': {
     client_first_name: 'Marcus',
+    service_label: 'New LLC formation',
     scheduled_at_label: 'Thursday, June 25, 2026 at 2:00 PM EDT',
-    reschedule_url: 'https://app.pacheco.law/book/reschedule/abc123',
+    reschedule_url: 'https://app.pacheco.law/book/manage/abc123',
+    cancel_url: 'https://app.pacheco.law/book/manage/abc123?intent=cancel',
+    account_url: 'https://app.pacheco.law/portal/login?email=marcus%40holloway.co',
     video_url: 'https://meet.google.com/abc-defg-hij',
   },
   'appointment-reminder': {

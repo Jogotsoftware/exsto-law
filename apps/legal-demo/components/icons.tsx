@@ -33,6 +33,12 @@ export const CalendarIcon = (p: IconProps) => (
   </Svg>
 )
 
+export const PaperclipIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </Svg>
+)
+
 // Rich-text formatting icons (Word-style) for the template editor toolbar.
 // Bold is a filled glyph (the open-stroke default would render a hollow "B").
 export const BoldIcon = (p: IconProps) => (
@@ -348,5 +354,18 @@ export const LogOutIcon = (p: IconProps) => (
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
     <polyline points="16 17 21 12 16 7" />
     <line x1="21" x2="9" y1="12" y2="12" />
+  </Svg>
+)
+
+export const ChevronDownIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <polyline points="6 9 12 15 18 9" />
+  </Svg>
+)
+
+export const DollarSignIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="12" x2="12" y1="2" y2="22" />
+    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
   </Svg>
 )
