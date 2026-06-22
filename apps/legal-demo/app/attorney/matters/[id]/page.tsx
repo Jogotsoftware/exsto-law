@@ -1,13 +1,27 @@
 'use client'
 
-// Matter › OVERVIEW tab. The case at a glance + the work: client/practice/opened,
-// the workflow actions (record call, generate documents), and the captured intake
-// (questionnaire + transcript). Status, title, Email/Schedule and Back live in the
-// layout header. Activity, Documents and Billing are their own tabs.
+// Matter › OVERVIEW tab. The case at a glance + the workflow as a clickable step
+// list: Intake → Consultation → Document. Each step opens a detail "window"
+// (modal) to view/download what it produced (questionnaire, transcript, document)
+// and to advance it (record the call, generate the document). Status, title,
+// Actions menu and Back live in the layout header.
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { humanizeService, QuestionnaireView, TranscriptView, type MatterDetail } from './shared'
+import { Modal } from '@/components/Modal'
+import { CheckCircleIcon, ClockIcon, ChevronRightIcon, FileTextIcon } from '@/components/icons'
+import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import {
+  humanizeService,
+  humanizeStatus,
+  QuestionnaireView,
+  TranscriptView,
+  deriveMatterSteps,
+  questionnaireToMarkdown,
+  type MatterDetail,
+  type StepKey,
+  type StepState,
+} from './shared'
 
 export default function MatterOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -15,6 +29,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [callTranscript, setCallTranscript] = useState('')
+  const [openStep, setOpenStep] = useState<StepKey | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -59,6 +74,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
 
   const hasQuestionnaire = matter.questionnaireResponses !== null
   const hasTranscript = matter.transcriptText !== null
+  const steps = deriveMatterSteps(matter)
 
   return (
     <>
@@ -91,96 +107,261 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
       <section>
         <h2>Workflow</h2>
         {error && <div className="alert alert-error">{error}</div>}
-        <div className="row" style={{ gap: 'var(--space-3)' }}>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--space-2)',
-              flex: '1 1 100%',
-            }}
-          >
-            <textarea
-              value={callTranscript}
-              onChange={(e) => setCallTranscript(e.target.value)}
-              placeholder="Paste the consultation transcript to record the call…"
-              rows={4}
-              disabled={!hasQuestionnaire || busy !== null}
-            />
+        <div className="step-list">
+          {steps.map((s) => (
             <button
-              disabled={!hasQuestionnaire || !callTranscript.trim() || busy !== null}
-              onClick={async () => {
-                await action('record-call', 'legal.call.record_manual', {
-                  matterEntityId: id,
-                  transcriptText: callTranscript,
-                })
-                setCallTranscript('')
-              }}
+              key={s.key}
+              type="button"
+              className={`step-row step-${s.state}`}
+              onClick={() => setOpenStep(s.key)}
             >
-              {busy === 'record-call' && <span className="spinner" />}
-              {busy === 'record-call' ? 'Recording…' : 'Record consultation call'}
+              <span className="step-ico" aria-hidden>
+                <StepIcon state={s.state} />
+              </span>
+              <span className="step-titles">
+                <span className="step-title">{s.title}</span>
+                <span className="step-subtitle">{s.subtitle}</span>
+              </span>
+              <span className="step-state-pill">{labelForState(s.state)}</span>
+              <span className="step-chevron" aria-hidden>
+                <ChevronRightIcon size={16} />
+              </span>
             </button>
-          </div>
-          <button
-            className="primary"
-            disabled={!hasQuestionnaire || !hasTranscript || busy !== null}
-            onClick={() =>
-              action('generate-draft', 'legal.draft.generate', {
-                matterEntityId: id,
-                documentKind: 'operating_agreement',
-              })
-            }
-          >
-            {busy === 'generate-draft' && <span className="spinner" />}
-            {busy === 'generate-draft' ? 'Queueing…' : 'Generate operating agreement (async)'}
-          </button>
-          <button
-            disabled={!hasQuestionnaire || !hasTranscript || busy !== null}
-            onClick={() =>
-              action('generate-engagement', 'legal.draft.generate', {
-                matterEntityId: id,
-                documentKind: 'engagement_letter',
-              })
-            }
-          >
-            {busy === 'generate-engagement' && <span className="spinner" />}
-            {busy === 'generate-engagement' ? 'Queueing…' : 'Generate engagement letter (async)'}
-          </button>
+          ))}
         </div>
-        {!hasQuestionnaire && (
-          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-            Questionnaire not yet submitted — drafting will unlock once the client completes intake.
-          </p>
-        )}
-        {hasQuestionnaire && !hasTranscript && (
-          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-            Run the consultation simulation (or attach a real Granola transcript) before generating.
-          </p>
-        )}
         <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-          Generated documents appear under the <strong>Documents</strong> tab.
+          Click a step to view or download what it produced, or to advance it.
         </p>
       </section>
 
-      <section>
-        <h2>Questionnaire</h2>
-        {hasQuestionnaire && matter.questionnaireResponses ? (
-          <QuestionnaireView data={matter.questionnaireResponses} />
-        ) : (
-          <p className="text-muted">Not submitted yet.</p>
-        )}
-      </section>
+      {openStep === 'intake' && (
+        <Modal
+          title="Intake — questionnaire"
+          onClose={() => setOpenStep(null)}
+          footer={
+            hasQuestionnaire && matter.questionnaireResponses ? (
+              <>
+                <button
+                  onClick={() =>
+                    downloadAsWord(
+                      questionnaireToMarkdown(matter.questionnaireResponses!),
+                      `${matter.matterNumber}-intake`,
+                    )
+                  }
+                >
+                  Download Word
+                </button>
+                <button
+                  className="primary"
+                  onClick={() =>
+                    downloadAsPdf(
+                      questionnaireToMarkdown(matter.questionnaireResponses!),
+                      `${matter.matterNumber}-intake`,
+                    )
+                  }
+                >
+                  Download PDF
+                </button>
+              </>
+            ) : null
+          }
+        >
+          {hasQuestionnaire && matter.questionnaireResponses ? (
+            <QuestionnaireView data={matter.questionnaireResponses} />
+          ) : (
+            <p className="text-muted">
+              The client hasn’t submitted the intake questionnaire yet. Drafting unlocks once intake
+              is complete.
+            </p>
+          )}
+        </Modal>
+      )}
 
-      <section>
-        <h2>Transcript</h2>
-        {hasTranscript && matter.transcriptText ? (
-          <TranscriptView text={matter.transcriptText} />
-        ) : (
-          <p className="text-muted">
-            No transcript yet. Run the consultation call (or stub it) first.
-          </p>
-        )}
-      </section>
+      {openStep === 'consultation' && (
+        <Modal title="Consultation" onClose={() => setOpenStep(null)}>
+          {hasTranscript && matter.transcriptText ? (
+            <TranscriptView text={matter.transcriptText} />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <p className="text-muted text-sm">
+                No transcript yet. Paste the consultation transcript (or attach a real Granola
+                transcript) to record the call.
+              </p>
+              <textarea
+                value={callTranscript}
+                onChange={(e) => setCallTranscript(e.target.value)}
+                placeholder="Paste the consultation transcript…"
+                rows={6}
+                disabled={!hasQuestionnaire || busy !== null}
+              />
+              <button
+                disabled={!hasQuestionnaire || !callTranscript.trim() || busy !== null}
+                onClick={async () => {
+                  await action('record-call', 'legal.call.record_manual', {
+                    matterEntityId: id,
+                    transcriptText: callTranscript,
+                  })
+                  setCallTranscript('')
+                }}
+              >
+                {busy === 'record-call' && <span className="spinner" />}
+                {busy === 'record-call' ? 'Recording…' : 'Record consultation call'}
+              </button>
+              {!hasQuestionnaire && (
+                <p className="text-muted text-sm">
+                  Recording unlocks once the client completes intake.
+                </p>
+              )}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {openStep === 'document' && (
+        <DocumentStep
+          matter={matter}
+          busy={busy}
+          canGenerate={hasQuestionnaire && hasTranscript}
+          onGenerate={(documentKind) =>
+            action(`generate-${documentKind}`, 'legal.draft.generate', {
+              matterEntityId: id,
+              documentKind,
+            })
+          }
+          onClose={() => setOpenStep(null)}
+        />
+      )}
     </>
+  )
+}
+
+function StepIcon({ state }: { state: StepState }) {
+  if (state === 'done') return <CheckCircleIcon size={18} />
+  if (state === 'current') return <ClockIcon size={18} />
+  return <FileTextIcon size={18} />
+}
+
+function labelForState(state: StepState): string {
+  if (state === 'done') return 'Done'
+  if (state === 'current') return 'Current'
+  return 'Pending'
+}
+
+interface DraftPayload {
+  documentKind: string
+  versionNumber: number
+  status: string
+  bodyMarkdown: string
+}
+
+// Document step detail. Lazily loads the latest draft (legal.draft.get, exactly as
+// the Documents tab does) for view/download; if there's no draft yet, surfaces the
+// generate actions inline.
+function DocumentStep({
+  matter,
+  busy,
+  canGenerate,
+  onGenerate,
+  onClose,
+}: {
+  matter: MatterDetail
+  busy: string | null
+  canGenerate: boolean
+  onGenerate: (documentKind: string) => void
+  onClose: () => void
+}) {
+  const versionId = matter.latestDraftVersionId
+  const [draft, setDraft] = useState<DraftPayload | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!versionId) return
+    let cancelled = false
+    setLoading(true)
+    callAttorneyMcp<{ draft: DraftPayload | null }>({
+      toolName: 'legal.draft.get',
+      input: { documentVersionId: versionId },
+    })
+      .then((r) => {
+        if (!cancelled) setDraft(r.draft)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [versionId])
+
+  const fileBase = draft ? `${matter.matterNumber}-${draft.documentKind}` : matter.matterNumber
+
+  const footer =
+    versionId && draft ? (
+      <>
+        <Link href={`/attorney/review/${versionId}`} className="button">
+          Open full review
+        </Link>
+        <button onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}>Download Word</button>
+        <button className="primary" onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>
+          Download PDF
+        </button>
+      </>
+    ) : null
+
+  return (
+    <Modal title="Document" onClose={onClose} footer={footer}>
+      {versionId ? (
+        loading || !draft ? (
+          <p className="text-muted text-sm">
+            <span className="spinner" /> Loading document…
+          </p>
+        ) : (
+          <div className="kv-grid">
+            <div>
+              <div className="kv-label">Document</div>
+              <div className="kv-value">{humanizeService(draft.documentKind)}</div>
+            </div>
+            <div>
+              <div className="kv-label">Version</div>
+              <div className="kv-value">v{draft.versionNumber}</div>
+            </div>
+            <div>
+              <div className="kv-label">Status</div>
+              <div className="kv-value">{humanizeStatus(draft.status)}</div>
+            </div>
+          </div>
+        )
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <p className="text-muted text-sm">
+            No document generated yet. Generate one from the captured intake + consultation; it will
+            appear here and under the <strong>Documents</strong> tab when ready.
+          </p>
+          <div className="row" style={{ gap: 'var(--space-2)' }}>
+            <button
+              className="primary"
+              disabled={!canGenerate || busy !== null}
+              onClick={() => onGenerate('operating_agreement')}
+            >
+              {busy === 'generate-operating_agreement' && <span className="spinner" />}
+              Generate operating agreement
+            </button>
+            <button
+              disabled={!canGenerate || busy !== null}
+              onClick={() => onGenerate('engagement_letter')}
+            >
+              {busy === 'generate-engagement_letter' && <span className="spinner" />}
+              Generate engagement letter
+            </button>
+          </div>
+          {!canGenerate && (
+            <p className="text-muted text-sm">
+              Drafting unlocks once intake is submitted and the consultation is recorded.
+            </p>
+          )}
+        </div>
+      )}
+    </Modal>
   )
 }
