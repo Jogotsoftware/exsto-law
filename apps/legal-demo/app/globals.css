@@ -7407,6 +7407,13 @@ input[type='number'] {
   position: relative;
   border-left: 1px solid var(--border);
 }
+/* Click an empty slot to book — a faint tint on hover signals the column is live. */
+.cal-grid-col-clickable {
+  cursor: pointer;
+}
+.cal-grid-col-clickable:hover {
+  background: var(--accent-attorney-soft, rgba(37, 99, 235, 0.05));
+}
 .cal-grid-hline {
   box-sizing: border-box;
   border-bottom: 1px solid var(--border-soft, #eee);
