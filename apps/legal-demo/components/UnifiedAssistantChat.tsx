@@ -472,6 +472,15 @@ export function UnifiedAssistantChat({
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [turns, busy, streaming])
 
+  // Auto-grow the composer with its content: the box expands UPWARD up to a cap,
+  // then scrolls — so multi-line input never flows under the bottom toolbar.
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }, [input])
+
   // ── Attachments ────────────────────────────────────────────────────────────
   function removeAttachment(idx: number) {
     setAttachments((a) => a.filter((_, i) => i !== idx))
@@ -1263,9 +1272,7 @@ export function UnifiedAssistantChat({
             ))}
           </div>
         )}
-        <div
-          className={`uac-composer${canAttach ? ' has-attach' : ''}${isClaude ? ' has-skills' : ''}`}
-        >
+        <div className="uac-composer">
           {attachMenuOpen && canAttach && (
             <div className="uac-attach-menu" role="menu">
               <button
@@ -1294,6 +1301,8 @@ export function UnifiedAssistantChat({
               )}
             </div>
           )}
+          {/* The textarea grows upward with content; the toolbar row stays pinned
+              at the bottom (it no longer overlays the text). */}
           <textarea
             ref={composerRef}
             value={input}
@@ -1303,43 +1312,44 @@ export function UnifiedAssistantChat({
             aria-label={placeholder || 'Message the assistant'}
             rows={2}
           />
-          {/* Bottom toolbar: attach + skills on the left, send on the right. */}
-          <div className="uac-composer-tools">
-            {canAttach && (
-              <button
-                type="button"
-                className={`uac-tool-btn${attachMenuOpen ? ' active' : ''}`}
-                onClick={onAttachClick}
-                disabled={attachBusy}
-                aria-label="Attach a document"
-                aria-haspopup={activeScope.matterEntityId ? 'menu' : undefined}
-                aria-expanded={activeScope.matterEntityId ? attachMenuOpen : undefined}
-                title="Attach a document"
-              >
-                {attachBusy ? <span className="spinner" /> : <PaperclipIcon size={16} />}
-              </button>
-            )}
-            {isClaude && (
-              <button
-                type="button"
-                className={`uac-tool-btn${skillMenuOpen ? ' active' : ''}`}
-                onClick={() => setSkillMenuOpen((o) => !o)}
-                aria-label="Legal skills"
-                title="Legal skills — or type / in an empty message"
-              >
-                <SparklesIcon size={16} />
-              </button>
-            )}
+          <div className="uac-composer-bar">
+            <div className="uac-composer-tools">
+              {canAttach && (
+                <button
+                  type="button"
+                  className={`uac-tool-btn${attachMenuOpen ? ' active' : ''}`}
+                  onClick={onAttachClick}
+                  disabled={attachBusy}
+                  aria-label="Attach a document"
+                  aria-haspopup={activeScope.matterEntityId ? 'menu' : undefined}
+                  aria-expanded={activeScope.matterEntityId ? attachMenuOpen : undefined}
+                  title="Attach a document"
+                >
+                  {attachBusy ? <span className="spinner" /> : <PaperclipIcon size={16} />}
+                </button>
+              )}
+              {isClaude && (
+                <button
+                  type="button"
+                  className={`uac-tool-btn${skillMenuOpen ? ' active' : ''}`}
+                  onClick={() => setSkillMenuOpen((o) => !o)}
+                  aria-label="Legal skills"
+                  title="Legal skills — or type / in an empty message"
+                >
+                  <SparklesIcon size={16} />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              className="uac-send"
+              onClick={() => void send()}
+              disabled={busy || !input.trim() || !modelId}
+              aria-label="Send"
+            >
+              <SendIcon size={16} />
+            </button>
           </div>
-          <button
-            type="button"
-            className="uac-send"
-            onClick={() => void send()}
-            disabled={busy || !input.trim() || !modelId}
-            aria-label="Send"
-          >
-            <SendIcon size={16} />
-          </button>
         </div>
         <input
           ref={fileInputRef}

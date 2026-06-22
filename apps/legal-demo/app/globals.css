@@ -5441,22 +5441,79 @@ button.danger.outline:hover:not(:disabled) {
 }
 
 /* Composer */
+/* The composer is now a bordered box that stacks the textarea over a real
+   toolbar row (column), so the toolbar never overlays the input text. */
 .uac-composer {
   position: relative;
   display: flex;
+  flex-direction: column;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition);
+}
+.uac-composer:focus-within {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.13);
 }
 .uac-composer textarea {
-  flex: 1;
+  border: none;
+  background: transparent;
+  min-height: 2.6rem;
+  max-height: 200px;
+  overflow-y: auto;
   resize: none;
+  width: 100%;
   font-family: inherit;
   font-size: 0.88rem;
-  padding: 0.5rem 2.6rem 0.5rem 0.6rem;
+  padding: 0.55rem 0.6rem 0.2rem;
 }
-/* Gold send glyph that sits INSIDE the composer's bottom-right corner. */
+.uac-composer textarea:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+}
+/* Bottom toolbar ROW: tools (attach/skills) on the left, send on the right —
+   in normal flow below the textarea, so input text can never flow under it. */
+.uac-composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.1rem 0.4rem 0.3rem;
+}
+.uac-composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+.uac-tool-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.uac-tool-btn:hover:not(:disabled),
+.uac-tool-btn.active {
+  background: rgba(127, 127, 127, 0.12);
+  color: var(--fg);
+}
+.uac-tool-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* Gold send glyph, now in-flow at the right of the toolbar row. */
 .uac-send {
-  position: absolute;
-  right: 0.4rem;
-  bottom: 0.4rem;
   width: 30px;
   height: 30px;
   display: grid;
@@ -5485,49 +5542,6 @@ button.danger.outline:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-}
-/* Reserve room for the paperclip at bottom-left when it's shown (Claude only). */
-/* Reserve room at bottom-left for the tool cluster (1 icon = ~2.6rem, 2 = ~4.5rem). */
-.uac-composer.has-attach textarea,
-.uac-composer.has-skills textarea {
-  padding-left: 2.6rem;
-}
-.uac-composer.has-attach.has-skills textarea {
-  padding-left: 4.5rem;
-}
-/* Bottom toolbar: attach + skills glyphs in the composer's bottom-left corner,
-   mirroring the send glyph at bottom-right. */
-.uac-composer-tools {
-  position: absolute;
-  left: 0.4rem;
-  bottom: 0.4rem;
-  display: flex;
-  align-items: center;
-  gap: 0.1rem;
-}
-.uac-tool-btn {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition:
-    background 0.12s ease,
-    color 0.12s ease;
-}
-.uac-tool-btn:hover:not(:disabled),
-.uac-tool-btn.active {
-  background: var(--surface);
-  color: var(--fg);
-}
-.uac-tool-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 
 /* Source menu (upload / matter document) above the paperclip. */
