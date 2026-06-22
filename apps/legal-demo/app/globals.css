@@ -7945,3 +7945,61 @@ input[type='number'] {
   font: inherit;
   resize: vertical;
 }
+
+/* Matter tasks (migration 0084) — add/edit form + the task list. */
+.task-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  margin: var(--space-3) 0;
+}
+.task-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1 1 9rem;
+  font-size: var(--text-sm);
+}
+.task-field > span {
+  color: var(--muted);
+}
+.task-form-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.task-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+.task-status-select {
+  max-width: 9.5rem;
+}
+.task-title {
+  font-weight: var(--weight-medium);
+}
+.task-archive {
+  color: var(--muted);
+  padding: 0.1rem 0.55rem;
+  line-height: 1;
+}
+.task-archive:hover:not(:disabled) {
+  color: var(--danger);
+}
