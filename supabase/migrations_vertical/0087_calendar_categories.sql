@@ -1,5 +1,8 @@
 -- =============================================================================
--- Vertical migration 0083: calendar categories / call types (color-coding)
+-- Vertical migration 0087: calendar categories / call types (color-coding)
+-- (Renumbered 0083→0087: 0083 taken by skill_library on main; 0084-0086 taken by
+--  the NC-SMLLC service migrations in the prod ledger. Id block 1011-708 /
+--  1013-705,706 verified free on prod.)
 --
 -- Beta feedback: the attorney wants to color-code calendar events by call type
 -- and configure the categories themselves. Two pieces, both schema-as-data:
