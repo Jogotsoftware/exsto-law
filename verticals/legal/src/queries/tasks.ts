@@ -101,7 +101,10 @@ function mapTask(r: TaskRow): Task {
 
 // All active tasks on a matter, newest-first. The matter scope is the `task_of`
 // relationship, so a task always belongs to exactly one matter.
-export async function listTasksByMatter(ctx: ActionContext, matterEntityId: string): Promise<Task[]> {
+export async function listTasksByMatter(
+  ctx: ActionContext,
+  matterEntityId: string,
+): Promise<Task[]> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<TaskRow>(
       `${TASK_SELECT}

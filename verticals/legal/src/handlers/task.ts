@@ -17,7 +17,14 @@ const MODES = new Set<string>(TASK_BILLING_MODES)
 
 async function setAttr(
   client: DbClient,
-  args: { tenantId: string; actionId: string; actorId: string; entityId: string; kind: string; value: unknown },
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    entityId: string
+    kind: string
+    value: unknown
+  },
 ): Promise<void> {
   const akId = await lookupKindId(client, 'attribute_kind_definition', args.tenantId, args.kind)
   await insertAttribute(client, {
@@ -87,11 +94,21 @@ registerActionHandler('legal.task.create', async (ctx, client, payload, actionId
   const mode = p.billing_mode ?? 'none'
   if (!MODES.has(mode)) throw new Error(`Unknown billing mode "${mode}".`)
 
-  const taskKindId = await lookupKindId(client, 'entity_kind_definition', ctx.tenantId, TASK_ENTITY_KIND)
+  const taskKindId = await lookupKindId(
+    client,
+    'entity_kind_definition',
+    ctx.tenantId,
+    TASK_ENTITY_KIND,
+  )
   const taskId = await insertEntity(client, ctx.tenantId, actionId, taskKindId, title, {})
 
   // Link the task to its matter.
-  const relKindId = await lookupKindId(client, 'relationship_kind_definition', ctx.tenantId, 'task_of')
+  const relKindId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    ctx.tenantId,
+    'task_of',
+  )
   await insertRelationship(client, {
     tenantId: ctx.tenantId,
     actionId,
@@ -113,7 +130,14 @@ registerActionHandler('legal.task.create', async (ctx, client, payload, actionId
     attrs.push({ kind: 'task_assignee_actor_id', value: String(p.assignee_actor_id).trim() })
   }
   for (const a of attrs) {
-    await setAttr(client, { tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, entityId: taskId, kind: a.kind, value: a.value })
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: taskId,
+      kind: a.kind,
+      value: a.value,
+    })
   }
 
   return { taskId }
@@ -161,7 +185,14 @@ registerActionHandler('legal.task.update', async (ctx, client, payload, actionId
   }
 
   for (const u of updates) {
-    await setAttr(client, { tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, entityId: p.task_id, kind: u.kind, value: u.value })
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: p.task_id,
+      kind: u.kind,
+      value: u.value,
+    })
   }
 
   return { taskId: p.task_id, updated: updates.map((u) => u.kind) }

@@ -20,8 +20,14 @@ const COST_PROPS = {
     enum: ['none', 'hours', 'fixed'],
     description: 'How the task bills when done. hours needs `hours`; fixed needs `feeAmount`.',
   },
-  hours: { type: 'string' as const, description: 'Billable hours (e.g. "2.5") when billingMode=hours.' },
-  feeAmount: { type: 'string' as const, description: 'Flat fee (e.g. "350") when billingMode=fixed.' },
+  hours: {
+    type: 'string' as const,
+    description: 'Billable hours (e.g. "2.5") when billingMode=hours.',
+  },
+  feeAmount: {
+    type: 'string' as const,
+    description: 'Flat fee (e.g. "350") when billingMode=fixed.',
+  },
 }
 
 const listTool: Tool<{ matterEntityId: string }, { tasks: Task[] }> = {
@@ -34,7 +40,9 @@ const listTool: Tool<{ matterEntityId: string }, { tasks: Task[] }> = {
     required: ['matterEntityId'],
     additionalProperties: false,
   },
-  handler: async (ctx: ActionContext, input) => ({ tasks: await listTasksByMatter(ctx, input.matterEntityId) }),
+  handler: async (ctx: ActionContext, input) => ({
+    tasks: await listTasksByMatter(ctx, input.matterEntityId),
+  }),
 }
 
 const createTool: Tool<CreateTaskInput, { task: Task }> = {
