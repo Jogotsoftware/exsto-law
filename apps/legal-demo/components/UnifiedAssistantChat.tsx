@@ -18,6 +18,7 @@ import {
   XIcon,
   CopyIcon,
   CheckIcon,
+  LockIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -258,6 +259,10 @@ export function UnifiedAssistantChat({
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
   const [workRate, setWorkRate] = useState<WorkRate>('balanced')
   const [webSearch, setWebSearch] = useState(false)
+  // Secure mode: a lock the attorney sets before pasting sensitive matter/client
+  // info — forces web search OFF for the turn so that context can't be put into an
+  // outbound search (beta ask). Stays on until toggled off.
+  const [secureMode, setSecureMode] = useState(false)
   const [useContext, setUseContext] = useState(true)
   const [contextDepth, setContextDepth] = useState<ContextDepth>('balanced')
 
@@ -614,7 +619,9 @@ export function UnifiedAssistantChat({
           history,
           ...scope,
           workRate,
-          webSearch,
+          // Secure mode hard-forces web search off so sensitive context can't be
+          // routed into an outbound search, regardless of the web-search setting.
+          webSearch: secureMode ? false : webSearch,
           // Only meaningful when scoped; the toggle is hidden otherwise.
           useContext: scoped ? useContext : undefined,
           // Depth only matters when grounded in a matter/client.
@@ -1337,6 +1344,22 @@ export function UnifiedAssistantChat({
                   title="Legal skills — or type / in an empty message"
                 >
                   <SparklesIcon size={16} />
+                </button>
+              )}
+              {isClaude && (
+                <button
+                  type="button"
+                  className={`uac-tool-btn${secureMode ? ' secure-on' : ''}`}
+                  onClick={() => setSecureMode((v) => !v)}
+                  aria-label={secureMode ? 'Secure mode on' : 'Secure mode off'}
+                  aria-pressed={secureMode}
+                  title={
+                    secureMode
+                      ? 'Secure mode ON — this context will not be used for web search'
+                      : 'Secure mode — keep sensitive matter/client context out of web search'
+                  }
+                >
+                  <LockIcon size={16} />
                 </button>
               )}
             </div>
