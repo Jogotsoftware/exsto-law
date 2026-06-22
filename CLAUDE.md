@@ -86,3 +86,10 @@ The repo is set up to work with Anthropic's Claude Code plus two community plugi
 Project-specific subagents live in `.claude/agents/`. The first one is `invariant-auditor`. Add new ones only when their workflow has been done manually enough times to encode it.
 
 Project-specific skills live in `.claude/skills/` — the substrate skill library every clone inherits (`.claude/skills/MANIFEST.md` is the index). Consult the relevant `exsto-*` skill before substrate work: schema changes (`exsto-substrate-migration`), new concepts (`exsto-add-kind`), MCP tools (`exsto-mcp-tool`), reads (`exsto-query-substrate`), AI actions (`exsto-ai-operation`), tenancy/verification (`exsto-verify-tenancy`), a new tenant (`exsto-bootstrap-tenant`), a new vertical (`exsto-new-vertical`). Standing up or shaping a new platform: `newplatform`, `starterprompt`.
+
+## Beta feedback
+
+User beta feedback (legal clone) is stored as `assistant.turn` events with `kind = feedback` in the substrate; each carries the stable event id shown to the submitter as their reference id. Whenever a commit completes — fully or partially — a beta-feedback item, **two things are required**:
+
+1. **Reference the feedback in the commit message.** Add a `Beta-Feedback:` trailer listing the `assistant.turn` event id(s) the commit addresses, e.g. `Beta-Feedback: a436b8c6, 86bc2170` (short ids are fine). This makes the code↔feedback link greppable forever (`git log --grep=<id>`), so a future session can tell what actually shipped from git history instead of re-deriving it from PR titles. If a commit only partially addresses an item, say so (`Beta-Feedback: <id> (partial)`).
+2. **Resolve it through the action layer, same session.** Call `legal.assistant.feedback_resolve` (MCP) / `resolveAssistantFeedback` — never a raw INSERT into `event` (hard rules 1 & 3). It records an append-only `assistant.feedback_resolved` event and pings the submitter's nav bell. Resolution is irreversible (there is no un-resolve), so only resolve what you are confident shipped; use a terse, code-free `summary` (a few words — the bell truncates ~35 chars).
