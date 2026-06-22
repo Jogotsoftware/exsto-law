@@ -12,8 +12,10 @@ const INTRO_CONTACT = 'How can I serve you, Counselor? Grounded in the client yo
 // The attorney's preferred panel size, remembered across sessions (beta ask:
 // "resizable, larger default"). Per-browser UI state, so localStorage.
 const PANEL_SIZE_KEY = 'exsto.assistant.panelSize'
-const MIN_W = 320
-const MIN_H = 380
+// Floor the resize near the default size (≈440×660) — the attorney can grow the
+// panel but never shrink it much below where it starts (beta ask).
+const MIN_W = 420
+const MIN_H = 600
 
 // Derive the assistant's context from the page you're on, so the one global chat
 // follows you: open it on a matter and it's grounded in that matter; on a contact,
