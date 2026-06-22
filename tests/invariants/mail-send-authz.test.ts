@@ -1,4 +1,4 @@
-// PR B (0087) — matter ownership + send authorization. An attorney may send
+// PR B (0088) — matter ownership + send authorization. An attorney may send
 // client mail / signature requests on a matter only if they OWN it, are GRANTED
 // access, or are a firm admin; a matter with no owner is firm-shared (any
 // attorney may send). Authorization is enforced in the operation-core API
@@ -35,7 +35,7 @@ const OWNER_ACTOR = '00000000-0000-0000-0001-000000000002' // seeded attorney
 const PUBLIC_INTAKE_ACTOR = '00000000-0000-0000-0001-000000000005'
 const ownerCtx = { tenantId: TENANT, actorId: OWNER_ACTOR }
 
-run('mail send authorization — matter ownership (0087)', { timeout: 90_000 }, () => {
+run('mail send authorization — matter ownership (0088)', { timeout: 90_000 }, () => {
   const db = new pg.Pool({ connectionString: url })
 
   const otherActor = randomUUID() // a real attorney who is NOT this matter's owner
@@ -75,7 +75,7 @@ run('mail send authorization — matter ownership (0087)', { timeout: 90_000 }, 
   }
 
   beforeAll(async () => {
-    // An attorney-created matter is owner-stamped to its creator (0087).
+    // An attorney-created matter is owner-stamped to its creator (0088).
     const created = await createMatter(ownerCtx, {
       matterNumber: `PRB-${randomUUID().slice(0, 8)}`,
       clientFullName: 'PR-B Client',
@@ -155,7 +155,7 @@ run('mail send authorization — matter ownership (0087)', { timeout: 90_000 }, 
   })
 
   it('an UNOWNED matter (legacy / public-booking) is firm-shared: any attorney may send', async () => {
-    // Insert a bare matter entity with NO matter_owner attribute (mimics a pre-0087
+    // Insert a bare matter entity with NO matter_owner attribute (mimics a pre-0088
     // / public-booking matter), bypassing the create handlers.
     const bareMatter = randomUUID()
     const kind = await db.query<{ id: string }>(

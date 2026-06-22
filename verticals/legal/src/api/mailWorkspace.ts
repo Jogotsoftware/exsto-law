@@ -253,7 +253,7 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
   if (!clientParticipant) {
     throw new Error('Refusing to reply: thread has no known client participant.')
   }
-  // Send authz (0087): the reply goes to clientParticipant, so authorize the
+  // Send authz (0088): the reply goes to clientParticipant, so authorize the
   // sender against THAT recipient's matters specifically — NOT the union of every
   // participant's matters (a thread can mix clients from different matters; the
   // sender must be authorized on a matter the actual recipient belongs to). An
@@ -350,7 +350,7 @@ export async function enqueueClientEmail(
       `Refusing to send: ${input.to} is not a known client contact (client-mail-only discipline).`,
     )
   }
-  // Send authz (0087): authorize the sender on the recipient's matters BEFORE
+  // Send authz (0088): authorize the sender on the recipient's matters BEFORE
   // sending, and attribute the message to a matter they may send on (preferring an
   // explicitly supplied one). An attorney may send only on matters they own, are
   // granted, or as a firm admin.

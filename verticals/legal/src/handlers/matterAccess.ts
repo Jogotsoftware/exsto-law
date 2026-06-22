@@ -1,4 +1,4 @@
-// Matter ownership / send-access handlers (0087, PR B).
+// Matter ownership / send-access handlers (0088, PR B).
 //   legal.matter.set_owner    — set/transfer the matter_owner attribute.
 //   legal.matter.grant_access — replace the matter_access_actor_ids array.
 //

@@ -28,7 +28,7 @@ registerActionHandler('legal.matter.create', async (ctx, client, payload, action
     { kind: 'client_name', value: parsed.client_full_name },
     { kind: 'matter_status', value: 'inquiry' },
     { kind: 'matter_summary', value: parsed.summary },
-    // Send-authz owner (0087): the actor creating the matter owns it. See 0087.
+    // Send-authz owner (0088): the actor creating the matter owns it. See 0088.
     { kind: 'matter_owner', value: ctx.actorId },
   ]
   for (const a of matterAttrs) {

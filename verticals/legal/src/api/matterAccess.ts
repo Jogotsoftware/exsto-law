@@ -1,4 +1,4 @@
-// Matter ownership + send authorization (0087, PR B) — operation-core API.
+// Matter ownership + send authorization (0088, PR B) — operation-core API.
 //
 // An attorney may send CLIENT email (compose / reply) and signature requests on a
 // matter only if they OWN it, are GRANTED access, or are a firm admin. Ownership
@@ -9,7 +9,7 @@
 // The send guard (assertCanSendOnMatter) lives here so every adapter — the mail
 // MCP tools, the esign send, a future REST/UI — inherits it from one place. A
 // matter with NO owner is treated as firm-shared (any attorney may send): this
-// introduces ownership without regressing pre-0087 matters; enforcement bites the
+// introduces ownership without regressing pre-0088 matters; enforcement bites the
 // moment a matter has an owner, which every newly-created matter does.
 //
 // Read note: the owner/grant read is AUTHORITATIVE (withSuperuser, tenant-filtered),

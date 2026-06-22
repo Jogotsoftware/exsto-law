@@ -122,7 +122,7 @@ export async function postAttorneyMessage(
   const body = (input.body ?? '').trim()
   if (!body) throw new Error('Message body is required.')
 
-  // Send authz (0087): posting an attorney reply emails the client (a client-facing
+  // Send authz (0088): posting an attorney reply emails the client (a client-facing
   // send), so only the matter owner / a granted attorney / a firm admin may do it.
   await assertCanSendOnMatter(ctx, input.matterEntityId)
 

@@ -276,7 +276,7 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
   // ctx.actorId is the public intake actor, not an attorney — so the matter starts
   // unowned (firm-shared: any attorney may send) until an attorney is assigned via
   // legal.matter.set_owner. Attorney-created matters (legal.matter.create) ARE
-  // owner-stamped at creation (0087, PR B).
+  // owner-stamped at creation (0088, PR B).
   if (p.attribution_source) {
     matterAttrs.push({ kind: 'attribution_source', value: p.attribution_source })
   }

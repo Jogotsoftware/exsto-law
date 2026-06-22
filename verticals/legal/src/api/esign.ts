@@ -102,7 +102,7 @@ export async function sendForSignature(
   const draft = await getDraftVersion(ctx, input.documentVersionId)
   if (!draft) throw new Error(`Document version not found: ${input.documentVersionId}`)
 
-  // Send authz (0087, PR B): dispatching a signature request emails the matter's
+  // Send authz (0088, PR B): dispatching a signature request emails the matter's
   // client, so only the matter owner / a granted attorney / a firm admin may do it.
   // (Matterless drafts have no ownership to gate; they fall through.)
   if (draft.matterEntityId) await assertCanSendOnMatter(ctx, draft.matterEntityId)

@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0087: matter ownership + send authorization (PR B)
+-- Vertical migration 0088: matter ownership + send authorization (PR B)
 --
 -- Mail-send permissions: an attorney may only send CLIENT email (compose / reply)
 -- and signature requests on matters they OWN, are GRANTED access to, or as a firm
@@ -17,7 +17,7 @@
 -- Enforcement lives in the operation-core API (assertCanSendOnMatter), NOT in
 -- RLS: the DB RBAC floor (0078) gates by action KIND only and cannot express
 -- per-matter ownership (every matter is kind=matter). A matter with NO owner set
--- (legacy / pre-0087) is treated as firm-shared — any attorney may send — so this
+-- (legacy / pre-0088) is treated as firm-shared — any attorney may send — so this
 -- introduces ownership without regressing existing matters; enforcement bites the
 -- moment a matter has an owner.
 --
@@ -32,9 +32,12 @@
 -- email index), so its guard already bites on any owned matter today.
 --
 -- Data-only / additive / idempotent (ON CONFLICT DO NOTHING). Migration number
--- 0087 chosen after confirming 0084 (task_primitive), 0085 (service_billing_mode)
--- and 0086 (engagement_status) are already applied to prod by parallel branches.
--- Ids verified free on prod: attribute 1011-…709/…70a, actions 1013-…707/…708.
+-- 0088 = next free across origin/main (max 0087 = calendar_categories, PR A) AND
+-- prod (0084 task_primitive / 0085 service_billing_mode / 0086 engagement_status;
+-- 0087 not yet applied). Parallel branches churn these numbers — if a collision
+-- appears at merge, bump the number: the KIND IDS are the real uniqueness contract
+-- and are verified free on prod (attribute 1011-…709/…70a, actions 1013-…707/…708;
+-- distinct from calendar_categories' 1011-…708 / 1013-…705/…706).
 -- =============================================================================
 
 SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', false);
