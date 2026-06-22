@@ -7175,6 +7175,46 @@ input[type='number'] {
   margin: 1.5em 0;
 }
 
+/* Review page (beta feedback c16aaab6) — a styled header/back bar and an
+   on-screen letter that reads like the exported PDF/Word document. The `.doc-paper`
+   modifier is scoped to the review screen so the shared `.doc-rendered` used by the
+   public draft view and the e-signature pages is unaffected. */
+.review-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.review-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.85rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+.review-back:hover {
+  border-color: var(--accent);
+  color: var(--accent-attorney);
+}
+.doc-rendered.doc-paper {
+  font-family: var(--font-serif, Georgia, 'Times New Roman', serif);
+  background: #fff;
+  color: var(--fg);
+  max-width: 7.5in;
+  margin-inline: auto;
+  padding: 2.5rem 3rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  box-shadow: var(--shadow-md);
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    Questionnaire editor (per-service builder) — card-based redesign.
    Each section is a surface card; each question is a nested sub-card. Replaces
