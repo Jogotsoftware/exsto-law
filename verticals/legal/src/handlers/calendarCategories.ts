@@ -27,61 +27,64 @@ async function currentActive(client: DbClient, tenantId: string): Promise<Curren
   return res.rows[0] ?? null
 }
 
-registerActionHandler('legal.calendar.categories.update', async (ctx, client, payload, actionId) => {
-  // Re-normalize in the handler too (a direct MCP call bypasses the api helper).
-  const categories = normalizeCalendarCategories(
-    (payload as { categories?: unknown }).categories ?? payload,
-  )
-
-  const prior = await currentActive(client, ctx.tenantId)
-  const nextVersion = prior ? prior.version + 1 : 1
-
-  if (prior) {
-    await client.query(
-      `UPDATE workflow_definition SET valid_to = now(), status = 'deprecated'
-        WHERE tenant_id = $1 AND id = $2`,
-      [ctx.tenantId, prior.id],
+registerActionHandler(
+  'legal.calendar.categories.update',
+  async (ctx, client, payload, actionId) => {
+    // Re-normalize in the handler too (a direct MCP call bypasses the api helper).
+    const categories = normalizeCalendarCategories(
+      (payload as { categories?: unknown }).categories ?? payload,
     )
-  }
 
-  const newId = randomUUID()
-  await client.query(
-    `INSERT INTO workflow_definition
+    const prior = await currentActive(client, ctx.tenantId)
+    const nextVersion = prior ? prior.version + 1 : 1
+
+    if (prior) {
+      await client.query(
+        `UPDATE workflow_definition SET valid_to = now(), status = 'deprecated'
+        WHERE tenant_id = $1 AND id = $2`,
+        [ctx.tenantId, prior.id],
+      )
+    }
+
+    const newId = randomUUID()
+    await client.query(
+      `INSERT INTO workflow_definition
        (id, tenant_id, action_id, kind_name, display_name, description,
         states, transitions, participating_entity_kinds, version, status)
      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,'active')`,
-    [
-      newId,
-      ctx.tenantId,
-      actionId,
-      KIND,
-      'Firm calendar categories',
-      'Singleton firm-level calendar category palette ({key,label,color}[]) for color-coding call types.',
-      JSON.stringify([]),
-      JSON.stringify({ categories }),
-      JSON.stringify([]),
-      nextVersion,
-    ],
-  )
+      [
+        newId,
+        ctx.tenantId,
+        actionId,
+        KIND,
+        'Firm calendar categories',
+        'Singleton firm-level calendar category palette ({key,label,color}[]) for color-coding call types.',
+        JSON.stringify([]),
+        JSON.stringify({ categories }),
+        JSON.stringify([]),
+        nextVersion,
+      ],
+    )
 
-  await client.query(
-    `INSERT INTO configuration_change
+    await client.query(
+      `INSERT INTO configuration_change
        (tenant_id, action_id, target_table, target_id, change_kind,
         before_value, after_value, authoring_actor_id)
      VALUES ($1, $2, 'workflow_definition', $3, $4, $5::jsonb, $6::jsonb, $7)`,
-    [
-      ctx.tenantId,
-      actionId,
-      newId,
-      prior ? 'update' : 'create',
-      prior ? JSON.stringify({ version: prior.version, transitions: prior.transitions }) : null,
-      JSON.stringify({ kind_name: KIND, version: nextVersion, categories }),
-      ctx.actorId,
-    ],
-  )
+      [
+        ctx.tenantId,
+        actionId,
+        newId,
+        prior ? 'update' : 'create',
+        prior ? JSON.stringify({ version: prior.version, transitions: prior.transitions }) : null,
+        JSON.stringify({ kind_name: KIND, version: nextVersion, categories }),
+        ctx.actorId,
+      ],
+    )
 
-  return { workflowDefinitionId: newId, version: nextVersion, categories }
-})
+    return { workflowDefinitionId: newId, version: nextVersion, categories }
+  },
+)
 
 registerActionHandler('legal.booking.categorize', async (ctx, client, payload, actionId) => {
   const p = payload as { matter_entity_id: string; category_key: string }

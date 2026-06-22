@@ -43,7 +43,10 @@ registerTool({
     additionalProperties: false,
   },
   handler: async (ctx: ActionContext, input) => ({
-    categories: await updateCalendarCategories(ctx, (input as { categories: CalendarCategory[] }).categories),
+    categories: await updateCalendarCategories(
+      ctx,
+      (input as { categories: CalendarCategory[] }).categories,
+    ),
   }),
 } satisfies Tool<{ categories: CalendarCategory[] }, { categories: CalendarCategory[] }>)
 
@@ -57,7 +60,10 @@ registerTool({
     type: 'object',
     properties: {
       matterEntityId: { type: 'string' },
-      categoryKey: { type: 'string', description: 'A firm.calendar_categories palette key, or "" to clear.' },
+      categoryKey: {
+        type: 'string',
+        description: 'A firm.calendar_categories palette key, or "" to clear.',
+      },
     },
     required: ['matterEntityId', 'categoryKey'],
     additionalProperties: false,
@@ -66,4 +72,7 @@ registerTool({
     const i = input as { matterEntityId: string; categoryKey: string }
     return categorizeBooking(ctx, { matterEntityId: i.matterEntityId, categoryKey: i.categoryKey })
   },
-} satisfies Tool<{ matterEntityId: string; categoryKey: string }, { matterEntityId: string; categoryKey: string }>)
+} satisfies Tool<
+  { matterEntityId: string; categoryKey: string },
+  { matterEntityId: string; categoryKey: string }
+>)

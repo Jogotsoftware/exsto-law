@@ -36,11 +36,18 @@ export function normalizeCalendarCategories(stored: unknown): CalendarCategory[]
   const out: CalendarCategory[] = []
   for (const item of raw) {
     const o = item as Partial<CalendarCategory>
-    const key = typeof o?.key === 'string' ? o.key.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_') : ''
+    const key =
+      typeof o?.key === 'string'
+        ? o.key
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9_]/g, '_')
+        : ''
     if (!key || seen.has(key)) continue
     seen.add(key)
     const label = typeof o?.label === 'string' && o.label.trim() ? o.label.trim() : key
-    const color = typeof o?.color === 'string' && HEX.test(o.color.trim()) ? o.color.trim() : '#64748b'
+    const color =
+      typeof o?.color === 'string' && HEX.test(o.color.trim()) ? o.color.trim() : '#64748b'
     out.push({ key, label, color })
   }
   return out.length ? out : DEFAULT_CALENDAR_CATEGORIES
