@@ -13,15 +13,51 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, relative } from 'node:path'
 
-import { closeDbPool } from '@exsto/shared'
+import { closeDbPool, withSuperuser } from '@exsto/shared'
 import type { ActionContext } from '@exsto/substrate'
 import { upsertSkill, type UpsertSkillInput } from '@exsto/legal'
 
-const TENANT_ID = '00000000-0000-0000-0000-000000000001'
-const ATTORNEY_ACTOR_ID = '00000000-0000-0000-0001-000000000002'
-const attorneyCtx: ActionContext = { tenantId: TENANT_ID, actorId: ATTORNEY_ACTOR_ID }
-
 const here = dirname(fileURLToPath(import.meta.url))
+
+// Every active tenant gets the skills (not just tenant zero). Each is seeded
+// through the action layer under its own system actor.
+interface SeedTarget {
+  tenantId: string
+  name: string
+  actorId: string
+  hasSkillKind: boolean
+}
+
+// Resolve every active tenant + its system actor + whether the skill kind has
+// been provisioned for it (migration 0083 backfills the kind to all tenants).
+// Superuser read — this crosses tenants, so RLS must be bypassed deliberately.
+async function resolveTargets(): Promise<SeedTarget[]> {
+  return withSuperuser(async (client) => {
+    const res = await client.query<{
+      tenant_id: string
+      name: string
+      actor_id: string | null
+      has_skill_kind: boolean
+    }>(
+      `SELECT t.id AS tenant_id, t.name,
+              (SELECT a.id FROM actor a
+                 WHERE a.tenant_id = t.id AND a.actor_type = 'system'
+                 ORDER BY a.created_at LIMIT 1) AS actor_id,
+              EXISTS (SELECT 1 FROM entity_kind_definition e
+                        WHERE e.tenant_id = t.id AND e.kind_name = 'skill' AND e.status = 'active')
+                AS has_skill_kind
+         FROM tenant t
+        WHERE t.status = 'active'
+        ORDER BY t.id`,
+    )
+    return res.rows.map((r) => ({
+      tenantId: r.tenant_id,
+      name: r.name,
+      actorId: r.actor_id ?? '',
+      hasSkillKind: r.has_skill_kind,
+    }))
+  })
+}
 
 // Recursively collect every .md file under the skills directory (skipping this
 // script's own dir markers). Skill content only — frontmatter + body.
@@ -64,19 +100,11 @@ function parseSkillFile(text: string, file: string): UpsertSkillInput {
   }
 }
 
-async function main(): Promise<void> {
-  if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL is required (set it in .env.local).')
-  }
-  const files = findMarkdown(here)
-  if (!files.length) {
-    console.log('No skill markdown files found under verticals/legal/skills/.')
-    return
-  }
-  console.log(`▸ Seeding ${files.length} skill(s) into tenant ${TENANT_ID}…`)
-  let ok = 0
-  const bySlug = new Set<string>()
-  for (const file of files.sort()) {
+// Parse every skill file once (deduped by slug) into upsert inputs.
+function parseAllSkills(): UpsertSkillInput[] {
+  const out: UpsertSkillInput[] = []
+  const seen = new Set<string>()
+  for (const file of findMarkdown(here).sort()) {
     const rel = relative(here, file)
     let input: UpsertSkillInput
     try {
@@ -85,20 +113,55 @@ async function main(): Promise<void> {
       console.error(`  ✗ ${rel}: ${err instanceof Error ? err.message : String(err)}`)
       continue
     }
-    if (bySlug.has(input.slug)) {
+    if (seen.has(input.slug)) {
       console.error(`  ✗ ${rel}: duplicate slug "${input.slug}" — skipped.`)
       continue
     }
-    bySlug.add(input.slug)
-    try {
-      await upsertSkill(attorneyCtx, input)
-      ok++
-      console.log(`  ✓ ${input.slug}  (${input.practiceArea})`)
-    } catch (err) {
-      console.error(`  ✗ ${input.slug}: ${err instanceof Error ? err.message : String(err)}`)
-    }
+    seen.add(input.slug)
+    out.push(input)
   }
-  console.log(`✓ Seeded ${ok}/${files.length} skill(s).`)
+  return out
+}
+
+async function main(): Promise<void> {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is required (set it in .env.local).')
+  }
+  const skills = parseAllSkills()
+  if (!skills.length) {
+    console.log('No skill markdown files found under verticals/legal/skills/.')
+    return
+  }
+
+  const targets = await resolveTargets()
+  console.log(`▸ Seeding ${skills.length} skill(s) into ${targets.length} active tenant(s)…`)
+
+  let seededTenants = 0
+  for (const t of targets) {
+    if (!t.hasSkillKind) {
+      console.warn(
+        `  ⚠ ${t.name} (${t.tenantId}): skill kind not provisioned — run \`pnpm migrate:vertical\` first. Skipped.`,
+      )
+      continue
+    }
+    if (!t.actorId) {
+      console.warn(`  ⚠ ${t.name} (${t.tenantId}): no system actor found. Skipped.`)
+      continue
+    }
+    const ctx: ActionContext = { tenantId: t.tenantId, actorId: t.actorId }
+    let ok = 0
+    for (const input of skills) {
+      try {
+        await upsertSkill(ctx, input)
+        ok++
+      } catch (err) {
+        console.error(`  ✗ [${t.name}] ${input.slug}: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    seededTenants++
+    console.log(`  ✓ ${t.name}: ${ok}/${skills.length} skill(s)`)
+  }
+  console.log(`✓ Seeded ${skills.length} skill(s) across ${seededTenants} tenant(s).`)
 }
 
 main()
