@@ -4,7 +4,8 @@ import { use, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { downloadAsPdf, downloadAsWord, renderMarkdown, shareUrlFor } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 
 // Step-through review session (started from the queue's "Begin review"): the ordered
@@ -303,7 +304,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       <div className="split-review">
         <div
           className="doc-rendered doc-paper"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(draft.bodyMarkdown) }}
+          dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
         />
 
         <div className="trace-rail">

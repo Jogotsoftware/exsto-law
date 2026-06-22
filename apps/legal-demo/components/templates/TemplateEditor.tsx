@@ -3,14 +3,24 @@
 import { useEditor, EditorContent, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
+import { TextStyle, FontFamily, FontSize } from '@tiptap/extension-text-style'
+import TextAlign from '@tiptap/extension-text-align'
 import { useEffect, useRef, type MutableRefObject, type ReactNode } from 'react'
 import { TemplateVariable } from './TemplateVariableNode'
+import { SignatureLine } from './SignatureLineNode'
+import { useFitToWidth } from '@/lib/useFitToWidth'
 import {
   BoldIcon,
   ItalicIcon,
+  UnderlineIcon,
   ListIcon,
   ListOrderedIcon,
   QuoteIcon,
+  AlignLeftIcon,
+  AlignCenterIcon,
+  AlignRightIcon,
+  AlignJustifyIcon,
+  SignatureIcon,
   RedoIcon,
   UndoIcon,
 } from '@/components/icons'
@@ -31,6 +41,21 @@ interface Props {
   editorRef?: MutableRefObject<TemplateEditorHandle | null>
 }
 
+// Word-style font choices. Values are full CSS stacks (so the document renders
+// with a sensible fallback) and validate against the document sanitizer's
+// font-family allowlist (letters/spaces/commas/quotes/hyphens only — no url()).
+const FONT_FAMILIES: Array<{ label: string; value: string }> = [
+  { label: 'Default (Garamond)', value: '' },
+  { label: 'Times New Roman', value: "'Times New Roman', Times, serif" },
+  { label: 'Georgia', value: 'Georgia, serif' },
+  { label: 'Arial', value: 'Arial, Helvetica, sans-serif' },
+  { label: 'Calibri', value: "Calibri, 'Segoe UI', sans-serif" },
+  { label: 'Courier New', value: "'Courier New', monospace" },
+]
+
+// Point sizes offered in the size picker. Stored as e.g. font-size:12pt.
+const FONT_SIZES = ['10', '11', '12', '14', '16', '18', '24', '36']
+
 export function TemplateEditor({ initialHtml, placeholder, onChange, editorRef }: Props) {
   const editor = useEditor({
     extensions: [
@@ -40,7 +65,15 @@ export function TemplateEditor({ initialHtml, placeholder, onChange, editorRef }
       Placeholder.configure({
         placeholder: placeholder ?? 'Start drafting…',
       }),
+      // Per-run typography. FontFamily + FontSize attach to TextStyle, so it must
+      // be present. They serialize to <span style="font-family|font-size"> — the
+      // styling the document sanitizer allowlists end-to-end.
+      TextStyle,
+      FontFamily,
+      FontSize,
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
       TemplateVariable,
+      SignatureLine,
     ],
     content: initialHtml || '<p></p>',
     immediatelyRender: false,
@@ -89,6 +122,9 @@ export function TemplateEditor({ initialHtml, placeholder, onChange, editorRef }
     }
   }, [editor, editorRef])
 
+  // Zoom-to-fit so the fixed-width page scales to the (often narrow) editor column.
+  const fitRef = useFitToWidth<HTMLDivElement>()
+
   if (!editor) {
     return <div className="tpl-editor-shell tpl-editor-loading">Loading editor…</div>
   }
@@ -96,7 +132,9 @@ export function TemplateEditor({ initialHtml, placeholder, onChange, editorRef }
   return (
     <div className="tpl-editor-shell">
       <Toolbar editor={editor} />
-      <EditorContent editor={editor} className="tpl-editor-content-wrap" />
+      <div className="tpl-editor-content-wrap" ref={fitRef}>
+        <EditorContent editor={editor} />
+      </div>
     </div>
   )
 }
@@ -124,17 +162,54 @@ function Toolbar({ editor }: { editor: Editor }) {
       {label}
     </button>
   )
+
+  const currentFont = (editor.getAttributes('textStyle').fontFamily as string) ?? ''
+  // fontSize comes back like "12pt"; strip the unit for the select's value.
+  const currentSize = ((editor.getAttributes('textStyle').fontSize as string) ?? '').replace(
+    /pt$/,
+    '',
+  )
+
   return (
     <div className="tpl-toolbar" role="toolbar" aria-label="Text formatting">
-      {btn(editor.isActive('heading', { level: 1 }), 'H1', 'Heading 1', () =>
-        editor.chain().focus().toggleHeading({ level: 1 }).run(),
-      )}
-      {btn(editor.isActive('heading', { level: 2 }), 'H2', 'Heading 2', () =>
-        editor.chain().focus().toggleHeading({ level: 2 }).run(),
-      )}
-      {btn(editor.isActive('heading', { level: 3 }), 'H3', 'Heading 3', () =>
-        editor.chain().focus().toggleHeading({ level: 3 }).run(),
-      )}
+      <select
+        className="tpl-tb-select tpl-tb-font"
+        aria-label="Font"
+        title="Font"
+        value={currentFont}
+        onMouseDown={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v) editor.chain().focus().setFontFamily(v).run()
+          else editor.chain().focus().unsetFontFamily().run()
+        }}
+      >
+        {FONT_FAMILIES.map((f) => (
+          <option key={f.label} value={f.value}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+      <select
+        className="tpl-tb-select tpl-tb-size"
+        aria-label="Font size"
+        title="Font size"
+        value={currentSize}
+        onMouseDown={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v) editor.chain().focus().setFontSize(`${v}pt`).run()
+          else editor.chain().focus().unsetFontSize().run()
+        }}
+      >
+        <option value="">Size</option>
+        {FONT_SIZES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
+
       <div className="tpl-tb-sep" aria-hidden="true" />
       {btn(
         editor.isActive('bold'),
@@ -150,6 +225,48 @@ function Toolbar({ editor }: { editor: Editor }) {
         () => editor.chain().focus().toggleItalic().run(),
         { title: 'Italic (Ctrl+I)' },
       )}
+      {btn(
+        editor.isActive('underline'),
+        <UnderlineIcon size={15} />,
+        'Underline',
+        () => editor.chain().focus().toggleUnderline().run(),
+        { title: 'Underline (Ctrl+U)' },
+      )}
+
+      <div className="tpl-tb-sep" aria-hidden="true" />
+      {btn(editor.isActive('heading', { level: 1 }), 'H1', 'Heading 1', () =>
+        editor.chain().focus().toggleHeading({ level: 1 }).run(),
+      )}
+      {btn(editor.isActive('heading', { level: 2 }), 'H2', 'Heading 2', () =>
+        editor.chain().focus().toggleHeading({ level: 2 }).run(),
+      )}
+      {btn(editor.isActive('heading', { level: 3 }), 'H3', 'Heading 3', () =>
+        editor.chain().focus().toggleHeading({ level: 3 }).run(),
+      )}
+
+      <div className="tpl-tb-sep" aria-hidden="true" />
+      {btn(editor.isActive({ textAlign: 'left' }), <AlignLeftIcon size={15} />, 'Align left', () =>
+        editor.chain().focus().setTextAlign('left').run(),
+      )}
+      {btn(
+        editor.isActive({ textAlign: 'center' }),
+        <AlignCenterIcon size={15} />,
+        'Align center',
+        () => editor.chain().focus().setTextAlign('center').run(),
+      )}
+      {btn(
+        editor.isActive({ textAlign: 'right' }),
+        <AlignRightIcon size={15} />,
+        'Align right',
+        () => editor.chain().focus().setTextAlign('right').run(),
+      )}
+      {btn(
+        editor.isActive({ textAlign: 'justify' }),
+        <AlignJustifyIcon size={15} />,
+        'Justify',
+        () => editor.chain().focus().setTextAlign('justify').run(),
+      )}
+
       <div className="tpl-tb-sep" aria-hidden="true" />
       {btn(editor.isActive('bulletList'), <ListIcon size={15} />, 'Bulleted list', () =>
         editor.chain().focus().toggleBulletList().run(),
@@ -157,10 +274,19 @@ function Toolbar({ editor }: { editor: Editor }) {
       {btn(editor.isActive('orderedList'), <ListOrderedIcon size={15} />, 'Numbered list', () =>
         editor.chain().focus().toggleOrderedList().run(),
       )}
+
       <div className="tpl-tb-sep" aria-hidden="true" />
       {btn(editor.isActive('blockquote'), <QuoteIcon size={15} />, 'Block quote', () =>
         editor.chain().focus().toggleBlockquote().run(),
       )}
+      {btn(
+        false,
+        <SignatureIcon size={15} />,
+        'Insert signature line',
+        () => editor.chain().focus().insertSignatureLine('Signature').run(),
+        { toggle: false, title: 'Insert signature line' },
+      )}
+
       <div className="tpl-tb-sep" aria-hidden="true" />
       {btn(false, <UndoIcon size={15} />, 'Undo', () => editor.chain().focus().undo().run(), {
         toggle: false,

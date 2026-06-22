@@ -2,7 +2,8 @@
 
 import { use, useEffect, useState } from 'react'
 import { callClientMcp } from '@/lib/mcpClient'
-import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { renderDocumentHtml } from '@/lib/documentHtml'
 
 interface DraftPayload {
   documentVersionId: string
@@ -76,7 +77,7 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
       </div>
       <div
         className="doc-rendered"
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(draft.bodyMarkdown) }}
+        dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
       />
     </div>
   )

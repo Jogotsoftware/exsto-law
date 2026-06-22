@@ -9,7 +9,7 @@
 import { use, useMemo, useRef, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { renderMarkdown } from '@/lib/draftExport'
+import { renderDocumentHtml } from '@/lib/documentHtml'
 
 interface DraftDetail {
   documentVersionId: string
@@ -334,7 +334,7 @@ export default function PrepareSignPage({ params }: { params: Promise<{ versionI
           <div
             className="doc-rendered"
             style={{ maxHeight: 420, overflow: 'auto' }}
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown) }}
+            dangerouslySetInnerHTML={{ __html: renderDocumentHtml(markdown) }}
           />
         </div>
       </section>

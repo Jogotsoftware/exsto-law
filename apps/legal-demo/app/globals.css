@@ -4043,6 +4043,62 @@ main.book-main {
   gap: 0.6rem;
   margin-top: 0.8rem;
 }
+/* "Drafting…" progress animation in the Draft-with-AI modal — shimmering document
+   lines so the wait reads as the AI writing, not a frozen window. */
+.tpl-drafting {
+  margin-top: 0.9rem;
+}
+.tpl-drafting-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--gold-700);
+  font-weight: var(--weight-semibold, 600);
+  font-size: 0.85rem;
+  margin-bottom: 0.65rem;
+}
+.tpl-drafting-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.tpl-drafting-lines span {
+  height: 0.7rem;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--rule-soft) 37%,
+    var(--surface-2) 63%
+  );
+  background-size: 400% 100%;
+  animation: tpl-shimmer 1.4s ease infinite;
+}
+.tpl-drafting-lines span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.tpl-drafting-lines span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.tpl-drafting-lines span:nth-child(4) {
+  animation-delay: 0.45s;
+}
+.tpl-drafting-lines span:nth-child(5) {
+  animation-delay: 0.6s;
+}
+@keyframes tpl-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tpl-drafting-lines span {
+    animation: none;
+  }
+}
 .tpl-tb-btn:hover {
   background: white;
   border-color: var(--border-soft);
@@ -4058,6 +4114,52 @@ main.book-main {
   background: var(--border-soft);
   margin: 0 0.3rem;
 }
+/* Toolbar dropdowns (font family + size). */
+.tpl-tb-select {
+  height: 1.85rem;
+  padding: 0 1.3rem 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--fg);
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.tpl-tb-select:hover {
+  border-color: var(--border-strong, var(--border));
+}
+.tpl-tb-font {
+  min-width: 8.5rem;
+}
+.tpl-tb-size {
+  min-width: 3.6rem;
+}
+
+/* Signature line — a ruled line to sign on with a small label beneath. Global
+   (not scoped to the editor) so it also renders in the finished/signed document
+   on the share, review, and e-sign pages. */
+.sig-line {
+  margin: 1.8em 0 0.6em;
+  break-inside: avoid;
+}
+.sig-line::before {
+  content: '';
+  display: block;
+  width: 16em;
+  max-width: 100%;
+  border-bottom: 1px solid #1b1b1b;
+  margin-bottom: 0.35em;
+}
+.sig-line-label {
+  font-size: 0.82em;
+  color: #555;
+}
+.tpl-editor-content .sig-line.ProseMirror-selectednode {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
 /* The "desk" — a soft grey surround the page floats on; scrolls long documents
    while the toolbar stays put above it. */
 .tpl-editor-content-wrap {
@@ -4071,8 +4173,14 @@ main.book-main {
    looks like the finished document (WYSIWYG, Outreach-style). */
 .tpl-editor-content,
 .tpl-preview-page {
-  width: 100%;
-  max-width: 7.75in;
+  /* FIXED-width letter sheet, scaled to fit its column via `zoom` (set per-
+     container by useFitToWidth). Page, margins, and text all scale together, so
+     the document always looks proportional — no more oversized text running off
+     the page when the editor|preview split is narrow. `zoom` (not transform) keeps
+     the caret correct inside the contenteditable. */
+  width: var(--tpl-page-width, 7.75in);
+  max-width: none;
+  zoom: var(--tpl-zoom, 1);
   margin: 0 auto;
   background: #fff;
   border: 1px solid var(--border);
@@ -4080,10 +4188,10 @@ main.book-main {
   box-shadow:
     0 1px 3px rgba(15, 23, 42, 0.08),
     0 10px 28px -8px rgba(15, 23, 42, 0.16);
-  /* True-to-scale page: height follows the chosen paper's aspect ratio (letter
-     1.294, legal 1.647), and the body font scales with the Font size control.
-     Both vars are set on .tpl-split so the editor + preview match. */
-  min-height: calc(7.75in * var(--tpl-page-aspect, 1.294));
+  /* Height follows the chosen paper's aspect ratio (letter 1.294, legal 1.647);
+     the base body font scales with the Font size control. Both vars are set on
+     .tpl-split so the editor + preview match. */
+  min-height: calc(var(--tpl-page-width, 7.75in) * var(--tpl-page-aspect, 1.294));
   padding: 3.25rem 3.5rem;
   font-family: var(--font-serif, 'EB Garamond', Georgia, 'Times New Roman', serif);
   font-size: calc(1.12rem * var(--tpl-font-scale, 1));

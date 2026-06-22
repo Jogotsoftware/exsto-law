@@ -1,7 +1,8 @@
 // Live-preview merge for the template editor. Takes the editor's markdown body
 // (with {{tokens}}) and renders the *finished* document the way the client will
-// actually see it — reusing renderMarkdown, the same renderer the review and
-// shared-link pages use, so the preview is faithful.
+// actually see it — reusing renderDocumentHtml, the same sanitizing renderer the
+// review and shared-link pages use, so the preview is faithful (and shows the
+// editor's per-run font / size / alignment styling).
 //
 // Token handling:
 //   {{plain_token}}   → a curated/heuristic SAMPLE value (so boilerplate reads
@@ -15,16 +16,18 @@
 // real matter's answers can drive it later.
 
 import type { TemplateVariables, TemplateVariableSpec } from '@exsto/legal'
-import { renderMarkdown } from './draftExport'
+import { renderDocumentHtml } from './documentHtml'
 
 // Any {{ ... }} run. We classify the inner text ourselves so includes/e-sign
 // tags/plain tokens are handled in one pass.
 const TOKEN_RE = /\{\{\s*([^}]+?)\s*\}\}/g
 const PLAIN_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 
-// Private-use sentinels — absent from real content and untouched by renderMarkdown
-// (it escapes only & < >). They mark placeholders through the markdown render,
-// then we swap them for styled spans. None survive to output.
+// Private-use sentinels — absent from real content and untouched by the document
+// renderer (marked + sanitize pass these Unicode chars through as plain text).
+// They mark placeholders through the render, then we swap them for styled spans
+// (added AFTER sanitize, so the trusted preview chrome is never stripped). None
+// survive to output.
 const S0 = String.fromCharCode(0xe000)
 const S1 = String.fromCharCode(0xe001)
 const MARKER_RE = new RegExp(`${S0}([A-Z]+)${S0}([\\s\\S]+?)${S1}`, 'g')
@@ -136,7 +139,7 @@ export function buildPreview(
     return whole
   })
 
-  let html = renderMarkdown(merged)
+  let html = renderDocumentHtml(merged)
   html = html.replace(MARKER_RE, (_m, kind: string, label: string) => {
     switch (kind) {
       case 'FIELD':

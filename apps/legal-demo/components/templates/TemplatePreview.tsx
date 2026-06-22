@@ -7,6 +7,7 @@
 import { useMemo } from 'react'
 import type { TemplateVariables } from '@exsto/legal'
 import { buildPreview } from '@/lib/templatePreview'
+import { useFitToWidth } from '@/lib/useFitToWidth'
 
 export function TemplatePreview({
   body,
@@ -20,6 +21,9 @@ export function TemplatePreview({
     [body, variables],
   )
 
+  // Zoom-to-fit so the preview page matches the editor page exactly.
+  const fitRef = useFitToWidth<HTMLDivElement>()
+
   return (
     <div className="tpl-preview">
       <div className="tpl-preview-bar">
@@ -30,7 +34,7 @@ export function TemplatePreview({
           </span>
         )}
       </div>
-      <div className="tpl-preview-desk">
+      <div className="tpl-preview-desk" ref={fitRef}>
         <div className="tpl-preview-page" dangerouslySetInnerHTML={{ __html: html }} />
       </div>
     </div>

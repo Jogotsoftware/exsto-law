@@ -376,3 +376,49 @@ export const EditIcon = (p: IconProps) => (
     <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
   </Svg>
 )
+
+export const UnderlineIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 4v6a6 6 0 0 0 12 0V4" />
+    <line x1="4" x2="20" y1="20" y2="20" />
+  </Svg>
+)
+
+export const AlignLeftIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="3" x2="21" y1="6" y2="6" />
+    <line x1="3" x2="15" y1="12" y2="12" />
+    <line x1="3" x2="18" y1="18" y2="18" />
+  </Svg>
+)
+
+export const AlignCenterIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="3" x2="21" y1="6" y2="6" />
+    <line x1="6" x2="18" y1="12" y2="12" />
+    <line x1="5" x2="19" y1="18" y2="18" />
+  </Svg>
+)
+
+export const AlignRightIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="3" x2="21" y1="6" y2="6" />
+    <line x1="9" x2="21" y1="12" y2="12" />
+    <line x1="6" x2="21" y1="18" y2="18" />
+  </Svg>
+)
+
+export const AlignJustifyIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <line x1="3" x2="21" y1="6" y2="6" />
+    <line x1="3" x2="21" y1="12" y2="12" />
+    <line x1="3" x2="21" y1="18" y2="18" />
+  </Svg>
+)
+
+export const SignatureIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 17c2.5 0 3.5-6 5-6s1 4 2.5 4 2-7 3.5-7 1.5 5 3 5 1.5-2 3-2" />
+    <line x1="3" x2="21" y1="21" y2="21" />
+  </Svg>
+)

@@ -39,6 +39,37 @@ turndown.addRule('templateVariableSpan', {
     `{{${(node as HTMLElement).getAttribute('data-variable') ?? ''}}}`,
 })
 
+// Rich typography must survive the save (markdown can't express per-run font /
+// size / alignment, so we KEEP the allowlisted inline-HTML the editor produces as
+// raw HTML in the markdown body — the document renderer sanitizes it on the way
+// out, see documentHtml.ts). Without this, turndown would flatten a styled span to
+// plain text and an aligned heading to a bare `#`, silently dropping the styling.
+// span[style] / underline / signature-line have NO built-in turndown rule, so a
+// keep() (lowest priority) cleanly preserves them as raw HTML.
+turndown.keep((node) => {
+  const el = node as HTMLElement
+  // Per-run font / size / decoration (token chips carry data-variable, not style,
+  // so they keep their own rule above and are never matched here).
+  if (el.nodeName === 'SPAN' && el.getAttribute('style')) return true
+  // Underline has no markdown equivalent.
+  if (el.nodeName === 'U') return true
+  // The signature-line block.
+  if (el.nodeName === 'DIV' && el.classList?.contains('sig-line')) return true
+  return false
+})
+
+// Alignment lives on block elements that DO have built-in commonmark rules
+// (heading → `#`, paragraph → text), which out-prioritize keep(). So an aligned
+// block needs an addRule (user rules win) that emits it as raw HTML; an unaligned
+// block doesn't match the filter and falls through to its normal markdown rule.
+const ALIGNED_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE'])
+turndown.addRule('alignedBlock', {
+  filter: (node) =>
+    ALIGNED_BLOCKS.has(node.nodeName) &&
+    /text-align\s*:/i.test((node as HTMLElement).getAttribute?.('style') ?? ''),
+  replacement: (_content, node) => `\n\n${(node as HTMLElement).outerHTML}\n\n`,
+})
+
 // A bare merge token: {{client_name}}. Deliberately NOT matched: {{>include_key}}
 // and {{type:signer}} e-sign tags carry `>`/`:` (outside [a-zA-Z0-9_]), so they
 // stay as plain text and are never turned into editable chips.
