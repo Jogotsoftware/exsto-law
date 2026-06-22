@@ -19,7 +19,17 @@
 -- per-matter ownership (every matter is kind=matter). A matter with NO owner set
 -- (legacy / pre-0087) is treated as firm-shared — any attorney may send — so this
 -- introduces ownership without regressing existing matters; enforcement bites the
--- moment a matter has an owner (all new matters do).
+-- moment a matter has an owner.
+--
+-- SCOPE / DORMANCY (known, intended): owner is stamped only on the attorney
+-- create path, and there is not yet an attorney-facing "assign owner" step wired
+-- into intake/triage — so booking-originated matters start unowned (firm-shared)
+-- until legal.matter.set_owner is called. There is also a link-shape split: the
+-- mail send path (clientEmailIndex) reads client_of + email (booking matters),
+-- while legal.matter.create writes matter_has_client + contact_email; reconciling
+-- that + wiring owner-assignment is the follow-up that makes mail isolation bite
+-- broadly. esign sendForSignature resolves the matter from the draft (not the
+-- email index), so its guard already bites on any owned matter today.
 --
 -- Data-only / additive / idempotent (ON CONFLICT DO NOTHING). Migration number
 -- 0087 chosen after confirming 0084 (task_primitive), 0085 (service_billing_mode)

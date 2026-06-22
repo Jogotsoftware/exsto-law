@@ -5,6 +5,7 @@ import {
   type ActionResult,
 } from '@exsto/substrate'
 import { queueNotification } from './notifications.js'
+import { assertCanSendOnMatter } from './matterAccess.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Client Portal PR2 — two-way client↔attorney messaging API.
@@ -120,6 +121,10 @@ export async function postAttorneyMessage(
 ): Promise<ActionResult> {
   const body = (input.body ?? '').trim()
   if (!body) throw new Error('Message body is required.')
+
+  // Send authz (0087): posting an attorney reply emails the client (a client-facing
+  // send), so only the matter owner / a granted attorney / a firm admin may do it.
+  await assertCanSendOnMatter(ctx, input.matterEntityId)
 
   const result = await submitAction(ctx, {
     actionKindName: 'attorney.message.post',
