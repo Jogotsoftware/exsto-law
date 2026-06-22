@@ -38,7 +38,10 @@ export interface CalendarItem {
   htmlLink: string | null
 }
 
-type ActiveModal = { type: 'reschedule' | 'cancel' | 'categorize'; item: CalendarItem } | null
+type ActiveModal = {
+  type: 'reschedule' | 'cancel' | 'categorize' | 'attendees'
+  item: CalendarItem
+} | null
 
 function isoToLocalInput(iso: string | null): string {
   if (!iso) return ''
@@ -205,6 +208,7 @@ export function WeeklyCalendar({
         },
       },
       { label: 'Categorize', onClick: () => setModal({ type: 'categorize', item: it }) },
+      { label: 'Add guests', onClick: () => setModal({ type: 'attendees', item: it }) },
       {
         label: 'View matter',
         href: it.matterEntityId ? `/attorney/matters/${it.matterEntityId}` : undefined,
@@ -444,6 +448,7 @@ function CalendarActionModal({
   const [endInput, setEndInput] = useState(() => isoToLocalInput(item.endIso))
   const [reason, setReason] = useState('')
   const [categoryKey, setCategoryKey] = useState(item.categoryKey ?? categories[0]?.key ?? '')
+  const [attendeesInput, setAttendeesInput] = useState('')
 
   // External Google events carry no matter, so there's nothing to act on.
   if (!item.matterEntityId) {
@@ -461,6 +466,7 @@ function CalendarActionModal({
     reschedule: 'Reschedule consultation',
     cancel: 'Cancel consultation',
     categorize: 'Categorize consultation',
+    attendees: 'Add guests',
   }
 
   function submit() {
@@ -474,9 +480,13 @@ function CalendarActionModal({
       })
     } else if (type === 'cancel') {
       onSubmit('legal.booking.cancel', { matterEntityId, reason: reason.trim() || undefined })
-    } else {
+    } else if (type === 'categorize') {
       if (!categoryKey) return
       onSubmit('legal.booking.categorize', { matterEntityId, categoryKey })
+    } else {
+      const emails = attendeesInput.split(/[\s,;]+/).filter((s) => s.includes('@'))
+      if (!emails.length) return
+      onSubmit('legal.booking.add_attendees', { matterEntityId, attendeeEmails: emails })
     }
   }
 
@@ -495,7 +505,13 @@ function CalendarActionModal({
             Close
           </button>
           <button type="button" className="primary" onClick={submit} disabled={busy}>
-            {busy ? 'Working…' : type === 'cancel' ? 'Cancel consultation' : 'Save'}
+            {busy
+              ? 'Working…'
+              : type === 'cancel'
+                ? 'Cancel consultation'
+                : type === 'attendees'
+                  ? 'Send invites'
+                  : 'Save'}
           </button>
         </>
       }
@@ -544,6 +560,17 @@ function CalendarActionModal({
             </select>
           </label>
         ))}
+      {type === 'attendees' && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <span>Guest emails (comma or space separated) — they’ll get a Google invite</span>
+          <textarea
+            value={attendeesInput}
+            onChange={(e) => setAttendeesInput(e.target.value)}
+            rows={3}
+            placeholder="alex@example.com, sam@example.com"
+          />
+        </label>
+      )}
     </Modal>
   )
 }

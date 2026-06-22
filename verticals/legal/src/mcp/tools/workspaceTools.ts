@@ -9,6 +9,7 @@ import {
   createConsultation,
   rescheduleBooking,
   cancelBooking,
+  addBookingAttendees,
   listMailThreads,
   openMailThread,
   replyToThread,
@@ -92,6 +93,26 @@ const cancelTool: Tool<{ matterEntityId: string; reason?: string }, ActionResult
     'Cancel a consultation: deletes the Google event (sendUpdates all) and records booking.cancel.',
   mode: 'write',
   handler: (ctx: ActionContext, input) => cancelBooking(ctx, input),
+}
+
+const addAttendeesTool: Tool<
+  { matterEntityId: string; attendeeEmails: string[] },
+  { attendees: string[] }
+> = {
+  name: 'legal.booking.add_attendees',
+  description:
+    "Invite extra guests to a matter's consultation: merges the emails into the Google event's attendees and sends them an invite (sendUpdates all). Returns the full attendee list.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      matterEntityId: { type: 'string' },
+      attendeeEmails: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['matterEntityId', 'attendeeEmails'],
+    additionalProperties: false,
+  },
+  handler: (ctx: ActionContext, input) => addBookingAttendees(ctx, input),
 }
 
 // ── Mail tab (REQ-CALMAIL-02/03) ───────────────────────────────────────────
@@ -201,6 +222,7 @@ registerTool(busyIntervalsTool)
 registerTool(createConsultationTool)
 registerTool(rescheduleTool)
 registerTool(cancelTool)
+registerTool(addAttendeesTool)
 registerTool(mailThreadsTool)
 registerTool(mailThreadGetTool)
 registerTool(mailReplyTool)

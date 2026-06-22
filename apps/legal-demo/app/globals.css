@@ -747,6 +747,12 @@ section h2 {
   right: auto;
   left: 0;
 }
+/* Portaled to <body> with fixed positioning (set inline) so the menu escapes any
+   overflow-clipping ancestor (e.g. the calendar grid). High z-index to sit above
+   page chrome. */
+.att-menu-portal {
+  z-index: 1000;
+}
 
 /* Matter workflow step list — clickable rows (Intake / Consultation / Document),
    each opening a detail modal. Status drives the icon tint + the right-side pill. */

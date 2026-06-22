@@ -717,3 +717,36 @@ export async function cancelEvent(
     sendUpdates: 'all',
   })
 }
+
+// Add guests to an existing event (e.g. invite extra people to a consultation).
+// Fetches the current attendees, merges the new ones (dedup, case-insensitive), and
+// patches with sendUpdates:'all' so Google emails the NEW guests their invite.
+// Returns the full attendee list after the change.
+export async function addEventAttendees(
+  tenantId: string,
+  eventId: string,
+  newEmails: string[],
+  actorId?: string | null,
+): Promise<{ attendees: string[] }> {
+  const { oauth2, creds } = await authedClient(tenantId, actorId)
+  const calendar = google.calendar({ version: 'v3', auth: oauth2 })
+  const existing = await calendar.events.get({ calendarId: creds.calendarId, eventId })
+  const merged = (existing.data.attendees ?? [])
+    .map((a) => (a.email ?? '').trim())
+    .filter((e) => e.includes('@'))
+  const seen = new Set(merged.map((e) => e.toLowerCase()))
+  for (const raw of newEmails) {
+    const e = raw.trim()
+    if (e.includes('@') && !seen.has(e.toLowerCase())) {
+      seen.add(e.toLowerCase())
+      merged.push(e)
+    }
+  }
+  await calendar.events.patch({
+    calendarId: creds.calendarId,
+    eventId,
+    sendUpdates: 'all',
+    requestBody: { attendees: merged.map((email) => ({ email })) },
+  })
+  return { attendees: merged }
+}

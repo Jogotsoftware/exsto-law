@@ -5,7 +5,8 @@
 // calendar event). It consolidates what used to be a row of header buttons into
 // one menu so the header stays uncluttered. Reuses the nav dropdown's look
 // (.att-pop / .att-menu-link) and its close-on-outside-click / Escape behaviour.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { ChevronDownIcon } from '@/components/icons'
 
@@ -40,28 +41,63 @@ export function ActionsMenu({
   triggerTitle?: string
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  // The menu renders in a PORTAL with fixed positioning so it escapes any
+  // overflow-clipping ancestor (e.g. a scrollable calendar grid) — the bug where
+  // a calendar event's actions got cut off. Position is measured from the trigger
+  // and flipped above it when there isn't room below.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
-  // Close on an outside click or Escape (mirrors AttorneyTopNav).
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return
+    const r = triggerRef.current.getBoundingClientRect()
+    const mh = menuRef.current?.offsetHeight ?? 0
+    const mw = menuRef.current?.offsetWidth ?? 220
+    let top = r.bottom + 4
+    if (mh && top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4) // flip up
+    let left = align === 'left' ? r.left : r.right - mw
+    left = Math.max(8, Math.min(left, window.innerWidth - mw - 8))
+    setPos({ top, left })
+  }, [open, align, items.length])
+
+  // Close on an outside click, Escape, or scroll/resize (positions go stale).
   useEffect(() => {
     if (!open) return
     function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (!triggerRef.current?.contains(t) && !menuRef.current?.contains(t)) setOpen(false)
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false)
     }
+    function onScrollResize() {
+      setOpen(false)
+    }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScrollResize, true)
+    window.addEventListener('resize', onScrollResize)
     return () => {
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScrollResize, true)
+      window.removeEventListener('resize', onScrollResize)
     }
   }, [open])
 
+  function toggle(e: React.MouseEvent) {
+    e.stopPropagation()
+    setOpen((o) => {
+      if (o) setPos(null)
+      return !o
+    })
+  }
+
   return (
-    <div className="att-pop-anchor" ref={ref}>
+    <div className="att-pop-anchor">
       <button
+        ref={triggerRef}
         type="button"
         className={
           triggerContent
@@ -72,10 +108,7 @@ export function ActionsMenu({
         aria-expanded={open}
         aria-label={triggerContent ? (triggerTitle ?? 'Actions') : undefined}
         title={triggerTitle}
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen((o) => !o)
-        }}
+        onClick={toggle}
       >
         {triggerContent ?? (
           <>
@@ -84,48 +117,63 @@ export function ActionsMenu({
           </>
         )}
       </button>
-      {open && (
-        <div className={`att-pop att-menu-pop ${align === 'left' ? 'align-left' : ''}`} role="menu">
-          {items.map((item) => {
-            const body = (
-              <>
-                {item.icon && <span className="att-menu-ico">{item.icon}</span>}
-                <span>{item.label}</span>
-              </>
-            )
-            if (item.href && !item.disabled) {
+      {open &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="att-pop att-menu-pop att-menu-portal"
+            role="menu"
+            style={{
+              position: 'fixed',
+              top: pos?.top ?? -9999,
+              left: pos?.left ?? -9999,
+              right: 'auto',
+              bottom: 'auto',
+              visibility: pos ? 'visible' : 'hidden',
+            }}
+          >
+            {items.map((item) => {
+              const body = (
+                <>
+                  {item.icon && <span className="att-menu-ico">{item.icon}</span>}
+                  <span>{item.label}</span>
+                </>
+              )
+              if (item.href && !item.disabled) {
+                return (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    role="menuitem"
+                    className="att-menu-link"
+                    title={item.title}
+                    onClick={() => setOpen(false)}
+                  >
+                    {body}
+                  </Link>
+                )
+              }
               return (
-                <Link
+                <button
                   key={item.label}
-                  href={item.href}
+                  type="button"
                   role="menuitem"
                   className="att-menu-link"
                   title={item.title}
-                  onClick={() => setOpen(false)}
+                  disabled={item.disabled}
+                  onClick={() => {
+                    setOpen(false)
+                    item.onClick?.()
+                  }}
                 >
                   {body}
-                </Link>
+                </button>
               )
-            }
-            return (
-              <button
-                key={item.label}
-                type="button"
-                role="menuitem"
-                className="att-menu-link"
-                title={item.title}
-                disabled={item.disabled}
-                onClick={() => {
-                  setOpen(false)
-                  item.onClick?.()
-                }}
-              >
-                {body}
-              </button>
-            )
-          })}
-        </div>
-      )}
+            })}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

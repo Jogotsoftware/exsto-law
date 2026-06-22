@@ -14,6 +14,7 @@ import {
   createBookingEvent,
   rescheduleEvent,
   cancelEvent,
+  addEventAttendees,
   loadCredentials,
   fetchBusyIntervals,
   type WorkspaceEvent,
@@ -330,6 +331,23 @@ export async function cancelBooking(
     intentKind: 'adjustment',
     payload: { matter_entity_id: input.matterEntityId, reason: input.reason ?? null },
   })
+}
+
+// Invite extra guests to a matter's consultation (a Google-event mutation — the
+// substrate models the matter's schedule, not the event's guest list, so this is a
+// read-through write to Google with no substrate effect, like the live calendar
+// read). Google emails the new guests their invite (sendUpdates:'all').
+export async function addBookingAttendees(
+  ctx: ActionContext,
+  input: { matterEntityId: string; attendeeEmails: string[]; calendarActorId?: string },
+): Promise<{ attendees: string[] }> {
+  const eventId = await matterGoogleEventId(ctx, input.matterEntityId)
+  if (!eventId) {
+    throw new Error('This consultation has no Google calendar event to add guests to.')
+  }
+  const emails = (input.attendeeEmails ?? []).map((e) => e.trim()).filter((e) => e.includes('@'))
+  if (emails.length === 0) throw new Error('Enter at least one valid email address.')
+  return addEventAttendees(ctx.tenantId, eventId, emails, input.calendarActorId ?? ctx.actorId)
 }
 
 async function matterGoogleEventId(
