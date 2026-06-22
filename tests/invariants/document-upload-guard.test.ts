@@ -25,13 +25,14 @@ function walkTs(dir: string): string[] {
 describe('document upload — service-role isolation (hard rule 9)', () => {
   const files = walkTs(APP)
 
-  it('createClient + SUPABASE_SERVICE_ROLE_KEY appear ONLY in lib/documentStorage.ts', () => {
+  it('the SERVICE-ROLE key (SUPABASE_SERVICE_ROLE_KEY) appears ONLY in lib/documentStorage.ts', () => {
+    // Scope this to the SERVICE-ROLE key specifically. A bare `createClient` is
+    // fine elsewhere (e.g. the client portal's Supabase Auth uses the public
+    // NEXT_PUBLIC_SUPABASE_ANON_KEY) — hard rule 9 is about the privileged
+    // service-role key, which must stay quarantined to the storage module.
     const offenders = files
       .filter((f) => !f.endsWith(STORAGE_MODULE))
-      .filter((f) => {
-        const src = readFileSync(f, 'utf8')
-        return /createClient\s*\(/.test(src) || /SUPABASE_SERVICE_ROLE_KEY/.test(src)
-      })
+      .filter((f) => /SUPABASE_SERVICE_ROLE_KEY/.test(readFileSync(f, 'utf8')))
       .map((f) => f.slice(APP.length + 1))
     expect(offenders).toEqual([])
   })

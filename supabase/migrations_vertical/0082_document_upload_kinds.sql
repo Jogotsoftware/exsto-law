@@ -16,8 +16,10 @@
 -- Schema-as-data ROWS only; idempotent (fixed ids + ON CONFLICT DO NOTHING). No
 -- substrate-table ALTER: document_version.status keeps its existing CHECK set (we
 -- use 'approved'); the `document_source` attribute marks upload provenance. Ids
--- verified free on prod (action 1013-…704, event 1014-…409, entity 1010-…704,
--- attribute 1011-…707, relationship 1012-…603) before authoring.
+-- verified free on prod AND clear of the parallel billing branch (action
+-- 1013-…704, event 1014-…40c [billing took …409/40a/40b], entity 1010-…704,
+-- attribute 1011-…707, relationship 1012-…603). Renumbered 0080→0082 (billing
+-- owns 0080/0081).
 -- =============================================================================
 
 INSERT INTO action_kind_definition
@@ -57,7 +59,7 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO event_kind_definition
   (id, tenant_id, kind_name, display_name, description, is_state_change) VALUES
-  ('00000000-0000-0000-1014-000000000409', '00000000-0000-0000-0000-000000000001',
+  ('00000000-0000-0000-1014-00000000040c', '00000000-0000-0000-0000-000000000001',
    'document.uploaded', 'Document uploaded',
    'An attorney uploaded a document to a matter; payload holds filename, content_type, size, object_key, document_version_id.',
    false)
