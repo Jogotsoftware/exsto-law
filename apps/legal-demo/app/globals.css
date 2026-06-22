@@ -5340,14 +5340,25 @@ button.danger.outline:hover:not(:disabled) {
   gap: 0.4rem;
 }
 /* Reserve room for the paperclip at bottom-left when it's shown (Claude only). */
-.uac-composer.has-attach textarea {
+/* Reserve room at bottom-left for the tool cluster (1 icon = ~2.6rem, 2 = ~4.5rem). */
+.uac-composer.has-attach textarea,
+.uac-composer.has-skills textarea {
   padding-left: 2.6rem;
 }
-/* Paperclip mirrors the send glyph, in the composer's bottom-left corner. */
-.uac-attach-btn {
+.uac-composer.has-attach.has-skills textarea {
+  padding-left: 4.5rem;
+}
+/* Bottom toolbar: attach + skills glyphs in the composer's bottom-left corner,
+   mirroring the send glyph at bottom-right. */
+.uac-composer-tools {
   position: absolute;
   left: 0.4rem;
   bottom: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+.uac-tool-btn {
   width: 30px;
   height: 30px;
   display: grid;
@@ -5362,12 +5373,12 @@ button.danger.outline:hover:not(:disabled) {
     background 0.12s ease,
     color 0.12s ease;
 }
-.uac-attach-btn:hover:not(:disabled),
-.uac-attach-btn.active {
+.uac-tool-btn:hover:not(:disabled),
+.uac-tool-btn.active {
   background: var(--surface);
   color: var(--fg);
 }
-.uac-attach-btn:disabled {
+.uac-tool-btn:disabled {
   opacity: 0.55;
   cursor: default;
 }
@@ -5407,6 +5418,7 @@ button.danger.outline:hover:not(:disabled) {
 
 /* Staged attachments above the composer, and the read-only chips on a bubble. */
 .uac-staged-attachments,
+.uac-staged-skills,
 .uac-bubble-attachments {
   display: flex;
   flex-wrap: wrap;
