@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
 import { readDevSession } from '@/lib/auth'
-import { renderMarkdown } from '@/lib/draftExport'
+import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import {
   SendIcon,
   SettingsIcon,
@@ -208,12 +208,12 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       type="button"
-      className={`uac-copy-btn${copied ? ' copied' : ''}`}
+      className={`uac-reply-btn${copied ? ' copied' : ''}`}
       onClick={copy}
       aria-label={copied ? 'Copied' : 'Copy message'}
       title={copied ? 'Copied' : 'Copy'}
     >
-      {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+      {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />} Copy
     </button>
   )
 }
@@ -1074,7 +1074,27 @@ export function UnifiedAssistantChat({
                   className="assistant-md"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
                 />
-                {t.content.trim() && <CopyButton text={t.content} />}
+                {t.content.trim() && (
+                  <div className="uac-reply-actions">
+                    <CopyButton text={t.content} />
+                    <button
+                      type="button"
+                      className="uac-reply-btn"
+                      onClick={() => downloadAsPdf(t.content, 'Assistant reply')}
+                      title="Download as PDF"
+                    >
+                      <FileTextIcon size={12} /> PDF
+                    </button>
+                    <button
+                      type="button"
+                      className="uac-reply-btn"
+                      onClick={() => downloadAsWord(t.content, 'assistant-reply')}
+                      title="Download as Word"
+                    >
+                      <FileTextIcon size={12} /> Word
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <div style={{ whiteSpace: 'pre-wrap' }}>{t.content}</div>

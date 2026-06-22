@@ -4806,38 +4806,41 @@ button.danger.outline:hover:not(:disabled) {
    (clear of the tail, which sits bottom-left), hidden until the bubble is
    hovered or its button is focused (keyboard). Has its own surface fill so it
    cleanly masks any text it overlaps. */
-.uac-copy-btn {
-  position: absolute;
-  bottom: 4px;
-  right: 4px;
+/* Per-reply actions (copy / download as PDF / Word), revealed on bubble hover. */
+.uac-reply-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  justify-content: flex-end;
+  margin-top: 0.35rem;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.feedback-bubble-assistant:hover .uac-reply-actions,
+.feedback-bubble-assistant:focus-within .uac-reply-actions {
+  opacity: 1;
+}
+.uac-reply-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
+  gap: 0.2rem;
+  padding: 0.12rem 0.45rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--muted);
-  box-shadow: var(--shadow-sm);
+  font-size: 0.72rem;
+  font-weight: 600;
   cursor: pointer;
-  opacity: 0;
   transition:
-    opacity 0.12s ease,
-    color 0.12s ease,
-    background 0.12s ease;
+    background 0.12s ease,
+    color 0.12s ease;
 }
-.feedback-bubble-assistant:hover .uac-copy-btn,
-.feedback-bubble-assistant:focus-within .uac-copy-btn {
-  opacity: 1;
-}
-.uac-copy-btn:hover {
+.uac-reply-btn:hover {
   background: var(--surface-2);
   color: var(--fg);
 }
-.uac-copy-btn.copied {
-  opacity: 1;
+.uac-reply-btn.copied {
   color: var(--accent);
   border-color: var(--accent-soft);
 }
