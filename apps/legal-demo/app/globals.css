@@ -5633,6 +5633,12 @@ button.danger.outline:hover:not(:disabled) {
   opacity: 0.55;
   cursor: default;
 }
+/* Secure mode engaged — the lock reads as clearly "on" (navy fill). */
+.uac-tool-btn.secure-on,
+.uac-tool-btn.secure-on:hover:not(:disabled) {
+  background: var(--navy);
+  color: #fff;
+}
 /* Gold send glyph, now in-flow at the right of the toolbar row. */
 .uac-send {
   width: 30px;
