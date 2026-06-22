@@ -264,7 +264,7 @@ export default function ServiceSettingsPage() {
                 onChange={(e) => update('route', e.target.value as 'auto' | 'manual')}
               >
                 <option value="manual">Manual — attorney drafts</option>
-                <option value="auto">Auto — drafts on submit (re-drafts after the call)</option>
+                <option value="auto">Attorney in the loop — auto-drafts on intake</option>
               </select>
             </label>
           </div>
