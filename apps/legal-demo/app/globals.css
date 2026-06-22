@@ -1242,6 +1242,39 @@ legend {
 .assistant-md p {
   margin: 0 0 0.5rem;
 }
+/* Render hyperlinks the assistant returns as styled "view/open" pill buttons
+   instead of plain underlined text (beta ask), with a small open affordance. */
+.assistant-md a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface, #f8fafc);
+  color: var(--navy);
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.6;
+  text-decoration: none;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+.assistant-md a::after {
+  content: '↗';
+  font-size: 0.78em;
+  opacity: 0.65;
+}
+.assistant-md a:hover {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
+.assistant-md a:hover::after {
+  opacity: 0.9;
+}
 .assistant-md ul,
 .assistant-md ol {
   margin: 0 0 0.5rem;
