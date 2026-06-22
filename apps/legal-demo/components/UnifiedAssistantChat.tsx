@@ -16,6 +16,8 @@ import {
   PaperclipIcon,
   FileTextIcon,
   XIcon,
+  CopyIcon,
+  CheckIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -178,6 +180,42 @@ function storeModelId(id: string): void {
   } catch {
     // ignore — a remembered model is a nicety, not load-bearing
   }
+}
+
+// Hover affordance on an assistant reply: copy its text to the clipboard. Copies
+// the raw markdown (what the attorney would paste into a doc/email), not the
+// rendered HTML. Flips to a check for ~1.5s on success; silently no-ops if the
+// clipboard is unavailable (insecure context / permission denied).
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      if (timer.current) clearTimeout(timer.current)
+      timer.current = setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard blocked — leave the icon as-is rather than faking success.
+    }
+  }
+  return (
+    <button
+      type="button"
+      className={`uac-copy-btn${copied ? ' copied' : ''}`}
+      onClick={copy}
+      aria-label={copied ? 'Copied' : 'Copy message'}
+      title={copied ? 'Copied' : 'Copy'}
+    >
+      {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+    </button>
+  )
 }
 
 export function UnifiedAssistantChat({
@@ -433,6 +471,15 @@ export function UnifiedAssistantChat({
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [turns, busy, streaming])
+
+  // Auto-grow the composer with its content: the box expands UPWARD up to a cap,
+  // then scrolls — so multi-line input never flows under the bottom toolbar.
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+  }, [input])
 
   // ── Attachments ────────────────────────────────────────────────────────────
   function removeAttachment(idx: number) {
@@ -1022,10 +1069,13 @@ export function UnifiedAssistantChat({
                 escapes HTML before formatting, so model output can't inject
                 markup. User turns stay verbatim. */}
             {t.role === 'assistant' ? (
-              <div
-                className="assistant-md"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
-              />
+              <>
+                <div
+                  className="assistant-md"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
+                />
+                {t.content.trim() && <CopyButton text={t.content} />}
+              </>
             ) : (
               <div style={{ whiteSpace: 'pre-wrap' }}>{t.content}</div>
             )}
@@ -1203,21 +1253,26 @@ export function UnifiedAssistantChat({
             {attachError}
           </div>
         )}
-        <div className={`uac-composer${canAttach ? ' has-attach' : ''}`}>
-          {canAttach && (
-            <button
-              type="button"
-              className={`uac-attach-btn${attachMenuOpen ? ' active' : ''}`}
-              onClick={onAttachClick}
-              disabled={attachBusy}
-              aria-label="Attach a document"
-              aria-haspopup={activeScope.matterEntityId ? 'menu' : undefined}
-              aria-expanded={activeScope.matterEntityId ? attachMenuOpen : undefined}
-              title="Attach a document"
-            >
-              {attachBusy ? <span className="spinner" /> : <PaperclipIcon size={16} />}
-            </button>
-          )}
+        {/* Picked-skill pills (Claude only) — what the assistant will force-load. */}
+        {isClaude && selectedSkills.length > 0 && (
+          <div className="uac-staged-skills">
+            {selectedSkills.map((s) => (
+              <span key={s.slug} className="uac-skill-pill" title={s.name}>
+                <SparklesIcon size={11} />
+                <span className="uac-skill-pill-name">{s.name}</span>
+                <button
+                  type="button"
+                  className="uac-attach-remove"
+                  onClick={() => setSelectedSkills((prev) => prev.filter((x) => x.slug !== s.slug))}
+                  aria-label={`Remove ${s.name}`}
+                >
+                  <XIcon size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="uac-composer">
           {attachMenuOpen && canAttach && (
             <div className="uac-attach-menu" role="menu">
               <button
@@ -1246,6 +1301,8 @@ export function UnifiedAssistantChat({
               )}
             </div>
           )}
+          {/* The textarea grows upward with content; the toolbar row stays pinned
+              at the bottom (it no longer overlays the text). */}
           <textarea
             ref={composerRef}
             value={input}
@@ -1255,43 +1312,45 @@ export function UnifiedAssistantChat({
             aria-label={placeholder || 'Message the assistant'}
             rows={2}
           />
-          <button
-            type="button"
-            className="uac-send"
-            onClick={() => void send()}
-            disabled={busy || !input.trim() || !modelId}
-            aria-label="Send"
-          >
-            <SendIcon size={16} />
-          </button>
-        </div>
-
-        {/* Skills affordance (Claude only): the /skills trigger + picked-skill pills. */}
-        {isClaude && (
-          <div className="uac-skillbar">
-            <button
-              type="button"
-              className={`uac-skilltrigger${skillMenuOpen ? ' is-open' : ''}`}
-              onClick={() => setSkillMenuOpen((o) => !o)}
-              title="Add a legal skill (or type / in an empty message)"
-            >
-              <SparklesIcon size={13} /> /skills
-            </button>
-            {selectedSkills.map((s) => (
-              <span key={s.slug} className="uac-skill-pill">
-                {s.name}
+          <div className="uac-composer-bar">
+            <div className="uac-composer-tools">
+              {canAttach && (
                 <button
                   type="button"
-                  className="uac-skill-pill-x"
-                  onClick={() => setSelectedSkills((prev) => prev.filter((x) => x.slug !== s.slug))}
-                  aria-label={`Remove ${s.name}`}
+                  className={`uac-tool-btn${attachMenuOpen ? ' active' : ''}`}
+                  onClick={onAttachClick}
+                  disabled={attachBusy}
+                  aria-label="Attach a document"
+                  aria-haspopup={activeScope.matterEntityId ? 'menu' : undefined}
+                  aria-expanded={activeScope.matterEntityId ? attachMenuOpen : undefined}
+                  title="Attach a document"
                 >
-                  ×
+                  {attachBusy ? <span className="spinner" /> : <PaperclipIcon size={16} />}
                 </button>
-              </span>
-            ))}
+              )}
+              {isClaude && (
+                <button
+                  type="button"
+                  className={`uac-tool-btn${skillMenuOpen ? ' active' : ''}`}
+                  onClick={() => setSkillMenuOpen((o) => !o)}
+                  aria-label="Legal skills"
+                  title="Legal skills — or type / in an empty message"
+                >
+                  <SparklesIcon size={16} />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              className="uac-send"
+              onClick={() => void send()}
+              disabled={busy || !input.trim() || !modelId}
+              aria-label="Send"
+            >
+              <SendIcon size={16} />
+            </button>
           </div>
-        )}
+        </div>
         <input
           ref={fileInputRef}
           type="file"

@@ -611,6 +611,7 @@ export default function TemplatesPage() {
                   autoFocus
                   className="tpl-modal-input"
                   value={aiPrompt}
+                  disabled={aiBusy}
                   onChange={(e) => setAiPrompt(e.target.value)}
                   placeholder={
                     draft.category === 'email'
@@ -618,6 +619,21 @@ export default function TemplatesPage() {
                       : 'Describe the document to draft — e.g. “a mutual NDA for a NC LLC, 2-year term”. The draft will use {{tokens}} for anything filled in per client or matter.'
                   }
                 />
+                {aiBusy && (
+                  <div className="tpl-drafting" role="status" aria-live="polite">
+                    <div className="tpl-drafting-label">
+                      <SparklesIcon size={14} /> Drafting your{' '}
+                      {draft.category === 'email' ? 'email' : 'document'}…
+                    </div>
+                    <div className="tpl-drafting-lines" aria-hidden="true">
+                      <span style={{ width: '92%' }} />
+                      <span style={{ width: '78%' }} />
+                      <span style={{ width: '85%' }} />
+                      <span style={{ width: '66%' }} />
+                      <span style={{ width: '80%' }} />
+                    </div>
+                  </div>
+                )}
                 <div className="tpl-modal-actions">
                   <button
                     type="button"

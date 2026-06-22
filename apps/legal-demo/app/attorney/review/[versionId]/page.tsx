@@ -4,7 +4,8 @@ import { use, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { downloadAsPdf, downloadAsWord, renderMarkdown, shareUrlFor } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 
 // Step-through review session (started from the queue's "Begin review"): the ordered
@@ -225,29 +226,20 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
 
   return (
     <main>
-      <p style={{ fontSize: '0.88rem' }}>
+      <div className="review-topbar">
         {sessionPos >= 0 && sessionIds ? (
-          <button
-            type="button"
-            onClick={exitSession}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              font: 'inherit',
-              color: 'var(--accent-attorney, #1e3a5f)',
-              textDecoration: 'underline',
-              cursor: 'pointer',
-            }}
-          >
+          <button type="button" className="review-back" onClick={exitSession}>
             ← Exit review ({sessionPos + 1} of {sessionIds.length})
           </button>
         ) : (
-          <Link href="/attorney/review">← Review queue</Link>
+          <Link href="/attorney/review" className="review-back">
+            ← Review queue
+          </Link>
         )}
-        {' · '}
-        <Link href={`/attorney/matters/${draft.matterEntityId}`}>Matter {draft.matterNumber}</Link>
-      </p>
+        <Link href={`/attorney/matters/${draft.matterEntityId}`} className="review-back">
+          Matter {draft.matterNumber}
+        </Link>
+      </div>
       <div
         style={{
           display: 'flex',
@@ -311,8 +303,8 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
 
       <div className="split-review">
         <div
-          className="doc-rendered"
-          dangerouslySetInnerHTML={{ __html: renderMarkdown(draft.bodyMarkdown) }}
+          className="doc-rendered doc-paper"
+          dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
         />
 
         <div className="trace-rail">

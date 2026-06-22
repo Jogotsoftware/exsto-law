@@ -5,7 +5,7 @@
 // the adopted-signature input + ESIGN/UETA consent, and Sign / Decline. The
 // caller supplies onSign/onDecline (portal MCP vs /api/sign routes).
 import { useState } from 'react'
-import { renderMarkdown } from '@/lib/draftExport'
+import { renderDocumentHtml } from '@/lib/documentHtml'
 
 export interface SignField {
   id: string
@@ -147,7 +147,7 @@ export function SignDocument({
 
       <div
         className="doc-rendered"
-        dangerouslySetInnerHTML={{ __html: renderMarkdown(doc.bodyMarkdown) }}
+        dangerouslySetInnerHTML={{ __html: renderDocumentHtml(doc.bodyMarkdown) }}
       />
 
       <div className="sign-panel" style={{ marginTop: 'var(--space-4)' }}>

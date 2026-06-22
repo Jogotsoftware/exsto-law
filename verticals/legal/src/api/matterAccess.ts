@@ -27,6 +27,35 @@ export interface MatterAccess {
   grantedActorIds: string[]
 }
 
+// The firm's default matter owner — the PRACTICING attorney a new matter is
+// assigned to at booking (the public matter.open path has no attorney in ctx).
+// Preference: a firm.attorney (the working attorney role) BEFORE firm.admin /
+// firm.super_admin — those are management/owner accounts, not who does the matter
+// (at Pacheco Law the super_admins are the firm owner's own accounts and the
+// practicing attorney holds firm.attorney). When the firm grows past one attorney
+// this single-default gives way to routing rules. Read authoritatively
+// (withSuperuser) since the caller is the intake actor, not an attorney. Returns
+// null if the firm has no attorney/admin actor (matter stays unowned/firm-shared).
+export async function resolveDefaultMatterOwner(tenantId: string): Promise<string | null> {
+  return withSuperuser(async (client) => {
+    const r = await client.query<{ actor_id: string }>(
+      `SELECT asa.actor_id
+         FROM actor_scope_assignment asa
+         JOIN permission_scope_definition psd ON psd.id = asa.permission_scope_definition_id
+         JOIN actor a ON a.id = asa.actor_id
+        WHERE psd.tenant_id = $1 AND a.tenant_id = $1
+          AND a.actor_type = 'human' AND a.status = 'active'
+          AND (asa.valid_to IS NULL OR asa.valid_to > now())
+          AND (psd.valid_to IS NULL OR psd.valid_to > now())
+          AND psd.scope_name IN ('firm.attorney', 'firm.admin', 'firm.super_admin')
+        ORDER BY (psd.scope_name = 'firm.attorney') DESC, psd.rank DESC, a.created_at ASC
+        LIMIT 1`,
+      [tenantId],
+    )
+    return r.rows[0]?.actor_id ?? null
+  })
+}
+
 // The matter's current owner + grant list (latest open values), read
 // authoritatively (tenant-scoped, RLS-bypassing) in a single round-trip.
 export async function getMatterAccess(
