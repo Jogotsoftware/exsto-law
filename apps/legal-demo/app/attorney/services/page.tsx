@@ -60,16 +60,30 @@ export default function ServicesPage() {
   }, [menuFor])
 
   async function toggleActive(svc: ServiceDefinition) {
-    setBusy(svc.serviceKey)
+    const next = !svc.isActive
     setError(null)
+    // Flip optimistically so the toggle responds instantly; reconcile on success
+    // and revert on failure.
+    setServices((prev) =>
+      prev
+        ? prev.map((s) => (s.serviceKey === svc.serviceKey ? { ...s, isActive: next } : s))
+        : prev,
+    )
+    setBusy(svc.serviceKey)
     try {
       await callAttorneyMcp({
         toolName: 'legal.service.set_active',
-        input: { serviceKey: svc.serviceKey, active: !svc.isActive },
+        input: { serviceKey: svc.serviceKey, active: next },
       })
       await refresh()
     } catch (e) {
-      // Enabling is gated on completeness; surface the "what's missing" message.
+      // Revert the optimistic flip. Enabling is gated on completeness; surface
+      // the "what's missing" message.
+      setServices((prev) =>
+        prev
+          ? prev.map((s) => (s.serviceKey === svc.serviceKey ? { ...s, isActive: !next } : s))
+          : prev,
+      )
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
@@ -151,14 +165,14 @@ export default function ServicesPage() {
             <thead>
               <tr>
                 <th>Service</th>
-                <th style={{ width: '7rem' }}>Enabled</th>
+                <th style={{ width: '9rem' }}>Status</th>
                 <th style={{ width: '3rem' }} aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody>
               {services.map((svc) => (
                 <tr key={svc.id}>
-                  <td>
+                  <td style={{ verticalAlign: 'middle' }}>
                     <Link
                       href={`/attorney/services/${svc.serviceKey}`}
                       className="client-name-link"
@@ -171,7 +185,7 @@ export default function ServicesPage() {
                       </div>
                     )}
                   </td>
-                  <td>
+                  <td style={{ verticalAlign: 'middle' }}>
                     <label
                       className="switch"
                       title={
@@ -189,9 +203,10 @@ export default function ServicesPage() {
                       <span className="switch-slider" />
                     </label>
                   </td>
-                  <td style={{ position: 'relative', textAlign: 'right' }}>
+                  <td style={{ position: 'relative', textAlign: 'right', verticalAlign: 'middle' }}>
                     <button
                       className="icon-btn"
+                      style={{ verticalAlign: 'middle' }}
                       aria-label="Service actions"
                       aria-haspopup="menu"
                       disabled={busy === svc.serviceKey}
@@ -200,7 +215,7 @@ export default function ServicesPage() {
                         setMenuFor(menuFor === svc.serviceKey ? null : svc.serviceKey)
                       }}
                     >
-                      <SettingsIcon size={18} />
+                      <SettingsIcon size={26} />
                     </button>
                     {menuFor === svc.serviceKey && (
                       <div className="row-menu" role="menu" onClick={(e) => e.stopPropagation()}>

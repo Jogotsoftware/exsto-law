@@ -1876,9 +1876,22 @@ pre {
 }
 
 /* Toggle switch (Services enable/disable) — on-brand navy, crisp knob. */
+/* Pill toggle (Services status): a plain iOS-style switch — a solid pill track
+   (green when active, gray when inactive) and a centered circular white knob.
+   No label or glyph. Track 44×26, knob a fixed 20px circle with a 3px margin
+   (26 − 20 = 6 = 3 + 3, vertically centered). The active position is pinned with
+   `left: calc(100% − 23px)` (knob 20 + 3px margin) instead of a fixed translate,
+   so the knob always lands 3px from the right edge no matter how wide the table
+   cell renders the track — and it animates smoothly because `left` is tweened. */
 .switch {
   position: relative;
+  /* inline-flex + vertical-align:middle matches the gear button exactly (also
+     inline-flex), so the two line up with each other in the row. margin:0
+     overrides the global `label { margin-bottom }` that used to push it high. */
   display: inline-flex;
+  vertical-align: middle;
+  box-sizing: border-box;
+  margin: 0;
   width: 44px;
   height: 26px;
   flex: none;
@@ -1895,40 +1908,33 @@ pre {
 .switch-slider {
   position: absolute;
   inset: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
+  background: #cbd5e1;
   border-radius: 999px;
-  transition:
-    background var(--transition),
-    border-color var(--transition);
+  transition: background var(--transition);
 }
 .switch-slider::before {
   content: '';
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   background: #fff;
   border-radius: 50%;
-  /* Defined two-layer shadow so the knob lifts off the track. */
-  box-shadow:
-    0 1px 1px rgba(15, 23, 42, 0.12),
-    0 2px 4px rgba(15, 23, 42, 0.22);
-  transition: transform var(--transition);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.3);
+  transition: left var(--transition);
 }
 .switch input:checked + .switch-slider {
-  background: linear-gradient(135deg, var(--navy-700) 0%, var(--navy) 100%);
-  border-color: transparent;
+  background: #16a34a;
 }
 .switch input:checked + .switch-slider::before {
-  transform: translateX(18px);
+  left: calc(100% - 23px);
 }
 .switch input:disabled {
   cursor: not-allowed;
 }
 .switch input:disabled + .switch-slider {
-  opacity: 0.5;
+  opacity: 0.6;
 }
 .switch input:focus-visible + .switch-slider {
   outline: 2px solid var(--ring);
