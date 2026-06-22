@@ -75,10 +75,14 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
           </button>
         </div>
       </div>
-      <div
-        className="doc-rendered"
-        dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
-      />
+      {/* Same page treatment as the attorney review screen, so the client sees
+          exactly the document that was approved (same renderer + .doc-paper page). */}
+      <div className="doc-canvas">
+        <article
+          className="doc-rendered doc-paper"
+          dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
+        />
+      </div>
     </div>
   )
 }

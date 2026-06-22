@@ -7554,8 +7554,11 @@ input[type='number'] {
   font-weight: 600;
 }
 
-/* The document, presented as a printed page on a soft desk. */
-.review-canvas {
+/* The document, presented as a printed page on a soft desk. Shared by the review
+   screen and the client share view (/d/[versionId]) so the attorney approves the
+   same page the client sees. */
+.review-canvas,
+.doc-canvas {
   background:
     radial-gradient(120% 60% at 50% 0%, rgba(15, 23, 42, 0.04), transparent),
     var(--surface-2, #eef1f5);
