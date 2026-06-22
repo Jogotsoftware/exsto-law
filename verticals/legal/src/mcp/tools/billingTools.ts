@@ -12,8 +12,14 @@ import {
   completeService,
   addMatterFee,
   voidMatterFee,
+  getInvoiceTemplate,
+  setInvoiceTemplate,
+  renderInvoicePdfBase64,
+  renderInvoiceTemplatePreviewBase64,
   type AddMatterFeeInput,
   type CompleteServiceResult,
+  type InvoiceTemplateConfig,
+  type InvoicePdf,
   type IssueInvoiceInput,
   type IssuedInvoice,
   type SendInvoiceInput,
@@ -203,6 +209,67 @@ registerTool({
   { sourceEventId: string },
   { eventId: string; sourceEventId: string; voided: boolean }
 >)
+
+// ── Invoice PDF + template (Phase 3) ──────────────────────────────────────────
+// One renderer (billing/invoicePdf.ts) feeds the view, download, email attachment,
+// and the Settings live preview, so a real branded PDF is the single artifact.
+
+registerTool({
+  name: 'legal.invoice.pdf',
+  description:
+    'Render an issued invoice to a real PDF (base64) using the firm\'s invoice template. Powers the "view"/"download" actions; returns null if the invoice is not found.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { invoiceEntityId: { type: 'string' } },
+    required: ['invoiceEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    pdf: await renderInvoicePdfBase64(ctx, input.invoiceEntityId),
+  }),
+} satisfies Tool<{ invoiceEntityId: string }, { pdf: InvoicePdf | null }>)
+
+registerTool({
+  name: 'legal.firm.get_invoice_template',
+  description:
+    "The firm's invoice template branding/content config (firm name/address/phone, logo, accent color, visible columns, header note, payment instructions), resolved over defaults.",
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ template: await getInvoiceTemplate(ctx) }),
+} satisfies Tool<Record<string, never>, { template: InvoiceTemplateConfig }>)
+
+registerTool({
+  name: 'legal.firm.set_invoice_template',
+  description:
+    "Save the firm's invoice template branding/content config. Partial configs are merged over defaults. Effective-dated (the prior config stays in history).",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: { config: { type: 'object', additionalProperties: true } },
+    required: ['config'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    template: await setInvoiceTemplate(ctx, input.config),
+  }),
+} satisfies Tool<{ config: Partial<InvoiceTemplateConfig> }, { template: InvoiceTemplateConfig }>)
+
+registerTool({
+  name: 'legal.invoice.template_preview',
+  description:
+    'Render a SAMPLE invoice to a PDF (base64) with a draft template config — the Settings editor live preview, no save.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { config: { type: 'object', additionalProperties: true } },
+    required: ['config'],
+    additionalProperties: false,
+  },
+  handler: async (_ctx: ActionContext, input) => ({
+    pdf: await renderInvoiceTemplatePreviewBase64(input.config),
+  }),
+} satisfies Tool<{ config: Partial<InvoiceTemplateConfig> }, { pdf: InvoicePdf }>)
 
 // ── Rates management (Contract K) ─────────────────────────────────────────────
 // One source of truth for the three rate scopes (rates.ts). The Rates tab reads

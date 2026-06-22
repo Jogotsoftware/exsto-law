@@ -7,6 +7,8 @@ import { enqueueClientEmail } from './mailWorkspace.js'
 import { getInvoice } from '../queries/billing.js'
 import { getClient } from '../queries/client.js'
 import { renderEmailHtml } from '../email/index.js'
+import { getInvoiceTemplate } from './invoiceTemplate.js'
+import { renderInvoicePdf } from '../billing/invoicePdf.js'
 
 export interface IssueInvoiceLineInput {
   sourceEventId: string
@@ -186,6 +188,23 @@ export async function sendInvoice(
     line_items: invoice.lines.map((l) => ({ label: l.description, amount: l.amount })),
   })
 
+  // Attach the real branded PDF (the same renderer the View/Download use). A render
+  // hiccup must never block the send, so it degrades to a no-attachment email.
+  let attachments: { filename: string; contentType: string; contentBase64: string }[] | undefined
+  try {
+    const cfg = await getInvoiceTemplate(ctx)
+    const pdf = await renderInvoicePdf(invoice, cfg)
+    attachments = [
+      {
+        filename: `${invoice.invoiceNumber}.pdf`,
+        contentType: 'application/pdf',
+        contentBase64: pdf.toString('base64'),
+      },
+    ]
+  } catch {
+    attachments = undefined
+  }
+
   // Real send through Contract B (throws if Google isn't connected — the genuine
   // activation gate — or if `to` isn't a known client contact). We do NOT fake a
   // delivery: a failure here surfaces to the caller.
@@ -194,6 +213,7 @@ export async function sendInvoice(
     subject,
     body,
     html: branded?.html,
+    attachments,
     matterId: invoice.matterEntityId ?? undefined,
   })
 

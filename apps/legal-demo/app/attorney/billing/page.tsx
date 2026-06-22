@@ -50,23 +50,6 @@ interface InvoiceSummary {
   lineCount: number
   createdAt: string
 }
-interface InvoiceLine {
-  lineEntityId: string
-  kind: string
-  description: string
-  quantity: string
-  rate: string
-  amount: string
-  sourceEventId: string | null
-  matterNumber: string | null
-}
-interface InvoiceDetail extends InvoiceSummary {
-  clientEntityId: string | null
-  matterEntityId: string | null
-  dueDate: string | null
-  notes: string | null
-  lines: InvoiceLine[]
-}
 function money(amount: string | null, currency = 'USD'): string {
   if (amount === null) return '—'
   return `${currency === 'USD' ? '$' : currency + ' '}${amount}`
@@ -95,6 +78,13 @@ function kindBadgeClass(kind: string): string {
   if (kind === 'time') return 'badge info'
   if (kind === 'service_fee' || kind === 'document_fee') return 'badge ok'
   return 'badge'
+}
+// A base64 PDF → object URL we can show in an <iframe> and offer as a download.
+function base64ToBlobUrl(base64: string, type = 'application/pdf'): string {
+  const bin = atob(base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return URL.createObjectURL(new Blob([bytes], { type }))
 }
 
 // ── Unbilled tab ───────────────────────────────────────────────────────────────
@@ -437,7 +427,7 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [detail, setDetail] = useState<InvoiceDetail | null>(null)
+  const [pdf, setPdf] = useState<{ url: string; filename: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const linkStyle: React.CSSProperties = {
     background: 'none',
@@ -463,20 +453,35 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
     refresh()
   }, [refresh, reloadKey])
 
-  async function open(id: string) {
+  // Revoke a previously-opened PDF blob URL so we don't leak object URLs.
+  function clearPdf() {
+    setPdf((p) => {
+      if (p) URL.revokeObjectURL(p.url)
+      return null
+    })
+  }
+
+  async function open(id: string, invoiceNumber: string) {
     if (openId === id) {
       setOpenId(null)
-      setDetail(null)
+      clearPdf()
       return
     }
     setOpenId(id)
-    setDetail(null)
+    clearPdf()
     try {
-      const r = await callAttorneyMcp<{ invoice: InvoiceDetail | null }>({
-        toolName: 'legal.invoice.get',
-        input: { invoiceEntityId: id },
-      })
-      setDetail(r.invoice)
+      // "View" shows the REAL invoice — the same branded PDF the client receives.
+      const r = await callAttorneyMcp<{
+        pdf: { filename: string; contentType: string; base64: string } | null
+      }>({ toolName: 'legal.invoice.pdf', input: { invoiceEntityId: id } })
+      if (r.pdf) {
+        setPdf({
+          url: base64ToBlobUrl(r.pdf.base64),
+          filename: r.pdf.filename || `${invoiceNumber}.pdf`,
+        })
+      } else {
+        setError('Could not render this invoice.')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -539,7 +544,10 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
               <Fragment key={inv.invoiceEntityId}>
                 <tr>
                   <td>
-                    <button style={linkStyle} onClick={() => open(inv.invoiceEntityId)}>
+                    <button
+                      style={linkStyle}
+                      onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
+                    >
                       <strong>{inv.invoiceNumber}</strong>
                     </button>
                   </td>
@@ -555,7 +563,7 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button
                       style={{ ...linkStyle, marginRight: '0.7rem' }}
-                      onClick={() => open(inv.invoiceEntityId)}
+                      onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
                     >
                       {openId === inv.invoiceEntityId ? 'Hide' : 'View'}
                     </button>
@@ -570,44 +578,31 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                 </tr>
                 {openId === inv.invoiceEntityId && (
                   <tr key={`${inv.invoiceEntityId}-detail`}>
-                    <td colSpan={7} style={{ background: 'var(--surface-2, #f7f7fa)' }}>
-                      {detail === null ? (
+                    <td
+                      colSpan={7}
+                      style={{ background: 'var(--surface-2, #f7f7fa)', padding: '0.8rem' }}
+                    >
+                      {pdf === null ? (
                         <div className="loading-block">
-                          <span className="spinner" /> Loading lines…
+                          <span className="spinner" /> Rendering invoice…
                         </div>
                       ) : (
-                        <table className="data-table">
-                          <thead>
-                            <tr>
-                              <th>Kind</th>
-                              <th>Matter</th>
-                              <th>Description</th>
-                              <th style={{ textAlign: 'right' }}>Qty</th>
-                              <th style={{ textAlign: 'right' }}>Rate</th>
-                              <th style={{ textAlign: 'right' }}>Amount</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {detail.lines.map((l) => (
-                              <tr key={l.lineEntityId}>
-                                <td>
-                                  <span className={kindBadgeClass(l.kind)}>
-                                    {kindLabel(l.kind)}
-                                  </span>
-                                </td>
-                                <td>{l.matterNumber ?? '—'}</td>
-                                <td>{l.description}</td>
-                                <td style={{ textAlign: 'right' }}>{l.quantity}</td>
-                                <td style={{ textAlign: 'right' }}>
-                                  {money(l.rate, detail.currency)}
-                                </td>
-                                <td style={{ textAlign: 'right' }}>
-                                  {money(l.amount, detail.currency)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <div>
+                          <div style={{ marginBottom: '0.5rem' }}>
+                            <a href={pdf.url} download={pdf.filename} style={linkStyle}>
+                              Download PDF
+                            </a>
+                          </div>
+                          <iframe
+                            title={`Invoice ${inv.invoiceNumber}`}
+                            src={pdf.url}
+                            style={{
+                              width: '100%',
+                              height: 560,
+                              border: '1px solid var(--border)',
+                            }}
+                          />
+                        </div>
                       )}
                     </td>
                   </tr>
