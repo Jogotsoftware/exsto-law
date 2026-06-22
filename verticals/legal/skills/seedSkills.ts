@@ -155,7 +155,9 @@ async function main(): Promise<void> {
         await upsertSkill(ctx, input)
         ok++
       } catch (err) {
-        console.error(`  ✗ [${t.name}] ${input.slug}: ${err instanceof Error ? err.message : String(err)}`)
+        console.error(
+          `  ✗ [${t.name}] ${input.slug}: ${err instanceof Error ? err.message : String(err)}`,
+        )
       }
     }
     seededTenants++
