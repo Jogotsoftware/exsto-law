@@ -14,6 +14,7 @@ import { fetchSession } from '@/lib/auth'
 import { PageHead } from '@/components/PageHead'
 import { MailComposer, type ComposerValue } from '@/components/MailComposer'
 import { SignatureBlock, type FirmSignature } from '@/components/SignatureBlock'
+import { Modal } from '@/components/Modal'
 import { AttachmentPicker, type PickedAttachment } from '@/components/mail/AttachmentPicker'
 
 type MatterRef = { matterEntityId: string; matterNumber: string }
@@ -410,17 +411,24 @@ export default function MailPage() {
         </div>
 
         {compose && (
-          <div className="mail-compose-card">
-            <div className="mail-compose-head">
-              <strong>New message</strong>
-              <button
-                className="mail-icon-btn"
-                onClick={() => setCompose(null)}
-                aria-label="Discard"
-              >
-                ✕
-              </button>
-            </div>
+          <Modal
+            title="New message"
+            onClose={() => setCompose(null)}
+            footer={
+              <>
+                <button onClick={() => setCompose(null)}>Discard</button>
+                <button
+                  className="primary"
+                  disabled={
+                    busy !== null || !compose.to || !compose.subject || !compose.body.text.trim()
+                  }
+                  onClick={sendCompose}
+                >
+                  {busy === 'compose' ? 'Sending…' : 'Send from my Gmail'}
+                </button>
+              </>
+            }
+          >
             <label className="mail-field">
               <span className="mail-field-label">To</span>
               <input
@@ -456,19 +464,7 @@ export default function MailPage() {
                 }}
               />
             )}
-            <div className="mail-compose-actions">
-              <button
-                className="primary"
-                disabled={
-                  busy !== null || !compose.to || !compose.subject || !compose.body.text.trim()
-                }
-                onClick={sendCompose}
-              >
-                {busy === 'compose' ? 'Sending…' : 'Send from my Gmail'}
-              </button>
-              <button onClick={() => setCompose(null)}>Discard</button>
-            </div>
-          </div>
+          </Modal>
         )}
 
         {threads === null ? (
@@ -505,6 +501,11 @@ export default function MailPage() {
                     <span className="mail-row-people">
                       {senderLabel(t.participantEmails, t.participantNames)}
                     </span>
+                    {t.matters[0] && (
+                      <span className="mail-row-matter-tag" title={t.matters[0].matterNumber}>
+                        {t.matters[0].matterNumber}
+                      </span>
+                    )}
                     <span className="mail-row-date">{t.lastAt ? relativeDate(t.lastAt) : ''}</span>
                   </div>
                   <div className="mail-row-subject">
@@ -534,30 +535,20 @@ export default function MailPage() {
       </section>
 
       {open && (
-        <section className="mail-thread">
-          <div className="mail-thread-head">
-            <div>
-              <h2 className="mail-thread-subject">{open.subject}</h2>
-              <p className="mail-thread-meta">
-                {open.participantEmails
-                  .map((e) => personLabel(e, open.participantNames))
-                  .join(', ')}
-                {open.matters.length > 0 && (
-                  <>
-                    {' · '}
-                    {open.matters.map((m) => (
-                      <Link key={m.matterEntityId} href={`/attorney/matters/${m.matterEntityId}`}>
-                        {m.matterNumber}
-                      </Link>
-                    ))}
-                  </>
-                )}
-              </p>
-            </div>
-            <button className="mail-icon-btn" onClick={() => setOpen(null)} aria-label="Close">
-              ✕
-            </button>
-          </div>
+        <Modal title={open.subject} onClose={() => setOpen(null)}>
+          <p className="mail-thread-meta">
+            {open.participantEmails.map((e) => personLabel(e, open.participantNames)).join(', ')}
+            {open.matters.length > 0 && (
+              <>
+                {' · '}
+                {open.matters.map((m) => (
+                  <Link key={m.matterEntityId} href={`/attorney/matters/${m.matterEntityId}`}>
+                    {m.matterNumber}
+                  </Link>
+                ))}
+              </>
+            )}
+          </p>
 
           <div className="mail-msgs">
             {open.messages.map((m) => (
@@ -627,7 +618,7 @@ export default function MailPage() {
               {busy === 'reply' ? 'Sending…' : 'Send reply'}
             </button>
           </div>
-        </section>
+        </Modal>
       )}
     </main>
   )

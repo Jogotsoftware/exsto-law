@@ -2098,9 +2098,25 @@ pre {
   gap: var(--space-3);
 }
 .mail-row-people {
+  flex: 1;
+  min-width: 0;
   font-weight: var(--weight-semibold);
   font-size: var(--text-sm);
   color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The matter number, shown right next to the sender (beta feedback). */
+.mail-row-matter-tag {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: var(--weight-semibold);
+  color: var(--accent-attorney, #2563eb);
+  background: var(--accent-attorney-soft, #eef2ff);
+  border-radius: 0.3rem;
+  padding: 0.05rem 0.4rem;
+  max-width: 9rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
