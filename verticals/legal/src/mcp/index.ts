@@ -60,6 +60,9 @@ import './tools/esignPortalTools.js'
 import './tools/billingTools.js'
 // S9 (tenancy & RBAC): firm user management — invite / assign role / deactivate.
 import './tools/userTools.js'
+// Skills: reusable legal playbooks (ported from claude-for-legal) the chatbot
+// loads on demand — stored as substrate data, managed via these tools.
+import './tools/skillTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {
