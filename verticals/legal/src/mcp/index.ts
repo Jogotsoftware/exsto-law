@@ -8,6 +8,7 @@
 // on @exsto/legal) — ADR 0024/0038: one core, generic adapter + per-vertical tools.
 // Importing a tool module runs its registerTool() side effect.
 import './tools/createMatter.js'
+import './tools/calendarCategoriesTools.js'
 import './tools/listMatters.js'
 import './tools/getMatter.js'
 import './tools/submitQuestionnaire.js'

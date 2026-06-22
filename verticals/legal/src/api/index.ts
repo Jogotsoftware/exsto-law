@@ -1,4 +1,5 @@
 export * from './createMatter.js'
+export * from './calendarCategories.js'
 export * from './templateMerge.js'
 export * from './submitQuestionnaire.js'
 export * from './recordManualCall.js'
