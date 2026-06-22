@@ -234,6 +234,17 @@ export async function openMailThread(
   }
 }
 
+// The matters a recipient email is a client of — for the compose attachment picker
+// (which matter's documents may be attached for this recipient). Empty if the
+// address is not a known client contact.
+export async function recipientMatters(
+  ctx: ActionContext,
+  email: string,
+): Promise<Array<{ matterEntityId: string; matterNumber: string }>> {
+  const index = await clientEmailIndex(ctx)
+  return dedupeMatters(index.get(email.trim().toLowerCase()) ?? [])
+}
+
 export interface ReplyInput {
   gmailThreadId: string
   bodyText: string
@@ -242,6 +253,14 @@ export interface ReplyInput {
   // bodyText stays the recorded body and the plaintext part. The firm signature is
   // appended to both centrally.
   bodyHtml?: string
+  // Optional document attachments (already resolved to bytes + scope-checked by the
+  // caller, e.g. resolveMatterAttachments). They ride out in the same Gmail send.
+  attachments?: EmailAttachment[]
+  // Optional matter to attribute + scope the reply to. Must be one the recipient is
+  // a client of (and the sender may send on). Used when attachments are present so
+  // the recorded matter matches the attachments' matter; defaults to the first
+  // authorized matter otherwise.
+  matterId?: string
 }
 
 // Reply in-app: goes out through the attorney's real Gmail, recorded as a
@@ -268,7 +287,14 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
       'You are not authorized to send on this matter. Ask the matter owner or a firm admin for access.',
     )
   }
-  const matterEntityId = authorized[0]!
+  // When a matter is specified (e.g. to scope attachments), it must be one the
+  // recipient is a client of AND the sender may send on — never silently re-route.
+  if (input.matterId && !authorized.includes(input.matterId)) {
+    throw new Error(
+      'You are not authorized to send on the specified matter for this recipient. Ask the matter owner or a firm admin for access.',
+    )
+  }
+  const matterEntityId = input.matterId || authorized[0]!
 
   const last = detail.messages[detail.messages.length - 1]
   // Sign centrally — replies carry the firm signature too (fix #10). The HTML
@@ -286,6 +312,7 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
       html: signedHtml,
       gmailThreadId: input.gmailThreadId,
       inReplyToMessageIdHeader: last?.messageIdHeader ?? undefined,
+      attachments: input.attachments,
     },
     ctx.actorId,
   )
@@ -301,6 +328,7 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
       body_text: signedBody,
       matter_entity_id: matterEntityId,
       participant_emails: detail.participantEmails,
+      attachment_filenames: (input.attachments ?? []).map((a) => a.filename),
     },
   })
 }

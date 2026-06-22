@@ -65,6 +65,56 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
   })
 }
 
+// The latest draft version per draft document of a matter — for the mail-attachment
+// picker (any status; one row per draft document). Scoped to the matter via draft_of.
+export async function listMatterDraftVersions(
+  ctx: ActionContext,
+  matterEntityId: string,
+): Promise<PendingDraftSummary[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      version_id: string
+      document_entity_id: string
+      matter_entity_id: string
+      matter_number: string
+      document_kind: string
+      version_number: number
+      status: string
+      recorded_at: string
+    }>(
+      `SELECT DISTINCT ON (dv.document_entity_id)
+         dv.id AS version_id,
+         dv.document_entity_id,
+         r.target_entity_id AS matter_entity_id,
+         e_matter.name AS matter_number,
+         coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
+         dv.version_number,
+         dv.status,
+         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at
+       FROM document_version dv
+       JOIN entity e_doc ON e_doc.id = dv.document_entity_id
+       JOIN relationship r ON r.source_entity_id = dv.document_entity_id
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+       JOIN entity e_matter ON e_matter.id = r.target_entity_id
+       WHERE dv.tenant_id = $1
+         AND r.target_entity_id = $2
+         AND rkd.kind_name = 'draft_of'
+       ORDER BY dv.document_entity_id, dv.version_number DESC`,
+      [ctx.tenantId, matterEntityId],
+    )
+    return res.rows.map((row) => ({
+      documentVersionId: row.version_id,
+      documentEntityId: row.document_entity_id,
+      matterEntityId: row.matter_entity_id,
+      matterNumber: row.matter_number,
+      documentKind: row.document_kind,
+      versionNumber: row.version_number,
+      status: row.status,
+      recordedAt: row.recorded_at,
+    }))
+  })
+}
+
 export interface SharedDraftView extends PendingDraftSummary {
   bodyMarkdown: string
 }

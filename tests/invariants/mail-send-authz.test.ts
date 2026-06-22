@@ -28,6 +28,8 @@ import {
   grantMatterAccess,
   enqueueClientEmail,
   postAttorneyMessage,
+  recordUploadedDocument,
+  resolveMatterAttachments,
 } from '@exsto/legal'
 
 const url = process.env.SUBSTRATE_TEST_DATABASE_URL ?? process.env.DATABASE_URL
@@ -235,5 +237,120 @@ run('mail send authorization — matter ownership (0088)', { timeout: 90_000 }, 
     // It got past authorization: either it sent, or it failed at the Gmail adapter
     // (no test connection) — but NOT with an authorization error.
     expect(err?.message ?? '').not.toMatch(/not authorized/i)
+  })
+})
+
+// Document-attachment matter-scope: a document may be attached only for the matter
+// it belongs to. resolveMatterAttachments must reject a doc whose owning matter
+// differs from the send matter (the IDOR guard for cross-matter exfiltration).
+run('mail attachment matter-scope', { timeout: 90_000 }, () => {
+  const db = new pg.Pool({ connectionString: url })
+  const stranger = randomUUID() // an attorney who owns neither matter
+  const strangerCtx = { tenantId: TENANT, actorId: stranger }
+  let matterA: string
+  let matterB: string
+  let uploadVersionId: string // an uploaded document_of matterA
+
+  async function makeMatter(): Promise<string> {
+    const id = randomUUID()
+    const action = (
+      await db.query<{ id: string }>(`SELECT id FROM action WHERE tenant_id = $1 LIMIT 1`, [TENANT])
+    ).rows[0]!.id
+    const kind = (
+      await db.query<{ id: string }>(
+        `SELECT id FROM entity_kind_definition WHERE tenant_id = $1 AND kind_name = 'matter' LIMIT 1`,
+        [TENANT],
+      )
+    ).rows[0]!.id
+    await db.query(
+      `INSERT INTO entity (id, tenant_id, action_id, entity_kind_id, name, status, metadata)
+       VALUES ($1, $2, $3, $4, 'PR-attach matter', 'active', '{}'::jsonb)`,
+      [id, TENANT, action, kind],
+    )
+    return id
+  }
+
+  beforeAll(async () => {
+    // A real attorney who owns neither matter (so canSend fails on both for them).
+    await db.query(
+      `INSERT INTO actor (id, tenant_id, actor_type, external_id, display_name, status)
+       VALUES ($1, $2, 'human', $3, 'attach stranger', 'active') ON CONFLICT (id) DO NOTHING`,
+      [stranger, TENANT, `attach-${stranger.slice(0, 8)}@example.test`],
+    )
+    const scope = (
+      await db.query<{ id: string }>(
+        `SELECT id FROM permission_scope_definition
+          WHERE tenant_id = $1 AND scope_name = 'firm.attorney' AND (valid_to IS NULL OR valid_to > now()) LIMIT 1`,
+        [TENANT],
+      )
+    ).rows[0]!.id
+    const action = (
+      await db.query<{ id: string }>(`SELECT id FROM action WHERE tenant_id = $1 LIMIT 1`, [TENANT])
+    ).rows[0]!.id
+    await db.query(
+      `INSERT INTO actor_scope_assignment (id, tenant_id, action_id, actor_id, permission_scope_definition_id)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4)`,
+      [TENANT, action, stranger, scope],
+    )
+
+    matterA = await makeMatter()
+    matterB = await makeMatter()
+    await setMatterOwner(ownerCtx, { matterEntityId: matterA, ownerActorId: OWNER_ACTOR })
+    await setMatterOwner(ownerCtx, { matterEntityId: matterB, ownerActorId: OWNER_ACTOR })
+
+    // An uploaded document of matterA (records it the substrate way; the object key
+    // is a pointer — the bytes are never fetched in these scope tests).
+    const rec = await recordUploadedDocument(ownerCtx, {
+      matterEntityId: matterA,
+      objectKey: `${TENANT}/${matterA}/fake-${randomUUID()}.pdf`,
+      originalFilename: 'engagement.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 12,
+      sha256Hex: 'a'.repeat(64),
+    })
+    uploadVersionId = rec.documentVersionId
+  })
+
+  afterAll(async () => {
+    await db.end()
+    await closeDbPool()
+  })
+
+  // A download stub that fails if ever called — proves the scope check rejects
+  // BEFORE any bytes are fetched.
+  const failDownload = async (): Promise<Buffer> => {
+    throw new Error('SHOULD-NOT-DOWNLOAD')
+  }
+
+  it('rejects attaching matter A’s document when sending on matter B (cross-matter)', async () => {
+    await expect(
+      resolveMatterAttachments(ownerCtx, {
+        matterEntityId: matterB,
+        refs: [{ kind: 'upload', id: uploadVersionId }],
+        downloadUpload: failDownload,
+      }),
+    ).rejects.toThrow(/not an uploaded document of this matter/i)
+  })
+
+  it('allows attaching matter A’s document when sending on matter A (same matter)', async () => {
+    const atts = await resolveMatterAttachments(ownerCtx, {
+      matterEntityId: matterA,
+      refs: [{ kind: 'upload', id: uploadVersionId }],
+      downloadUpload: async () => Buffer.from('%PDF-fake-bytes'),
+    })
+    expect(atts).toHaveLength(1)
+    expect(atts[0]!.filename).toBe('engagement.pdf')
+    expect(atts[0]!.contentType).toBe('application/pdf')
+    expect(Buffer.from(atts[0]!.contentBase64, 'base64').toString()).toBe('%PDF-fake-bytes')
+  })
+
+  it('rejects when the sender is not authorized to send on the matter', async () => {
+    await expect(
+      resolveMatterAttachments(strangerCtx, {
+        matterEntityId: matterA,
+        refs: [{ kind: 'upload', id: uploadVersionId }],
+        downloadUpload: failDownload,
+      }),
+    ).rejects.toThrow(/not authorized/i)
   })
 })
