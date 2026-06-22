@@ -6057,6 +6057,19 @@ button.danger.outline:hover:not(:disabled) {
 .bk-stage .bk-phone-wrap .PhoneInputInput:focus {
   box-shadow: none;
 }
+/* Line the phone field up with the field beside it in the 2-col contact grid.
+   The phone wrap and the standard inputs share the same padding + border, but the
+   react-phone-number-input input inherits a slightly different line-height, which
+   left the phone field a hair shorter than its neighbour (Company name). Pin the
+   line-height on both and center the wrap's contents so the two boxes match. */
+.bk-stage .bk-phone-wrap {
+  display: flex;
+  align-items: center;
+}
+.bk-stage .bk-phone-wrap .PhoneInputInput,
+.bk-stage .bk-input-wrap input.bk-input {
+  line-height: 1.45;
+}
 
 /* Member repeater */
 .bk-member {
