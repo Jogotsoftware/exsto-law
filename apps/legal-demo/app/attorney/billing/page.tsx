@@ -7,6 +7,7 @@
 //   Rates    — READ-ONLY mirror of the client billable rates the Clients/Services
 //              screens (S2) persist; the editor is NOT reimplemented here.
 import { Fragment, useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Tabs } from '@/components/Tabs'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
@@ -636,6 +637,7 @@ interface RateServiceRow {
   serviceKey: string
   displayName: string
   fixedFee: string | null
+  documentFees: Record<string, string>
 }
 interface RatesView {
   firmDefaultRate: string | null
@@ -800,7 +802,11 @@ function RatesTab() {
         </tbody>
       </table>
 
-      <h3 style={{ marginTop: '1.2rem', marginBottom: '0.4rem' }}>Service fixed fees</h3>
+      <h3 style={{ marginTop: '1.2rem', marginBottom: '0.4rem' }}>Service &amp; document fees</h3>
+      <p style={{ color: 'var(--muted)', marginTop: 0, fontSize: '0.85rem' }}>
+        A service’s fixed fee bills when the service is marked complete. Per-document fees (billed
+        when a document is approved) are set on each service’s Billing tab and shown here.
+      </p>
       <table className="data-table">
         <thead>
           <tr>
@@ -825,6 +831,21 @@ function RatesTab() {
               <tr key={s.serviceKey}>
                 <td>
                   <strong>{s.displayName}</strong>
+                  <div style={{ color: 'var(--muted)', fontSize: '0.78rem', marginTop: '0.15rem' }}>
+                    {Object.keys(s.documentFees).length > 0
+                      ? `Document fees: ${Object.entries(s.documentFees)
+                          .map(([k, v]) => `${k.replace(/_/g, ' ')} ${money(v)}`)
+                          .join(', ')} · `
+                      : ''}
+                    <Link
+                      href={`/attorney/services/${s.serviceKey}/billing`}
+                      style={{ color: 'var(--accent, #1a3a6b)' }}
+                    >
+                      {Object.keys(s.documentFees).length > 0
+                        ? 'edit document fees'
+                        : 'set document fees →'}
+                    </Link>
+                  </div>
                 </td>
                 <td style={{ textAlign: 'right' }}>
                   <input

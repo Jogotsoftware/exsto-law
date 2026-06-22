@@ -36,7 +36,7 @@ function priceTime(minutes: number, rateStr: string): { quantity: string; amount
 }
 
 export interface UnbilledEntry {
-  kind: 'time' | 'expense' | 'service_fee'
+  kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
   sourceEventId: string
   date: string | null
   description: string
@@ -95,10 +95,14 @@ export async function listUnbilled(
       entry_date: string | null
     }>(
       `${ATTRS_CTE},
+       -- A ledger entry leaves the unbilled feed when it is billed onto an invoice
+       -- (*.billed) OR voided by the attorney (billing_entry.voided) — both name the
+       -- source ledger event, so one NOT EXISTS handles both.
        billed AS (
          SELECT e.payload->>'source_event_id' AS sid
          FROM event e JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
-         WHERE e.tenant_id = $1 AND ekd.kind_name IN ('time.billed','expense.billed','service_fee.billed')
+         WHERE e.tenant_id = $1
+           AND ekd.kind_name IN ('time.billed','expense.billed','service_fee.billed','document_fee.billed','billing_entry.voided')
            AND e.payload->>'source_event_id' IS NOT NULL
        ),
        matter_of AS (
@@ -142,7 +146,7 @@ export async function listUnbilled(
          AND (r.valid_to IS NULL OR r.valid_to > now())
        LEFT JOIN entity cli ON cli.id = r.target_entity_id AND cli.status = 'active'
        WHERE e.tenant_id = $1
-         AND ekd.kind_name IN ('time.logged','expense.recorded','service_fee.recorded')
+         AND ekd.kind_name IN ('time.logged','expense.recorded','service_fee.recorded','document_fee.recorded')
          AND NOT EXISTS (SELECT 1 FROM billed b WHERE b.sid = e.id::text)
        ORDER BY client_name NULLS LAST, m.name, e.occurred_at`,
       [ctx.tenantId],
@@ -208,15 +212,17 @@ export async function listUnbilled(
             amount: null,
           }
         }
-      } else if (r.kind === 'service_fee.recorded') {
-        // An approved document's flat service fee (recorded once per matter on
-        // first approval). Always carries its own amount — no client-rate lookup.
+      } else if (r.kind === 'service_fee.recorded' || r.kind === 'document_fee.recorded') {
+        // A flat service or document fee. Always carries its own amount — no
+        // client-rate lookup. Service fee accrues when the service is completed;
+        // document fee when a document is approved (one per document kind).
+        const isDoc = r.kind === 'document_fee.recorded'
         const amt = centsToAmount(amountToCents(r.amount ?? '0'))
         entry = {
-          kind: 'service_fee',
+          kind: isDoc ? 'document_fee' : 'service_fee',
           sourceEventId: r.event_id,
           date: r.entry_date,
-          description: r.description ?? 'Service fee',
+          description: r.description ?? (isDoc ? 'Document fee' : 'Service fee'),
           durationMinutes: null,
           quantity: '1',
           rate: amt,

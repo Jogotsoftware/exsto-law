@@ -350,7 +350,7 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
       sourceType: 'human',
       sourceRef: ctx.actorId,
     })
-    await accrueServiceFeeOnApproval(client, {
+    await accrueDocumentFeeOnApproval(client, {
       tenantId: ctx.tenantId,
       actionId,
       actorId: ctx.actorId,
@@ -365,14 +365,16 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
   }
 })
 
-// Beta billing: the first time a document is APPROVED for a matter, the matter's
-// FIXED service fee accrues as a billable item — one service_fee.recorded event per
-// matter, which then shows in the Unbilled list and can be invoiced like time and
-// expenses. Hourly services bill through logged time, so only a fixed fee accrues
-// here. Idempotent: skips if a service_fee.recorded already exists for the matter.
-// The fee is read from the service config under either convention: transitions.cost
-// (type 'fixed') or the legacy transitions.fixed_fee.
-async function accrueServiceFeeOnApproval(
+// Beta billing: when a document is APPROVED, its flat DOCUMENT fee (if the service
+// configures one for that document kind) accrues as a billable item — a
+// document_fee.recorded event on the matter, which shows in the Unbilled list and
+// invoices like time/expenses. A matter can produce several documents, so several
+// document fees. Idempotent per (matter, document_kind): one fee per kind per
+// matter, even if the document is re-approved or has multiple versions. The fee is
+// read from the service config's transitions.document_fees[document_kind]. (The
+// SERVICE-completion fee — transitions.cost type 'fixed' — accrues separately, when
+// the service is marked complete; see handlers/fee.ts.)
+async function accrueDocumentFeeOnApproval(
   client: DbClient,
   args: {
     tenantId: string
@@ -382,14 +384,23 @@ async function accrueServiceFeeOnApproval(
     documentEntityId: string
   },
 ): Promise<void> {
+  const documentKind = await getLatestAttributeValue<string>(
+    client,
+    args.tenantId,
+    args.documentEntityId,
+    'document_kind',
+  )
+  if (!documentKind) return
+
   const already = await client.query<{ found: boolean }>(
     `SELECT EXISTS(
        SELECT 1 FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
        WHERE e.tenant_id = $1 AND e.primary_entity_id = $2
-         AND ekd.kind_name = 'service_fee.recorded'
+         AND ekd.kind_name = 'document_fee.recorded'
+         AND e.payload->>'document_kind' = $3
      ) AS found`,
-    [args.tenantId, args.matterEntityId],
+    [args.tenantId, args.matterEntityId, documentKind],
   )
   if (already.rows[0]?.found) return
 
@@ -402,34 +413,31 @@ async function accrueServiceFeeOnApproval(
   if (!serviceKey) return
 
   const feeRes = await client.query<{
-    cost: { type?: string; amount?: string } | null
-    fixed_fee: string | null
+    document_fees: Record<string, string> | null
   }>(
-    `SELECT transitions->'cost' AS cost, transitions->>'fixed_fee' AS fixed_fee
+    `SELECT transitions->'document_fees' AS document_fees
        FROM workflow_definition
       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
       ORDER BY version DESC LIMIT 1`,
     [args.tenantId, serviceKey],
   )
-  const row = feeRes.rows[0]
-  const fixedAmount =
-    row?.cost && row.cost.type === 'fixed' && row.cost.amount
-      ? row.cost.amount
-      : (row?.fixed_fee ?? null)
-  if (!fixedAmount || !String(fixedAmount).trim()) return
+  const fees = feeRes.rows[0]?.document_fees ?? null
+  const amount = fees && typeof fees === 'object' ? fees[documentKind] : null
+  if (!amount || !String(amount).trim()) return
 
   await insertEvent(client, {
     tenantId: args.tenantId,
     actionId: args.actionId,
-    eventKindName: 'service_fee.recorded',
+    eventKindName: 'document_fee.recorded',
     primaryEntityId: args.matterEntityId,
     secondaryEntityIds: [args.documentEntityId],
     sourceType: 'system',
     sourceRef: args.actorId,
     data: {
       service_key: serviceKey,
-      amount: String(fixedAmount),
-      description: `Service fee — ${serviceKey.replace(/_/g, ' ')}`,
+      document_kind: documentKind,
+      amount: String(amount),
+      description: `Document fee — ${documentKind.replace(/_/g, ' ')}`,
     },
   })
 }

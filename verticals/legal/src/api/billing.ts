@@ -10,7 +10,7 @@ import { renderEmailHtml } from '../email/index.js'
 
 export interface IssueInvoiceLineInput {
   sourceEventId: string
-  kind: 'time' | 'expense' | 'service_fee'
+  kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
   // Optional per-entry overrides; rate defaults to the client's billable rate,
   // description to the source entry's description.
   rateOverride?: string | null

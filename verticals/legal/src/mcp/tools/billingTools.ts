@@ -9,6 +9,11 @@ import {
   getRatesView,
   setClientRate,
   setServiceRate,
+  completeService,
+  addMatterFee,
+  voidMatterFee,
+  type AddMatterFeeInput,
+  type CompleteServiceResult,
   type IssueInvoiceInput,
   type IssuedInvoice,
   type SendInvoiceInput,
@@ -94,9 +99,10 @@ registerTool({
           properties: {
             sourceEventId: {
               type: 'string',
-              description: 'Id of the time.logged / expense.recorded / service_fee.recorded event.',
+              description:
+                'Id of the time.logged / expense.recorded / service_fee.recorded / document_fee.recorded event.',
             },
-            kind: { type: 'string', enum: ['time', 'expense', 'service_fee'] },
+            kind: { type: 'string', enum: ['time', 'expense', 'service_fee', 'document_fee'] },
             rateOverride: {
               type: 'string',
               description: 'Per-line rate override (decimal string); time only.',
@@ -139,6 +145,64 @@ registerTool({
   },
   handler: async (ctx: ActionContext, input) => await sendInvoice(ctx, input),
 } satisfies Tool<SendInvoiceInput, SentInvoice>)
+
+// ── Flat fees (Phase 2) ───────────────────────────────────────────────────────
+// Document fees accrue automatically on document approval and service fees on
+// service completion; these tools cover the manual + completion edges.
+
+registerTool({
+  name: 'legal.service.complete',
+  description:
+    "Mark a matter's service workflow complete, accruing the service's flat fee (if configured) as a billable entry. Idempotent per matter + service.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: { matterEntityId: { type: 'string' } },
+    required: ['matterEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await completeService(ctx, input.matterEntityId),
+} satisfies Tool<{ matterEntityId: string }, CompleteServiceResult>)
+
+registerTool({
+  name: 'legal.matter.add_fee',
+  description:
+    "Add a service or document fee to a matter by hand (decimal string, ADR 0044). Becomes a billable line in the matter's Unbilled list.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      matterEntityId: { type: 'string' },
+      feeType: { type: 'string', enum: ['service', 'document'] },
+      amount: { type: 'string', description: 'Decimal string, e.g. "250.00".' },
+      description: { type: 'string' },
+      documentKind: { type: 'string', description: 'For a document fee: the document kind label.' },
+    },
+    required: ['matterEntityId', 'feeType', 'amount'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await addMatterFee(ctx, input),
+} satisfies Tool<
+  AddMatterFeeInput,
+  { eventId: string; matterEntityId: string; feeType: string; amount: string }
+>)
+
+registerTool({
+  name: 'legal.matter.void_fee',
+  description:
+    'Void an unbilled service or document fee on a matter (records billing_entry.voided naming its ledger event). Fails if the fee is already invoiced.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: { sourceEventId: { type: 'string' } },
+    required: ['sourceEventId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await voidMatterFee(ctx, input.sourceEventId),
+} satisfies Tool<
+  { sourceEventId: string },
+  { eventId: string; sourceEventId: string; voided: boolean }
+>)
 
 // ── Rates management (Contract K) ─────────────────────────────────────────────
 // One source of truth for the three rate scopes (rates.ts). The Rates tab reads
