@@ -722,6 +722,39 @@ section h2 {
   color: var(--accent-attorney);
 }
 
+/* "Libraries"-style collapsible group inside the nav dropdown. The header is a
+   normal menu row with a caret that rotates open; its children indent under it
+   against a hairline rule so the grouping reads at a glance. */
+.att-menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.att-menu-caret {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--muted);
+  flex: none;
+  transition: transform 0.16s ease;
+}
+.att-menu-caret.open {
+  transform: rotate(90deg);
+}
+/* When the active page lives inside a collapsed group, tint the header so the
+   user can tell where they are without expanding it. */
+.att-menu-group-btn.within,
+.att-menu-group-btn.within .att-menu-ico {
+  color: var(--accent-attorney);
+}
+.att-menu-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 0.6rem;
+  margin: 1px 0 1px 0.95rem;
+  border-left: 1px solid var(--rule-soft);
+}
+
 /* Actions menu — a normal pill button (inherits the global button style) that
    drops a right-anchored mini menu of entity actions. The chevron flips when open. */
 .att-actions-btn {
