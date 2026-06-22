@@ -1203,21 +1203,28 @@ export function UnifiedAssistantChat({
             {attachError}
           </div>
         )}
-        <div className={`uac-composer${canAttach ? ' has-attach' : ''}`}>
-          {canAttach && (
-            <button
-              type="button"
-              className={`uac-attach-btn${attachMenuOpen ? ' active' : ''}`}
-              onClick={onAttachClick}
-              disabled={attachBusy}
-              aria-label="Attach a document"
-              aria-haspopup={activeScope.matterEntityId ? 'menu' : undefined}
-              aria-expanded={activeScope.matterEntityId ? attachMenuOpen : undefined}
-              title="Attach a document"
-            >
-              {attachBusy ? <span className="spinner" /> : <PaperclipIcon size={16} />}
-            </button>
-          )}
+        {/* Picked-skill pills (Claude only) — what the assistant will force-load. */}
+        {isClaude && selectedSkills.length > 0 && (
+          <div className="uac-staged-skills">
+            {selectedSkills.map((s) => (
+              <span key={s.slug} className="uac-skill-pill" title={s.name}>
+                <SparklesIcon size={11} />
+                <span className="uac-skill-pill-name">{s.name}</span>
+                <button
+                  type="button"
+                  className="uac-attach-remove"
+                  onClick={() => setSelectedSkills((prev) => prev.filter((x) => x.slug !== s.slug))}
+                  aria-label={`Remove ${s.name}`}
+                >
+                  <XIcon size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div
+          className={`uac-composer${canAttach ? ' has-attach' : ''}${isClaude ? ' has-skills' : ''}`}
+        >
           {attachMenuOpen && canAttach && (
             <div className="uac-attach-menu" role="menu">
               <button
@@ -1255,6 +1262,34 @@ export function UnifiedAssistantChat({
             aria-label={placeholder || 'Message the assistant'}
             rows={2}
           />
+          {/* Bottom toolbar: attach + skills on the left, send on the right. */}
+          <div className="uac-composer-tools">
+            {canAttach && (
+              <button
+                type="button"
+                className={`uac-tool-btn${attachMenuOpen ? ' active' : ''}`}
+                onClick={onAttachClick}
+                disabled={attachBusy}
+                aria-label="Attach a document"
+                aria-haspopup={activeScope.matterEntityId ? 'menu' : undefined}
+                aria-expanded={activeScope.matterEntityId ? attachMenuOpen : undefined}
+                title="Attach a document"
+              >
+                {attachBusy ? <span className="spinner" /> : <PaperclipIcon size={16} />}
+              </button>
+            )}
+            {isClaude && (
+              <button
+                type="button"
+                className={`uac-tool-btn${skillMenuOpen ? ' active' : ''}`}
+                onClick={() => setSkillMenuOpen((o) => !o)}
+                aria-label="Legal skills"
+                title="Legal skills — or type / in an empty message"
+              >
+                <SparklesIcon size={16} />
+              </button>
+            )}
+          </div>
           <button
             type="button"
             className="uac-send"
@@ -1265,33 +1300,6 @@ export function UnifiedAssistantChat({
             <SendIcon size={16} />
           </button>
         </div>
-
-        {/* Skills affordance (Claude only): the /skills trigger + picked-skill pills. */}
-        {isClaude && (
-          <div className="uac-skillbar">
-            <button
-              type="button"
-              className={`uac-skilltrigger${skillMenuOpen ? ' is-open' : ''}`}
-              onClick={() => setSkillMenuOpen((o) => !o)}
-              title="Add a legal skill (or type / in an empty message)"
-            >
-              <SparklesIcon size={13} /> /skills
-            </button>
-            {selectedSkills.map((s) => (
-              <span key={s.slug} className="uac-skill-pill">
-                {s.name}
-                <button
-                  type="button"
-                  className="uac-skill-pill-x"
-                  onClick={() => setSelectedSkills((prev) => prev.filter((x) => x.slug !== s.slug))}
-                  aria-label={`Remove ${s.name}`}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
         <input
           ref={fileInputRef}
           type="file"
