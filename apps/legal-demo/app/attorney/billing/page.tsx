@@ -11,6 +11,35 @@ import Link from 'next/link'
 import { Tabs } from '@/components/Tabs'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
+// A select-all checkbox for a table/group header: checked when every row is
+// selected, indeterminate when only some are. The attorney asked for one plain
+// header checkbox instead of "Select all" text. React has no `indeterminate`
+// prop, so it's set on the element through a callback ref.
+function SelectAllCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  title,
+}: {
+  checked: boolean
+  indeterminate: boolean
+  onChange: (checked: boolean) => void
+  title: string
+}) {
+  return (
+    <input
+      type="checkbox"
+      ref={(el) => {
+        if (el) el.indeterminate = !checked && indeterminate
+      }}
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+      title={title}
+      aria-label={title}
+    />
+  )
+}
+
 // ── Shared types (mirror verticals/legal/src/queries/billing.ts) ───────────────
 interface UnbilledEntry {
   kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
@@ -240,22 +269,14 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
             {(() => {
               const ids = clientEntryIds(c)
               const allSelected = ids.length > 0 && ids.every((id) => selected[id])
+              const someSelected = ids.some((id) => selected[id])
               return (
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.3rem',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={(ev) => setClientSelection(c, ev.target.checked)}
-                  />
-                  Select all
-                </label>
+                <SelectAllCheckbox
+                  checked={allSelected}
+                  indeterminate={someSelected}
+                  onChange={(v) => setClientSelection(c, v)}
+                  title={`Select all unbilled entries for ${c.clientName}`}
+                />
               )
             })()}
             <button
@@ -291,28 +312,25 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
                 <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
                   · {money(m.total, currency)}
                 </span>
-                <button
-                  onClick={() =>
-                    setMatterSelection(m, !m.entries.every((e) => selected[e.sourceEventId]))
-                  }
-                  style={{
-                    marginLeft: 'auto',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--accent, #1a3a6b)',
-                    cursor: 'pointer',
-                    padding: 0,
-                    font: 'inherit',
-                    fontSize: '0.8rem',
-                  }}
-                >
-                  {m.entries.every((e) => selected[e.sourceEventId]) ? 'Clear' : 'Select all'}
-                </button>
               </div>
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '2rem' }}></th>
+                    <th style={{ width: '2rem' }}>
+                      {(() => {
+                        const allSelected =
+                          m.entries.length > 0 && m.entries.every((e) => selected[e.sourceEventId])
+                        const someSelected = m.entries.some((e) => selected[e.sourceEventId])
+                        return (
+                          <SelectAllCheckbox
+                            checked={allSelected}
+                            indeterminate={someSelected}
+                            onChange={(v) => setMatterSelection(m, v)}
+                            title="Select all entries in this matter"
+                          />
+                        )
+                      })()}
+                    </th>
                     <th>Date</th>
                     <th>Kind</th>
                     <th>Description</th>
