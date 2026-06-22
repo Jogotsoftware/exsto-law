@@ -1,6 +1,7 @@
 import { submitAction, type ActionContext } from '@exsto/substrate'
 import { archiveEntity } from '@exsto/primitives'
-import { chatWithAssistant } from '../adapters/claude.js'
+import { chatWithAssistantDetailed } from '../adapters/claude.js'
+import { withSkills } from './skillContext.js'
 import {
   getStandaloneTemplate,
   type StandaloneTemplate,
@@ -86,19 +87,30 @@ export async function aiDraftTemplate(
   const instructions = input.instructions?.trim()
   if (!instructions) throw new Error('Describe the template you want drafted.')
   const kind = input.category === 'email' ? 'email' : 'legal document'
-  const system = [
+  const baseSystem = [
     `You draft reusable ${kind} TEMPLATES for a US law firm.`,
     'Output the template body ONLY — no preamble, no explanation, no markdown code fences.',
     'Wherever a value is filled in per client or matter, insert a merge token in double',
     'curly braces with a snake_case name, e.g. {{client_name}}, {{firm_name}},',
     '{{matter_number}}, {{effective_date}}. Reuse the same token name when a value recurs.',
     'Use clear headings and short paragraphs; keep it practical and ready to edit.',
+    // Anti-hallucination — the same standard the chatbot holds (beta ask).
+    'Never fabricate statutes, code sections, case names, or citations. Where a specific',
+    'legal citation would go, prefer a {{citation}} merge token or general phrasing the',
+    'attorney can verify; do not invent a section number.',
   ].join(' ')
-  const body = await chatWithAssistant(ctx.tenantId, [
-    { role: 'system', content: system },
-    { role: 'user', content: instructions },
-  ])
-  return { body: body.trim() }
+  // Make the draft skill-aware: the model can pull a relevant legal playbook
+  // (NDA, MSA, demand letter, …) via load_skill, exactly like the chatbot.
+  const { system, clientTools } = await withSkills(ctx, baseSystem)
+  const { reply } = await chatWithAssistantDetailed(
+    ctx.tenantId,
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: instructions },
+    ],
+    { clientTools },
+  )
+  return { body: reply.trim() }
 }
 
 // Archive a standalone template through the core entity.archive action (status
