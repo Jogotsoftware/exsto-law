@@ -625,7 +625,7 @@ export default function CalendarPage() {
               })
             }
           >
-            New consultation
+            + Event
           </button>
         </div>
       </section>
