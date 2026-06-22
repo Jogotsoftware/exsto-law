@@ -4219,6 +4219,99 @@ main.book-main {
   gap: 0.6rem;
   margin-top: 0.8rem;
 }
+/* Draft-with-AI options: model selector + a compact searchable skill picker. */
+.tpl-ai-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.7rem;
+}
+.tpl-ai-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.tpl-ai-opt-lbl {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.tpl-ai-opt-select {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.84rem;
+}
+.tpl-ai-skillpick {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.tpl-ai-skillchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.tpl-ai-skillchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.2rem 0.1rem 0.5rem;
+  border: 1px solid var(--accent, #1e3a8a);
+  border-radius: 999px;
+  background: var(--accent-attorney-soft, #e8efff);
+  color: var(--accent, #1e3a8a);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.tpl-ai-skillchip button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+.tpl-ai-skillsearch {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.84rem;
+}
+.tpl-ai-skilllist {
+  display: flex;
+  flex-direction: column;
+  max-height: 11rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+}
+.tpl-ai-skillopt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.tpl-ai-skillopt:hover {
+  background: rgba(127, 127, 127, 0.1);
+}
+.tpl-ai-skillopt span {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.tpl-ai-skillopt small {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.tpl-ai-skillempty {
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
 /* "Drafting…" progress animation in the Draft-with-AI modal — shimmering document
    lines so the wait reads as the AI writing, not a frozen window. */
 .tpl-drafting {

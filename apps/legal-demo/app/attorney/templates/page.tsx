@@ -37,6 +37,20 @@ interface Draft {
   variables: TemplateVariables
 }
 
+// Options for the "Draft with AI" model + skill pickers.
+interface AiModelOpt {
+  id: string
+  label: string
+  available: boolean
+  provider: string
+  model: string
+}
+interface AiSkillOpt {
+  slug: string
+  name: string
+  practiceArea: string
+}
+
 const EMPTY_DRAFT: Draft = {
   templateEntityId: null,
   name: '',
@@ -92,6 +106,12 @@ export default function TemplatesPage() {
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
   const [showAi, setShowAi] = useState(false)
+  // "Draft with AI" options: model (defaults to cheapest) + optional forced skills.
+  const [aiModelId, setAiModelId] = useState('')
+  const [aiModels, setAiModels] = useState<AiModelOpt[]>([])
+  const [aiSkills, setAiSkills] = useState<AiSkillOpt[]>([])
+  const [aiSkillSlugs, setAiSkillSlugs] = useState<string[]>([])
+  const [aiSkillQuery, setAiSkillQuery] = useState('')
   const [importing, setImporting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [showFields, setShowFields] = useState(false)
@@ -121,6 +141,31 @@ export default function TemplatesPage() {
       .catch((err) => setError(err.message))
   }
   useEffect(load, [])
+
+  // Model + skill options for "Draft with AI" (fetched once). The model defaults
+  // to the cheapest available Claude model — drafts are simple, so Haiku is plenty.
+  useEffect(() => {
+    let cancelled = false
+    callAttorneyMcp<{ models: AiModelOpt[] }>({ toolName: 'legal.assistant.models' })
+      .then((r) => {
+        if (cancelled) return
+        const claude = (r.models ?? []).filter((m) => m.provider === 'anthropic' && m.available)
+        setAiModels(claude)
+        const rank = (m: AiModelOpt) =>
+          /haiku/i.test(m.model) ? 0 : /sonnet/i.test(m.model) ? 1 : /opus/i.test(m.model) ? 2 : 3
+        const cheapest = [...claude].sort((a, b) => rank(a) - rank(b))[0]
+        setAiModelId((cur) => cur || cheapest?.id || '')
+      })
+      .catch(() => {})
+    callAttorneyMcp<{ skills: AiSkillOpt[] }>({ toolName: 'legal.skill.list' })
+      .then((r) => {
+        if (!cancelled) setAiSkills(r.skills ?? [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Escape closes the "Draft with AI" modal (and restores focus to its trigger).
   useEffect(() => {
@@ -218,7 +263,12 @@ export default function TemplatesPage() {
     try {
       const r = await callAttorneyMcp<{ body: string }>({
         toolName: 'legal.template.ai_draft',
-        input: { instructions: aiPrompt.trim(), category: draft.category },
+        input: {
+          instructions: aiPrompt.trim(),
+          category: draft.category,
+          skillSlugs: aiSkillSlugs.length ? aiSkillSlugs : undefined,
+          modelId: aiModelId || undefined,
+        },
       })
       setDraft({ ...draft, body: r.body })
       setSeedKey((k) => k + 1) // full-body replacement → re-seed the editor
@@ -619,6 +669,87 @@ export default function TemplatesPage() {
                       : 'Describe the document to draft — e.g. “a mutual NDA for a NC LLC, 2-year term”. The draft will use {{tokens}} for anything filled in per client or matter.'
                   }
                 />
+                {!aiBusy && (
+                  <div className="tpl-ai-opts">
+                    <label className="tpl-ai-opt">
+                      <span className="tpl-ai-opt-lbl">Model</span>
+                      <select
+                        className="tpl-ai-opt-select"
+                        value={aiModelId}
+                        onChange={(e) => setAiModelId(e.target.value)}
+                      >
+                        {aiModels.length === 0 && <option value="">Default</option>}
+                        {aiModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="tpl-ai-skillpick">
+                      <span className="tpl-ai-opt-lbl">Skills (optional — force a playbook)</span>
+                      {aiSkillSlugs.length > 0 && (
+                        <div className="tpl-ai-skillchips">
+                          {aiSkillSlugs.map((slug) => (
+                            <span key={slug} className="tpl-ai-skillchip">
+                              {aiSkills.find((x) => x.slug === slug)?.name ?? slug}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setAiSkillSlugs((p) => p.filter((x) => x !== slug))
+                                }
+                                aria-label="Remove skill"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <input
+                        className="tpl-ai-skillsearch"
+                        value={aiSkillQuery}
+                        onChange={(e) => setAiSkillQuery(e.target.value)}
+                        placeholder="Search legal skills to force…"
+                      />
+                      {aiSkillQuery.trim() &&
+                        (() => {
+                          const q = aiSkillQuery.toLowerCase()
+                          const matches = aiSkills
+                            .filter(
+                              (s) =>
+                                !aiSkillSlugs.includes(s.slug) &&
+                                (s.name.toLowerCase().includes(q) ||
+                                  s.slug.toLowerCase().includes(q) ||
+                                  s.practiceArea.toLowerCase().includes(q)),
+                            )
+                            .slice(0, 8)
+                          return (
+                            <div className="tpl-ai-skilllist">
+                              {matches.length === 0 ? (
+                                <div className="tpl-ai-skillempty">No matching skills.</div>
+                              ) : (
+                                matches.map((s) => (
+                                  <button
+                                    key={s.slug}
+                                    type="button"
+                                    className="tpl-ai-skillopt"
+                                    onClick={() => {
+                                      setAiSkillSlugs((p) => [...p, s.slug])
+                                      setAiSkillQuery('')
+                                    }}
+                                  >
+                                    <span>{s.name}</span>
+                                    <small>{s.practiceArea}</small>
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          )
+                        })()}
+                    </div>
+                  </div>
+                )}
                 {aiBusy && (
                   <div className="tpl-drafting" role="status" aria-live="polite">
                     <div className="tpl-drafting-label">
