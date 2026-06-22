@@ -101,7 +101,9 @@ export async function setClientRate(
 
 /** Set a service's fixed fee. Routes through legal.service.upsert, preserving the
  *  service's other config (the handler merges transitions_patch over the prior
- *  version), so the fee is the service config's fixed_fee — one source. */
+ *  version). Writes the CANONICAL home — transitions.cost {type:'fixed'} — so the
+ *  Rates tab, the service editor, and the service-fee accrual all read one source
+ *  (the legacy transitions.fixed_fee is still read as a fallback on the way in). */
 export async function setServiceRate(
   ctx: ActionContext,
   serviceKey: string,
@@ -124,7 +126,7 @@ export async function setServiceRate(
     payload: {
       service_key: serviceKey,
       display_name: displayName,
-      transitions_patch: { fixed_fee: fee },
+      transitions_patch: { cost: { type: 'fixed', amount: fee, hours: null } },
     },
   })
   return { fixedFee: fee }
@@ -146,6 +148,9 @@ export interface ServiceRateRow {
   serviceKey: string
   displayName: string
   fixedFee: string | null
+  // Per-document-kind flat fees configured on the service (read-only here; edited
+  // on the service's Billing tab). { [document_kind]: decimal-string }.
+  documentFees: Record<string, string>
 }
 
 export interface RatesView {
@@ -187,19 +192,36 @@ export async function getRatesView(ctx: ActionContext): Promise<RatesView> {
     const serviceRows = await client.query<{
       kind_name: string
       display_name: string
+      cost: { type?: string; amount?: string } | null
       fixed_fee: string | null
+      document_fees: Record<string, string> | null
     }>(
-      `SELECT kind_name, display_name, transitions ->> 'fixed_fee' AS fixed_fee
+      `SELECT kind_name, display_name,
+              transitions -> 'cost'           AS cost,
+              transitions ->> 'fixed_fee'     AS fixed_fee,
+              transitions -> 'document_fees'  AS document_fees
          FROM workflow_definition
         WHERE tenant_id = $1 AND valid_to IS NULL
         ORDER BY display_name`,
       [ctx.tenantId],
     )
-    const services: ServiceRateRow[] = serviceRows.rows.map((r) => ({
-      serviceKey: r.kind_name,
-      displayName: r.display_name,
-      fixedFee: r.fixed_fee,
-    }))
+    const services: ServiceRateRow[] = serviceRows.rows.map((r) => {
+      // One source of truth: a fixed cost.amount is the fee; legacy fixed_fee is a
+      // read fallback for rows written before the convention was unified.
+      const fromCost = r.cost && r.cost.type === 'fixed' && r.cost.amount ? r.cost.amount : null
+      const docFees: Record<string, string> = {}
+      if (r.document_fees && typeof r.document_fees === 'object') {
+        for (const [k, v] of Object.entries(r.document_fees)) {
+          if (typeof v === 'string') docFees[k] = v
+        }
+      }
+      return {
+        serviceKey: r.kind_name,
+        displayName: r.display_name,
+        fixedFee: fromCost ?? r.fixed_fee,
+        documentFees: docFees,
+      }
+    })
 
     return { firmDefaultRate, clients, services }
   })

@@ -85,6 +85,9 @@ export interface ServiceDefinition {
   intakeSchema: IntakeSchema
   documents: string[]
   cost: ServiceCost | null
+  // Per-document-kind flat fees, accrued when that document is approved (Phase 2).
+  // { [document_kind]: decimal-string }. Empty when none configured.
+  documentFees: Record<string, string>
   generationMode: GenerationMode
   booking: ServiceBooking | null
   isActive: boolean
@@ -106,6 +109,7 @@ type WorkflowRow = {
     drafting?: DraftingConfig
     document_templates?: DocumentTemplateConfig
     cost?: { type?: string; amount?: string; hours?: number | null }
+    document_fees?: Record<string, string>
     generation_mode?: string
     booking?: { enabled?: boolean; send_calendar_invite?: boolean; duration_minutes?: number }
     [k: string]: unknown
@@ -200,6 +204,37 @@ function normalizeCost(cost: ServiceCost | null | undefined): ServiceCost | null
   return { type: cost.type, amount: cost.amount, hours }
 }
 
+// Read stored per-document-kind fees into a clean { kind: amount } map, dropping
+// any malformed money string. Defensive: a non-object reads as no fees.
+function parseDocumentFees(fees: Record<string, string> | undefined): Record<string, string> {
+  if (!fees || typeof fees !== 'object') return {}
+  const out: Record<string, string> = {}
+  for (const [kind, amount] of Object.entries(fees)) {
+    if (typeof amount === 'string' && MONEY_RE.test(amount)) out[kind] = amount
+  }
+  return out
+}
+
+// Validate + normalize a document-fees patch (throws on a bad money string). An
+// entry with an empty amount is dropped (clears that document kind's fee).
+function normalizeDocumentFees(
+  fees: Record<string, string> | null | undefined,
+): Record<string, string> {
+  if (!fees) return {}
+  const out: Record<string, string> = {}
+  for (const [kind, raw] of Object.entries(fees)) {
+    const amount = (raw ?? '').trim()
+    if (amount === '') continue
+    if (!MONEY_RE.test(amount)) {
+      throw new Error(
+        `document fee for "${kind}" must be a decimal string like "250.00" (ADR 0044).`,
+      )
+    }
+    out[kind] = amount
+  }
+  return out
+}
+
 // Validate + normalize a booking block (throws on a bad duration).
 function normalizeBooking(b: ServiceBooking | null | undefined): ServiceBooking | null {
   if (!b) return null
@@ -230,6 +265,7 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     intakeSchema,
     documents: Array.isArray(r.transitions.documents) ? r.transitions.documents : [],
     cost: parseServiceCost(r.transitions.cost),
+    documentFees: parseDocumentFees(r.transitions.document_fees),
     generationMode: parseGenerationMode(r.transitions.generation_mode),
     booking: parseBooking(r.transitions.booking),
     isActive: r.status === 'active',
@@ -325,6 +361,9 @@ export interface UpdateServiceMetadataInput {
   generationMode?: GenerationMode
   booking?: ServiceBooking | null
   cost?: ServiceCost | null
+  // Per-document-kind flat fees, { [document_kind]: decimal-string }. Replaces the
+  // stored map; an empty amount clears that kind's fee.
+  documentFees?: Record<string, string> | null
 }
 
 // Create a new service (metadata only — questionnaire/prompt editors are a
@@ -366,6 +405,8 @@ export async function updateServiceMetadata(
     transitionsPatch.generation_mode = parseGenerationMode(input.generationMode)
   if (input.booking !== undefined) transitionsPatch.booking = normalizeBooking(input.booking)
   if (input.cost !== undefined) transitionsPatch.cost = normalizeCost(input.cost)
+  if (input.documentFees !== undefined)
+    transitionsPatch.document_fees = normalizeDocumentFees(input.documentFees)
 
   await submitAction(ctx, {
     actionKindName: 'legal.service.upsert',

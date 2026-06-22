@@ -9,6 +9,17 @@ import {
   getRatesView,
   setClientRate,
   setServiceRate,
+  completeService,
+  addMatterFee,
+  voidMatterFee,
+  getInvoiceTemplate,
+  setInvoiceTemplate,
+  renderInvoicePdfBase64,
+  renderInvoiceTemplatePreviewBase64,
+  type AddMatterFeeInput,
+  type CompleteServiceResult,
+  type InvoiceTemplateConfig,
+  type InvoicePdf,
   type IssueInvoiceInput,
   type IssuedInvoice,
   type SendInvoiceInput,
@@ -94,9 +105,10 @@ registerTool({
           properties: {
             sourceEventId: {
               type: 'string',
-              description: 'Id of the time.logged / expense.recorded / service_fee.recorded event.',
+              description:
+                'Id of the time.logged / expense.recorded / service_fee.recorded / document_fee.recorded event.',
             },
-            kind: { type: 'string', enum: ['time', 'expense', 'service_fee'] },
+            kind: { type: 'string', enum: ['time', 'expense', 'service_fee', 'document_fee'] },
             rateOverride: {
               type: 'string',
               description: 'Per-line rate override (decimal string); time only.',
@@ -139,6 +151,125 @@ registerTool({
   },
   handler: async (ctx: ActionContext, input) => await sendInvoice(ctx, input),
 } satisfies Tool<SendInvoiceInput, SentInvoice>)
+
+// ── Flat fees (Phase 2) ───────────────────────────────────────────────────────
+// Document fees accrue automatically on document approval and service fees on
+// service completion; these tools cover the manual + completion edges.
+
+registerTool({
+  name: 'legal.service.complete',
+  description:
+    "Mark a matter's service workflow complete, accruing the service's flat fee (if configured) as a billable entry. Idempotent per matter + service.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: { matterEntityId: { type: 'string' } },
+    required: ['matterEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await completeService(ctx, input.matterEntityId),
+} satisfies Tool<{ matterEntityId: string }, CompleteServiceResult>)
+
+registerTool({
+  name: 'legal.matter.add_fee',
+  description:
+    "Add a service or document fee to a matter by hand (decimal string, ADR 0044). Becomes a billable line in the matter's Unbilled list.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      matterEntityId: { type: 'string' },
+      feeType: { type: 'string', enum: ['service', 'document'] },
+      amount: { type: 'string', description: 'Decimal string, e.g. "250.00".' },
+      description: { type: 'string' },
+      documentKind: { type: 'string', description: 'For a document fee: the document kind label.' },
+    },
+    required: ['matterEntityId', 'feeType', 'amount'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await addMatterFee(ctx, input),
+} satisfies Tool<
+  AddMatterFeeInput,
+  { eventId: string; matterEntityId: string; feeType: string; amount: string }
+>)
+
+registerTool({
+  name: 'legal.matter.void_fee',
+  description:
+    'Void an unbilled service or document fee on a matter (records billing_entry.voided naming its ledger event). Fails if the fee is already invoiced.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: { sourceEventId: { type: 'string' } },
+    required: ['sourceEventId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await voidMatterFee(ctx, input.sourceEventId),
+} satisfies Tool<
+  { sourceEventId: string },
+  { eventId: string; sourceEventId: string; voided: boolean }
+>)
+
+// ── Invoice PDF + template (Phase 3) ──────────────────────────────────────────
+// One renderer (billing/invoicePdf.ts) feeds the view, download, email attachment,
+// and the Settings live preview, so a real branded PDF is the single artifact.
+
+registerTool({
+  name: 'legal.invoice.pdf',
+  description:
+    'Render an issued invoice to a real PDF (base64) using the firm\'s invoice template. Powers the "view"/"download" actions; returns null if the invoice is not found.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { invoiceEntityId: { type: 'string' } },
+    required: ['invoiceEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    pdf: await renderInvoicePdfBase64(ctx, input.invoiceEntityId),
+  }),
+} satisfies Tool<{ invoiceEntityId: string }, { pdf: InvoicePdf | null }>)
+
+registerTool({
+  name: 'legal.firm.get_invoice_template',
+  description:
+    "The firm's invoice template branding/content config (firm name/address/phone, logo, accent color, visible columns, header note, payment instructions), resolved over defaults.",
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ template: await getInvoiceTemplate(ctx) }),
+} satisfies Tool<Record<string, never>, { template: InvoiceTemplateConfig }>)
+
+registerTool({
+  name: 'legal.firm.set_invoice_template',
+  description:
+    "Save the firm's invoice template branding/content config. Partial configs are merged over defaults. Effective-dated (the prior config stays in history).",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: { config: { type: 'object', additionalProperties: true } },
+    required: ['config'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    template: await setInvoiceTemplate(ctx, input.config),
+  }),
+} satisfies Tool<{ config: Partial<InvoiceTemplateConfig> }, { template: InvoiceTemplateConfig }>)
+
+registerTool({
+  name: 'legal.invoice.template_preview',
+  description:
+    'Render a SAMPLE invoice to a PDF (base64) with a draft template config — the Settings editor live preview, no save.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { config: { type: 'object', additionalProperties: true } },
+    required: ['config'],
+    additionalProperties: false,
+  },
+  handler: async (_ctx: ActionContext, input) => ({
+    pdf: await renderInvoiceTemplatePreviewBase64(input.config),
+  }),
+} satisfies Tool<{ config: Partial<InvoiceTemplateConfig> }, { pdf: InvoicePdf }>)
 
 // ── Rates management (Contract K) ─────────────────────────────────────────────
 // One source of truth for the three rate scopes (rates.ts). The Rates tab reads
