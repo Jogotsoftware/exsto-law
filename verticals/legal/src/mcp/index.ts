@@ -9,6 +9,7 @@
 // Importing a tool module runs its registerTool() side effect.
 import './tools/createMatter.js'
 import './tools/calendarCategoriesTools.js'
+import './tools/matterAccessTools.js'
 import './tools/documentUploadTools.js'
 import './tools/listMatters.js'
 import './tools/getMatter.js'

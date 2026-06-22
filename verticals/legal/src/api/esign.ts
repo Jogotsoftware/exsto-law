@@ -18,6 +18,7 @@ import { loadConnection } from '../adapters/connectionStore.js'
 import { ingestionContext } from './granolaIngestion.js'
 import { queueNotification } from './notifications.js'
 import { findClientContactByEmail } from './clientIdentity.js'
+import { assertCanSendOnMatter } from './matterAccess.js'
 import {
   DEFAULT_ESIGN_PROVIDER,
   EsignNotConfiguredError,
@@ -100,6 +101,11 @@ export async function sendForSignature(
 ): Promise<SendForSignatureResult> {
   const draft = await getDraftVersion(ctx, input.documentVersionId)
   if (!draft) throw new Error(`Document version not found: ${input.documentVersionId}`)
+
+  // Send authz (0087, PR B): dispatching a signature request emails the matter's
+  // client, so only the matter owner / a granted attorney / a firm admin may do it.
+  // (Matterless drafts have no ownership to gate; they fall through.)
+  if (draft.matterEntityId) await assertCanSendOnMatter(ctx, draft.matterEntityId)
 
   // Resolve signers (default to the matter's client contact).
   let signers: PrepareSigner[] = (input.signers ?? []).filter((s) => s.email?.trim())
