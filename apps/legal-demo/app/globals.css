@@ -7055,6 +7055,7 @@ input[type='number'] {
   border-top: 2px solid #ef4444;
   z-index: 5;
   pointer-events: none;
+}
 /* ── Client portal sign-in (email+password / Google / magic-link) ──────────── */
 .cauth-shell {
   display: flex;

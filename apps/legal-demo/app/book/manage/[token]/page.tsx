@@ -118,7 +118,11 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
       const r = await fetch('/api/book/manage/reschedule', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token, startIso: selectedSlot.startIso, endIso: selectedSlot.endIso }),
+        body: JSON.stringify({
+          token,
+          startIso: selectedSlot.startIso,
+          endIso: selectedSlot.endIso,
+        }),
       })
       const data = await r.json()
       if (!r.ok) throw new Error(data.error ?? 'We could not reschedule this consultation.')
@@ -177,7 +181,9 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
               <Centered>
                 <SuccessMark />
                 <h1 className="bk-h1">
-                  {done.kind === 'rescheduled' ? 'Your consultation is moved' : 'Your consultation is cancelled'}
+                  {done.kind === 'rescheduled'
+                    ? 'Your consultation is moved'
+                    : 'Your consultation is cancelled'}
                 </h1>
                 <p className="bk-sub">
                   {done.kind === 'rescheduled' ? (
@@ -186,7 +192,10 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
                       calendar invitation is on its way.
                     </>
                   ) : (
-                    <>We&rsquo;ve cancelled this consultation and let the office know. You can book again any time.</>
+                    <>
+                      We&rsquo;ve cancelled this consultation and let the office know. You can book
+                      again any time.
+                    </>
                   )}
                 </p>
                 <Link href="/" className="bk-btn bk-btn-ghost bk-btn-wide">
@@ -201,7 +210,8 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
                   {loadError}
                 </div>
                 <p className="bk-sub">
-                  The link may have expired. Please contact the firm and we&rsquo;ll be glad to help.
+                  The link may have expired. Please contact the firm and we&rsquo;ll be glad to
+                  help.
                 </p>
               </Centered>
             ) : !booking ? (
@@ -214,7 +224,9 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
               <>
                 <div className="bk-stage-head">
                   <h1 className="bk-h1">
-                    {booking.clientFirstName ? `Hi ${booking.clientFirstName} —` : 'Your consultation'}
+                    {booking.clientFirstName
+                      ? `Hi ${booking.clientFirstName} —`
+                      : 'Your consultation'}
                   </h1>
                   <p className="bk-sub">
                     {booking.status === 'consultation_cancelled'
@@ -247,13 +259,20 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
                       ? 'If you&rsquo;d like to meet, you can book a new consultation any time.'
                       : 'This consultation can no longer be changed online. Please contact the firm for help.'}
                     <br />
-                    <Link href="/book" className="bk-btn bk-btn-primary bk-btn-wide" style={{ marginTop: 16 }}>
+                    <Link
+                      href="/book"
+                      className="bk-btn bk-btn-primary bk-btn-wide"
+                      style={{ marginTop: 16 }}
+                    >
                       Book a consultation
                     </Link>
                   </p>
                 ) : view === 'overview' ? (
                   <div className="bk-actions">
-                    <button className="bk-btn bk-btn-primary bk-btn-grow" onClick={() => setView('reschedule')}>
+                    <button
+                      className="bk-btn bk-btn-primary bk-btn-grow"
+                      onClick={() => setView('reschedule')}
+                    >
                       Reschedule
                     </button>
                     <button className="bk-btn bk-btn-ghost" onClick={() => setView('cancel')}>
@@ -321,8 +340,8 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
                   /* view === 'cancel' */
                   <>
                     <div className="bk-notice">
-                      Cancelling will release your time slot and notify the office. This can&rsquo;t be undone,
-                      but you can always book again.
+                      Cancelling will release your time slot and notify the office. This can&rsquo;t
+                      be undone, but you can always book again.
                     </div>
                     <div className="bk-actions">
                       <button

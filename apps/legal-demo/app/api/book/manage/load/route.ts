@@ -23,7 +23,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, booking })
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'This appointment link is invalid or expired.' },
+      {
+        error: err instanceof Error ? err.message : 'This appointment link is invalid or expired.',
+      },
       { status: 400 },
     )
   }

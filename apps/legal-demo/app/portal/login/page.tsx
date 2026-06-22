@@ -64,7 +64,7 @@ export default function ClientPortalLoginPage() {
 
     const prefill = params.get('email')
     if (prefill) setEmail(prefill)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Mount-only: parse the URL once (?code= confirmation return, ?email= prefill).
   }, [])
 
   async function submit(e: React.FormEvent) {
@@ -126,11 +126,17 @@ export default function ClientPortalLoginPage() {
     return (
       <Shell title="Confirm your email">
         <p className="cauth-lead">
-          We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account,
-          then come back and sign in.
+          We sent a confirmation link to <strong>{email}</strong>. Click it to activate your
+          account, then come back and sign in.
         </p>
         <p style={{ marginTop: 'var(--space-3)' }}>
-          <button className="cauth-link" onClick={() => { setPhase('form'); setIsSignUp(false) }}>
+          <button
+            className="cauth-link"
+            onClick={() => {
+              setPhase('form')
+              setIsSignUp(false)
+            }}
+          >
             ← Back to sign in
           </button>
         </p>
@@ -161,7 +167,9 @@ export default function ClientPortalLoginPage() {
       )}
 
       <form onSubmit={submit} className="cauth-form">
-        <label className="cauth-label" htmlFor="cauth-email">Email</label>
+        <label className="cauth-label" htmlFor="cauth-email">
+          Email
+        </label>
         <input
           id="cauth-email"
           type="email"
@@ -172,7 +180,9 @@ export default function ClientPortalLoginPage() {
           placeholder="you@example.com"
           className="cauth-input"
         />
-        <label className="cauth-label" htmlFor="cauth-pass">Password</label>
+        <label className="cauth-label" htmlFor="cauth-pass">
+          Password
+        </label>
         <input
           id="cauth-pass"
           type="password"
@@ -193,7 +203,13 @@ export default function ClientPortalLoginPage() {
 
       <p className="cauth-foot">
         {isSignUp ? 'Already have an account?' : 'New here?'}{' '}
-        <button className="cauth-link" onClick={() => { setIsSignUp(!isSignUp); setError(null) }}>
+        <button
+          className="cauth-link"
+          onClick={() => {
+            setIsSignUp(!isSignUp)
+            setError(null)
+          }}
+        >
           {isSignUp ? 'Sign in' : 'Create an account'}
         </button>
       </p>
@@ -201,7 +217,13 @@ export default function ClientPortalLoginPage() {
   )
 }
 
-function Shell({ title = 'Client Portal', children }: { title?: string; children: React.ReactNode }) {
+function Shell({
+  title = 'Client Portal',
+  children,
+}: {
+  title?: string
+  children: React.ReactNode
+}) {
   return (
     <main className="public-draft cauth-shell">
       <div className="cauth-card">

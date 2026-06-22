@@ -127,8 +127,8 @@ export default function ClientPortalPage() {
 
       {matters.length === 0 ? (
         <div className="pdash-card pdash-empty">
-          You don&apos;t have any matters with the firm yet. Once you book a consultation, it&apos;ll
-          appear here.
+          You don&apos;t have any matters with the firm yet. Once you book a consultation,
+          it&apos;ll appear here.
         </div>
       ) : (
         <>
@@ -155,9 +155,7 @@ export default function ClientPortalPage() {
             </div>
           ) : (
             <>
-              {timeline.scheduledAt && (
-                <UpcomingEventCard timeline={timeline} />
-              )}
+              {timeline.scheduledAt && <UpcomingEventCard timeline={timeline} />}
 
               <section className="pdash-card">
                 <div className="pdash-card-head">
@@ -252,7 +250,9 @@ function DocumentsPanel() {
           <span className="spinner" /> Loading documents…
         </div>
       ) : docs.length === 0 ? (
-        <p className="text-muted">No documents yet. We&apos;ll post them here when they&apos;re ready.</p>
+        <p className="text-muted">
+          No documents yet. We&apos;ll post them here when they&apos;re ready.
+        </p>
       ) : (
         <ul className="pdash-docs">
           {docs.map((d) => (
@@ -362,7 +362,8 @@ function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
             >
               <div className="pdash-msg-body">{m.body}</div>
               <div className="pdash-msg-meta">
-                {m.author === 'client' ? 'You' : 'Pacheco Law'} · {new Date(m.sentAt).toLocaleString()}
+                {m.author === 'client' ? 'You' : 'Pacheco Law'} ·{' '}
+                {new Date(m.sentAt).toLocaleString()}
               </div>
             </div>
           ))}

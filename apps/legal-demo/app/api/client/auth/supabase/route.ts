@@ -46,7 +46,10 @@ export async function POST(request: Request) {
     continue?: unknown
   } | null
   const accessToken = typeof body?.accessToken === 'string' ? body.accessToken : ''
-  const dest = safeInternalPath(typeof body?.continue === 'string' ? body.continue : null, '/portal')
+  const dest = safeInternalPath(
+    typeof body?.continue === 'string' ? body.continue : null,
+    '/portal',
+  )
   if (!accessToken) {
     return NextResponse.json({ error: 'Missing sign-in token.' }, { status: 400 })
   }
