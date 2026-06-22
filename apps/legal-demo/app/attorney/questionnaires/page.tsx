@@ -5,8 +5,10 @@
 // service from the service builder. CRUD via the through-core
 // legal.questionnaire_template.* tools (backed by migration 0067).
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { LayersIcon, SearchIcon } from '@/components/icons'
 
 type FieldType =
   | 'text'
@@ -63,6 +65,10 @@ interface BField {
   type: FieldType
   required: boolean
   options: string
+  // Stable {{answer}} token, kept when the field came from the question library
+  // so it binds templates identically everywhere. Absent for hand-authored
+  // fields — their id is slugged from the label on save.
+  token?: string
 }
 interface BSection {
   title: string
@@ -93,6 +99,106 @@ const EMPTY_DRAFT = (): Draft => ({
   sections: [{ title: 'Details', fields: [NEW_FIELD()] }],
 })
 
+// A reusable question from the firm's library (legal.question_template.list).
+interface LibQuestion {
+  questionTemplateId: string
+  label: string
+  type: string
+  token: string
+  options: string[] | null
+}
+
+// Map a picked library question into a builder field, keeping its stable
+// {{answer}} token so the same question binds templates identically everywhere.
+function fieldFromLib(q: LibQuestion): BField {
+  return {
+    label: q.label,
+    type: (FIELD_TYPES.some((ft) => ft.value === q.type) ? q.type : 'text') as FieldType,
+    required: true,
+    options: (q.options ?? []).join('\n'),
+    token: q.token || undefined,
+  }
+}
+
+// "Add from library" — a searchable picker of the firm's reusable questions
+// (mirrors the one in the service questionnaire editor). Picking one inserts it
+// into the section carrying its {{answer}} token, so a question reused across
+// questionnaires binds a template once and fills everywhere.
+function AddFromLibrary({ onPick }: { onPick: (q: LibQuestion) => void }) {
+  const [open, setOpen] = useState(false)
+  const [items, setItems] = useState<LibQuestion[]>([])
+  const [q, setQ] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!open || loaded) return
+    callAttorneyMcp<{ questions: LibQuestion[] }>({ toolName: 'legal.question_template.list' })
+      .then((r) => setItems(r.questions))
+      .catch(() => setItems([]))
+      .finally(() => setLoaded(true))
+  }, [open, loaded])
+
+  const needle = q.trim().toLowerCase()
+  const filtered = needle
+    ? items.filter(
+        (i) => i.label.toLowerCase().includes(needle) || i.token.toLowerCase().includes(needle),
+      )
+    : items
+
+  return (
+    <div className="qlib-picker">
+      <button className="qb-add qb-add-lib" type="button" onClick={() => setOpen((o) => !o)}>
+        <LayersIcon size={16} />
+        Add from library
+      </button>
+      {open && (
+        <div className="qlib-pop" role="dialog" aria-label="Question library">
+          <div className="qlib-search">
+            <SearchIcon size={15} />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search the question library…"
+            />
+          </div>
+          <div className="qlib-list">
+            {!loaded && <div className="qlib-empty">Loading…</div>}
+            {loaded && filtered.length === 0 && (
+              <div className="qlib-empty">
+                {items.length === 0
+                  ? 'No saved questions yet. Save one from the question library.'
+                  : 'No matches.'}
+              </div>
+            )}
+            {filtered.map((it) => (
+              <button
+                key={it.questionTemplateId}
+                type="button"
+                className="qlib-item"
+                onClick={() => {
+                  onPick(it)
+                  setOpen(false)
+                  setQ('')
+                }}
+              >
+                <span className="qlib-item-label">{it.label}</span>
+                <span className="qlib-item-meta">
+                  {FIELD_TYPES.find((ft) => ft.value === it.type)?.label ?? 'Short text'} ·{' '}
+                  {`{{${it.token}}}`}
+                </span>
+              </button>
+            ))}
+          </div>
+          <Link href="/attorney/questions" className="qlib-manage">
+            Manage question library →
+          </Link>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function QuestionnaireLibraryPage() {
   const [items, setItems] = useState<QuestionnaireTemplate[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -121,6 +227,10 @@ export default function QuestionnaireLibraryPage() {
           type: (FIELD_TYPES.some((ft) => ft.value === f.type) ? f.type : 'text') as FieldType,
           required: f.required ?? false,
           options: (f.options ?? []).join('\n'),
+          // Preserve the existing field id so re-saving keeps stable ids (and the
+          // {{answer}} binding of any library-sourced question) instead of
+          // re-slugging from the label.
+          token: f.id,
         })),
       })),
     })
@@ -137,7 +247,7 @@ export default function QuestionnaireLibraryPage() {
         fields: s.fields
           .filter((f) => f.label.trim())
           .map((f) => ({
-            id: slug(f.label),
+            id: f.token?.trim() || slug(f.label),
             label: f.label.trim(),
             type: f.type,
             required: f.required,
@@ -368,12 +478,27 @@ export default function QuestionnaireLibraryPage() {
                 </div>
               ))}
 
-              <button
-                type="button"
-                onClick={() => patchSection(si, { fields: [...section.fields, NEW_FIELD()] })}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '0.6rem',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  marginTop: '0.5rem',
+                }}
               >
-                + Add field
-              </button>
+                <button
+                  type="button"
+                  onClick={() => patchSection(si, { fields: [...section.fields, NEW_FIELD()] })}
+                >
+                  + Add field
+                </button>
+                <AddFromLibrary
+                  onPick={(lib) =>
+                    patchSection(si, { fields: [...section.fields, fieldFromLib(lib)] })
+                  }
+                />
+              </div>
             </fieldset>
           ))}
 
