@@ -74,7 +74,7 @@ jobs:
         # that vitest treats as a filter separator, so --reporter/--outputFile were
         # dropped and no JSON was written (the assert step then failed). Passing the
         # flags straight to vitest writes vitest-invariants.json as intended.
-        run: pnpm exec vitest run tests/invariants --reporter=json --outputFile=vitest-invariants.json
+        run: pnpm exec vitest run tests/invariants --reporter=default --reporter=json --outputFile=vitest-invariants.json
       - name: Assert invariant tests actually executed (no false-green)
         run: |
           node -e "const r=require('./vitest-invariants.json');const passed=r.numPassedTests||0;const skipped=r.numPendingTests||0;console.log('invariant tests passed:',passed,'skipped:',skipped);if(passed<20){console.error('Expected >=20 invariant tests to run; only '+passed+' did — DB-gated tests likely skipped.');process.exit(1);}"
