@@ -573,7 +573,8 @@ export function UnifiedAssistantChat({
           // Depth only matters when grounded in a matter/client.
           contextDepth: scoped && useContext ? contextDepth : undefined,
           // Attorney-picked skills (Claude only) — force-loaded this turn.
-          skillSlugs: isClaude && selectedSkills.length ? selectedSkills.map((s) => s.slug) : undefined,
+          skillSlugs:
+            isClaude && selectedSkills.length ? selectedSkills.map((s) => s.slug) : undefined,
           attachments: sentAttachments.length
             ? sentAttachments.map((a) => ({ name: a.name, text: a.text }))
             : undefined,

@@ -84,7 +84,12 @@ registerActionHandler('legal.skill.create', async (ctx, client, payload, actionI
     throw new Error('when_to_use is required.')
   }
 
-  const kindId = await lookupKindId(client, 'entity_kind_definition', ctx.tenantId, SKILL_ENTITY_KIND)
+  const kindId = await lookupKindId(
+    client,
+    'entity_kind_definition',
+    ctx.tenantId,
+    SKILL_ENTITY_KIND,
+  )
   const skillEntityId = await insertEntity(client, ctx.tenantId, actionId, kindId, name, {
     slug,
   })
@@ -140,7 +145,8 @@ registerActionHandler('legal.skill.update', async (ctx, client, payload, actionI
     updates.push({ kind: 'skill_name', value: name })
   }
   if (p.practice_area != null) updates.push({ kind: 'skill_practice_area', value: p.practice_area })
-  if (p.description != null) updates.push({ kind: 'skill_description', value: String(p.description) })
+  if (p.description != null)
+    updates.push({ kind: 'skill_description', value: String(p.description) })
   if (p.when_to_use != null) {
     if (!p.when_to_use.trim()) throw new Error('when_to_use cannot be blank.')
     updates.push({ kind: 'skill_when_to_use', value: p.when_to_use })

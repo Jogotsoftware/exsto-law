@@ -46,7 +46,10 @@ export interface UpdateSkillInput {
   userInvocable?: boolean
 }
 
-export async function updateSkill(ctx: ActionContext, input: UpdateSkillInput): Promise<Skill | null> {
+export async function updateSkill(
+  ctx: ActionContext,
+  input: UpdateSkillInput,
+): Promise<Skill | null> {
   await submitAction(ctx, {
     actionKindName: 'legal.skill.update',
     intentKind: 'adjustment',

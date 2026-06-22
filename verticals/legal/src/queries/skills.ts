@@ -81,10 +81,9 @@ const NON_FIRM_AREAS = new Set(['law-student'])
 // the /skills picker. Excludes the non-firm (academic) practice areas.
 export async function listSkillCatalog(ctx: ActionContext): Promise<SkillCatalogEntry[]> {
   return withActionContext(ctx, async (client) => {
-    const res = await client.query<SkillRow>(
-      `${skillSelect(false)} ORDER BY practice_area, name`,
-      [ctx.tenantId],
-    )
+    const res = await client.query<SkillRow>(`${skillSelect(false)} ORDER BY practice_area, name`, [
+      ctx.tenantId,
+    ])
     return res.rows.map(mapCatalog).filter((s) => !NON_FIRM_AREAS.has(s.practiceArea))
   })
 }
@@ -92,9 +91,12 @@ export async function listSkillCatalog(ctx: ActionContext): Promise<SkillCatalog
 // Full skill incl. body, by stable slug — the load_skill fetch.
 export async function getSkillBySlug(ctx: ActionContext, slug: string): Promise<Skill | null> {
   return withActionContext(ctx, async (client) => {
-    const res = await client.query<SkillRow>(`${skillSelect(true)} AND e.id = (
+    const res = await client.query<SkillRow>(
+      `${skillSelect(true)} AND e.id = (
         SELECT entity_id FROM attrs WHERE kind_name = 'skill_slug' AND value #>> '{}' = $2 LIMIT 1
-      )`, [ctx.tenantId, slug])
+      )`,
+      [ctx.tenantId, slug],
+    )
     const r = res.rows[0]
     if (!r) return null
     return {
