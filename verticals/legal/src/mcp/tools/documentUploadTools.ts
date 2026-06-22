@@ -20,7 +20,10 @@ registerTool({
     additionalProperties: false,
   },
   handler: async (ctx: ActionContext, input) => {
-    const documents = await listMatterDocuments(ctx, (input as { matterEntityId: string }).matterEntityId)
+    const documents = await listMatterDocuments(
+      ctx,
+      (input as { matterEntityId: string }).matterEntityId,
+    )
     return { documents }
   },
 } satisfies Tool<{ matterEntityId: string }, { documents: UploadedDocItem[] }>)
