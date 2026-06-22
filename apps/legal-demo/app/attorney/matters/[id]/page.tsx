@@ -3,7 +3,7 @@
 // Matter › OVERVIEW tab. The case at a glance + the workflow as a clickable step
 // list: Intake → Consultation → Document. Each step opens a detail "window"
 // (modal) to view/download what it produced (questionnaire, transcript, document)
-// and to advance it (record the call, generate the document). Status, title,
+// and to advance it (record the call, generate documents). Status, title,
 // Actions menu and Back live in the layout header.
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -23,10 +23,16 @@ import {
   type StepState,
 } from './shared'
 
+const GENERATABLE: Array<{ kind: string; label: string }> = [
+  { kind: 'operating_agreement', label: 'operating agreement' },
+  { kind: 'engagement_letter', label: 'engagement letter' },
+]
+
 export default function MatterOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const [matter, setMatter] = useState<MatterDetail | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [generating, setGenerating] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [callTranscript, setCallTranscript] = useState('')
   const [openStep, setOpenStep] = useState<StepKey | null>(null)
@@ -61,6 +67,51 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
     }
   }
 
+  // Draft generation is async: legal.draft.generate enqueues a worker job and
+  // returns immediately (the document_version appears only once the worker runs).
+  // So enqueue ONCE, then poll the matter until the new draft lands (or give up) —
+  // the step + modal reflect it without a manual refresh, and the attorney isn't
+  // tempted to re-click and enqueue a duplicate job.
+  async function generate(documentKind: string) {
+    if (generating) return
+    setError(null)
+    setGenerating(documentKind)
+    const startVersion = matter?.latestDraftVersionId ?? null
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.draft.generate',
+        input: { matterEntityId: id, documentKind },
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setGenerating(null)
+      return
+    }
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 3500))
+      const res = await callAttorneyMcp<{ matter: MatterDetail | null }>({
+        toolName: 'legal.matter.get',
+        input: { matterEntityId: id },
+      }).catch(() => null)
+      if (res?.matter) {
+        setMatter(res.matter)
+        if (res.matter.latestDraftVersionId && res.matter.latestDraftVersionId !== startVersion) {
+          break
+        }
+      }
+    }
+    setGenerating(null)
+  }
+
+  function openStepAt(key: StepKey) {
+    setError(null)
+    setOpenStep(key)
+  }
+  function closeStep() {
+    setError(null)
+    setOpenStep(null)
+  }
+
   if (!matter && !error) {
     return (
       <div className="loading-block">
@@ -74,6 +125,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
 
   const hasQuestionnaire = matter.questionnaireResponses !== null
   const hasTranscript = matter.transcriptText !== null
+  const canGenerate = hasQuestionnaire && hasTranscript
   const steps = deriveMatterSteps(matter)
 
   return (
@@ -106,14 +158,16 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
 
       <section>
         <h2>Workflow</h2>
-        {error && <div className="alert alert-error">{error}</div>}
+        {/* The page-level error banner only shows when no modal is open; modals
+            surface their own errors in-context (an action started in a modal). */}
+        {error && openStep === null && <div className="alert alert-error">{error}</div>}
         <div className="step-list">
           {steps.map((s) => (
             <button
               key={s.key}
               type="button"
               className={`step-row step-${s.state}`}
-              onClick={() => setOpenStep(s.key)}
+              onClick={() => openStepAt(s.key)}
             >
               <span className="step-ico" aria-hidden>
                 <StepIcon state={s.state} />
@@ -137,7 +191,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
       {openStep === 'intake' && (
         <Modal
           title="Intake — questionnaire"
-          onClose={() => setOpenStep(null)}
+          onClose={closeStep}
           footer={
             hasQuestionnaire && matter.questionnaireResponses ? (
               <>
@@ -178,7 +232,8 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
       )}
 
       {openStep === 'consultation' && (
-        <Modal title="Consultation" onClose={() => setOpenStep(null)}>
+        <Modal title="Consultation" onClose={closeStep}>
+          {error && <div className="alert alert-error">{error}</div>}
           {hasTranscript && matter.transcriptText ? (
             <TranscriptView text={matter.transcriptText} />
           ) : (
@@ -220,15 +275,11 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
       {openStep === 'document' && (
         <DocumentStep
           matter={matter}
-          busy={busy}
-          canGenerate={hasQuestionnaire && hasTranscript}
-          onGenerate={(documentKind) =>
-            action(`generate-${documentKind}`, 'legal.draft.generate', {
-              matterEntityId: id,
-              documentKind,
-            })
-          }
-          onClose={() => setOpenStep(null)}
+          generating={generating}
+          error={error}
+          canGenerate={canGenerate}
+          onGenerate={generate}
+          onClose={closeStep}
         />
       )}
     </>
@@ -255,17 +306,19 @@ interface DraftPayload {
 }
 
 // Document step detail. Lazily loads the latest draft (legal.draft.get, exactly as
-// the Documents tab does) for view/download; if there's no draft yet, surfaces the
-// generate actions inline.
+// the Documents tab does) for view/download; the generate actions stay available
+// either way, so a second document kind is still reachable once a first one exists.
 function DocumentStep({
   matter,
-  busy,
+  generating,
+  error,
   canGenerate,
   onGenerate,
   onClose,
 }: {
   matter: MatterDetail
-  busy: string | null
+  generating: string | null
+  error: string | null
   canGenerate: boolean
   onGenerate: (documentKind: string) => void
   onClose: () => void
@@ -275,7 +328,10 @@ function DocumentStep({
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!versionId) return
+    if (!versionId) {
+      setDraft(null)
+      return
+    }
     let cancelled = false
     setLoading(true)
     callAttorneyMcp<{ draft: DraftPayload | null }>({
@@ -311,6 +367,8 @@ function DocumentStep({
 
   return (
     <Modal title="Document" onClose={onClose} footer={footer}>
+      {error && <div className="alert alert-error">{error}</div>}
+
       {versionId ? (
         loading || !draft ? (
           <p className="text-muted text-sm">
@@ -319,7 +377,7 @@ function DocumentStep({
         ) : (
           <div className="kv-grid">
             <div>
-              <div className="kv-label">Document</div>
+              <div className="kv-label">Latest document</div>
               <div className="kv-value">{humanizeService(draft.documentKind)}</div>
             </div>
             <div>
@@ -333,35 +391,38 @@ function DocumentStep({
           </div>
         )
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <p className="text-muted text-sm">
-            No document generated yet. Generate one from the captured intake + consultation; it will
-            appear here and under the <strong>Documents</strong> tab when ready.
-          </p>
-          <div className="row" style={{ gap: 'var(--space-2)' }}>
-            <button
-              className="primary"
-              disabled={!canGenerate || busy !== null}
-              onClick={() => onGenerate('operating_agreement')}
-            >
-              {busy === 'generate-operating_agreement' && <span className="spinner" />}
-              Generate operating agreement
-            </button>
-            <button
-              disabled={!canGenerate || busy !== null}
-              onClick={() => onGenerate('engagement_letter')}
-            >
-              {busy === 'generate-engagement_letter' && <span className="spinner" />}
-              Generate engagement letter
-            </button>
-          </div>
-          {!canGenerate && (
-            <p className="text-muted text-sm">
-              Drafting unlocks once intake is submitted and the consultation is recorded.
-            </p>
-          )}
-        </div>
+        <p className="text-muted text-sm">No document generated yet.</p>
       )}
+
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <div className="kv-label" style={{ marginBottom: 'var(--space-2)' }}>
+          {versionId ? 'Generate another document' : 'Generate a document'}
+        </div>
+        {generating ? (
+          <p className="text-muted text-sm">
+            <span className="spinner" /> Queued — generating {humanizeService(generating)}… it’ll
+            appear here and under the Documents tab when ready.
+          </p>
+        ) : (
+          <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            {GENERATABLE.map((g) => (
+              <button
+                key={g.kind}
+                className={g.kind === 'operating_agreement' ? 'primary' : ''}
+                disabled={!canGenerate}
+                onClick={() => onGenerate(g.kind)}
+              >
+                Generate {g.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {!canGenerate && !generating && (
+          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-2)' }}>
+            Drafting unlocks once intake is submitted and the consultation is recorded.
+          </p>
+        )}
+      </div>
     </Modal>
   )
 }
