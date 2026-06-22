@@ -186,22 +186,21 @@ export default function ServicesPage() {
                     )}
                   </td>
                   <td style={{ verticalAlign: 'middle' }}>
-                    <label
-                      className="switch"
+                    <button
+                      type="button"
+                      className={`status-pill ${svc.isActive ? 'is-active' : 'is-inactive'}`}
+                      disabled={busy === svc.serviceKey}
+                      aria-pressed={svc.isActive}
+                      onClick={() => toggleActive(svc)}
                       title={
                         svc.isActive
-                          ? 'Enabled — shown on the booking page'
-                          : 'Disabled — hidden from booking'
+                          ? 'Active — shown on the booking page. Click to disable.'
+                          : 'Inactive — hidden from booking. Click to enable.'
                       }
                     >
-                      <input
-                        type="checkbox"
-                        checked={svc.isActive}
-                        disabled={busy === svc.serviceKey}
-                        onChange={() => toggleActive(svc)}
-                      />
-                      <span className="switch-slider" />
-                    </label>
+                      <span className="status-dot" aria-hidden="true" />
+                      {svc.isActive ? 'Active' : 'Inactive'}
+                    </button>
                   </td>
                   <td style={{ position: 'relative', textAlign: 'right', verticalAlign: 'middle' }}>
                     <button

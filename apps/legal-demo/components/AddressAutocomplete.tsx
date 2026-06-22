@@ -103,6 +103,10 @@ export function AddressAutocomplete({ label, required, value, onChange }: Props)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [open, setOpen] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // Surfaced when the Places *lookup* itself fails (key loaded, but the request is
+  // rejected — e.g. Places API (New) not enabled, or an HTTP-referrer restriction).
+  // Previously this failed silently, which read to the user as "nothing happens".
+  const [lookupError, setLookupError] = useState<string | null>(null)
   const fieldId = useId()
 
   const libRef = useRef<GPlacesLib | null>(null)
@@ -155,9 +159,15 @@ export function AddressAutocomplete({ label, required, value, onChange }: Props)
         .map((p) => ({ id: p.placeId, label: p.text.toString(), prediction: p }))
       setSuggestions(mapped)
       setOpen(mapped.length > 0)
-    } catch {
-      // A failed lookup (bad key / API not enabled / quota) just yields no
-      // suggestions; the typed text is still committed as a partial address.
+      setLookupError(null)
+    } catch (err) {
+      // A failed lookup (key restricted to wrong referrer, Places API (New) not
+      // enabled, billing/quota) yields no suggestions. Surface it instead of
+      // failing silently, and log the full error for diagnosis. The typed text is
+      // still committed as a partial address.
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn('[AddressAutocomplete] Places lookup failed:', msg)
+      setLookupError(msg)
       setSuggestions([])
       setOpen(false)
     }
@@ -278,6 +288,11 @@ export function AddressAutocomplete({ label, required, value, onChange }: Props)
         )}
       </div>
       {loadError && (
+        <div className="help" style={{ color: 'var(--warn)' }}>
+          {t('addr.unavailable')}
+        </div>
+      )}
+      {!loadError && lookupError && (
         <div className="help" style={{ color: 'var(--warn)' }}>
           {t('addr.unavailable')}
         </div>

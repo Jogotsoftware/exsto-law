@@ -1875,70 +1875,63 @@ pre {
   color: var(--muted);
 }
 
-/* Toggle switch (Services enable/disable) — on-brand navy, crisp knob. */
-/* Pill toggle (Services status): a plain iOS-style switch — a solid pill track
-   (green when active, gray when inactive) and a centered circular white knob.
-   No label or glyph. Track 44×26, knob a fixed 20px circle with a 3px margin
-   (26 − 20 = 6 = 3 + 3, vertically centered). The active position is pinned with
-   `left: calc(100% − 23px)` (knob 20 + 3px margin) instead of a fixed translate,
-   so the knob always lands 3px from the right edge no matter how wide the table
-   cell renders the track — and it animates smoothly because `left` is tweened. */
-.switch {
-  position: relative;
-  /* inline-flex + vertical-align:middle matches the gear button exactly (also
-     inline-flex), so the two line up with each other in the row. margin:0
-     overrides the global `label { margin-bottom }` that used to push it high. */
+/* Status pill (Services active/inactive): a clickable badge that says the status
+   in words. Replaces the old iOS switch, whose absolutely-positioned 20px knob
+   kept rendering LARGER than its track — the track (`inset:0`) collapsed inside
+   the table cell while the knob held its fixed size, so the circle bulged out
+   top and bottom. This control lives in normal flow with padding only: no knob,
+   no track, nothing to misalign, and the state is legible without a legend. */
+.status-pill {
   display: inline-flex;
-  vertical-align: middle;
-  box-sizing: border-box;
+  align-items: center;
+  gap: 0.45rem;
   margin: 0;
-  width: 44px;
-  height: 26px;
-  flex: none;
-  cursor: pointer;
-}
-.switch input {
-  position: absolute;
-  opacity: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  cursor: pointer;
-}
-.switch-slider {
-  position: absolute;
-  inset: 0;
-  background: #cbd5e1;
+  padding: 0.3rem 0.7rem 0.3rem 0.6rem;
+  border: 1px solid transparent;
   border-radius: 999px;
-  transition: background var(--transition);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition);
 }
-.switch-slider::before {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
-  background: #fff;
+.status-pill .status-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.3);
-  transition: left var(--transition);
+  /* Always white — only the pill background carries the state color. */
+  background: #fff;
+  flex: none;
 }
-.switch input:checked + .switch-slider {
+.status-pill.is-active {
+  color: #fff;
   background: #16a34a;
+  border-color: transparent;
 }
-.switch input:checked + .switch-slider::before {
-  left: calc(100% - 23px);
+.status-pill.is-inactive {
+  color: #fff;
+  background: #64748b;
+  border-color: transparent;
 }
-.switch input:disabled {
-  cursor: not-allowed;
+.status-pill:hover:not(:disabled) {
+  filter: brightness(0.97);
 }
-.switch input:disabled + .switch-slider {
-  opacity: 0.6;
+.status-pill:active:not(:disabled) {
+  filter: brightness(0.94);
 }
-.switch input:focus-visible + .switch-slider {
+.status-pill:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+.status-pill:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* Borderless icon button (gear / kebab triggers) */
@@ -4688,6 +4681,45 @@ button.danger.outline:hover:not(:disabled) {
 .feedback-bubble-pending {
   color: var(--muted);
 }
+/* Copy affordance on an assistant reply — floats at the bubble's bottom-right
+   (clear of the tail, which sits bottom-left), hidden until the bubble is
+   hovered or its button is focused (keyboard). Has its own surface fill so it
+   cleanly masks any text it overlaps. */
+.uac-copy-btn {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
+}
+.feedback-bubble-assistant:hover .uac-copy-btn,
+.feedback-bubble-assistant:focus-within .uac-copy-btn {
+  opacity: 1;
+}
+.uac-copy-btn:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.uac-copy-btn.copied {
+  opacity: 1;
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
 .feedback-error {
   margin: 0;
   font-size: 0.82rem;
@@ -5455,14 +5487,25 @@ button.danger.outline:hover:not(:disabled) {
   gap: 0.4rem;
 }
 /* Reserve room for the paperclip at bottom-left when it's shown (Claude only). */
-.uac-composer.has-attach textarea {
+/* Reserve room at bottom-left for the tool cluster (1 icon = ~2.6rem, 2 = ~4.5rem). */
+.uac-composer.has-attach textarea,
+.uac-composer.has-skills textarea {
   padding-left: 2.6rem;
 }
-/* Paperclip mirrors the send glyph, in the composer's bottom-left corner. */
-.uac-attach-btn {
+.uac-composer.has-attach.has-skills textarea {
+  padding-left: 4.5rem;
+}
+/* Bottom toolbar: attach + skills glyphs in the composer's bottom-left corner,
+   mirroring the send glyph at bottom-right. */
+.uac-composer-tools {
   position: absolute;
   left: 0.4rem;
   bottom: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+.uac-tool-btn {
   width: 30px;
   height: 30px;
   display: grid;
@@ -5477,12 +5520,12 @@ button.danger.outline:hover:not(:disabled) {
     background 0.12s ease,
     color 0.12s ease;
 }
-.uac-attach-btn:hover:not(:disabled),
-.uac-attach-btn.active {
+.uac-tool-btn:hover:not(:disabled),
+.uac-tool-btn.active {
   background: var(--surface);
   color: var(--fg);
 }
-.uac-attach-btn:disabled {
+.uac-tool-btn:disabled {
   opacity: 0.55;
   cursor: default;
 }
@@ -5522,6 +5565,7 @@ button.danger.outline:hover:not(:disabled) {
 
 /* Staged attachments above the composer, and the read-only chips on a bubble. */
 .uac-staged-attachments,
+.uac-staged-skills,
 .uac-bubble-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -6048,6 +6092,12 @@ button.danger.outline:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  /* Reset the global `label { margin-bottom: 0.85rem }` (globals.css:287). It leaks
+     into <label className="bk-label"> fields (ContactField) but NOT into <span
+     className="bk-label"> ones (the Phone field), so label-based fields sat ~0.85rem
+     lower than span-based ones — the Phone vs Company name misalignment. Field
+     spacing is owned by the parent .bk-field { gap }, so zero it here. */
+  margin: 0;
 }
 /* AddressAutocomplete renders its own <label><span>+<input>; lay it out as a field. */
 .bk-stage label:not(.bk-label):not(.bk-checkbox) {
@@ -7265,6 +7315,46 @@ input[type='number'] {
   margin: 1.5em 0;
 }
 
+/* Review page (beta feedback c16aaab6) — a styled header/back bar and an
+   on-screen letter that reads like the exported PDF/Word document. The `.doc-paper`
+   modifier is scoped to the review screen so the shared `.doc-rendered` used by the
+   public draft view and the e-signature pages is unaffected. */
+.review-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.review-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.85rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+.review-back:hover {
+  border-color: var(--accent);
+  color: var(--accent-attorney);
+}
+.doc-rendered.doc-paper {
+  font-family: var(--font-serif, Georgia, 'Times New Roman', serif);
+  background: #fff;
+  color: var(--fg);
+  max-width: 7.5in;
+  margin-inline: auto;
+  padding: 2.5rem 3rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  box-shadow: var(--shadow-md);
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    Questionnaire editor (per-service builder) — card-based redesign.
    Each section is a surface card; each question is a nested sub-card. Replaces
@@ -8047,4 +8137,62 @@ input[type='number'] {
   border-radius: var(--radius-md, 10px);
   font: inherit;
   resize: vertical;
+}
+
+/* Matter tasks (migration 0084) — add/edit form + the task list. */
+.task-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  margin: var(--space-3) 0;
+}
+.task-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1 1 9rem;
+  font-size: var(--text-sm);
+}
+.task-field > span {
+  color: var(--muted);
+}
+.task-form-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.task-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+.task-status-select {
+  max-width: 9.5rem;
+}
+.task-title {
+  font-weight: var(--weight-medium);
+}
+.task-archive {
+  color: var(--muted);
+  padding: 0.1rem 0.55rem;
+  line-height: 1;
+}
+.task-archive:hover:not(:disabled) {
+  color: var(--danger);
 }
