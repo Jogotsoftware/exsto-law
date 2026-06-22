@@ -57,6 +57,8 @@ import './tools/esignPortalTools.js'
 // Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
 // invoices, list/inspect them, and send (activation-gated). Session 4.
 import './tools/billingTools.js'
+// S9 (tenancy & RBAC): firm user management — invite / assign role / deactivate.
+import './tools/userTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

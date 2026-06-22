@@ -42,6 +42,7 @@ export * from './rates.js'
 export * from './savedViews.js'
 export * from './meetings.js'
 export * from './esign.js'
+export * from './users.js'
 export { getStubAvailability, mergeBusyIntervals } from '../adapters/googleCalendar.js'
 export type { AvailabilitySlot, CreatedEvent, BusyInterval } from '../adapters/googleCalendar.js'
 // `generateDraft.ts` and `services.ts` both define an identical `GenerationMode`
