@@ -16,6 +16,8 @@ import {
   PaperclipIcon,
   FileTextIcon,
   XIcon,
+  CopyIcon,
+  CheckIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -178,6 +180,42 @@ function storeModelId(id: string): void {
   } catch {
     // ignore — a remembered model is a nicety, not load-bearing
   }
+}
+
+// Hover affordance on an assistant reply: copy its text to the clipboard. Copies
+// the raw markdown (what the attorney would paste into a doc/email), not the
+// rendered HTML. Flips to a check for ~1.5s on success; silently no-ops if the
+// clipboard is unavailable (insecure context / permission denied).
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      if (timer.current) clearTimeout(timer.current)
+      timer.current = setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard blocked — leave the icon as-is rather than faking success.
+    }
+  }
+  return (
+    <button
+      type="button"
+      className={`uac-copy-btn${copied ? ' copied' : ''}`}
+      onClick={copy}
+      aria-label={copied ? 'Copied' : 'Copy message'}
+      title={copied ? 'Copied' : 'Copy'}
+    >
+      {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+    </button>
+  )
 }
 
 export function UnifiedAssistantChat({
@@ -1022,10 +1060,13 @@ export function UnifiedAssistantChat({
                 escapes HTML before formatting, so model output can't inject
                 markup. User turns stay verbatim. */}
             {t.role === 'assistant' ? (
-              <div
-                className="assistant-md"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
-              />
+              <>
+                <div
+                  className="assistant-md"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
+                />
+                {t.content.trim() && <CopyButton text={t.content} />}
+              </>
             ) : (
               <div style={{ whiteSpace: 'pre-wrap' }}>{t.content}</div>
             )}
