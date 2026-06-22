@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
+import { readDevSession } from '@/lib/auth'
 import { renderMarkdown } from '@/lib/draftExport'
 import {
   SendIcon,
@@ -12,6 +13,9 @@ import {
   SearchIcon,
   ClockIcon,
   PlusIcon,
+  PaperclipIcon,
+  FileTextIcon,
+  XIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -46,6 +50,8 @@ interface DisplayTurn {
   content: string
   citations?: string[]
   model?: string
+  // Names of documents attached to a user turn (shown as chips on the bubble).
+  attachments?: string[]
 }
 
 interface ThreadTurn {
@@ -54,9 +60,18 @@ interface ThreadTurn {
   reply: string
   model: string
   citations: string[]
+  attachmentNames?: string[]
 }
 
-type FeedbackCategory = 'ui' | 'ai' | 'workflow' | 'other'
+// A document attached to the next message: an uploaded file (parsed to text) or a
+// matter document. `text` is the content sent to Claude; `name` labels the chip.
+interface Attachment {
+  name: string
+  text: string
+  source: 'upload' | 'matter'
+}
+
+type FeedbackCategory = 'ui' | 'ai' | 'workflow' | 'feature' | 'other'
 
 // One prior conversation in the history picker (from legal.assistant.threads).
 interface ThreadSummary {
@@ -96,9 +111,23 @@ const CONTEXT_DEPTHS: Array<{ value: ContextDepth; label: string; hint: string }
 const FEEDBACK_CATEGORIES: Array<{ value: FeedbackCategory; label: string }> = [
   { value: 'ui', label: 'UI / design' },
   { value: 'ai', label: 'AI / answers' },
-  { value: 'workflow', label: 'Workflow' },
+  // A problem with an EXISTING flow vs. asking for something NEW — kept distinct
+  // so the team can separate bug triage from the feature/workflow request queue.
+  { value: 'workflow', label: 'Workflow problem' },
+  { value: 'feature', label: 'Feature / workflow request' },
   { value: 'other', label: 'Other' },
 ]
+
+const IS_DEV = process.env.NODE_ENV !== 'production'
+
+// Dev-only session headers for direct (non-MCP) fetches like the attach upload —
+// mirrors callAttorneyMcp/streamAssistant. Inert in prod (the signed cookie rides
+// along automatically and the route ignores these headers there).
+function devAuthHeaders(): Record<string, string> {
+  if (!IS_DEV) return {}
+  const dev = readDevSession()
+  return dev ? { 'x-actor-id': dev.actorId, 'x-tenant-id': dev.tenantId } : {}
+}
 
 // Citations come from the model — only link http(s) URLs so a javascript:/data:
 // URL can't execute on click; otherwise the raw text is shown.
@@ -117,6 +146,29 @@ function pickDefault(models: AssistantModel[]): string | null {
   if (usable) return usable.id
   const fallback = models.find((m) => m.available && m.isDefault) ?? models.find((m) => m.available)
   return fallback?.id ?? null
+}
+
+// The attorney's last-picked model, remembered across sessions so the chat stops
+// resetting to the default each time it opens (beta ask). localStorage (not a
+// cookie) — it's a per-browser UI preference, never sent to the server.
+const MODEL_STORAGE_KEY = 'exsto.assistant.modelId'
+
+function readStoredModelId(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage.getItem(MODEL_STORAGE_KEY)
+  } catch {
+    return null // storage disabled / private mode
+  }
+}
+
+function storeModelId(id: string): void {
+  if (typeof window === 'undefined' || !id) return
+  try {
+    window.localStorage.setItem(MODEL_STORAGE_KEY, id)
+  } catch {
+    // ignore — a remembered model is a nicety, not load-bearing
+  }
 }
 
 export function UnifiedAssistantChat({
@@ -161,6 +213,15 @@ export function UnifiedAssistantChat({
   // trail" beta asks).
   const [fbRef, setFbRef] = useState<string | null>(null)
 
+  // Documents attached to the NEXT message. Cleared after each send (per-message,
+  // like email attachments). Claude only — see canAttach below.
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [attachBusy, setAttachBusy] = useState(false)
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const MAX_ATTACHMENTS = 6
+
   // The conversation's CURRENT scope — starts from the props (the page the FAB was
   // opened on); the history picker can re-point it at another matter/client thread
   // without remounting.
@@ -180,6 +241,20 @@ export function UnifiedAssistantChat({
   const effectiveWebSearch = selected
     ? selected.webSearchInherent || (selected.supportsWebSearch && webSearch)
     : false
+  // Attachments go ONLY to the firm's own model (Claude). An external research
+  // model (Perplexity) must never receive client documents, so the affordance is
+  // hidden for it — matching the provider-privacy split in assistantChat.ts.
+  const canAttach = selected?.provider === 'anthropic'
+
+  // Switching to a non-Claude model drops any staged attachments (they can't be
+  // sent), so stale chips don't imply they will be.
+  useEffect(() => {
+    if (!canAttach) {
+      setAttachments([])
+      setAttachMenuOpen(false)
+      setAttachError(null)
+    }
+  }, [canAttach])
 
   // Load the model list (and preselect a usable model).
   useEffect(() => {
@@ -191,7 +266,16 @@ export function UnifiedAssistantChat({
         })
         if (cancelled) return
         setModels(r.models)
-        setModelId((prev) => prev || pickDefault(r.models) || '')
+        // Restore the remembered model if it's still selectable (available +
+        // connected); otherwise fall back to the usual default.
+        setModelId((prev) => {
+          if (prev) return prev
+          const stored = readStoredModelId()
+          if (stored && r.models.some((m) => m.id === stored && m.available && m.connected)) {
+            return stored
+          }
+          return pickDefault(r.models) || ''
+        })
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
       }
@@ -214,7 +298,7 @@ export function UnifiedAssistantChat({
         if (genRef.current !== gen) return // a newer send/selection superseded this load
         const display: DisplayTurn[] = r.turns.map((t) =>
           t.role === 'user'
-            ? { role: 'user', content: t.message }
+            ? { role: 'user', content: t.message, attachments: t.attachmentNames }
             : { role: 'assistant', content: t.reply, citations: t.citations, model: t.model },
         )
         setTurns(display)
@@ -250,6 +334,9 @@ export function UnifiedAssistantChat({
     setFbDone(false)
     setFbRef(null)
     setFbError(null)
+    setAttachments([])
+    setAttachError(null)
+    setAttachMenuOpen(false)
     void loadHistory(target)
     // The picker button just unmounted; return keyboard focus to the composer.
     setTimeout(() => composerRef.current?.focus(), 0)
@@ -282,6 +369,9 @@ export function UnifiedAssistantChat({
     setFbDone(false)
     setFbRef(null)
     setFbError(null)
+    setAttachments([])
+    setAttachError(null)
+    setAttachMenuOpen(false)
     setTimeout(() => composerRef.current?.focus(), 0)
   }
 
@@ -289,6 +379,102 @@ export function UnifiedAssistantChat({
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [turns, busy, streaming])
+
+  // ── Attachments ────────────────────────────────────────────────────────────
+  function removeAttachment(idx: number) {
+    setAttachments((a) => a.filter((_, i) => i !== idx))
+  }
+
+  // Parse an uploaded file to text server-side, then stage it for the next send.
+  async function uploadFile(file: File) {
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      setAttachError(`You can attach up to ${MAX_ATTACHMENTS} documents at a time.`)
+      return
+    }
+    setAttachBusy(true)
+    setAttachError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/attorney/assistant/attach', {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin',
+        headers: devAuthHeaders(),
+      })
+      const data = (await res.json().catch(() => null)) as {
+        name?: string
+        text?: string
+        error?: string
+      } | null
+      if (!res.ok || !data?.text) {
+        throw new Error(data?.error || `Couldn’t read that file (${res.status}).`)
+      }
+      setAttachments((a) => [
+        ...a,
+        { name: data.name || file.name, text: data.text as string, source: 'upload' },
+      ])
+    } catch (e) {
+      setAttachError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAttachBusy(false)
+    }
+  }
+
+  function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = '' // let the same file be re-picked later
+    for (const f of files) void uploadFile(f)
+  }
+
+  // Attach the current matter's document (its latest draft) by pulling its body.
+  async function attachMatterDocument() {
+    const matterId = activeScope.matterEntityId
+    if (!matterId) return
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      setAttachError(`You can attach up to ${MAX_ATTACHMENTS} documents at a time.`)
+      return
+    }
+    setAttachBusy(true)
+    setAttachError(null)
+    try {
+      const { matter } = await callAttorneyMcp<{
+        matter: { latestDraftVersionId: string | null } | null
+      }>({ toolName: 'legal.matter.get', input: { matterEntityId: matterId } })
+      const versionId = matter?.latestDraftVersionId
+      if (!versionId) {
+        setAttachError('This matter has no document yet.')
+        return
+      }
+      const { draft } = await callAttorneyMcp<{
+        draft: { bodyMarkdown: string; documentKind: string; matterNumber: string } | null
+      }>({ toolName: 'legal.draft.get', input: { documentVersionId: versionId } })
+      if (!draft?.bodyMarkdown) {
+        setAttachError('Could not read this matter’s document.')
+        return
+      }
+      const name = `${draft.matterNumber} — ${draft.documentKind.replace(/_/g, ' ')}`
+      setAttachments((a) =>
+        a.some((x) => x.source === 'matter' && x.name === name)
+          ? a // already attached
+          : [...a, { name, text: draft.bodyMarkdown, source: 'matter' }],
+      )
+    } catch (e) {
+      setAttachError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAttachBusy(false)
+    }
+  }
+
+  // Paperclip: when a matter document is available, open a small source menu;
+  // otherwise jump straight to the file picker.
+  function onAttachClick() {
+    if (activeScope.matterEntityId) {
+      setAttachMenuOpen((o) => !o)
+    } else {
+      fileInputRef.current?.click()
+    }
+  }
 
   async function send() {
     const message = input.trim()
@@ -300,8 +486,19 @@ export function UnifiedAssistantChat({
     setSettingsOpen(false)
     // The model history the server expects: prior user/assistant turns as text.
     const history = turns.map((t) => ({ role: t.role, content: t.content }))
-    setTurns((t) => [...t, { role: 'user', content: message }])
+    // Attachments are per-message and Claude-only; snapshot then clear them.
+    const sentAttachments = canAttach ? attachments : []
+    setTurns((t) => [
+      ...t,
+      {
+        role: 'user',
+        content: message,
+        attachments: sentAttachments.length ? sentAttachments.map((a) => a.name) : undefined,
+      },
+    ])
     setInput('')
+    setAttachments([])
+    setAttachMenuOpen(false)
 
     // Accumulate deltas locally; each handler hands React a fresh object.
     const partial = { thinking: '', text: '' }
@@ -321,6 +518,9 @@ export function UnifiedAssistantChat({
           useContext: scoped ? useContext : undefined,
           // Depth only matters when grounded in a matter/client.
           contextDepth: scoped && useContext ? contextDepth : undefined,
+          attachments: sentAttachments.length
+            ? sentAttachments.map((a) => ({ name: a.name, text: a.text }))
+            : undefined,
           pageContext:
             typeof window !== 'undefined' ? { path: window.location.pathname } : undefined,
         },
@@ -563,7 +763,10 @@ export function UnifiedAssistantChat({
             <label className="uac-setting-label">Model</label>
             <select
               value={modelId}
-              onChange={(e) => setModelId(e.target.value)}
+              onChange={(e) => {
+                setModelId(e.target.value)
+                storeModelId(e.target.value) // remember it for next session
+              }}
               disabled={!models}
               aria-label="AI model"
             >
@@ -655,14 +858,21 @@ export function UnifiedAssistantChat({
           {fbDone ? (
             <div className="uac-fbmode-done">
               <span className="uac-fbmode-thanks">
-                <SparklesIcon size={14} /> Thank you for your feedback
+                <SparklesIcon size={16} /> Thank you — your feedback is with the team.
               </span>
               {fbRef && (
-                <span className="uac-beta-ref" title={`Recorded as event ${fbRef}`}>
-                  ref {fbRef.slice(0, 8)}
+                <span className="uac-fbmode-refrow">
+                  <span className="uac-fbmode-reflabel">Reference</span>
+                  <code className="uac-beta-ref" title={`Recorded as event ${fbRef}`}>
+                    {fbRef.slice(0, 8)}
+                  </code>
                 </span>
               )}
-              <button type="button" className="uac-fbmode-exit" onClick={exitFeedbackMode}>
+              <button
+                type="button"
+                className="uac-fbmode-exit uac-fbmode-backbtn"
+                onClick={exitFeedbackMode}
+              >
                 Back to chat
               </button>
             </div>
@@ -678,37 +888,41 @@ export function UnifiedAssistantChat({
                 </span>
               </div>
               <div className="uac-fbmode-controls">
-                <select
-                  aria-label="Feedback category"
-                  value={fbCategory}
-                  onChange={(e) => setFbCategory(e.target.value as FeedbackCategory)}
-                >
-                  {FEEDBACK_CATEGORIES.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="uac-toolbar-spacer" />
-                <button
-                  type="button"
-                  className="uac-fbmode-exit"
-                  onClick={exitFeedbackMode}
-                  disabled={fbBusy}
-                >
-                  Exit
-                </button>
-                <button
-                  type="button"
-                  className="primary uac-fbmode-send"
-                  disabled={fbBusy || turns.length === 0}
-                  onClick={() => void submitFeedback()}
-                  title={
-                    turns.length === 0 ? 'Describe your feedback in the chat first' : undefined
-                  }
-                >
-                  {fbBusy ? 'Submitting…' : 'Submit feedback'}
-                </button>
+                <label className="uac-fbmode-catlabel">
+                  <span>Category</span>
+                  <select
+                    aria-label="Feedback category"
+                    value={fbCategory}
+                    onChange={(e) => setFbCategory(e.target.value as FeedbackCategory)}
+                  >
+                    {FEEDBACK_CATEGORIES.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="uac-fbmode-actions">
+                  <button
+                    type="button"
+                    className="uac-fbmode-exit"
+                    onClick={exitFeedbackMode}
+                    disabled={fbBusy}
+                  >
+                    Exit
+                  </button>
+                  <button
+                    type="button"
+                    className="primary uac-fbmode-send"
+                    disabled={fbBusy || turns.length === 0}
+                    onClick={() => void submitFeedback()}
+                    title={
+                      turns.length === 0 ? 'Describe your feedback in the chat first' : undefined
+                    }
+                  >
+                    {fbBusy ? 'Submitting…' : 'Submit feedback'}
+                  </button>
+                </div>
               </div>
               {fbError && <div className="alert alert-error">{fbError}</div>}
             </>
@@ -755,6 +969,16 @@ export function UnifiedAssistantChat({
                 ))}
               </ol>
             )}
+            {t.role === 'user' && t.attachments && t.attachments.length > 0 && (
+              <div className="uac-bubble-attachments">
+                {t.attachments.map((name, k) => (
+                  <span key={k} className="uac-attach-chip uac-attach-chip-static" title={name}>
+                    <FileTextIcon size={11} />
+                    <span className="uac-attach-chip-name">{name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         ))}
 
@@ -794,26 +1018,101 @@ export function UnifiedAssistantChat({
         )}
       </div>
 
-      {/* ── Composer ──────────────────────────────────────────────────────── */}
-      <div className="uac-composer">
-        <textarea
-          ref={composerRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={placeholder}
-          aria-label={placeholder || 'Message the assistant'}
-          rows={2}
+      {/* ── Composer (with attachments) ───────────────────────────────────── */}
+      <div className="uac-composer-area">
+        {canAttach && attachments.length > 0 && (
+          <div className="uac-staged-attachments">
+            {attachments.map((a, i) => (
+              <span key={i} className="uac-attach-chip" title={a.name}>
+                {a.source === 'matter' ? <FileTextIcon size={11} /> : <PaperclipIcon size={11} />}
+                <span className="uac-attach-chip-name">{a.name}</span>
+                <button
+                  type="button"
+                  className="uac-attach-remove"
+                  onClick={() => removeAttachment(i)}
+                  aria-label={`Remove ${a.name}`}
+                >
+                  <XIcon size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {attachError && (
+          <div className="uac-attach-error" role="alert">
+            {attachError}
+          </div>
+        )}
+        <div className={`uac-composer${canAttach ? ' has-attach' : ''}`}>
+          {canAttach && (
+            <button
+              type="button"
+              className={`uac-attach-btn${attachMenuOpen ? ' active' : ''}`}
+              onClick={onAttachClick}
+              disabled={attachBusy}
+              aria-label="Attach a document"
+              aria-haspopup={activeScope.matterEntityId ? 'menu' : undefined}
+              aria-expanded={activeScope.matterEntityId ? attachMenuOpen : undefined}
+              title="Attach a document"
+            >
+              {attachBusy ? <span className="spinner" /> : <PaperclipIcon size={16} />}
+            </button>
+          )}
+          {attachMenuOpen && canAttach && (
+            <div className="uac-attach-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="uac-attach-menu-item"
+                onClick={() => {
+                  setAttachMenuOpen(false)
+                  fileInputRef.current?.click()
+                }}
+              >
+                <PaperclipIcon size={14} /> Upload a file
+              </button>
+              {activeScope.matterEntityId && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="uac-attach-menu-item"
+                  onClick={() => {
+                    setAttachMenuOpen(false)
+                    void attachMatterDocument()
+                  }}
+                >
+                  <FileTextIcon size={14} /> This matter’s document
+                </button>
+              )}
+            </div>
+          )}
+          <textarea
+            ref={composerRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={placeholder}
+            aria-label={placeholder || 'Message the assistant'}
+            rows={2}
+          />
+          <button
+            type="button"
+            className="uac-send"
+            onClick={() => void send()}
+            disabled={busy || !input.trim() || !modelId}
+            aria-label="Send"
+          >
+            <SendIcon size={16} />
+          </button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/html"
+          multiple
+          hidden
+          onChange={onFilePicked}
         />
-        <button
-          type="button"
-          className="uac-send"
-          onClick={() => void send()}
-          disabled={busy || !input.trim() || !modelId}
-          aria-label="Send"
-        >
-          <SendIcon size={16} />
-        </button>
       </div>
     </div>
   )

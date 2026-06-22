@@ -35,8 +35,9 @@ import { getContact } from '../queries/contacts.js'
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
 export type AssistantScope = 'matter' | 'contact' | 'global'
 // Beta-feedback category (Obj 11): the attorney tags feedback so the team can
-// triage by area. Only meaningful for feedback turns.
-export type FeedbackCategory = 'ui' | 'ai' | 'workflow' | 'other'
+// triage by area. Only meaningful for feedback turns. 'feature' = a request for
+// something new (vs 'workflow' = a problem with an existing flow).
+export type FeedbackCategory = 'ui' | 'ai' | 'workflow' | 'feature' | 'other'
 
 export interface AssistantChatInput {
   message: string
@@ -59,6 +60,11 @@ export interface AssistantChatInput {
   // How much matter/client history to feed the model (chat settings). More depth
   // = richer grounding but a larger, slower, pricier prompt. Default 'balanced'.
   contextDepth?: ContextDepth
+  // Documents the attorney attached to THIS message — uploaded files (parsed to
+  // text upstream) or a matter document. Appended to the user message for CLAUDE
+  // ONLY (the firm's own model); never sent to an external research model. Capped
+  // server-side by composeUserMessage.
+  attachments?: Array<{ name: string; text: string }>
   // Optional widget hint: a "Leave feedback" entry point forces kind='feedback'.
   intent?: 'feedback' | 'question'
   // Beta feedback (Obj 11): the category the attorney tagged + where they were.
@@ -112,6 +118,9 @@ export interface AssistantThreadEntry {
   kind: AssistantTurnKind
   citations: string[]
   recordedAt: string
+  // Names of documents attached to this turn (on the user side), so a reopened
+  // thread still shows what was attached.
+  attachmentNames?: string[]
 }
 
 const SYSTEM_PROMPT = [
@@ -143,8 +152,9 @@ const LOG_FEEDBACK_TOOL_DEF = {
       },
       category: {
         type: 'string',
-        enum: ['ui', 'ai', 'workflow', 'other'],
-        description: 'Which area the feedback concerns.',
+        enum: ['ui', 'ai', 'workflow', 'feature', 'other'],
+        description:
+          "Which area the feedback concerns. Use 'feature' when the attorney is asking for something NEW (a feature or workflow they wish existed); 'workflow' when an existing flow is clumsy or broken.",
       },
     },
     required: ['summary'],
@@ -196,6 +206,40 @@ function buildClaudeSystem(
     system += `\n\nThe current page is ${path} — link to it with a markdown link when referring the attorney back to this ${scope}.`
   }
   return system
+}
+
+// Caps so an attached document can't blow the context window (or the bill): per
+// attachment, and across all attachments in one turn. Generous enough for a long
+// contract; oversized text is truncated with a marker.
+const MAX_ATTACHMENT_CHARS = 60_000
+const MAX_ATTACHMENTS_TOTAL_CHARS = 160_000
+
+// Append the attorney's attached documents to their message (Claude only). Each
+// document is delimited and labelled; total size is bounded. Returns the message
+// unchanged when there are no attachments.
+function composeUserMessage(
+  message: string,
+  attachments: AssistantChatInput['attachments'],
+): string {
+  if (!attachments || attachments.length === 0) return message
+  let budget = MAX_ATTACHMENTS_TOTAL_CHARS
+  const sections: string[] = []
+  for (const a of attachments) {
+    if (budget <= 0) break
+    const name = (a.name || 'document').slice(0, 200)
+    let body = (a.text ?? '').trim()
+    if (!body) continue
+    let truncated = false
+    const cap = Math.min(MAX_ATTACHMENT_CHARS, budget)
+    if (body.length > cap) {
+      body = body.slice(0, cap)
+      truncated = true
+    }
+    budget -= body.length
+    sections.push(`[Attached document: ${name}]\n${body}${truncated ? '\n…(truncated)' : ''}`)
+  }
+  if (sections.length === 0) return message
+  return `${message}\n\n--- Attached documents (provided by the attorney for this question) ---\n\n${sections.join('\n\n')}`
 }
 
 // Heuristic feedback sniff (mirrors the legacy assistant). Perplexity turns are
@@ -287,6 +331,9 @@ export async function recordAssistantTurn(
     // Feedback turns (Obj 11): the tagged category + the page the attorney was on.
     category?: FeedbackCategory | null
     pageContext?: Record<string, unknown> | null
+    // Names of any documents the attorney attached to this turn (names only — the
+    // text already shaped the reply; keeping it out of the event avoids bloat).
+    attachmentNames?: string[] | null
   },
 ): Promise<{ eventId: string }> {
   const res = await submitAction(ctx, {
@@ -310,6 +357,7 @@ export async function recordAssistantTurn(
         // Only feedback carries a category; default 'other' so triage never sees null.
         category: input.kind === 'feedback' ? (input.category ?? 'other') : null,
         page_context: input.pageContext ?? null,
+        attachment_names: input.attachmentNames ?? null,
       },
     },
   })
@@ -334,13 +382,18 @@ export async function assistantChat(
 
   const { scope, context, primaryEntityId } = await loadContext(ctx, input)
   const kind = classifyKind(model.provider, message, input.intent)
-  const webSearch = webSearchOn(model, input.webSearch, Boolean(context))
+  // Attachments (Claude only) carry potentially-confidential text in the prompt,
+  // so they gate web search off for the same reason a grounded turn does — the
+  // attached text must never reach an outbound web_search query.
+  const hasAttachments = (input.attachments?.length ?? 0) > 0
+  const webSearch = webSearchOn(model, input.webSearch, Boolean(context) || hasAttachments)
 
   let reply: string
   let citations: string[] = []
 
   if (model.provider === 'perplexity') {
-    // External research: only the non-confidential framing leaves the firm.
+    // External research: only the non-confidential framing leaves the firm —
+    // attachments (which may hold client documents) are deliberately NOT sent.
     const result = await runPerplexityResearch(ctx.tenantId, {
       question: message,
       context: context?.framing,
@@ -349,12 +402,13 @@ export async function assistantChat(
     reply = result.answer
     citations = result.citations
   } else {
-    // Claude: full matter context is safe (the firm's own model).
+    // Claude: full matter context is safe (the firm's own model), as are any
+    // attached documents — appended to the user message.
     const system = buildClaudeSystem(scope, primaryEntityId, context)
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
-      { role: 'user', content: message },
+      { role: 'user', content: composeUserMessage(message, input.attachments) },
     ]
     const result = await chatWithAssistantDetailed(ctx.tenantId, messages, {
       model: model.model,
@@ -378,6 +432,7 @@ export async function assistantChat(
     primaryEntityId,
     category: input.category ?? null,
     pageContext: input.pageContext ?? null,
+    attachmentNames: input.attachments?.map((a) => a.name) ?? null,
   })
 
   return { eventId, reply, citations, provider: model.provider, model: model.model, kind, scope }
@@ -402,7 +457,10 @@ export async function* assistantChatStream(
 
   const { scope, context, primaryEntityId } = await loadContext(ctx, input)
   const kind = classifyKind(model.provider, message, input.intent)
-  const webSearch = webSearchOn(model, input.webSearch, Boolean(context))
+  // See assistantChat: attachments gate web search off (their text must not leak
+  // into an outbound web_search query).
+  const hasAttachments = (input.attachments?.length ?? 0) > 0
+  const webSearch = webSearchOn(model, input.webSearch, Boolean(context) || hasAttachments)
 
   yield { type: 'meta', provider: model.provider, model: model.model, kind, scope, webSearch }
 
@@ -424,12 +482,13 @@ export async function* assistantChatStream(
       }
     }
   } else {
-    // Claude: full matter context is safe (the firm's own model).
+    // Claude: full matter context is safe (the firm's own model), as are any
+    // attached documents — appended to the user message.
     const system = buildClaudeSystem(scope, primaryEntityId, context)
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
-      { role: 'user', content: message },
+      { role: 'user', content: composeUserMessage(message, input.attachments) },
     ]
     for await (const chunk of streamChatWithAssistant(ctx.tenantId, messages, {
       model: model.model,
@@ -460,6 +519,7 @@ export async function* assistantChatStream(
     primaryEntityId,
     category: input.category ?? null,
     pageContext: input.pageContext ?? null,
+    attachmentNames: input.attachments?.map((a) => a.name) ?? null,
   })
 
   yield {
@@ -534,6 +594,7 @@ export async function listAssistantThread(
         model?: string
         kind?: AssistantTurnKind
         citations?: string[]
+        attachment_names?: string[] | null
       }
       occurred_at: string
     }>(
@@ -558,8 +619,15 @@ export async function listAssistantThread(
         recordedAt: r.occurred_at,
       }
       // One stored exchange expands to two display turns (user then assistant).
+      // Attachment names ride on the user side (that's where they were attached).
       return [
-        { ...base, role: 'user' as const, message: r.payload.message ?? '', reply: '' },
+        {
+          ...base,
+          role: 'user' as const,
+          message: r.payload.message ?? '',
+          reply: '',
+          attachmentNames: r.payload.attachment_names ?? undefined,
+        },
         { ...base, role: 'assistant' as const, message: '', reply: r.payload.reply ?? '' },
       ]
     })

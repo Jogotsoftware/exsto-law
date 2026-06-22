@@ -81,6 +81,20 @@ registerTool({
         description:
           'How much matter/client history to feed the model (emails, transcript, intake, draft). More = richer grounding but a larger, slower, pricier prompt. Default balanced.',
       },
+      attachments: {
+        type: 'array',
+        description:
+          'Documents the attorney attached to this message (Claude only): each { name, text }. Appended to the prompt as extra context; never sent to an external research model. Bounded server-side.',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            text: { type: 'string' },
+          },
+          required: ['name', 'text'],
+          additionalProperties: false,
+        },
+      },
       intent: {
         type: 'string',
         enum: ['feedback', 'question'],
@@ -88,7 +102,7 @@ registerTool({
       },
       category: {
         type: 'string',
-        enum: ['ui', 'ai', 'workflow', 'other'],
+        enum: ['ui', 'ai', 'workflow', 'feature', 'other'],
         description: 'Beta-feedback category (feedback turns only).',
       },
       pageContext: {
@@ -144,7 +158,7 @@ registerTool({
       message: { type: 'string', description: "The attorney's feedback." },
       category: {
         type: 'string',
-        enum: ['ui', 'ai', 'workflow', 'other'],
+        enum: ['ui', 'ai', 'workflow', 'feature', 'other'],
         description: 'Which area the feedback is about.',
       },
       pageContext: {
@@ -164,7 +178,7 @@ registerTool({
 registerTool({
   name: 'legal.assistant.feedback_list',
   description:
-    'All beta feedback (newest first) with its category (ui/ai/workflow/other) and page context — the triage surface.',
+    'All beta feedback (newest first) with its category (ui/ai/workflow/feature/other) and page context — the triage surface.',
   mode: 'read',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => ({ feedback: await listAssistantFeedback(ctx) }),
