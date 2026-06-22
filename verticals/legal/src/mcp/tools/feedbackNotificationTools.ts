@@ -27,7 +27,7 @@ registerTool({
       summary: {
         type: 'string',
         description:
-          'A clean one-sentence restatement of WHAT the feedback/feature was, in plain language (e.g. "Add a Select-all option when building an invoice"). Shown as the notification headline; keep it short and code-free.',
+          'A short, plain-language label for WHAT the feedback/feature was — a few words, not a sentence (e.g. "Invoice select-all", "Chat bubble tails"). Shown as "Resolved Feedback: <summary>" in the bell, truncated to ~35 chars, so keep it terse and code-free.',
       },
       note: {
         type: 'string',

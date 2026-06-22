@@ -252,21 +252,17 @@ export function AttorneyTopNav() {
                 ) : (
                   <ul className="att-notif-list">
                     {notifs.map((n) => {
+                      // One compact line — "Resolved Feedback: <≤35-char teaser>" —
+                      // with the whole row hyperlinked to the page the feedback was
+                      // on. Full text is in the title tooltip; the detail lives on
+                      // the linked page, not in the bell.
+                      const text = (n.summary ?? n.excerpt ?? '').trim()
+                      const short = text.length > 35 ? `${text.slice(0, 35).trimEnd()}…` : text
                       const body = (
                         <>
-                          <span className="att-notif-row-top">
-                            {n.unread && <span className="att-notif-dot" aria-hidden="true" />}
-                            <span className="att-notif-title">Feedback resolved</span>
-                            <span className="att-notif-cat">{n.category}</span>
-                          </span>
-                          {/* Headline: the resolver's clean one-liner. Legacy events
-                              with no summary fall back to the quoted raw excerpt. */}
-                          {n.summary ? (
-                            <span className="att-notif-summary">{n.summary}</span>
-                          ) : (
-                            <span className="att-notif-excerpt">“{n.excerpt}”</span>
-                          )}
-                          {n.note && <span className="att-notif-note">{n.note}</span>}
+                          {n.unread && <span className="att-notif-dot" aria-hidden="true" />}
+                          <span className="att-notif-label">Resolved Feedback:</span>
+                          <span className="att-notif-text">{short}</span>
                         </>
                       )
                       return (
@@ -275,11 +271,17 @@ export function AttorneyTopNav() {
                           className={`att-notif-item${n.unread ? ' unread' : ''}`}
                         >
                           {n.linkPath ? (
-                            <Link href={n.linkPath} className="att-notif-link">
+                            <Link
+                              href={n.linkPath}
+                              className="att-notif-link"
+                              title={text || undefined}
+                            >
                               {body}
                             </Link>
                           ) : (
-                            <div className="att-notif-link">{body}</div>
+                            <div className="att-notif-link" title={text || undefined}>
+                              {body}
+                            </div>
                           )}
                         </li>
                       )

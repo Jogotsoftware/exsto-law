@@ -15,9 +15,10 @@ export interface ResolveFeedbackInput {
   feedbackEventId: string
   // What was done about it (shown verbatim in the attorney's notification).
   note?: string
-  // A clean one-sentence restatement of WHAT the feedback/feature was, in plain
-  // language. This is the notification's headline so the attorney reads the
-  // substance, not the raw (sometimes coded, e.g. "fbk-123 …") original text.
+  // A short, plain-language label for WHAT the feedback/feature was — a few
+  // words, not a sentence. The bell shows "Resolved Feedback: <summary>"
+  // truncated to ~35 chars, so the attorney reads the substance, not the raw
+  // (sometimes coded, e.g. "fbk-123 …") original text.
   summary?: string
 }
 
