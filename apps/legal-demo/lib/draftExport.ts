@@ -119,7 +119,7 @@ const PRINT_STYLES = `
     color: #111;
     font-size: 11pt;
   }
-  h1 { font-size: 18pt; margin: 0 0 14pt; }
+  h1 { font-size: 18pt; margin: 0 0 14pt; text-align: center; }
   h2 { font-size: 14pt; margin: 22pt 0 10pt; }
   h3 { font-size: 12pt; margin: 18pt 0 8pt; }
   p  { margin: 0 0 10pt; }
