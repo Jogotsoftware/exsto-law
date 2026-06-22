@@ -18,6 +18,7 @@ import {
   type EmailAttachment,
 } from '../adapters/gmail.js'
 import { resolveEmailSignature } from './firmSignature.js'
+import { authorizedSendMatters } from './matterAccess.js'
 
 // ── Signature (fix #10) ──────────────────────────────────────────────────────
 // Append the firm signature to a message body (and its HTML alternative, if
@@ -252,6 +253,23 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
   if (!clientParticipant) {
     throw new Error('Refusing to reply: thread has no known client participant.')
   }
+  // Send authz (0088): the reply goes to clientParticipant, so authorize the
+  // sender against THAT recipient's matters specifically — NOT the union of every
+  // participant's matters (a thread can mix clients from different matters; the
+  // sender must be authorized on a matter the actual recipient belongs to). An
+  // attorney may send only on matters they own, are granted, or as a firm admin.
+  const recipientMatters = index.get(clientParticipant.toLowerCase()) ?? []
+  const authorized = await authorizedSendMatters(
+    ctx,
+    recipientMatters.map((m) => m.matterEntityId),
+  )
+  if (authorized.length === 0) {
+    throw new Error(
+      'You are not authorized to send on this matter. Ask the matter owner or a firm admin for access.',
+    )
+  }
+  const matterEntityId = authorized[0]!
+
   const last = detail.messages[detail.messages.length - 1]
   // Sign centrally — replies carry the firm signature too (fix #10). The HTML
   // alternative (when the composer sent one) is signed alongside the plaintext.
@@ -271,9 +289,6 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
     },
     ctx.actorId,
   )
-  const matters = dedupeMatters(
-    detail.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? []),
-  )
   return submitAction(ctx, {
     actionKindName: 'mail.send',
     intentKind: 'enforcement',
@@ -284,7 +299,7 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
       to: clientParticipant,
       from: sent.from,
       body_text: signedBody,
-      matter_entity_id: matters[0]?.matterEntityId ?? null,
+      matter_entity_id: matterEntityId,
       participant_emails: detail.participantEmails,
     },
   })
@@ -335,11 +350,27 @@ export async function enqueueClientEmail(
       `Refusing to send: ${input.to} is not a known client contact (client-mail-only discipline).`,
     )
   }
-  // Prefer an explicitly supplied matter when it is one this contact belongs to;
-  // otherwise fall back to the contact's first matter.
-  const matterEntityId =
-    (input.matterId && matters.find((m) => m.matterEntityId === input.matterId)?.matterEntityId) ||
-    matters[0]!.matterEntityId
+  // Send authz (0088): authorize the sender on the recipient's matters BEFORE
+  // sending, and attribute the message to a matter they may send on (preferring an
+  // explicitly supplied one). An attorney may send only on matters they own, are
+  // granted, or as a firm admin.
+  const authorized = await authorizedSendMatters(
+    ctx,
+    matters.map((m) => m.matterEntityId),
+  )
+  if (authorized.length === 0) {
+    throw new Error(
+      'You are not authorized to send to this contact on any of their matters. Ask the matter owner or a firm admin for access.',
+    )
+  }
+  // An explicit matter must be one the actor may send on — never silently re-route
+  // an unauthorized matterId to a different (authorized) matter (provenance/intent).
+  if (input.matterId && !authorized.includes(input.matterId)) {
+    throw new Error(
+      'You are not authorized to send on the specified matter for this contact. Ask the matter owner or a firm admin for access.',
+    )
+  }
+  const matterEntityId = input.matterId || authorized[0]!
 
   // Sign centrally: every Contract B send carries the firm signature (fix #10).
   const signed = withSignature(
