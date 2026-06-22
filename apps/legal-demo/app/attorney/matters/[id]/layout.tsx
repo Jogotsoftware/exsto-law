@@ -8,6 +8,7 @@
 // picks up this matter as its context automatically.
 import { use, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
 import { MatterTabs } from '@/components/MatterTabs'
@@ -23,6 +24,7 @@ export default function MatterLayout({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
+  const router = useRouter()
   const [matter, setMatter] = useState<Pick<
     MatterDetail,
     'matterNumber' | 'summary' | 'status' | 'clientEmail' | 'matterEntityId'
@@ -67,6 +69,18 @@ export default function MatterLayout({
           </button>
           <button onClick={() => launchScheduler({ matterId: id })} title="Schedule a meeting">
             Schedule
+          </button>
+          <button
+            onClick={() => router.push(`/attorney/matters/${id}/billing?add=time`)}
+            title="Log time on this matter"
+          >
+            Log time
+          </button>
+          <button
+            onClick={() => router.push(`/attorney/matters/${id}/billing?add=expense`)}
+            title="Log an expense on this matter"
+          >
+            Log expense
           </button>
         </div>
       </div>

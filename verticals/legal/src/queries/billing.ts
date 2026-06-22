@@ -49,6 +49,9 @@ export interface UnbilledEntry {
 export interface UnbilledMatter {
   matterEntityId: string
   matterNumber: string
+  // Plain-language matter summary (e.g. "NC LLC formation for Acme"); the UI shows
+  // this as the readable label and keeps matterNumber as a secondary code.
+  matterSummary: string | null
   // The matter's contact (client_of). Present even when the matter has no client
   // parent — the Unbilled UI uses it to one-click set up billing for an orphan.
   contactEntityId: string | null
@@ -79,6 +82,7 @@ export async function listUnbilled(
       kind: string
       matter_id: string
       matter_number: string
+      matter_summary: string | null
       client_id: string | null
       client_name: string | null
       billable_rate: string | null
@@ -106,6 +110,7 @@ export async function listUnbilled(
          ekd.kind_name AS kind,
          m.id AS matter_id,
          m.name AS matter_number,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = m.id AND kind_name = 'matter_summary') AS matter_summary,
          cli.id AS client_id,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_name')          AS client_name,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billable_rate') AS billable_rate,
@@ -164,6 +169,7 @@ export async function listUnbilled(
         m = {
           matterEntityId: r.matter_id,
           matterNumber: r.matter_number,
+          matterSummary: r.matter_summary,
           contactEntityId: r.contact_id,
           contactName: r.contact_name,
           entries: [],
@@ -429,6 +435,82 @@ export async function getInvoice(
         amount: r.amount ?? '0.00',
         sourceEventId: r.source_event_id,
         matterNumber: r.matter_number,
+      })),
+    }
+  })
+}
+
+export interface MatterInvoicedItem {
+  lineEntityId: string
+  kind: string
+  description: string
+  quantity: string
+  rate: string
+  amount: string
+  invoiceEntityId: string
+  invoiceNumber: string
+  invoiceStatus: string
+  issuedDate: string | null
+}
+
+// The INVOICED (already-billed) line items for one matter — the counterpart to the
+// unbilled feed, so the matter Billing tab shows both what's outstanding and what's
+// been invoiced, with each invoice's status. Lines carry line_matter_id = this
+// matter and link to their invoice (line_of) for the number + status.
+export async function listMatterInvoiced(
+  ctx: ActionContext,
+  matterEntityId: string,
+): Promise<{ items: MatterInvoicedItem[]; currency: string }> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      line_id: string
+      kind: string | null
+      description: string | null
+      quantity: string | null
+      rate: string | null
+      amount: string | null
+      invoice_id: string
+      invoice_number: string | null
+      invoice_status: string | null
+      currency: string | null
+      issued_date: string | null
+    }>(
+      `${ATTRS_CTE}
+       SELECT le.id AS line_id,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_kind')        AS kind,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_description') AS description,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_quantity')    AS quantity,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_rate')        AS rate,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_amount')      AS amount,
+         inv.id AS invoice_id,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = inv.id AND kind_name = 'invoice_number')      AS invoice_number,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = inv.id AND kind_name = 'invoice_status')      AS invoice_status,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = inv.id AND kind_name = 'invoice_currency')    AS currency,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = inv.id AND kind_name = 'invoice_issued_date') AS issued_date
+       FROM entity le
+       JOIN relationship r ON r.source_entity_id = le.id AND r.tenant_id = $1
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'line_of'
+       JOIN entity inv ON inv.id = r.target_entity_id AND inv.status = 'active'
+       WHERE le.tenant_id = $1 AND le.status = 'active'
+         AND (r.valid_to IS NULL OR r.valid_to > now())
+         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_matter_id') = $2
+       ORDER BY inv.created_at DESC, le.created_at`,
+      [ctx.tenantId, matterEntityId],
+    )
+    const currency = res.rows.find((r) => r.currency)?.currency ?? 'USD'
+    return {
+      currency,
+      items: res.rows.map((r) => ({
+        lineEntityId: r.line_id,
+        kind: r.kind ?? '',
+        description: r.description ?? '',
+        quantity: r.quantity ?? '0',
+        rate: r.rate ?? '0.00',
+        amount: r.amount ?? '0.00',
+        invoiceEntityId: r.invoice_id,
+        invoiceNumber: r.invoice_number ?? '(draft)',
+        invoiceStatus: r.invoice_status ?? 'draft',
+        issuedDate: r.issued_date,
       })),
     }
   })

@@ -4,6 +4,7 @@ import {
   sendInvoice,
   listUnbilled,
   listInvoices,
+  listMatterInvoiced,
   getInvoice,
   getRatesView,
   setClientRate,
@@ -15,6 +16,7 @@ import {
   type UnbilledClient,
   type InvoiceSummary,
   type InvoiceDetail,
+  type MatterInvoicedItem,
   type RatesView,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
@@ -32,6 +34,20 @@ registerTool({
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => await listUnbilled(ctx),
 } satisfies Tool<Record<string, never>, { clients: UnbilledClient[]; currency: string }>)
+
+registerTool({
+  name: 'legal.billing.matter_invoiced',
+  description:
+    'List the already-invoiced (billed) line items for one matter, each with its invoice number and status — the counterpart to the unbilled feed for a matter Billing tab.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { matterEntityId: { type: 'string' } },
+    required: ['matterEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await listMatterInvoiced(ctx, input.matterEntityId),
+} satisfies Tool<{ matterEntityId: string }, { items: MatterInvoicedItem[]; currency: string }>)
 
 registerTool({
   name: 'legal.invoice.list',
