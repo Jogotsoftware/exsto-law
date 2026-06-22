@@ -154,7 +154,11 @@ export function AttachmentPicker({
                       type="checkbox"
                       checked={has('upload', u.documentVersionId)}
                       onChange={() =>
-                        toggle({ kind: 'upload', id: u.documentVersionId, label: u.originalFilename })
+                        toggle({
+                          kind: 'upload',
+                          id: u.documentVersionId,
+                          label: u.originalFilename,
+                        })
                       }
                     />
                     <span>
