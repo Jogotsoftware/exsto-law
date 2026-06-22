@@ -2,11 +2,13 @@ import { registerTool, type Tool } from '@exsto/mcp-tools'
 import type { ActionContext } from '@exsto/substrate'
 import {
   declineForClient,
+  listClientDocuments,
   listClientSignatures,
   loadClientContactEmail,
   loadSignableForClient,
   recordSignatureForClient,
   resolveClientMatterIds,
+  type ClientDocument,
   type ClientPrincipal,
   type PendingSignature,
   type RecordSignatureResult,
@@ -36,6 +38,15 @@ const listTool: Tool<WithClient, { signatures: PendingSignature[] }> = {
   mode: 'read',
   handler: async (ctx, input) => ({
     signatures: await listClientSignatures(await principal(ctx, input.clientContactId)),
+  }),
+}
+
+const documentsTool: Tool<WithClient, { documents: ClientDocument[] }> = {
+  name: 'legal.esign.portal.documents',
+  description: 'List ALL of the signed-in client’s documents (to-sign and already signed).',
+  mode: 'read',
+  handler: async (ctx, input) => ({
+    documents: await listClientDocuments(await principal(ctx, input.clientContactId)),
   }),
 }
 
@@ -88,6 +99,7 @@ const declineTool: Tool<
 }
 
 registerTool(listTool)
+registerTool(documentsTool)
 registerTool(loadTool)
 registerTool(signTool)
 registerTool(declineTool)

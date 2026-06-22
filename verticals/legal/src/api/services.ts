@@ -14,6 +14,7 @@ import {
 } from '../templates/loader.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
+import { signBookingManageToken } from './bookingManageToken.js'
 import type { GenerationMode } from './generateDraft.js'
 
 export interface ServiceField {
@@ -1331,6 +1332,17 @@ export async function submitBooking(
   // never waits on the Gmail API; failures retry in the worker.
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
   const firstName = input.clientFullName.split(/\s+/)[0]
+  // Self-service manage-link token (minted once, reused for reschedule + cancel).
+  // Best-effort: if the signing secret is unset, the email simply omits the
+  // manage buttons (the booking itself must never fail over a missing link).
+  let manageToken: string | null = null
+  if (baseUrl) {
+    try {
+      manageToken = signBookingManageToken({ matterEntityId, tenantId: ctx.tenantId })
+    } catch (err) {
+      console.error('[submitBooking] manage-link token not minted (booking still saved):', err)
+    }
+  }
   const commonVars = {
     matter_entity_id: matterEntityId,
     matter_number: matterNumber,
@@ -1352,9 +1364,17 @@ export async function submitBooking(
     }),
     matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
     // Client account access (S10): magic-link portal sign-in. The prospect
-    // booking confirmation email links here so the client can set up portal
-    // access using the same email they just booked with.
+    // booking confirmation email links here, pre-filled with the email they just
+    // booked with, so "Create your account" lands them one click from a link.
     portal_url: baseUrl ? `${baseUrl}/portal/login` : null,
+    account_url: baseUrl
+      ? `${baseUrl}/portal/login?email=${encodeURIComponent(input.clientEmail)}`
+      : null,
+    // Self-service reschedule / cancel: one HMAC-signed, tenant-bound token gates
+    // the public /book/manage page (exsto-public-surface). The page opens on
+    // reschedule; ?intent=cancel jumps straight to the cancel panel.
+    reschedule_url: manageToken ? `${baseUrl}/book/manage/${manageToken}` : null,
+    cancel_url: manageToken ? `${baseUrl}/book/manage/${manageToken}?intent=cancel` : null,
   }
   await queueNotification(ctx, {
     routeKindName: 'prospect_intake_confirmation',

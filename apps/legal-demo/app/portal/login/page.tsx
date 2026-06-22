@@ -3,130 +3,238 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeInternalPath } from '@/lib/safeRedirect'
+import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
 
-// The client-portal sign-in page. Two jobs:
-//   1. No ?token= → show the email form. POSTing to /api/client/auth/request
-//      always returns the same neutral message (anti-enumeration), so the UI
-//      shows the same confirmation whether or not the email is on file.
-//   2. ?token=... → the magic-link landing. POST it to /api/client/auth/consume,
-//      which sets the httpOnly session cookie and returns a validated redirect.
+// The client-portal sign-in page — email + password (Supabase Auth). On sign in
+// or a confirmed sign-up we POST the verified token to /api/client/auth/supabase,
+// which maps the verified email to the firm's client_contact and mints our own
+// httpOnly portal session (the substrate-side authorization is unchanged).
+
+type Phase = 'form' | 'working' | 'error' | 'check-email'
+
 export default function ClientPortalLoginPage() {
   const router = useRouter()
-  const [phase, setPhase] = useState<'form' | 'sent' | 'consuming' | 'error'>('form')
+  const [phase, setPhase] = useState<Phase>('form')
+  const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [continueParam, setContinueParam] = useState('/portal')
 
-  // Token-consume bounce: if we landed with ?token=, exchange it for a session.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-    const token = params.get('token')
-    if (!token) return
-    setPhase('consuming')
-    const cont = safeInternalPath(params.get('continue'), '/portal')
-    fetch('/api/client/auth/consume', {
+  // Exchange a verified Supabase access token for our portal session cookie,
+  // then sign the Supabase session out (we only needed the email proof).
+  async function bridge(accessToken: string, cont: string) {
+    const sb = getSupabaseBrowser()
+    const res = await fetch('/api/client/auth/supabase', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ token, continue: cont }),
+      body: JSON.stringify({ accessToken, continue: cont }),
     })
-      .then(async (res) => {
-        if (!res.ok) {
-          const body = (await res.json().catch(() => null)) as { error?: string } | null
-          throw new Error(body?.error ?? 'This sign-in link is invalid or has expired.')
-        }
-        const body = (await res.json()) as { path?: string }
-        router.replace(safeInternalPath(body.path, '/portal'))
-      })
-      .catch((e) => {
-        setError(e instanceof Error ? e.message : String(e))
-        setPhase('error')
-      })
-  }, [router])
+    const data = (await res.json().catch(() => null)) as { error?: string; path?: string } | null
+    await sb?.auth.signOut().catch(() => {})
+    if (!res.ok) throw new Error(data?.error ?? 'We could not sign you in.')
+    router.replace(safeInternalPath(data?.path, '/portal'))
+  }
 
-  async function requestLink(e: React.FormEvent) {
+  // On mount: handle an email-confirmation return (?code=) and pre-fill ?email=.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const cont = safeInternalPath(params.get('continue'), '/portal')
+    setContinueParam(cont)
+
+    const code = params.get('code')
+    const sb = getSupabaseBrowser()
+    if (code && sb) {
+      setPhase('working')
+      sb.auth
+        .exchangeCodeForSession(code)
+        .then(({ data, error: exErr }) => {
+          if (exErr || !data.session) throw new Error(exErr?.message ?? 'Sign-in failed.')
+          return bridge(data.session.access_token, cont)
+        })
+        .catch((e) => {
+          setError(e instanceof Error ? e.message : String(e))
+          setPhase('error')
+        })
+      return
+    }
+
+    const prefill = params.get('email')
+    if (prefill) setEmail(prefill)
+    // Mount-only: parse the URL once (?code= confirmation return, ?email= prefill).
+  }, [])
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault()
+    const sb = getSupabaseBrowser()
+    if (!sb) return
     setSubmitting(true)
     setError(null)
     try {
-      await fetch('/api/client/auth/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-      // Neutral by design: we don't reveal whether the email matched.
-      setPhase('sent')
-    } catch {
-      // Even a network error: show the neutral sent state rather than leak.
-      setPhase('sent')
-    } finally {
+      if (isSignUp) {
+        const { error: upErr } = await sb.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/portal/login` },
+        })
+        if (upErr) throw upErr
+        // ALWAYS require the email-confirmation click — never bridge a fresh
+        // sign-up session. If the Supabase project has "Confirm email" turned off
+        // it auto-issues a confirmed session here, which would let anyone sign up
+        // AS another client's email and take over their portal. Drop any such
+        // session; the ?code= confirmation return (handled on mount) is the only
+        // path that bridges a newly-created account.
+        await sb.auth.signOut().catch(() => {})
+        setSubmitting(false)
+        setPhase('check-email')
+      } else {
+        const { data, error: inErr } = await sb.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        })
+        if (inErr) throw inErr
+        if (!data.session) throw new Error('We could not sign you in.')
+        await bridge(data.session.access_token, continueParam)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
       setSubmitting(false)
     }
   }
 
-  if (phase === 'consuming') {
+  if (phase === 'working') {
     return (
-      <main className="public-draft">
-        <div className="loading-block" style={{ marginTop: '4rem' }}>
+      <Shell>
+        <div className="loading-block" style={{ marginTop: '2rem' }}>
           <span className="spinner" /> Signing you in…
         </div>
-      </main>
+      </Shell>
     )
   }
-
   if (phase === 'error') {
     return (
-      <main className="public-draft">
-        <div className="public-draft-firm">Pacheco Law</div>
-        <h1 style={{ marginTop: 'var(--space-1)' }}>Client Portal</h1>
+      <Shell>
         <div className="alert alert-error" style={{ marginTop: 'var(--space-3)' }}>
           {error}
         </div>
         <p style={{ marginTop: 'var(--space-3)' }}>
-          <a href="/portal/login">Request a new sign-in link</a>
+          <a href="/portal/login">Back to sign in</a>
         </p>
-      </main>
+      </Shell>
+    )
+  }
+  if (phase === 'check-email') {
+    return (
+      <Shell title="Confirm your email">
+        <p className="cauth-lead">
+          We sent a confirmation link to <strong>{email}</strong>. Click it to activate your
+          account, then come back and sign in.
+        </p>
+        <p style={{ marginTop: 'var(--space-3)' }}>
+          <button
+            className="cauth-link"
+            onClick={() => {
+              setPhase('form')
+              setIsSignUp(false)
+            }}
+          >
+            ← Back to sign in
+          </button>
+        </p>
+      </Shell>
     )
   }
 
-  if (phase === 'sent') {
+  if (!supabaseAuthConfigured) {
     return (
-      <main className="public-draft">
-        <div className="public-draft-firm">Pacheco Law</div>
-        <h1 style={{ marginTop: 'var(--space-1)' }}>Check your email</h1>
-        <p style={{ marginTop: 'var(--space-3)' }}>
-          If that email is on file, we&apos;ve sent a secure sign-in link. It expires in 30 minutes.
+      <Shell>
+        <p className="cauth-lead">
+          Sign-in isn&apos;t configured for this environment yet. Please contact the firm.
         </p>
-      </main>
+      </Shell>
     )
   }
 
   return (
-    <main className="public-draft">
-      <div className="public-draft-firm">Pacheco Law</div>
-      <h1 style={{ marginTop: 'var(--space-1)' }}>Client Portal</h1>
-      <p className="text-muted" style={{ marginTop: 'var(--space-2)' }}>
-        Enter the email you gave the firm and we&apos;ll send you a secure sign-in link.
+    <Shell>
+      <p className="cauth-lead">
+        Sign in to view your matters, documents, and messages with the firm.
       </p>
-      <form onSubmit={requestLink} style={{ marginTop: 'var(--space-3)', maxWidth: '24rem' }}>
-        <label htmlFor="portal-email" className="text-sm">
+
+      {error && (
+        <div className="alert alert-error" role="alert" style={{ marginTop: 'var(--space-3)' }}>
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={submit} className="cauth-form">
+        <label className="cauth-label" htmlFor="cauth-email">
           Email
         </label>
         <input
-          id="portal-email"
+          id="cauth-email"
           type="email"
           required
+          autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          autoComplete="email"
-          style={{ display: 'block', width: '100%', marginTop: 'var(--space-1)' }}
+          className="cauth-input"
         />
-        <button type="submit" disabled={submitting} style={{ marginTop: 'var(--space-3)' }}>
-          {submitting ? 'Sending…' : 'Send sign-in link'}
+        <label className="cauth-label" htmlFor="cauth-pass">
+          Password
+        </label>
+        <input
+          id="cauth-pass"
+          type="password"
+          required
+          // Enforce a minimum only when creating an account; an existing
+          // password may be shorter (don't lock a returning client out).
+          minLength={isSignUp ? 8 : undefined}
+          autoComplete={isSignUp ? 'new-password' : 'current-password'}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={isSignUp ? 'At least 8 characters' : 'Your password'}
+          className="cauth-input"
+        />
+        <button type="submit" className="cauth-primary" disabled={submitting}>
+          {submitting ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
         </button>
       </form>
+
+      <p className="cauth-foot">
+        {isSignUp ? 'Already have an account?' : 'New here?'}{' '}
+        <button
+          className="cauth-link"
+          onClick={() => {
+            setIsSignUp(!isSignUp)
+            setError(null)
+          }}
+        >
+          {isSignUp ? 'Sign in' : 'Create an account'}
+        </button>
+      </p>
+    </Shell>
+  )
+}
+
+function Shell({
+  title = 'Client Portal',
+  children,
+}: {
+  title?: string
+  children: React.ReactNode
+}) {
+  return (
+    <main className="public-draft cauth-shell">
+      <div className="cauth-card">
+        <div className="public-draft-firm">Pacheco Law</div>
+        <h1 className="cauth-title">{title}</h1>
+        {children}
+      </div>
     </main>
   )
 }

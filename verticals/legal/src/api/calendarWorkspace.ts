@@ -276,6 +276,12 @@ export interface RescheduleBookingInput {
   matterEntityId: string
   startIso: string
   endIso: string
+  // Whose Google credentials drive the calendar-event update. Defaults to the
+  // acting context (attorney-side flow). The PUBLIC client manage-link flow runs
+  // as the system actor — which has no Google creds — so it passes the firm's
+  // primary connected actor here while the substrate action stays attributed to
+  // the context actor (provenance of who initiated the change).
+  calendarActorId?: string
 }
 
 export async function rescheduleBooking(
@@ -284,7 +290,13 @@ export async function rescheduleBooking(
 ): Promise<ActionResult> {
   const eventId = await matterGoogleEventId(ctx, input.matterEntityId)
   if (eventId) {
-    await rescheduleEvent(ctx.tenantId, eventId, input.startIso, input.endIso, ctx.actorId)
+    await rescheduleEvent(
+      ctx.tenantId,
+      eventId,
+      input.startIso,
+      input.endIso,
+      input.calendarActorId ?? ctx.actorId,
+    )
   }
   return submitAction(ctx, {
     actionKindName: 'booking.update',
@@ -300,11 +312,11 @@ export async function rescheduleBooking(
 
 export async function cancelBooking(
   ctx: ActionContext,
-  input: { matterEntityId: string; reason?: string },
+  input: { matterEntityId: string; reason?: string; calendarActorId?: string },
 ): Promise<ActionResult> {
   const eventId = await matterGoogleEventId(ctx, input.matterEntityId)
   if (eventId) {
-    await cancelEvent(ctx.tenantId, eventId, ctx.actorId).catch(() => {
+    await cancelEvent(ctx.tenantId, eventId, input.calendarActorId ?? ctx.actorId).catch(() => {
       // Event already gone in Google — the substrate record still closes out.
     })
   }
