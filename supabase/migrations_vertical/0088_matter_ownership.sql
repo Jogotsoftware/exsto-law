@@ -5,12 +5,12 @@
 -- and signature requests on matters they OWN, are GRANTED access to, or as a firm
 -- admin. Two schema-as-data facts on the matter carry that, written ONLY through
 -- the action layer:
---   1) matter_owner            — the owning attorney's actor id (text). Stamped at
---      creation on the ATTORNEY path (legal.matter.create = the creating actor);
---      transferable via legal.matter.set_owner. The PUBLIC booking/intake path
---      (matter.open) does NOT stamp it — its actor is the public intake actor, not
---      an attorney — so booking matters start unowned (firm-shared) until an
---      attorney is assigned. A matter with no owner is open to any attorney.
+--   1) matter_owner            — the owning attorney's actor id (text). Assigned
+--      via legal.matter.set_owner. There is no create-time stamp: the only real
+--      create path is the PUBLIC matter.open (its actor is the intake actor, not an
+--      attorney), and legal.matter.create is a phantom kind (0078). So new matters
+--      start unowned (firm-shared — any attorney may send) until assigned. Wiring an
+--      attorney-facing assignment step is the follow-up that ACTIVATES enforcement.
 --   2) matter_access_actor_ids — a JSON array of additional attorney actor ids
 --      granted send access, replaced wholesale via legal.matter.grant_access.
 --
