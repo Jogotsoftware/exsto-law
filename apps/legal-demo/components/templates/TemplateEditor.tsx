@@ -6,7 +6,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { TextStyle, FontFamily, FontSize } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
 import { useEffect, useRef, type MutableRefObject, type ReactNode } from 'react'
-import { TemplateVariable } from './TemplateVariableNode'
+import { TemplateVariable, type VariableStatus } from './TemplateVariableNode'
 import { SignatureLine } from './SignatureLineNode'
 import { useFitToWidth } from '@/lib/useFitToWidth'
 import {
@@ -39,6 +39,9 @@ interface Props {
   // imperative handle into .current. Recreating the wrapper object every
   // render would orphan the handle on the previous object.
   editorRef?: MutableRefObject<TemplateEditorHandle | null>
+  // Classify a {{variable}} for coloring (matched/orphaned/unknown). Read live
+  // through a ref, so updating the reference sets just recolors (no remount).
+  validateVariable?: (name: string) => VariableStatus
 }
 
 // Word-style font choices. Values are full CSS stacks (so the document renders
@@ -56,7 +59,19 @@ const FONT_FAMILIES: Array<{ label: string; value: string }> = [
 // Point sizes offered in the size picker. Stored as e.g. font-size:12pt.
 const FONT_SIZES = ['10', '11', '12', '14', '16', '18', '24', '36']
 
-export function TemplateEditor({ initialHtml, placeholder, onChange, editorRef }: Props) {
+export function TemplateEditor({
+  initialHtml,
+  placeholder,
+  onChange,
+  editorRef,
+  validateVariable,
+}: Props) {
+  // The variable classifier read live by the node's coloring plugin. Configured
+  // once (below) as a stable closure over this ref; updating the ref + nudging
+  // the editor recolors without recreating it.
+  const resolveRef = useRef(validateVariable)
+  resolveRef.current = validateVariable
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -72,7 +87,9 @@ export function TemplateEditor({ initialHtml, placeholder, onChange, editorRef }
       FontFamily,
       FontSize,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      TemplateVariable,
+      TemplateVariable.configure({
+        resolve: (name: string) => resolveRef.current?.(name) ?? 'matched',
+      }),
       SignatureLine,
     ],
     content: initialHtml || '<p></p>',
@@ -104,6 +121,13 @@ export function TemplateEditor({ initialHtml, placeholder, onChange, editorRef }
       editor.commands.setContent(initialHtml || '<p></p>', { emitUpdate: false })
     }
   }, [editor, initialHtml])
+
+  // Recolor the chips when the classifier changes (e.g. the platform variables /
+  // question library finish loading). An empty transaction re-runs the decoration
+  // plugin without touching the document.
+  useEffect(() => {
+    if (editor) editor.view.dispatch(editor.state.tr)
+  }, [editor, validateVariable])
 
   // Expose imperative handle for the toolbar / sidebar variable inserter.
   useEffect(() => {

@@ -4093,6 +4093,19 @@ main.book-main {
   white-space: nowrap;
   vertical-align: baseline;
 }
+/* Variable validity (set by the editor's coloring plugin). Matched keeps the
+   default blue; unknown (no platform variable) is red; orphaned (a known
+   variable with no corresponding question) is yellow/amber. */
+.tpl-var-chip.tpl-var-chip--unknown {
+  background: var(--danger-soft, #fee2e2);
+  color: var(--danger, #dc2626);
+  border-color: #fca5a5;
+}
+.tpl-var-chip.tpl-var-chip--orphaned {
+  background: var(--warn-soft, #fef3c7);
+  color: var(--warn-text, #92400e);
+  border-color: #fcd9a8;
+}
 .tpl-var-chip-inline {
   margin: 0 0.25rem;
   vertical-align: baseline;
