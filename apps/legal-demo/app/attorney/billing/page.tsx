@@ -12,7 +12,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
 // ── Shared types (mirror verticals/legal/src/queries/billing.ts) ───────────────
 interface UnbilledEntry {
-  kind: 'time' | 'expense' | 'service_fee'
+  kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
   sourceEventId: string
   date: string | null
   description: string
@@ -24,6 +24,7 @@ interface UnbilledEntry {
 interface UnbilledMatter {
   matterEntityId: string
   matterNumber: string
+  matterSummary: string | null
   contactEntityId: string | null
   contactName: string | null
   entries: UnbilledEntry[]
@@ -74,6 +75,26 @@ function fmtDate(iso: string | null): string {
   const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso)
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString()
 }
+// Plain-language label for a billable kind — the screen shows this, not the code.
+function kindLabel(kind: string): string {
+  switch (kind) {
+    case 'time':
+      return 'Time'
+    case 'expense':
+      return 'Expense'
+    case 'service_fee':
+      return 'Service fee'
+    case 'document_fee':
+      return 'Document fee'
+    default:
+      return kind.replace(/_/g, ' ')
+  }
+}
+function kindBadgeClass(kind: string): string {
+  if (kind === 'time') return 'badge info'
+  if (kind === 'service_fee' || kind === 'document_fee') return 'badge ok'
+  return 'badge'
+}
 
 // ── Unbilled tab ───────────────────────────────────────────────────────────────
 function UnbilledTab({ onIssued }: { onIssued: () => void }) {
@@ -103,6 +124,25 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
   }, [refresh])
 
   const toggle = (id: string) => setSelected((s) => ({ ...s, [id]: !s[id] }))
+
+  // Every entry id under one client (across its matters) — drives "select all".
+  const clientEntryIds = (c: UnbilledClient) =>
+    c.matters.flatMap((m) => m.entries.map((e) => e.sourceEventId))
+  function setClientSelection(c: UnbilledClient, value: boolean) {
+    const ids = clientEntryIds(c)
+    setSelected((s) => {
+      const next = { ...s }
+      for (const id of ids) next[id] = value
+      return next
+    })
+  }
+  function setMatterSelection(m: UnbilledMatter, value: boolean) {
+    setSelected((s) => {
+      const next = { ...s }
+      for (const e of m.entries) next[e.sourceEventId] = value
+      return next
+    })
+  }
 
   async function generate(c: UnbilledClient) {
     const lines = c.matters
@@ -206,6 +246,27 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
               {c.billingType ? ` · ${c.billingType}` : ''}
             </span>
             <strong style={{ marginLeft: 'auto' }}>Unbilled {money(c.total, currency)}</strong>
+            {(() => {
+              const ids = clientEntryIds(c)
+              const allSelected = ids.length > 0 && ids.every((id) => selected[id])
+              return (
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={(ev) => setClientSelection(c, ev.target.checked)}
+                  />
+                  Select all
+                </label>
+              )
+            })()}
             <button
               className="primary"
               disabled={busy === c.clientEntityId}
@@ -216,8 +277,46 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
           </div>
           {c.matters.map((m) => (
             <div key={m.matterEntityId} style={{ marginBottom: '0.8rem' }}>
-              <div style={{ color: 'var(--muted)', fontSize: '0.82rem', marginBottom: '0.2rem' }}>
-                {m.matterNumber} · {money(m.total, currency)}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: '0.4rem',
+                  marginBottom: '0.2rem',
+                }}
+              >
+                {m.matterSummary ? (
+                  <>
+                    <span style={{ fontWeight: 600 }}>{m.matterSummary}</span>
+                    <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+                      {m.matterNumber}
+                    </span>
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                    {m.matterNumber}
+                  </span>
+                )}
+                <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                  · {money(m.total, currency)}
+                </span>
+                <button
+                  onClick={() =>
+                    setMatterSelection(m, !m.entries.every((e) => selected[e.sourceEventId]))
+                  }
+                  style={{
+                    marginLeft: 'auto',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent, #1a3a6b)',
+                    cursor: 'pointer',
+                    padding: 0,
+                    font: 'inherit',
+                    fontSize: '0.8rem',
+                  }}
+                >
+                  {m.entries.every((e) => selected[e.sourceEventId]) ? 'Clear' : 'Select all'}
+                </button>
               </div>
               <table className="data-table">
                 <thead>
@@ -244,17 +343,13 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
                       </td>
                       <td>{fmtDate(e.date)}</td>
                       <td>
-                        <span
-                          className={`badge ${e.kind === 'time' ? 'info' : e.kind === 'service_fee' ? 'ok' : ''}`}
-                        >
-                          {e.kind.replace('_', ' ')}
-                        </span>
+                        <span className={kindBadgeClass(e.kind)}>{kindLabel(e.kind)}</span>
                       </td>
                       <td>{e.description}</td>
                       <td style={{ textAlign: 'right' }}>
                         {e.kind === 'time'
                           ? `${e.quantity}h`
-                          : e.kind === 'service_fee'
+                          : e.kind === 'service_fee' || e.kind === 'document_fee'
                             ? '—'
                             : e.quantity}
                       </td>
@@ -495,10 +590,8 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                             {detail.lines.map((l) => (
                               <tr key={l.lineEntityId}>
                                 <td>
-                                  <span
-                                    className={`badge ${l.kind === 'time' ? 'info' : l.kind === 'service_fee' ? 'ok' : ''}`}
-                                  >
-                                    {l.kind.replace('_', ' ')}
+                                  <span className={kindBadgeClass(l.kind)}>
+                                    {kindLabel(l.kind)}
                                   </span>
                                 </td>
                                 <td>{l.matterNumber ?? '—'}</td>

@@ -58,7 +58,17 @@ function readFileAsBase64(file: File): Promise<string> {
   })
 }
 
-export function TimeExpensePanel({ matterEntityId }: { matterEntityId: string }) {
+export function TimeExpensePanel({
+  matterEntityId,
+  initialForm = null,
+  onChange,
+}: {
+  matterEntityId: string
+  // Open a form on mount (deep-linked from the matter's "Log time/expense" buttons).
+  initialForm?: 'time' | 'expense' | null
+  // Called after a successful log so the parent can refresh its billing ledgers.
+  onChange?: () => void
+}) {
   const [time, setTime] = useState<{ entries: TimeEntry[]; totalMinutes: number } | null>(null)
   const [expenses, setExpenses] = useState<{
     entries: ExpenseEntry[]
@@ -66,7 +76,7 @@ export function TimeExpensePanel({ matterEntityId }: { matterEntityId: string })
     currency: string
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState<'time' | 'expense' | null>(null)
+  const [form, setForm] = useState<'time' | 'expense' | null>(initialForm)
   const [busy, setBusy] = useState(false)
 
   // Time form fields.
@@ -128,6 +138,7 @@ export function TimeExpensePanel({ matterEntityId }: { matterEntityId: string })
       })
       resetForms()
       await load()
+      onChange?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -157,6 +168,7 @@ export function TimeExpensePanel({ matterEntityId }: { matterEntityId: string })
       })
       resetForms()
       await load()
+      onChange?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
