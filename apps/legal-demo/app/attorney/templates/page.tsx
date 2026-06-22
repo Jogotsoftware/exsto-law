@@ -695,9 +695,7 @@ export default function TemplatesPage() {
                               {aiSkills.find((x) => x.slug === slug)?.name ?? slug}
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setAiSkillSlugs((p) => p.filter((x) => x !== slug))
-                                }
+                                onClick={() => setAiSkillSlugs((p) => p.filter((x) => x !== slug))}
                                 aria-label="Remove skill"
                               >
                                 ×
