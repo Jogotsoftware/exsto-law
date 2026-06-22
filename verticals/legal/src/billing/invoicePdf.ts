@@ -170,11 +170,7 @@ export async function renderInvoicePdf(
       View,
       { key: l.lineEntityId || `line-${i}`, style: s.tr },
       [
-        h(
-          Text,
-          { key: 'd', style: s.cDesc },
-          `${l.description || kindLabel(l.kind)}`,
-        ),
+        h(Text, { key: 'd', style: s.cDesc }, `${l.description || kindLabel(l.kind)}`),
         cols.matter ? h(Text, { key: 'm', style: s.cMatter }, l.matterNumber || '—') : null,
         cols.quantity ? h(Text, { key: 'q', style: s.cQty }, l.quantity ?? '') : null,
         cols.rate ? h(Text, { key: 'r', style: s.cRate }, money(l.rate, cur)) : null,
@@ -191,39 +187,52 @@ export async function renderInvoicePdf(
       { size: 'LETTER', style: s.page },
       // Header: firm (+ logo) on the left, INVOICE block on the right.
       h(View, { style: s.header }, [
-        h(View, { key: 'firm', style: s.firmBlock }, [
-          t.logoDataUrl ? h(Image, { key: 'logo', style: s.logo, src: t.logoDataUrl }) : null,
-          h(View, { key: 'fb' }, [
-            h(Text, { key: 'n', style: s.firmName }, t.firmName),
-            t.firmAddress ? h(Text, { key: 'a', style: s.firmMeta }, t.firmAddress) : null,
-            t.firmPhone ? h(Text, { key: 'p', style: s.firmMeta }, t.firmPhone) : null,
-          ].filter(Boolean)),
-        ].filter(Boolean)),
-        h(View, { key: 'inv' }, [
-          h(Text, { key: 't', style: s.invoiceTitle }, 'INVOICE'),
-          h(Text, { key: 'num', style: s.invoiceMeta }, invoice.invoiceNumber),
-          h(Text, { key: 'iss', style: s.invoiceMeta }, `Issued ${fmtDate(invoice.issuedDate)}`),
-          invoice.dueDate
-            ? h(Text, { key: 'due', style: s.invoiceMeta }, `Due ${fmtDate(invoice.dueDate)}`)
-            : null,
-          h(Text, { key: 'st', style: s.invoiceMeta }, `Status: ${invoice.status}`),
-        ].filter(Boolean)),
+        h(
+          View,
+          { key: 'firm', style: s.firmBlock },
+          [
+            t.logoDataUrl ? h(Image, { key: 'logo', style: s.logo, src: t.logoDataUrl }) : null,
+            h(
+              View,
+              { key: 'fb' },
+              [
+                h(Text, { key: 'n', style: s.firmName }, t.firmName),
+                t.firmAddress ? h(Text, { key: 'a', style: s.firmMeta }, t.firmAddress) : null,
+                t.firmPhone ? h(Text, { key: 'p', style: s.firmMeta }, t.firmPhone) : null,
+              ].filter(Boolean),
+            ),
+          ].filter(Boolean),
+        ),
+        h(
+          View,
+          { key: 'inv' },
+          [
+            h(Text, { key: 't', style: s.invoiceTitle }, 'INVOICE'),
+            h(Text, { key: 'num', style: s.invoiceMeta }, invoice.invoiceNumber),
+            h(Text, { key: 'iss', style: s.invoiceMeta }, `Issued ${fmtDate(invoice.issuedDate)}`),
+            invoice.dueDate
+              ? h(Text, { key: 'due', style: s.invoiceMeta }, `Due ${fmtDate(invoice.dueDate)}`)
+              : null,
+            h(Text, { key: 'st', style: s.invoiceMeta }, `Status: ${invoice.status}`),
+          ].filter(Boolean),
+        ),
       ]),
 
       h(View, { style: s.rule }),
 
       // Bill-to + optional header note.
-      h(View, { style: s.billTo }, [
-        h(Text, { key: 'l', style: s.label }, 'Bill to'),
-        h(Text, { key: 'c', style: s.strong }, invoice.clientName || '—'),
-        t.headerNote ? h(Text, { key: 'note', style: s.note }, t.headerNote) : null,
-      ].filter(Boolean)),
+      h(
+        View,
+        { style: s.billTo },
+        [
+          h(Text, { key: 'l', style: s.label }, 'Bill to'),
+          h(Text, { key: 'c', style: s.strong }, invoice.clientName || '—'),
+          t.headerNote ? h(Text, { key: 'note', style: s.note }, t.headerNote) : null,
+        ].filter(Boolean),
+      ),
 
       // Line items.
-      h(View, { style: s.table }, [
-        h(View, { key: 'th', style: s.th }, headerCells),
-        ...rows,
-      ]),
+      h(View, { style: s.table }, [h(View, { key: 'th', style: s.th }, headerCells), ...rows]),
 
       // Totals.
       h(
