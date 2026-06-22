@@ -62,6 +62,47 @@ describe('template body round-trip', () => {
     expect(markdownToHtml('')).toBe('')
   })
 
+  // Rich per-run typography (font / size / alignment / underline / signature line)
+  // can't be expressed in markdown, so the bridge KEEPS the editor's allowlisted
+  // inline HTML as raw HTML in the body. These pin that it survives the save.
+  it('keeps per-run font-family and font-size spans', () => {
+    const md = htmlToMarkdown(
+      '<p>A <span style="font-family: Georgia, serif">styled</span> ' +
+        '<span style="font-size: 14pt">clause</span>.</p>',
+    )
+    expect(md).toContain('font-family: Georgia, serif')
+    expect(md).toContain('font-size: 14pt')
+    expect(md).toContain('styled')
+    expect(md).toContain('clause')
+  })
+
+  it('keeps paragraph / heading alignment', () => {
+    const md = htmlToMarkdown(
+      '<h1 style="text-align: center">Title</h1><p style="text-align: right">Right.</p>',
+    )
+    expect(md).toContain('text-align: center')
+    expect(md).toContain('text-align: right')
+  })
+
+  it('keeps underline', () => {
+    const md = htmlToMarkdown('<p>See <u>Exhibit A</u>.</p>')
+    expect(md).toContain('<u>Exhibit A</u>')
+  })
+
+  it('keeps the signature-line block', () => {
+    const md = htmlToMarkdown(
+      '<div class="sig-line"><span class="sig-line-label">Signature</span></div>',
+    )
+    expect(md).toContain('class="sig-line"')
+    expect(md).toContain('Signature')
+  })
+
+  it('round-trips a styled span back into HTML for the editor', () => {
+    const html = markdownToHtml(htmlToMarkdown('<p>X <span style="font-size: 16pt">big</span>.</p>'))
+    expect(html).toContain('font-size: 16pt')
+    expect(html).toContain('big')
+  })
+
   // The DOCX/HTML import route runs mammoth.convertToHtml then htmlToMarkdown, so
   // an imported Word document keeps its structure instead of flattening to text.
   it('converts mammoth-style structured HTML to markdown (import path)', () => {

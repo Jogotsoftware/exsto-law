@@ -1,6 +1,11 @@
 // Tiny markdown renderer (subset: headings, bold, italic, code, lists, hr,
 // paragraphs) — good enough for the legal drafts the agent produces. Escapes HTML
-// before applying inline syntax so output is safe to inject.
+// before applying inline syntax so output is safe to inject. This is kept for the
+// assistant CHAT (which must not render rich document styling). The finished
+// DOCUMENT paths (preview/share/review/e-sign/PDF/Word) use renderDocumentHtml,
+// which sanitizes an allowlisted styling subset instead of escaping it.
+
+import { renderDocumentHtml } from './documentHtml'
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -137,7 +142,7 @@ const PRINT_STYLES = `
 `
 
 export function downloadAsPdf(markdown: string, title: string): void {
-  const html = renderMarkdown(markdown)
+  const html = renderDocumentHtml(markdown)
   const w = window.open('', '_blank')
   if (!w) {
     alert('Pop-up blocked. Allow pop-ups for this site to export PDF.')
@@ -150,7 +155,7 @@ export function downloadAsPdf(markdown: string, title: string): void {
 }
 
 export function downloadAsWord(markdown: string, filename: string): void {
-  const html = renderMarkdown(markdown)
+  const html = renderDocumentHtml(markdown)
   const fullHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head><meta charset="utf-8"><title>${escapeHtml(filename)}</title><style>${PRINT_STYLES}</style></head>
 <body>${html}</body>
