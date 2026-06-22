@@ -4486,14 +4486,6 @@ button.danger.outline:hover:not(:disabled) {
   flex-direction: column;
   gap: 0.55rem;
 }
-.feedback-intro {
-  font-size: 0.85rem;
-  color: var(--muted);
-  background: var(--border-soft);
-  padding: 0.6rem 0.75rem;
-  border-radius: var(--radius-md);
-}
-
 .feedback-bubble {
   position: relative;
   max-width: 85%;

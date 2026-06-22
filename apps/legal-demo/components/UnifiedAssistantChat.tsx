@@ -939,7 +939,14 @@ export function UnifiedAssistantChat({
         aria-atomic="false"
         aria-label="Conversation"
       >
-        {intro && turns.length === 0 && !streaming && <div className="feedback-intro">{intro}</div>}
+        {/* Greeting: render as the assistant's first message bubble (not a centered
+            header), so an empty chat already reads like the assistant opened it.
+            Ephemeral — it isn't a stored turn; it clears once the attorney replies. */}
+        {intro && turns.length === 0 && !streaming && (
+          <div className="feedback-bubble feedback-bubble-assistant">
+            <div className="assistant-md">{intro}</div>
+          </div>
+        )}
         {turns.map((t, i) => (
           <div key={i} className={`feedback-bubble feedback-bubble-${t.role}`}>
             {/* Assistant replies are markdown — render so **bold**, lists and
