@@ -3426,6 +3426,43 @@ main.book-main {
   white-space: nowrap;
 }
 
+/* Per-event edit affordance — a small pencil that opens the actions menu
+   (reschedule / cancel / email / categorize / view). Tucked into the block's
+   top-right corner; appears on hover or keyboard focus so it stays uncluttered. */
+.wcal-block-wrap {
+  position: relative;
+}
+.wcal-block-edit {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.wcal-block-wrap:hover .wcal-block-edit,
+.wcal-block-wrap:focus-within .wcal-block-edit {
+  opacity: 1;
+}
+.wcal-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+.wcal-edit-btn:hover,
+.wcal-edit-btn.active {
+  color: var(--fg);
+  border-color: var(--muted);
+}
+
 /* Category color coding — used by both blocks (.wcal-block) and legend swatches
    (.wcal-swatch). new_consultation = attorney blue, new_matter = ok green,
    existing_project = muted grey. */

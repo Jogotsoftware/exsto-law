@@ -740,6 +740,8 @@ export default function SettingsPage() {
         )}
       </CollapsibleSection>
 
+      <CalendarCategoriesSection />
+
       {connectingProvider && (
         <ConnectKeyModal
           provider={connectingProvider}
@@ -988,5 +990,147 @@ function ConnectKeyModal({
         </div>
       </div>
     </div>
+  )
+}
+
+// ── Calendar categories (the color palette for consultation call-types) ───────
+// Self-contained: fetches + saves the firm's `firm.calendar_categories` palette
+// (config-as-data, versioned + audited via legal.calendar.categories.set). The
+// server normalizes — derives stable keys, dedupes, validates hex — so the editor
+// stays a thin UI. Existing rows keep their key, so already-tagged consultations
+// stay linked when a label is renamed.
+interface EditCategory {
+  key: string
+  label: string
+  color: string
+}
+function slugifyKey(label: string): string {
+  return label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+function CalendarCategoriesSection() {
+  const [cats, setCats] = useState<EditCategory[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ categories: EditCategory[] }>({
+        toolName: 'legal.calendar.categories.get',
+      })
+      setCats(r.categories)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  function update(i: number, patch: Partial<EditCategory>) {
+    setCats((c) => (c ? c.map((cat, idx) => (idx === i ? { ...cat, ...patch } : cat)) : c))
+    setSaved(false)
+  }
+  function remove(i: number) {
+    setCats((c) => (c ? c.filter((_, idx) => idx !== i) : c))
+    setSaved(false)
+  }
+  function add() {
+    setCats((c) => [...(c ?? []), { key: '', label: '', color: '#2563eb' }])
+    setSaved(false)
+  }
+
+  async function save() {
+    if (!cats) return
+    // Derive a stable key for new rows; existing rows keep theirs (server dedupes).
+    const prepared = cats
+      .map((c) => ({ ...c, label: c.label.trim(), key: c.key || slugifyKey(c.label) }))
+      .filter((c) => c.label && c.key)
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await callAttorneyMcp<{ categories: EditCategory[] }>({
+        toolName: 'legal.calendar.categories.set',
+        input: { categories: prepared },
+      })
+      setCats(r.categories)
+      setSaved(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <CollapsibleSection title="Calendar categories">
+      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+        Color-code consultations by call type. Tag any event with one of these from its edit menu on
+        the calendar.
+      </p>
+      {saved && <div className="alert alert-success">Saved.</div>}
+      {error && <div className="alert alert-error">{error}</div>}
+      {!cats ? (
+        <div className="loading-block">
+          <span className="spinner" /> Loading…
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {cats.length === 0 && (
+              <p className="text-muted text-sm" style={{ margin: 0 }}>
+                No categories yet. Add one below.
+              </p>
+            )}
+            {cats.map((cat, i) => (
+              <div
+                key={i}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
+              >
+                <input
+                  type="color"
+                  value={cat.color}
+                  onChange={(e) => update(i, { color: e.target.value })}
+                  aria-label="Color"
+                  style={{
+                    width: '2.4rem',
+                    height: '2.2rem',
+                    padding: 0,
+                    border: 'none',
+                    background: 'none',
+                    cursor: 'pointer',
+                  }}
+                />
+                <input
+                  type="text"
+                  value={cat.label}
+                  placeholder="e.g. Court appearance"
+                  onChange={(e) => update(i, { label: e.target.value })}
+                  style={{ flex: 1, minWidth: '12rem' }}
+                />
+                <button type="button" onClick={() => remove(i)} aria-label="Remove category">
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+          <div
+            className="firm-details-actions"
+            style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem' }}
+          >
+            <button type="button" onClick={add}>
+              + Add category
+            </button>
+            <button className="primary" onClick={save} disabled={busy}>
+              {busy ? 'Saving…' : 'Save categories'}
+            </button>
+          </div>
+        </>
+      )}
+    </CollapsibleSection>
   )
 }

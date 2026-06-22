@@ -60,7 +60,11 @@ export interface UpcomingBooking {
   scheduledEnd: string | null
   status: string
   bookedAt: string
+  // The DERIVED bucket (deterministic fallback color/grouping).
   category: BookingCategory
+  // The attorney-CHOSEN palette key (consultation_category attribute), if set —
+  // takes precedence over `category` for color-coding. Null when never categorized.
+  categoryKey: string | null
 }
 
 // Matters scheduled in the future (from matter.metadata.scheduled_at).
@@ -79,6 +83,7 @@ export async function listUpcomingBookings(
       status: string | null
       booked_at: Date
       has_draft: boolean
+      category_key: string | null
     }>(
       `WITH attrs AS (
          SELECT DISTINCT ON (a.entity_id, akd.kind_name)
@@ -101,6 +106,7 @@ export async function listUpcomingBookings(
          (e.metadata->>'scheduled_at') AS scheduled_at,
          (e.metadata->>'scheduled_end') AS scheduled_end,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'consultation_category') AS category_key,
          e.created_at AS booked_at,
          EXISTS (
            SELECT 1 FROM relationship rd
@@ -130,6 +136,7 @@ export async function listUpcomingBookings(
         status,
         bookedAt,
         category: classifyBooking({ status, hasDraft: r.has_draft === true, bookedAt }),
+        categoryKey: r.category_key ?? null,
       }
     })
   })
@@ -155,6 +162,7 @@ export async function listMatterConsultations(
       status: string | null
       booked_at: Date
       has_draft: boolean
+      category_key: string | null
     }>(
       `WITH attrs AS (
          SELECT DISTINCT ON (a.entity_id, akd.kind_name)
@@ -177,6 +185,7 @@ export async function listMatterConsultations(
          (e.metadata->>'scheduled_at') AS scheduled_at,
          (e.metadata->>'scheduled_end') AS scheduled_end,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'consultation_category') AS category_key,
          e.created_at AS booked_at,
          EXISTS (
            SELECT 1 FROM relationship rd
@@ -206,6 +215,7 @@ export async function listMatterConsultations(
         status,
         bookedAt,
         category: classifyBooking({ status, hasDraft: r.has_draft === true, bookedAt }),
+        categoryKey: r.category_key ?? null,
       }
     })
   })
