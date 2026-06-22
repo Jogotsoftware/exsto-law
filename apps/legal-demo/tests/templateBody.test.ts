@@ -98,7 +98,9 @@ describe('template body round-trip', () => {
   })
 
   it('round-trips a styled span back into HTML for the editor', () => {
-    const html = markdownToHtml(htmlToMarkdown('<p>X <span style="font-size: 16pt">big</span>.</p>'))
+    const html = markdownToHtml(
+      htmlToMarkdown('<p>X <span style="font-size: 16pt">big</span>.</p>'),
+    )
     expect(html).toContain('font-size: 16pt')
     expect(html).toContain('big')
   })

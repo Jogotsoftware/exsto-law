@@ -622,7 +622,8 @@ export default function TemplatesPage() {
                 {aiBusy && (
                   <div className="tpl-drafting" role="status" aria-live="polite">
                     <div className="tpl-drafting-label">
-                      <SparklesIcon size={14} /> Drafting your {draft.category === 'email' ? 'email' : 'document'}…
+                      <SparklesIcon size={14} /> Drafting your{' '}
+                      {draft.category === 'email' ? 'email' : 'document'}…
                     </div>
                     <div className="tpl-drafting-lines" aria-hidden="true">
                       <span style={{ width: '92%' }} />

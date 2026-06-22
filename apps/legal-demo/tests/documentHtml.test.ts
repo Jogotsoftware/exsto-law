@@ -31,7 +31,7 @@ describe('renderDocumentHtml — allowlisted styling survives', () => {
       'A <span style="font-family:\'Times New Roman\', serif; font-size:14pt">clause</span> here.',
     )
     expect(html).toContain('font-family')
-    expect(html).toContain("Times New Roman")
+    expect(html).toContain('Times New Roman')
     expect(html).toContain('font-size:14pt')
     expect(html).toContain('clause')
   })
@@ -42,7 +42,9 @@ describe('renderDocumentHtml — allowlisted styling survives', () => {
   })
 
   it('keeps a signature-line block', () => {
-    const html = renderDocumentHtml('<div class="sig-line"><span class="sig-line-label">Signature</span></div>')
+    const html = renderDocumentHtml(
+      '<div class="sig-line"><span class="sig-line-label">Signature</span></div>',
+    )
     expect(html).toContain('class="sig-line"')
     expect(html).toContain('Signature')
   })
@@ -88,9 +90,7 @@ describe('renderDocumentHtml — dangerous content is stripped', () => {
   })
 
   it('rejects url()/expression() injection in font-family', () => {
-    const html = renderDocumentHtml(
-      '<span style="font-family:url(javascript:alert(1))">x</span>',
-    )
+    const html = renderDocumentHtml('<span style="font-family:url(javascript:alert(1))">x</span>')
     expect(html).not.toContain('url(')
     expect(html).not.toContain('javascript')
   })
