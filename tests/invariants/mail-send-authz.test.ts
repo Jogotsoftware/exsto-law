@@ -16,11 +16,14 @@ import pg from 'pg'
 import { closeDbPool } from '@exsto/shared'
 import {
   createMatter,
+  submitBooking,
   canSendOnMatter,
   assertCanSendOnMatter,
   getMatterAccess,
   setMatterOwner,
   grantMatterAccess,
+  enqueueClientEmail,
+  postAttorneyMessage,
 } from '@exsto/legal'
 
 const url = process.env.SUBSTRATE_TEST_DATABASE_URL ?? process.env.DATABASE_URL
@@ -29,6 +32,7 @@ const run = describe.skipIf(!url)
 
 const TENANT = '00000000-0000-0000-0000-000000000001'
 const OWNER_ACTOR = '00000000-0000-0000-0001-000000000002' // seeded attorney
+const PUBLIC_INTAKE_ACTOR = '00000000-0000-0000-0001-000000000005'
 const ownerCtx = { tenantId: TENANT, actorId: OWNER_ACTOR }
 
 run('mail send authorization — matter ownership (0087)', { timeout: 90_000 }, () => {
@@ -39,6 +43,10 @@ run('mail send authorization — matter ownership (0087)', { timeout: 90_000 }, 
   const otherCtx = { tenantId: TENANT, actorId: otherActor }
   const adminCtx = { tenantId: TENANT, actorId: adminActor }
   let matterId: string
+  // A BOOKING matter (client_of + email link — the shape the mail send path reads
+  // via clientEmailIndex), then owner-assigned so the send guard bites end-to-end.
+  let bookingMatterId: string
+  let bookingClientEmail: string
 
   // Create a human actor (active) bound to one ladder scope, committed via the
   // owner connection (mirrors the rbac fixtures). Needs an action_id FK.
@@ -78,6 +86,28 @@ run('mail send authorization — matter ownership (0087)', { timeout: 90_000 }, 
     matterId = (created.effects[0] as { matterEntityId: string }).matterEntityId
     await makeActor(otherActor, 'firm.attorney')
     await makeActor(adminActor, 'firm.admin')
+
+    // Booking matter: public intake → client_of + email link (visible to the mail
+    // send path), unowned. Then assign OWNER_ACTOR so the send guard has teeth.
+    bookingClientEmail = `prb-deny-${randomUUID().slice(0, 8)}@example.test`
+    const start = new Date(
+      Date.now() + (90 + Math.floor(Math.random() * 100000)) * 24 * 3600 * 1000,
+    )
+    start.setUTCHours(15, 0, 0, 0)
+    const booking = await submitBooking(
+      { tenantId: TENANT, actorId: PUBLIC_INTAKE_ACTOR },
+      {
+        clientFullName: 'PR-B Deny Client',
+        clientEmail: bookingClientEmail,
+        attributionSource: 'prb-test',
+        serviceKey: 'nc_llc_single_member',
+        intakeResponses: { company_name: 'PR-B Deny LLC', company_purpose: 'deny test' },
+        scheduledAtIso: start.toISOString(),
+        scheduledEndIso: new Date(start.getTime() + 1800e3).toISOString(),
+      },
+    )
+    bookingMatterId = (booking.effects[0] as { matterEntityId: string }).matterEntityId
+    await setMatterOwner(ownerCtx, { matterEntityId: bookingMatterId, ownerActorId: OWNER_ACTOR })
   })
 
   afterAll(async () => {
@@ -143,5 +173,35 @@ run('mail send authorization — matter ownership (0087)', { timeout: 90_000 }, 
     )
     expect(await getMatterAccess(otherCtx, bareMatter)).toMatchObject({ ownerActorId: null })
     expect(await canSendOnMatter(otherCtx, bareMatter)).toBe(true)
+  })
+
+  // End-to-end (finding #1): the guard must fire INSIDE the real send functions —
+  // not just the helper — and BEFORE the outbound adapter. If the guard were
+  // removed, these calls would instead fail at the Gmail/notification adapter with
+  // a DIFFERENT message, so matching /not authorized/i proves the guard fired.
+
+  it('enqueueClientEmail rejects an unauthorized attorney before the Gmail send', async () => {
+    await expect(
+      enqueueClientEmail(otherCtx, { to: bookingClientEmail, subject: 'PR-B', body: 'hi' }),
+    ).rejects.toThrow(/not authorized/i)
+  })
+
+  it('postAttorneyMessage rejects an unauthorized attorney before notifying the client', async () => {
+    await expect(
+      postAttorneyMessage(otherCtx, { matterEntityId: bookingMatterId, body: 'hi' }),
+    ).rejects.toThrow(/not authorized/i)
+  })
+
+  it('once granted, enqueueClientEmail gets PAST authz (fails later, not on authz)', async () => {
+    await grantMatterAccess(ownerCtx, { matterEntityId: bookingMatterId, actorIds: [otherActor] })
+    let err: Error | null = null
+    try {
+      await enqueueClientEmail(otherCtx, { to: bookingClientEmail, subject: 'PR-B', body: 'hi' })
+    } catch (e) {
+      err = e as Error
+    }
+    // It got past authorization: either it sent, or it failed at the Gmail adapter
+    // (no test connection) — but NOT with an authorization error.
+    expect(err?.message ?? '').not.toMatch(/not authorized/i)
   })
 })

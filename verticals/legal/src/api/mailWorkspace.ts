@@ -253,15 +253,15 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
   if (!clientParticipant) {
     throw new Error('Refusing to reply: thread has no known client participant.')
   }
-  // Send authz (0087): authorize the sender on this thread's matters BEFORE
-  // sending, and attribute the reply to a matter they may send on. An attorney
-  // may send only on matters they own, are granted, or as a firm admin.
-  const matters = dedupeMatters(
-    detail.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? []),
-  )
+  // Send authz (0087): the reply goes to clientParticipant, so authorize the
+  // sender against THAT recipient's matters specifically — NOT the union of every
+  // participant's matters (a thread can mix clients from different matters; the
+  // sender must be authorized on a matter the actual recipient belongs to). An
+  // attorney may send only on matters they own, are granted, or as a firm admin.
+  const recipientMatters = index.get(clientParticipant.toLowerCase()) ?? []
   const authorized = await authorizedSendMatters(
     ctx,
-    matters.map((m) => m.matterEntityId),
+    recipientMatters.map((m) => m.matterEntityId),
   )
   if (authorized.length === 0) {
     throw new Error(
@@ -363,8 +363,14 @@ export async function enqueueClientEmail(
       'You are not authorized to send to this contact on any of their matters. Ask the matter owner or a firm admin for access.',
     )
   }
-  const matterEntityId =
-    (input.matterId && authorized.includes(input.matterId) && input.matterId) || authorized[0]!
+  // An explicit matter must be one the actor may send on — never silently re-route
+  // an unauthorized matterId to a different (authorized) matter (provenance/intent).
+  if (input.matterId && !authorized.includes(input.matterId)) {
+    throw new Error(
+      'You are not authorized to send on the specified matter for this contact. Ask the matter owner or a firm admin for access.',
+    )
+  }
+  const matterEntityId = input.matterId || authorized[0]!
 
   // Sign centrally: every Contract B send carries the firm signature (fix #10).
   const signed = withSignature(

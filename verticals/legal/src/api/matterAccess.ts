@@ -41,7 +41,7 @@ export async function getMatterAccess(
         WHERE a.tenant_id = $1 AND a.entity_id = $2
           AND akd.kind_name IN ('matter_owner', 'matter_access_actor_ids')
           AND (a.valid_to IS NULL OR a.valid_to > now())
-        ORDER BY akd.kind_name, a.valid_from DESC`,
+        ORDER BY akd.kind_name, a.valid_from DESC, a.recorded_at DESC, a.id DESC`,
       [ctx.tenantId, matterEntityId],
     )
     let ownerActorId: string | null = null
