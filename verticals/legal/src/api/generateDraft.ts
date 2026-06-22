@@ -11,6 +11,7 @@ import { loadDraftingPrompt } from '../templates/loader.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
 import { renderTemplate, buildMergeData } from './templateMerge.js'
+import { loadForcedSkills, buildActiveSkillsText } from './skillContext.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent).
 const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
@@ -27,6 +28,13 @@ export interface GenerateDraftInput {
   // worker resolves this from the service config (Contract G); a caller (the
   // "merge from template" UI action, or a receipt run) may force it.
   generationMode?: GenerationMode
+  // Attorney's free-text instructions for THIS (re)draft — e.g. the revision notes
+  // typed on the review screen. Appended to the drafting prompt so a regenerate
+  // actually acts on what the attorney asked to change. AI path only.
+  guidance?: string
+  // Legal-skill slugs (claude-for-legal playbooks) to force-apply to this draft,
+  // selected by the attorney. Their bodies are injected into the drafting prompt.
+  skillSlugs?: string[]
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -54,6 +62,8 @@ export async function requestDraft(
       matter_entity_id: input.matterEntityId,
       document_kind: input.documentKind,
       requested_by: ctx.actorId,
+      guidance: input.guidance?.trim() || undefined,
+      skill_slugs: input.skillSlugs?.length ? input.skillSlugs : undefined,
     },
   })
 
@@ -212,6 +222,12 @@ export async function runDraftGeneration(
   const promptSource = resolved?.promptText ? resolved.source : 'repo'
   const promptVersion = resolved?.promptText ? resolved.promptVersion : null
 
+  // Attorney-selected legal skills (playbooks) force-applied to this draft, and
+  // the attorney's free-text instructions (revision notes from the review screen).
+  // Both shape the redraft; either may be empty on a first draft.
+  const forcedSkills = await loadForcedSkills(agentCtx, input.skillSlugs)
+  const activeSkillsText = buildActiveSkillsText(forcedSkills)
+
   const prompt = assembleDraftingPrompt({
     basePrompt,
     template,
@@ -222,6 +238,8 @@ export async function runDraftGeneration(
       m.transcriptText ??
       '(No consultation transcript yet — draft from the intake questionnaire answers above.)',
     documentKind: input.documentKind,
+    guidance: input.guidance,
+    activeSkillsText,
   })
 
   const result = await callClaudeDrafter(agentCtx.tenantId, { prompt })
@@ -288,6 +306,12 @@ export interface AssembleArgs {
   questionnaireResponses: Record<string, unknown>
   transcriptText: string
   documentKind: string
+  // Selected-skill bodies (buildActiveSkillsText) injected so a picked playbook is
+  // guaranteed to apply. Empty string when none selected.
+  activeSkillsText?: string
+  // Attorney's free-text instructions for this redraft (revision notes). Appended
+  // LAST so the model treats it as the highest-priority guidance for this pass.
+  guidance?: string
 }
 
 // Fills the FIXED three-slot contract from the (config-or-repo) base prompt.
@@ -296,7 +320,7 @@ export interface AssembleArgs {
 export function assembleDraftingPrompt(args: AssembleArgs): string {
   // basePrompt is resolved by the caller (config-first, repo fallback). The slot
   // contract is FIXED: these are the same three slots the prompt editor validates.
-  return args.basePrompt
+  let prompt = args.basePrompt
     .replace(
       '{{questionnaire_responses_json}}',
       JSON.stringify(args.questionnaireResponses, null, 2),
@@ -307,6 +331,18 @@ export function assembleDraftingPrompt(args: AssembleArgs): string {
       /operating agreement/gi,
       args.documentKind === 'engagement_letter' ? 'engagement letter' : 'operating agreement',
     )
+
+  // Selected legal playbooks (force-applied), then the attorney's own revision
+  // instructions LAST — so they carry the most weight for this pass.
+  if (args.activeSkillsText?.trim()) {
+    prompt += `\n\n${args.activeSkillsText.trim()}`
+  }
+  if (args.guidance?.trim()) {
+    prompt +=
+      `\n\n--- Attorney instructions for this draft (apply these; they take precedence over the base prompt where they conflict) ---\n` +
+      args.guidance.trim()
+  }
+  return prompt
 }
 
 interface PersistTraceArgs {

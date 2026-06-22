@@ -7699,6 +7699,48 @@ input[type='number'] {
   color: #374151;
 }
 
+/* Regenerate-draft modal: legal-skills picker (checklist of forced skills the
+   redraft should apply). Reuses the shared .modal-* shell. */
+.regen-skills {
+  margin-top: var(--space-3);
+}
+.regen-skills-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.regen-skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem;
+  background: var(--surface);
+}
+.regen-skill {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 400;
+}
+.regen-skill:hover {
+  background: var(--surface-2, #f6f7f9);
+}
+.regen-skill input {
+  margin-top: 0.2rem;
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    Questionnaire editor (per-service builder) — card-based redesign.
    Each section is a surface card; each question is a nested sub-card. Replaces
