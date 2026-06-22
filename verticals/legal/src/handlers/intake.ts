@@ -8,6 +8,7 @@ import {
   insertRelationship,
   lookupKindId,
 } from './common.js'
+import { resolveDefaultMatterOwner } from '../api/matterAccess.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // intake.submit — steps 1–3 of the intake flow (REQ-INTAKE-01..04, 07).
@@ -272,13 +273,16 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
     { kind: 'matter_status', value: 'intake_submitted' },
     { kind: 'governing_law', value: 'North Carolina' },
   ]
-  // NB: no matter_owner is stamped here. This is the PUBLIC booking/intake path —
-  // ctx.actorId is the public intake actor, not an attorney — so the matter starts
-  // unowned (firm-shared: any attorney may send) until an attorney is assigned via
-  // legal.matter.set_owner. There is no usable create-time owner stamp: matter.open
-  // is the only real create path and is public; legal.matter.create is a phantom
-  // kind (0078). Wiring an attorney-facing assignment step is the PR B follow-up
-  // that activates enforcement (until then it is dormant by design).
+  // Send-authz owner (0088): this is the PUBLIC booking/intake path — ctx.actorId is
+  // the intake actor, not an attorney — so auto-assign the firm's PRACTICING
+  // attorney (resolveDefaultMatterOwner) as owner. While the firm has one attorney
+  // this is correct; multi-attorney routing rules supersede it later. Reassignable
+  // via legal.matter.set_owner. If the firm has no attorney yet, the matter stays
+  // unowned (firm-shared) and enforcement is dormant for it.
+  const defaultOwner = await resolveDefaultMatterOwner(ctx.tenantId)
+  if (defaultOwner) {
+    matterAttrs.push({ kind: 'matter_owner', value: defaultOwner })
+  }
   if (p.attribution_source) {
     matterAttrs.push({ kind: 'attribution_source', value: p.attribution_source })
   }

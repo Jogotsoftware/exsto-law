@@ -28,6 +28,7 @@ import {
   grantMatterAccess,
   enqueueClientEmail,
   postAttorneyMessage,
+  resolveDefaultMatterOwner,
 } from '@exsto/legal'
 
 const url = process.env.SUBSTRATE_TEST_DATABASE_URL ?? process.env.DATABASE_URL
@@ -165,6 +166,22 @@ run('mail send authorization — matter ownership (0088)', { timeout: 90_000 }, 
   it('set_owner assigns the matter owner', async () => {
     const access = await getMatterAccess(ownerCtx, matterId)
     expect(access.ownerActorId).toBe(OWNER_ACTOR)
+  })
+
+  it('resolveDefaultMatterOwner prefers a practicing attorney (firm.attorney)', async () => {
+    // otherActor holds firm.attorney; the resolver must prefer that role over any
+    // firm.admin / super_admin (management accounts) for matter ownership.
+    const owner = await resolveDefaultMatterOwner(TENANT)
+    expect(owner).toBeTruthy()
+    const scopes = await db.query<{ scope_name: string }>(
+      `SELECT psd.scope_name
+         FROM actor_scope_assignment asa
+         JOIN permission_scope_definition psd ON psd.id = asa.permission_scope_definition_id
+        WHERE asa.actor_id = $1 AND psd.tenant_id = $2
+          AND (asa.valid_to IS NULL OR asa.valid_to > now())`,
+      [owner, TENANT],
+    )
+    expect(scopes.rows.map((r) => r.scope_name)).toContain('firm.attorney')
   })
 
   it('owner may send; a non-owner non-admin attorney may not', async () => {
