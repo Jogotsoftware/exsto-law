@@ -5,7 +5,11 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
 import { Tabs, type TabSpec } from '@/components/Tabs'
-import { WeeklyCalendar, type CalendarItem } from '@/components/WeeklyCalendar'
+import {
+  WeeklyCalendar,
+  type CalendarItem,
+  type CalendarCategory,
+} from '@/components/WeeklyCalendar'
 import { ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
 
 // Copies the public booking-page link to the clipboard. Replaces the old
@@ -108,6 +112,7 @@ function timeAgo(iso: string): string {
 
 export default function AttorneyHome() {
   const [upcoming, setUpcoming] = useState<CalendarItem[] | null>(null)
+  const [categories, setCategories] = useState<CalendarCategory[]>([])
   const [recent, setRecent] = useState<RecentBooking[] | null>(null)
   const [matters, setMatters] = useState<MatterSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -142,6 +147,13 @@ export default function AttorneyHome() {
       callAttorneyMcp<{ matters: MatterSummary[] }>({ toolName: 'legal.matter.list' }).then((m) =>
         setMatters(m.matters),
       ),
+      callAttorneyMcp<{ categories: CalendarCategory[] }>({
+        toolName: 'legal.calendar.categories.get',
+      })
+        .then((r) => setCategories(r.categories))
+        .catch(() => {
+          // Non-fatal: fall back to the built-in booking-category colors.
+        }),
     ]).catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [refreshUpcoming])
 
@@ -230,6 +242,8 @@ export default function AttorneyHome() {
             items={upcoming ?? []}
             loaded={upcoming !== null}
             lastRefreshedAt={lastRefreshedAt}
+            categories={categories}
+            onChanged={refreshUpcoming}
           />
         )}
       </section>

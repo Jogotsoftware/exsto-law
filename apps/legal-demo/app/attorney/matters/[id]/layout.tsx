@@ -93,6 +93,12 @@ export default function MatterLayout({
                 href: `/attorney/matters/${id}/billing?add=expense`,
                 title: 'Log an expense on this matter',
               },
+              {
+                label: 'Add fee',
+                icon: <DollarSignIcon size={16} />,
+                href: `/attorney/matters/${id}/billing?add=fee`,
+                title: 'Add a service or document fee to this matter',
+              },
             ]}
           />
         </div>

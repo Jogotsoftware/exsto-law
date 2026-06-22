@@ -55,6 +55,11 @@ function addMonths(d: Date, n: number): Date {
   x.setMonth(x.getMonth() + n)
   return x
 }
+// Format a Date for a <input type="datetime-local"> value (local, no seconds/TZ).
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 // The visible window for a view: what to fetch, which day cells to draw, and the
 // header label. day → one day; week/list → Mon–Sun; month → a 6-week grid that
@@ -232,6 +237,21 @@ export default function CalendarPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  // Click an empty slot on the hourly grid → open the creator prefilled to that
+  // hour (default 1h block). Needs Google connected + at least one matter to book.
+  function openCreateAt(day: Date, hour: number) {
+    if (source !== 'google' || matters.length === 0) return
+    const start = startOfDay(day)
+    start.setHours(hour, 0, 0, 0)
+    const end = new Date(start.getTime() + 60 * 60 * 1000)
+    setPanel({
+      kind: 'create',
+      matterEntityId: matters[0]?.matterEntityId,
+      start: toLocalInput(start),
+      end: toLocalInput(end),
+    })
   }
 
   // WP3.2 — assign an unlinked Google event to a matter (legal.meeting.assign).
@@ -551,8 +571,25 @@ export default function CalendarPage() {
               const nowTop = isToday
                 ? ((now.getTime() - startOfDay(now).getTime()) / 3600_000) * HOUR_PX
                 : null
+              const canCreate = source === 'google' && matters.length > 0
               return (
-                <div key={day.toISOString()} className="cal-grid-col">
+                <div
+                  key={day.toISOString()}
+                  className={`cal-grid-col${canCreate ? ' cal-grid-col-clickable' : ''}`}
+                  onClick={(ev) => {
+                    // Only empty grid space schedules — clicks on an event block
+                    // (Link/anchor/div.cal-event) are theirs to handle.
+                    if (!canCreate) return
+                    if ((ev.target as HTMLElement).closest('.cal-event')) return
+                    const rect = ev.currentTarget.getBoundingClientRect()
+                    const hour = Math.max(
+                      0,
+                      Math.min(23, Math.floor((ev.clientY - rect.top) / HOUR_PX)),
+                    )
+                    openCreateAt(day, hour)
+                  }}
+                  title={canCreate ? 'Click an empty slot to book a consultation' : undefined}
+                >
                   {hours.map((h) => (
                     <div key={h} className="cal-grid-hline" style={{ height: HOUR_PX }} />
                   ))}
@@ -625,7 +662,7 @@ export default function CalendarPage() {
               })
             }
           >
-            New consultation
+            + Event
           </button>
         </div>
       </section>

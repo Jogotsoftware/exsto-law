@@ -105,3 +105,31 @@ registerActionHandler('legal.firm.set_default_rate', async (ctx, client, payload
 
   return { firm_settings_id: firmSettingsId, rate }
 })
+
+// The firm's invoice template branding/content config (Phase 3). Stored as one
+// JSON attribute on the firm_settings singleton; a new write supersedes the prior
+// (append-only, effective-dated). The shape is validated/resolved on the read side
+// (api/invoiceTemplate.ts) so a partial save still renders.
+registerActionHandler('legal.firm.set_invoice_template', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as { config?: Record<string, unknown> }
+  const config = p.config && typeof p.config === 'object' ? p.config : {}
+
+  const firmSettingsId = await ensureFirmSettings(client, ctx.tenantId, actionId)
+  const akId = await lookupKindId(
+    client,
+    'attribute_kind_definition',
+    ctx.tenantId,
+    'invoice_template_config',
+  )
+  await insertAttribute(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    entityId: firmSettingsId,
+    attributeKindId: akId,
+    value: config,
+    confidence: 1.0,
+    sourceType: 'human',
+    sourceRef: ctx.actorId,
+  })
+  return { firm_settings_id: firmSettingsId }
+})

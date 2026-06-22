@@ -8,6 +8,9 @@
 // on @exsto/legal) — ADR 0024/0038: one core, generic adapter + per-vertical tools.
 // Importing a tool module runs its registerTool() side effect.
 import './tools/createMatter.js'
+import './tools/calendarCategoriesTools.js'
+import './tools/matterAccessTools.js'
+import './tools/documentUploadTools.js'
 import './tools/listMatters.js'
 import './tools/getMatter.js'
 import './tools/submitQuestionnaire.js'
@@ -24,6 +27,7 @@ import './tools/templatesTools.js'
 import './tools/standaloneTemplateTools.js'
 import './tools/questionnaireLibraryTools.js'
 import './tools/questionTemplateTools.js'
+import './tools/taskTools.js'
 import './tools/calendarTools.js'
 import './tools/googleTools.js'
 import './tools/contactTools.js'
@@ -59,6 +63,9 @@ import './tools/esignPortalTools.js'
 import './tools/billingTools.js'
 // S9 (tenancy & RBAC): firm user management — invite / assign role / deactivate.
 import './tools/userTools.js'
+// Skills: reusable legal playbooks (ported from claude-for-legal) the chatbot
+// loads on demand — stored as substrate data, managed via these tools.
+import './tools/skillTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

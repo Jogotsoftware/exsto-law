@@ -44,7 +44,7 @@ function centsToAmount(cents: number): string {
 
 interface IssueLineSpec {
   source_event_id: string
-  kind: 'time' | 'expense' | 'service_fee'
+  kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
   // Optional per-line overrides; rate defaults to the client's billable rate,
   // description defaults to the source entry's description.
   rate_override?: string | null
@@ -63,7 +63,7 @@ interface IssueInvoicePayload {
 // One resolved, priced line ready to write.
 interface PricedLine {
   sourceEventId: string
-  kind: 'time' | 'expense' | 'service_fee'
+  kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
   matterId: string
   description: string
   quantity: string // hours (time) or "1" (expense)
@@ -106,7 +106,7 @@ async function isAlreadyBilled(
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
       WHERE e.tenant_id = $1
-        AND ekd.kind_name IN ('time.billed', 'expense.billed', 'service_fee.billed')
+        AND ekd.kind_name IN ('time.billed', 'expense.billed', 'service_fee.billed', 'document_fee.billed')
         AND e.payload->>'source_event_id' = $2`,
     [tenantId, sourceEventId],
   )
@@ -187,22 +187,24 @@ async function priceLine(
     }
   }
 
-  if (spec.kind === 'service_fee') {
-    if (src.kindName !== 'service_fee.recorded')
-      throw new Error(`Entry ${spec.source_event_id} is not a service fee.`)
+  if (spec.kind === 'service_fee' || spec.kind === 'document_fee') {
+    const expectedKind =
+      spec.kind === 'document_fee' ? 'document_fee.recorded' : 'service_fee.recorded'
+    if (src.kindName !== expectedKind)
+      throw new Error(`Entry ${spec.source_event_id} is not a ${spec.kind.replace('_', ' ')}.`)
     const amount = String((src.payload as { amount?: string }).amount ?? '0')
     const amountCents = amountToCents(amount)
-    if (!(amountCents > 0)) throw new Error(`Service fee ${spec.source_event_id} has no amount.`)
+    if (!(amountCents > 0)) throw new Error(`Fee ${spec.source_event_id} has no amount.`)
     return {
       sourceEventId: spec.source_event_id,
-      kind: 'service_fee',
+      kind: spec.kind,
       matterId: src.matterId,
       description:
         (
           spec.description_override ??
           (src.payload as { description?: string }).description ??
           ''
-        ).trim() || 'Service fee',
+        ).trim() || (spec.kind === 'document_fee' ? 'Document fee' : 'Service fee'),
       quantity: '1',
       rate: centsToAmount(amountCents),
       amountCents,
@@ -244,6 +246,103 @@ async function nextInvoiceNumber(client: DbClient, tenantId: string): Promise<st
   return `INV-${new Date().getFullYear()}-${String(seq).padStart(4, '0')}`
 }
 
+// ── Task billing (migration 0084) ─────────────────────────────────────────────
+// A line whose source_event_id is `task:<id>` bills a matter TASK. The task is a
+// VIRTUAL unbilled line until now; we MATERIALISE it into a real ledger event
+// (time.logged for hours, service_fee.recorded for fixed) tagged with the task, so
+// the rest of invoice.issue prices + bills it exactly like any other entry. The
+// task is then LOCKED (task_invoice_id) so it can't be billed twice or un-billed
+// by moving it back. Append-only throughout — no event is ever mutated.
+const TASK_SOURCE_PREFIX = 'task:'
+
+interface MaterialisedTask {
+  taskId: string
+  spec: IssueLineSpec // rewritten to point at the freshly-created ledger event
+}
+
+async function materialiseTaskLine(
+  client: DbClient,
+  ctx: { tenantId: string; actorId: string },
+  actionId: string,
+  spec: IssueLineSpec,
+): Promise<MaterialisedTask> {
+  const taskId = spec.source_event_id.slice(TASK_SOURCE_PREFIX.length)
+  const res = await client.query<{
+    status: string | null
+    billing_mode: string | null
+    hours: string | null
+    fee_amount: string | null
+    title: string | null
+    invoice_id: string | null
+    matter_id: string | null
+  }>(
+    `WITH attrs AS (
+       SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
+       FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+       WHERE a.tenant_id = $1 AND a.entity_id = $2 ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC),
+     task_of AS (SELECT id FROM relationship_kind_definition
+                  WHERE tenant_id = $1 AND kind_name = 'task_of' AND status = 'active' LIMIT 1)
+     SELECT
+       (SELECT value #>> '{}' FROM attrs WHERE kind_name = 'task_status')       AS status,
+       (SELECT value #>> '{}' FROM attrs WHERE kind_name = 'task_billing_mode') AS billing_mode,
+       (SELECT value #>> '{}' FROM attrs WHERE kind_name = 'task_hours')        AS hours,
+       (SELECT value #>> '{}' FROM attrs WHERE kind_name = 'task_fee_amount')   AS fee_amount,
+       (SELECT value #>> '{}' FROM attrs WHERE kind_name = 'task_title')        AS title,
+       (SELECT value #>> '{}' FROM attrs WHERE kind_name = 'task_invoice_id')   AS invoice_id,
+       (SELECT r.target_entity_id FROM relationship r
+          WHERE r.tenant_id = $1 AND r.source_entity_id = $2
+            AND r.relationship_kind_id = (SELECT id FROM task_of)
+            AND (r.valid_to IS NULL OR r.valid_to > now()) LIMIT 1)             AS matter_id`,
+    [ctx.tenantId, taskId],
+  )
+  const t = res.rows[0]
+  if (!t || !t.matter_id) throw new Error(`Task ${taskId} not found.`)
+  const desc = (t.title ?? 'Task').trim() || 'Task'
+  if (t.invoice_id) throw new Error(`Task "${desc}" is already on an invoice.`)
+  if (t.status !== 'done') throw new Error(`Task "${desc}" must be done before it can be billed.`)
+
+  let eventKindName: 'time.logged' | 'service_fee.recorded'
+  let data: Record<string, unknown>
+  if (t.billing_mode === 'hours') {
+    const hours = Number(t.hours ?? '0')
+    if (!(hours > 0)) throw new Error(`Task "${desc}" has no hours to bill.`)
+    eventKindName = 'time.logged'
+    data = {
+      duration_minutes: Math.round(hours * 60),
+      description: desc,
+      worked_date: new Date().toISOString().slice(0, 10),
+    }
+  } else if (t.billing_mode === 'fixed') {
+    const fee = String(t.fee_amount ?? '0')
+    if (!(amountToCents(fee) > 0)) throw new Error(`Task "${desc}" has no fee to bill.`)
+    eventKindName = 'service_fee.recorded'
+    data = { amount: fee, description: desc }
+  } else {
+    throw new Error(`Task "${desc}" has no billable cost.`)
+  }
+
+  const eventId = await insertEvent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    eventKindName,
+    primaryEntityId: t.matter_id,
+    secondaryEntityIds: [taskId],
+    sourceType: 'human',
+    sourceRef: ctx.actorId,
+    data,
+  })
+
+  return {
+    taskId,
+    spec: {
+      source_event_id: eventId,
+      kind: eventKindName === 'time.logged' ? 'time' : 'service_fee',
+      rate_override: spec.rate_override,
+      description_override: spec.description_override,
+    },
+  }
+}
+
 registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as IssueInvoicePayload
   const clientEntityId = (p.client_entity_id ?? '').trim()
@@ -262,6 +361,21 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
     )
   }
 
+  // Materialise any `task:<id>` lines into real ledger events first, so the rest
+  // of the handler prices + bills them like any other entry. Collect the task ids
+  // to LOCK once the invoice exists.
+  const materialisedTasks: MaterialisedTask[] = []
+  const lines: IssueLineSpec[] = []
+  for (const spec of p.lines) {
+    if (spec.source_event_id.startsWith(TASK_SOURCE_PREFIX)) {
+      const mt = await materialiseTaskLine(client, ctx, actionId, spec)
+      materialisedTasks.push(mt)
+      lines.push(mt.spec)
+    } else {
+      lines.push(spec)
+    }
+  }
+
   // Contract K (Session 7): the per-line default rate is the client's explicit
   // client_billable_rate, falling back to the firm default when the client has
   // none. A per-line rate_override still wins over both (priceLine).
@@ -274,8 +388,9 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
   const defaultRate = clientRate ?? (await readFirmDefaultRate(client, ctx.tenantId))
 
   // Resolve + price every line first (also validates each source is unbilled).
+  // `lines` = the event lines plus the now-materialised task lines.
   const priced: PricedLine[] = []
-  for (const spec of p.lines) {
+  for (const spec of lines) {
     priced.push(await priceLine(client, ctx.tenantId, spec, defaultRate))
   }
   const totalCents = priced.reduce((sum, l) => sum + l.amountCents, 0)
@@ -331,6 +446,20 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
     targetEntityId: clientEntityId,
     relationshipKindId: invoiceOfId,
   })
+
+  // LOCK each billed task to this invoice (task_invoice_id) — it stops showing as
+  // unbilled and can no longer be billed again or un-billed by moving it back. The
+  // materialised ledger event it produced is billed below like any other line.
+  for (const mt of materialisedTasks) {
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: mt.taskId,
+      kind: 'task_invoice_id',
+      value: invoiceId,
+    })
+  }
 
   // ── Lines + billed events ─────────────────────────────────────────────────────
   const lineOfId = await lookupKindId(
@@ -388,7 +517,9 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
           ? 'time.billed'
           : l.kind === 'service_fee'
             ? 'service_fee.billed'
-            : 'expense.billed',
+            : l.kind === 'document_fee'
+              ? 'document_fee.billed'
+              : 'expense.billed',
       primaryEntityId: l.matterId,
       secondaryEntityIds: [invoiceId, lineId],
       sourceType: 'human',

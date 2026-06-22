@@ -272,6 +272,13 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
     { kind: 'matter_status', value: 'intake_submitted' },
     { kind: 'governing_law', value: 'North Carolina' },
   ]
+  // NB: no matter_owner is stamped here. This is the PUBLIC booking/intake path —
+  // ctx.actorId is the public intake actor, not an attorney — so the matter starts
+  // unowned (firm-shared: any attorney may send) until an attorney is assigned via
+  // legal.matter.set_owner. There is no usable create-time owner stamp: matter.open
+  // is the only real create path and is public; legal.matter.create is a phantom
+  // kind (0078). Wiring an attorney-facing assignment step is the PR B follow-up
+  // that activates enforcement (until then it is dormant by design).
   if (p.attribution_source) {
     matterAttrs.push({ kind: 'attribution_source', value: p.attribution_source })
   }

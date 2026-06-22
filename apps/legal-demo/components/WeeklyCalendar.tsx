@@ -9,9 +9,19 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon } from '@/components/icons'
+import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon, EditIcon } from '@/components/icons'
+import { ActionsMenu } from '@/components/ActionsMenu'
+import { Modal } from '@/components/Modal'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { launchCompose } from '@/lib/contractD'
 
 export type BookingCategory = 'new_consultation' | 'new_matter' | 'existing_project'
+
+export interface CalendarCategory {
+  key: string
+  label: string
+  color: string
+}
 
 export interface CalendarItem {
   id: string
@@ -23,7 +33,24 @@ export interface CalendarItem {
   matterEntityId: string | null
   serviceKey: string | null
   category: BookingCategory | null
+  // Attorney-chosen palette key (consultation_category); colors the block.
+  categoryKey: string | null
   htmlLink: string | null
+}
+
+type ActiveModal = { type: 'reschedule' | 'cancel' | 'categorize'; item: CalendarItem } | null
+
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (!Number.isFinite(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function localInputToIso(v: string): string | null {
+  if (!v) return null
+  const d = new Date(v)
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null
 }
 
 type View = 'week' | 'day' | 'month'
@@ -79,13 +106,47 @@ interface WeeklyCalendarProps {
   loaded: boolean
   /** ISO of the most recent successful refresh, for the "live" indicator. */
   lastRefreshedAt: number | null
+  /** The firm's category palette (key→label/color) for color-coding + the picker. */
+  categories?: CalendarCategory[]
+  /** Called after a successful reschedule/cancel/categorize so the parent refetches. */
+  onChanged?: () => void
 }
 
-export function WeeklyCalendar({ items, loaded, lastRefreshedAt }: WeeklyCalendarProps) {
+export function WeeklyCalendar({
+  items,
+  loaded,
+  lastRefreshedAt,
+  categories = [],
+  onChanged,
+}: WeeklyCalendarProps) {
   const router = useRouter()
   const [view, setView] = useState<View>('week')
   // The anchor date: which week/day/month is shown. Navigation moves it.
   const [anchor, setAnchor] = useState(() => new Date())
+  const [modal, setModal] = useState<ActiveModal>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const palette = useMemo(() => {
+    const m = new Map<string, CalendarCategory>()
+    for (const c of categories) m.set(c.key, c)
+    return m
+  }, [categories])
+
+  // Run a calendar write (reschedule/cancel/categorize), then refetch via onChanged.
+  async function act(toolName: string, input: Record<string, unknown>) {
+    setBusy(true)
+    setError(null)
+    try {
+      await callAttorneyMcp({ toolName, input })
+      setModal(null)
+      onChanged?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const sorted = useMemo(
     () =>
@@ -124,23 +185,57 @@ export function WeeklyCalendar({ items, loaded, lastRefreshedAt }: WeeklyCalenda
         </a>
       )
     }
-    const cat = it.category ?? 'new_consultation'
-    const label = `${it.title} at ${timeOnly(it.startIso)} — ${CATEGORY_LABELS[cat]}`
+    const computed = it.category ?? 'new_consultation'
+    const paletteCat = it.categoryKey ? palette.get(it.categoryKey) : undefined
+    const label = `${it.title} at ${timeOnly(it.startIso)}${paletteCat ? ` — ${paletteCat.label}` : ''}`
+    const colorStyle: React.CSSProperties = paletteCat
+      ? {
+          background: `${paletteCat.color}1a`,
+          borderLeft: `3px solid ${paletteCat.color}`,
+          color: '#1e293b',
+        }
+      : {}
+    const menuItems = [
+      { label: 'Reschedule', onClick: () => setModal({ type: 'reschedule', item: it }) },
+      { label: 'Cancel', onClick: () => setModal({ type: 'cancel', item: it }) },
+      {
+        label: 'Email client',
+        onClick: () => {
+          if (it.matterEntityId) launchCompose({ matterId: it.matterEntityId })
+        },
+      },
+      { label: 'Categorize', onClick: () => setModal({ type: 'categorize', item: it }) },
+      {
+        label: 'View matter',
+        href: it.matterEntityId ? `/attorney/matters/${it.matterEntityId}` : undefined,
+      },
+    ]
     return (
-      <button
-        key={it.id}
-        type="button"
-        className={`wcal-block wcal-${cat}`}
-        onClick={() => it.matterEntityId && goToMatter(it.matterEntityId)}
-        title={label}
-        aria-label={label}
-      >
-        <span className="wcal-block-time">{timeOnly(it.startIso)}</span>
-        <span className="wcal-block-client">{it.title}</span>
-        {it.serviceKey && (
-          <span className="wcal-block-service">{humanizeService(it.serviceKey)}</span>
-        )}
-      </button>
+      <div key={it.id} className="wcal-block-wrap">
+        <button
+          type="button"
+          className={`wcal-block ${paletteCat ? '' : `wcal-${computed}`}`}
+          style={colorStyle}
+          onClick={() => it.matterEntityId && goToMatter(it.matterEntityId)}
+          title={label}
+          aria-label={label}
+        >
+          <span className="wcal-block-time">{timeOnly(it.startIso)}</span>
+          <span className="wcal-block-client">{it.title}</span>
+          {it.serviceKey && (
+            <span className="wcal-block-service">{humanizeService(it.serviceKey)}</span>
+          )}
+        </button>
+        <span className="wcal-block-edit">
+          <ActionsMenu
+            align="left"
+            triggerContent={<EditIcon size={13} />}
+            triggerClassName="wcal-edit-btn"
+            triggerTitle="Event actions"
+            items={menuItems}
+          />
+        </span>
+      </div>
     )
   }
 
@@ -249,11 +344,17 @@ export function WeeklyCalendar({ items, loaded, lastRefreshedAt }: WeeklyCalenda
           )}
         </span>
         <span className="wcal-legend">
-          {CATEGORY_ORDER.map((c) => (
-            <span key={c} className="wcal-legend-item">
-              <span className={`wcal-swatch wcal-${c}`} /> {CATEGORY_LABELS[c]}
-            </span>
-          ))}
+          {palette.size > 0
+            ? categories.map((c) => (
+                <span key={c.key} className="wcal-legend-item">
+                  <span className="wcal-swatch" style={{ background: c.color }} /> {c.label}
+                </span>
+              ))
+            : CATEGORY_ORDER.map((c) => (
+                <span key={c} className="wcal-legend-item">
+                  <span className={`wcal-swatch wcal-${c}`} /> {CATEGORY_LABELS[c]}
+                </span>
+              ))}
           <span className="wcal-legend-item">
             <span className="wcal-swatch" style={{ background: '#94a3b8' }} /> Google event
           </span>
@@ -304,7 +405,146 @@ export function WeeklyCalendar({ items, loaded, lastRefreshedAt }: WeeklyCalenda
           )}
         </div>
       )}
+
+      {modal && (
+        <CalendarActionModal
+          modal={modal}
+          categories={categories}
+          busy={busy}
+          error={error}
+          onClose={() => {
+            setModal(null)
+            setError(null)
+          }}
+          onSubmit={act}
+        />
+      )}
     </div>
+  )
+}
+
+// ── Reschedule / Cancel / Categorize modal (one component, three modes) ───────
+function CalendarActionModal({
+  modal,
+  categories,
+  busy,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  modal: NonNullable<ActiveModal>
+  categories: CalendarCategory[]
+  busy: boolean
+  error: string | null
+  onClose: () => void
+  onSubmit: (toolName: string, input: Record<string, unknown>) => void
+}) {
+  const { type, item } = modal
+  const [startInput, setStartInput] = useState(() => isoToLocalInput(item.startIso))
+  const [endInput, setEndInput] = useState(() => isoToLocalInput(item.endIso))
+  const [reason, setReason] = useState('')
+  const [categoryKey, setCategoryKey] = useState(item.categoryKey ?? categories[0]?.key ?? '')
+
+  // External Google events carry no matter, so there's nothing to act on.
+  if (!item.matterEntityId) {
+    return (
+      <Modal title="Read-only event" onClose={onClose}>
+        <p style={{ margin: 0 }}>
+          This is a Google event and can’t be changed from here. Open it in Google Calendar instead.
+        </p>
+      </Modal>
+    )
+  }
+  const matterEntityId = item.matterEntityId
+
+  const titles: Record<typeof type, string> = {
+    reschedule: 'Reschedule consultation',
+    cancel: 'Cancel consultation',
+    categorize: 'Categorize consultation',
+  }
+
+  function submit() {
+    if (type === 'reschedule') {
+      const startIso = localInputToIso(startInput)
+      if (!startIso) return
+      onSubmit('legal.booking.reschedule', {
+        matterEntityId,
+        startIso,
+        endIso: localInputToIso(endInput),
+      })
+    } else if (type === 'cancel') {
+      onSubmit('legal.booking.cancel', { matterEntityId, reason: reason.trim() || undefined })
+    } else {
+      if (!categoryKey) return
+      onSubmit('legal.booking.categorize', { matterEntityId, categoryKey })
+    }
+  }
+
+  return (
+    <Modal
+      title={titles[type]}
+      onClose={onClose}
+      footer={
+        <>
+          {error && (
+            <span style={{ color: '#b91c1c', marginRight: 'auto', fontSize: '0.85rem' }}>
+              {error}
+            </span>
+          )}
+          <button type="button" onClick={onClose} disabled={busy}>
+            Close
+          </button>
+          <button type="button" className="primary" onClick={submit} disabled={busy}>
+            {busy ? 'Working…' : type === 'cancel' ? 'Cancel consultation' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <p style={{ marginTop: 0, color: 'var(--muted)' }}>{item.title}</p>
+      {type === 'reschedule' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <span>Start</span>
+            <input
+              type="datetime-local"
+              value={startInput}
+              onChange={(e) => setStartInput(e.target.value)}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <span>End</span>
+            <input
+              type="datetime-local"
+              value={endInput}
+              onChange={(e) => setEndInput(e.target.value)}
+            />
+          </label>
+        </div>
+      )}
+      {type === 'cancel' && (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <span>Reason (optional, shared with the client)</span>
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} />
+        </label>
+      )}
+      {type === 'categorize' &&
+        (categories.length === 0 ? (
+          <p style={{ margin: 0 }}>
+            No categories defined yet. Add them in Settings → Calendar categories.
+          </p>
+        ) : (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <span>Category</span>
+            <select value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
+              {categories.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+    </Modal>
   )
 }
 

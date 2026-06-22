@@ -18,6 +18,7 @@ import {
   type EmailAttachment,
 } from '../adapters/gmail.js'
 import { resolveEmailSignature } from './firmSignature.js'
+import { authorizedSendMatters } from './matterAccess.js'
 
 // ── Signature (fix #10) ──────────────────────────────────────────────────────
 // Append the firm signature to a message body (and its HTML alternative, if
@@ -87,8 +88,69 @@ async function clientEmailIndex(
   })
 }
 
+// All client_contact emails → display name (latest full_name). Lets the inbox
+// label rows with the person's name instead of a raw address. Scope-matched to
+// the same client_contact allow-list as clientEmailIndex.
+async function clientNameIndex(ctx: ActionContext): Promise<Map<string, string>> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ email: string; full_name: string | null }>(
+      `WITH latest_emails AS (
+         SELECT DISTINCT ON (a.entity_id) a.entity_id, lower(a.value #>> '{}') AS email
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+         JOIN entity e ON e.id = a.entity_id
+         JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+         WHERE a.tenant_id = $1 AND akd.kind_name = 'email' AND ekd.kind_name = 'client_contact'
+           AND e.status = 'active'
+         ORDER BY a.entity_id, a.valid_from DESC
+       ),
+       latest_names AS (
+         SELECT DISTINCT ON (a.entity_id) a.entity_id, a.value #>> '{}' AS full_name
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+         WHERE a.tenant_id = $1 AND akd.kind_name = 'full_name'
+         ORDER BY a.entity_id, a.valid_from DESC
+       )
+       SELECT le.email, ln.full_name
+       FROM latest_emails le
+       LEFT JOIN latest_names ln ON ln.entity_id = le.entity_id`,
+      [ctx.tenantId],
+    )
+    const map = new Map<string, string>()
+    for (const row of res.rows) {
+      const name = row.full_name?.trim()
+      if (name) map.set(row.email, name)
+    }
+    return map
+  })
+}
+
+// Bare address out of "Name <a@b.com>" (or the string itself), lowercased — the
+// key the name index uses.
+function bareEmailKey(addr: string): string {
+  const m = addr.match(/<([^>]+)>/)
+  return (m ? m[1]! : addr).trim().toLowerCase()
+}
+
+// The subset of the name index that applies to this thread's participants, keyed
+// by lowercased bare address. Kept per-thread so we never ship the firm's whole
+// contact list to the client.
+function namesForParticipants(
+  participants: string[],
+  names: Map<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const p of participants) {
+    const name = names.get(bareEmailKey(p))
+    if (name) out[bareEmailKey(p)] = name
+  }
+  return out
+}
+
 export interface MailThreadSummary extends GmailThreadSummary {
   matters: Array<{ matterEntityId: string; matterNumber: string }>
+  // email (lowercased, bare) → client contact display name, for known contacts.
+  participantNames: Record<string, string>
 }
 
 export async function listMailThreads(
@@ -101,12 +163,16 @@ export async function listMailThreads(
   const index = await clientEmailIndex(ctx)
   const emails = [...index.keys()].filter((e) => !e.endsWith('@example.test'))
   if (emails.length === 0) return { threads: [], clientEmailCount: 0 }
-  const threads = await listClientThreads(ctx.tenantId, emails, 50, ctx.actorId, search)
+  const [threads, names] = await Promise.all([
+    listClientThreads(ctx.tenantId, emails, 50, ctx.actorId, search),
+    clientNameIndex(ctx),
+  ])
   return {
     clientEmailCount: emails.length,
     threads: threads.map((t) => ({
       ...t,
       matters: dedupeMatters(t.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? [])),
+      participantNames: namesForParticipants(t.participantEmails, names),
     })),
   }
 }
@@ -121,6 +187,8 @@ function dedupeMatters(
 
 export interface MailThreadView extends GmailThreadDetail {
   matters: Array<{ matterEntityId: string; matterNumber: string }>
+  // email (lowercased, bare) → client contact display name, for known contacts.
+  participantNames: Record<string, string>
 }
 
 // Open a thread: live read from Gmail + idempotent ingestion into the
@@ -130,7 +198,7 @@ export async function openMailThread(
   gmailThreadId: string,
 ): Promise<MailThreadView> {
   const detail = await getClientThread(ctx.tenantId, gmailThreadId, ctx.actorId)
-  const index = await clientEmailIndex(ctx)
+  const [index, names] = await Promise.all([clientEmailIndex(ctx), clientNameIndex(ctx)])
   const matters = dedupeMatters(
     detail.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? []),
   )
@@ -159,7 +227,11 @@ export async function openMailThread(
     },
   })
 
-  return { ...detail, matters }
+  return {
+    ...detail,
+    matters,
+    participantNames: namesForParticipants(detail.participantEmails, names),
+  }
 }
 
 export interface ReplyInput {
@@ -181,6 +253,23 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
   if (!clientParticipant) {
     throw new Error('Refusing to reply: thread has no known client participant.')
   }
+  // Send authz (0088): the reply goes to clientParticipant, so authorize the
+  // sender against THAT recipient's matters specifically — NOT the union of every
+  // participant's matters (a thread can mix clients from different matters; the
+  // sender must be authorized on a matter the actual recipient belongs to). An
+  // attorney may send only on matters they own, are granted, or as a firm admin.
+  const recipientMatters = index.get(clientParticipant.toLowerCase()) ?? []
+  const authorized = await authorizedSendMatters(
+    ctx,
+    recipientMatters.map((m) => m.matterEntityId),
+  )
+  if (authorized.length === 0) {
+    throw new Error(
+      'You are not authorized to send on this matter. Ask the matter owner or a firm admin for access.',
+    )
+  }
+  const matterEntityId = authorized[0]!
+
   const last = detail.messages[detail.messages.length - 1]
   // Sign centrally — replies carry the firm signature too (fix #10). The HTML
   // alternative (when the composer sent one) is signed alongside the plaintext.
@@ -200,9 +289,6 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
     },
     ctx.actorId,
   )
-  const matters = dedupeMatters(
-    detail.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? []),
-  )
   return submitAction(ctx, {
     actionKindName: 'mail.send',
     intentKind: 'enforcement',
@@ -213,7 +299,7 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
       to: clientParticipant,
       from: sent.from,
       body_text: signedBody,
-      matter_entity_id: matters[0]?.matterEntityId ?? null,
+      matter_entity_id: matterEntityId,
       participant_emails: detail.participantEmails,
     },
   })
@@ -264,11 +350,27 @@ export async function enqueueClientEmail(
       `Refusing to send: ${input.to} is not a known client contact (client-mail-only discipline).`,
     )
   }
-  // Prefer an explicitly supplied matter when it is one this contact belongs to;
-  // otherwise fall back to the contact's first matter.
-  const matterEntityId =
-    (input.matterId && matters.find((m) => m.matterEntityId === input.matterId)?.matterEntityId) ||
-    matters[0]!.matterEntityId
+  // Send authz (0088): authorize the sender on the recipient's matters BEFORE
+  // sending, and attribute the message to a matter they may send on (preferring an
+  // explicitly supplied one). An attorney may send only on matters they own, are
+  // granted, or as a firm admin.
+  const authorized = await authorizedSendMatters(
+    ctx,
+    matters.map((m) => m.matterEntityId),
+  )
+  if (authorized.length === 0) {
+    throw new Error(
+      'You are not authorized to send to this contact on any of their matters. Ask the matter owner or a firm admin for access.',
+    )
+  }
+  // An explicit matter must be one the actor may send on — never silently re-route
+  // an unauthorized matterId to a different (authorized) matter (provenance/intent).
+  if (input.matterId && !authorized.includes(input.matterId)) {
+    throw new Error(
+      'You are not authorized to send on the specified matter for this contact. Ask the matter owner or a firm admin for access.',
+    )
+  }
+  const matterEntityId = input.matterId || authorized[0]!
 
   // Sign centrally: every Contract B send carries the firm signature (fix #10).
   const signed = withSignature(

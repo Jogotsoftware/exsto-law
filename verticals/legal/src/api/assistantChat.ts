@@ -31,6 +31,12 @@ import {
 } from './assistantContext.js'
 import { getMatter } from '../queries/matters.js'
 import { getContact } from '../queries/contacts.js'
+import {
+  listSkillCatalog,
+  getSkillBySlug,
+  type SkillCatalogEntry,
+  type Skill,
+} from '../queries/skills.js'
 
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
 export type AssistantScope = 'matter' | 'contact' | 'global'
@@ -60,6 +66,10 @@ export interface AssistantChatInput {
   // How much matter/client history to feed the model (chat settings). More depth
   // = richer grounding but a larger, slower, pricier prompt. Default 'balanced'.
   contextDepth?: ContextDepth
+  // Skills the attorney explicitly picked from the /skills menu — force-loaded
+  // (their full instructions injected) for this turn, vs. the model deciding via
+  // load_skill. Claude only; ignored for Perplexity.
+  skillSlugs?: string[]
   // Documents the attorney attached to THIS message — uploaded files (parsed to
   // text upstream) or a matter document. Appended to the user message for CLAUDE
   // ONLY (the firm's own model); never sent to an external research model. Capped
@@ -87,6 +97,9 @@ export type AssistantChatStreamEvent =
     }
   | { type: 'thinking'; text: string }
   | { type: 'text'; text: string }
+  // The assistant loaded a specialized skill (playbook) for this turn — the UI
+  // shows a "using <skill>" chip while it works.
+  | { type: 'skill'; slug: string; name: string }
   | {
       type: 'done'
       eventId: string
@@ -131,6 +144,14 @@ const SYSTEM_PROMPT = [
   // link. Point the attorney to the right page instead of just naming it.
   'When you point the attorney to a part of the app, LINK to it with a markdown link they can click. Main pages: Dashboard (/attorney), Matters (/attorney/matters), Clients (/attorney/crm), Contacts (/attorney/crm/contacts), Calendar (/attorney/calendar), Mail (/attorney/mail), Services (/attorney/services), Templates (/attorney/templates), Questionnaires (/attorney/questionnaires), Billing (/attorney/billing), Review queue (/attorney/review), Settings (/attorney/settings). Only link to these paths or links given in the context below; never invent entity ids.',
   "You are a drafting and workflow aid, not the attorney's legal judgment: when asked for a legal conclusion, give your best analysis but remind the attorney to verify it and that they own the legal opinion.",
+  // Anti-hallucination is the top priority for a legal tool: a confident wrong
+  // answer is worse than "I don't know". This is reinforced per-skill, but it
+  // holds on EVERY turn regardless of any loaded skill.
+  'ACCURACY OVER COMPLETENESS — never make anything up. Do not fabricate or guess at facts, statutes, code sections, regulations, case names, citations, court decisions, dates, deadlines, dollar figures, or quotations. If you do not know, or are not sure, SAY SO plainly — "I don\'t know", "I\'m not certain", or "I couldn\'t find that" are always acceptable, correct answers and are far better than a confident guess. Never invent a statute number, case cite, or rule to fill a gap; if you can\'t verify a specific citation, give the general principle instead and say the citation needs to be confirmed.',
+  'CITE YOUR SOURCES — ground every factual or legal claim in something the attorney can check: the matter/client context provided below, a skill you have loaded, a document the attorney shared, or a web-search result (include the link). When a statement rests only on your general training and is NOT grounded in those sources, label it as such and tell the attorney to verify it against the primary source (the actual statute, regulation, or case) before relying on it. Distinguish clearly between what the provided context says and what you are inferring or recalling.',
+  // Statute/case citation is where fabrication is most tempting and most harmful,
+  // so the rule is: cite when confident, name-and-flag when not, never guess a number.
+  'CITE THE GOVERNING LAW — when you state a legal rule or conclusion, name the controlling authority (the statute, regulation, or case) so the attorney can check it. Give a specific citation — a statute by name AND code section (e.g., "the Lanham Act, 15 U.S.C. § 1051 et seq."), or a case by name — ONLY when you are confident it is correct. If you are not certain of the exact section, subsection, pincite, or case name, name the statute or body of law generally (e.g., "the North Carolina Wage and Hour Act") and say the precise citation must be verified against the primary source. NEVER guess or invent a code section, subsection number, case name, date, or pincite to look authoritative — a wrong citation is worse than no citation. When web search is available, use it to confirm a citation before giving it.',
   'You also collect product feedback. When the attorney shares a complaint, idea, or praise: if it is vague or missing actionable detail (which screen, what they expected, the steps to reproduce), ask ONE short clarifying question first. Once you have a clear, specific item, CALL the log_feedback tool to file it with the right category, then tell the attorney it is logged and share the reference id the tool returns. Use the tool only for genuine product feedback, not for ordinary questions.',
   'Keep replies focused and concise.',
 ].join(' ')
@@ -186,25 +207,125 @@ function buildFeedbackTool(ctx: ActionContext, input: AssistantChatInput): Clien
   }
 }
 
+// Definition advertised to the model for the load_skill client tool. Skills are
+// reusable legal playbooks stored as substrate data (ported from claude-for-legal).
+// The model calls this with a slug from the catalog to pull the full instructions
+// into context (progressive disclosure), then follows them. Executed by
+// buildSkillTool below.
+const LOAD_SKILL_TOOL_DEF = {
+  name: 'load_skill',
+  description:
+    "Load a specialized legal skill's full instructions before answering. When the attorney's request matches one of the skills listed under '--- Skills ---' in the system prompt (e.g. they paste an NDA, ask to review a vendor MSA, want a termination checked, ask for a demand letter), CALL this FIRST with the skill's slug, then follow the loaded playbook. You may load more than one. Every skill output is a draft for the attorney to review, never a final legal opinion.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      slug: {
+        type: 'string',
+        description: 'The slug of the skill to load, exactly as listed in the Skills catalog.',
+      },
+    },
+    required: ['slug'],
+    additionalProperties: false,
+  },
+}
+
+// Build the load_skill ClientTool for this turn. run() fetches the skill body from
+// the substrate (tenant-scoped read) and returns it verbatim for the model to
+// follow. Read-only — loading a skill writes nothing; the model's resulting draft
+// is what (optionally) gets recorded downstream.
+function buildSkillTool(ctx: ActionContext): ClientTool {
+  return {
+    definition: LOAD_SKILL_TOOL_DEF,
+    name: 'load_skill',
+    run: async (raw) => {
+      const args = (raw ?? {}) as { slug?: string }
+      const slug = (args.slug ?? '').trim()
+      if (!slug) return 'No skill slug was provided, so no skill was loaded.'
+      const skill = await getSkillBySlug(ctx, slug)
+      if (!skill) {
+        return `No skill found with slug "${slug}". Answer from general knowledge and remind the attorney to verify.`
+      }
+      return `LOADED SKILL — ${skill.name}\nFollow these instructions for this request. The result is a draft for the attorney to review, not a final legal opinion.\n\n${skill.body}`
+    },
+  }
+}
+
+// Render the skill catalog the model sees every Claude turn: practice-area
+// groupings of `slug — name: when-to-use`. Only the short routing fields go in the
+// prompt; the (long) bodies load on demand via load_skill. Helper skills
+// (user_invocable = false) are reachable by slug but kept out of the routed list.
+export function buildSkillCatalogText(catalog: SkillCatalogEntry[]): string {
+  const invocable = catalog.filter((s) => s.userInvocable && s.slug)
+  if (!invocable.length) return ''
+  const byArea = new Map<string, SkillCatalogEntry[]>()
+  for (const s of invocable) {
+    const arr = byArea.get(s.practiceArea) ?? []
+    arr.push(s)
+    byArea.set(s.practiceArea, arr)
+  }
+  const lines: string[] = [
+    '--- Skills ---',
+    "You have specialized legal skills (playbooks ported from Anthropic's claude-for-legal). When the attorney's request matches one, CALL the load_skill tool with its slug BEFORE answering, then follow the loaded instructions. You may load more than one. Every skill output is a draft for the attorney to review — never a final legal opinion. If nothing matches, answer normally.",
+  ]
+  for (const [area, skills] of byArea) {
+    lines.push(`### ${area || 'general'}`)
+    for (const s of skills) lines.push(`- ${s.slug} — ${s.name}: ${s.whenToUse}`)
+  }
+  return lines.join('\n')
+}
+
+// Render the bodies of the attorney-selected skills (the /skills picker) as an
+// "active skills" block injected directly into the system prompt — so a picked
+// skill is GUARANTEED to apply this turn, vs. the model deciding via load_skill.
+function buildActiveSkillsText(skills: Skill[]): string {
+  if (!skills.length) return ''
+  const parts = [
+    '--- Active skills (the attorney selected these — follow them for this request) ---',
+    'Each output remains a draft for the attorney to review, never a final legal opinion.',
+  ]
+  for (const s of skills) parts.push(`\n## ${s.name}\n${s.body}`)
+  return parts.join('\n')
+}
+
+// Resolve the attorney-selected skill slugs to full skills (bodies), in order,
+// dropping any that no longer exist.
+async function loadForcedSkills(ctx: ActionContext, slugs: string[] | undefined): Promise<Skill[]> {
+  if (!slugs?.length) return []
+  const loaded = await Promise.all(slugs.map((s) => getSkillBySlug(ctx, s)))
+  return loaded.filter((s): s is Skill => s != null)
+}
+
 // Build the Claude system text: the base prompt + the matter/client context, plus
-// the current entity's in-app link so the assistant can refer the attorney back to
-// the page they're on (Claude is the firm's own model, so the link/id is safe; the
-// external research path never receives it).
+// where the attorney is in the app — the exact route they're on (so "this page",
+// "here", "this screen" resolve) and the current entity's in-app link so the
+// assistant can refer them back to it. Then the attorney-selected active skills and
+// the skills catalog. Claude is the firm's own model, so the route/id is safe; the
+// external research path never receives any of it.
 function buildClaudeSystem(
   scope: AssistantScope,
   primaryEntityId: string | null,
   context: AssistantContext | null,
+  skillCatalogText = '',
+  activeSkillsText = '',
+  pageContext?: { path?: string; [k: string]: unknown } | null,
 ): string {
   let system = context ? `${SYSTEM_PROMPT}\n\n--- Context ---\n${context.full}` : SYSTEM_PROMPT
-  const path =
+  const currentPath =
+    typeof pageContext?.path === 'string' && pageContext.path ? pageContext.path : null
+  if (currentPath) {
+    system += `\n\nThe attorney is currently on ${currentPath}. When they say "this page", "here", or "this screen", they mean that route — ground your answer in it and link back to it with a markdown link when relevant.`
+  }
+  const entityPath =
     primaryEntityId && scope === 'matter'
       ? `/attorney/matters/${primaryEntityId}`
       : primaryEntityId && scope === 'contact'
         ? `/attorney/crm/contacts/${primaryEntityId}`
         : null
-  if (path) {
-    system += `\n\nThe current page is ${path} — link to it with a markdown link when referring the attorney back to this ${scope}.`
+  if (entityPath && entityPath !== currentPath) {
+    system += `\n\nThis conversation is about the ${scope} at ${entityPath} — link to it with a markdown link when referring the attorney back to it.`
   }
+  if (activeSkillsText) system += `\n\n${activeSkillsText}`
+  if (skillCatalogText) system += `\n\n${skillCatalogText}`
   return system
 }
 
@@ -403,8 +524,19 @@ export async function assistantChat(
     citations = result.citations
   } else {
     // Claude: full matter context is safe (the firm's own model), as are any
-    // attached documents — appended to the user message.
-    const system = buildClaudeSystem(scope, primaryEntityId, context)
+    // attached documents — appended to the user message. Load the skill catalog so
+    // the model can pull a playbook on demand (load_skill), plus any skills the
+    // attorney force-selected from the /skills menu, and pass the current route.
+    const catalog = await listSkillCatalog(ctx)
+    const forced = await loadForcedSkills(ctx, input.skillSlugs)
+    const system = buildClaudeSystem(
+      scope,
+      primaryEntityId,
+      context,
+      buildSkillCatalogText(catalog),
+      buildActiveSkillsText(forced),
+      input.pageContext,
+    )
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
@@ -415,7 +547,9 @@ export async function assistantChat(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      clientTools: [buildFeedbackTool(ctx, input)],
+      clientTools: catalog.length
+        ? [buildFeedbackTool(ctx, input), buildSkillTool(ctx)]
+        : [buildFeedbackTool(ctx, input)],
     })
     reply = result.reply
     citations = result.citations
@@ -483,8 +617,21 @@ export async function* assistantChatStream(
     }
   } else {
     // Claude: full matter context is safe (the firm's own model), as are any
-    // attached documents — appended to the user message.
-    const system = buildClaudeSystem(scope, primaryEntityId, context)
+    // attached documents — appended to the user message. Load the skill catalog so
+    // the model can pull a playbook on demand (load_skill), plus any skills the
+    // attorney force-selected from the /skills menu, and pass the current route.
+    const catalog = await listSkillCatalog(ctx)
+    const forced = await loadForcedSkills(ctx, input.skillSlugs)
+    // Surface the picked skills as chips immediately, before the reply streams.
+    for (const s of forced) yield { type: 'skill', slug: s.slug, name: s.name }
+    const system = buildClaudeSystem(
+      scope,
+      primaryEntityId,
+      context,
+      buildSkillCatalogText(catalog),
+      buildActiveSkillsText(forced),
+      input.pageContext,
+    )
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
@@ -495,7 +642,9 @@ export async function* assistantChatStream(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      clientTools: [buildFeedbackTool(ctx, input)],
+      clientTools: catalog.length
+        ? [buildFeedbackTool(ctx, input), buildSkillTool(ctx)]
+        : [buildFeedbackTool(ctx, input)],
     })) {
       if (chunk.type === 'text') {
         reply += chunk.text
@@ -504,6 +653,11 @@ export async function* assistantChatStream(
         yield { type: 'thinking', text: chunk.text }
       } else if (chunk.type === 'citations') {
         citations = chunk.citations
+      } else if (chunk.type === 'tool' && chunk.name === 'load_skill') {
+        // Surface the loaded skill so the UI can show a "using <skill>" chip.
+        const slug = ((chunk.input ?? {}) as { slug?: string }).slug ?? ''
+        const name = catalog.find((s) => s.slug === slug)?.name ?? slug
+        if (slug) yield { type: 'skill', slug, name }
       }
     }
   }

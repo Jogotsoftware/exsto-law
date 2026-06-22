@@ -8,7 +8,11 @@
 import { use, useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
-import { WeeklyCalendar, type CalendarItem } from '@/components/WeeklyCalendar'
+import {
+  WeeklyCalendar,
+  type CalendarItem,
+  type CalendarCategory,
+} from '@/components/WeeklyCalendar'
 import { humanizeKind } from '../shared'
 
 interface MatterActionEntry {
@@ -48,8 +52,9 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
   const [calLoaded, setCalLoaded] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [calError, setCalError] = useState<string | null>(null)
+  const [categories, setCategories] = useState<CalendarCategory[]>([])
 
-  useEffect(() => {
+  const refreshHistory = useCallback(() => {
     callAttorneyMcp<MatterHistory>({
       toolName: 'legal.matter.history',
       input: { matterEntityId: id },
@@ -59,30 +64,50 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
   }, [id])
 
   useEffect(() => {
-    let cancelled = false
+    refreshHistory()
+  }, [refreshHistory])
+
+  // Fetch the unified feed for a window and keep the items for this matter. Reused
+  // by the initial load and by onChanged (after a reschedule/cancel/categorize).
+  const refreshCal = useCallback(() => {
     const now = Date.now()
     const fromIso = new Date(now - 90 * 24 * 3600 * 1000).toISOString()
     const toIso = new Date(now + 120 * 24 * 3600 * 1000).toISOString()
-    callAttorneyMcp<{ items: CalendarItem[]; source: string; error?: string }>({
+    return callAttorneyMcp<{ items: CalendarItem[]; source: string; error?: string }>({
       toolName: 'legal.calendar.feed',
       input: { fromIso, toIso },
     })
       .then((r) => {
-        if (cancelled) return
         setCalItems(r.items)
         setCalLoaded(true)
         setLastRefreshedAt(Date.now())
         setCalError(r.source === 'error' ? (r.error ?? 'Google calendar read failed.') : null)
       })
       .catch((e) => {
-        if (cancelled) return
         setCalError(e instanceof Error ? e.message : String(e))
         setCalLoaded(true)
       })
-    return () => {
-      cancelled = true
-    }
-  }, [id])
+  }, [])
+
+  useEffect(() => {
+    refreshCal()
+  }, [refreshCal])
+
+  useEffect(() => {
+    callAttorneyMcp<{ categories: CalendarCategory[] }>({
+      toolName: 'legal.calendar.categories.get',
+    })
+      .then((r) => setCategories(r.categories))
+      .catch(() => {
+        // Non-fatal: fall back to the built-in booking-category colors.
+      })
+  }, [])
+
+  // After a calendar write, refetch both the feed and the audit timeline.
+  const onCalChanged = useCallback(() => {
+    refreshCal()
+    refreshHistory()
+  }, [refreshCal, refreshHistory])
 
   const matterEvents = (calItems ?? []).filter((i) => i.matterEntityId === id)
 
@@ -107,7 +132,13 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
         <h2>Calendar</h2>
         <p className="text-muted text-sm">Consultations and meetings booked on this matter.</p>
         {calError && <div className="alert alert-error">{calError}</div>}
-        <WeeklyCalendar items={matterEvents} loaded={calLoaded} lastRefreshedAt={lastRefreshedAt} />
+        <WeeklyCalendar
+          items={matterEvents}
+          loaded={calLoaded}
+          lastRefreshedAt={lastRefreshedAt}
+          categories={categories}
+          onChanged={onCalChanged}
+        />
       </section>
 
       <CollapsibleSection
