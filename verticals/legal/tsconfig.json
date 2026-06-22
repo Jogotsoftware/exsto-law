@@ -4,7 +4,13 @@
     "rootDir": "./src",
     "outDir": "./dist",
     "composite": true,
-    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    // The invoice PDF renderer (billing/invoicePdf.ts) uses @react-pdf/renderer +
+    // React.createElement, whose types reference the DOM lib; the markdown↔HTML
+    // bridge (turndown) also wants the full DOM HTMLElement. Add DOM types for the
+    // typecheck only — this package still runs in Node (no browser at runtime).
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react"
   },
   "include": ["src/**/*"],
   "references": [

@@ -196,6 +196,9 @@ export type AssistantStreamChunk =
   | { type: 'thinking'; text: string }
   | { type: 'text'; text: string }
   | { type: 'citations'; citations: string[] }
+  // The model invoked a client tool (e.g. load_skill). Surfaced so the UI can
+  // show what the assistant is doing — "using NDA review" — while the tool runs.
+  | { type: 'tool'; name: string; input: unknown }
 
 // Anthropic's web search server tool. When enabled the model searches the web
 // itself and annotates its answer with source URLs (the citation blocks we
@@ -525,6 +528,9 @@ export async function* streamChatWithAssistant(
     if (stop === 'tool_use' && i < MAX_PAUSE_CONTINUATIONS && (opts.clientTools?.length ?? 0) > 0) {
       const uses = clientToolUses(final.content)
       if (uses.length) {
+        // Surface each tool call so the UI can show what the assistant is doing
+        // (e.g. "using NDA review") before the tool runs and the answer resumes.
+        for (const u of uses) yield { type: 'tool', name: u.name, input: u.input }
         carryTurns.push({ role: 'assistant', content: stripThinkingBlocks(final.content) })
         carryTurns.push(await runClientTools(uses, opts.clientTools!))
         continue

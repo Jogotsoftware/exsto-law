@@ -538,6 +538,10 @@ export default function SettingsPage() {
         )}
       </CollapsibleSection>
 
+      <CollapsibleSection title="Invoice template">
+        <InvoiceTemplateSection />
+      </CollapsibleSection>
+
       <CollapsibleSection title="Email signature">
         {savedSig && (
           <div className="alert alert-success">Saved. New emails will use this signature.</div>
@@ -753,6 +757,212 @@ export default function SettingsPage() {
         />
       )}
     </main>
+  )
+}
+
+interface InvoiceTemplateConfig {
+  firmName: string
+  firmAddress: string
+  firmPhone: string
+  logoDataUrl: string | null
+  accentColor: string
+  columns: { matter: boolean; quantity: boolean; rate: boolean }
+  headerNote: string
+  paymentInstructions: string
+}
+
+function base64ToBlobUrl(base64: string, type = 'application/pdf'): string {
+  const bin = atob(base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return URL.createObjectURL(new Blob([bytes], { type }))
+}
+
+// Invoice template editor (Phase 3): edit the firm's invoice branding/content and
+// see a live PDF preview rendered by the same engine that produces real invoices.
+function InvoiceTemplateSection() {
+  const [cfg, setCfg] = useState<InvoiceTemplateConfig | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const preview = useCallback(async (config: InvoiceTemplateConfig) => {
+    setBusy('preview')
+    try {
+      const r = await callAttorneyMcp<{ pdf: { base64: string } }>({
+        toolName: 'legal.invoice.template_preview',
+        input: { config },
+      })
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return base64ToBlobUrl(r.pdf.base64)
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    callAttorneyMcp<{ template: InvoiceTemplateConfig }>({
+      toolName: 'legal.firm.get_invoice_template',
+    })
+      .then((r) => {
+        setCfg(r.template)
+        void preview(r.template)
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [preview])
+
+  function set<K extends keyof InvoiceTemplateConfig>(key: K, value: InvoiceTemplateConfig[K]) {
+    setCfg((c) => (c ? { ...c, [key]: value } : c))
+    setSaved(false)
+  }
+
+  async function onLogo(file: File | null) {
+    if (!file) return set('logoDataUrl', null)
+    if (file.size > 500_000) {
+      setError('Logo is too large — use an image under 500 KB.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => set('logoDataUrl', String(reader.result))
+    reader.readAsDataURL(file)
+  }
+
+  async function save() {
+    if (!cfg) return
+    setBusy('save')
+    setError(null)
+    try {
+      await callAttorneyMcp({ toolName: 'legal.firm.set_invoice_template', input: { config: cfg } })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+      void preview(cfg)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!cfg)
+    return (
+      <div className="loading-block">
+        <span className="spinner" /> Loading…
+      </div>
+    )
+
+  return (
+    <>
+      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+        Customize the invoice clients receive — branding and content. The preview on the right is
+        the real PDF, rendered by the same engine that produces sent invoices.
+      </p>
+      {error && <div className="alert alert-error">{error}</div>}
+      {saved && <div className="alert alert-success">Saved.</div>}
+      <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <div style={{ flex: '1 1 320px', minWidth: 300 }}>
+          <div className="form-grid">
+            <label>
+              <span>Firm name</span>
+              <input value={cfg.firmName} onChange={(e) => set('firmName', e.target.value)} />
+            </label>
+            <label>
+              <span>Accent color</span>
+              <input
+                type="color"
+                value={cfg.accentColor}
+                onChange={(e) => set('accentColor', e.target.value)}
+                style={{ width: 60, padding: 2 }}
+              />
+            </label>
+            <label>
+              <span>Firm phone</span>
+              <input value={cfg.firmPhone} onChange={(e) => set('firmPhone', e.target.value)} />
+            </label>
+          </div>
+          <label>
+            <span>Firm address</span>
+            <textarea
+              value={cfg.firmAddress}
+              onChange={(e) => set('firmAddress', e.target.value)}
+              rows={2}
+            />
+          </label>
+          <label>
+            <span>Logo (PNG/JPG, under 500 KB)</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={(e) => void onLogo(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          {cfg.logoDataUrl && (
+            <button onClick={() => set('logoDataUrl', null)} style={{ marginTop: '0.3rem' }}>
+              Remove logo
+            </button>
+          )}
+          <fieldset className="svc-fieldset" style={{ marginTop: '0.8rem' }}>
+            <legend>Columns</legend>
+            {(['matter', 'quantity', 'rate'] as const).map((col) => (
+              <label
+                key={col}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  marginBottom: '0.3rem',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={cfg.columns[col]}
+                  onChange={(e) => set('columns', { ...cfg.columns, [col]: e.target.checked })}
+                  style={{ width: 'auto' }}
+                />
+                <span style={{ textTransform: 'capitalize' }}>{col}</span>
+              </label>
+            ))}
+          </fieldset>
+          <label>
+            <span>Header note (optional)</span>
+            <input value={cfg.headerNote} onChange={(e) => set('headerNote', e.target.value)} />
+          </label>
+          <label>
+            <span>Footer / payment instructions</span>
+            <textarea
+              value={cfg.paymentInstructions}
+              onChange={(e) => set('paymentInstructions', e.target.value)}
+              rows={2}
+            />
+          </label>
+          <div className="firm-details-actions" style={{ marginTop: '1rem' }}>
+            <button onClick={() => void preview(cfg)} disabled={busy === 'preview'}>
+              {busy === 'preview' ? 'Rendering…' : 'Refresh preview'}
+            </button>
+            <button className="primary" onClick={save} disabled={busy === 'save'}>
+              {busy === 'save' ? 'Saving…' : 'Save template'}
+            </button>
+          </div>
+        </div>
+        <div style={{ flex: '1 1 360px', minWidth: 320 }}>
+          {previewUrl ? (
+            <iframe
+              title="Invoice preview"
+              src={previewUrl}
+              style={{ width: '100%', height: 520, border: '1px solid var(--border)' }}
+            />
+          ) : (
+            <div className="loading-block">
+              <span className="spinner" /> Rendering preview…
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   )
 }
 

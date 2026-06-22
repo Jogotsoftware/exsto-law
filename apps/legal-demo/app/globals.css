@@ -5078,6 +5078,169 @@ button.danger.outline:hover:not(:disabled) {
   max-height: 7.5em;
   overflow: hidden;
 }
+/* "Using <skill>" chips — shown while the assistant works a loaded playbook. */
+.uac-skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0 0 0.4rem;
+}
+.uac-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* /skills picker — composer affordance + popup menu (Claude only). */
+.uac-composer-wrap {
+  position: relative;
+}
+.uac-skillbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.1rem 0.1rem;
+}
+.uac-skilltrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.uac-skilltrigger:hover,
+.uac-skilltrigger.is-open {
+  color: var(--text, inherit);
+  border-color: var(--accent, #6366f1);
+}
+.uac-skill-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.2rem 0.15rem 0.55rem;
+  border: 1px solid var(--accent, #6366f1);
+  border-radius: 999px;
+  background: var(--surface-2, rgba(99, 102, 241, 0.08));
+  color: var(--text, inherit);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+.uac-skill-pill-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.uac-skill-pill-x:hover {
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--text, inherit);
+}
+.uac-skillmenu {
+  position: absolute;
+  bottom: calc(100% + 0.3rem);
+  left: 0;
+  right: 0;
+  max-height: 22rem;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface, #fff);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+  overflow: hidden;
+}
+.uac-skillmenu-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.uac-skillmenu-search {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text, inherit);
+  font-size: 0.84rem;
+  outline: none;
+}
+.uac-skillmenu-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.uac-skillmenu-list {
+  overflow-y: auto;
+  padding: 0.3rem 0;
+}
+.uac-skillmenu-empty {
+  padding: 0.8rem 0.7rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.uac-skillmenu-area {
+  padding: 0.35rem 0.7rem 0.15rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.uac-skillmenu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.35rem 0.7rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.uac-skillmenu-item:hover {
+  background: rgba(127, 127, 127, 0.1);
+}
+.uac-skillmenu-item.is-on {
+  background: var(--surface-2, rgba(99, 102, 241, 0.1));
+}
+.uac-skillmenu-name {
+  color: var(--text, inherit);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.uac-skillmenu-desc {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
 @keyframes uac-shimmer {
   0%,
   100% {

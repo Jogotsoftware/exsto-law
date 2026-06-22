@@ -44,7 +44,7 @@ function centsToAmount(cents: number): string {
 
 interface IssueLineSpec {
   source_event_id: string
-  kind: 'time' | 'expense' | 'service_fee'
+  kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
   // Optional per-line overrides; rate defaults to the client's billable rate,
   // description defaults to the source entry's description.
   rate_override?: string | null
@@ -63,7 +63,7 @@ interface IssueInvoicePayload {
 // One resolved, priced line ready to write.
 interface PricedLine {
   sourceEventId: string
-  kind: 'time' | 'expense' | 'service_fee'
+  kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
   matterId: string
   description: string
   quantity: string // hours (time) or "1" (expense)
@@ -106,7 +106,7 @@ async function isAlreadyBilled(
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
       WHERE e.tenant_id = $1
-        AND ekd.kind_name IN ('time.billed', 'expense.billed', 'service_fee.billed')
+        AND ekd.kind_name IN ('time.billed', 'expense.billed', 'service_fee.billed', 'document_fee.billed')
         AND e.payload->>'source_event_id' = $2`,
     [tenantId, sourceEventId],
   )
@@ -187,22 +187,24 @@ async function priceLine(
     }
   }
 
-  if (spec.kind === 'service_fee') {
-    if (src.kindName !== 'service_fee.recorded')
-      throw new Error(`Entry ${spec.source_event_id} is not a service fee.`)
+  if (spec.kind === 'service_fee' || spec.kind === 'document_fee') {
+    const expectedKind =
+      spec.kind === 'document_fee' ? 'document_fee.recorded' : 'service_fee.recorded'
+    if (src.kindName !== expectedKind)
+      throw new Error(`Entry ${spec.source_event_id} is not a ${spec.kind.replace('_', ' ')}.`)
     const amount = String((src.payload as { amount?: string }).amount ?? '0')
     const amountCents = amountToCents(amount)
-    if (!(amountCents > 0)) throw new Error(`Service fee ${spec.source_event_id} has no amount.`)
+    if (!(amountCents > 0)) throw new Error(`Fee ${spec.source_event_id} has no amount.`)
     return {
       sourceEventId: spec.source_event_id,
-      kind: 'service_fee',
+      kind: spec.kind,
       matterId: src.matterId,
       description:
         (
           spec.description_override ??
           (src.payload as { description?: string }).description ??
           ''
-        ).trim() || 'Service fee',
+        ).trim() || (spec.kind === 'document_fee' ? 'Document fee' : 'Service fee'),
       quantity: '1',
       rate: centsToAmount(amountCents),
       amountCents,
@@ -388,7 +390,9 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
           ? 'time.billed'
           : l.kind === 'service_fee'
             ? 'service_fee.billed'
-            : 'expense.billed',
+            : l.kind === 'document_fee'
+              ? 'document_fee.billed'
+              : 'expense.billed',
       primaryEntityId: l.matterId,
       secondaryEntityIds: [invoiceId, lineId],
       sourceType: 'human',
