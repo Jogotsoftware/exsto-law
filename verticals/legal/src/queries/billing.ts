@@ -68,6 +68,83 @@ export interface UnbilledClient {
   total: string
 }
 
+// Done + costed + not-yet-invoiced tasks (migration 0084) — the VIRTUAL unbilled
+// lines. A task is the LIVE source of its charge: it appears here only while it is
+// `done`, costed (billing_mode hours|fixed), and un-invoiced, so moving it back
+// out of `done` simply removes the line again. Nothing is written until
+// invoice.issue MATERIALISES it into a ledger event and sets task_invoice_id (the
+// lock). Same matter/client/contact context as the event feed, so it slots into
+// the same client -> matter groups.
+interface BillableTaskRow {
+  task_id: string
+  title: string | null
+  billing_mode: string | null
+  hours: string | null
+  fee_amount: string | null
+  matter_id: string | null
+  matter_number: string | null
+  matter_summary: string | null
+  client_id: string | null
+  client_name: string | null
+  billable_rate: string | null
+  billing_type: string | null
+  contact_id: string | null
+  contact_name: string | null
+}
+
+async function listBillableTasks(
+  client: Parameters<Parameters<typeof withActionContext>[1]>[0],
+  tenantId: string,
+): Promise<BillableTaskRow[]> {
+  const res = await client.query<BillableTaskRow>(
+    `${ATTRS_CTE},
+     task_of AS (SELECT id FROM relationship_kind_definition
+                  WHERE tenant_id = $1 AND kind_name = 'task_of' AND status = 'active' LIMIT 1),
+     matter_of AS (SELECT id FROM relationship_kind_definition
+                  WHERE tenant_id = $1 AND kind_name = 'matter_of' AND status = 'active' LIMIT 1)
+     SELECT
+       e.id AS task_id,
+       (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_title')        AS title,
+       (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_billing_mode') AS billing_mode,
+       (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_hours')        AS hours,
+       (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_fee_amount')   AS fee_amount,
+       m.id AS matter_id,
+       m.name AS matter_number,
+       (SELECT value #>> '{}' FROM attrs WHERE entity_id = m.id AND kind_name = 'matter_summary')        AS matter_summary,
+       cli.id AS client_id,
+       (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_name')          AS client_name,
+       (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billable_rate') AS billable_rate,
+       (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billing_type')  AS billing_type,
+       (SELECT co.source_entity_id FROM relationship co
+          JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id
+         WHERE co.tenant_id = $1 AND co.target_entity_id = m.id AND cok.kind_name = 'client_of'
+           AND (co.valid_to IS NULL OR co.valid_to > now()) LIMIT 1) AS contact_id,
+       (SELECT COALESCE(
+          (SELECT value #>> '{}' FROM attrs WHERE entity_id = c2.cid AND kind_name = 'contact_full_name'),
+          (SELECT value #>> '{}' FROM attrs WHERE entity_id = c2.cid AND kind_name = 'full_name'))
+        FROM (SELECT co.source_entity_id AS cid FROM relationship co
+                JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id
+               WHERE co.tenant_id = $1 AND co.target_entity_id = m.id AND cok.kind_name = 'client_of'
+                 AND (co.valid_to IS NULL OR co.valid_to > now()) LIMIT 1) c2) AS contact_name
+     FROM entity e
+     JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'task'
+     JOIN relationship tr ON tr.source_entity_id = e.id AND tr.tenant_id = $1
+       AND tr.relationship_kind_id = (SELECT id FROM task_of)
+       AND (tr.valid_to IS NULL OR tr.valid_to > now())
+     JOIN entity m ON m.id = tr.target_entity_id AND m.tenant_id = $1
+     LEFT JOIN relationship r ON r.source_entity_id = m.id AND r.tenant_id = $1
+       AND r.relationship_kind_id = (SELECT id FROM matter_of)
+       AND (r.valid_to IS NULL OR r.valid_to > now())
+     LEFT JOIN entity cli ON cli.id = r.target_entity_id AND cli.status = 'active'
+     WHERE e.tenant_id = $1 AND e.status = 'active'
+       AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_status') = 'done'
+       AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_billing_mode') IN ('hours','fixed')
+       AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_invoice_id') IS NULL`,
+    [tenantId],
+  )
+  return res.rows
+}
+
 export async function listUnbilled(
   ctx: ActionContext,
 ): Promise<{ clients: UnbilledClient[]; currency: string }> {
@@ -242,6 +319,83 @@ export async function listUnbilled(
         }
       }
       m.entries.push(entry)
+    }
+
+    // Inject the VIRTUAL task lines (done + costed + un-invoiced) into the same
+    // client -> matter groups. sourceEventId is prefixed `task:` so the UI can
+    // select it and invoice.issue routes it to the materialise-and-lock path.
+    for (const t of await listBillableTasks(client, ctx.tenantId)) {
+      if (!t.matter_id) continue
+      const clientKey = t.client_id ?? '__none__'
+      let c = byClient.get(clientKey)
+      if (!c) {
+        c = {
+          clientEntityId: t.client_id,
+          clientName: t.client_name ?? 'Unassigned client',
+          billableRate: t.billable_rate,
+          billingType: t.billing_type,
+          matters: [],
+          total: '0.00',
+        }
+        byClient.set(clientKey, c)
+      }
+      let m = c.matters.find((x) => x.matterEntityId === t.matter_id)
+      if (!m) {
+        m = {
+          matterEntityId: t.matter_id,
+          matterNumber: t.matter_number ?? '',
+          matterSummary: t.matter_summary,
+          contactEntityId: t.contact_id,
+          contactName: t.contact_name,
+          entries: [],
+          total: '0.00',
+        }
+        c.matters.push(m)
+      }
+      const source = `task:${t.task_id}`
+      const label = (t.title ?? 'Task').trim() || 'Task'
+      if (t.billing_mode === 'fixed') {
+        const amt = centsToAmount(amountToCents(t.fee_amount ?? '0'))
+        m.entries.push({
+          kind: 'service_fee',
+          sourceEventId: source,
+          date: null,
+          description: label,
+          durationMinutes: null,
+          quantity: '1',
+          rate: amt,
+          amount: amt,
+        })
+      } else {
+        // hours
+        const hours = Number(t.hours ?? '0')
+        const minutes = Math.round(hours * 60)
+        const rate = t.billable_rate ?? firmDefaultRate
+        if (rate && minutes > 0) {
+          const { quantity, amountCents } = priceTime(minutes, rate)
+          m.entries.push({
+            kind: 'time',
+            sourceEventId: source,
+            date: null,
+            description: label,
+            durationMinutes: minutes,
+            quantity,
+            rate: centsToAmount(amountToCents(rate)),
+            amount: centsToAmount(amountCents),
+          })
+        } else {
+          m.entries.push({
+            kind: 'time',
+            sourceEventId: source,
+            date: null,
+            description: label,
+            durationMinutes: minutes,
+            quantity: (minutes / 60).toFixed(2),
+            rate: null,
+            amount: null,
+          })
+        }
+      }
     }
 
     // Roll up totals (entries with a null amount don't count toward the total).
