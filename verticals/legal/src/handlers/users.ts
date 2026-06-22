@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
+import { canManage } from '../api/users.js'
 
 interface InvitePayload {
   email: string
@@ -74,6 +75,78 @@ async function assignScopes(
   }
 }
 
+// --- Authorization floor (defense in depth) ---------------------------------
+// The rank ceiling is ALSO enforced here, inside the handlers, so it holds on
+// EVERY adapter — the api/users.ts wrapper, the generic substrate.action.submit
+// dispatch, an MCP client — not just the API. Ranks are read from the DB
+// (permission_scope_definition.rank, seeded by private.provision_firm_rbac), and
+// the caller is ALWAYS ctx.actorId (the authenticated session), never the
+// payload. A throw rolls the whole action back (submitAction runs in one tx).
+// The matching DB RLS floor (migration 0078) backs these even if a handler is
+// bypassed. "Admin" is the scope NAME firm.admin/super_admin, not a rank.
+const ADMIN_SCOPES = ['firm.admin', 'firm.super_admin']
+
+async function callerHasAdminScope(
+  client: DbClient,
+  tenantId: string,
+  actorId: string,
+): Promise<boolean> {
+  const r = await client.query(
+    `SELECT 1
+       FROM actor_scope_assignment asa
+       JOIN permission_scope_definition psd ON psd.id = asa.permission_scope_definition_id
+      WHERE asa.tenant_id = $1 AND asa.actor_id = $2
+        AND (asa.valid_to IS NULL OR asa.valid_to > now())
+        AND (psd.valid_to IS NULL OR psd.valid_to > now())
+        AND psd.scope_name = ANY($3::text[])
+      LIMIT 1`,
+    [tenantId, actorId, ADMIN_SCOPES],
+  )
+  return (r.rowCount ?? 0) > 0
+}
+
+// Highest rank among an actor's active scopes (0 if it holds none).
+async function actorRank(client: DbClient, tenantId: string, actorId: string): Promise<number> {
+  const r = await client.query<{ rank: number }>(
+    `SELECT COALESCE(MAX(psd.rank), 0)::int AS rank
+       FROM actor_scope_assignment asa
+       JOIN permission_scope_definition psd ON psd.id = asa.permission_scope_definition_id
+      WHERE asa.tenant_id = $1 AND asa.actor_id = $2
+        AND (asa.valid_to IS NULL OR asa.valid_to > now())
+        AND (psd.valid_to IS NULL OR psd.valid_to > now())`,
+    [tenantId, actorId],
+  )
+  return r.rows[0]?.rank ?? 0
+}
+
+// Rank a role confers: the highest rank among its default scopes (0 if none).
+async function roleRank(client: DbClient, tenantId: string, roleName: string): Promise<number> {
+  const r = await client.query<{ rank: number }>(
+    `SELECT COALESCE(MAX(psd.rank), 0)::int AS rank
+       FROM role_definition rd
+       CROSS JOIN LATERAL jsonb_array_elements_text(rd.default_permission_scopes) AS s(scope_name)
+       JOIN permission_scope_definition psd
+         ON psd.tenant_id = rd.tenant_id AND psd.scope_name = s.scope_name
+        AND (psd.valid_to IS NULL OR psd.valid_to > now())
+      WHERE rd.tenant_id = $1 AND rd.role_name = $2
+        AND (rd.valid_to IS NULL OR rd.valid_to > now())`,
+    [tenantId, roleName],
+  )
+  return r.rows[0]?.rank ?? 0
+}
+
+// Require the caller to hold an admin scope; return their effective rank (the
+// ceiling for what they may grant or whom they may touch).
+async function requireUserAdmin(
+  client: DbClient,
+  ctx: { tenantId: string; actorId: string },
+): Promise<number> {
+  if (!(await callerHasAdminScope(client, ctx.tenantId, ctx.actorId))) {
+    throw new Error('Only a firm admin can manage users.')
+  }
+  return actorRank(client, ctx.tenantId, ctx.actorId)
+}
+
 // Create (or re-activate) a human actor and bind it to a role. A NEW user
 // defaults to the least-privilege firm.paralegal role so they are never born
 // unrestricted. Re-inviting an EXISTING user only re-binds scopes when a role is
@@ -84,13 +157,32 @@ registerActionHandler('legal.user.invite', async (ctx, client, payload, actionId
   const email = (p.email ?? '').trim().toLowerCase()
   if (!email) throw new Error('email is required')
 
+  // Authorization floor: caller must be an admin; the role being conferred and
+  // any existing target must rank strictly below the caller (no peer/superior).
+  const callerR = await requireUserAdmin(client, ctx)
+
   const existing = await client.query<{ id: string }>(
     `SELECT id FROM actor WHERE tenant_id = $1 AND lower(external_id) = $2 AND actor_type = 'human' LIMIT 1`,
     [ctx.tenantId, email],
   )
-  const displayName = (p.display_name ?? '').trim() || email
   const isExisting = Boolean(existing.rows[0])
   const actorId = existing.rows[0]?.id ?? randomUUID()
+
+  if (isExisting) {
+    const targetR = await actorRank(client, ctx.tenantId, actorId)
+    if (targetR >= callerR) {
+      throw new Error('You cannot modify a user at or above your own rank.')
+    }
+  }
+  const explicitRole = (p.role_name ?? '').trim()
+  // A NEW user defaults to the least-privilege paralegal role; an existing user
+  // with no explicit role keeps their current role (nothing conferred → no check).
+  const conferred = explicitRole || (isExisting ? '' : 'firm.paralegal')
+  if (conferred && (await roleRank(client, ctx.tenantId, conferred)) >= callerR) {
+    throw new Error('You cannot grant a role at or above your own.')
+  }
+
+  const displayName = (p.display_name ?? '').trim() || email
   if (isExisting) {
     await client.query(
       `UPDATE actor SET status = 'active', display_name = $3 WHERE tenant_id = $1 AND id = $2`,
@@ -104,7 +196,6 @@ registerActionHandler('legal.user.invite', async (ctx, client, payload, actionId
     )
   }
 
-  const explicitRole = (p.role_name ?? '').trim()
   // Preserve an existing user's role when none is specified (no silent demotion).
   if (isExisting && !explicitRole) {
     return { actorId, roleName: null, scopeCount: null, preserved: true }
@@ -121,6 +212,19 @@ registerActionHandler('legal.user.invite', async (ctx, client, payload, actionId
 registerActionHandler('legal.user.assign_role', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as AssignRolePayload
   if (!p.actor_id) throw new Error('actor_id is required')
+
+  // Authorization floor: admin only, no self-change, and you must strictly
+  // out-rank BOTH the target you touch and the role you grant (canManage).
+  const callerR = await requireUserAdmin(client, ctx)
+  if (p.actor_id === ctx.actorId) {
+    throw new Error('You cannot change your own role.')
+  }
+  const targetR = await actorRank(client, ctx.tenantId, p.actor_id)
+  const grantedR = await roleRank(client, ctx.tenantId, p.role_name)
+  if (!canManage(callerR, targetR, grantedR)) {
+    throw new Error('You cannot assign a role at or above your own, or change a peer/superior.')
+  }
+
   const scopeIds = await scopeIdsForRole(client, ctx.tenantId, p.role_name)
   await closeActiveScopes(client, ctx.tenantId, p.actor_id)
   await assignScopes(client, ctx.tenantId, actionId, p.actor_id, scopeIds)
@@ -131,6 +235,17 @@ registerActionHandler('legal.user.assign_role', async (ctx, client, payload, act
 registerActionHandler('legal.user.deactivate', async (ctx, client, payload) => {
   const p = payload as unknown as DeactivatePayload
   if (!p.actor_id) throw new Error('actor_id is required')
+
+  // Authorization floor: admin only, no self-deactivation, and you may only
+  // deactivate a user ranking strictly below you (no locking out a peer/superior).
+  const callerR = await requireUserAdmin(client, ctx)
+  if (p.actor_id === ctx.actorId) {
+    throw new Error('You cannot deactivate your own account.')
+  }
+  if ((await actorRank(client, ctx.tenantId, p.actor_id)) >= callerR) {
+    throw new Error('You cannot deactivate a user at or above your own rank.')
+  }
+
   const r = await client.query(
     `UPDATE actor SET status = 'inactive' WHERE tenant_id = $1 AND id = $2 AND actor_type = 'human'`,
     [ctx.tenantId, p.actor_id],

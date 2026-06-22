@@ -57,6 +57,16 @@
 CREATE SCHEMA IF NOT EXISTS private;
 
 -- -----------------------------------------------------------------------------
+-- Rank as data (schema-as-data, CLAUDE.md hard rule 8). The ladder's authority
+-- order lives on the scope row, NOT hardcoded in TypeScript — so the DB floor
+-- (the rank-ceiling RLS below) and the application layer share ONE source of
+-- truth and cannot drift. A custom/unseeded scope ranks 0 (no authority).
+-- super_admin 100 > admin 80 > attorney 50 > paralegal 30. Idempotent.
+-- -----------------------------------------------------------------------------
+ALTER TABLE public.permission_scope_definition
+  ADD COLUMN IF NOT EXISTS rank integer NOT NULL DEFAULT 0;
+
+-- -----------------------------------------------------------------------------
 -- Gate helpers (CREATE OR REPLACE the 0073 versions).
 -- -----------------------------------------------------------------------------
 
@@ -96,6 +106,32 @@ AS $$
       AND (psd.valid_to IS NULL OR psd.valid_to > now())
       AND psd.scope_name IN ('firm.admin', 'firm.super_admin')
   );
+$$;
+
+-- Effective rank of an actor: the HIGHEST rank among its active scopes (0 if it
+-- holds none / does not exist). This is the caller's authority in the ladder.
+CREATE OR REPLACE FUNCTION private.actor_rank(p_actor_id uuid)
+RETURNS integer
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = private, public, pg_temp
+AS $$
+  SELECT COALESCE(MAX(psd.rank), 0)::integer
+  FROM public.actor_scope_assignment asa
+  JOIN public.permission_scope_definition psd ON psd.id = asa.permission_scope_definition_id
+  WHERE asa.actor_id = p_actor_id
+    AND (asa.valid_to IS NULL OR asa.valid_to > now())
+    AND (psd.valid_to IS NULL OR psd.valid_to > now());
+$$;
+
+-- Rank a specific scope confers (0 if the scope row is unknown).
+CREATE OR REPLACE FUNCTION private.scope_rank(p_scope_id uuid)
+RETURNS integer
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = private, public, pg_temp
+AS $$
+  SELECT COALESCE(
+    (SELECT psd.rank FROM public.permission_scope_definition psd WHERE psd.id = p_scope_id),
+    0)::integer;
 $$;
 
 -- Is this action one that grants access OR reshapes the firm's configuration?
@@ -191,6 +227,8 @@ $$;
 
 GRANT EXECUTE ON FUNCTION private.actor_has_admin_scope(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION private.action_is_escalation(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION private.actor_rank(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION private.scope_rank(uuid) TO authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Reusable per-tenant provisioning of the 4-tier ladder. UPSERT by name so it
@@ -214,34 +252,36 @@ BEGIN
   -- lives in un-scoped `event` rows — an entity-only `!invoice` exclusion would
   -- be a false guarantee. Read-side billing isolation needs event-level scoping
   -- (a substrate-wide follow-up), tracked separately.
+  -- rank: the ladder's authority order, persisted as data (read by the
+  -- rank-ceiling RLS and the application layer alike — one source of truth).
   FOR s IN
     SELECT * FROM (VALUES
       ('firm.super_admin', 'Super Admin (platform owner)',
         'Full access across the firm, plus authority over admins. The platform owner.',
-        '["*"]'::jsonb, '["*"]'::jsonb),
+        '["*"]'::jsonb, '["*"]'::jsonb, 100),
       ('firm.admin', 'Admin (Head Attorney)',
         'Full access: matters, clients, billing, firm settings, and user management.',
-        '["*"]'::jsonb, '["*"]'::jsonb),
+        '["*"]'::jsonb, '["*"]'::jsonb, 80),
       ('firm.attorney', 'Attorney',
         'Full practice access incl. billing; cannot manage users or define firm kinds/workflows/RBAC.',
-        '["*"]'::jsonb, '["*"]'::jsonb),
+        '["*"]'::jsonb, '["*"]'::jsonb, 50),
       ('firm.paralegal', 'Paralegal',
         'Full practice access; cannot issue/send invoices, set the firm rate, or administer the firm.',
         '["*","!invoice.issue","!invoice.send","!legal.firm.set_default_rate"]'::jsonb,
-        '["*"]'::jsonb)
-    ) AS t(scope_name, display_name, description, action_kinds, entity_kinds)
+        '["*"]'::jsonb, 30)
+    ) AS t(scope_name, display_name, description, action_kinds, entity_kinds, rank)
   LOOP
     UPDATE permission_scope_definition
        SET display_name = s.display_name, description = s.description,
-           action_kinds = s.action_kinds, entity_kinds = s.entity_kinds, status = 'active'
+           action_kinds = s.action_kinds, entity_kinds = s.entity_kinds, rank = s.rank, status = 'active'
      WHERE tenant_id = p_tenant AND scope_name = s.scope_name
        AND (valid_to IS NULL OR valid_to > now());
     IF NOT FOUND THEN
       INSERT INTO permission_scope_definition
         (id, tenant_id, action_id, scope_name, display_name, description,
-         action_kinds, entity_kinds, attribute_kinds, row_filter_expression, status)
+         action_kinds, entity_kinds, attribute_kinds, row_filter_expression, rank, status)
       VALUES (gen_random_uuid(), p_tenant, p_action_id, s.scope_name, s.display_name, s.description,
-              s.action_kinds, s.entity_kinds, '[]'::jsonb, '{}'::jsonb, 'active');
+              s.action_kinds, s.entity_kinds, '[]'::jsonb, '{}'::jsonb, s.rank, 'active');
     END IF;
   END LOOP;
 
@@ -389,6 +429,82 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
   PERFORM private.assign_actor_role(tb, v_action, v_super, 'firm.super_admin');
 END $$;
+
+-- =============================================================================
+-- DB-layer privilege-escalation floor (defense in depth, BENEATH the API adapter).
+--
+-- The rank ceiling used to live ONLY in the TypeScript API layer
+-- (verticals/legal/src/api/users.ts). But the generic substrate.action.submit
+-- path reaches the registered handlers WITHOUT that wrapper, so a firm.admin
+-- could call legal.user.assign_role / actor_scope.assign directly to mint a peer
+-- admin or self-escalate to super_admin. The handlers now re-enforce the ceiling;
+-- these RESTRICTIVE policies are the floor beneath them, so NO path (legal
+-- handler, generic actor_scope.assign primitive, or a raw INSERT under the
+-- `authenticated` role) can grant authority the caller does not itself hold.
+--
+-- RESTRICTIVE policies AND with the permissive tenant policies and are bypassed
+-- by BYPASSRLS roles (owner / service_role) — so migrations, the seed, and the
+-- bootstrap super_admin assignments above keep working; they bite for the
+-- runtime's `authenticated` role (ADR 0037). Each carries the same fail-safe as
+-- 0073: an unset session actor (NULL — migration/superuser paths) or an
+-- UNRESTRICTED non-human actor (system/agent/worker; the seed & job paths)
+-- short-circuits, so only restricted (human / forged) callers are rank-checked.
+-- =============================================================================
+
+-- (1) Rank ceiling on GRANTING a scope: the granting (session) actor must
+--     STRICTLY out-rank the scope being granted. Closes self-escalation and
+--     peer-admin minting via every assignment path.
+DROP POLICY IF EXISTS actor_scope_assignment_rank_enforcement_insert ON public.actor_scope_assignment;
+CREATE POLICY actor_scope_assignment_rank_enforcement_insert ON public.actor_scope_assignment
+  AS RESTRICTIVE FOR INSERT
+  WITH CHECK (
+    private.current_actor_id() IS NULL
+    OR NOT private.actor_is_scope_restricted(private.current_actor_id())
+    OR private.actor_rank(private.current_actor_id()) > private.scope_rank(permission_scope_definition_id)
+  );
+
+-- (2) Admin floor on (re)defining the firm's privilege grammar. Minting a
+--     permission scope or a role IS an escalation surface (CLAUDE.md hard rule 8);
+--     gate it on holding an admin scope, mirroring the action-layer floor. Before
+--     this only the `action` table was gated (0073) — these close the path of
+--     INSERTing straight into the definition tables under `authenticated`.
+DROP POLICY IF EXISTS psd_scope_enforcement_insert ON public.permission_scope_definition;
+CREATE POLICY psd_scope_enforcement_insert ON public.permission_scope_definition
+  AS RESTRICTIVE FOR INSERT
+  WITH CHECK (
+    private.current_actor_id() IS NULL
+    OR NOT private.actor_is_scope_restricted(private.current_actor_id())
+    OR private.actor_has_admin_scope(private.current_actor_id())
+  );
+
+DROP POLICY IF EXISTS role_definition_scope_enforcement_insert ON public.role_definition;
+CREATE POLICY role_definition_scope_enforcement_insert ON public.role_definition
+  AS RESTRICTIVE FOR INSERT
+  WITH CHECK (
+    private.current_actor_id() IS NULL
+    OR NOT private.actor_is_scope_restricted(private.current_actor_id())
+    OR private.actor_has_admin_scope(private.current_actor_id())
+  );
+
+-- (3) Tighten the 0073 action write-gate: gate on the SESSION actor
+--     (private.current_actor_id()) and require the recorded action.actor_id to
+--     EQUAL it — so a write cannot be attributed to (and pass the scope check as)
+--     an actor other than the one making the request. submitAction binds
+--     ctx.actorId to BOTH app.actor_id and the action row, so every real write
+--     path has them equal and is unaffected; this only removes the latent
+--     "record as someone else" gap on the raw mcp-server HTTP transport. The
+--     NULL branch preserves 0073's superuser/migration fail-open (those bypass
+--     RLS regardless).
+DROP POLICY IF EXISTS action_scope_enforcement_insert ON public.action;
+CREATE POLICY action_scope_enforcement_insert ON public.action
+  AS RESTRICTIVE FOR INSERT
+  WITH CHECK (
+    private.current_actor_id() IS NULL
+    OR (
+      actor_id = private.current_actor_id()
+      AND private.actor_may_run_action(private.current_actor_id(), action_kind_id)
+    )
+  );
 
 -- Self-record (invariant 12).
 SELECT public.sync_migration_history();

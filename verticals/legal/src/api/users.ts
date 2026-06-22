@@ -11,20 +11,18 @@
 // attorneys/paralegals but cannot touch (or mint) another admin or a super_admin.
 import { submitAction, executeQuery, type ActionContext, type ActionResult } from '@exsto/substrate'
 
-// Rank of each ladder scope. Higher = more authority. Custom/unknown scopes
-// rank 0 (no management authority, manageable by any admin). Keyed by scope_name
-// (role_name == scope_name across the 4-tier ladder).
-export const ROLE_RANK: Record<string, number> = {
-  'firm.super_admin': 100,
-  'firm.admin': 80,
-  'firm.attorney': 50,
-  'firm.paralegal': 30,
-}
 export const ADMIN_SCOPES = ['firm.admin', 'firm.super_admin'] as const
 
+// Rank lives on the scope ROW in the DB (permission_scope_definition.rank,
+// seeded by private.provision_firm_rbac) — schema-as-data, so the DB enforcement
+// floor (migration 0078) and this layer share ONE source of truth and cannot
+// drift. A RankMap is scope_name -> rank for the tenant's active scopes; an
+// unmapped/custom scope ranks 0 (no management authority).
+export type RankMap = Record<string, number>
+
 // Highest rank among a set of scope names (an actor's effective rank).
-export function rankOfScopes(scopeNames: string[]): number {
-  return scopeNames.reduce((max, s) => Math.max(max, ROLE_RANK[s] ?? 0), 0)
+export function rankOfScopes(scopeNames: string[], ranks: RankMap): number {
+  return scopeNames.reduce((max, s) => Math.max(max, ranks[s] ?? 0), 0)
 }
 
 // Pure hierarchy check: may a caller of rank `caller` set a target (current rank
@@ -74,6 +72,19 @@ async function scopeNamesFor(ctx: ActionContext, actorId: string): Promise<strin
   return r.rows.map((x) => x.scope_name)
 }
 
+// scope_name -> rank for the tenant's active scopes (the rank source of truth).
+async function scopeRanks(ctx: ActionContext): Promise<RankMap> {
+  const r = await executeQuery<{ scope_name: string; rank: number }>(
+    ctx,
+    `SELECT scope_name, MAX(rank)::int AS rank
+       FROM permission_scope_definition
+      WHERE tenant_id = $1 AND (valid_to IS NULL OR valid_to > now())
+      GROUP BY scope_name`,
+    [ctx.tenantId],
+  )
+  return Object.fromEntries(r.rows.map((x) => [x.scope_name, x.rank]))
+}
+
 // True iff the acting actor holds an active admin (firm.admin/super_admin) scope.
 export async function isAdmin(ctx: ActionContext): Promise<boolean> {
   const r = await executeQuery(
@@ -99,10 +110,11 @@ export async function requireAdmin(ctx: ActionContext): Promise<void> {
 
 // The caller's own effective rank.
 async function callerRank(ctx: ActionContext): Promise<number> {
-  return rankOfScopes(await scopeNamesFor(ctx, ctx.actorId))
+  return rankOfScopes(await scopeNamesFor(ctx, ctx.actorId), await scopeRanks(ctx))
 }
 
 export async function listRoles(ctx: ActionContext): Promise<FirmRole[]> {
+  const ranks = await scopeRanks(ctx)
   const res = await executeQuery<{
     role_name: string
     display_name: string
@@ -121,7 +133,7 @@ export async function listRoles(ctx: ActionContext): Promise<FirmRole[]> {
     displayName: r.display_name,
     description: r.description,
     scopeNames: r.default_permission_scopes ?? [],
-    rank: rankOfScopes(r.default_permission_scopes ?? []),
+    rank: rankOfScopes(r.default_permission_scopes ?? [], ranks),
   }))
 }
 
@@ -150,6 +162,7 @@ export async function listUsers(
 ): Promise<{ users: FirmUser[]; roles: FirmRole[] }> {
   await requireAdmin(ctx)
   const roles = await listRoles(ctx)
+  const ranks = await scopeRanks(ctx)
   const res = await executeQuery<{
     id: string
     email: string | null
@@ -180,7 +193,7 @@ export async function listUsers(
     status: r.status,
     scopes: r.scopes ?? [],
     role: deriveRole(r.scopes ?? [], roles),
-    rank: rankOfScopes(r.scopes ?? []),
+    rank: rankOfScopes(r.scopes ?? [], ranks),
   }))
   return { users, roles }
 }
@@ -188,12 +201,13 @@ export async function listUsers(
 export async function whoAmI(ctx: ActionContext): Promise<WhoAmI> {
   const admin = await isAdmin(ctx)
   const roles = await listRoles(ctx)
+  const ranks = await scopeRanks(ctx)
   const scopes = await scopeNamesFor(ctx, ctx.actorId)
   return {
     actorId: ctx.actorId,
     isAdmin: admin,
     role: deriveRole(scopes, roles),
-    rank: rankOfScopes(scopes),
+    rank: rankOfScopes(scopes, ranks),
   }
 }
 
@@ -206,7 +220,7 @@ async function roleRankByName(ctx: ActionContext, roleName: string): Promise<num
 }
 
 async function actorRank(ctx: ActionContext, actorId: string): Promise<number> {
-  return rankOfScopes(await scopeNamesFor(ctx, actorId))
+  return rankOfScopes(await scopeNamesFor(ctx, actorId), await scopeRanks(ctx))
 }
 
 export interface InviteUserInput {
