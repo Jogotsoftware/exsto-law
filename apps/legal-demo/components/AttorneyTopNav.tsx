@@ -56,6 +56,9 @@ type OpenMenu = null | 'nav' | 'notif' | 'user'
 type NotifItem = {
   eventId: string
   note: string | null
+  // Clean one-line restatement of the feedback (null on legacy events → fall
+  // back to the raw excerpt).
+  summary: string | null
   excerpt: string
   linkPath: string | null
   category: string
@@ -256,8 +259,14 @@ export function AttorneyTopNav() {
                             <span className="att-notif-title">Feedback resolved</span>
                             <span className="att-notif-cat">{n.category}</span>
                           </span>
+                          {/* Headline: the resolver's clean one-liner. Legacy events
+                              with no summary fall back to the quoted raw excerpt. */}
+                          {n.summary ? (
+                            <span className="att-notif-summary">{n.summary}</span>
+                          ) : (
+                            <span className="att-notif-excerpt">“{n.excerpt}”</span>
+                          )}
                           {n.note && <span className="att-notif-note">{n.note}</span>}
-                          <span className="att-notif-excerpt">“{n.excerpt}”</span>
                         </>
                       )
                       return (

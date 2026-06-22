@@ -15,7 +15,7 @@ import type { ActionContext } from '@exsto/substrate'
 registerTool({
   name: 'legal.assistant.feedback_resolve',
   description:
-    'Mark a piece of beta feedback resolved and notify the attorney who submitted it, in-app, with a link back to the page they gave the feedback on. Pass the feedback event id (the ref shown on submit) and an optional note describing what was done. Records an append-only resolution event addressed to the submitter.',
+    'Mark a piece of beta feedback resolved and notify the attorney who submitted it, in-app, with a link back to the page they gave the feedback on. Pass the feedback event id (the ref shown on submit), a one-sentence plain-language summary of what the feedback/feature was (the notification headline — write this, do not echo codes or the raw text), and an optional note describing what was done. Records an append-only resolution event addressed to the submitter.',
   mode: 'write',
   inputSchema: {
     type: 'object',
@@ -23,6 +23,11 @@ registerTool({
       feedbackEventId: {
         type: 'string',
         description: 'The assistant.turn (kind=feedback) event id — the ref shown when submitted.',
+      },
+      summary: {
+        type: 'string',
+        description:
+          'A clean one-sentence restatement of WHAT the feedback/feature was, in plain language (e.g. "Add a Select-all option when building an invoice"). Shown as the notification headline; keep it short and code-free.',
       },
       note: {
         type: 'string',
@@ -38,7 +43,7 @@ registerTool({
 registerTool({
   name: 'legal.notifications.list',
   description:
-    "The current attorney's in-app notifications (resolved feedback addressed to them), newest first, each with the resolution note, an excerpt of their original feedback, a link back to the page, and whether it is unread. Powers the nav notification bell.",
+    "The current attorney's in-app notifications (resolved feedback addressed to them), newest first, each with a one-line summary of the feedback, the resolution note, an excerpt of the original (fallback), a link back to the page, and whether it is unread. Powers the nav notification bell.",
   mode: 'read',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => await listMyNotifications(ctx),

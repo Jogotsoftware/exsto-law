@@ -47,16 +47,19 @@ run('feedback resolution -> in-app notification (live DB)', { timeout: 90_000 },
     // Resolving it addresses a notification back to the submitter.
     const res = await resolveAssistantFeedback(ctx, {
       feedbackEventId: fb.eventId,
+      summary: `${tag} restyle the Services page toggle`,
       note: `${tag} fixed in the next build`,
     })
     expect(res.eventId).toBeTruthy()
 
-    // It shows in the submitter's bell — unread, with the note, excerpt, deep link.
+    // It shows in the submitter's bell — unread, with the summary headline, the
+    // note, the raw excerpt (fallback), and the deep link.
     const before = await listMyNotifications(ctx)
     const mine = before.items.find((i) => i.eventId === res.eventId)
     expect(mine).toBeTruthy()
     expect(mine?.unread).toBe(true)
     expect(mine?.linkPath).toBe(path)
+    expect(mine?.summary).toBe(`${tag} restyle the Services page toggle`)
     expect(mine?.note).toBe(`${tag} fixed in the next build`)
     expect(mine?.excerpt).toContain('the toggle is ugly')
     expect(before.unreadCount).toBeGreaterThanOrEqual(1)

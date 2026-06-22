@@ -812,9 +812,19 @@ a.att-notif-link:hover {
   border-radius: 999px;
   padding: 0.02rem 0.4rem;
 }
-.att-notif-note {
+.att-notif-summary {
   font-size: var(--text-sm, 0.85rem);
+  font-weight: 500;
   color: var(--fg, #0f172a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.att-notif-note {
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 .att-notif-excerpt {
   font-size: 0.76rem;
@@ -4337,6 +4347,7 @@ button.danger.outline:hover:not(:disabled) {
 }
 
 .feedback-bubble {
+  position: relative;
   max-width: 85%;
   padding: 0.55rem 0.75rem;
   border-radius: var(--radius-lg);
@@ -4345,17 +4356,43 @@ button.danger.outline:hover:not(:disabled) {
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* iMessage-style corner tail: a small triangle merging with the bubble's bottom
+   corner and pointing outward toward its sender's side. Colored to match the
+   bubble so it reads as part of it. */
+.feedback-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-bottom: 0;
+}
 .feedback-bubble-user {
   align-self: flex-end;
   background: var(--accent);
   color: white;
   border-bottom-right-radius: var(--radius-sm);
+  /* Reserve the tail's overhang inside the bubble's own box so the tail reaches
+     the container edge without spilling past it (the message list scrolls). */
+  margin-right: 4px;
+}
+.feedback-bubble-user::after {
+  right: -4px;
+  border-left-color: var(--accent); /* wedge points right, off the right corner */
+  border-right: 0;
 }
 .feedback-bubble-assistant {
   align-self: flex-start;
   background: var(--border-soft);
   color: var(--fg);
   border-bottom-left-radius: var(--radius-sm);
+  margin-left: 4px;
+}
+.feedback-bubble-assistant::after {
+  left: -4px;
+  border-right-color: var(--border-soft); /* wedge points left, off the left corner */
+  border-left: 0;
 }
 .feedback-bubble-pending {
   color: var(--muted);

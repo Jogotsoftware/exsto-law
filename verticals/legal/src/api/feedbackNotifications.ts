@@ -15,6 +15,10 @@ export interface ResolveFeedbackInput {
   feedbackEventId: string
   // What was done about it (shown verbatim in the attorney's notification).
   note?: string
+  // A clean one-sentence restatement of WHAT the feedback/feature was, in plain
+  // language. This is the notification's headline so the attorney reads the
+  // substance, not the raw (sometimes coded, e.g. "fbk-123 …") original text.
+  summary?: string
 }
 
 // Resolve one beta-feedback item. Reads the original feedback to learn who
@@ -44,6 +48,10 @@ export async function resolveAssistantFeedback(
         feedback_event_id: input.feedbackEventId,
         // The submitter — who gets notified in-app.
         recipient_actor_id: original.sourceRef,
+        // The resolver's one-line restatement of the feedback — the notification
+        // headline. Falls back to the (truncated) raw excerpt for legacy events
+        // that predate this field; see listMyNotifications.
+        summary: input.summary?.trim() || null,
         note: input.note?.trim() || null,
         link_path: original.linkPath,
         excerpt: message.length > 140 ? `${message.slice(0, 140)}…` : message,
@@ -60,6 +68,9 @@ export interface NotificationItem {
   feedbackEventId: string | null
   note: string | null
   linkPath: string | null
+  // The resolver's clean one-line restatement (null on legacy events). The bell
+  // shows this as the headline; it falls back to `excerpt` when absent.
+  summary: string | null
   excerpt: string
   category: FeedbackCategory
   resolvedAt: string
@@ -79,6 +90,7 @@ export async function listMyNotifications(
       feedback_event_id: string | null
       note: string | null
       link_path: string | null
+      summary: string | null
       excerpt: string | null
       category: string | null
       resolved_at: string
@@ -98,6 +110,7 @@ export async function listMyNotifications(
               e.payload->>'feedback_event_id' AS feedback_event_id,
               e.payload->>'note'              AS note,
               e.payload->>'link_path'         AS link_path,
+              e.payload->>'summary'           AS summary,
               e.payload->>'excerpt'           AS excerpt,
               e.payload->>'category'          AS category,
               to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS resolved_at,
@@ -116,6 +129,7 @@ export async function listMyNotifications(
       feedbackEventId: r.feedback_event_id,
       note: r.note,
       linkPath: r.link_path,
+      summary: r.summary,
       excerpt: r.excerpt ?? '',
       category: (r.category as FeedbackCategory) ?? 'other',
       resolvedAt: r.resolved_at,
