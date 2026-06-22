@@ -18,8 +18,41 @@ import {
   type EmailAttachment,
 } from '../adapters/gmail.js'
 import { resolveEmailSignature } from './firmSignature.js'
-import { authorizedSendMatters } from './matterAccess.js'
+import { authorizedSendMatters, getMatterAccess } from './matterAccess.js'
 import { resolveMatterAttachments, type AttachmentRef } from './mailAttachments.js'
+import { getConnectionInfo, resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
+
+// True iff this actor has a 'connected' Google account with the gmail.send scope —
+// i.e. an outbound email can actually be sent from their mailbox.
+async function canSendAsActor(
+  tenantId: string,
+  actorId: string | null | undefined,
+): Promise<boolean> {
+  if (!actorId) return false
+  const info = await getConnectionInfo(tenantId, 'google', actorId)
+  return !!info && info.status === 'connected' && (info.scope ?? '').includes('gmail.send')
+}
+
+// Resolve the actor whose Gmail an outbound client email sends FROM. Beta feedback:
+// "everything should come from the executor's email" — so prefer the matter OWNER
+// (the responsible attorney), then the actual sender, then the firm-primary. Each
+// candidate must actually have a usable Gmail send connection; the matter owner is
+// not always connected (e.g. a practicing attorney who hasn't linked Gmail yet), so
+// this degrades gracefully instead of hard-failing the send. Falls back to
+// ctx.actorId if nobody is connected (sendEmail then surfaces a clear connect error).
+export async function resolveSendAsActor(
+  ctx: ActionContext,
+  matterEntityId: string | null,
+): Promise<string> {
+  const ownerActorId = matterEntityId
+    ? (await getMatterAccess(ctx, matterEntityId)).ownerActorId
+    : null
+  const firmPrimary = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
+  for (const candidate of [ownerActorId, ctx.actorId, firmPrimary]) {
+    if (await canSendAsActor(ctx.tenantId, candidate)) return candidate!
+  }
+  return ctx.actorId
+}
 
 // Build the outbound attachment list for a send authorized on `matterEntityId`:
 // resolve client document REFERENCES to bytes (scope-checked against THIS matter)
@@ -336,6 +369,9 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
     { body: input.bodyText, html: input.bodyHtml },
     await resolveEmailSignature(ctx),
   )
+  // Send FROM the matter owner's mailbox when possible (beta feedback), else fall
+  // back to the sender / firm-primary.
+  const sendAsActor = await resolveSendAsActor(ctx, matterEntityId)
   const sent = await sendEmail(
     ctx.tenantId,
     {
@@ -347,7 +383,7 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
       inReplyToMessageIdHeader: last?.messageIdHeader ?? undefined,
       attachments,
     },
-    ctx.actorId,
+    sendAsActor,
   )
   return submitAction(ctx, {
     actionKindName: 'mail.send',
@@ -450,6 +486,9 @@ export async function enqueueClientEmail(
     { body: input.body, html: input.html },
     await resolveEmailSignature(ctx),
   )
+  // Send FROM the matter owner's mailbox when possible (beta feedback), else fall
+  // back to the sender / firm-primary.
+  const sendAsActor = await resolveSendAsActor(ctx, matterEntityId)
   const sent = await sendEmail(
     ctx.tenantId,
     {
@@ -459,7 +498,7 @@ export async function enqueueClientEmail(
       html: signed.html,
       attachments,
     },
-    ctx.actorId,
+    sendAsActor,
   )
 
   const action = await submitAction(ctx, {
