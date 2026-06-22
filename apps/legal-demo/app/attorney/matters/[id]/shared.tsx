@@ -26,6 +26,88 @@ export function humanizeKind(k: string): string {
   return k.replace(/_/g, ' ')
 }
 
+// ── Matter workflow steps ──────────────────────────────────────────────────
+// There is no first-class "step" record; a matter's progress IS the presence of
+// the intake questionnaire, the consultation transcript, and the latest document
+// draft, walked in lifecycle order. The first not-done step is the "current" one.
+export type StepKey = 'intake' | 'consultation' | 'document'
+export type StepState = 'done' | 'current' | 'pending'
+
+export interface MatterStep {
+  key: StepKey
+  title: string
+  state: StepState
+  subtitle: string
+}
+
+export function deriveMatterSteps(matter: MatterDetail): MatterStep[] {
+  const draftLabel = matter.latestDraftStatus
+    ? `Latest draft · ${humanizeStatus(matter.latestDraftStatus)}`
+    : 'Latest draft ready'
+  const defs: Array<{ key: StepKey; title: string; isDone: boolean; subtitle: string }> = [
+    {
+      key: 'intake',
+      title: 'Intake',
+      isDone: matter.questionnaireResponses !== null,
+      subtitle:
+        matter.questionnaireResponses !== null
+          ? 'Questionnaire submitted'
+          : 'Awaiting the client’s questionnaire',
+    },
+    {
+      key: 'consultation',
+      title: 'Consultation',
+      isDone: matter.transcriptText !== null,
+      subtitle: matter.transcriptText !== null ? 'Call recorded' : 'No consultation transcript yet',
+    },
+    {
+      key: 'document',
+      title: 'Document',
+      isDone: matter.latestDraftVersionId !== null,
+      subtitle: matter.latestDraftVersionId !== null ? draftLabel : 'No document generated yet',
+    },
+  ]
+  let currentAssigned = false
+  return defs.map((d): MatterStep => {
+    if (d.isDone) return { key: d.key, title: d.title, state: 'done', subtitle: d.subtitle }
+    if (!currentAssigned) {
+      currentAssigned = true
+      return { key: d.key, title: d.title, state: 'current', subtitle: d.subtitle }
+    }
+    return { key: d.key, title: d.title, state: 'pending', subtitle: d.subtitle }
+  })
+}
+
+// Flatten the questionnaire payload into simple markdown so the intake step can be
+// downloaded (PDF/Word) via the same client-side export the drafts use.
+export function questionnaireToMarkdown(
+  data: Record<string, unknown>,
+  heading = 'Intake questionnaire',
+): string {
+  const lines: string[] = [`# ${heading}`, '']
+  for (const [k, v] of Object.entries(data)) {
+    const label = humanizeKey(k)
+    if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'object' && v[0] !== null) {
+      const rows = v as Array<Record<string, unknown>>
+      const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))))
+      lines.push(`## ${label}`, '')
+      lines.push(`| ${cols.map(humanizeKey).join(' | ')} |`)
+      lines.push(`| ${cols.map(() => '---').join(' | ')} |`)
+      for (const row of rows) {
+        lines.push(`| ${cols.map((c) => mdCell(row[c])).join(' | ')} |`)
+      }
+      lines.push('')
+    } else {
+      lines.push(`**${label}:** ${humanizeValue(v)}`, '')
+    }
+  }
+  return lines.join('\n')
+}
+
+function mdCell(value: unknown): string {
+  return humanizeValue(value).replace(/\|/g, '\\|').replace(/\n/g, ' ')
+}
+
 export function humanizeService(key: string): string {
   if (!key) return '—'
   if (key === 'llc_formation') return 'NC LLC formation'

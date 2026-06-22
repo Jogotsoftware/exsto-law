@@ -722,6 +722,134 @@ section h2 {
   color: var(--accent-attorney);
 }
 
+/* Actions menu — a normal pill button (inherits the global button style) that
+   drops a right-anchored mini menu of entity actions. The chevron flips when open. */
+.att-actions-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.att-actions-btn svg {
+  transition: transform 0.16s ease;
+}
+.att-actions-btn.active svg {
+  transform: rotate(180deg);
+}
+/* The menu panel reuses the right-anchored .att-pop shell; this just lays the
+   items out as a list. `.align-left` hangs it from the left edge instead. */
+.att-menu-pop {
+  min-width: 184px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.att-menu-pop.align-left {
+  right: auto;
+  left: 0;
+}
+
+/* Matter workflow step list — clickable rows (Intake / Consultation / Document),
+   each opening a detail modal. Status drives the icon tint + the right-side pill. */
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface, #fff);
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    background 0.14s ease;
+}
+.step-row:hover {
+  border-color: var(--accent-attorney, #c08a3e);
+  box-shadow: var(--shadow-sm);
+}
+.step-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+.step-row.step-done .step-ico {
+  color: #2e7d52;
+}
+.step-row.step-current .step-ico {
+  color: #c08a3e;
+}
+.step-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.step-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+.step-subtitle {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.step-state-pill {
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--rule-soft);
+}
+.step-row.step-done .step-state-pill {
+  color: #2e7d52;
+  background: rgba(46, 125, 82, 0.12);
+}
+.step-row.step-current .step-state-pill {
+  color: #92400e;
+  background: rgba(231, 182, 103, 0.18);
+}
+.step-chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted);
+}
+
+/* A Next <Link> styled as a button (e.g. "Open full review" in a modal footer),
+   mirroring the base button rule so it sits cleanly beside real buttons. */
+a.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: 500;
+  font-size: 0.92rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    border-color var(--transition),
+    background var(--transition);
+}
+a.button:hover {
+  border-color: var(--accent-attorney);
+  text-decoration: none;
+}
+
 /* Notifications dropdown */
 .att-notif {
   min-width: 280px;

@@ -1,13 +1,14 @@
 'use client'
 
-// Matter › ACTIVITY tab. One chronological feed of everything that has happened on
-// the matter — audited actions AND lifecycle events merged into a single timeline
-// (the old page showed an actions table AND a near-duplicate lifecycle-event badge
-// ribbon; this collapses them) — plus the client↔attorney message thread and the
-// research log.
+// Matter › ACTIVITY tab. Leads with what the attorney acts on day-to-day — the
+// client↔attorney message thread and this matter's calendar (consultations /
+// meetings) — and tucks the full audited timeline (actions + lifecycle events)
+// into a collapsed section below. (Beta feedback: messages/calendar at the top,
+// timeline collapsible & collapsed by default, drop the research section.)
 import { use, useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { MatterResearchPanel } from '@/components/MatterResearchPanel'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { WeeklyCalendar, type CalendarItem } from '@/components/WeeklyCalendar'
 import { humanizeKind } from '../shared'
 
 interface MatterActionEntry {
@@ -40,6 +41,14 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
   const [history, setHistory] = useState<MatterHistory | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // This matter's calendar. There is no matter-scoped calendar tool, so we read
+  // the unified feed for a window and keep only the items tagged with this matter
+  // (consultations carry matterEntityId; external Google events are null → dropped).
+  const [calItems, setCalItems] = useState<CalendarItem[] | null>(null)
+  const [calLoaded, setCalLoaded] = useState(false)
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
+  const [calError, setCalError] = useState<string | null>(null)
+
   useEffect(() => {
     callAttorneyMcp<MatterHistory>({
       toolName: 'legal.matter.history',
@@ -48,6 +57,34 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
       .then(setHistory)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [id])
+
+  useEffect(() => {
+    let cancelled = false
+    const now = Date.now()
+    const fromIso = new Date(now - 90 * 24 * 3600 * 1000).toISOString()
+    const toIso = new Date(now + 120 * 24 * 3600 * 1000).toISOString()
+    callAttorneyMcp<{ items: CalendarItem[]; source: string; error?: string }>({
+      toolName: 'legal.calendar.feed',
+      input: { fromIso, toIso },
+    })
+      .then((r) => {
+        if (cancelled) return
+        setCalItems(r.items)
+        setCalLoaded(true)
+        setLastRefreshedAt(Date.now())
+        setCalError(r.source === 'error' ? (r.error ?? 'Google calendar read failed.') : null)
+      })
+      .catch((e) => {
+        if (cancelled) return
+        setCalError(e instanceof Error ? e.message : String(e))
+        setCalLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [id])
+
+  const matterEvents = (calItems ?? []).filter((i) => i.matterEntityId === id)
 
   // Merge actions + events into one timeline, newest first. Actions carry the rich
   // audit detail; events are the lifecycle markers — together they read as one story.
@@ -64,12 +101,19 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
 
   return (
     <>
+      <MessagesSection matterEntityId={id} />
+
       <section>
-        <h2>Timeline</h2>
-        <p className="text-muted text-sm">
-          Every change to this matter — audited actions (actor · intent · autonomy · reasoning
-          trace) and lifecycle events, newest first.
-        </p>
+        <h2>Calendar</h2>
+        <p className="text-muted text-sm">Consultations and meetings booked on this matter.</p>
+        {calError && <div className="alert alert-error">{calError}</div>}
+        <WeeklyCalendar items={matterEvents} loaded={calLoaded} lastRefreshedAt={lastRefreshedAt} />
+      </section>
+
+      <CollapsibleSection
+        title="Timeline"
+        subtitle="Every change to this matter — audited actions (actor · intent · autonomy · reasoning trace) and lifecycle events, newest first."
+      >
         {error && <div className="alert alert-error">{error}</div>}
         {history === null ? (
           <p className="text-muted text-sm">
@@ -121,14 +165,7 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
             </table>
           </div>
         )}
-      </section>
-
-      <MessagesSection matterEntityId={id} />
-
-      <section>
-        <h2>Research</h2>
-        <MatterResearchPanel matterEntityId={id} />
-      </section>
+      </CollapsibleSection>
     </>
   )
 }
