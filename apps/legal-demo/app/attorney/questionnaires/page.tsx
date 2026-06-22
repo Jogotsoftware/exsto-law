@@ -90,6 +90,15 @@ function slug(s: string): string {
     .slice(0, 60)
 }
 
+// Normalize a typed VARIABLE to a valid {{token}} without fighting the user
+// mid-word (keeps a trailing "_" so "company_" → "company_name" types cleanly).
+function normToken(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .slice(0, 60)
+}
+
 const NEW_FIELD = (): BField => ({ label: '', type: 'text', required: true, options: '' })
 const NEW_SECTION = (): BSection => ({ title: '', fields: [NEW_FIELD()] })
 const EMPTY_DRAFT = (): Draft => ({
@@ -406,6 +415,12 @@ export default function QuestionnaireLibraryPage() {
             </label>
           </div>
 
+          <p className="muted" style={{ fontSize: '0.82rem', margin: '-0.3rem 0 0.9rem' }}>
+            Each question’s <strong>variable</strong> is the <code>{'{{token}}'}</code> its answer
+            fills in the bound document template — set it to tie a question to a template field.
+            Leave it blank to default to the question label.
+          </p>
+
           {draft.sections.map((section, si) => (
             <fieldset key={si} className="svc-fieldset qb-section">
               <legend>
@@ -437,6 +452,34 @@ export default function QuestionnaireLibraryPage() {
                     onChange={(e) => patchField(si, fi, { label: e.target.value })}
                     placeholder="Question label"
                   />
+                  <span
+                    className="qb-var"
+                    title="The variable this answer fills in the document template. Leave blank to use the question label."
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontSize: '0.8rem',
+                      color: 'var(--muted)',
+                    }}
+                  >
+                    {'{{'}
+                    <input
+                      value={field.token ?? ''}
+                      onChange={(e) => patchField(si, fi, { token: normToken(e.target.value) })}
+                      placeholder={slug(field.label) || 'variable'}
+                      spellCheck={false}
+                      aria-label="Variable name"
+                      style={{
+                        width: '7.5rem',
+                        fontFamily: 'inherit',
+                        fontSize: 'inherit',
+                        padding: '0.2rem 0.35rem',
+                      }}
+                    />
+                    {'}}'}
+                  </span>
                   <select
                     value={field.type}
                     onChange={(e) => patchField(si, fi, { type: e.target.value as FieldType })}
