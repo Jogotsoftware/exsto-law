@@ -98,6 +98,9 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   const [regenSkills, setRegenSkills] = useState<Set<string>>(new Set())
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[] | null>(null)
   const [skillQuery, setSkillQuery] = useState('')
+  // After "Request revision", nudge the attorney to regenerate now with those very
+  // notes — closing the loop between asking for changes and producing them.
+  const [revisionNudge, setRevisionNudge] = useState(false)
   // The ordered ids of an in-progress step-through review, or null for a normal
   // single visit. Loaded only when the URL carries ?review=session.
   const [sessionIds, setSessionIds] = useState<string[] | null>(null)
@@ -165,6 +168,8 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     }
     setBusy(label)
     setError(null)
+    setNotice(null)
+    setRevisionNudge(false)
     try {
       await callAttorneyMcp({
         toolName,
@@ -187,6 +192,9 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         return
       }
       await load()
+      // Outside a step-through session, requesting a revision leaves the attorney on
+      // this page — so nudge them to regenerate now with the notes they just wrote.
+      if (toolName === 'legal.draft.request_revision') setRevisionNudge(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -201,6 +209,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     setRegenGuidance(notes)
     setRegenSkills(new Set())
     setError(null)
+    setRevisionNudge(false)
     setRegenOpen(true)
     if (!skillCatalog) {
       callAttorneyMcp<{ skills: SkillCatalogItem[] }>({ toolName: 'legal.skill.list' })
@@ -370,6 +379,20 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         </h2>
         {error && <div className="alert alert-error">{error}</div>}
         {notice && <div className="alert alert-success">{notice}</div>}
+        {revisionNudge && (
+          <div className="review-nudge">
+            <span>
+              Revision requested. Regenerate the draft now with these notes — or keep editing them
+              first.
+            </span>
+            <span className="review-nudge-actions">
+              <button className="primary" onClick={openRegen}>
+                Regenerate now…
+              </button>
+              <button onClick={() => setRevisionNudge(false)}>Not now</button>
+            </span>
+          </div>
+        )}
         <label>
           Notes (required for revision; optional otherwise)
           <textarea
