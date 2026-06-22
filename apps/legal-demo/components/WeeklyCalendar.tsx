@@ -38,9 +38,7 @@ export interface CalendarItem {
   htmlLink: string | null
 }
 
-type ActiveModal =
-  | { type: 'reschedule' | 'cancel' | 'categorize'; item: CalendarItem }
-  | null
+type ActiveModal = { type: 'reschedule' | 'cancel' | 'categorize'; item: CalendarItem } | null
 
 function isoToLocalInput(iso: string | null): string {
   if (!iso) return ''
@@ -191,7 +189,11 @@ export function WeeklyCalendar({
     const paletteCat = it.categoryKey ? palette.get(it.categoryKey) : undefined
     const label = `${it.title} at ${timeOnly(it.startIso)}${paletteCat ? ` — ${paletteCat.label}` : ''}`
     const colorStyle: React.CSSProperties = paletteCat
-      ? { background: `${paletteCat.color}1a`, borderLeft: `3px solid ${paletteCat.color}`, color: '#1e293b' }
+      ? {
+          background: `${paletteCat.color}1a`,
+          borderLeft: `3px solid ${paletteCat.color}`,
+          color: '#1e293b',
+        }
       : {}
     const menuItems = [
       { label: 'Reschedule', onClick: () => setModal({ type: 'reschedule', item: it }) },

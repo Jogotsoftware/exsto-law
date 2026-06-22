@@ -226,7 +226,11 @@ export async function openMailThread(
     },
   })
 
-  return { ...detail, matters, participantNames: namesForParticipants(detail.participantEmails, names) }
+  return {
+    ...detail,
+    matters,
+    participantNames: namesForParticipants(detail.participantEmails, names),
+  }
 }
 
 export interface ReplyInput {

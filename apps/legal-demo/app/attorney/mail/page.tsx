@@ -441,7 +441,9 @@ export default function MailPage() {
             <div>
               <h2 className="mail-thread-subject">{open.subject}</h2>
               <p className="mail-thread-meta">
-                {open.participantEmails.map((e) => personLabel(e, open.participantNames)).join(', ')}
+                {open.participantEmails
+                  .map((e) => personLabel(e, open.participantNames))
+                  .join(', ')}
                 {open.matters.length > 0 && (
                   <>
                     {' · '}
