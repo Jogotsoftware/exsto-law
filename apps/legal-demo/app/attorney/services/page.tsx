@@ -202,45 +202,50 @@ export default function ServicesPage() {
                       {svc.isActive ? 'Active' : 'Inactive'}
                     </button>
                   </td>
-                  <td style={{ position: 'relative', textAlign: 'right', verticalAlign: 'middle' }}>
-                    <button
-                      className="icon-btn"
-                      style={{ verticalAlign: 'middle' }}
-                      aria-label="Service actions"
-                      aria-haspopup="menu"
-                      disabled={busy === svc.serviceKey}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setMenuFor(menuFor === svc.serviceKey ? null : svc.serviceKey)
-                      }}
-                    >
-                      <SettingsIcon size={26} />
-                    </button>
-                    {menuFor === svc.serviceKey && (
-                      <div className="row-menu" role="menu" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setMenuFor(null)
-                            router.push(`/attorney/services/${svc.serviceKey}`)
-                          }}
-                        >
-                          Edit
-                        </button>
-                        <button type="button" role="menuitem" onClick={() => clone(svc)}>
-                          Clone
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="row-menu-danger"
-                          onClick={() => remove(svc)}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    )}
+                  <td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
+                    {/* The menu anchors to this span (which wraps only the gear),
+                        not the full-height cell — otherwise on a two-line row its
+                        `top: 100%` drops it an inch below the gear. */}
+                    <span style={{ position: 'relative', display: 'inline-block' }}>
+                      <button
+                        className="icon-btn"
+                        style={{ verticalAlign: 'middle' }}
+                        aria-label="Service actions"
+                        aria-haspopup="menu"
+                        disabled={busy === svc.serviceKey}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setMenuFor(menuFor === svc.serviceKey ? null : svc.serviceKey)
+                        }}
+                      >
+                        <SettingsIcon size={26} />
+                      </button>
+                      {menuFor === svc.serviceKey && (
+                        <div className="row-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMenuFor(null)
+                              router.push(`/attorney/services/${svc.serviceKey}`)
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button type="button" role="menuitem" onClick={() => clone(svc)}>
+                            Clone
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="row-menu-danger"
+                            onClick={() => remove(svc)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </span>
                   </td>
                 </tr>
               ))}
