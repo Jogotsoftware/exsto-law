@@ -152,10 +152,7 @@ export default function TemplatesPage() {
   // recognized variable with no question (e.g. an auto-fill token) is "orphaned"
   // (yellow); anything unrecognized is "unknown" (red).
   const validateVariable = useMemo(() => {
-    const hasQuestion = new Set<string>([
-      ...libraryTokens,
-      ...Object.keys(draft?.variables ?? {}),
-    ])
+    const hasQuestion = new Set<string>([...libraryTokens, ...Object.keys(draft?.variables ?? {})])
     const known = new Set<string>([...hasQuestion, ...STANDARD_TOKENS.map((t) => t.id)])
     return (name: string): VariableStatus =>
       hasQuestion.has(name) ? 'matched' : known.has(name) ? 'orphaned' : 'unknown'
