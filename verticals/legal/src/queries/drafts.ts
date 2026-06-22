@@ -219,6 +219,8 @@ export async function getDraftVersion(
        WHERE dv.tenant_id = $1
          AND dv.id = $2
          AND rkd.kind_name = 'draft_of'
+         AND (r.valid_to IS NULL OR r.valid_to > now())
+       ORDER BY r.valid_from DESC
        LIMIT 1`,
       [ctx.tenantId, documentVersionId],
     )

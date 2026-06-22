@@ -101,16 +101,18 @@ export async function getUploadedDocumentObject(
   ctx: ActionContext,
   matterEntityId: string,
   documentVersionId: string,
-): Promise<{ objectKey: string; contentType: string; filename: string } | null> {
+): Promise<{ objectKey: string; contentType: string; filename: string; sizeBytes: number } | null> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       object_key: string | null
       content_type: string | null
       original_filename: string | null
+      size_bytes: string | null
     }>(
       `SELECT dv.metadata->>'object_key'        AS object_key,
               dv.metadata->>'content_type'      AS content_type,
-              dv.metadata->>'original_filename' AS original_filename
+              dv.metadata->>'original_filename' AS original_filename,
+              dv.metadata->>'size_bytes'        AS size_bytes
          FROM document_version dv
          JOIN entity e ON e.id = dv.document_entity_id
          JOIN relationship r ON r.source_entity_id = e.id
@@ -129,6 +131,7 @@ export async function getUploadedDocumentObject(
       objectKey: row.object_key,
       contentType: row.content_type ?? 'application/octet-stream',
       filename: row.original_filename ?? 'document',
+      sizeBytes: row.size_bytes ? Number(row.size_bytes) : 0,
     }
   })
 }

@@ -50,6 +50,9 @@ export async function attachableDocuments(
   ctx: ActionContext,
   matterEntityId: string,
 ): Promise<AttachableDocuments> {
+  // Only an attorney authorized to send on the matter may enumerate its documents
+  // (the picker is a send affordance) — matches the send guard, no metadata leak.
+  await assertCanSendOnMatter(ctx, matterEntityId)
   const [uploads, drafts] = await Promise.all([
     listMatterDocuments(ctx, matterEntityId),
     listMatterDraftVersions(ctx, matterEntityId),
@@ -68,6 +71,13 @@ function slugFilename(kind: string): string {
   return `${base || 'document'}.pdf`
 }
 
+// Resource caps: bound the count and total RAW bytes so a legitimately-authorized
+// but pathological request (e.g. 50 same-matter uploads, or a 25 MB file) can't OOM
+// the function. The total tracks raw bytes; the Gmail send guard (~18 MB) is the
+// final ceiling, but we short-circuit BEFORE fetching/rendering the rest.
+const MAX_ATTACHMENTS = 10
+const MAX_TOTAL_RAW_BYTES = 18 * 1024 * 1024
+
 // Resolve attachment refs to EmailAttachment[] for ONE matter, scope-checking each.
 // `downloadUpload(objectKey)` fetches an uploaded file's bytes (injected by the app).
 export async function resolveMatterAttachments(
@@ -79,20 +89,41 @@ export async function resolveMatterAttachments(
   },
 ): Promise<EmailAttachment[]> {
   if (!input.refs.length) return []
+  if (input.refs.length > MAX_ATTACHMENTS) {
+    throw new Error(`Too many attachments (max ${MAX_ATTACHMENTS}).`)
+  }
   // Defense in depth: the sender must be authorized to send on this matter. (The
   // send path checks recipient↔matter separately; this guards the doc side.)
   await assertCanSendOnMatter(ctx, input.matterEntityId)
 
   const out: EmailAttachment[] = []
+  let totalRaw = 0
+  const overBudget = () => {
+    if (totalRaw > MAX_TOTAL_RAW_BYTES) {
+      throw new Error('Attachments are too large to email (about 18 MB total).')
+    }
+  }
+
   for (const ref of input.refs) {
     if (ref.kind === 'draft') {
       const draft = await getDraftVersion(ctx, ref.id)
       if (!draft || draft.matterEntityId !== input.matterEntityId) {
         throw new Error('Attachment is not a draft of this matter.')
       }
-      const pdf = await renderDraftPdf(draft.bodyMarkdown, {
-        title: humanizeKind(draft.documentKind),
-      })
+      // renderDraftPdf caps its source markdown; name the draft if it still fails so
+      // one bad draft doesn't opaquely fail the whole send.
+      let pdf: Buffer
+      try {
+        pdf = await renderDraftPdf(draft.bodyMarkdown, { title: humanizeKind(draft.documentKind) })
+      } catch (e) {
+        throw new Error(
+          `Could not render the "${humanizeKind(draft.documentKind)}" draft to PDF: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        )
+      }
+      totalRaw += pdf.length
+      overBudget()
       out.push({
         filename: slugFilename(draft.documentKind),
         contentType: 'application/pdf',
@@ -103,6 +134,10 @@ export async function resolveMatterAttachments(
       if (!obj) {
         throw new Error('Attachment is not an uploaded document of this matter.')
       }
+      // Reject by RECORDED size before fetching the bytes (uploads can be up to
+      // 25 MB; the email cap is ~18 MB).
+      totalRaw += obj.sizeBytes
+      overBudget()
       const bytes = await input.downloadUpload(obj.objectKey)
       out.push({
         filename: obj.filename,

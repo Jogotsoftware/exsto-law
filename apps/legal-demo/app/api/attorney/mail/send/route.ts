@@ -1,11 +1,6 @@
 import { NextResponse } from 'next/server'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
-import {
-  resolveMatterAttachments,
-  enqueueClientEmail,
-  replyToThread,
-  type AttachmentRef,
-} from '@exsto/legal'
+import { enqueueClientEmail, replyToThread, type AttachmentRef } from '@exsto/legal'
 import '@exsto/legal' // register legal action handlers (mail.send) — side effect
 import { downloadObject } from '@/lib/documentStorage'
 
@@ -47,26 +42,27 @@ export async function POST(request: Request) {
   if (!body.matterId || !body.bodyText?.trim()) {
     return NextResponse.json({ error: 'matterId and bodyText are required.' }, { status: 400 })
   }
-  const refs = Array.isArray(body.attachments) ? body.attachments : []
+  const attachmentRefs = Array.isArray(body.attachments) ? body.attachments : []
 
   try {
-    // Resolve refs → bytes server-side, enforcing each doc belongs to matterId.
-    const attachments = await resolveMatterAttachments(ctx, {
-      matterEntityId: body.matterId,
-      refs,
-      downloadUpload: downloadObject,
-    })
-
+    // The send functions resolve the refs to bytes THEMSELVES, scope-checked against
+    // matterId (the matter the recipient/sender authz also uses) — so the doc-scope
+    // composite is enforced in @exsto/legal, not here. downloadObject (the app-only
+    // service-role Storage read) is injected for upload refs.
     if (body.mode === 'reply') {
       if (!body.gmailThreadId) {
-        return NextResponse.json({ error: 'gmailThreadId is required for a reply.' }, { status: 400 })
+        return NextResponse.json(
+          { error: 'gmailThreadId is required for a reply.' },
+          { status: 400 },
+        )
       }
       await replyToThread(ctx, {
         gmailThreadId: body.gmailThreadId,
         bodyText: body.bodyText,
         bodyHtml: body.bodyHtml,
         matterId: body.matterId,
-        attachments,
+        attachmentRefs,
+        downloadUpload: downloadObject,
       })
     } else {
       if (!body.to || !body.subject) {
@@ -81,7 +77,8 @@ export async function POST(request: Request) {
         body: body.bodyText,
         html: body.bodyHtml,
         matterId: body.matterId,
-        attachments,
+        attachmentRefs,
+        downloadUpload: downloadObject,
       })
     }
     return NextResponse.json({ ok: true })

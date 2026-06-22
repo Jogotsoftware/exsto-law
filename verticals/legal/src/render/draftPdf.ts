@@ -214,8 +214,17 @@ function renderBlock(token: Token, key: string): React.ReactNode {
  * clock, no randomness. `opts.title` (if given) prints as a bold title with a
  * rule under it. Long drafts paginate automatically across LETTER pages.
  */
+// Cap the source markdown so a pathologically large draft can't OOM/stall the
+// render (tokenize + react-pdf layout happen before any output-size guard). 1 MB
+// covers any real legal draft.
+const MAX_DRAFT_MARKDOWN_BYTES = 1_000_000
+
 export async function renderDraftPdf(markdown: string, opts?: { title?: string }): Promise<Buffer> {
-  const tokens = marked.lexer(markdown ?? '')
+  const md = markdown ?? ''
+  if (md.length > MAX_DRAFT_MARKDOWN_BYTES) {
+    throw new Error('Draft is too large to render as a PDF attachment.')
+  }
+  const tokens = marked.lexer(md)
 
   const body = tokens.map((tok, i) => renderBlock(tok, `b-${i}`)).filter(Boolean)
 

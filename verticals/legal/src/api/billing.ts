@@ -213,7 +213,9 @@ export async function sendInvoice(
     subject,
     body,
     html: branded?.html,
-    attachments,
+    // Server-generated PDF (trusted): rides as a system attachment, not a client
+    // document reference, so it is not subject to the doc-scope resolution.
+    systemAttachments: attachments,
     matterId: invoice.matterEntityId ?? undefined,
   })
 

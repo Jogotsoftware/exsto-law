@@ -100,11 +100,14 @@ function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
     const mixB = `=_exsto_mix_${seed}`
     const parts: string[] = [`--${mixB}`, ...body.typeLines, '', ...body.lines]
     for (const att of args.attachments) {
+      // Sanitize at the MIME boundary regardless of upstream: strip CR/LF/quote so a
+      // crafted filename can't break out of the header (smuggling / Bcc injection).
+      const name = att.filename.replace(/[\r\n"]/g, '_')
       parts.push(
         `--${mixB}`,
-        `Content-Type: ${att.contentType}; name="${att.filename}"`,
+        `Content-Type: ${att.contentType}; name="${name}"`,
         'Content-Transfer-Encoding: base64',
-        `Content-Disposition: attachment; filename="${att.filename}"`,
+        `Content-Disposition: attachment; filename="${name}"`,
         '',
         wrap76(att.contentBase64),
       )
