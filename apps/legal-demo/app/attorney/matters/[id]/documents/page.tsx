@@ -1,9 +1,10 @@
 'use client'
 
-// Matter › DOCUMENTS tab. The documents produced for this matter — the latest
-// draft with download (PDF / Word), email-to-client, and a link into full review
-// (which carries the version history). Generation happens from the Overview tab.
-import { use, useCallback, useEffect, useState } from 'react'
+// Matter › DOCUMENTS tab. Two lanes: the GENERATED latest draft (download PDF/Word,
+// email-to-client, open review) and UPLOADED documents (signed PDFs, exhibits,
+// client files) stored in Supabase Storage. Generation happens from the Overview
+// tab; uploads POST to the dedicated upload route and download via the proxy route.
+import { use, useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
@@ -24,15 +25,34 @@ interface SendDraftLinkResult {
   from: string
   to: string
 }
+interface UploadedDoc {
+  documentVersionId: string
+  documentEntityId: string
+  originalFilename: string
+  contentType: string
+  sizeBytes: number
+  documentKind: string
+  uploadedAt: string
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
 
 export default function MatterDocumentsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const [matter, setMatter] = useState<MatterDetail | null>(null)
   const [draft, setDraft] = useState<DraftPayload | null>(null)
+  const [uploads, setUploads] = useState<UploadedDoc[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [emailStatus, setEmailStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -51,6 +71,11 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
       } else {
         setDraft(null)
       }
+      const docs = await callAttorneyMcp<{ documents: UploadedDoc[] }>({
+        toolName: 'legal.document.list',
+        input: { matterEntityId: id },
+      }).catch(() => ({ documents: [] as UploadedDoc[] }))
+      setUploads(docs.documents)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -61,6 +86,31 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
   useEffect(() => {
     load()
   }, [load])
+
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file later
+    if (!file) return
+    setUploadError(null)
+    setUploadBusy(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`/api/attorney/matters/${id}/documents/upload`, {
+        method: 'POST',
+        body: fd,
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body.error || `Upload failed (${res.status}).`)
+      }
+      await load()
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploadBusy(false)
+    }
+  }
 
   async function emailDraftLink() {
     if (!draft || !matter) return
@@ -115,75 +165,146 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
     : ''
 
   return (
-    <section>
-      <h2>Documents</h2>
-      {!draft ? (
-        <p className="text-muted">
-          No documents yet. Generate one from the <strong>Overview</strong> tab once intake and the
-          consultation are in.
-        </p>
-      ) : (
-        <>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: 'var(--space-3)',
-            }}
-          >
-            <h3 style={{ margin: 0 }}>Latest draft — {humanizeKind(draft.documentKind)}</h3>
-            <span className="text-sm text-muted">
-              v{draft.versionNumber} · {humanizeStatus(draft.status)} ·{' '}
-              {new Date(draft.recordedAt).toLocaleDateString()}
-            </span>
-          </div>
-          <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-            <button onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>
-              Download PDF
-            </button>
-            <button onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}>
-              Download Word
-            </button>
-            <button
-              onClick={emailDraftLink}
-              disabled={busy === 'email'}
-              title={
-                matter?.clientEmail
-                  ? `Will send to ${matter.clientEmail}`
-                  : "No client email on file — you'll be prompted"
-              }
-            >
-              {busy === 'email' && <span className="spinner" />}
-              {busy === 'email' ? 'Sending…' : 'Email link to client'}
-            </button>
-            <Link
-              href={`/attorney/review/${draft.documentVersionId}`}
-              style={{ marginLeft: 'auto' }}
-            >
-              <button className="primary">Open full review</button>
-            </Link>
-          </div>
-          {emailStatus && (
+    <>
+      <section>
+        <h2>Documents</h2>
+        {!draft ? (
+          <p className="text-muted">
+            No generated documents yet. Generate one from the <strong>Overview</strong> tab once
+            intake and the consultation are in.
+          </p>
+        ) : (
+          <>
             <div
-              className={`alert ${emailStatus.kind === 'ok' ? '' : 'alert-error'}`}
-              style={
-                emailStatus.kind === 'ok'
-                  ? {
-                      background: 'var(--ok-soft)',
-                      color: '#166534',
-                      border: '1px solid #86efac',
-                      marginTop: 'var(--space-3)',
-                    }
-                  : { marginTop: 'var(--space-3)' }
-              }
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 'var(--space-3)',
+              }}
             >
-              {emailStatus.msg}
+              <h3 style={{ margin: 0 }}>Latest draft — {humanizeKind(draft.documentKind)}</h3>
+              <span className="text-sm text-muted">
+                v{draft.versionNumber} · {humanizeStatus(draft.status)} ·{' '}
+                {new Date(draft.recordedAt).toLocaleDateString()}
+              </span>
             </div>
-          )}
-        </>
-      )}
-    </section>
+            <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+              <button onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>
+                Download PDF
+              </button>
+              <button onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}>
+                Download Word
+              </button>
+              <button
+                onClick={emailDraftLink}
+                disabled={busy === 'email'}
+                title={
+                  matter?.clientEmail
+                    ? `Will send to ${matter.clientEmail}`
+                    : "No client email on file — you'll be prompted"
+                }
+              >
+                {busy === 'email' && <span className="spinner" />}
+                {busy === 'email' ? 'Sending…' : 'Email link to client'}
+              </button>
+              <Link
+                href={`/attorney/review/${draft.documentVersionId}`}
+                style={{ marginLeft: 'auto' }}
+              >
+                <button className="primary">Open full review</button>
+              </Link>
+            </div>
+            {emailStatus && (
+              <div
+                className={`alert ${emailStatus.kind === 'ok' ? '' : 'alert-error'}`}
+                style={
+                  emailStatus.kind === 'ok'
+                    ? {
+                        background: 'var(--ok-soft)',
+                        color: '#166534',
+                        border: '1px solid #86efac',
+                        marginTop: 'var(--space-3)',
+                      }
+                    : { marginTop: 'var(--space-3)' }
+                }
+              >
+                {emailStatus.msg}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
+      <section style={{ marginTop: 'var(--space-5)' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 'var(--space-3)',
+          }}
+        >
+          <h2 style={{ margin: 0 }}>Uploaded documents</h2>
+          <button
+            className="primary"
+            disabled={uploadBusy}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploadBusy && <span className="spinner" />}
+            {uploadBusy ? 'Uploading…' : 'Upload document'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            hidden
+            disabled={uploadBusy}
+            accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.tif,.tiff,.txt,application/pdf,image/png,image/jpeg,image/tiff,text/plain"
+            onChange={onPickFile}
+          />
+        </div>
+        <p className="text-muted text-sm">
+          Signed PDFs, exhibits, or any client file — stored securely. Max 25 MB (PDF, Word, images,
+          text).
+        </p>
+        {uploadError && <div className="alert alert-error">{uploadError}</div>}
+        {uploads.length === 0 ? (
+          <p className="text-muted">No uploaded documents yet.</p>
+        ) : (
+          <div style={{ overflowX: 'auto', marginTop: 'var(--space-2)' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Size</th>
+                  <th>Uploaded</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {uploads.map((u) => (
+                  <tr key={u.documentVersionId}>
+                    <td>{u.originalFilename}</td>
+                    <td className="text-sm text-muted">{formatBytes(u.sizeBytes)}</td>
+                    <td className="text-sm text-muted">
+                      {new Date(u.uploadedAt).toLocaleDateString()}
+                    </td>
+                    <td>
+                      <a
+                        href={`/api/attorney/matters/${id}/documents/${u.documentVersionId}/download`}
+                      >
+                        Download
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
   )
 }

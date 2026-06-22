@@ -215,22 +215,22 @@ export async function insertContentBlob(
     actionId: string
     contentType: string
     body: string
+    // POINTER-blob case (uploads): `body` is a storage OBJECT KEY, not the file
+    // bytes, so the integrity hash + size describe the POINTEE (the real file) and
+    // are passed in explicitly. When omitted (inline-content case, e.g. a draft's
+    // markdown), both are computed from `body`. Note the deliberate consequence:
+    // for a pointer blob, size_bytes ≠ length(body) — it's the file's byte length.
+    sha256?: Buffer
+    sizeBytes?: number
   },
 ): Promise<string> {
   const id = randomUUID()
-  const sha = createHash('sha256').update(args.body, 'utf8').digest()
+  const sha = args.sha256 ?? createHash('sha256').update(args.body, 'utf8').digest()
+  const size = args.sizeBytes ?? Buffer.byteLength(args.body, 'utf8')
   await client.query(
     `INSERT INTO content_blob (id, tenant_id, action_id, content_type, body, sha256, size_bytes)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [
-      id,
-      args.tenantId,
-      args.actionId,
-      args.contentType,
-      args.body,
-      sha,
-      Buffer.byteLength(args.body, 'utf8'),
-    ],
+    [id, args.tenantId, args.actionId, args.contentType, args.body, sha, size],
   )
   return id
 }
