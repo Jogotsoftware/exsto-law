@@ -22,6 +22,7 @@ import {
   type StepKey,
   type StepState,
 } from './shared'
+import { MatterTasks } from './MatterTasks'
 
 const GENERATABLE: Array<{ kind: string; label: string }> = [
   { kind: 'operating_agreement', label: 'operating agreement' },
@@ -187,6 +188,8 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
           Click a step to view or download what it produced, or to advance it.
         </p>
       </section>
+
+      <MatterTasks matterEntityId={id} />
 
       {openStep === 'intake' && (
         <Modal
