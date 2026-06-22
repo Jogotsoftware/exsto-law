@@ -48,22 +48,22 @@ receipt run against prod (see the PR description).
    attributes (`client_billing_type`, `client_billable_rate`,
    `firm_default_hourly_rate`) are reused, not re-created.
 
-## Task primitive (groundwork)
+## Task primitive — deferred to the parallel session (collision resolved)
 
-7. **`task` is a first-class entity** (migration 0084): attributes `task_status`
-   (todo|in_progress|blocked|done), `task_assignee`, `task_billable`, `task_rate`
-   (money); the existing `due_date` is reused, not duplicated; relationship `task_of`
-   (task→matter); actions `legal.task.create/update/complete`. Definitions only — no
-   UI, no lifecycle engine. Per-task rate override is data shape only (resolution
-   deferred to Contract K / S4).
-
-   **⚠ Cross-session collision (for the manager to reconcile):** a parallel session
-   registered an overlapping subset of task kinds (`task`, `task_status`, `task_of`,
-   `legal.task.create/update`) in tenant zero ~2 minutes earlier, using the `0900`
-   id-block (ours uses `0800`). Both are additive and active; no task *entities*
-   exist yet, so nothing is functionally broken. Before tasks ship, the two
-   definitions must converge to one canonical set (retire the redundant rows through
-   the proper versioning path — never a raw delete).
+7. **This PR ships NO task primitive.** A parallel session (commit `78e7b80`,
+   "feat(tasks): migration 0084") independently registered a `task` primitive in
+   tenant zero ~2 minutes before this work, under a different id-block (`0900` vs
+   our `0800`) but the same `kind_name`s — a genuine collision. Their model is the
+   stronger, billing-aware one (`task_billing_mode` none|hours|fixed, `task_hours`,
+   `task_fee_amount`, `task_invoice_id` that locks on invoicing, `task_assignee_actor_id`
+   as a real actor link, plus `task_title`/`task_due_date`/`task_status`), and it
+   subsumes everything our draft had (`task_billable`/`task_rate`/`task_assignee`-text/
+   `legal.task.complete`). So per the founder's call, the duplicate was removed:
+   our `0800` task kinds were deleted from prod (zero dependents — no task entities
+   existed), our `0084` ledger row was deleted to free the version number for their
+   canonical migration, and `0084_task_primitive.sql` was dropped from this PR. The
+   other session's task primitive stands as the single canonical one. (This PR's
+   migrations therefore start at 0085; the 0084 slot belongs to the tasks PR.)
 
 ## Engagement status (groundwork)
 
@@ -85,10 +85,12 @@ receipt run against prod (see the PR description).
 
 ## Migration numbering
 
-10. Numbered **0084–0086**, not 0082. The prod ledger frontier was 0081, but
+10. This PR's migrations are **0085 (`service_billing_mode`) and 0086
+    (`engagement_status`)** — not 0082. The prod ledger frontier was 0081, but
     origin/main already carried a merged-but-unapplied `0082_document_upload` (0700
-    id-block) and a held `0083_skill_library`. Numbers were taken above the
-    origin/main filesystem max AND the prod ledger max to avoid the parallel-session
-    collision class. Applied surgically (only 0084–0086, with the runner's exact
-    LF-checksum) so the pending 0082 and held 0083 stay untouched and a later
-    `pnpm migrate:vertical` remains idempotent.
+    id-block) and a held `0083_skill_library`; the parallel tasks PR owns `0084`.
+    Numbers were taken above the origin/main filesystem max AND the prod ledger max
+    to avoid the parallel-session collision class, applied surgically (with the
+    runner's exact LF-checksum) so the pending 0082/0083/0084 stay untouched and a
+    later `pnpm migrate:vertical` remains idempotent. (0085/0086 leave a 0084 gap;
+    the runner has no contiguity requirement, and the tasks PR fills it.)
