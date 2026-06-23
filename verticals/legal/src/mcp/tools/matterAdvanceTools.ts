@@ -20,7 +20,7 @@ interface MatterAdvanceInput {
 const tool: Tool<MatterAdvanceInput, ActionResult> = {
   name: 'legal.matter.advance',
   description:
-    "Advance a matter one step through its bound workflow lifecycle (ADR 0045). The graph decides legality — a to_state not reachable from the current state via an edge of this gate is rejected. Idempotent: advancing to the state the matter is already in is a no-op.",
+    'Advance a matter one step through its bound workflow lifecycle (ADR 0045). The graph decides legality — a to_state not reachable from the current state via an edge of this gate is rejected. Idempotent: advancing to the state the matter is already in is a no-op.',
   mode: 'write',
   inputSchema: {
     type: 'object',
@@ -45,7 +45,8 @@ const tool: Tool<MatterAdvanceInput, ActionResult> = {
   handler: (ctx: ActionContext, input) =>
     submitAction(ctx, {
       actionKindName: 'legal.matter.advance',
-      intentKind: input.gate === 'system' || input.gate === 'automatic' ? 'automatic_sync' : 'adjustment',
+      intentKind:
+        input.gate === 'system' || input.gate === 'automatic' ? 'automatic_sync' : 'adjustment',
       payload: {
         matter_entity_id: input.matterEntityId,
         to_state: input.toState,
