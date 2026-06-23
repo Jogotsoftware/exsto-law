@@ -202,7 +202,9 @@ function renderMeetings(meetings: Awaited<ReturnType<typeof listMeetingsForMatte
   return meetings
     .map((m) => {
       const when = m.startIso ? fmtDate(m.startIso) : 'unscheduled'
-      const who = m.attendeeEmails.length ? ` — with ${m.attendeeEmails.slice(0, 5).join(', ')}` : ''
+      const who = m.attendeeEmails.length
+        ? ` — with ${m.attendeeEmails.slice(0, 5).join(', ')}`
+        : ''
       return `- ${when}: ${safeField(m.title)}${who}`
     })
     .join('\n')
