@@ -23,7 +23,11 @@ import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import { getFirmBookingRules } from './firmBookingRules.js'
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 
-export type GoogleAuthMode = 'signin' | 'calendar' | 'mail'
+// 'admin' = platform admin-console sign-in (ADR 0046). Identity-only like
+// 'signin' (email scope, no calendar/mail grant), but the callback resolves the
+// email to a PLATFORM admin (cp_resolve_admin_by_email) and mints the separate
+// admin session cookie — never the attorney session.
+export type GoogleAuthMode = 'signin' | 'calendar' | 'mail' | 'admin'
 
 export interface GoogleConnectionStatus {
   connected: boolean
@@ -74,10 +78,12 @@ export function buildGoogleAuthUrl(
   // Any non-signin connect (calendar or mail mode) requests the FULL set —
   // one Google connection covers calendar + Gmail read + Gmail send. offline +
   // consent so we always get a refresh token and the user sees the full grant.
-  const scope = mode === 'signin' ? GOOGLE_OAUTH_SCOPES_SIGNIN : GOOGLE_OAUTH_SCOPES_CONNECT
+  // 'admin' is identity-only, exactly like 'signin' (no calendar/mail grant).
+  const identityOnly = mode === 'signin' || mode === 'admin'
+  const scope = identityOnly ? GOOGLE_OAUTH_SCOPES_SIGNIN : GOOGLE_OAUTH_SCOPES_CONNECT
   return oauth2.generateAuthUrl({
-    access_type: mode === 'signin' ? 'online' : 'offline',
-    prompt: mode === 'signin' ? 'select_account' : 'consent',
+    access_type: identityOnly ? 'online' : 'offline',
+    prompt: identityOnly ? 'select_account' : 'consent',
     scope,
     state,
   })
@@ -114,8 +120,15 @@ export async function exchangeGoogleCode(state: string, code: string): Promise<E
   }
   // Default to 'signin' (identity-only, no DB write) so a malformed or
   // stale state never accidentally trips the calendar-mode DB save path.
+  // 'admin' is preserved so the callback routes it to the admin-session path.
   const mode: GoogleAuthMode =
-    parsedState.mode === 'calendar' ? 'calendar' : parsedState.mode === 'mail' ? 'mail' : 'signin'
+    parsedState.mode === 'calendar'
+      ? 'calendar'
+      : parsedState.mode === 'mail'
+        ? 'mail'
+        : parsedState.mode === 'admin'
+          ? 'admin'
+          : 'signin'
 
   // Direct fetch for the token exchange — avoids the heavy googleapis cold
   // start in Netlify Functions. Saves ~3-5 seconds on first invocation.

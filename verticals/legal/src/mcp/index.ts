@@ -26,6 +26,14 @@ import './tools/reviewDraft.js'
 import './tools/getIntakeQuestionnaire.js'
 import './tools/bookingTools.js'
 import './tools/serviceLibraryTools.js'
+// ADR 0045 PR4a: author/read a service's workflow lifecycle graph (states).
+import './tools/serviceLifecycleTools.js'
+// ADR 0045 PR4b: the closed step-action + gate catalog the service-editor Workflow
+// builder composes a lifecycle from (server-side guardrail, data-driven UI).
+import './tools/workflowCatalogTools.js'
+// ADR 0045 PR4c: the reusable workflow STEP library — save a step + drop it into
+// any service's workflow from the builder (mirrors the questionnaire library).
+import './tools/workflowStepLibraryTools.js'
 import './tools/templatesTools.js'
 import './tools/standaloneTemplateTools.js'
 import './tools/questionnaireLibraryTools.js'
@@ -71,6 +79,12 @@ import './tools/userTools.js'
 // Skills: reusable legal playbooks (ported from claude-for-legal) the chatbot
 // loads on demand — stored as substrate data, managed via these tools.
 import './tools/skillTools.js'
+// Platform control plane (ADR 0046): tenants / modules / access / promotion.
+// Reachable ONLY from /admin/api/mcp (default-deny via adminPolicy.ts).
+import './tools/adminTools.js'
+// Firm-facing module read (legal.module.enabled) — attorney nav gating. NOT an
+// admin tool; reads only the caller's own tenant.
+import './tools/moduleTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {
@@ -79,3 +93,6 @@ export {
   CLIENT_PORTAL_AUTHED_TOOLS,
   isClientPortalAuthedTool,
 } from './clientPolicy.js'
+
+// The admin-console allowlist travels with the control-plane tools it gates.
+export { ADMIN_CONSOLE_TOOLS, isAdminConsoleTool } from './adminPolicy.js'
