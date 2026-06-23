@@ -10,6 +10,12 @@ and because any vertical with a multi-step process (Huber AR dunning, a corporat
 deal flow) inherits the same lifecycle engine. Implemented in staged PRs (see
 *Implementation notes*); no behavior changes until an attorney edits a lifecycle.
 
+**Open questions resolved (Joe, 2026-06-22):** the graph lives in `states` (Q1
+recommendation); four extensible gate kinds (Q2 recommendation); **lifecycle edits
+are folded into the existing service-save action, not a dedicated one (Q3)**; and the
+service is a *template* — a matter is an *instance* you compose (add tasks/services)
+**without editing the service** (new requirement, Decision §6).
+
 ## Context
 
 A "service" is a `workflow_definition` row (ADR 0032: matters are entities; a service
@@ -132,18 +138,49 @@ condition), and `isAutomatic(from, to, def)`. Three call sites stop hardcoding:
 Status is still a `matter_status` entity_attribute written only by action handlers.
 This ADR adds a data-defined **guard and vocabulary**, not a new write path.
 
-### 4. Editing is a new version; in-flight matters bind to the version they opened under
+### 4. Editing is folded into the existing service-save; each edit is a new version
 
-`workflow_definition` is already versioned (`version`, `valid_from`, `valid_to`).
-Editing a lifecycle **creates a new version** (next `version`, `valid_from = now`,
-prior row's `valid_to = now`) through the action layer + a `configuration_change`
-row — never an in-place `UPDATE` of a live row's `states` (ADR 0017 config-version
-binding; hard rule 3 append-only spirit). A matter records the
-`workflow_definition` version it was opened against at `matter.open`; the engine
-resolves *that* version for the matter's whole life. New matters get the latest.
-An edit can never reroute a matter that is already moving.
+There is **no separate "edit the workflow" action**. The lifecycle is edited through
+the **existing service-save (upsert) action** (`handlers/serviceLibrary.ts`) that
+already handles the Settings/Questionnaire/Templates/Billing tabs — the Workflow tab
+becomes one more facet of the same save. That handler already **versions** the row
+(it carries `states` forward verbatim today, `const states = prior ? prior.states :
+[]`); the only change is that it now accepts and validates an edited `states` instead
+of copying the old one. The save **creates a new version** (next `version`,
+`valid_from = now`, prior row's `valid_to = now`) + a `configuration_change` row —
+never an in-place `UPDATE` of a live row's `states` (ADR 0017 config-version binding;
+hard rule 3 append-only spirit). The graph is validated inside that save (single
+`entry`, reachable `terminal`, every `to` exists, every gate valid); an invalid graph
+rejects the save.
 
-### 5. Backfill makes day one a no-op
+A matter records the `workflow_definition` version it was opened against at
+`matter.open`; the engine resolves *that* version for the matter's whole life. New
+matters get the latest. **An edit can never reroute a matter that is already moving.**
+
+### 5. A service is a TEMPLATE; a matter is an INSTANCE you compose without editing the service
+
+The service workflow defines the **default** stages — and the **default tasks** —
+every matter of that service starts with. But a single matter must be adjustable
+**without touching the service definition**: you can **add a task or a service to one
+matter** ad hoc. The two scopes are kept distinct:
+
+- **Template scope (service):** stages + default tasks, edited on **service-save**
+  (§4). Changing it versions the definition and affects *future* matters only.
+- **Instance scope (matter):** a matter is seeded from its service version on
+  `matter.open`, then composes freely:
+  - **Tasks** — the existing `task` entity + `task_of` relationship to the matter
+    (shipped #148), with their own billing (`task_billing_mode`/`hours`/`fee_amount`).
+    Adding a task to a matter is a matter-level action; it does **not** edit the
+    service and does **not** create a new service version.
+  - **Services / service fees** — a billable service-fee line attaches to a matter by
+    hand today (`api/fees.ts`, the matter's "Add a service or document fee" action);
+    matter-instance service composition builds on this, never on a service edit.
+
+So "add a task to this matter" and "edit this service's workflow" are deliberately
+different operations on different scopes. The lifecycle engine reads the template for
+a matter's default stages/tasks and treats matter-added tasks as instance state.
+
+### 6. Backfill makes day one a no-op
 
 A migration computes each existing service's `states` from the current hardcoded
 path, parameterized by its `route`: the auto/manual choice flips one edge's gate;
@@ -187,7 +224,9 @@ every seeded service before the engine is allowed to read the data (PR3).
 **Obligations**
 - New status values must be added as stages in `states`, never as new literals in a
   handler. Advancing a matter must go through an edge; ad-hoc status writes are a
-  regression. The editor's `set_lifecycle` action must reject invalid graphs.
+  regression. The service-save must reject invalid graphs. Per-matter work (tasks,
+  service fees) attaches to the matter instance and must never edit the service
+  definition (Decision §5).
 
 ## Implementation notes
 
@@ -201,14 +240,19 @@ after the equality invariant is green.
 3. **Engine read-path flip.** Worker auto-draft check, status-advance validation, UI
    `deriveMatterSteps`, and client portal labels read `states`. Gated behind the PR2
    equality invariant. Bind matter → workflow version at `matter.open`.
-4. **Editor (Workflow tab) + `legal.service.set_lifecycle` action.** Validates the
-   graph, writes a new `workflow_definition` version through the action layer +
-   `configuration_change`; extends `checkServiceCompleteness` to lifecycle validity.
-   This is the user-facing deliverable that resolves `c518a178`/`bf16d226`.
-5. **Polish.** Client portal labels fully data-driven; version-binding edge cases;
+4. **Editor (Workflow tab), folded into service-save.** The tab edits `states`; the
+   existing service-save (upsert) action validates the graph and writes a new
+   `workflow_definition` version through the action layer + `configuration_change`;
+   `checkServiceCompleteness` is extended to lifecycle validity. This is the
+   user-facing deliverable that resolves `c518a178`/`bf16d226`.
+5. **Matter-instance composition.** Confirm "add a task to this matter" (#148) and
+   "add a service/fee to this matter" (`api/fees.ts`) work on the matter instance
+   with no service edit, and surface them on the matter page (Decision §5). Mostly
+   present for tasks; this step verifies the boundary holds under the new engine.
+6. **Polish.** Client portal labels fully data-driven; version-binding edge cases;
    docs/pattern entry for "defining a vertical's lifecycle as data."
 
-New action kinds (schema-as-data, `kind.define`): `legal.service.set_lifecycle`
-(intent `adjustment`/`configuration`). No new tables. Invariants land in
-`tests/invariants/` (graph validity, version binding, append-only edit) per hard
-rule 10; verified against the live DB per hard rule 12 before any "done".
+No dedicated lifecycle action kind — editing rides the existing service-save (§4); no
+new tables. Invariants land in `tests/invariants/` (graph validity, version binding,
+append-only edit, template-vs-instance separation) per hard rule 10; verified against
+the live DB per hard rule 12 before any "done".
