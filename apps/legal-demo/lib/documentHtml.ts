@@ -62,8 +62,9 @@ export const DOCUMENT_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     div: ['style', 'class'],
   },
   allowedClasses: {
-    // The only class that carries meaning in a document is the signature line.
-    div: ['sig-line'],
+    // Classes that carry meaning in a finished document: the signature line and
+    // the page break.
+    div: ['sig-line', 'page-break'],
     span: ['sig-line-label'],
   },
   allowedStyles: {
