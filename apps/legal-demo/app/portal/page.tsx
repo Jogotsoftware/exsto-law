@@ -36,6 +36,25 @@ interface ClientDocument {
   state: 'awaiting_you' | 'signed' | 'declined' | 'in_progress'
   rawStatus: string
 }
+interface ApprovedDocument {
+  documentVersionId: string
+  documentKind: string
+  matterNumber: string
+  versionNumber: number
+  approvedAt: string
+}
+interface UploadedDocument {
+  documentVersionId: string
+  originalFilename: string
+  contentType: string
+  sizeBytes: number
+  matterNumber: string
+  uploadedAt: string
+}
+
+function humanizeKind(kind: string): string {
+  return kind.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
 interface PortalMessage {
   author: 'client' | 'attorney'
   body: string
@@ -129,7 +148,7 @@ export default function ClientPortalPage() {
       })
   }, [selected])
 
-  const matterScoped = tab === 'matters' || tab === 'messages'
+  const matterScoped = tab === 'matters' || tab === 'messages' || tab === 'documents'
 
   return (
     <div className="cp-shell">
@@ -242,7 +261,7 @@ export default function ClientPortalPage() {
                 </>
               ))}
 
-            {tab === 'documents' && <DocumentsPanel />}
+            {tab === 'documents' && <DocumentsPanel matterEntityId={selected} />}
             {tab === 'billing' && <InvoicesPanel />}
             {tab === 'messages' &&
               (selected ? (
@@ -286,10 +305,34 @@ function UpcomingEventCard({ timeline }: { timeline: Timeline }) {
   )
 }
 
-// All of the client's documents (to-sign and already signed), across matters.
-function DocumentsPanel() {
+function formatBytes(n: number): string {
+  if (!n) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const UPLOAD_ACCEPT = '.pdf,.doc,.docx,.png,.jpg,.jpeg,.tif,.tiff,.txt'
+
+// All of the client's documents: approved by the attorney (read via the shared-draft
+// page), e-sign documents (to-sign / signed), and documents the client uploads to
+// the selected matter.
+function DocumentsPanel({ matterEntityId }: { matterEntityId: string | null }) {
   const [docs, setDocs] = useState<ClientDocument[] | null>(null)
+  const [approved, setApproved] = useState<ApprovedDocument[] | null>(null)
+  const [uploads, setUploads] = useState<UploadedDocument[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadErr, setUploadErr] = useState<string | null>(null)
+
+  const loadUploads = useCallback(() => {
+    callClientPortalMcp<{ documents: UploadedDocument[] }>({ toolName: 'legal.client.uploads' })
+      .then((r) => setUploads(r.documents))
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return
+        setUploads([])
+      })
+  }, [])
 
   useEffect(() => {
     callClientPortalMcp<{ documents: ClientDocument[] }>({
@@ -301,7 +344,44 @@ function DocumentsPanel() {
         setError(e instanceof Error ? e.message : String(e))
         setDocs([])
       })
-  }, [])
+    callClientPortalMcp<{ documents: ApprovedDocument[] }>({ toolName: 'legal.client.documents' })
+      .then((r) => setApproved(r.documents))
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return
+        setApproved([])
+      })
+    loadUploads()
+  }, [loadUploads])
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file later
+    if (!file || !matterEntityId) return
+    setUploading(true)
+    setUploadErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`/api/client/portal/matters/${matterEntityId}/documents/upload`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: fd,
+      })
+      if (res.status === 401) {
+        window.location.href = '/portal/login'
+        return
+      }
+      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      if (!res.ok) throw new Error(data?.error ?? 'Upload failed.')
+      loadUploads()
+    } catch (err) {
+      setUploadErr(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const loading = docs === null || approved === null || uploads === null
 
   return (
     <section className="pdash-card">
@@ -313,30 +393,117 @@ function DocumentsPanel() {
           {error}
         </div>
       )}
-      {docs === null ? (
+
+      {/* Upload */}
+      <div style={{ margin: '0 0 var(--space-3)' }}>
+        <label
+          className={`pdash-btn pdash-btn-sm ${uploading || !matterEntityId ? 'is-disabled' : ''}`}
+        >
+          {uploading ? 'Uploading…' : 'Upload a document'}
+          <input
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            onChange={onFile}
+            disabled={uploading || !matterEntityId}
+            style={{ display: 'none' }}
+          />
+        </label>
+        <span className="text-sm text-muted" style={{ marginLeft: '0.6rem' }}>
+          PDF, Word, images, or text · up to 25 MB
+        </span>
+        {uploadErr && (
+          <div className="alert alert-error" role="alert" style={{ marginTop: '0.5rem' }}>
+            {uploadErr}
+          </div>
+        )}
+      </div>
+
+      {loading ? (
         <div className="loading-block" role="status">
           <span className="spinner" /> Loading documents…
         </div>
-      ) : docs.length === 0 ? (
-        <p className="text-muted">
-          No documents yet. We&apos;ll post them here when they&apos;re ready.
-        </p>
       ) : (
-        <ul className="pdash-docs">
-          {docs.map((d) => (
-            <li key={d.requestId} className="pdash-doc">
-              <div>
-                <div className="pdash-doc-title">{d.documentTitle ?? 'Document'}</div>
-                <DocStateBadge state={d.state} />
-              </div>
-              {d.state === 'awaiting_you' && (
-                <a className="pdash-btn pdash-btn-sm" href={`/portal/sign/${d.requestId}`}>
-                  Review &amp; sign
-                </a>
-              )}
-            </li>
-          ))}
-        </ul>
+        <>
+          {approved && approved.length > 0 && (
+            <>
+              <h4 className="pdash-subhead" style={{ marginTop: 0 }}>
+                From your attorney
+              </h4>
+              <ul className="pdash-docs">
+                {approved.map((d) => (
+                  <li key={d.documentVersionId} className="pdash-doc">
+                    <div>
+                      <div className="pdash-doc-title">{humanizeKind(d.documentKind)}</div>
+                      <span className="text-sm text-muted">
+                        {d.matterNumber} · approved {new Date(d.approvedAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <a
+                      className="pdash-btn pdash-btn-sm"
+                      href={`/d/${d.documentVersionId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {docs && docs.length > 0 && (
+            <>
+              <h4 className="pdash-subhead">To sign &amp; signed</h4>
+              <ul className="pdash-docs">
+                {docs.map((d) => (
+                  <li key={d.requestId} className="pdash-doc">
+                    <div>
+                      <div className="pdash-doc-title">{d.documentTitle ?? 'Document'}</div>
+                      <DocStateBadge state={d.state} />
+                    </div>
+                    {d.state === 'awaiting_you' && (
+                      <a className="pdash-btn pdash-btn-sm" href={`/portal/sign/${d.requestId}`}>
+                        Review &amp; sign
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {uploads && uploads.length > 0 && (
+            <>
+              <h4 className="pdash-subhead">You&apos;ve uploaded</h4>
+              <ul className="pdash-docs">
+                {uploads.map((u) => (
+                  <li key={u.documentVersionId} className="pdash-doc">
+                    <div>
+                      <div className="pdash-doc-title">{u.originalFilename}</div>
+                      <span className="text-sm text-muted">
+                        {u.matterNumber} · {formatBytes(u.sizeBytes)} · uploaded{' '}
+                        {new Date(u.uploadedAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {approved &&
+            approved.length === 0 &&
+            docs &&
+            docs.length === 0 &&
+            uploads &&
+            uploads.length === 0 && (
+              <p className="text-muted">
+                No documents yet. Upload one above, or we&apos;ll post documents here when
+                they&apos;re ready.
+              </p>
+            )}
+        </>
       )}
     </section>
   )

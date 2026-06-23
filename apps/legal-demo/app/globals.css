@@ -9451,3 +9451,9 @@ input[type='number'] {
   cursor: pointer;
   padding: 0;
 }
+
+/* Disabled look for the label-styled upload button (a label can't be :disabled). */
+.pdash-btn.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}

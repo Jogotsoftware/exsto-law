@@ -3,6 +3,7 @@
 // a real PDF via the one renderer in billing/invoicePdf.ts.
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { getInvoice } from '../queries/billing.js'
+import { getClientInvoiceByNumber } from '../queries/clientBilling.js'
 import {
   renderInvoicePdf,
   resolveInvoiceTemplate,
@@ -68,6 +69,66 @@ export async function renderInvoicePdfBase64(
   const buf = await renderInvoicePdf(invoice, cfg)
   return {
     filename: `${invoice.invoiceNumber || 'invoice'}.pdf`,
+    contentType: 'application/pdf',
+    base64: buf.toString('base64'),
+  }
+}
+
+// CLIENT-SAFE invoice PDF: render the signed-in client's OWN invoice (by number)
+// to a branded PDF. Sources data from the CLIENT projection (getClientInvoiceByNumber
+// — matter-scoped authz, issued/sent/paid only, descriptions+amounts only), NEVER
+// the attorney getInvoice (which carries rates, source ledger events, internal ids).
+// Firm branding (name/logo/accent/payment instructions) is shown, but the rate /
+// quantity / matter columns are FORCE-HIDDEN so a saved firm config that enables the
+// rate column can never print hourly rates to the client. Returns null when the
+// invoice isn't the client's own / not yet issued (no oracle).
+export async function renderClientInvoicePdfBase64(
+  ctx: ActionContext,
+  clientContactId: string,
+  invoiceNumber: string,
+): Promise<InvoicePdf | null> {
+  const inv = await getClientInvoiceByNumber(ctx, clientContactId, invoiceNumber)
+  if (!inv) return null
+
+  const cfg = await getInvoiceTemplate(ctx)
+  // Force client-unsafe columns off regardless of the firm's saved config.
+  const clientCfg: InvoiceTemplateConfig = {
+    ...cfg,
+    columns: { matter: false, quantity: false, rate: false },
+  }
+
+  // Map the client projection into the renderer's InvoiceDetail shape, supplying
+  // ONLY client-safe fields (no rate/quantity/matterNumber/sourceEventId/notes).
+  const detail = {
+    invoiceEntityId: inv.invoiceEntityId,
+    invoiceNumber: inv.invoiceNumber,
+    // Client-facing status label, not the internal lifecycle word ('sent' etc.).
+    status: inv.status === 'paid' ? 'paid' : 'due',
+    clientName: inv.clientName,
+    clientEntityId: null,
+    matterEntityId: null,
+    total: inv.total,
+    currency: inv.currency,
+    issuedDate: inv.issuedDate,
+    dueDate: inv.dueDate,
+    notes: null,
+    lineCount: inv.lines.length,
+    createdAt: inv.issuedDate ?? '',
+    lines: inv.lines.map((l, i) => ({
+      lineEntityId: String(i),
+      kind: '',
+      description: l.description,
+      quantity: '',
+      rate: '',
+      amount: l.amount,
+      sourceEventId: null,
+      matterNumber: null,
+    })),
+  }
+
+  const buf = await renderInvoicePdf(detail, clientCfg)
+  return {
+    filename: `${inv.invoiceNumber || 'invoice'}.pdf`,
     contentType: 'application/pdf',
     base64: buf.toString('base64'),
   }

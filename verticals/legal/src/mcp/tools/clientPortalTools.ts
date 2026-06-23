@@ -10,7 +10,13 @@ import {
   createClientRequest,
   listClientRequests,
   submitClientPortalFeedback,
+  renderClientInvoicePdfBase64,
+  listApprovedClientDocuments,
+  listClientUploadedDocuments,
   isRequestType,
+  type InvoicePdf,
+  type ApprovedClientDocument,
+  type ClientUploadedDocument,
   type ClientMatterTimeline,
   type ClientMatterListItem,
   type PortalMessage,
@@ -135,6 +141,16 @@ const invoiceGetTool: Tool<InvoiceGetInput, { invoice: ClientInvoiceDetail | nul
   }),
 }
 
+const invoicePdfTool: Tool<InvoiceGetInput, { pdf: InvoicePdf | null }> = {
+  name: 'legal.client.invoice_pdf',
+  description:
+    "Render one of the signed-in client's own invoices to a branded PDF (base64). Client-safe: no rates, quantities, matter numbers, or notes — descriptions + amounts only.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    pdf: await renderClientInvoicePdfBase64(ctx, input.clientContactId, input.invoiceNumber),
+  }),
+}
+
 // ── Requests (cost-gated self-serve) ─────────────────────────────────────────
 // quote = price only (no write); create = the client accepted the price (write).
 // The route stamps clientContactId and asserts matterEntityId ∈ session.matterIds.
@@ -199,6 +215,29 @@ const requestListTool: Tool<RequestListInput, { requests: ClientRequestSummary[]
   }),
 }
 
+interface DocumentsInput {
+  clientContactId: string
+}
+
+const documentsTool: Tool<DocumentsInput, { documents: ApprovedClientDocument[] }> = {
+  name: 'legal.client.documents',
+  description:
+    "List the attorney-approved documents on the signed-in client's matters (view each via the shared-draft page).",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    documents: await listApprovedClientDocuments(ctx, input.clientContactId),
+  }),
+}
+
+const uploadsTool: Tool<DocumentsInput, { documents: ClientUploadedDocument[] }> = {
+  name: 'legal.client.uploads',
+  description: 'List the documents the signed-in client has uploaded (metadata only).',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    documents: await listClientUploadedDocuments(ctx, input.clientContactId),
+  }),
+}
+
 // ── Feedback (the portal chat widget) ────────────────────────────────────────
 // Client leaves feedback ABOUT the portal; recorded into the same triage channel
 // as attorney beta feedback (tagged client/client_portal). clientContactId is
@@ -229,7 +268,10 @@ registerTool(threadGetTool)
 registerTool(messagePostTool)
 registerTool(invoicesTool)
 registerTool(invoiceGetTool)
+registerTool(invoicePdfTool)
 registerTool(requestQuoteTool)
 registerTool(requestCreateTool)
 registerTool(requestListTool)
+registerTool(documentsTool)
+registerTool(uploadsTool)
 registerTool(feedbackSubmitTool)
