@@ -81,6 +81,24 @@ const NAV: NavNode[] = [
   { href: '/attorney/settings', label: 'Settings', Icon: SettingsIcon },
 ]
 
+// Which nav hrefs each feature MODULE gates (mirrors the platform module catalog,
+// ADR 0046 §5). Used to hide nav for modules an operator has DISABLED for this
+// firm. Areas not listed here (Dashboard, Mail, Settings) are never module-gated.
+const MODULE_AREAS: Record<string, string[]> = {
+  matters: ['/attorney/matters', '/attorney/review'],
+  calendar: ['/attorney/calendar'],
+  billing: ['/attorney/billing'],
+  crm: ['/attorney/crm'],
+  documents: [
+    '/attorney/templates',
+    '/attorney/questionnaires',
+    '/attorney/questions',
+    '/attorney/services',
+  ],
+  'client-portal': ['/attorney/requests'],
+  'e-sign': [],
+}
+
 type OpenMenu = null | 'nav' | 'notif' | 'user'
 
 // One in-app notification (a resolved beta-feedback item) for the nav bell.
@@ -117,6 +135,8 @@ export function AttorneyTopNav() {
   const userRef = useRef<HTMLDivElement>(null)
   const [notifs, setNotifs] = useState<NotifItem[]>([])
   const [unread, setUnread] = useState(0)
+  // Nav hrefs hidden because their feature module is disabled for this firm.
+  const [hiddenHrefs, setHiddenHrefs] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     // The attorney console never wears the client theme; the old header used to
@@ -144,6 +164,29 @@ export function AttorneyTopNav() {
       })
       .catch(() => {
         /* leave the bell empty if the load fails */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Hide nav for feature modules an operator has explicitly DISABLED for this
+  // firm. Modules are opt-out: the firm tool returns only the disabled module
+  // keys, and we hide exactly those modules' areas — so enabling/disabling one
+  // module never affects another's UI, and a fresh firm (no rows) hides nothing.
+  // Failure leaves all nav visible.
+  useEffect(() => {
+    let cancelled = false
+    callAttorneyMcp<{ disabledModuleKeys: string[] }>({
+      toolName: 'legal.module.gating',
+    })
+      .then((r) => {
+        if (cancelled || !r.disabledModuleKeys?.length) return
+        const hidden = new Set(r.disabledModuleKeys.flatMap((k) => MODULE_AREAS[k] ?? []))
+        setHiddenHrefs(hidden)
+      })
+      .catch(() => {
+        /* leave all nav visible on failure */
       })
     return () => {
       cancelled = true
@@ -188,6 +231,14 @@ export function AttorneyTopNav() {
   const leafActive = (item: NavLeaf) =>
     item.exact ? pathname === item.href : pathname.startsWith(item.href)
 
+  // Drop nav leaves whose feature module is disabled; drop a group if all its
+  // children are hidden.
+  const visibleNav: NavNode[] = NAV.flatMap((node): NavNode[] => {
+    if (!isGroup(node)) return hiddenHrefs.has(node.href) ? [] : [node]
+    const children = node.children.filter((c) => !hiddenHrefs.has(c.href))
+    return children.length ? [{ ...node, children }] : []
+  })
+
   return (
     <header className="att-top">
       <div className="att-top-inner">
@@ -216,7 +267,7 @@ export function AttorneyTopNav() {
           </Link>
           {open === 'nav' && (
             <nav className="att-menu" aria-label="Primary">
-              {NAV.map((node) => {
+              {visibleNav.map((node) => {
                 if (!isGroup(node)) {
                   const active = leafActive(node)
                   const { Icon } = node

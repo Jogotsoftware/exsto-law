@@ -1,5 +1,8 @@
 -- =============================================================================
--- Vertical migration 0095: Workflow STEP / TASK library (ADR 0045, PR4c)
+-- Vertical migration 0107: Workflow STEP / TASK library (ADR 0045, PR4c)
+-- (Renumbered 0095→0107: the original dup-0095 was fixed two ways at once — #215
+--  moved #213's control-plane chain to 0101-0106, and a separate fix moved this to
+--  0101, re-colliding. This standalone library now sits clear at 0107.)
 --
 -- Today a workflow step lives INSIDE a service (workflow_definition.states[] —
 -- one LifecycleStage). This adds a STANDALONE, reusable STEP — a firm-wide

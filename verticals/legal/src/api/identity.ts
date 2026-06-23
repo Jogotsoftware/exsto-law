@@ -20,6 +20,13 @@ export interface ResolvedActor {
 // If the same email exists in multiple tenants (future multi-firm), this
 // returns the most recently created one. A real tenant picker UI is the right
 // fix once that's a real scenario.
+//
+// The reserved PLATFORM (00FF…0001) and SANDBOX (00FE…0001) tenants are excluded:
+// they may contain human actors whose external_id is a real operator email (the
+// platform admin signs in there), and this cross-tenant, most-recent-wins lookup
+// would otherwise let such an actor hijack the operator's FIRM sign-in (ADR 0046).
+// Firm sign-in must never resolve into a control-plane tenant; the admin console
+// resolves its actor through its own path (private.cp_resolve_admin_by_email).
 export async function lookupActorByEmail(email: string): Promise<ResolvedActor | null> {
   if (!email) return null
   return withSuperuser(async (client) => {
@@ -34,6 +41,10 @@ export async function lookupActorByEmail(email: string): Promise<ResolvedActor |
        WHERE lower(external_id) = lower($1)
          AND actor_type = 'human'
          AND status = 'active'
+         AND tenant_id NOT IN (
+           '00000000-0000-0000-00FF-000000000001',  -- platform tenant
+           '00000000-0000-0000-00FE-000000000001'   -- sandbox tenant
+         )
        ORDER BY created_at DESC
        LIMIT 1`,
       [email],

@@ -11,7 +11,13 @@
 // attorneys/paralegals but cannot touch (or mint) another admin or a super_admin.
 import { submitAction, executeQuery, type ActionContext, type ActionResult } from '@exsto/substrate'
 
-export const ADMIN_SCOPES = ['firm.admin', 'firm.super_admin'] as const
+// firm.admin/super_admin are the firm's own admin scopes. platform.super_admin is
+// the PLATFORM operator's impersonation scope (rank 1000, granted only to a
+// tenant's hidden 'platform-console' system actor by cp_platform_actor_for, ADR
+// 0046): it reads as admin AND out-ranks every firm role, so the admin console can
+// manage all firm users — including (re)appointing a firm super_admin — through the
+// shared user-management core. No human firm user ever holds it.
+export const ADMIN_SCOPES = ['firm.admin', 'firm.super_admin', 'platform.super_admin'] as const
 
 // Rank lives on the scope ROW in the DB (permission_scope_definition.rank,
 // seeded by private.provision_firm_rbac) — schema-as-data, so the DB enforcement
