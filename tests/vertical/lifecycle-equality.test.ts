@@ -64,11 +64,19 @@ describe('handler-faithful gates on the human transitions', () => {
   const lc = deriveLifecycleFromService({ route: 'auto', bookingEnabled: true })
 
   it('in_review → approved is attorney-gated via draft.approve (matches handler)', () => {
-    expect(edgesFrom(lc, 'in_review')).toContainEqual({ to: 'approved', gate: 'attorney', via: 'draft.approve' })
+    expect(edgesFrom(lc, 'in_review')).toContainEqual({
+      to: 'approved',
+      gate: 'attorney',
+      via: 'draft.approve',
+    })
   })
 
   it('inquiry → intake_submitted is client-gated via matter.open', () => {
-    expect(edgesFrom(lc, 'inquiry')).toContainEqual({ to: 'intake_submitted', gate: 'client', via: 'matter.open' })
+    expect(edgesFrom(lc, 'inquiry')).toContainEqual({
+      to: 'intake_submitted',
+      gate: 'client',
+      via: 'matter.open',
+    })
   })
 
   it('approved rests (its only edge is non-automatic, so a matter stops here like today)', () => {

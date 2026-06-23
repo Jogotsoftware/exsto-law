@@ -13,7 +13,12 @@
 // Run (apply): tsx --env-file=.env.local verticals/legal/demo/backfill-lifecycle.ts --apply
 import { closeDbPool } from '@exsto/shared'
 import { withActionContext, type ActionContext } from '@exsto/substrate'
-import { listServices, deriveLifecycleFromService, validateLifecycle, automaticEdges } from '@exsto/legal'
+import {
+  listServices,
+  deriveLifecycleFromService,
+  validateLifecycle,
+  automaticEdges,
+} from '@exsto/legal'
 import '@exsto/legal'
 
 const ctx: ActionContext = {
@@ -25,7 +30,9 @@ const APPLY = process.argv.includes('--apply')
 
 async function main(): Promise<void> {
   const services = await listServices(ctx)
-  console.log(`${services.length} active services${APPLY ? ' (APPLY mode)' : ' (dry-run — no writes)'}\n`)
+  console.log(
+    `${services.length} active services${APPLY ? ' (APPLY mode)' : ' (dry-run — no writes)'}\n`,
+  )
 
   let wouldWrite = 0
   let skippedNonEmpty = 0
@@ -39,7 +46,10 @@ async function main(): Promise<void> {
       console.log(`  ✗ ${svc.serviceKey}: derived graph INVALID — ${v.errors.join('; ')} (skipped)`)
       continue
     }
-    const auto = automaticEdges(lc).map((e) => `${e.from}→${e.to}`).join(', ') || '(none)'
+    const auto =
+      automaticEdges(lc)
+        .map((e) => `${e.from}→${e.to}`)
+        .join(', ') || '(none)'
     console.log(
       `  • ${svc.serviceKey}  route=${svc.route} booking=${bookingEnabled}  ` +
         `${lc.length} stages  automatic: ${auto}`,

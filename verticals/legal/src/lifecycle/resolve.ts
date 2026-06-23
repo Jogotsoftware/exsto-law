@@ -44,7 +44,8 @@ export function hasAutomaticTransition(lc: Lifecycle, stageKey: string): boolean
 // THIS set against the one automatic transition the engine performs today.
 export function automaticEdges(lc: Lifecycle): Array<{ from: string; to: string }> {
   const out: Array<{ from: string; to: string }> = []
-  for (const s of lc) for (const e of s.advances_to) if (e.gate === 'automatic') out.push({ from: s.key, to: e.to })
+  for (const s of lc)
+    for (const e of s.advances_to) if (e.gate === 'automatic') out.push({ from: s.key, to: e.to })
   return out
 }
 
@@ -76,7 +77,8 @@ export function validateLifecycle(lc: Lifecycle): LifecycleValidation {
   if (keySet.size !== keys.length) errors.push('stage keys must be unique')
 
   const entries = lc.filter((s) => s.entry)
-  if (entries.length !== 1) errors.push(`exactly one entry stage required (found ${entries.length})`)
+  if (entries.length !== 1)
+    errors.push(`exactly one entry stage required (found ${entries.length})`)
 
   const terminals = lc.filter((s) => s.terminal)
   if (terminals.length === 0) errors.push('at least one terminal stage required')
@@ -84,10 +86,12 @@ export function validateLifecycle(lc: Lifecycle): LifecycleValidation {
   for (const s of lc) {
     if (!s.key) errors.push('every stage needs a key')
     if (!s.label) errors.push(`stage "${s.key}" needs a label`)
-    if (s.terminal && s.advances_to.length > 0) errors.push(`terminal stage "${s.key}" must have no outgoing edges`)
+    if (s.terminal && s.advances_to.length > 0)
+      errors.push(`terminal stage "${s.key}" must have no outgoing edges`)
     for (const e of s.advances_to) {
       if (!keySet.has(e.to)) errors.push(`stage "${s.key}" has an edge to unknown stage "${e.to}"`)
-      if (!GATE_KINDS.includes(e.gate)) errors.push(`stage "${s.key}" → "${e.to}" has invalid gate "${e.gate}"`)
+      if (!GATE_KINDS.includes(e.gate))
+        errors.push(`stage "${s.key}" → "${e.to}" has invalid gate "${e.gate}"`)
     }
   }
 

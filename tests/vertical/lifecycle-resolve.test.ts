@@ -81,7 +81,9 @@ describe('validateLifecycle — catches malformed graphs', () => {
       { key: 'a', label: 'A', entry: true, advances_to: [{ to: 'b', gate: 'attorney' }] },
       { key: 'b', label: 'B', terminal: true, advances_to: [{ to: 'a', gate: 'attorney' }] },
     ]
-    expect(validateLifecycle(lc).errors.join(' ')).toMatch(/terminal stage "b" must have no outgoing/)
+    expect(validateLifecycle(lc).errors.join(' ')).toMatch(
+      /terminal stage "b" must have no outgoing/,
+    )
   })
 
   it('rejects an unreachable stage', () => {
@@ -107,7 +109,9 @@ describe('resolver helpers', () => {
   })
 
   it('edgesFrom returns the outgoing edges', () => {
-    expect(edgesFrom(lc, 'in_review')).toEqual([{ to: 'approved', gate: 'attorney', via: 'draft.approve' }])
+    expect(edgesFrom(lc, 'in_review')).toEqual([
+      { to: 'approved', gate: 'attorney', via: 'draft.approve' },
+    ])
   })
 
   it('allowedTransitions filters by gate', () => {
