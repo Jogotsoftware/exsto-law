@@ -28,6 +28,9 @@ import './tools/bookingTools.js'
 import './tools/serviceLibraryTools.js'
 // ADR 0045 PR4a: author/read a service's workflow lifecycle graph (states).
 import './tools/serviceLifecycleTools.js'
+// ADR 0045 PR4b: the closed step-action + gate catalog the service-editor Workflow
+// builder composes a lifecycle from (server-side guardrail, data-driven UI).
+import './tools/workflowCatalogTools.js'
 import './tools/templatesTools.js'
 import './tools/standaloneTemplateTools.js'
 import './tools/questionnaireLibraryTools.js'
