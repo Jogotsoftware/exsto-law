@@ -26,6 +26,8 @@ import './tools/reviewDraft.js'
 import './tools/getIntakeQuestionnaire.js'
 import './tools/bookingTools.js'
 import './tools/serviceLibraryTools.js'
+// ADR 0045 PR4a: author/read a service's workflow lifecycle graph (states).
+import './tools/serviceLifecycleTools.js'
 import './tools/templatesTools.js'
 import './tools/standaloneTemplateTools.js'
 import './tools/questionnaireLibraryTools.js'
