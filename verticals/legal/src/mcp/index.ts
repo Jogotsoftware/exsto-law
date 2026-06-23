@@ -31,6 +31,9 @@ import './tools/serviceLifecycleTools.js'
 // ADR 0045 PR4b: the closed step-action + gate catalog the service-editor Workflow
 // builder composes a lifecycle from (server-side guardrail, data-driven UI).
 import './tools/workflowCatalogTools.js'
+// ADR 0045 PR4c: the reusable workflow STEP library — save a step + drop it into
+// any service's workflow from the builder (mirrors the questionnaire library).
+import './tools/workflowStepLibraryTools.js'
 import './tools/templatesTools.js'
 import './tools/standaloneTemplateTools.js'
 import './tools/questionnaireLibraryTools.js'

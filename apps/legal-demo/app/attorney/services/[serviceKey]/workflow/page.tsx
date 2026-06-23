@@ -65,6 +65,27 @@ interface WorkflowCatalog {
   gates: WfGate[]
 }
 
+// ── Workflow STEP library (PR4c) ───────────────────────────────────────────────
+// A saved step's STAGE is a LifecycleStage WITHOUT edges (no advances_to/key/
+// entry/terminal): { label, client_label?, action {kind,config?}, gate, documents?,
+// blocking? }. Mirrors verticals/legal/src/queries/workflowStepLibrary.ts — NOT
+// imported (no server-package imports). The builder wires the outgoing edge + gate
+// when a saved step is dropped in, exactly as a catalog add does.
+interface WfStepStage {
+  label: string
+  client_label?: string
+  blocking?: boolean
+  gate: WfGate
+  action: { kind: WfActionKind; config?: Record<string, unknown> }
+  documents?: WfDocumentRef[]
+}
+interface WorkflowStepTemplate {
+  workflowStepTemplateId: string
+  name: string
+  description: string | null
+  stage: WfStepStage
+}
+
 // ── The builder's working model. One Step per stage, in display = run order. The
 // outgoing edge to the NEXT step is implicit (rebuilt on save); we only keep the
 // per-step gate + trigger so editing is local and reordering is trivial. The last
@@ -207,30 +228,84 @@ function stepsToGraph(steps: BuilderStep[]): WfLifecycle {
   })
 }
 
+// One builder step → a saved-step STAGE (no edges/key/entry/terminal). The step's
+// per-step `gate` is the gate its OUTGOING edge gets by default when reused; we
+// carry it so a dropped-in step keeps a sensible default. The free-text trigger is
+// NOT saved — it is edge metadata the builder re-defaults per gate at insertion.
+function stepToStage(s: BuilderStep): WfStepStage {
+  const stage: WfStepStage = {
+    label: s.label.trim() || 'Step',
+    gate: s.gate,
+    action: { kind: s.actionKind },
+  }
+  if (s.clientLabel.trim()) stage.client_label = s.clientLabel.trim()
+  if (!s.blocking) stage.blocking = false
+  if (s.documents.length) stage.documents = s.documents
+  return stage
+}
+
+// A saved-step STAGE → a fresh builder step (new uid, blank key so it slugs on
+// save). Edge wiring (the outgoing edge to the next step) is rebuilt on save by
+// stepsToGraph, exactly as for a catalog add.
+function stageToStep(t: WorkflowStepTemplate): BuilderStep {
+  const st = t.stage
+  return {
+    uid: nextUid(),
+    key: '',
+    label: st.label || t.name,
+    clientLabel: st.client_label ?? '',
+    actionKind: st.action?.kind ?? 'manual_task',
+    gate: st.gate ?? 'attorney',
+    trigger: '',
+    blocking: st.blocking !== false,
+    documents: st.documents ?? [],
+  }
+}
+
 export default function ServiceWorkflowPage() {
   const params = useParams<{ serviceKey: string }>()
   const serviceKey = params.serviceKey
 
   const [catalog, setCatalog] = useState<WorkflowCatalog | null>(null)
+  const [library, setLibrary] = useState<WorkflowStepTemplate[]>([])
   const [steps, setSteps] = useState<BuilderStep[] | null>(null)
   const [version, setVersion] = useState<number | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [savingToLib, setSavingToLib] = useState<string | null>(null) // step uid
+  const [libNotice, setLibNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // Refresh just the step library (after a Save to library). Tolerant: a library
+  // load failure must not blank the builder.
+  const loadLibrary = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ steps: WorkflowStepTemplate[] }>({
+        toolName: 'legal.workflow_step_template.list',
+      })
+      setLibrary(r.steps ?? [])
+    } catch {
+      setLibrary([])
+    }
+  }, [])
+
   const load = useCallback(async () => {
     try {
-      const [lc, cat] = await Promise.all([
+      const [lc, cat, lib] = await Promise.all([
         callAttorneyMcp<{ lifecycle: { graph: WfLifecycle; version: number } | null }>({
           toolName: 'legal.service.lifecycle.get',
           input: { serviceKey },
         }),
         callAttorneyMcp<WorkflowCatalog>({ toolName: 'legal.workflow.catalog' }),
+        callAttorneyMcp<{ steps: WorkflowStepTemplate[] }>({
+          toolName: 'legal.workflow_step_template.list',
+        }).catch(() => ({ steps: [] as WorkflowStepTemplate[] })),
       ])
       setCatalog(cat)
+      setLibrary(lib.steps ?? [])
       setVersion(lc.lifecycle?.version ?? null)
       setSteps(lc.lifecycle ? graphToSteps(lc.lifecycle.graph) : [])
     } catch (e) {
@@ -265,6 +340,39 @@ export default function ServiceWorkflowPage() {
     mutate([...steps, step])
     setAdding(false)
     setEditing(step.uid)
+  }
+
+  // Drop a saved library step in as a new step (a fresh, editable copy — the
+  // builder wires its outgoing edge on save, exactly like a catalog add).
+  function addFromLibrary(t: WorkflowStepTemplate) {
+    if (!steps) return
+    const step = stageToStep(t)
+    mutate([...steps, step])
+    setAdding(false)
+    setEditing(step.uid)
+  }
+
+  // Save one builder step to the firm library, then refresh the picker so it's
+  // immediately reusable. The stored stage carries NO edges (the handler rejects
+  // advances_to), so it can be dropped into any workflow without a half-edge.
+  async function saveStepToLibrary(uid: string, name: string) {
+    const step = steps?.find((s) => s.uid === uid)
+    if (!step) return
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setSavingToLib(null)
+    setLibNotice(null)
+    try {
+      await callAttorneyMcp<{ step: WorkflowStepTemplate }>({
+        toolName: 'legal.workflow_step_template.create',
+        input: { name: trimmed, stage: stepToStage(step) },
+      })
+      await loadLibrary()
+      setLibNotice(`Saved "${trimmed}" to your step library.`)
+      setTimeout(() => setLibNotice(null), 3000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   function updateStep(uid: string, patch: Partial<BuilderStep>) {
@@ -391,6 +499,14 @@ export default function ServiceWorkflowPage() {
           Saved workflow {version != null ? `v${version}` : ''}.
         </div>
       )}
+      {libNotice && (
+        <div
+          className="alert"
+          style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
+        >
+          {libNotice}
+        </div>
+      )}
 
       {steps.length === 0 ? (
         <div
@@ -402,17 +518,29 @@ export default function ServiceWorkflowPage() {
             color: 'var(--muted)',
           }}
         >
-          <p style={{ margin: '0 0 0.8rem' }}>No workflow yet — add your first step.</p>
-          {catalog && (
-            <button type="button" className="primary" onClick={() => setAdding(true)}>
-              + Add a step
-            </button>
+          {adding ? (
+            <AddPalette
+              catalog={catalog}
+              library={library}
+              onPick={addStep}
+              onPickLibrary={addFromLibrary}
+              onCancel={() => setAdding(false)}
+            />
+          ) : (
+            <>
+              <p style={{ margin: '0 0 0.8rem' }}>No workflow yet — add your first step.</p>
+              {catalog && (
+                <button type="button" className="primary" onClick={() => setAdding(true)}>
+                  + Add a step
+                </button>
+              )}
+              <div style={{ marginTop: '0.7rem' }}>
+                <button type="button" className="outline" onClick={startFromSmllc}>
+                  Start from the SMLLC template
+                </button>
+              </div>
+            </>
           )}
-          <div style={{ marginTop: '0.7rem' }}>
-            <button type="button" className="outline" onClick={startFromSmllc}>
-              Start from the SMLLC template
-            </button>
-          </div>
         </div>
       ) : (
         <ol
@@ -431,6 +559,10 @@ export default function ServiceWorkflowPage() {
                 onRemove={() => removeStep(s.uid)}
                 onMoveUp={() => move(s.uid, -1)}
                 onMoveDown={() => move(s.uid, 1)}
+                savingToLib={savingToLib === s.uid}
+                onStartSaveToLib={() => setSavingToLib(s.uid)}
+                onCancelSaveToLib={() => setSavingToLib(null)}
+                onSaveToLib={(name) => saveStepToLibrary(s.uid, name)}
               />
               {i < steps.length - 1 && <Connector />}
             </li>
@@ -441,7 +573,13 @@ export default function ServiceWorkflowPage() {
       {steps.length > 0 && (
         <div style={{ marginTop: '0.6rem' }}>
           {adding ? (
-            <AddPalette catalog={catalog} onPick={addStep} onCancel={() => setAdding(false)} />
+            <AddPalette
+              catalog={catalog}
+              library={library}
+              onPick={addStep}
+              onPickLibrary={addFromLibrary}
+              onCancel={() => setAdding(false)}
+            />
           ) : (
             <button
               type="button"
@@ -509,14 +647,20 @@ function Connector() {
 }
 
 // A palette of catalog actions; picking one appends a step seeded with that
-// action's label + defaultGate (handled by the parent's addStep).
+// action's label + defaultGate (handled by the parent's addStep). PR4c: it also
+// lists the firm's SAVED step library — picking one appends an editable copy of
+// that saved step (the builder wires its edge on save, just like a catalog add).
 function AddPalette({
   catalog,
+  library,
   onPick,
+  onPickLibrary,
   onCancel,
 }: {
   catalog: WorkflowCatalog | null
+  library: WorkflowStepTemplate[]
   onPick: (a: CatalogAction) => void
+  onPickLibrary: (t: WorkflowStepTemplate) => void
   onCancel: () => void
 }) {
   if (!catalog) return null
@@ -527,6 +671,7 @@ function AddPalette({
         borderRadius: 8,
         padding: '0.8rem',
         background: 'var(--surface, #fafafa)',
+        textAlign: 'left',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -560,6 +705,50 @@ function AddPalette({
           </button>
         ))}
       </div>
+
+      {library.length > 0 && (
+        <>
+          <div
+            style={{
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              color: 'var(--muted)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+              margin: '0.8rem 0 0.4rem',
+            }}
+          >
+            From your step library
+          </div>
+          <div style={{ display: 'grid', gap: '0.4rem' }}>
+            {library.map((t) => {
+              const actionLabel =
+                catalog.actions.find((a) => a.kind === t.stage.action?.kind)?.label ??
+                t.stage.action?.kind
+              return (
+                <button
+                  key={t.workflowStepTemplateId}
+                  type="button"
+                  onClick={() => onPickLibrary(t)}
+                  style={{
+                    textAlign: 'left',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    padding: '0.55rem 0.7rem',
+                    background: 'var(--bg, #fff)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{t.name}</div>
+                  <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+                    {t.description || actionLabel}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -575,6 +764,10 @@ function StepCard({
   onRemove,
   onMoveUp,
   onMoveDown,
+  savingToLib,
+  onStartSaveToLib,
+  onCancelSaveToLib,
+  onSaveToLib,
 }: {
   step: BuilderStep
   index: number
@@ -586,6 +779,10 @@ function StepCard({
   onRemove: () => void
   onMoveUp: () => void
   onMoveDown: () => void
+  savingToLib: boolean
+  onStartSaveToLib: () => void
+  onCancelSaveToLib: () => void
+  onSaveToLib: (name: string) => void
 }) {
   const isLast = index === total - 1
   const actionLabel =
@@ -653,6 +850,16 @@ function StepCard({
           <button
             type="button"
             className="outline"
+            title="Save this step to the firm library for reuse in other workflows"
+            onClick={onStartSaveToLib}
+            disabled={savingToLib}
+            style={{ padding: '0.25rem 0.6rem' }}
+          >
+            Save to library
+          </button>
+          <button
+            type="button"
+            className="outline"
             onClick={onToggle}
             style={{ padding: '0.25rem 0.6rem' }}
           >
@@ -670,7 +877,68 @@ function StepCard({
         </div>
       </div>
 
+      {savingToLib && (
+        <SaveToLibraryRow
+          defaultName={step.label}
+          onCancel={onCancelSaveToLib}
+          onSave={onSaveToLib}
+        />
+      )}
+
       {open && <StepEditor step={step} isLast={isLast} catalog={catalog} onChange={onChange} />}
+    </div>
+  )
+}
+
+// Inline name prompt for saving a step to the library. The saved stage carries no
+// edges (the builder rebuilds those on insertion), so a library name is all we ask.
+function SaveToLibraryRow({
+  defaultName,
+  onCancel,
+  onSave,
+}: {
+  defaultName: string
+  onCancel: () => void
+  onSave: (name: string) => void
+}) {
+  const [name, setName] = useState(defaultName)
+  return (
+    <div
+      style={{
+        marginTop: '0.6rem',
+        display: 'flex',
+        gap: '0.4rem',
+        alignItems: 'center',
+        padding: '0.5rem',
+        border: '1px dashed var(--border)',
+        borderRadius: 6,
+        background: 'var(--surface, #fafafa)',
+      }}
+    >
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Name this saved step"
+        style={{ flex: 1 }}
+        autoFocus
+      />
+      <button
+        type="button"
+        className="primary"
+        onClick={() => onSave(name)}
+        disabled={!name.trim()}
+        style={{ padding: '0.3rem 0.7rem' }}
+      >
+        Save
+      </button>
+      <button
+        type="button"
+        className="outline"
+        onClick={onCancel}
+        style={{ padding: '0.3rem 0.6rem' }}
+      >
+        Cancel
+      </button>
     </div>
   )
 }
