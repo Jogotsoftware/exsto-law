@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0093: platform control plane — schema + guarded functions
+-- Vertical migration 0095: platform control plane — schema + guarded functions
 --
 -- exsto-law runs live with real firm tenants, but there is no platform-operator
 -- surface: no way to see all firms, stand one up, or act across them. Everything
@@ -26,8 +26,8 @@
 -- append-only (invariant 9/14). This is clone-owned schema → vertical namespace,
 -- never supabase/migrations/ (ADR 0043).
 --
--- Number 0093 = next free across origin/main (max 0092 = client_request_kinds)
--- and all remote branches; verified before authoring. Vertical files are
+-- Number 0095 = next free across origin/main (max 0094 = service_set_lifecycle,
+-- after 0093 workflow_engine merged post-branch). Vertical files are
 -- checksum-immutable once applied (scripts/migrate-vertical.mjs) — forward-only.
 -- =============================================================================
 

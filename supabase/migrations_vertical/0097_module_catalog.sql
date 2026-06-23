@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0095: module catalog + per-tenant enablement (ADR 0046 §5)
+-- Vertical migration 0097: module catalog + per-tenant enablement (ADR 0046 §5)
 --
 -- A "module" is a named FEATURE BUNDLE (billing, client-portal, e-sign, calendar,
 -- documents, crm, matters) that the platform admin turns on/off per tenant. Two
@@ -9,13 +9,13 @@
 --     a module's manifest into a target tenant. `ui_areas` gates the firm app nav;
 --     `requires` declares the kinds/scopes a module installs (used by promotion).
 --   * module_enablement   — per-tenant on/off + the manifest that was installed.
---     Written through the action layer (legal.module.enable/disable, 0096), so
+--     Written through the action layer (legal.module.enable/disable, 0098), so
 --     every transition is an audited action; updated in place (lifecycle table).
 --
 -- Disable hides UI + deactivates the module's scopes but NEVER deletes kinds that
 -- may hold data (data-safety, invariant 11/14).
 --
--- Both tables carry tenant_id + RLS (invariant 1). Number 0095 = next after 0094.
+-- Both tables carry tenant_id + RLS (invariant 1). Number 0097 = next after 0096.
 -- =============================================================================
 
 SELECT set_config('app.tenant_id', '00000000-0000-0000-00FF-000000000001', false);

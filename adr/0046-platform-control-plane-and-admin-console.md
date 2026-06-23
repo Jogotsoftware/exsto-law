@@ -3,7 +3,7 @@
 ## Status
 
 Accepted. Implemented in the legal clone (`exsto-law`) as a Layer-3 concern:
-control-plane schema in `supabase/migrations_vertical/` (0093–0099), control-plane
+control-plane schema in `supabase/migrations_vertical/` (0095–0100), control-plane
 operation core in `verticals/legal/src/controlPlane/`, admin auth + `/admin` surface
 in `apps/legal-demo`. Companion to ADR 0024 (MCP as primary interface), ADR 0037
 (RLS role model), ADR 0038 (REST adapter), ADR 0043 (clone upgrade path / migration

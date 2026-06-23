@@ -5,8 +5,8 @@
 //     even for the BYPASSRLS test/migration role, not just the RLS-subject app role);
 //   - the `tenant` table gains NO broad cross-tenant policy (still self-select only);
 //   - the four new control-plane tables all have RLS enabled.
-// Skipped without a connection string. Assumes the vertical migrations (0093–0098)
-// + seed are applied — i.e. the platform admin (0094) is present.
+// Skipped without a connection string. Assumes the vertical migrations (0095–0100)
+// + seed are applied — i.e. the platform admin (0096) is present.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import pg from 'pg'
 
@@ -14,7 +14,7 @@ const url = process.env.SUBSTRATE_TEST_DATABASE_URL ?? process.env.DATABASE_URL
 const run = describe.skipIf(!url)
 
 const PLATFORM_TENANT = '00000000-0000-0000-00FF-000000000001'
-const PLATFORM_ADMIN_ACTOR = '00000000-0000-0000-00FF-00000000000a' // seeded by 0094
+const PLATFORM_ADMIN_ACTOR = '00000000-0000-0000-00FF-00000000000a' // seeded by 0096
 const NON_ADMIN_ACTOR = '00000000-0000-0000-0001-000000000001' // tenant zero's system actor (not a platform admin)
 
 run('ADR 0046: platform control plane', () => {
