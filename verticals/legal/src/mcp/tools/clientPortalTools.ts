@@ -231,7 +231,7 @@ const documentsTool: Tool<DocumentsInput, { documents: ApprovedClientDocument[] 
 
 const uploadsTool: Tool<DocumentsInput, { documents: ClientUploadedDocument[] }> = {
   name: 'legal.client.uploads',
-  description: "List the documents the signed-in client has uploaded (metadata only).",
+  description: 'List the documents the signed-in client has uploaded (metadata only).',
   mode: 'read',
   handler: async (ctx: ActionContext, input) => ({
     documents: await listClientUploadedDocuments(ctx, input.clientContactId),

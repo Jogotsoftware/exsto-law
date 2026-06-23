@@ -396,7 +396,9 @@ function DocumentsPanel({ matterEntityId }: { matterEntityId: string | null }) {
 
       {/* Upload */}
       <div style={{ margin: '0 0 var(--space-3)' }}>
-        <label className={`pdash-btn pdash-btn-sm ${uploading || !matterEntityId ? 'is-disabled' : ''}`}>
+        <label
+          className={`pdash-btn pdash-btn-sm ${uploading || !matterEntityId ? 'is-disabled' : ''}`}
+        >
           {uploading ? 'Uploading…' : 'Upload a document'}
           <input
             type="file"
