@@ -189,6 +189,37 @@ export interface AssistantChatOptions {
   clientTools?: ClientTool[]
 }
 
+// Token usage for an assistant turn, summed across every API call the turn made
+// (a turn can span several calls: web-search pauses, client-tool loops). Cache
+// tokens are tracked separately because they price differently. This is what the
+// AI usage/cost view aggregates — recorded on each assistant.turn event.
+export interface AssistantUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+}
+
+function emptyUsage(): AssistantUsage {
+  return { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }
+}
+
+// Fold one API response's usage into the running total. Anthropic's usage fields
+// are optional/loosely typed across SDK versions, so read defensively.
+function addUsage(acc: AssistantUsage, usage: Anthropic.Message['usage'] | undefined): void {
+  if (!usage) return
+  const u = usage as {
+    input_tokens?: number
+    output_tokens?: number
+    cache_creation_input_tokens?: number | null
+    cache_read_input_tokens?: number | null
+  }
+  acc.inputTokens += u.input_tokens ?? 0
+  acc.outputTokens += u.output_tokens ?? 0
+  acc.cacheCreationTokens += u.cache_creation_input_tokens ?? 0
+  acc.cacheReadTokens += u.cache_read_input_tokens ?? 0
+}
+
 // A single piece of a streamed assistant reply. `thinking` carries the model's
 // summarized reasoning (shown as a live "thinking" trace), `text` the answer
 // itself, and a terminal `citations` chunk the web-search sources (if any).
@@ -199,6 +230,8 @@ export type AssistantStreamChunk =
   // The model invoked a client tool (e.g. load_skill). Surfaced so the UI can
   // show what the assistant is doing — "using NDA review" — while the tool runs.
   | { type: 'tool'; name: string; input: unknown }
+  // Terminal chunk carrying the turn's summed token usage (for the AI usage view).
+  | { type: 'usage'; usage: AssistantUsage }
 
 // Anthropic's web search server tool. When enabled the model searches the web
 // itself and annotates its answer with source URLs (the citation blocks we
@@ -421,12 +454,13 @@ export async function chatWithAssistantDetailed(
   tenantId: string | null,
   messages: ChatMessage[],
   opts: AssistantChatOptions = {},
-): Promise<{ reply: string; citations: string[] }> {
+): Promise<{ reply: string; citations: string[]; usage: AssistantUsage }> {
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
   const anthropic = makeAnthropic(apiKey)
 
   const carryTurns: Array<{ role: 'assistant' | 'user'; content: unknown }> = []
   const citations: string[] = []
+  const usage = emptyUsage()
   let reply = ''
 
   for (let i = 0; ; i++) {
@@ -440,6 +474,7 @@ export async function chatWithAssistantDetailed(
       throw await assistantAuthError(err, source, tenantId, apiKey)
     }
     reply += extractText(response.content)
+    addUsage(usage, response.usage)
     mergeCitations(citations, collectCitations(response.content))
 
     // Resume a paused server-tool (web-search) turn until it finishes.
@@ -462,7 +497,7 @@ export async function chatWithAssistantDetailed(
   }
 
   if (!reply) throw new Error('Claude response contained no text block.')
-  return { reply, citations }
+  return { reply, citations, usage }
 }
 
 // Back-compat thin wrapper: prose reply only. Kept for the legacy assistant and
@@ -489,6 +524,7 @@ export async function* streamChatWithAssistant(
 
   const carryTurns: Array<{ role: 'assistant' | 'user'; content: unknown }> = []
   const citations: string[] = []
+  const usage = emptyUsage()
 
   for (let i = 0; ; i++) {
     const body = buildChatRequest(messages, opts, carryTurns)
@@ -511,6 +547,7 @@ export async function* streamChatWithAssistant(
     } catch (err) {
       throw await assistantAuthError(err, source, tenantId, apiKey)
     }
+    addUsage(usage, final.usage)
     mergeCitations(citations, collectCitations(final.content))
 
     // If a web-search turn paused at the server tool-loop limit, resume it: re-
@@ -540,6 +577,8 @@ export async function* streamChatWithAssistant(
   }
 
   if (citations.length) yield { type: 'citations', citations }
+  // Terminal usage chunk so the streaming caller can record token cost.
+  yield { type: 'usage', usage }
 }
 
 function splitDocumentAndTrace(raw: string): {

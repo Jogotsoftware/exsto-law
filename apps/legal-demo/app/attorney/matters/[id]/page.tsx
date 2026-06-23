@@ -10,7 +10,7 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
 import { CheckCircleIcon, ClockIcon, ChevronRightIcon, FileTextIcon } from '@/components/icons'
-import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 import {
   humanizeService,
   humanizeStatus,
@@ -37,6 +37,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState<string | null>(null)
   const [callTranscript, setCallTranscript] = useState('')
   const [openStep, setOpenStep] = useState<StepKey | null>(null)
+  const [hasInvoice, setHasInvoice] = useState(false)
 
   const load = useCallback(async () => {
     setError(null)
@@ -46,6 +47,13 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         input: { matterEntityId: id },
       })
       setMatter(res.matter)
+      // Whether this matter already has an issued invoice — drives the Bill step's
+      // "done" state. Best-effort: a billing read must never block the overview.
+      const inv = await callAttorneyMcp<{ items: unknown[] }>({
+        toolName: 'legal.billing.matter_invoiced',
+        input: { matterEntityId: id },
+      }).catch(() => ({ items: [] as unknown[] }))
+      setHasInvoice((inv.items ?? []).length > 0)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -127,7 +135,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
   const hasQuestionnaire = matter.questionnaireResponses !== null
   const hasTranscript = matter.transcriptText !== null
   const canGenerate = hasQuestionnaire && hasTranscript
-  const steps = deriveMatterSteps(matter)
+  const steps = deriveMatterSteps(matter, { hasInvoice })
 
   return (
     <>
@@ -285,6 +293,14 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
           onClose={closeStep}
         />
       )}
+
+      {openStep === 'approve' && (
+        <ApproveStep matter={matter} onClose={closeStep} onChanged={load} />
+      )}
+
+      {openStep === 'client' && <ClientStep matter={matter} onClose={closeStep} />}
+
+      {openStep === 'bill' && <BillStep matter={matter} onClose={closeStep} onChanged={load} />}
     </>
   )
 }
@@ -426,6 +442,456 @@ function DocumentStep({
           </p>
         )}
       </div>
+    </Modal>
+  )
+}
+
+function money(amount: string | null, currency: string): string {
+  if (amount == null) return '—'
+  const n = Number(amount)
+  if (!Number.isFinite(n)) return amount
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(n)
+}
+
+// ── Approve step ────────────────────────────────────────────────────────────
+// Approve the latest draft from the workflow window — the same legal.draft.approve
+// the full review page calls. Approval flips the matter to approved AND
+// auto-accrues the document fee (handlers/draft.ts), so the Bill step then has
+// something to invoice.
+function ApproveStep({
+  matter,
+  onClose,
+  onChanged,
+}: {
+  matter: MatterDetail
+  onClose: () => void
+  onChanged: () => Promise<void>
+}) {
+  const versionId = matter.latestDraftVersionId
+  const approved = matter.latestDraftStatus === 'approved'
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function approve() {
+    if (!versionId) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.draft.approve',
+        input: { documentVersionId: versionId },
+      })
+      await onChanged()
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  const footer = versionId ? (
+    <>
+      <Link href={`/attorney/review/${versionId}`} className="button">
+        Open full review
+      </Link>
+      {!approved && (
+        <button className="primary" onClick={() => void approve()} disabled={busy}>
+          {busy && <span className="spinner" />}
+          {busy ? 'Approving…' : 'Approve document'}
+        </button>
+      )}
+    </>
+  ) : null
+
+  return (
+    <Modal title="Approve" onClose={onClose} footer={footer}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {!versionId ? (
+        <p className="text-muted text-sm">
+          No document to approve yet — generate one in the Document step first.
+        </p>
+      ) : approved ? (
+        <p className="text-sm">
+          This document is <strong>approved</strong>. The document fee (if the service sets one) is
+          accrued and ready to bill in the <strong>Bill</strong> step.
+        </p>
+      ) : (
+        <p className="text-sm">
+          Approving marks the latest draft as the firm-approved version, flips the matter to{' '}
+          <strong>approved</strong>, and automatically accrues the document fee. Review it in full
+          first if you like.
+        </p>
+      )}
+    </Modal>
+  )
+}
+
+// ── Send-to-client step ─────────────────────────────────────────────────────
+// Email the approved document to the client as a secure shared link (the same
+// legal.email.send_draft_link the Documents tab uses), gated on approval.
+function ClientStep({ matter, onClose }: { matter: MatterDetail; onClose: () => void }) {
+  const versionId = matter.latestDraftVersionId
+  const approved = matter.latestDraftStatus === 'approved'
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+
+  async function send() {
+    if (!versionId) return
+    const defaultTo = matter.clientEmail ?? ''
+    const to =
+      defaultTo ||
+      (typeof window !== 'undefined'
+        ? (window.prompt('No client email on file. Send to which email?', '') ?? '').trim()
+        : '')
+    if (!to) {
+      setStatus({
+        kind: 'err',
+        msg: 'No recipient — add a client email or enter one when prompted.',
+      })
+      return
+    }
+    if (typeof window !== 'undefined' && !window.confirm(`Email the document to ${to}?`)) return
+    setBusy(true)
+    setStatus(null)
+    try {
+      const r = await callAttorneyMcp<{ to?: string }>({
+        toolName: 'legal.email.send_draft_link',
+        input: {
+          matterEntityId: matter.matterEntityId,
+          documentVersionId: versionId,
+          shareUrl: shareUrlFor(versionId),
+          to,
+        },
+      })
+      setStatus({ kind: 'ok', msg: `Sent to ${r.to ?? to}.` })
+    } catch (e) {
+      setStatus({ kind: 'err', msg: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const footer =
+    approved && versionId ? (
+      <button className="primary" onClick={() => void send()} disabled={busy}>
+        {busy && <span className="spinner" />}
+        {busy ? 'Sending…' : 'Email document to client'}
+      </button>
+    ) : null
+
+  return (
+    <Modal title="Send to client" onClose={onClose} footer={footer}>
+      {status && (
+        <div
+          className={`alert ${status.kind === 'ok' ? '' : 'alert-error'}`}
+          style={
+            status.kind === 'ok'
+              ? { background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }
+              : undefined
+          }
+        >
+          {status.msg}
+        </div>
+      )}
+      {!approved ? (
+        <p className="text-muted text-sm">
+          Approve the document first — then you can email the approved version to the client.
+        </p>
+      ) : (
+        <p className="text-sm">
+          Emails the client a secure link to the approved document
+          {matter.clientEmail ? (
+            <>
+              {' '}
+              at <strong>{matter.clientEmail}</strong>
+            </>
+          ) : (
+            ' (no client email on file — you’ll be prompted)'
+          )}
+          .
+        </p>
+      )}
+    </Modal>
+  )
+}
+
+// ── Bill step ───────────────────────────────────────────────────────────────
+// Create the invoice from this matter's accrued/unbilled entries and send it with
+// a Pay-now link — without leaving the matter. Reuses legal.billing.unbilled
+// (filtered to the matter), legal.service.complete (accrue the flat fee),
+// legal.invoice.issue, and legal.invoice.send.
+interface BillEntry {
+  sourceEventId: string
+  kind: 'time' | 'expense' | 'service_fee' | 'document_fee'
+  description: string
+  amount: string | null
+}
+interface BillInvoice {
+  invoiceEntityId: string
+  invoiceNumber: string
+  invoiceStatus: string
+  amount: string
+}
+
+function BillStep({
+  matter,
+  onClose,
+  onChanged,
+}: {
+  matter: MatterDetail
+  onClose: () => void
+  onChanged: () => Promise<void>
+}) {
+  const id = matter.matterEntityId
+  const [entries, setEntries] = useState<BillEntry[]>([])
+  const [unbilledTotal, setUnbilledTotal] = useState('0.00')
+  const [invoices, setInvoices] = useState<BillInvoice[]>([])
+  const [currency, setCurrency] = useState('USD')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setErr(null)
+    try {
+      const [u, inv] = await Promise.all([
+        callAttorneyMcp<{
+          clients: { matters: { matterEntityId: string; entries: BillEntry[]; total: string }[] }[]
+          currency: string
+        }>({ toolName: 'legal.billing.unbilled' }),
+        callAttorneyMcp<{
+          items: {
+            invoiceEntityId: string
+            invoiceNumber: string
+            invoiceStatus: string
+            amount: string
+          }[]
+          currency: string
+        }>({ toolName: 'legal.billing.matter_invoiced', input: { matterEntityId: id } }),
+      ])
+      setCurrency(u.currency || inv.currency || 'USD')
+      let mine: { entries: BillEntry[]; total: string } | null = null
+      for (const c of u.clients ?? [])
+        for (const m of c.matters ?? []) if (m.matterEntityId === id) mine = m
+      setEntries(mine?.entries ?? [])
+      setUnbilledTotal(mine?.total ?? '0.00')
+      // Collapse invoiced line items to distinct invoices, summing line amounts.
+      const byInvoice = new Map<string, BillInvoice>()
+      for (const it of inv.items ?? []) {
+        const prev = byInvoice.get(it.invoiceEntityId)
+        const sum = (prev ? Number(prev.amount) : 0) + (Number(it.amount) || 0)
+        byInvoice.set(it.invoiceEntityId, {
+          invoiceEntityId: it.invoiceEntityId,
+          invoiceNumber: it.invoiceNumber,
+          invoiceStatus: it.invoiceStatus,
+          amount: sum.toFixed(2),
+        })
+      }
+      setInvoices([...byInvoice.values()])
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  async function markComplete() {
+    setBusy('complete')
+    setErr(null)
+    setNotice(null)
+    try {
+      await callAttorneyMcp({ toolName: 'legal.service.complete', input: { matterEntityId: id } })
+      setNotice('Service marked complete — its flat fee (if any) is now accrued below.')
+      await load()
+      await onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function createInvoice() {
+    if (!matter.clientEntityId) {
+      setErr('This matter has no linked client, so an invoice can’t be addressed.')
+      return
+    }
+    setBusy('create')
+    setErr(null)
+    setNotice(null)
+    try {
+      const r = await callAttorneyMcp<{ invoiceNumber?: string }>({
+        toolName: 'legal.invoice.issue',
+        input: {
+          clientEntityId: matter.clientEntityId,
+          matterEntityId: id,
+          lines: entries.map((e) => ({ sourceEventId: e.sourceEventId, kind: e.kind })),
+        },
+      })
+      setNotice(`Invoice ${r.invoiceNumber ?? ''} created — send it below.`)
+      await load()
+      await onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function sendInvoice(invoiceEntityId: string, number: string) {
+    setBusy(`send:${invoiceEntityId}`)
+    setErr(null)
+    setNotice(null)
+    try {
+      const r = await callAttorneyMcp<{ to?: string }>({
+        toolName: 'legal.invoice.send',
+        input: {
+          invoiceEntityId,
+          payUrlBase: typeof window !== 'undefined' ? window.location.origin : undefined,
+        },
+      })
+      setNotice(`Invoice ${number} sent${r.to ? ` to ${r.to}` : ''}.`)
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <Modal title="Bill" onClose={onClose}>
+      {err && <div className="alert alert-error">{err}</div>}
+      {notice && (
+        <div
+          className="alert"
+          style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
+        >
+          {notice}
+        </div>
+      )}
+      {loading ? (
+        <p className="text-muted text-sm">
+          <span className="spinner" /> Loading billing…
+        </p>
+      ) : (
+        <>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--space-2)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span className="kv-label">Accrued, not yet invoiced</span>
+            <button onClick={() => void markComplete()} disabled={busy === 'complete'}>
+              {busy === 'complete' ? 'Working…' : 'Mark service complete'}
+            </button>
+          </div>
+
+          {entries.length === 0 ? (
+            <p className="text-muted text-sm" style={{ marginTop: 'var(--space-2)' }}>
+              Nothing accrued yet. Approving the document accrues its fee; “Mark service complete”
+              accrues the flat fee; or log time on the Billing tab.
+            </p>
+          ) : (
+            <div style={{ overflowX: 'auto', marginTop: 'var(--space-2)' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((e) => (
+                    <tr key={e.sourceEventId}>
+                      <td>{e.kind.replace(/_/g, ' ')}</td>
+                      <td>{e.description || '—'}</td>
+                      <td>{money(e.amount, currency)}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={2} style={{ textAlign: 'right', fontWeight: 600 }}>
+                      Total
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{money(unbilledTotal, currency)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{ marginTop: 'var(--space-3)' }}>
+                <button
+                  className="primary"
+                  onClick={() => void createInvoice()}
+                  disabled={busy === 'create'}
+                >
+                  {busy === 'create' && <span className="spinner" />}
+                  {busy === 'create'
+                    ? 'Creating…'
+                    : `Create invoice (${money(unbilledTotal, currency)})`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {invoices.length > 0 && (
+            <div style={{ marginTop: 'var(--space-5)' }}>
+              <span className="kv-label">Invoices</span>
+              <div style={{ overflowX: 'auto', marginTop: 'var(--space-2)' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Invoice</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoices.map((inv) => (
+                      <tr key={inv.invoiceEntityId}>
+                        <td>{inv.invoiceNumber}</td>
+                        <td>{money(inv.amount, currency)}</td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              inv.invoiceStatus === 'sent' || inv.invoiceStatus === 'paid'
+                                ? 'ok'
+                                : 'info'
+                            }`}
+                          >
+                            {inv.invoiceStatus}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {inv.invoiceStatus === 'issued' && (
+                            <button
+                              onClick={() =>
+                                void sendInvoice(inv.invoiceEntityId, inv.invoiceNumber)
+                              }
+                              disabled={busy === `send:${inv.invoiceEntityId}`}
+                            >
+                              {busy === `send:${inv.invoiceEntityId}` ? 'Sending…' : 'Send invoice'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </Modal>
   )
 }

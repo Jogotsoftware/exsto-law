@@ -86,6 +86,9 @@ async function writeScheduleAttrs(
 
 interface BookingCreatePayload {
   matter_entity_id: string
+  // The human-facing matter reference (entity name), echoed back in the effect so
+  // the booking-confirmation page can show it (it reads effects[0].matterNumber).
+  matter_number?: string
   scheduled_at: string
   scheduled_end: string | null
   google_event_id: string | null
@@ -144,6 +147,7 @@ registerActionHandler('booking.create', async (ctx, client, payload, actionId) =
 
   return {
     matterEntityId: p.matter_entity_id,
+    matterNumber: p.matter_number ?? null,
     scheduledAt: p.scheduled_at,
     googleEventId: p.google_event_id,
     googleEventUrl: p.google_event_url,

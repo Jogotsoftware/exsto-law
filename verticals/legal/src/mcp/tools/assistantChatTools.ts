@@ -6,6 +6,8 @@ import {
   listAssistantThreads,
   listAssistantModels,
   listAssistantFeedback,
+  getAiUsageSummary,
+  saveAssistantReplyToMatter,
   type AssistantChatInput,
   type AssistantChatReply,
   type SubmitFeedbackInput,
@@ -13,6 +15,8 @@ import {
   type AssistantThreadSummary,
   type AssistantModel,
   type AssistantFeedbackEntry,
+  type AiUsageSummary,
+  type SaveAssistantReplyInput,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -183,3 +187,44 @@ registerTool({
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => ({ feedback: await listAssistantFeedback(ctx) }),
 } satisfies Tool<Record<string, never>, { feedback: AssistantFeedbackEntry[] }>)
+
+registerTool({
+  name: 'legal.assistant.usage',
+  description:
+    "Firm-wide AI token usage and ESTIMATED cost over the trailing window (sinceDays, default 30), broken down by model and by day. Reads the token usage recorded on each Claude assistant.turn event; Perplexity turns don't report tokens. Cost is an estimate from list prices. Powers the Settings → AI usage tab.",
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      sinceDays: {
+        type: 'number',
+        description: 'Trailing window in days (1–365). Default 30.',
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) =>
+    getAiUsageSummary(ctx, { sinceDays: input?.sinceDays }),
+} satisfies Tool<{ sinceDays?: number }, AiUsageSummary>)
+
+registerTool({
+  name: 'legal.assistant.save_reply',
+  description:
+    "Save an assistant reply as a document draft on a matter (pending review), so a useful answer/letter/memo is kept on the matter instead of copy-pasted out. Lands in the matter's drafts/review like any AI draft.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      matterEntityId: { type: 'string', description: 'The matter to attach the draft to.' },
+      markdown: { type: 'string', description: 'The reply markdown to save.' },
+      documentKind: {
+        type: 'string',
+        description: 'Optional kind tag (e.g. memo, letter); defaults to assistant_draft.',
+      },
+      modelIdentity: { type: 'string', description: 'Optional model that produced the reply.' },
+    },
+    required: ['matterEntityId', 'markdown'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => saveAssistantReplyToMatter(ctx, input),
+} satisfies Tool<SaveAssistantReplyInput, { draftVersionId: string | null }>)

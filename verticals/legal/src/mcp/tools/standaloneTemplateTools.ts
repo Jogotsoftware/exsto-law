@@ -6,9 +6,11 @@ import {
   updateTemplate,
   archiveTemplate,
   aiDraftTemplate,
+  aiEnhanceTemplate,
   type StandaloneTemplate,
   type CreateTemplateInput,
   type UpdateTemplateInput,
+  type AiEnhanceTemplateInput,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -113,12 +115,17 @@ const archiveTool: Tool<
 // reviews it in the editor and SAVES via create/update (that's the recorded write),
 // so this is a read-mode generation with no substrate mutation.
 const aiDraftTool: Tool<
-  { instructions: string; category: 'document' | 'email' },
+  {
+    instructions: string
+    category: 'document' | 'email'
+    skillSlugs?: string[]
+    modelId?: string
+  },
   { body: string }
 > = {
   name: 'legal.template.ai_draft',
   description:
-    'Draft a reusable template body from a plain-language description, using the firm’s Settings-managed Anthropic key. Returns the body text (with {{merge_tokens}} for fill-ins) for the attorney to review and save — it does not persist anything itself.',
+    'Draft a reusable template body from a plain-language description, using the firm’s Settings-managed Anthropic key. Optionally force specific legal skills (skillSlugs) and choose the model (modelId). Returns the body text (with {{merge_tokens}}) for the attorney to review and save — it does not persist anything itself.',
   mode: 'write',
   inputSchema: {
     type: 'object',
@@ -128,11 +135,61 @@ const aiDraftTool: Tool<
         description: 'Plain-language description of the template to draft.',
       },
       category: { type: 'string', enum: ['document', 'email'] },
+      skillSlugs: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional legal-skill slugs to force-load as drafting guidance.',
+      },
+      modelId: {
+        type: 'string',
+        description:
+          "Optional model id from legal.assistant.models, e.g. 'anthropic:claude-haiku-4-5-20251001'. Defaults to the firm default.",
+      },
     },
     required: ['instructions', 'category'],
     additionalProperties: false,
   },
   handler: async (ctx: ActionContext, input) => aiDraftTemplate(ctx, input),
+}
+
+const aiEnhanceTool: Tool<AiEnhanceTemplateInput, { body: string }> = {
+  name: 'legal.template.ai_enhance',
+  description:
+    'Revise an EXISTING template body (or draft fresh when it is empty) using the firm’s Settings-managed Anthropic key — preserving the {{merge_tokens}} already in it and reusing the bound questionnaire’s fields (fieldIds) for fill-ins. Optionally force specific legal skills (skillSlugs) and choose the model (modelId). Returns the revised body for the attorney to review and save — it persists nothing itself.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      currentBody: {
+        type: 'string',
+        description:
+          'The current template body to improve. Empty string ⇒ draft from instructions.',
+      },
+      instructions: {
+        type: 'string',
+        description: 'What to change. Omit for a general polish/tighten pass.',
+      },
+      category: { type: 'string', enum: ['document', 'email'] },
+      fieldIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Questionnaire field ids to reuse as {{tokens}} for fill-ins.',
+      },
+      skillSlugs: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional legal-skill slugs to force-load as drafting guidance.',
+      },
+      modelId: {
+        type: 'string',
+        description:
+          "Optional model id from legal.assistant.models, e.g. 'anthropic:claude-haiku-4-5-20251001'. Defaults to the firm default.",
+      },
+    },
+    required: ['currentBody', 'category'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => aiEnhanceTemplate(ctx, input),
 }
 
 registerTool(listTool)
@@ -141,3 +198,4 @@ registerTool(createTool)
 registerTool(updateTool)
 registerTool(archiveTool)
 registerTool(aiDraftTool)
+registerTool(aiEnhanceTool)

@@ -19,6 +19,7 @@ import {
   type ChatMessage,
   type ClientTool,
   type WorkRate,
+  type AssistantUsage,
 } from '../adapters/claude.js'
 import { runPerplexityResearch, streamPerplexityResearch } from '../adapters/perplexity.js'
 import { resolveAssistantModel, type AssistantProvider } from './assistantModels.js'
@@ -373,6 +374,9 @@ export async function recordAssistantTurn(
     // Names of any documents the attorney attached to this turn (names only — the
     // text already shaped the reply; keeping it out of the event avoids bloat).
     attachmentNames?: string[] | null
+    // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
+    // Recorded additively in the event payload; powers the AI usage/cost view.
+    usage?: AssistantUsage | null
   },
 ): Promise<{ eventId: string }> {
   const res = await submitAction(ctx, {
@@ -397,6 +401,17 @@ export async function recordAssistantTurn(
         category: input.kind === 'feedback' ? (input.category ?? 'other') : null,
         page_context: input.pageContext ?? null,
         attachment_names: input.attachmentNames ?? null,
+        // Token usage (snake_case to match the rest of the payload), null when the
+        // provider doesn't report it. The actor is captured as source_ref above, so
+        // the usage view can attribute cost per attorney.
+        usage: input.usage
+          ? {
+              input_tokens: input.usage.inputTokens,
+              output_tokens: input.usage.outputTokens,
+              cache_creation_tokens: input.usage.cacheCreationTokens,
+              cache_read_tokens: input.usage.cacheReadTokens,
+            }
+          : null,
       },
     },
   })
@@ -429,6 +444,8 @@ export async function assistantChat(
 
   let reply: string
   let citations: string[] = []
+  // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
+  let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
     // External research: only the non-confidential framing leaves the firm —
@@ -471,6 +488,7 @@ export async function assistantChat(
     })
     reply = result.reply
     citations = result.citations
+    usage = result.usage
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -485,6 +503,7 @@ export async function assistantChat(
     category: input.category ?? null,
     pageContext: input.pageContext ?? null,
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
+    usage,
   })
 
   return { eventId, reply, citations, provider: model.provider, model: model.model, kind, scope }
@@ -518,6 +537,7 @@ export async function* assistantChatStream(
 
   let reply = ''
   let citations: string[] = []
+  let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
     // External research: only the non-confidential framing leaves the firm.
@@ -571,6 +591,8 @@ export async function* assistantChatStream(
         yield { type: 'thinking', text: chunk.text }
       } else if (chunk.type === 'citations') {
         citations = chunk.citations
+      } else if (chunk.type === 'usage') {
+        usage = chunk.usage
       } else if (chunk.type === 'tool' && chunk.name === 'load_skill') {
         // Surface the loaded skill so the UI can show a "using <skill>" chip.
         const slug = ((chunk.input ?? {}) as { slug?: string }).slug ?? ''
@@ -592,6 +614,7 @@ export async function* assistantChatStream(
     category: input.category ?? null,
     pageContext: input.pageContext ?? null,
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
+    usage,
   })
 
   yield {

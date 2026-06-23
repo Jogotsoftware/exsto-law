@@ -1,43 +1,156 @@
 'use client'
 
-// Public "Pay now" landing for an invoice (the link in the invoice email points
-// here: /portal/pay/<invoiceNumber>). Online card payments are not built yet, so
-// this is an honest "coming soon" page that names the invoice and tells the client
-// how to pay in the meantime. No auth and no invoice data fetch — it only shows the
-// invoice number from the URL, so nothing sensitive is exposed on a public link.
-import { use } from 'react'
+// Invoice detail + pay landing (the link in the invoice email points here:
+// /portal/pay/<invoiceNumber>). It now fetches REAL invoice data behind the signed
+// client session — the authed portal tool authorizes the invoice against the
+// client's own matters, so a number in the URL is no longer a public oracle. Online
+// payment is a seam (lib/payments/provider.ts); until a provider is wired, the page
+// shows the amount due and how to pay offline.
+import { use, useEffect, useMemo, useState } from 'react'
+import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
+import { getPaymentProvider } from '@/lib/payments/provider'
 
-export default function InvoicePayComingSoonPage({
-  params,
-}: {
-  params: Promise<{ invoice: string }>
-}) {
+interface ClientInvoiceLine {
+  description: string
+  amount: string
+}
+interface ClientInvoiceDetail {
+  invoiceEntityId: string
+  invoiceNumber: string
+  status: 'due' | 'paid'
+  total: string
+  currency: string
+  issuedDate: string | null
+  dueDate: string | null
+  lines: ClientInvoiceLine[]
+}
+
+function money(amount: string, currency: string): string {
+  const n = Number(amount)
+  if (!Number.isFinite(n)) return `${amount} ${currency}`
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(n)
+  } catch {
+    return `${amount} ${currency}`
+  }
+}
+
+export default function InvoicePayPage({ params }: { params: Promise<{ invoice: string }> }) {
   const { invoice } = use(params)
   const invoiceNumber = decodeURIComponent(invoice)
+  const [data, setData] = useState<ClientInvoiceDetail | null>(null)
+  const [state, setState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading')
+  const [error, setError] = useState<string | null>(null)
+  const provider = useMemo(() => getPaymentProvider(), [])
+
+  useEffect(() => {
+    callClientPortalMcp<{ invoice: ClientInvoiceDetail | null }>({
+      toolName: 'legal.client.invoice_get',
+      input: { invoiceNumber },
+    })
+      .then((r) => {
+        if (!r.invoice) {
+          setState('notfound')
+          return
+        }
+        setData(r.invoice)
+        setState('ready')
+      })
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return // wrapper bounces to login
+        setError(e instanceof Error ? e.message : String(e))
+        setState('error')
+      })
+  }, [invoiceNumber])
 
   return (
     <main className="public-draft">
       <div className="public-draft-head">
         <div>
           <div className="public-draft-firm">Pacheco Law</div>
-          <h1 style={{ margin: 'var(--space-1) 0 0' }}>Pay invoice {invoiceNumber}</h1>
+          <h1 style={{ margin: 'var(--space-1) 0 0' }}>Invoice {invoiceNumber}</h1>
         </div>
       </div>
 
       <section style={{ marginTop: 'var(--space-4)' }}>
-        <div className="alert">
-          <strong>Online payments are coming soon.</strong> We&apos;re finishing secure card and
-          bank payments for {invoiceNumber}. In the meantime, you can pay by check or bank transfer
-          — just reply to the invoice email and we&apos;ll send payment details right away.
-        </div>
+        {state === 'loading' && (
+          <div className="loading-block" role="status">
+            <span className="spinner" /> Loading invoice…
+          </div>
+        )}
 
-        <p className="text-muted" style={{ marginTop: 'var(--space-4)' }}>
-          The amount due is shown on the invoice email we sent you. Once online payments are live,
-          this page will let you pay {invoiceNumber} by card in a few clicks.
-        </p>
+        {state === 'notfound' && (
+          <div className="alert">
+            We couldn&apos;t find this invoice on your account. If you think this is a mistake,
+            reply to the invoice email or contact the firm.
+          </div>
+        )}
+
+        {state === 'error' && (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
+
+        {state === 'ready' && data && (
+          <>
+            <div className="pdash-card">
+              <div className="pdash-card-head">
+                <h2 style={{ margin: 0 }}>{money(data.total, data.currency)}</h2>
+                <span className={`pdash-badge ${data.status === 'paid' ? '' : ''}`}>
+                  {data.status === 'paid' ? 'Paid' : 'Amount due'}
+                </span>
+              </div>
+              <div className="text-sm text-muted">
+                {data.issuedDate && <>Issued {new Date(data.issuedDate).toLocaleDateString()} · </>}
+                {data.dueDate && data.status !== 'paid' && (
+                  <>Due {new Date(data.dueDate).toLocaleDateString()}</>
+                )}
+              </div>
+
+              {data.lines.length > 0 && (
+                <ul className="pdash-docs" style={{ marginTop: 'var(--space-3)' }}>
+                  {data.lines.map((l, i) => (
+                    <li key={i} className="pdash-doc">
+                      <div className="pdash-doc-title">{l.description || 'Service'}</div>
+                      <div>{money(l.amount, data.currency)}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {data.status === 'paid' ? (
+              <p className="text-muted" style={{ marginTop: 'var(--space-4)' }}>
+                This invoice has been paid. Thank you!
+              </p>
+            ) : provider.enabled && provider.startCheckout ? (
+              <button
+                type="button"
+                className="pdash-btn"
+                style={{ marginTop: 'var(--space-4)' }}
+                onClick={async () => {
+                  const { url } = await provider.startCheckout!({
+                    invoiceNumber: data.invoiceNumber,
+                    amount: data.total,
+                    currency: data.currency,
+                  })
+                  window.location.href = url
+                }}
+              >
+                Pay {money(data.total, data.currency)}
+              </button>
+            ) : (
+              <div className="alert" style={{ marginTop: 'var(--space-4)' }}>
+                <strong>To pay this invoice,</strong> reply to the invoice email or contact the firm
+                for check or bank-transfer details. Online card payment is coming soon.
+              </div>
+            )}
+          </>
+        )}
 
         <p style={{ marginTop: 'var(--space-4)' }}>
-          <a href="/portal">Go to your client portal →</a>
+          <a href="/portal">← Back to your client portal</a>
         </p>
       </section>
     </main>

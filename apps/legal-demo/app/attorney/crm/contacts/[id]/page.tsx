@@ -57,6 +57,8 @@ export default function ContactDetailPage() {
   const id = params.id
   const [contact, setContact] = useState<ContactDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [inviting, setInviting] = useState(false)
+  const [inviteMsg, setInviteMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const load = useCallback(async () => {
     setError(null)
@@ -75,6 +77,26 @@ export default function ContactDetailPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  const invite = useCallback(async () => {
+    setInviting(true)
+    setInviteMsg(null)
+    try {
+      const r = await callAttorneyMcp<{ ok: boolean; email?: string; error?: string }>({
+        toolName: 'legal.contact.invite_to_portal',
+        input: { contactEntityId: id },
+      })
+      if (r.ok) {
+        setInviteMsg({ ok: true, text: `Invite sent to ${r.email}.` })
+      } else {
+        setInviteMsg({ ok: false, text: r.error ?? 'Could not send the invite.' })
+      }
+    } catch (e) {
+      setInviteMsg({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setInviting(false)
+    }
+  }, [id])
 
   const standing = contact ? BUCKET_META[contact.crmBucket] : null
 
@@ -113,6 +135,35 @@ export default function ContactDetailPage() {
               <Field label="Company" value={contact.companyName || '—'} />
               <Field label="Referral source" value={contact.attributionSource || '—'} />
             </div>
+          </section>
+
+          <section>
+            <h2 style={{ marginBottom: '0.5rem' }}>Portal access</h2>
+            <p className="text-muted" style={{ marginTop: 0 }}>
+              Email this client a secure link to set their password and sign in to view their
+              matters, documents, and invoices, and message you. Re-sending resets their password.
+            </p>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={inviting || !contact.email}
+              onClick={invite}
+            >
+              {inviting ? 'Sending…' : 'Invite to portal'}
+            </button>
+            {!contact.email && (
+              <span className="text-muted" style={{ marginLeft: '0.6rem' }}>
+                Add an email first.
+              </span>
+            )}
+            {inviteMsg && (
+              <div
+                className={`alert ${inviteMsg.ok ? 'alert-success' : 'alert-error'}`}
+                style={{ marginTop: '0.6rem' }}
+              >
+                {inviteMsg.text}
+              </div>
+            )}
           </section>
 
           <section>

@@ -152,6 +152,23 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+// Whether a reply is an actual DOCUMENT worth downloading (a draft/letter/memo),
+// vs. a quick conversational answer. Gates the PDF/Word buttons so they don't show
+// on every chat — only when the assistant produced something document-shaped:
+// substantial length AND some structure (a heading, several paragraphs, or
+// letter/agreement phrasing).
+function looksLikeDocument(md: string): boolean {
+  const t = md.trim()
+  if (t.length < 500) return false
+  const paragraphs = t.split(/\n\s*\n/).filter((p) => p.trim()).length
+  const hasHeading = /^#{1,6}\s/m.test(t)
+  const letterish =
+    /\b(Dear\b|Sincerely|Regards,|Re:|RE:|WHEREAS|AGREEMENT|This .{0,40}Agreement|MEMORANDUM)\b/.test(
+      t,
+    )
+  return hasHeading || paragraphs >= 3 || letterish
+}
+
 // Pick the first usable (connected + available) model, else the first available.
 function pickDefault(models: AssistantModel[]): string | null {
   const usable = models.find((m) => m.available && m.connected)
@@ -215,6 +232,58 @@ function CopyButton({ text }: { text: string }) {
       title={copied ? 'Copied' : 'Copy'}
     >
       {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />} Copy
+    </button>
+  )
+}
+
+// Save an assistant reply onto the current matter as a document draft (pending
+// review). Transient saving/saved/failed states; only rendered for matter-scoped,
+// document-like replies.
+function SaveToMatterButton({
+  matterEntityId,
+  markdown,
+}: {
+  matterEntityId: string
+  markdown: string
+}) {
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+  async function save() {
+    setState('saving')
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.assistant.save_reply',
+        input: { matterEntityId, markdown },
+      })
+      setState('saved')
+    } catch {
+      setState('error')
+    }
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setState('idle'), 2200)
+  }
+  return (
+    <button
+      type="button"
+      className={`uac-reply-btn${state === 'saved' ? ' copied' : ''}`}
+      onClick={save}
+      disabled={state === 'saving'}
+      title="Save this reply to the matter's drafts (for review)"
+    >
+      {state === 'saved' ? <CheckIcon size={12} /> : <FileTextIcon size={12} />}{' '}
+      {state === 'saving'
+        ? 'Saving…'
+        : state === 'saved'
+          ? 'Saved'
+          : state === 'error'
+            ? 'Failed'
+            : 'Save to matter'}
     </button>
   )
 }
@@ -1084,22 +1153,33 @@ export function UnifiedAssistantChat({
                 {t.content.trim() && (
                   <div className="uac-reply-actions">
                     <CopyButton text={t.content} />
-                    <button
-                      type="button"
-                      className="uac-reply-btn"
-                      onClick={() => downloadAsPdf(t.content, 'Assistant reply')}
-                      title="Download as PDF"
-                    >
-                      <FileTextIcon size={12} /> PDF
-                    </button>
-                    <button
-                      type="button"
-                      className="uac-reply-btn"
-                      onClick={() => downloadAsWord(t.content, 'assistant-reply')}
-                      title="Download as Word"
-                    >
-                      <FileTextIcon size={12} /> Word
-                    </button>
+                    {/* Downloads only when the reply is an actual document. */}
+                    {looksLikeDocument(t.content) && (
+                      <>
+                        <button
+                          type="button"
+                          className="uac-reply-btn"
+                          onClick={() => downloadAsPdf(t.content, 'Assistant reply')}
+                          title="Download as PDF"
+                        >
+                          <FileTextIcon size={12} /> PDF
+                        </button>
+                        <button
+                          type="button"
+                          className="uac-reply-btn"
+                          onClick={() => downloadAsWord(t.content, 'assistant-reply')}
+                          title="Download as Word"
+                        >
+                          <FileTextIcon size={12} /> Word
+                        </button>
+                        {activeScope.matterEntityId && (
+                          <SaveToMatterButton
+                            matterEntityId={activeScope.matterEntityId}
+                            markdown={t.content}
+                          />
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </>

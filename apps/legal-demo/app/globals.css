@@ -4093,6 +4093,19 @@ main.book-main {
   white-space: nowrap;
   vertical-align: baseline;
 }
+/* Variable validity (set by the editor's coloring plugin). Matched keeps the
+   default blue; unknown (no platform variable) is red; orphaned (a known
+   variable with no corresponding question) is yellow/amber. */
+.tpl-var-chip.tpl-var-chip--unknown {
+  background: var(--danger-soft, #fee2e2);
+  color: var(--danger, #dc2626);
+  border-color: #fca5a5;
+}
+.tpl-var-chip.tpl-var-chip--orphaned {
+  background: var(--warn-soft, #fef3c7);
+  color: var(--warn-text, #92400e);
+  border-color: #fcd9a8;
+}
 .tpl-var-chip-inline {
   margin: 0 0.25rem;
   vertical-align: baseline;
@@ -4218,6 +4231,168 @@ main.book-main {
   display: flex;
   gap: 0.6rem;
   margin-top: 0.8rem;
+}
+/* Inline AI-enhance panel on a service document (mirrors the library modal's
+   controls, but lives inline under the document header). */
+.tpl-ai-panel {
+  margin: 0.2rem 0 0.7rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2, #fafafa);
+}
+.tpl-ai-instr {
+  width: 100%;
+  resize: vertical;
+  min-height: 3.2rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+.tpl-ai-skillarea {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+/* Draft-with-AI options: model selector + a compact searchable skill picker. */
+.tpl-ai-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.7rem;
+}
+
+/* Attach-a-reference-document control in the Draft-with-AI modal. */
+.tpl-ai-attach {
+  margin-top: 0.6rem;
+}
+.tpl-ai-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px dashed var(--border-strong, var(--border));
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.tpl-ai-attach-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-attorney);
+}
+.tpl-ai-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+.tpl-ai-attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 18rem;
+}
+.tpl-ai-attach-x {
+  display: inline-flex;
+  color: var(--muted);
+  padding: 0;
+  line-height: 1;
+}
+.tpl-ai-attach-x:hover {
+  color: var(--danger);
+}
+.tpl-ai-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.tpl-ai-opt-lbl {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.tpl-ai-opt-select {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.84rem;
+}
+.tpl-ai-skillpick {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.tpl-ai-skillchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.tpl-ai-skillchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.2rem 0.1rem 0.5rem;
+  border: 1px solid var(--accent, #1e3a8a);
+  border-radius: 999px;
+  background: var(--accent-attorney-soft, #e8efff);
+  color: var(--accent, #1e3a8a);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.tpl-ai-skillchip button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+.tpl-ai-skillsearch {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.84rem;
+}
+.tpl-ai-skilllist {
+  display: flex;
+  flex-direction: column;
+  max-height: 11rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+}
+.tpl-ai-skillopt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.tpl-ai-skillopt:hover {
+  background: rgba(127, 127, 127, 0.1);
+}
+.tpl-ai-skillopt span {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.tpl-ai-skillopt small {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.tpl-ai-skillempty {
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 /* "Drafting…" progress animation in the Draft-with-AI modal — shimmering document
    lines so the wait reads as the AI writing, not a frozen window. */
@@ -7697,6 +7872,69 @@ input[type='number'] {
   margin: 0.8rem 0 0;
   font-size: 0.88rem;
   color: #374151;
+}
+
+/* Post-"Request revision" nudge: closes the loop to a regenerate with the notes
+   just written. An accent-tinted call-to-action above the notes field. */
+.review-nudge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--accent, #4f46e5);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft, #eef2ff);
+  font-size: 0.92rem;
+}
+.review-nudge-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Regenerate-draft modal: legal-skills picker (checklist of forced skills the
+   redraft should apply). Reuses the shared .modal-* shell. */
+.regen-skills {
+  margin-top: var(--space-3);
+}
+.regen-skills-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.regen-skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem;
+  background: var(--surface);
+}
+.regen-skill {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 400;
+}
+.regen-skill:hover {
+  background: var(--surface-2, #f6f7f9);
+}
+.regen-skill input {
+  margin-top: 0.2rem;
 }
 
 /* ───────────────────────────────────────────────────────────────────────────

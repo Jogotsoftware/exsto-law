@@ -30,7 +30,7 @@ export function humanizeKind(k: string): string {
 // There is no first-class "step" record; a matter's progress IS the presence of
 // the intake questionnaire, the consultation transcript, and the latest document
 // draft, walked in lifecycle order. The first not-done step is the "current" one.
-export type StepKey = 'intake' | 'consultation' | 'document'
+export type StepKey = 'intake' | 'consultation' | 'document' | 'approve' | 'client' | 'bill'
 export type StepState = 'done' | 'current' | 'pending'
 
 export interface MatterStep {
@@ -40,11 +40,20 @@ export interface MatterStep {
   subtitle: string
 }
 
-export function deriveMatterSteps(matter: MatterDetail): MatterStep[] {
+export function deriveMatterSteps(
+  matter: MatterDetail,
+  opts: { hasInvoice?: boolean } = {},
+): MatterStep[] {
   const draftLabel = matter.latestDraftStatus
     ? `Latest draft · ${humanizeStatus(matter.latestDraftStatus)}`
     : 'Latest draft ready'
-  const defs: Array<{ key: StepKey; title: string; isDone: boolean; subtitle: string }> = [
+  const hasDraft = matter.latestDraftVersionId !== null
+  const approved = matter.latestDraftStatus === 'approved'
+  const hasInvoice = opts.hasInvoice === true
+
+  // The first four steps walk in lifecycle order; the first not-done one is the
+  // "current" step.
+  const coreDefs: Array<{ key: StepKey; title: string; isDone: boolean; subtitle: string }> = [
     {
       key: 'intake',
       title: 'Intake',
@@ -63,12 +72,22 @@ export function deriveMatterSteps(matter: MatterDetail): MatterStep[] {
     {
       key: 'document',
       title: 'Document',
-      isDone: matter.latestDraftVersionId !== null,
-      subtitle: matter.latestDraftVersionId !== null ? draftLabel : 'No document generated yet',
+      isDone: hasDraft,
+      subtitle: hasDraft ? draftLabel : 'No document generated yet',
+    },
+    {
+      key: 'approve',
+      title: 'Approve',
+      isDone: approved,
+      subtitle: approved
+        ? 'Approved — document fee accrued'
+        : hasDraft
+          ? 'Ready for your approval'
+          : 'Approve once a document is generated',
     },
   ]
   let currentAssigned = false
-  return defs.map((d): MatterStep => {
+  const core = coreDefs.map((d): MatterStep => {
     if (d.isDone) return { key: d.key, title: d.title, state: 'done', subtitle: d.subtitle }
     if (!currentAssigned) {
       currentAssigned = true
@@ -76,6 +95,29 @@ export function deriveMatterSteps(matter: MatterDetail): MatterStep[] {
     }
     return { key: d.key, title: d.title, state: 'pending', subtitle: d.subtitle }
   })
+
+  // After approval, "send to client" and "bill" are independently actionable.
+  // "Send to client" has no persisted sent-flag, so it stays actionable (current)
+  // once approved; "Bill" completes once this matter has an issued invoice.
+  const client: MatterStep = {
+    key: 'client',
+    title: 'Send to client',
+    state: approved ? 'current' : 'pending',
+    subtitle: approved
+      ? 'Email the approved document to the client'
+      : 'Available once the document is approved',
+  }
+  const bill: MatterStep = {
+    key: 'bill',
+    title: 'Bill',
+    state: hasInvoice ? 'done' : approved ? 'current' : 'pending',
+    subtitle: hasInvoice
+      ? 'Invoice issued'
+      : approved
+        ? 'Create & send the invoice from accrued fees'
+        : 'Available once the document is approved',
+  }
+  return [...core, client, bill]
 }
 
 // Flatten the questionnaire payload into simple markdown so the intake step can be

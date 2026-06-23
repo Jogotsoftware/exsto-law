@@ -8,6 +8,7 @@ import { usePathname } from 'next/navigation'
 const TABS = [
   { href: '/attorney/settings', label: 'Firm settings', exact: true },
   { href: '/attorney/settings/users', label: 'Users & roles' },
+  { href: '/attorney/settings/ai-usage', label: 'AI usage' },
 ]
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
