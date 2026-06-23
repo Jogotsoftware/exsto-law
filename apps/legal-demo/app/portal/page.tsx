@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { ScaleIcon } from '@/components/icons'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 
 interface MeResponse {
@@ -69,14 +70,23 @@ interface ClientRequest {
   createdAt: string
 }
 
-// Signed-in client portal — one secure place for matters, upcoming events,
-// documents, and attorney messaging. All identity comes from the httpOnly
-// cookie; this page sends no identity (the server derives + authorizes it).
+type Tab = 'matters' | 'documents' | 'billing' | 'messages'
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'matters', label: 'Matters' },
+  { key: 'documents', label: 'Documents' },
+  { key: 'billing', label: 'Billing' },
+  { key: 'messages', label: 'Messages & Requests' },
+]
+
+// Signed-in client portal — a tabbed shell (header + nav + wide content) over the
+// client's matters, documents, billing, and messaging/requests. All identity comes
+// from the httpOnly cookie; this page sends no identity (the server derives it).
 export default function ClientPortalPage() {
   const [me, setMe] = useState<MeResponse | null>(null)
   const [matters, setMatters] = useState<MatterListItem[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<Timeline | null>(null)
+  const [tab, setTab] = useState<Tab>('matters')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -119,106 +129,134 @@ export default function ClientPortalPage() {
       })
   }, [selected])
 
-  if (error) {
-    return (
-      <main className="pdash">
-        <div className="alert alert-error" role="alert">
-          {error}
-        </div>
-      </main>
-    )
-  }
-  if (!me || !matters) {
-    return (
-      <main className="pdash">
-        <div className="loading-block" role="status">
-          <span className="spinner" /> Loading…
-        </div>
-      </main>
-    )
-  }
+  const matterScoped = tab === 'matters' || tab === 'messages'
 
   return (
-    <main className="pdash">
-      <header className="pdash-head">
-        <div>
-          <div className="pdash-firm">Pacheco Law</div>
-          <h1 className="pdash-title">Your client portal</h1>
-          <div className="pdash-who">
-            Signed in as {me.displayName} ({me.email})
+    <div className="cp-shell">
+      <header className="cp-top">
+        <div className="cp-top-inner">
+          <div className="cp-brand">
+            <span className="cp-crest" aria-hidden>
+              <ScaleIcon size={18} />
+            </span>
+            <span className="cp-brand-text">
+              <span className="cp-brand-name">Pacheco Law</span>
+              <span className="cp-brand-sub">Client Portal</span>
+            </span>
+          </div>
+          <div className="cp-top-right">
+            {me && (
+              <span className="cp-who" title={me.email}>
+                {me.displayName}
+              </span>
+            )}
+            <a href="/api/client/auth/logout" className="cp-signout">
+              Sign out
+            </a>
           </div>
         </div>
-        <a href="/api/client/auth/logout" className="pdash-signout">
-          Sign out
-        </a>
+        <nav className="cp-nav" aria-label="Portal sections">
+          <div className="cp-nav-inner">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className={`cp-tab ${tab === t.key ? 'active' : ''}`}
+                aria-current={tab === t.key ? 'page' : undefined}
+                onClick={() => setTab(t.key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </nav>
       </header>
 
-      {matters.length === 0 ? (
-        <div className="pdash-card pdash-empty">
-          You don&apos;t have any matters with the firm yet. Once you book a consultation,
-          it&apos;ll appear here.
-        </div>
-      ) : (
-        <>
-          {matters.length > 1 && (
-            <div className="pdash-switch">
-              <label htmlFor="matter-switch">Matter</label>
-              <select
-                id="matter-switch"
-                value={selected ?? ''}
-                onChange={(e) => setSelected(e.target.value)}
-              >
-                {matters.map((m) => (
-                  <option key={m.matterEntityId} value={m.matterEntityId}>
-                    {m.matterNumber} — {m.statusLabel}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+      <main className="cp-main">
+        {error && (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
 
-          {!timeline ? (
-            <div className="loading-block" role="status" style={{ marginTop: 'var(--space-4)' }}>
-              <span className="spinner" /> Loading matter…
-            </div>
-          ) : (
-            <>
-              {timeline.scheduledAt && <UpcomingEventCard timeline={timeline} />}
+        {!me || !matters ? (
+          <div className="loading-block" role="status">
+            <span className="spinner" /> Loading…
+          </div>
+        ) : matters.length === 0 ? (
+          <div className="pdash-card pdash-empty">
+            You don&apos;t have any matters with the firm yet. Once you book a consultation,
+            it&apos;ll appear here.
+          </div>
+        ) : (
+          <>
+            {matterScoped && matters.length > 1 && (
+              <div className="cp-switch">
+                <label htmlFor="matter-switch">Matter</label>
+                <select
+                  id="matter-switch"
+                  value={selected ?? ''}
+                  onChange={(e) => setSelected(e.target.value)}
+                >
+                  {matters.map((m) => (
+                    <option key={m.matterEntityId} value={m.matterEntityId}>
+                      {m.matterNumber} — {m.statusLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-              <section className="pdash-card">
-                <div className="pdash-card-head">
-                  <h2>Matter {timeline.matterNumber}</h2>
-                  <span className="pdash-badge">{timeline.statusLabel}</span>
+            {tab === 'matters' &&
+              (!timeline ? (
+                <div className="loading-block" role="status">
+                  <span className="spinner" /> Loading matter…
                 </div>
-                <h3 className="pdash-subhead">Timeline</h3>
-                {timeline.milestones.length === 0 ? (
-                  <p className="text-muted">No updates yet.</p>
-                ) : (
-                  <ol className="pdash-timeline">
-                    {timeline.milestones.map((m, i) => (
-                      <li key={`${m.key}-${i}`}>
-                        <span className="pdash-dot" aria-hidden />
-                        <div>
-                          <div>{m.label}</div>
-                          <div className="text-sm text-muted">
-                            {new Date(m.occurredAt).toLocaleDateString()}
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </section>
-            </>
-          )}
+              ) : (
+                <>
+                  {timeline.scheduledAt && <UpcomingEventCard timeline={timeline} />}
+                  <section className="pdash-card">
+                    <div className="pdash-card-head">
+                      <h2>Matter {timeline.matterNumber}</h2>
+                      <span className="pdash-badge">{timeline.statusLabel}</span>
+                    </div>
+                    <h3 className="pdash-subhead">Timeline</h3>
+                    {timeline.milestones.length === 0 ? (
+                      <p className="text-muted">No updates yet.</p>
+                    ) : (
+                      <ol className="pdash-timeline">
+                        {timeline.milestones.map((m, i) => (
+                          <li key={`${m.key}-${i}`}>
+                            <span className="pdash-dot" aria-hidden />
+                            <div>
+                              <div>{m.label}</div>
+                              <div className="text-sm text-muted">
+                                {new Date(m.occurredAt).toLocaleDateString()}
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </section>
+                </>
+              ))}
 
-          <DocumentsPanel />
-          <InvoicesPanel />
-          {selected && <RequestsPanel matterEntityId={selected} />}
-          {selected && <MessagesPanel matterEntityId={selected} />}
-        </>
-      )}
-    </main>
+            {tab === 'documents' && <DocumentsPanel />}
+            {tab === 'billing' && <InvoicesPanel />}
+            {tab === 'messages' &&
+              (selected ? (
+                <>
+                  <RequestsPanel matterEntityId={selected} />
+                  <MessagesPanel matterEntityId={selected} />
+                </>
+              ) : (
+                <p className="text-muted">Select a matter to message the firm.</p>
+              ))}
+          </>
+        )}
+      </main>
+    </div>
   )
 }
 
