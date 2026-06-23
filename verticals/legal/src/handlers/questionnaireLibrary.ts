@@ -1,6 +1,12 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
-import { insertAttribute, insertEntity, lookupKindId } from './common.js'
+import {
+  getRelatedEntityIds,
+  insertAttribute,
+  insertEntity,
+  insertRelationship,
+  lookupKindId,
+} from './common.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Questionnaire library (migration 0067). A questionnaire_template entity is a
@@ -137,6 +143,70 @@ registerActionHandler(
     return {
       questionnaireTemplateId: p.questionnaire_template_id,
       updated: updates.map((u) => u.kind),
+    }
+  },
+)
+
+const QT_FEEDS_TEMPLATE = 'questionnaire_feeds_template'
+
+interface SetTemplatesPayload {
+  questionnaire_template_id: string
+  template_entity_ids: string[]
+}
+
+// Set the EXACT set of document templates this questionnaire feeds. Closes removed
+// edges (valid_to = now(), append-only — never deletes) and inserts added ones,
+// all in this one recorded action. Mirrors contact.set_company (migration 0067).
+registerActionHandler(
+  'legal.questionnaire_template.set_templates',
+  async (ctx, client, payload, actionId) => {
+    const p = payload as unknown as SetTemplatesPayload
+    const qtId = p.questionnaire_template_id
+    if (!qtId) throw new Error('questionnaire_template_id is required.')
+    const desired = Array.from(
+      new Set((p.template_entity_ids ?? []).filter((x) => typeof x === 'string' && x)),
+    )
+
+    const current = await getRelatedEntityIds(client, ctx.tenantId, qtId, QT_FEEDS_TEMPLATE)
+    const toRemove = current.filter((id) => !desired.includes(id))
+    const toAdd = desired.filter((id) => !current.includes(id))
+
+    if (toRemove.length > 0) {
+      await client.query(
+        `UPDATE relationship r SET valid_to = now()
+         FROM relationship_kind_definition rkd
+         WHERE rkd.id = r.relationship_kind_id
+           AND rkd.kind_name = $4
+           AND r.tenant_id = $1
+           AND r.source_entity_id = $2
+           AND r.target_entity_id = ANY($3::uuid[])
+           AND r.valid_to IS NULL`,
+        [ctx.tenantId, qtId, toRemove, QT_FEEDS_TEMPLATE],
+      )
+    }
+    if (toAdd.length > 0) {
+      const kindId = await lookupKindId(
+        client,
+        'relationship_kind_definition',
+        ctx.tenantId,
+        QT_FEEDS_TEMPLATE,
+      )
+      for (const targetEntityId of toAdd) {
+        await insertRelationship(client, {
+          tenantId: ctx.tenantId,
+          actionId,
+          sourceEntityId: qtId,
+          targetEntityId,
+          relationshipKindId: kindId,
+        })
+      }
+    }
+
+    return {
+      questionnaireTemplateId: qtId,
+      templateEntityIds: desired,
+      added: toAdd.length,
+      removed: toRemove.length,
     }
   },
 )

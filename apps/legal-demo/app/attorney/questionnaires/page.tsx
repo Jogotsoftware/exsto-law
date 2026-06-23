@@ -50,6 +50,10 @@ interface SchemaSection {
   title?: string
   fields?: SchemaField[]
 }
+interface AssocTemplate {
+  templateEntityId: string
+  name: string | null
+}
 interface QuestionnaireTemplate {
   questionnaireTemplateId: string
   name: string
@@ -57,6 +61,7 @@ interface QuestionnaireTemplate {
   fieldCount: number
   updatedAt: string
   schema: { id?: string; title?: string; sections?: SchemaSection[] }
+  associatedTemplates?: AssocTemplate[]
 }
 
 // Builder-side shapes (options edited as one-per-line text).
@@ -79,6 +84,8 @@ interface Draft {
   name: string
   description: string
   sections: BSection[]
+  // Template entity ids this questionnaire feeds (migration 0109).
+  associatedTemplateIds: string[]
 }
 
 function slug(s: string): string {
@@ -106,6 +113,7 @@ const EMPTY_DRAFT = (): Draft => ({
   name: '',
   description: '',
   sections: [{ title: 'Details', fields: [NEW_FIELD()] }],
+  associatedTemplateIds: [],
 })
 
 // A reusable question from the firm's library (legal.question_template.list).
@@ -213,6 +221,8 @@ export default function QuestionnaireLibraryPage() {
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
+  // The firm's document templates, for the "Associated templates" picker.
+  const [templates, setTemplates] = useState<{ templateEntityId: string; name: string }[]>([])
 
   function load() {
     setError(null)
@@ -223,6 +233,14 @@ export default function QuestionnaireLibraryPage() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }
   useEffect(load, [])
+
+  useEffect(() => {
+    callAttorneyMcp<{ templates: { templateEntityId: string; name: string; category: string }[] }>({
+      toolName: 'legal.template.list',
+    })
+      .then((r) => setTemplates(r.templates.filter((t) => t.category === 'document')))
+      .catch(() => setTemplates([]))
+  }, [])
 
   function editFrom(t: QuestionnaireTemplate) {
     setDraft({
@@ -242,6 +260,7 @@ export default function QuestionnaireLibraryPage() {
           token: f.id,
         })),
       })),
+      associatedTemplateIds: (t.associatedTemplates ?? []).map((a) => a.templateEntityId),
     })
   }
 
@@ -288,6 +307,7 @@ export default function QuestionnaireLibraryPage() {
     setSaving(true)
     setError(null)
     try {
+      let qtId = draft.id
       if (draft.id) {
         await callAttorneyMcp({
           toolName: 'legal.questionnaire_template.update',
@@ -299,9 +319,18 @@ export default function QuestionnaireLibraryPage() {
           },
         })
       } else {
-        await callAttorneyMcp({
+        const r = await callAttorneyMcp<{ questionnaire: { questionnaireTemplateId: string } }>({
           toolName: 'legal.questionnaire_template.create',
           input: { name: draft.name.trim(), description: draft.description.trim() || null, schema },
+        })
+        qtId = r.questionnaire.questionnaireTemplateId
+      }
+      // Persist the questionnaire → document-template association (migration 0109),
+      // once the questionnaire entity exists. Sends the full desired set.
+      if (qtId) {
+        await callAttorneyMcp({
+          toolName: 'legal.questionnaire_template.set_templates',
+          input: { questionnaireTemplateId: qtId, templateEntityIds: draft.associatedTemplateIds },
         })
       }
       setDraft(null)
@@ -414,6 +443,49 @@ export default function QuestionnaireLibraryPage() {
               />
             </label>
           </div>
+
+          <fieldset className="svc-fieldset" style={{ marginBottom: '1rem' }}>
+            <legend>Associated document templates</legend>
+            <p className="muted" style={{ fontSize: '0.82rem', margin: '-0.2rem 0 0.6rem' }}>
+              The document template(s) this questionnaire feeds. When a client submits it, the
+              answers fill the linked template(s) — and the pairing shows on both sides.
+            </p>
+            {templates.length === 0 ? (
+              <p className="muted" style={{ fontSize: '0.82rem', margin: 0 }}>
+                No document templates yet — create one in{' '}
+                <a href="/attorney/templates">Templates</a>.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem 1.2rem' }}>
+                {templates.map((t) => {
+                  const on = draft.associatedTemplateIds.includes(t.templateEntityId)
+                  return (
+                    <label
+                      key={t.templateEntityId}
+                      className="svc-check"
+                      style={{ flex: '0 0 auto' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            associatedTemplateIds: e.target.checked
+                              ? [...draft.associatedTemplateIds, t.templateEntityId]
+                              : draft.associatedTemplateIds.filter(
+                                  (id) => id !== t.templateEntityId,
+                                ),
+                          })
+                        }
+                      />
+                      <span>{t.name}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+          </fieldset>
 
           <p className="muted" style={{ fontSize: '0.82rem', margin: '-0.3rem 0 0.9rem' }}>
             Each question’s <strong>variable</strong> is the <code>{'{{token}}'}</code> its answer
@@ -572,6 +644,7 @@ export default function QuestionnaireLibraryPage() {
                 <th>Name</th>
                 <th>Description</th>
                 <th style={{ textAlign: 'right' }}>Fields</th>
+                <th>Feeds</th>
                 <th>Updated</th>
                 <th></th>
               </tr>
@@ -584,6 +657,11 @@ export default function QuestionnaireLibraryPage() {
                   </td>
                   <td className="text-muted">{t.description ?? '—'}</td>
                   <td style={{ textAlign: 'right' }}>{t.fieldCount}</td>
+                  <td className="text-muted">
+                    {(t.associatedTemplates ?? []).length > 0
+                      ? (t.associatedTemplates ?? []).map((a) => a.name || 'untitled').join(', ')
+                      : '—'}
+                  </td>
                   <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     <button onClick={() => editFrom(t)}>Edit</button>{' '}

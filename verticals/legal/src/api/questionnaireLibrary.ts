@@ -62,6 +62,27 @@ export async function updateQuestionnaireTemplate(
   return updated
 }
 
+// Set the exact set of document templates this questionnaire feeds (a first-class
+// questionnaire_feeds_template relationship per template — migration 0109). The
+// handler closes removed edges + inserts added ones in one action; pass the full
+// desired set. Returns the resolved questionnaire (with its associatedTemplates).
+export async function setQuestionnaireTemplates(
+  ctx: ActionContext,
+  input: { questionnaireTemplateId: string; templateEntityIds: string[] },
+): Promise<QuestionnaireTemplate> {
+  await submitAction(ctx, {
+    actionKindName: 'legal.questionnaire_template.set_templates',
+    intentKind: 'adjustment',
+    payload: {
+      questionnaire_template_id: input.questionnaireTemplateId,
+      template_entity_ids: input.templateEntityIds,
+    },
+  })
+  const updated = await getQuestionnaireTemplate(ctx, input.questionnaireTemplateId)
+  if (!updated) throw new Error('Questionnaire templates set but could not be read back.')
+  return updated
+}
+
 // Archive through the core entity.archive action (status 'archived' — kept as
 // history, dropped from active listings). Append-only.
 export async function archiveQuestionnaireTemplate(

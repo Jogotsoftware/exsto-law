@@ -25,12 +25,20 @@ export interface QuestionnaireSchema {
   sections: QLibSection[]
 }
 
+// A document template this questionnaire feeds (migration 0109).
+export interface AssociatedTemplate {
+  templateEntityId: string
+  name: string | null
+}
+
 export interface QuestionnaireTemplate {
   questionnaireTemplateId: string
   name: string
   description: string | null
   schema: QuestionnaireSchema
   fieldCount: number
+  // The document template(s) this questionnaire feeds (questionnaire_feeds_template).
+  associatedTemplates: AssociatedTemplate[]
   updatedAt: string
 }
 
@@ -40,6 +48,7 @@ type QtRow = {
   description: string | null
   // jsonb → node-postgres returns a parsed object (or null).
   schema: QuestionnaireSchema | null
+  associated_templates: AssociatedTemplate[] | null
   updated_at: Date
 }
 
@@ -54,6 +63,16 @@ const QT_SELECT = `
     (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'questionnaire_template_name')        AS name,
     (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'questionnaire_template_description') AS description,
     (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'questionnaire_template_schema')               AS schema,
+    (SELECT coalesce(jsonb_agg(jsonb_build_object(
+        'templateEntityId', t.id,
+        'name', (SELECT value #>> '{}' FROM attrs WHERE entity_id = t.id AND kind_name = 'template_name')
+      ) ORDER BY t.created_at), '[]'::jsonb)
+     FROM relationship r
+     JOIN relationship_kind_definition rk ON rk.id = r.relationship_kind_id
+       AND rk.kind_name = 'questionnaire_feeds_template'
+     JOIN entity t ON t.id = r.target_entity_id AND t.status = 'active'
+     WHERE r.tenant_id = $1 AND r.source_entity_id = e.id
+       AND (r.valid_to IS NULL OR r.valid_to > now()))                                                            AS associated_templates,
     e.created_at AS updated_at
   FROM entity e
   JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'questionnaire_template'
@@ -68,6 +87,7 @@ function mapQt(r: QtRow): QuestionnaireTemplate {
     description: r.description,
     schema,
     fieldCount,
+    associatedTemplates: r.associated_templates ?? [],
     updatedAt: r.updated_at.toISOString(),
   }
 }
