@@ -291,6 +291,9 @@ export default function QuestionnaireEditorPage() {
   const [notice, setNotice] = useState<string | null>(null)
   // Drag-to-reorder context: which section, and (for a field) which field index.
   const [drag, setDrag] = useState<{ si: number; fi: number | null } | null>(null)
+  // The document kinds this service produces from the questionnaire — surfaced
+  // read-only so the attorney sees which template(s) this questionnaire feeds.
+  const [documents, setDocuments] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setError(null)
@@ -318,6 +321,15 @@ export default function QuestionnaireEditorPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    callAttorneyMcp<{ service: { documents?: string[] } | null }>({
+      toolName: 'legal.service.get',
+      input: { serviceKey },
+    })
+      .then((r) => setDocuments(r.service?.documents ?? []))
+      .catch(() => setDocuments([]))
+  }, [serviceKey])
 
   function patch(mut: (d: EditorDoc) => EditorDoc) {
     setDoc((d) => (d ? mut(d) : d))
@@ -427,6 +439,30 @@ export default function QuestionnaireEditorPage() {
           </button>
         </span>
       </div>
+
+      {documents.length > 0 && (
+        <div
+          className="muted"
+          style={{
+            fontSize: '0.85rem',
+            margin: '0 0 0.9rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span>Feeds these documents:</span>
+          {documents.map((k) => (
+            <code key={k} style={{ fontSize: '0.85rem' }}>
+              {k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            </code>
+          ))}
+          <a href={`/attorney/services/${serviceKey}/templates`} className="back-link">
+            Manage templates →
+          </a>
+        </div>
+      )}
 
       <StartFromLibrary
         onApply={(schema) => {
