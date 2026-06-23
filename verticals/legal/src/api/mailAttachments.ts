@@ -43,9 +43,17 @@ export interface AttachableDocuments {
   drafts: PendingDraftSummary[]
 }
 
+// A draft whose latest version is rejected / revision_requested is not a
+// deliverable: the attorney pulled it back, so it must not be offered as an
+// email attachment (and resolveMatterAttachments refuses it authoritatively).
+// listMatterDraftVersions itself stays status-agnostic — the assistant's matter
+// context legitimately surfaces these with their status.
+const UNDELIVERABLE_DRAFT_STATUSES = new Set(['rejected', 'revision_requested'])
+
 // The documents attachable for a matter — uploaded files (document_of) and the
-// latest version of each generated draft (draft_of). Metadata only (no bytes); the
-// picker shows these and the chosen ids are resolved server-side at send time.
+// latest version of each generated draft (draft_of), excluding drafts pulled back
+// for revision. Metadata only (no bytes); the picker shows these and the chosen ids
+// are resolved server-side at send time.
 export async function attachableDocuments(
   ctx: ActionContext,
   matterEntityId: string,
@@ -57,7 +65,7 @@ export async function attachableDocuments(
     listMatterDocuments(ctx, matterEntityId),
     listMatterDraftVersions(ctx, matterEntityId),
   ])
-  return { uploads, drafts }
+  return { uploads, drafts: drafts.filter((d) => !UNDELIVERABLE_DRAFT_STATUSES.has(d.status)) }
 }
 
 function humanizeKind(kind: string): string {
@@ -109,6 +117,15 @@ export async function resolveMatterAttachments(
       const draft = await getDraftVersion(ctx, ref.id)
       if (!draft || draft.matterEntityId !== input.matterEntityId) {
         throw new Error('Attachment is not a draft of this matter.')
+      }
+      // A draft the attorney has rejected or sent back for revision is not a
+      // deliverable — it must never reach the client by email. The picker omits
+      // these (attachableDocuments), but this is the authoritative guard: a stale
+      // ref captured before the rejection is refused here too.
+      if (UNDELIVERABLE_DRAFT_STATUSES.has(draft.status)) {
+        throw new Error(
+          'This draft was pulled back for revision and can’t be emailed to the client.',
+        )
       }
       // renderDraftPdf caps its source markdown; name the draft if it still fails so
       // one bad draft doesn't opaquely fail the whole send.
