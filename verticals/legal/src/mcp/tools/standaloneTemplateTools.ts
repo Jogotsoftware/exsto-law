@@ -113,12 +113,17 @@ const archiveTool: Tool<
 // reviews it in the editor and SAVES via create/update (that's the recorded write),
 // so this is a read-mode generation with no substrate mutation.
 const aiDraftTool: Tool<
-  { instructions: string; category: 'document' | 'email' },
+  {
+    instructions: string
+    category: 'document' | 'email'
+    skillSlugs?: string[]
+    modelId?: string
+  },
   { body: string }
 > = {
   name: 'legal.template.ai_draft',
   description:
-    'Draft a reusable template body from a plain-language description, using the firm’s Settings-managed Anthropic key. Returns the body text (with {{merge_tokens}} for fill-ins) for the attorney to review and save — it does not persist anything itself.',
+    'Draft a reusable template body from a plain-language description, using the firm’s Settings-managed Anthropic key. Optionally force specific legal skills (skillSlugs) and choose the model (modelId). Returns the body text (with {{merge_tokens}}) for the attorney to review and save — it does not persist anything itself.',
   mode: 'write',
   inputSchema: {
     type: 'object',
@@ -128,6 +133,16 @@ const aiDraftTool: Tool<
         description: 'Plain-language description of the template to draft.',
       },
       category: { type: 'string', enum: ['document', 'email'] },
+      skillSlugs: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional legal-skill slugs to force-load as drafting guidance.',
+      },
+      modelId: {
+        type: 'string',
+        description:
+          "Optional model id from legal.assistant.models, e.g. 'anthropic:claude-haiku-4-5-20251001'. Defaults to the firm default.",
+      },
     },
     required: ['instructions', 'category'],
     additionalProperties: false,

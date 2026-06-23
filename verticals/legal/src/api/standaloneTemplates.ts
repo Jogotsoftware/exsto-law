@@ -1,7 +1,8 @@
 import { submitAction, type ActionContext } from '@exsto/substrate'
 import { archiveEntity } from '@exsto/primitives'
 import { chatWithAssistantDetailed } from '../adapters/claude.js'
-import { withSkills } from './skillContext.js'
+import { withSkills, loadForcedSkills, buildActiveSkillsText } from './skillContext.js'
+import { resolveAssistantModel } from './assistantModels.js'
 import {
   getStandaloneTemplate,
   type StandaloneTemplate,
@@ -78,6 +79,12 @@ export async function updateTemplate(
 export interface AiDraftTemplateInput {
   instructions: string
   category: StandaloneTemplateCategory
+  // Skills the attorney explicitly picked in the modal — force-loaded (their full
+  // instructions injected) on top of the model's own load_skill auto-routing.
+  skillSlugs?: string[]
+  // `${provider}:${model}` from legal.assistant.models. Defaults to the firm
+  // default; the modal defaults this to the cheapest available model.
+  modelId?: string
 }
 
 export async function aiDraftTemplate(
@@ -101,14 +108,22 @@ export async function aiDraftTemplate(
   ].join(' ')
   // Make the draft skill-aware: the model can pull a relevant legal playbook
   // (NDA, MSA, demand letter, …) via load_skill, exactly like the chatbot.
-  const { system, clientTools } = await withSkills(ctx, baseSystem)
+  const { system: catalogSystem, clientTools } = await withSkills(ctx, baseSystem)
+  // Plus any skills the attorney explicitly picked — force-loaded for this draft.
+  const forced = await loadForcedSkills(ctx, input.skillSlugs)
+  const activeText = buildActiveSkillsText(forced)
+  const system = activeText ? `${catalogSystem}\n\n${activeText}` : catalogSystem
+  // The chosen model (falls back to the firm default inside the adapter). Only the
+  // Claude path is used here, so a non-Claude id resolves to its model string and
+  // the adapter still drives Anthropic — the modal only offers Claude models.
+  const model = input.modelId ? resolveAssistantModel(input.modelId)?.model : undefined
   const { reply } = await chatWithAssistantDetailed(
     ctx.tenantId,
     [
       { role: 'system', content: system },
       { role: 'user', content: instructions },
     ],
-    { clientTools },
+    { clientTools, model },
   )
   return { body: reply.trim() }
 }
