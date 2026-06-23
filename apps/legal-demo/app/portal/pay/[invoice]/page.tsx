@@ -58,6 +58,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
   const [error, setError] = useState<string | null>(null)
   const [pdf, setPdf] = useState<{ url: string; filename: string } | null>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
+  const [pdfError, setPdfError] = useState<string | null>(null)
   const provider = useMemo(() => getPaymentProvider(), [])
 
   // Revoke the blob URL when it changes or the page unmounts (no leaked object URLs).
@@ -70,6 +71,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
   async function viewPdf() {
     if (pdfBusy) return
     setPdfBusy(true)
+    setPdfError(null)
     try {
       const r = await callClientPortalMcp<{ pdf: InvoicePdf | null }>({
         toolName: 'legal.client.invoice_pdf',
@@ -77,10 +79,12 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
       })
       if (r.pdf) {
         setPdf({ url: base64ToBlobUrl(r.pdf.base64, r.pdf.contentType), filename: r.pdf.filename })
+      } else {
+        setPdfError('This invoice isn’t available to download yet.')
       }
     } catch (e) {
       if (!(e instanceof PortalSessionExpiredError)) {
-        setError(e instanceof Error ? e.message : String(e))
+        setPdfError(e instanceof Error ? e.message : String(e))
       }
     } finally {
       setPdfBusy(false)
@@ -179,6 +183,11 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                   </a>
                 )}
               </div>
+              {pdfError && (
+                <div className="text-sm text-muted" role="alert" style={{ marginTop: '0.4rem' }}>
+                  {pdfError}
+                </div>
+              )}
             </div>
 
             {pdf && (

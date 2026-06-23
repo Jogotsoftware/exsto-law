@@ -28,6 +28,12 @@ export interface ClientUploadedDocument {
 // approved version), newest first. The client reads the body via the existing
 // client-safe shared-draft surface (/d/[versionId] → legal.draft.get_shared); this
 // list deliberately carries NO body and none of the internal fields.
+//
+// DESIGN DECISION (founder intent): approving a draft IS the publish-to-client step —
+// "the attorney approves it, and it goes into their portal." So this lists every
+// approved draft; there is intentionally no separate 'shared with client' gate.
+// Documents routed for e-signature are EXCLUDED here (the anti-join below) so they
+// appear only under the e-sign "To sign & signed" section, not twice.
 export async function listApprovedClientDocuments(
   ctx: ActionContext,
   clientContactId: string,
@@ -57,6 +63,15 @@ export async function listApprovedClientDocuments(
          AND rkd.kind_name = 'draft_of'
          AND r.target_entity_id = ANY($2::uuid[])
          AND dv.status = 'approved'
+         -- Exclude docs routed for e-signature (they show in the e-sign list instead).
+         AND NOT EXISTS (
+           SELECT 1 FROM relationship er
+           JOIN relationship_kind_definition erk ON erk.id = er.relationship_kind_id
+           WHERE er.tenant_id = $1
+             AND erk.kind_name = 'envelope_of'
+             AND er.target_entity_id = dv.document_entity_id
+             AND (er.valid_to IS NULL OR er.valid_to > now())
+         )
        ORDER BY dv.document_entity_id, dv.version_number DESC`,
       [ctx.tenantId, matterIds],
     )
