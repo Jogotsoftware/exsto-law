@@ -61,6 +61,14 @@ interface Ambiguity {
   needs_input_from?: string
 }
 
+interface SkillCatalogItem {
+  slug: string
+  name: string
+  practiceArea: string
+  whenToUse: string
+  userInvocable: boolean
+}
+
 function statusBadge(status: string): string {
   if (status === 'approved') return 'badge ok'
   if (status === 'rejected') return 'badge danger'
@@ -82,6 +90,17 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   // Reasoning trace lives in a drawer now (it's attorney context, not part of the
   // document) — opened from a toolbar button instead of crowding the page.
   const [traceOpen, setTraceOpen] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  // Regenerate modal: an editable prompt (prefilled with the revision notes) + a
+  // skills picker, so the redraft acts on exactly what the attorney asked.
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [regenGuidance, setRegenGuidance] = useState('')
+  const [regenSkills, setRegenSkills] = useState<Set<string>>(new Set())
+  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[] | null>(null)
+  const [skillQuery, setSkillQuery] = useState('')
+  // After "Request revision", nudge the attorney to regenerate now with those very
+  // notes — closing the loop between asking for changes and producing them.
+  const [revisionNudge, setRevisionNudge] = useState(false)
   // The ordered ids of an in-progress step-through review, or null for a normal
   // single visit. Loaded only when the URL carries ?review=session.
   const [sessionIds, setSessionIds] = useState<string[] | null>(null)
@@ -149,6 +168,8 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     }
     setBusy(label)
     setError(null)
+    setNotice(null)
+    setRevisionNudge(false)
     try {
       await callAttorneyMcp({
         toolName,
@@ -171,6 +192,9 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         return
       }
       await load()
+      // Outside a step-through session, requesting a revision leaves the attorney on
+      // this page — so nudge them to regenerate now with the notes they just wrote.
+      if (toolName === 'legal.draft.request_revision') setRevisionNudge(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -178,15 +202,40 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     }
   }
 
-  async function regenerate() {
+  // Open the regenerate prompt window: prefill the editable instructions with the
+  // current review notes (so "request revision" notes carry straight into the
+  // redraft), reset the skill selection, and lazy-load the skills catalog.
+  function openRegen() {
+    setRegenGuidance(notes)
+    setRegenSkills(new Set())
+    setError(null)
+    setRevisionNudge(false)
+    setRegenOpen(true)
+    if (!skillCatalog) {
+      callAttorneyMcp<{ skills: SkillCatalogItem[] }>({ toolName: 'legal.skill.list' })
+        .then((r) => setSkillCatalog(r.skills.filter((s) => s.userInvocable && s.slug)))
+        .catch(() => setSkillCatalog([]))
+    }
+  }
+
+  function toggleSkill(slug: string) {
+    setRegenSkills((prev) => {
+      const next = new Set(prev)
+      if (next.has(slug)) next.delete(slug)
+      else next.add(slug)
+      return next
+    })
+  }
+
+  // Drafting is async (enqueues a worker job), so we confirm + return the attorney
+  // to the queue where the regenerated version will appear, rather than waiting.
+  async function runRegenerate() {
     if (!draft) return
     setBusy('regenerate')
     setError(null)
+    setNotice(null)
     try {
-      const result = await callAttorneyMcp<{
-        actionId: string
-        effects: Array<{ documentVersionId: string; versionNumber: number }>
-      }>({
+      await callAttorneyMcp({
         toolName: 'legal.draft.generate',
         input: {
           matterEntityId: draft.matterEntityId,
@@ -194,14 +243,14 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             draft.documentKind === 'engagement_letter'
               ? 'engagement_letter'
               : 'operating_agreement',
+          guidance: regenGuidance.trim() || undefined,
+          skillSlugs: [...regenSkills],
         },
       })
-      const newId = result.effects[0]?.documentVersionId
-      if (newId) {
-        router.push(`/attorney/review/${newId}`)
-      } else {
-        await load()
-      }
+      setRegenOpen(false)
+      setNotice(
+        'Regenerating with your instructions — the updated draft will appear in the review queue shortly.',
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -329,6 +378,21 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           )}
         </h2>
         {error && <div className="alert alert-error">{error}</div>}
+        {notice && <div className="alert alert-success">{notice}</div>}
+        {revisionNudge && (
+          <div className="review-nudge">
+            <span>
+              Revision requested. Regenerate the draft now with these notes — or keep editing them
+              first.
+            </span>
+            <span className="review-nudge-actions">
+              <button className="primary" onClick={openRegen}>
+                Regenerate now…
+              </button>
+              <button onClick={() => setRevisionNudge(false)}>Not now</button>
+            </span>
+          </div>
+        )}
         <label>
           Notes (required for revision; optional otherwise)
           <textarea
@@ -367,11 +431,10 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           <span style={{ marginLeft: 'auto' }} />
           <button
             disabled={busy !== null}
-            onClick={regenerate}
-            title="Calls Claude live and creates a new version of this document for the same matter."
+            onClick={openRegen}
+            title="Redraft this document with the live model — add instructions and pick legal skills first."
           >
-            {busy === 'regenerate' && <span className="spinner" />}
-            {busy === 'regenerate' ? 'Drafting via live API…' : 'Regenerate draft (live API)'}
+            Regenerate draft…
           </button>
         </div>
       </section>
@@ -460,6 +523,112 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
               </div>
             )}
           </aside>
+        </div>
+      )}
+
+      {/* Regenerate prompt window: editable instructions (prefilled with the
+          revision notes) + a legal-skills picker, then redraft. */}
+      {regenOpen && (
+        <div className="modal-backdrop" onClick={() => setRegenOpen(false)} role="presentation">
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Regenerate draft"
+          >
+            <div className="modal-head">
+              <h2 style={{ margin: 0 }}>Regenerate draft</h2>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setRegenOpen(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+                Redraft this {humanizeKind(draft.documentKind)} with the live model. Your
+                instructions and any selected legal skills guide the new version; the matter&apos;s
+                questionnaire and transcript are always included.
+              </p>
+              <label>
+                <span>Instructions for this draft</span>
+                <textarea
+                  rows={4}
+                  value={regenGuidance}
+                  onChange={(e) => setRegenGuidance(e.target.value)}
+                  placeholder="e.g. Make the indemnification clause mutual and add a 30-day cure period."
+                  autoFocus
+                />
+              </label>
+
+              <div className="regen-skills">
+                <div className="regen-skills-head">
+                  <span>
+                    Legal skills{' '}
+                    {regenSkills.size > 0 && (
+                      <span className="badge info">{regenSkills.size} selected</span>
+                    )}
+                  </span>
+                  {skillCatalog && skillCatalog.length > 6 && (
+                    <input
+                      type="text"
+                      value={skillQuery}
+                      onChange={(e) => setSkillQuery(e.target.value)}
+                      placeholder="Search skills…"
+                      style={{ width: 'auto', flex: '1 1 10rem', minWidth: '9rem' }}
+                    />
+                  )}
+                </div>
+                {skillCatalog === null ? (
+                  <p className="text-muted text-sm">
+                    <span className="spinner" /> Loading skills…
+                  </p>
+                ) : skillCatalog.length === 0 ? (
+                  <p className="text-muted text-sm">No legal skills configured.</p>
+                ) : (
+                  <div className="regen-skills-list">
+                    {skillCatalog
+                      .filter((s) => {
+                        const q = skillQuery.trim().toLowerCase()
+                        return (
+                          !q ||
+                          s.name.toLowerCase().includes(q) ||
+                          s.slug.toLowerCase().includes(q) ||
+                          s.practiceArea.toLowerCase().includes(q)
+                        )
+                      })
+                      .map((s) => (
+                        <label key={s.slug} className="regen-skill" title={s.whenToUse}>
+                          <input
+                            type="checkbox"
+                            checked={regenSkills.has(s.slug)}
+                            onChange={() => toggleSkill(s.slug)}
+                            style={{ width: 'auto' }}
+                          />
+                          <span>
+                            <strong>{s.name}</strong>
+                            <span className="text-muted text-sm"> · {s.practiceArea}</span>
+                          </span>
+                        </label>
+                      ))}
+                  </div>
+                )}
+              </div>
+              {error && <div className="alert alert-error">{error}</div>}
+            </div>
+            <div className="modal-foot">
+              <button onClick={() => setRegenOpen(false)} disabled={busy === 'regenerate'}>
+                Cancel
+              </button>
+              <button className="primary" onClick={runRegenerate} disabled={busy === 'regenerate'}>
+                {busy === 'regenerate' && <span className="spinner" />}
+                {busy === 'regenerate' ? 'Regenerating…' : 'Regenerate'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </main>

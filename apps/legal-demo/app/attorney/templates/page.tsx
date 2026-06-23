@@ -11,6 +11,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
 import { SparklesIcon, FileTextIcon, EyeIcon, LayersIcon, XIcon } from '@/components/icons'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
+import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
@@ -133,6 +134,10 @@ export default function TemplatesPage() {
   // editor re-seeds from the new markdown. Plain typing does NOT bump it, so the
   // cursor never jumps mid-edit.
   const [seedKey, setSeedKey] = useState(0)
+  // Platform question-library tokens — the variables that have a corresponding
+  // intake question. Used to color {{variables}} in the editor (best-effort; the
+  // chips just fall back to "no question / yellow" if the library can't load).
+  const [libraryTokens, setLibraryTokens] = useState<Set<string>>(() => new Set())
 
   function load() {
     setError(null)
@@ -142,8 +147,9 @@ export default function TemplatesPage() {
   }
   useEffect(load, [])
 
-  // Model + skill options for "Draft with AI" (fetched once). The model defaults
-  // to the cheapest available Claude model — drafts are simple, so Haiku is plenty.
+  // Model + skill options for "Draft with AI" and the question library for variable
+  // coloring — all fetched once on mount, best-effort. The model defaults to the
+  // cheapest available Claude model (drafts are simple, so Haiku is plenty).
   useEffect(() => {
     let cancelled = false
     callAttorneyMcp<{ models: AiModelOpt[] }>({ toolName: 'legal.assistant.models' })
@@ -162,10 +168,33 @@ export default function TemplatesPage() {
         if (!cancelled) setAiSkills(r.skills ?? [])
       })
       .catch(() => {})
+    callAttorneyMcp<{ questions: Array<{ token?: string }> }>({
+      toolName: 'legal.question_template.list',
+    })
+      .then((r) => {
+        if (cancelled) return
+        const toks = (r.questions ?? []).map((q) => (q.token ?? '').trim()).filter(Boolean)
+        setLibraryTokens(new Set(toks))
+      })
+      .catch(() => {
+        // No library / tool unavailable — coloring still works off STANDARD_TOKENS
+        // and the template's own defined variables.
+      })
     return () => {
       cancelled = true
     }
   }, [])
+
+  // Classify a {{variable}} for the editor: a variable backed by a question
+  // (library question OR a defined template variable) is "matched" (blue); a
+  // recognized variable with no question (e.g. an auto-fill token) is "orphaned"
+  // (yellow); anything unrecognized is "unknown" (red).
+  const validateVariable = useMemo(() => {
+    const hasQuestion = new Set<string>([...libraryTokens, ...Object.keys(draft?.variables ?? {})])
+    const known = new Set<string>([...hasQuestion, ...STANDARD_TOKENS.map((t) => t.id)])
+    return (name: string): VariableStatus =>
+      hasQuestion.has(name) ? 'matched' : known.has(name) ? 'orphaned' : 'unknown'
+  }, [libraryTokens, draft?.variables])
 
   // Escape closes the "Draft with AI" modal (and restores focus to its trigger).
   useEffect(() => {
@@ -622,6 +651,7 @@ export default function TemplatesPage() {
                 }
                 onChange={onEditorChange}
                 editorRef={editorRef}
+                validateVariable={validateVariable}
               />
             </div>
             {showPreview && (

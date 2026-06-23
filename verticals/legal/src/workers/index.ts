@@ -33,10 +33,17 @@ registerWorkerHandler('legal.granola.project', async (ctx, payload) => {
 // or the request path). Transient model/API errors throw → runtime backoff.
 registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
   const { runDraftGeneration } = await import('../api/generateDraft.js')
-  const p = payload as { matter_entity_id: string; document_kind: string }
+  const p = payload as {
+    matter_entity_id: string
+    document_kind: string
+    guidance?: string
+    skill_slugs?: string[]
+  }
   await runDraftGeneration(ctx, {
     matterEntityId: p.matter_entity_id,
     documentKind: p.document_kind,
+    guidance: p.guidance,
+    skillSlugs: p.skill_slugs,
   })
 })
 
