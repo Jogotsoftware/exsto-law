@@ -48,6 +48,13 @@ interface AssistantModel {
   webSearchInherent: boolean
 }
 
+// A finished document the assistant produced (a deliverable to download/save),
+// distinct from the prose reply.
+interface ProducedDoc {
+  title: string
+  markdown: string
+}
+
 interface DisplayTurn {
   role: 'user' | 'assistant'
   content: string
@@ -55,6 +62,8 @@ interface DisplayTurn {
   model?: string
   // Names of documents attached to a user turn (shown as chips on the bubble).
   attachments?: string[]
+  // Documents the assistant produced on an assistant turn — shown as download cards.
+  documents?: ProducedDoc[]
 }
 
 // One legal skill (playbook) the attorney can pick from the /skills menu.
@@ -73,6 +82,7 @@ interface ThreadTurn {
   model: string
   citations: string[]
   attachmentNames?: string[]
+  documents?: ProducedDoc[]
 }
 
 // A document attached to the next message: an uploaded file (parsed to text) or a
@@ -152,21 +162,15 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-// Whether a reply is an actual DOCUMENT worth downloading (a draft/letter/memo),
-// vs. a quick conversational answer. Gates the PDF/Word buttons so they don't show
-// on every chat — only when the assistant produced something document-shaped:
-// substantial length AND some structure (a heading, several paragraphs, or
-// letter/agreement phrasing).
-function looksLikeDocument(md: string): boolean {
-  const t = md.trim()
-  if (t.length < 500) return false
-  const paragraphs = t.split(/\n\s*\n/).filter((p) => p.trim()).length
-  const hasHeading = /^#{1,6}\s/m.test(t)
-  const letterish =
-    /\b(Dear\b|Sincerely|Regards,|Re:|RE:|WHEREAS|AGREEMENT|This .{0,40}Agreement|MEMORANDUM)\b/.test(
-      t,
-    )
-  return hasHeading || paragraphs >= 3 || letterish
+function slugifyTitle(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'document'
+  )
 }
 
 // Pick the first usable (connected + available) model, else the first available.
@@ -236,17 +240,13 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-// Save an assistant reply onto the current matter as a document draft (pending
-// review). Transient saving/saved/failed states; only rendered for matter-scoped,
-// document-like replies.
-function SaveToMatterButton({
-  matterEntityId,
-  markdown,
-}: {
-  matterEntityId: string
-  markdown: string
-}) {
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+// A document the assistant produced this turn — rendered as a distinct card (so
+// it reads as a deliverable, not a chat bubble) with the document preview and the
+// download/save actions. This is where downloads live now: on a real produced
+// document, never on every reply.
+function DocumentCard({ doc, matterEntityId }: { doc: ProducedDoc; matterEntityId?: string }) {
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [expanded, setExpanded] = useState(true)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
     () => () => {
@@ -254,37 +254,85 @@ function SaveToMatterButton({
     },
     [],
   )
+  const filename = slugifyTitle(doc.title)
   async function save() {
-    setState('saving')
+    if (!matterEntityId) return
+    setSaveState('saving')
     try {
       await callAttorneyMcp({
         toolName: 'legal.assistant.save_reply',
-        input: { matterEntityId, markdown },
+        input: {
+          matterEntityId,
+          markdown: doc.markdown,
+          documentKind: filename.replace(/-/g, '_'),
+        },
       })
-      setState('saved')
+      setSaveState('saved')
     } catch {
-      setState('error')
+      setSaveState('error')
     }
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setState('idle'), 2200)
+    timer.current = setTimeout(() => setSaveState('idle'), 2200)
   }
   return (
-    <button
-      type="button"
-      className={`uac-reply-btn${state === 'saved' ? ' copied' : ''}`}
-      onClick={save}
-      disabled={state === 'saving'}
-      title="Save this reply to the matter's drafts (for review)"
-    >
-      {state === 'saved' ? <CheckIcon size={12} /> : <FileTextIcon size={12} />}{' '}
-      {state === 'saving'
-        ? 'Saving…'
-        : state === 'saved'
-          ? 'Saved'
-          : state === 'error'
-            ? 'Failed'
-            : 'Save to matter'}
-    </button>
+    <div className="uac-doc-card">
+      <div className="uac-doc-head">
+        <span className="uac-doc-title">
+          <FileTextIcon size={14} /> {doc.title}
+        </span>
+        <button
+          type="button"
+          className="uac-doc-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? 'Collapse the document' : 'Show the document'}
+        >
+          {expanded ? 'Hide' : 'Show'}
+        </button>
+      </div>
+      {expanded && (
+        <div
+          className="uac-doc-body assistant-md"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(doc.markdown) }}
+        />
+      )}
+      <div className="uac-doc-actions">
+        <button
+          type="button"
+          className="uac-reply-btn"
+          onClick={() => downloadAsPdf(doc.markdown, doc.title)}
+          title="Download as PDF"
+        >
+          <FileTextIcon size={12} /> PDF
+        </button>
+        <button
+          type="button"
+          className="uac-reply-btn"
+          onClick={() => downloadAsWord(doc.markdown, filename)}
+          title="Download as Word"
+        >
+          <FileTextIcon size={12} /> Word
+        </button>
+        <CopyButton text={doc.markdown} />
+        {matterEntityId && (
+          <button
+            type="button"
+            className={`uac-reply-btn${saveState === 'saved' ? ' copied' : ''}`}
+            onClick={save}
+            disabled={saveState === 'saving'}
+            title="Save this document to the matter's drafts (for review)"
+          >
+            {saveState === 'saved' ? <CheckIcon size={12} /> : <FileTextIcon size={12} />}{' '}
+            {saveState === 'saving'
+              ? 'Saving…'
+              : saveState === 'saved'
+                ? 'Saved'
+                : saveState === 'error'
+                  ? 'Failed'
+                  : 'Save to matter'}
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -307,6 +355,7 @@ export function UnifiedAssistantChat({
     thinking: string
     text: string
     skills: { slug: string; name: string }[]
+    documents: ProducedDoc[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -455,7 +504,13 @@ export function UnifiedAssistantChat({
         const display: DisplayTurn[] = r.turns.map((t) =>
           t.role === 'user'
             ? { role: 'user', content: t.message, attachments: t.attachmentNames }
-            : { role: 'assistant', content: t.reply, citations: t.citations, model: t.model },
+            : {
+                role: 'assistant',
+                content: t.reply,
+                citations: t.citations,
+                model: t.model,
+                documents: t.documents,
+              },
         )
         setTurns(display)
       } catch (e) {
@@ -676,7 +731,12 @@ export function UnifiedAssistantChat({
     setAttachMenuOpen(false)
 
     // Accumulate deltas locally; each handler hands React a fresh object.
-    const partial = { thinking: '', text: '', skills: [] as { slug: string; name: string }[] }
+    const partial = {
+      thinking: '',
+      text: '',
+      skills: [] as { slug: string; name: string }[],
+      documents: [] as ProducedDoc[],
+    }
     setStreaming({ ...partial })
     let finished = false
 
@@ -720,12 +780,23 @@ export function UnifiedAssistantChat({
             if (s.slug && !partial.skills.some((x) => x.slug === s.slug)) partial.skills.push(s)
             setStreaming({ ...partial, skills: [...partial.skills] })
           },
+          onDocument: (doc) => {
+            if (!live()) return
+            if (doc.markdown.trim()) partial.documents.push(doc)
+            setStreaming({ ...partial, documents: [...partial.documents] })
+          },
           onDone: (d) => {
             if (!live()) return
             finished = true
             setTurns((prev) => [
               ...prev,
-              { role: 'assistant', content: d.reply, citations: d.citations, model: d.model },
+              {
+                role: 'assistant',
+                content: d.reply,
+                citations: d.citations,
+                model: d.model,
+                documents: partial.documents.length ? partial.documents : undefined,
+              },
             ])
             setStreaming(null)
           },
@@ -750,10 +821,15 @@ export function UnifiedAssistantChat({
 
     // Reconcile a stream that ended without a terminal event (e.g. a drop):
     // keep whatever streamed rather than losing it.
-    if (!finished && (partial.text || partial.thinking)) {
+    if (!finished && (partial.text || partial.thinking || partial.documents.length)) {
       setTurns((prev) => [
         ...prev,
-        { role: 'assistant', content: partial.text || '(no response)', model: modelId },
+        {
+          role: 'assistant',
+          content: partial.text || (partial.documents.length ? '' : '(no response)'),
+          model: modelId,
+          documents: partial.documents.length ? partial.documents : undefined,
+        },
       ])
     }
     setStreaming(null)
@@ -1146,40 +1222,21 @@ export function UnifiedAssistantChat({
                 markup. User turns stay verbatim. */}
             {t.role === 'assistant' ? (
               <>
-                <div
-                  className="assistant-md"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
-                />
+                {t.content.trim() && (
+                  <div
+                    className="assistant-md"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
+                  />
+                )}
+                {/* Documents the assistant produced — downloadable deliverables
+                    (PDF/Word + save to matter), not the prose. Downloads attach
+                    here, never to an ordinary reply. */}
+                {t.documents?.map((doc, di) => (
+                  <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
+                ))}
                 {t.content.trim() && (
                   <div className="uac-reply-actions">
                     <CopyButton text={t.content} />
-                    {/* Downloads only when the reply is an actual document. */}
-                    {looksLikeDocument(t.content) && (
-                      <>
-                        <button
-                          type="button"
-                          className="uac-reply-btn"
-                          onClick={() => downloadAsPdf(t.content, 'Assistant reply')}
-                          title="Download as PDF"
-                        >
-                          <FileTextIcon size={12} /> PDF
-                        </button>
-                        <button
-                          type="button"
-                          className="uac-reply-btn"
-                          onClick={() => downloadAsWord(t.content, 'assistant-reply')}
-                          title="Download as Word"
-                        >
-                          <FileTextIcon size={12} /> Word
-                        </button>
-                        {activeScope.matterEntityId && (
-                          <SaveToMatterButton
-                            matterEntityId={activeScope.matterEntityId}
-                            markdown={t.content}
-                          />
-                        )}
-                      </>
-                    )}
                   </div>
                 )}
               </>
@@ -1234,13 +1291,17 @@ export function UnifiedAssistantChat({
                 <div className="uac-thinking-body">{streaming.thinking}</div>
               </div>
             )}
-            {!streaming.text && !streaming.thinking && (
+            {!streaming.text && !streaming.thinking && streaming.documents.length === 0 && (
               <span className="uac-typing" aria-label="Thinking">
                 <span />
                 <span />
                 <span />
               </span>
             )}
+            {/* A document produced mid-stream appears as a card right away. */}
+            {streaming.documents.map((doc, di) => (
+              <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
+            ))}
             {streaming.text && (
               <div
                 className="assistant-md"

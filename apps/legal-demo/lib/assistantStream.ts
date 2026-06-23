@@ -45,6 +45,8 @@ export interface AssistantStreamHandlers {
   onText?: (text: string) => void
   // The assistant loaded a specialized skill (playbook) for this turn.
   onSkill?: (skill: { slug: string; name: string }) => void
+  // The assistant produced a downloadable document (a deliverable, not the prose).
+  onDocument?: (doc: { title: string; markdown: string }) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -118,6 +120,12 @@ export async function streamAssistant(
         break
       case 'skill':
         handlers.onSkill?.({ slug: String(evt.slug ?? ''), name: String(evt.name ?? '') })
+        break
+      case 'document':
+        handlers.onDocument?.({
+          title: String(evt.title ?? 'Document'),
+          markdown: String(evt.markdown ?? ''),
+        })
         break
       case 'done':
         handlers.onDone?.(evt as unknown as StreamDone)
