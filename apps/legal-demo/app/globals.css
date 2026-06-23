@@ -8778,3 +8778,101 @@ input[type='number'] {
 .task-archive:hover:not(:disabled) {
   color: var(--danger);
 }
+
+/* ── Client-portal feedback widget (the portal chat bubble) ─────────────────── */
+.pfb-root {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+.pfb-fab {
+  padding: 0.7rem 1.1rem;
+  background: var(--navy-900, #0b1b3a);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px -10px rgba(11, 27, 58, 0.55);
+}
+.pfb-panel {
+  width: min(360px, calc(100vw - 2.5rem));
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 18px 48px -20px rgba(11, 27, 58, 0.45);
+  overflow: hidden;
+}
+.pfb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.8rem 1rem;
+  background: var(--navy-900, #0b1b3a);
+  color: #fff;
+}
+.pfb-x {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.pfb-body {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.pfb-lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.pfb-thanks {
+  margin: 0;
+  font-weight: 600;
+}
+.pfb-select,
+.pfb-textarea {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius-md, 10px);
+  font-size: 0.92rem;
+  background: #fff;
+  font-family: inherit;
+}
+.pfb-textarea {
+  resize: vertical;
+}
+.pfb-send {
+  padding: 0.7rem 1rem;
+  background: var(--navy-900, #0b1b3a);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.92rem;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  cursor: pointer;
+}
+.pfb-send:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pfb-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--navy-900, #0b1b3a);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
