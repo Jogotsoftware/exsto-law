@@ -8,6 +8,9 @@
 // on @exsto/legal) — ADR 0024/0038: one core, generic adapter + per-vertical tools.
 // Importing a tool module runs its registerTool() side effect.
 import './tools/createMatter.js'
+// ADR 0045 PR3: the thin write tool the matter Workflow window calls to advance a
+// matter one step through its bound lifecycle (delegates to the action handler).
+import './tools/matterAdvanceTools.js'
 import './tools/calendarCategoriesTools.js'
 import './tools/matterAccessTools.js'
 import './tools/documentUploadTools.js'

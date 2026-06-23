@@ -18,9 +18,13 @@ import {
   TranscriptView,
   deriveMatterSteps,
   questionnaireToMarkdown,
+  workflowStepStates,
   type MatterDetail,
   type StepKey,
   type StepState,
+  type WfStage,
+  type WfStepState,
+  type MatterWorkflow,
 } from './shared'
 import { MatterTasks } from './MatterTasks'
 
@@ -165,41 +169,50 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         </div>
       </section>
 
-      <section>
-        <h2>Workflow</h2>
-        {/* The page-level error banner only shows when no modal is open; modals
-            surface their own errors in-context (an action started in a modal). */}
-        {error && openStep === null && <div className="alert alert-error">{error}</div>}
-        <div className="step-list">
-          {steps.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              className={`step-row step-${s.state}`}
-              onClick={() => openStepAt(s.key)}
-            >
-              <span className="step-ico" aria-hidden>
-                <StepIcon state={s.state} />
-              </span>
-              <span className="step-titles">
-                <span className="step-title">{s.title}</span>
-                <span className="step-subtitle">{s.subtitle}</span>
-              </span>
-              <span className="step-state-pill">{labelForState(s.state)}</span>
-              <span className="step-chevron" aria-hidden>
-                <ChevronRightIcon size={16} />
-              </span>
-            </button>
-          ))}
-        </div>
-        <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-          Click a step to view or download what it produced, or to advance it.
-        </p>
-      </section>
+      {matter.workflow ? (
+        // ── Data-driven workflow window (ADR 0045 PR3) ──────────────────────
+        // The matter is running an authored lifecycle: render the strip + window
+        // straight from matter.workflow.graph. This branch is reached ONLY when a
+        // workflow instance exists; the no-workflow path below is untouched.
+        <WorkflowWindow matter={matter} workflow={matter.workflow} onChanged={load} />
+      ) : (
+        // ── Fallback: the existing derived-step window (#197), UNCHANGED ──────
+        <section>
+          <h2>Workflow</h2>
+          {/* The page-level error banner only shows when no modal is open; modals
+              surface their own errors in-context (an action started in a modal). */}
+          {error && openStep === null && <div className="alert alert-error">{error}</div>}
+          <div className="step-list">
+            {steps.map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                className={`step-row step-${s.state}`}
+                onClick={() => openStepAt(s.key)}
+              >
+                <span className="step-ico" aria-hidden>
+                  <StepIcon state={s.state} />
+                </span>
+                <span className="step-titles">
+                  <span className="step-title">{s.title}</span>
+                  <span className="step-subtitle">{s.subtitle}</span>
+                </span>
+                <span className="step-state-pill">{labelForState(s.state)}</span>
+                <span className="step-chevron" aria-hidden>
+                  <ChevronRightIcon size={16} />
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
+            Click a step to view or download what it produced, or to advance it.
+          </p>
+        </section>
+      )}
 
       <MatterTasks matterEntityId={id} />
 
-      {openStep === 'intake' && (
+      {!matter.workflow && openStep === 'intake' && (
         <Modal
           title="Intake — questionnaire"
           onClose={closeStep}
@@ -242,7 +255,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         </Modal>
       )}
 
-      {openStep === 'consultation' && (
+      {!matter.workflow && openStep === 'consultation' && (
         <Modal title="Consultation" onClose={closeStep}>
           {error && <div className="alert alert-error">{error}</div>}
           {hasTranscript && matter.transcriptText ? (
@@ -283,7 +296,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         </Modal>
       )}
 
-      {openStep === 'document' && (
+      {!matter.workflow && openStep === 'document' && (
         <DocumentStep
           matter={matter}
           generating={generating}
@@ -294,13 +307,17 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         />
       )}
 
-      {openStep === 'approve' && (
+      {!matter.workflow && openStep === 'approve' && (
         <ApproveStep matter={matter} onClose={closeStep} onChanged={load} />
       )}
 
-      {openStep === 'client' && <ClientStep matter={matter} onClose={closeStep} />}
+      {!matter.workflow && openStep === 'client' && (
+        <ClientStep matter={matter} onClose={closeStep} />
+      )}
 
-      {openStep === 'bill' && <BillStep matter={matter} onClose={closeStep} onChanged={load} />}
+      {!matter.workflow && openStep === 'bill' && (
+        <BillStep matter={matter} onClose={closeStep} onChanged={load} />
+      )}
     </>
   )
 }
@@ -315,6 +332,260 @@ function labelForState(state: StepState): string {
   if (state === 'done') return 'Done'
   if (state === 'current') return 'Current'
   return 'Pending'
+}
+
+// ── Data-driven workflow window (ADR 0045 PR3) ──────────────────────────────
+// Renders the matter's RUNNING lifecycle straight from matter.workflow.graph: a
+// step strip (done/current/upcoming via the client-side stepStates replica) and a
+// per-step pop-up whose body is chosen by stage.action.kind. The pop-up reuses the
+// exact same step bodies the legacy window uses (QuestionnaireView, TranscriptView,
+// ApproveBody+ClientBody, BillStep) — nothing is rewritten. The current stage's
+// pop-up carries a "Continue" affordance that fires legal.matter.advance through
+// the manual (attorney/client) outgoing edge and reloads, so the window swaps to
+// the next step in place. A stage whose only outgoing edge is system/automatic
+// disables Continue and shows a waiting note (the engine advances on the event).
+function workflowStripState(state: WfStepState): StepState {
+  return state === 'upcoming' ? 'pending' : state
+}
+
+function WorkflowWindow({
+  matter,
+  workflow,
+  onChanged,
+}: {
+  matter: MatterDetail
+  workflow: MatterWorkflow
+  onChanged: () => Promise<void>
+}) {
+  const [openKey, setOpenKey] = useState<string | null>(null)
+  const steps = workflowStepStates(workflow.graph, workflow.currentState)
+  const openEntry = openKey ? steps.find((s) => s.stage.key === openKey) : null
+
+  return (
+    <>
+      <section>
+        <h2>Workflow</h2>
+        <div className="step-list">
+          {steps.map(({ stage, state }) => {
+            const stripState = workflowStripState(state)
+            return (
+              <button
+                key={stage.key}
+                type="button"
+                className={`step-row step-${stripState}`}
+                onClick={() => setOpenKey(stage.key)}
+              >
+                <span className="step-ico" aria-hidden>
+                  <StepIcon state={stripState} />
+                </span>
+                <span className="step-titles">
+                  <span className="step-title">{stage.label}</span>
+                  <span className="step-subtitle">{stage.client_label ?? stage.label}</span>
+                </span>
+                <span className="step-state-pill">{labelForState(stripState)}</span>
+                <span className="step-chevron" aria-hidden>
+                  <ChevronRightIcon size={16} />
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
+          Click a step to view what it produced, or to advance the matter.
+        </p>
+      </section>
+
+      {openEntry && (
+        <WorkflowStepWindow
+          matter={matter}
+          workflow={workflow}
+          stage={openEntry.stage}
+          isCurrent={openEntry.state === 'current'}
+          onClose={() => setOpenKey(null)}
+          onChanged={onChanged}
+        />
+      )}
+    </>
+  )
+}
+
+// One step's pop-up. The body is dispatched by stage.action.kind onto the reused
+// step bodies; the current stage additionally gets the Continue advance affordance.
+function WorkflowStepWindow({
+  matter,
+  workflow,
+  stage,
+  isCurrent,
+  onClose,
+  onChanged,
+}: {
+  matter: MatterDetail
+  workflow: MatterWorkflow
+  stage: WfStage
+  isCurrent: boolean
+  onClose: () => void
+  onChanged: () => Promise<void>
+}) {
+  const [advancing, setAdvancing] = useState(false)
+  const [advanceErr, setAdvanceErr] = useState<string | null>(null)
+
+  // The manual (attorney/client) outgoing edge is the one a human "Continue" fires.
+  const manualEdge = isCurrent
+    ? (stage.advances_to.find((e) => e.gate === 'attorney' || e.gate === 'client') ?? null)
+    : null
+  // A current stage with ONLY a system/automatic outgoing edge waits on its event.
+  const waitsOnSystem =
+    isCurrent &&
+    !manualEdge &&
+    stage.advances_to.some((e) => e.gate === 'system' || e.gate === 'automatic')
+
+  async function advance() {
+    if (!manualEdge) return
+    setAdvancing(true)
+    setAdvanceErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.matter.advance',
+        input: {
+          matterEntityId: matter.matterEntityId,
+          toState: manualEdge.to,
+          gate: manualEdge.gate,
+          trigger: 'continue',
+        },
+      })
+      await onChanged()
+      onClose()
+    } catch (e) {
+      setAdvanceErr(e instanceof Error ? e.message : String(e))
+      setAdvancing(false)
+    }
+  }
+
+  const continueButton = manualEdge ? (
+    <button className="primary" onClick={() => void advance()} disabled={advancing}>
+      {advancing && <span className="spinner" />}
+      {advancing ? 'Advancing…' : 'Continue'}
+    </button>
+  ) : null
+
+  // ── review_send_document: reuse ApproveBody + ClientBody in one window ──────
+  if (stage.action?.kind === 'review_send_document') {
+    return (
+      <Modal
+        title={stage.label}
+        onClose={onClose}
+        footer={
+          <>
+            {matter.latestDraftVersionId && (
+              <Link href={`/attorney/review/${matter.latestDraftVersionId}`} className="button">
+                Open full review
+              </Link>
+            )}
+            {continueButton}
+          </>
+        }
+      >
+        {advanceErr && <div className="alert alert-error">{advanceErr}</div>}
+        <ApproveBody matter={matter} onChanged={onChanged} onClose={onClose} />
+        <div style={{ marginTop: 'var(--space-5)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
+          <ClientBody matter={matter} />
+        </div>
+        {waitsOnSystem && <WaitingNote />}
+      </Modal>
+    )
+  }
+
+  // ── approve_send_invoice: reuse the BillStep window verbatim ────────────────
+  if (stage.action?.kind === 'approve_send_invoice') {
+    return (
+      <BillStep
+        matter={matter}
+        onClose={onClose}
+        onChanged={onChanged}
+        title={stage.label}
+        extraFooter={
+          <>
+            {advanceErr && <span className="text-sm" style={{ color: 'var(--danger)' }}>{advanceErr}</span>}
+            {continueButton}
+          </>
+        }
+      />
+    )
+  }
+
+  // ── All other kinds: a Modal with the matching body + Continue footer ───────
+  return (
+    <Modal title={stage.label} onClose={onClose} footer={continueButton}>
+      {advanceErr && <div className="alert alert-error">{advanceErr}</div>}
+      <WorkflowStepBody stage={stage} matter={matter} />
+      {waitsOnSystem && <WaitingNote />}
+    </Modal>
+  )
+}
+
+function WaitingNote() {
+  return (
+    <p className="text-muted text-sm" style={{ marginTop: 'var(--space-4)' }}>
+      This step advances automatically when its event arrives (e.g. the invoice is
+      paid). There’s nothing to do here by hand.
+    </p>
+  )
+}
+
+// Body for the simple step-action kinds, reusing the existing view components.
+function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDetail }) {
+  const kind = stage.action?.kind
+  if (kind === 'view_intake') {
+    return matter.questionnaireResponses ? (
+      <QuestionnaireView data={matter.questionnaireResponses} />
+    ) : (
+      <p className="text-muted text-sm">
+        The client hasn’t submitted the intake questionnaire yet.
+      </p>
+    )
+  }
+  if (kind === 'view_consultation') {
+    return matter.transcriptText ? (
+      <TranscriptView text={matter.transcriptText} />
+    ) : (
+      <p className="text-muted text-sm">No consultation transcript on this matter yet.</p>
+    )
+  }
+  if (kind === 'await_payment') {
+    return (
+      <p className="text-sm">
+        Waiting for the client’s payment. Once the invoice is marked paid, the matter
+        moves on automatically.
+      </p>
+    )
+  }
+  if (kind === 'complete_matter') {
+    return (
+      <p className="text-sm">
+        This matter is <strong>complete</strong>. Every step in the workflow has run.
+      </p>
+    )
+  }
+  if (kind === 'generate_document') {
+    return (
+      <p className="text-sm">
+        Generate this step’s document from the <strong>Documents</strong> tab; it will
+        appear here once drafted.
+      </p>
+    )
+  }
+  // manual_task and any unmapped kind: a plain status panel.
+  return (
+    <p className="text-sm">
+      {stage.client_label ?? stage.label}
+      {stage.documents && stage.documents.length > 0 && (
+        <>
+          {' — '}
+          {stage.documents.map((d) => d.label ?? d.docKind).filter(Boolean).join(', ')}
+        </>
+      )}
+    </p>
+  )
 }
 
 interface DraftPayload {
@@ -334,6 +605,7 @@ function DocumentStep({
   canGenerate,
   onGenerate,
   onClose,
+  extraFooter,
 }: {
   matter: MatterDetail
   generating: string | null
@@ -341,6 +613,9 @@ function DocumentStep({
   canGenerate: boolean
   onGenerate: (documentKind: string) => void
   onClose: () => void
+  // Optional advance affordance the data-driven workflow window appends to the
+  // Modal footer; the legacy path omits it (its own derived strip drives advance).
+  extraFooter?: React.ReactNode
 }) {
   const versionId = matter.latestDraftVersionId
   const [draft, setDraft] = useState<DraftPayload | null>(null)
@@ -385,7 +660,18 @@ function DocumentStep({
     ) : null
 
   return (
-    <Modal title="Document" onClose={onClose} footer={footer}>
+    <Modal
+      title="Document"
+      onClose={onClose}
+      footer={
+        footer || extraFooter ? (
+          <>
+            {footer}
+            {extraFooter}
+          </>
+        ) : null
+      }
+    >
       {error && <div className="alert alert-error">{error}</div>}
 
       {versionId ? (
@@ -462,10 +748,41 @@ function ApproveStep({
   matter,
   onClose,
   onChanged,
+  extraFooter,
 }: {
   matter: MatterDetail
   onClose: () => void
   onChanged: () => Promise<void>
+  extraFooter?: React.ReactNode
+}) {
+  const versionId = matter.latestDraftVersionId
+  return (
+    <Modal title="Approve" onClose={onClose}>
+      <ApproveBody matter={matter} onChanged={onChanged} onClose={onClose} />
+      {versionId && (
+        <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
+          <Link href={`/attorney/review/${versionId}`} className="button">
+            Open full review
+          </Link>
+          {extraFooter}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+// The Approve step's body + its approve action, with NO Modal wrapper, so the
+// legacy ApproveStep and the data-driven review_send_document window render the
+// same review/approve UI. The Approve button lives in the body (not a Modal
+// footer) so the body composes cleanly inside any container.
+function ApproveBody({
+  matter,
+  onChanged,
+  onClose,
+}: {
+  matter: MatterDetail
+  onChanged: () => Promise<void>
+  onClose: () => void
 }) {
   const versionId = matter.latestDraftVersionId
   const approved = matter.latestDraftStatus === 'approved'
@@ -489,22 +806,8 @@ function ApproveStep({
     }
   }
 
-  const footer = versionId ? (
-    <>
-      <Link href={`/attorney/review/${versionId}`} className="button">
-        Open full review
-      </Link>
-      {!approved && (
-        <button className="primary" onClick={() => void approve()} disabled={busy}>
-          {busy && <span className="spinner" />}
-          {busy ? 'Approving…' : 'Approve document'}
-        </button>
-      )}
-    </>
-  ) : null
-
   return (
-    <Modal title="Approve" onClose={onClose} footer={footer}>
+    <>
       {err && <div className="alert alert-error">{err}</div>}
       {!versionId ? (
         <p className="text-muted text-sm">
@@ -516,20 +819,49 @@ function ApproveStep({
           accrued and ready to bill in the <strong>Bill</strong> step.
         </p>
       ) : (
-        <p className="text-sm">
-          Approving marks the latest draft as the firm-approved version, flips the matter to{' '}
-          <strong>approved</strong>, and automatically accrues the document fee. Review it in full
-          first if you like.
-        </p>
+        <>
+          <p className="text-sm">
+            Approving marks the latest draft as the firm-approved version, flips the matter to{' '}
+            <strong>approved</strong>, and automatically accrues the document fee. Review it in full
+            first if you like.
+          </p>
+          <button
+            className="primary"
+            onClick={() => void approve()}
+            disabled={busy}
+            style={{ marginTop: 'var(--space-3)' }}
+          >
+            {busy && <span className="spinner" />}
+            {busy ? 'Approving…' : 'Approve document'}
+          </button>
+        </>
       )}
-    </Modal>
+    </>
   )
 }
 
 // ── Send-to-client step ─────────────────────────────────────────────────────
 // Email the approved document to the client as a secure shared link (the same
 // legal.email.send_draft_link the Documents tab uses), gated on approval.
-function ClientStep({ matter, onClose }: { matter: MatterDetail; onClose: () => void }) {
+function ClientStep({
+  matter,
+  onClose,
+  extraFooter,
+}: {
+  matter: MatterDetail
+  onClose: () => void
+  extraFooter?: React.ReactNode
+}) {
+  return (
+    <Modal title="Send to client" onClose={onClose} footer={extraFooter ?? null}>
+      <ClientBody matter={matter} />
+    </Modal>
+  )
+}
+
+// The Send-to-client body + its send action, NO Modal wrapper, so the legacy
+// ClientStep and the data-driven review_send_document window share one UI.
+function ClientBody({ matter }: { matter: MatterDetail }) {
   const versionId = matter.latestDraftVersionId
   const approved = matter.latestDraftStatus === 'approved'
   const [busy, setBusy] = useState(false)
@@ -571,16 +903,8 @@ function ClientStep({ matter, onClose }: { matter: MatterDetail; onClose: () => 
     }
   }
 
-  const footer =
-    approved && versionId ? (
-      <button className="primary" onClick={() => void send()} disabled={busy}>
-        {busy && <span className="spinner" />}
-        {busy ? 'Sending…' : 'Email document to client'}
-      </button>
-    ) : null
-
   return (
-    <Modal title="Send to client" onClose={onClose} footer={footer}>
+    <>
       {status && (
         <div
           className={`alert ${status.kind === 'ok' ? '' : 'alert-error'}`}
@@ -598,20 +922,31 @@ function ClientStep({ matter, onClose }: { matter: MatterDetail; onClose: () => 
           Approve the document first — then you can email the approved version to the client.
         </p>
       ) : (
-        <p className="text-sm">
-          Emails the client a secure link to the approved document
-          {matter.clientEmail ? (
-            <>
-              {' '}
-              at <strong>{matter.clientEmail}</strong>
-            </>
-          ) : (
-            ' (no client email on file — you’ll be prompted)'
-          )}
-          .
-        </p>
+        <>
+          <p className="text-sm">
+            Emails the client a secure link to the approved document
+            {matter.clientEmail ? (
+              <>
+                {' '}
+                at <strong>{matter.clientEmail}</strong>
+              </>
+            ) : (
+              ' (no client email on file — you’ll be prompted)'
+            )}
+            .
+          </p>
+          <button
+            className="primary"
+            onClick={() => void send()}
+            disabled={busy}
+            style={{ marginTop: 'var(--space-3)' }}
+          >
+            {busy && <span className="spinner" />}
+            {busy ? 'Sending…' : 'Email document to client'}
+          </button>
+        </>
       )}
-    </Modal>
+    </>
   )
 }
 
@@ -637,10 +972,14 @@ function BillStep({
   matter,
   onClose,
   onChanged,
+  title = 'Bill',
+  extraFooter,
 }: {
   matter: MatterDetail
   onClose: () => void
   onChanged: () => Promise<void>
+  title?: string
+  extraFooter?: React.ReactNode
 }) {
   const id = matter.matterEntityId
   const [entries, setEntries] = useState<BillEntry[]>([])
@@ -765,7 +1104,7 @@ function BillStep({
   }
 
   return (
-    <Modal title="Bill" onClose={onClose}>
+    <Modal title={title} onClose={onClose} footer={extraFooter ?? null}>
       {err && <div className="alert alert-error">{err}</div>}
       {notice && (
         <div
