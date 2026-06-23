@@ -7696,6 +7696,142 @@ button.danger.outline:hover:not(:disabled) {
 .tpl-newfield input {
   width: 12rem;
 }
+/* Service "Documents" manager — a clean header + pills + one add row (replaces
+   the old cramped, dual-control "documents this service produces" block). */
+.tpl-docs {
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: var(--radius-md, 10px);
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--surface, #fff);
+}
+.tpl-docs-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+.tpl-docs-title {
+  font-size: 1rem;
+  margin: 0;
+}
+.tpl-docs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+}
+.tpl-docs-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.3rem 0.25rem 0.65rem;
+  background: var(--surface-2, #f1f3f6);
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.tpl-docs-pill button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted, #889);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 1rem;
+}
+.tpl-docs-pill button:hover {
+  background: rgba(176, 0, 32, 0.12);
+  color: #b00020;
+}
+.tpl-docs-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+.tpl-docs-select,
+.tpl-docs-new {
+  height: 2.1rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border, #d9d9d9);
+  border-radius: var(--radius-sm, 8px);
+  font: inherit;
+  font-size: 0.88rem;
+  background: var(--surface, #fff);
+}
+.tpl-docs-new {
+  flex: 1;
+  min-width: 12rem;
+}
+.tpl-docs-addbtn {
+  height: 2.1rem;
+  padding: 0 0.9rem;
+  border: 1px solid var(--border, #d9d9d9);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2, #f1f3f6);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tpl-docs-addbtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Collapsible "Insert a field" — a toggle header + a hidden body (default
+   collapsed); typing `{{` in the editor is the primary path. */
+.tpl-insert-collapsible {
+  display: block;
+}
+.tpl-insert-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 0;
+  background: transparent;
+  padding: 0.2rem 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+.tpl-insert-caret {
+  display: inline-block;
+  transition: transform 0.12s ease;
+  font-size: 0.8rem;
+  color: var(--muted, #889);
+}
+.tpl-insert-caret.open {
+  transform: rotate(90deg);
+}
+.tpl-insert-count {
+  font-weight: 600;
+  font-size: 0.72rem;
+  background: var(--surface-2, #eef1f5);
+  color: var(--muted, #667);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+}
+.tpl-insert-hint {
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--muted, #99a);
+}
+.tpl-insert-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
 /* Document-styled template canvas — a white page on a soft "desk", so a template
    reads like a Word document rather than a bare text box. Shared by the standalone
    Templates builder and the per-service document editor. */
