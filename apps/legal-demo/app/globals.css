@@ -360,6 +360,24 @@ tbody tr:hover {
   background: var(--navy-50);
 }
 
+/* Sortable column headers (review queue): clickable, with a direction arrow. */
+th.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+th.sortable-th:hover {
+  color: var(--text);
+  background: var(--navy-50);
+}
+th.sortable-th .sort-arrow {
+  font-size: 0.7rem;
+  opacity: 0.55;
+}
+th.sortable-th[aria-sort='none'] .sort-arrow {
+  opacity: 0.3;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
