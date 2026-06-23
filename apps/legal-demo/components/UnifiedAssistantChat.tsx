@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
+import { WorkflowProposalCard, type WorkflowProposal } from '@/components/WorkflowProposalCard'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import {
@@ -65,6 +66,9 @@ interface DisplayTurn {
   attachments?: string[]
   // Documents the assistant produced on an assistant turn — shown as download cards.
   documents?: ProducedDoc[]
+  // Workflow proposals the assistant captured on an assistant turn — shown as inline
+  // approval cards (PR5). The live write happens only when the attorney approves.
+  workflowProposals?: WorkflowProposal[]
 }
 
 // One legal skill (playbook) the attorney can pick from the /skills menu.
@@ -84,6 +88,7 @@ interface ThreadTurn {
   citations: string[]
   attachmentNames?: string[]
   documents?: ProducedDoc[]
+  workflowProposals?: WorkflowProposal[]
 }
 
 // A document attached to the next message: an uploaded file (parsed to text) or a
@@ -401,6 +406,7 @@ export function UnifiedAssistantChat({
     text: string
     skills: { slug: string; name: string }[]
     documents: ProducedDoc[]
+    workflowProposals: WorkflowProposal[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -569,6 +575,7 @@ export function UnifiedAssistantChat({
                 citations: t.citations,
                 model: t.model,
                 documents: t.documents,
+                workflowProposals: t.workflowProposals,
               },
         )
         setTurns(display)
@@ -795,6 +802,7 @@ export function UnifiedAssistantChat({
       text: '',
       skills: [] as { slug: string; name: string }[],
       documents: [] as ProducedDoc[],
+      workflowProposals: [] as WorkflowProposal[],
     }
     setStreaming({ ...partial })
     let finished = false
@@ -853,6 +861,13 @@ export function UnifiedAssistantChat({
             if (doc.markdown.trim()) partial.documents.push(doc)
             setStreaming({ ...partial, documents: [...partial.documents] })
           },
+          onWorkflowProposal: (p) => {
+            if (!live()) return
+            if (p.serviceKey && Array.isArray(p.graph) && p.graph.length) {
+              partial.workflowProposals.push(p as unknown as WorkflowProposal)
+            }
+            setStreaming({ ...partial, workflowProposals: [...partial.workflowProposals] })
+          },
           onDone: (d) => {
             if (!live()) return
             finished = true
@@ -864,6 +879,9 @@ export function UnifiedAssistantChat({
                 citations: d.citations,
                 model: d.model,
                 documents: partial.documents.length ? partial.documents : undefined,
+                workflowProposals: partial.workflowProposals.length
+                  ? partial.workflowProposals
+                  : undefined,
               },
             ])
             setStreaming(null)
@@ -889,14 +907,25 @@ export function UnifiedAssistantChat({
 
     // Reconcile a stream that ended without a terminal event (e.g. a drop):
     // keep whatever streamed rather than losing it.
-    if (!finished && (partial.text || partial.thinking || partial.documents.length)) {
+    if (
+      !finished &&
+      (partial.text ||
+        partial.thinking ||
+        partial.documents.length ||
+        partial.workflowProposals.length)
+    ) {
       setTurns((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: partial.text || (partial.documents.length ? '' : '(no response)'),
+          content:
+            partial.text ||
+            (partial.documents.length || partial.workflowProposals.length ? '' : '(no response)'),
           model: modelId,
           documents: partial.documents.length ? partial.documents : undefined,
+          workflowProposals: partial.workflowProposals.length
+            ? partial.workflowProposals
+            : undefined,
         },
       ])
     }
@@ -1280,6 +1309,11 @@ export function UnifiedAssistantChat({
                 {t.documents?.map((doc, di) => (
                   <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
                 ))}
+                {/* Workflow proposals (PR5) — inline approval cards. Approving is the
+                    live write; nothing was saved by the turn that proposed them. */}
+                {t.workflowProposals?.map((p, pi) => (
+                  <WorkflowProposalCard key={pi} proposal={p} />
+                ))}
                 {t.content.trim() && (
                   <div className="uac-reply-actions">
                     <CopyButton text={t.content} />
@@ -1347,6 +1381,10 @@ export function UnifiedAssistantChat({
             {/* A document produced mid-stream appears as a card right away. */}
             {streaming.documents.map((doc, di) => (
               <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
+            ))}
+            {/* A workflow proposed mid-stream appears as an approval card right away. */}
+            {streaming.workflowProposals.map((p, pi) => (
+              <WorkflowProposalCard key={pi} proposal={p} />
             ))}
             {streaming.text && (
               <div
