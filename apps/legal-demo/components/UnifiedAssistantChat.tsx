@@ -236,6 +236,58 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+// Save an assistant reply onto the current matter as a document draft (pending
+// review). Transient saving/saved/failed states; only rendered for matter-scoped,
+// document-like replies.
+function SaveToMatterButton({
+  matterEntityId,
+  markdown,
+}: {
+  matterEntityId: string
+  markdown: string
+}) {
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+  async function save() {
+    setState('saving')
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.assistant.save_reply',
+        input: { matterEntityId, markdown },
+      })
+      setState('saved')
+    } catch {
+      setState('error')
+    }
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => setState('idle'), 2200)
+  }
+  return (
+    <button
+      type="button"
+      className={`uac-reply-btn${state === 'saved' ? ' copied' : ''}`}
+      onClick={save}
+      disabled={state === 'saving'}
+      title="Save this reply to the matter's drafts (for review)"
+    >
+      {state === 'saved' ? <CheckIcon size={12} /> : <FileTextIcon size={12} />}{' '}
+      {state === 'saving'
+        ? 'Saving…'
+        : state === 'saved'
+          ? 'Saved'
+          : state === 'error'
+            ? 'Failed'
+            : 'Save to matter'}
+    </button>
+  )
+}
+
 export function UnifiedAssistantChat({
   matterEntityId,
   contactEntityId,
@@ -1120,6 +1172,12 @@ export function UnifiedAssistantChat({
                         >
                           <FileTextIcon size={12} /> Word
                         </button>
+                        {activeScope.matterEntityId && (
+                          <SaveToMatterButton
+                            matterEntityId={activeScope.matterEntityId}
+                            markdown={t.content}
+                          />
+                        )}
                       </>
                     )}
                   </div>
