@@ -16,6 +16,7 @@ import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
 import { signBookingManageToken } from './bookingManageToken.js'
 import type { GenerationMode } from './generateDraft.js'
+import { deriveLifecycleFromService, validateLifecycle, type Lifecycle } from '../lifecycle/index.js'
 
 export interface ServiceField {
   id: string
@@ -311,6 +312,36 @@ export async function getService(
     )
     const r = res.rows[0]
     return r ? mapRow(r) : null
+  })
+}
+
+// The service's matter lifecycle as data (ADR 0045). Reads workflow_definition.states
+// for the active version — so an attorney's edits (PR4) take effect immediately — and
+// falls back to deriving it from the service's route/booking when states is empty or
+// invalid. The fallback makes the engine robust whether or not the one-time backfill
+// has run, and equals the backfilled data by construction (the equality invariant).
+export async function getServiceLifecycle(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<Lifecycle | null> {
+  const stored = await withActionContext(ctx, async (client) => {
+    const res = await client.query<{ states: unknown }>(
+      `SELECT states FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND status = 'active' AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0]?.states
+  })
+  if (Array.isArray(stored) && stored.length > 0) {
+    const lc = stored as Lifecycle
+    if (validateLifecycle(lc).ok) return lc
+    // A malformed stored graph should never drive the engine — fall through to derive.
+  }
+  const service = await getService(ctx, serviceKey)
+  if (!service) return null
+  return deriveLifecycleFromService({
+    route: service.route,
+    bookingEnabled: service.booking?.enabled === true,
   })
 }
 
