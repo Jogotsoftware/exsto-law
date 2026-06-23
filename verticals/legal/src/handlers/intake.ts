@@ -9,6 +9,10 @@ import {
   lookupKindId,
 } from './common.js'
 import { resolveDefaultMatterOwner } from '../api/matterAccess.js'
+import { workflowEngineEnabled } from '../lifecycle/flags.js'
+import { resolveActiveServiceVersion } from '../lifecycle/binding.js'
+import { createWorkflowInstance } from '../lifecycle/instance.js'
+import { entryStage } from '../lifecycle/resolve.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // intake.submit — steps 1–3 of the intake flow (REQ-INTAKE-01..04, 07).
@@ -298,6 +302,40 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
       sourceType: 'human',
       sourceRef: ctx.actorId,
     })
+  }
+
+  // ADR 0045 (PR3) — flag-gated workflow ENGINE. When LEGAL_WORKFLOW_ENGINE is on
+  // AND this service has an authored lifecycle bound (a non-empty
+  // workflow_definition.states for its kind_name), stand up a workflow_instance for
+  // the matter so the engine can drive it. The existing matter_status write above
+  // stays the source of truth and is untouched; the instance is bound to the LATEST
+  // active version (invariant 17 pins the matter to that version thereafter). Wrapped
+  // so a binding/insert failure never fails matter.open — with the flag OFF this
+  // block is a perfect no-op.
+  if (workflowEngineEnabled()) {
+    // The whole handler runs in ONE Postgres transaction (withTenant), so a bare
+    // try/catch can't fail-open: a failed INSERT aborts the transaction and the next
+    // query ("current transaction is aborted") would roll back the ENTIRE matter.open.
+    // A SQL SAVEPOINT isolates the engine work — on failure we roll back only this
+    // block and the transaction stays usable, so the matter is opened either way.
+    await client.query('SAVEPOINT workflow_engine')
+    try {
+      const bound = await resolveActiveServiceVersion(client, ctx.tenantId, p.service_key)
+      if (bound) {
+        const entry = entryStage(bound.graph)
+        await createWorkflowInstance(client, ctx, {
+          workflowDefinitionId: bound.workflowDefinitionId,
+          subjectEntityId: matterEntityId,
+          currentState: entry?.key ?? 'intake_submitted',
+          actionId,
+        })
+      }
+      await client.query('RELEASE SAVEPOINT workflow_engine')
+    } catch (err) {
+      // Roll back ONLY the engine work; the matter is opened either way.
+      await client.query('ROLLBACK TO SAVEPOINT workflow_engine')
+      console.error('[legal.matter.open] workflow instance creation skipped:', err)
+    }
   }
 
   const clientOfId = await lookupKindId(

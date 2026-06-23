@@ -5,6 +5,53 @@
 // tab pages and the layout, so humanizers + the questionnaire/transcript renderers
 // live in exactly one place.
 
+// ── Workflow shape (ADR 0045 PR3) ───────────────────────────────────────────
+// The app cannot import the server lifecycle types (no server-package imports in
+// app code), so it declares the MINIMAL shape the data-driven Workflow window needs
+// — a structural mirror of verticals/legal/src/lifecycle/types.ts. These are read
+// off the matter read contract (queries/matters.ts) verbatim; the app never
+// constructs them. Null `matter.workflow` ⇒ the matter has no running instance and
+// the page falls back to the existing derived-step window, unchanged.
+export type WfGate = 'automatic' | 'attorney' | 'client' | 'system'
+
+export type WfStepActionKind =
+  | 'view_intake'
+  | 'view_consultation'
+  | 'generate_document'
+  | 'review_send_document'
+  | 'approve_send_invoice'
+  | 'await_payment'
+  | 'manual_task'
+  | 'complete_matter'
+
+export interface WfEdge {
+  to: string
+  gate: WfGate
+  via?: string
+  on?: string
+  when?: string
+}
+
+export interface WfStage {
+  key: string
+  label: string
+  client_label?: string
+  entry?: boolean
+  terminal?: boolean
+  blocking?: boolean
+  action?: { kind: WfStepActionKind; config?: Record<string, unknown> }
+  documents?: Array<{ templateEntityId?: string; docKind?: string; label?: string }>
+  advances_to: WfEdge[]
+}
+
+export interface MatterWorkflow {
+  instanceId: string
+  definitionId: string
+  graph: WfStage[]
+  currentState: string
+  status: string
+}
+
 export interface MatterDetail {
   matterEntityId: string
   matterNumber: string
@@ -20,6 +67,34 @@ export interface MatterDetail {
   latestDraftVersionId: string | null
   latestDraftStatus: string | null
   clientEntityId: string | null
+  // Present only when a workflow instance is running for this matter (ADR 0045
+  // PR3). Null is the default today; null ⇒ the page renders the existing
+  // derived-step window with no behavior change.
+  workflow?: MatterWorkflow | null
+}
+
+// Client-side replica of the server resolver's stepStates idea (resolve.ts): a
+// stage is `done` if it comes before the current stage in graph (display) order,
+// `current` if it IS the current stage, `upcoming` otherwise. Kept here (≈5 lines)
+// rather than imported so app code never reaches into a server package.
+export type WfStepState = 'done' | 'current' | 'upcoming'
+
+export function workflowStepStates(
+  graph: WfStage[],
+  currentState: string,
+): Array<{ stage: WfStage; state: WfStepState }> {
+  const currentIdx = graph.findIndex((s) => s.key === currentState)
+  return graph.map((stage, i) => ({
+    stage,
+    state:
+      currentIdx === -1
+        ? 'upcoming'
+        : i < currentIdx
+          ? 'done'
+          : i === currentIdx
+            ? 'current'
+            : 'upcoming',
+  }))
 }
 
 export function humanizeKind(k: string): string {
