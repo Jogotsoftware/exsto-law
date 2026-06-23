@@ -14,9 +14,9 @@
 // (/attorney/services/new) has no service yet, so it shows just the create form.
 import { useEffect, useState } from 'react'
 import { useParams, usePathname } from 'next/navigation'
-import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { ServiceTabs } from '@/components/ServiceTabs'
+import { BackButton } from '@/components/BackButton'
 import {
   ServiceSetupGuide,
   ServiceSetupContinue,
@@ -73,14 +73,12 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
   if (isNew) {
     return (
       <main>
+        <BackButton fallback="/attorney/services" />
         <div
           className="attorney-page-head"
           style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
         >
           <h1 style={{ margin: 0 }}>New service</h1>
-          <Link href="/attorney/services" className="back-link" style={{ marginLeft: 'auto' }}>
-            Back to services
-          </Link>
         </div>
         {children}
       </main>
@@ -97,6 +95,7 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
 
   return (
     <main>
+      <BackButton fallback="/attorney/services" />
       <div
         className="attorney-page-head"
         style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
@@ -107,9 +106,6 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
             {svc.isActive ? 'Enabled' : 'Disabled'}
           </span>
         )}
-        <Link href="/attorney/services" className="back-link" style={{ marginLeft: 'auto' }}>
-          Back to services
-        </Link>
       </div>
       {steps ? (
         <ServiceSetupGuide steps={steps} />

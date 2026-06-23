@@ -9,6 +9,7 @@
 import { use, useEffect, useMemo, useState } from 'react'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 import { getPaymentProvider } from '@/lib/payments/provider'
+import { BackButton } from '@/components/BackButton'
 
 interface ClientInvoiceLine {
   description: string
@@ -113,6 +114,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
 
   return (
     <main className="public-draft">
+      <BackButton fallback="/portal" forceFallback />
       <div className="public-draft-head">
         <div>
           <div className="public-draft-firm">Pacheco Law</div>
@@ -232,10 +234,6 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
             )}
           </>
         )}
-
-        <p style={{ marginTop: 'var(--space-4)' }}>
-          <a href="/portal">← Back to your client portal</a>
-        </p>
       </section>
     </main>
   )

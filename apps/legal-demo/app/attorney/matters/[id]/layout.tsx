@@ -7,18 +7,12 @@
 // AI assistant is no longer embedded here — the global assistant (bottom-right)
 // picks up this matter as its context automatically.
 import { use, useEffect, useState } from 'react'
-import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
 import { MatterTabs } from '@/components/MatterTabs'
 import { ActionsMenu } from '@/components/ActionsMenu'
-import {
-  ChevronLeftIcon,
-  MailIcon,
-  CalendarIcon,
-  ClockIcon,
-  DollarSignIcon,
-} from '@/components/icons'
+import { BackButton } from '@/components/BackButton'
+import { MailIcon, CalendarIcon, ClockIcon, DollarSignIcon } from '@/components/icons'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
 import { humanizeStatus, statusBadgeClass, type MatterDetail } from './shared'
 
@@ -52,9 +46,7 @@ export default function MatterLayout({
 
   return (
     <main>
-      <Link href="/attorney/matters" className="back-link">
-        <ChevronLeftIcon size={14} /> All matters
-      </Link>
+      <BackButton fallback="/attorney/matters" />
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
         <PageHead
           title={matter?.matterNumber ?? 'Matter'}
