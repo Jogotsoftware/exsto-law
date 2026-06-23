@@ -61,7 +61,11 @@ const WST_SELECT = `
 function mapWst(r: WstRow): WorkflowStepTemplate {
   // A stored stage always has at least a label + action + gate; default defensively
   // so a malformed row never throws on read.
-  const stage: StepStage = r.stage ?? { label: '', action: { kind: 'manual_task' }, gate: 'attorney' }
+  const stage: StepStage = r.stage ?? {
+    label: '',
+    action: { kind: 'manual_task' },
+    gate: 'attorney',
+  }
   return {
     workflowStepTemplateId: r.workflow_step_template_id,
     name: r.name ?? '',

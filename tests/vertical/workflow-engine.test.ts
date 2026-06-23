@@ -70,7 +70,13 @@ const GRAPH = [
     action: { kind: 'approve_send_invoice' },
     advances_to: [{ to: 'closed', gate: 'system', on: 'invoice.paid' }],
   },
-  { key: 'closed', label: 'Complete', terminal: true, action: { kind: 'complete_matter' }, advances_to: [] },
+  {
+    key: 'closed',
+    label: 'Complete',
+    terminal: true,
+    action: { kind: 'complete_matter' },
+    advances_to: [],
+  },
 ]
 
 // Create a service (writes its workflow_definition through the action layer) and then

@@ -35,7 +35,8 @@ export const STEP_ACTION_CATALOG: StepActionSpec[] = [
   {
     kind: 'generate_document',
     label: 'Generate document',
-    description: "Produce a document draft from the step's document template(s) + the intake answers.",
+    description:
+      "Produce a document draft from the step's document template(s) + the intake answers.",
     defaultGate: 'automatic',
     blocking: true,
   },

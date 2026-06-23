@@ -44,17 +44,15 @@ async function setAttr(
 // A half-edge would later fail validateLifecycle, so we reject it AT THE WRITE.
 // The closed action + gate catalogs are the only sets a step may compose from.
 function assertStage(stage: unknown): void {
-  const s = stage as
-    | {
-        label?: unknown
-        action?: { kind?: unknown }
-        gate?: unknown
-        advances_to?: unknown
-        key?: unknown
-        entry?: unknown
-        terminal?: unknown
-      }
-    | null
+  const s = stage as {
+    label?: unknown
+    action?: { kind?: unknown }
+    gate?: unknown
+    advances_to?: unknown
+    key?: unknown
+    entry?: unknown
+    terminal?: unknown
+  } | null
   if (!s || typeof s !== 'object') throw new Error('stage must be an object.')
   if (typeof s.label !== 'string' || !s.label.trim()) throw new Error('stage.label is required.')
   if ('advances_to' in s && s.advances_to != null)

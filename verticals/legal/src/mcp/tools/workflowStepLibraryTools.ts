@@ -61,10 +61,7 @@ const listTool: Tool<Record<string, never>, { steps: WorkflowStepTemplate[] }> =
   }),
 }
 
-const getTool: Tool<
-  { workflowStepTemplateId: string },
-  { step: WorkflowStepTemplate | null }
-> = {
+const getTool: Tool<{ workflowStepTemplateId: string }, { step: WorkflowStepTemplate | null }> = {
   name: 'legal.workflow_step_template.get',
   description: 'Fetch one reusable workflow step template (name, description, stage).',
   mode: 'read',

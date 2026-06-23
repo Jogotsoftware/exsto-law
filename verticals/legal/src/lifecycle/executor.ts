@@ -60,11 +60,7 @@ export async function loadInstanceForMatter(
   if (instance.statesOverride && instance.statesOverride.length > 0) {
     return { instance, graph: instance.statesOverride }
   }
-  const bound = await resolveBoundWorkflowById(
-    client,
-    ctx.tenantId,
-    instance.workflowDefinitionId,
-  )
+  const bound = await resolveBoundWorkflowById(client, ctx.tenantId, instance.workflowDefinitionId)
   return { instance, graph: bound?.graph ?? [] }
 }
 

@@ -39,6 +39,15 @@ export const PaperclipIcon = (p: IconProps) => (
   </Svg>
 )
 
+// Page break: solid page edges top & bottom with a dashed break line between.
+export const PageBreakIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 6h14" />
+    <path d="M5 18h14" />
+    <path d="M4 12h2m4 0h2m4 0h2" />
+  </Svg>
+)
+
 // Rich-text formatting icons (Word-style) for the template editor toolbar.
 // Bold is a filled glyph (the open-stroke default would render a hollow "B").
 export const BoldIcon = (p: IconProps) => (
