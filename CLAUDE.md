@@ -98,3 +98,13 @@ Many Claude sessions work in parallel and a **merge manager** integrates every P
 3. **Pick migration numbers AND kind ids against both `main` and prod.** Parallel branches collide constantly on vertical-migration numbers and on kind ids (entity/attribute/relationship/action/event). Before choosing, check the highest number in `git ls-tree origin/main supabase/migrations_vertical/` AND the prod ledger (`private.vertical_migration`) + existing kind ids, then number **above both**, use a **fresh id-block** (never another branch's block — same `kind_name` at a different id still collides), and write inserts as `ON CONFLICT (id) DO NOTHING`. Follow `exsto-substrate-migration`. Never run `pnpm migrate:vertical` against prod from a feature branch — prod migrations are gated and applied by the manager.
 
 4. **Keep your branch mergeable.** When `main` moves under you, merge it in (or rebase) and resolve conflicts yourself — keeping BOTH your changes and what landed. Smaller, focused PRs reconcile far more cleanly than large ones that touch hot files (e.g. `verticals/legal/src/api/assistantChat.ts`, `apps/legal-demo/app/globals.css`).
+
+## Beta feedback — close the loop on everything you ship
+
+Beta feedback is captured as `assistant.turn` events (`kind = 'feedback'`) in the substrate — each carries `category`, `page_context.path`, and the message/reply. (The old `feedback.recorded` kind is unused; ignore it.) Most of the work this product is shipping comes from this backlog, and it drifts out of date — reading as all-open — unless every session closes the loop on what it ships. Two required steps whenever a change addresses a feedback item:
+
+1. **Reference it in the commit.** Add a `Beta-Feedback:` trailer listing the `assistant.turn` event id(s) — e.g. `Beta-Feedback: a436b8c6, 86bc2170` (append `(partial)` if it only partly addresses the item). This makes the code↔feedback link greppable: `git log --grep=<id>`.
+
+2. **Resolve the event the same session you ship it** — through the action layer (hard rule 1; never a raw INSERT into `event`): `legal.assistant.feedback_resolve` (MCP) or `resolveAssistantFeedback(ctx, { feedbackEventId, summary, note? })` from `@exsto/legal`. Resolving is what removes the item from the open backlog; a shipped-but-unresolved item looks open and gets re-worked by another session.
+
+Do both — they're not interchangeable. The merge manager resolves from your `Beta-Feedback:` trailers at merge time as a backstop, but the source of truth is you marking the item when you ship it. To see what's still open, read the unresolved `assistant.turn` feedback rows (the manager keeps the backlog current as PRs land).
