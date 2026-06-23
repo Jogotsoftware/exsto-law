@@ -60,6 +60,7 @@ const NAV: NavNode[] = [
   { href: '/attorney/matters', label: 'Matters', Icon: BriefcaseIcon },
   { href: '/attorney/crm', label: 'CRM', Icon: Building2Icon },
   { href: '/attorney/review', label: 'Review', Icon: CheckCircleIcon },
+  { href: '/attorney/requests', label: 'Requests', Icon: HelpCircleIcon },
   { href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
   { href: '/attorney/mail', label: 'Mail', Icon: MailIcon },
   {
