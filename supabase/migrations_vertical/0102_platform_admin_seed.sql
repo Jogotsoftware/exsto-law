@@ -1,7 +1,7 @@
 -- =============================================================================
--- Vertical migration 0096: seed the first platform admin (ADR 0046)
+-- Vertical migration 0102: seed the first platform admin (ADR 0046)
 --
--- The platform tenant + its system actor ship in 0095. This seeds the founder as
+-- The platform tenant + its system actor ship in 0101. This seeds the founder as
 -- the first human platform admin so the admin console is reachable on day one.
 -- Authority is the platform_admin row (is_platform_admin checks it); admin sign-in
 -- resolves the Google email -> this actor via private.cp_resolve_admin_by_email.
@@ -12,7 +12,7 @@
 -- by inserting platform_admin rows (a later seed migration or an admin tool);
 -- revocation sets revoked_at.
 --
--- Idempotent: fixed UUIDs + ON CONFLICT DO NOTHING. Number 0096 = next after 0095.
+-- Idempotent: fixed UUIDs + ON CONFLICT DO NOTHING. Number 0102 = next after 0101.
 -- =============================================================================
 
 SELECT set_config('app.tenant_id', '00000000-0000-0000-00FF-000000000001', false);

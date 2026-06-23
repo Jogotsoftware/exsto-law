@@ -1,6 +1,6 @@
 // Platform control-plane context helpers (ADR 0046). The control plane's ONLY
 // cross-tenant capability is the set of guarded private.cp_* SECURITY DEFINER
-// functions (migration 0095); these helpers call them as the non-owner app role
+// functions (migration 0101); these helpers call them as the non-owner app role
 // (withAppRole), exactly as the REST adapter calls auth_resolve_api_key. Per-tenant
 // operations use NO override — they build the target tenant's ActionContext and go
 // through submitAction. Every function here re-asserts platform-admin, so the gate

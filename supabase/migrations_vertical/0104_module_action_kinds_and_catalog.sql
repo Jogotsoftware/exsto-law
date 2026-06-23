@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0098: module action kinds (all tenants) + master catalog
+-- Vertical migration 0104: module action kinds (all tenants) + master catalog
 --
 -- (1) Seed legal.module.define/enable/disable into EVERY existing tenant so the
 --     control plane can submitAction these in any target tenant. Seeding into
@@ -9,10 +9,10 @@
 --     in the platform context; ui_areas gate the firm app nav). `requires` is left
 --     minimal for the legal modules because their kinds already exist in every
 --     tenant (cloned from tenant zero) — enablement is a GATE here; promotion
---     (0100) is what installs genuinely-new config.
+--     (0106) is what installs genuinely-new config.
 --
 -- Idempotent: per-tenant NOT EXISTS guard on action kinds; ON CONFLICT on the
--- catalog unique (tenant_id, module_key). Number 0098 = next after 0097.
+-- catalog unique (tenant_id, module_key). Number 0104 = next after 0103.
 -- =============================================================================
 
 -- (1) Module action kinds into every tenant.

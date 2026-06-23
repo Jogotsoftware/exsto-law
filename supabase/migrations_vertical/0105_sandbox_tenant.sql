@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0099: the sandbox tenant + enter-sandbox helper (ADR 0046 §6)
+-- Vertical migration 0105: the sandbox tenant + enter-sandbox helper (ADR 0046 §6)
 --
 -- A reserved SANDBOX tenant (00FE…0001) where the operator builds/tests anything
 -- in a live environment before promoting it to production tenants. Stood up the
@@ -12,7 +12,7 @@
 -- is deliberately EXCLUDED from firm Google sign-in (identity.ts), so this is the
 -- only way in, and it keeps the sandbox owner's email from ever hijacking a firm.
 --
--- Number 0099 = next after 0098 (0098 seeds the module catalog this depends on).
+-- Number 0105 = next after 0104 (0104 seeds the module catalog this depends on).
 -- =============================================================================
 
 DO $$
