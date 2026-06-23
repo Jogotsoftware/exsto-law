@@ -4,6 +4,7 @@ import {
   getQuestionnaireTemplate,
   createQuestionnaireTemplate,
   updateQuestionnaireTemplate,
+  setQuestionnaireTemplates,
   archiveQuestionnaireTemplate,
   type QuestionnaireTemplate,
   type CreateQuestionnaireTemplateInput,
@@ -121,8 +122,35 @@ const archiveTool: Tool<
     archiveQuestionnaireTemplate(ctx, input.questionnaireTemplateId),
 }
 
+const setTemplatesTool: Tool<
+  { questionnaireTemplateId: string; templateEntityIds: string[] },
+  { questionnaire: QuestionnaireTemplate }
+> = {
+  name: 'legal.questionnaire_template.set_templates',
+  description:
+    'Set the exact set of document templates this questionnaire feeds (the questionnaire_feeds_template links). Pass the FULL desired set of template entity ids; the handler adds new links and ends removed ones, append-only.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      questionnaireTemplateId: { type: 'string' },
+      templateEntityIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'The full set of template entity ids this questionnaire feeds.',
+      },
+    },
+    required: ['questionnaireTemplateId', 'templateEntityIds'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    questionnaire: await setQuestionnaireTemplates(ctx, input),
+  }),
+}
+
 registerTool(listTool)
 registerTool(getTool)
 registerTool(createTool)
 registerTool(updateTool)
+registerTool(setTemplatesTool)
 registerTool(archiveTool)
