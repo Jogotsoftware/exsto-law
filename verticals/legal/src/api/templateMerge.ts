@@ -39,13 +39,20 @@ export function renderTemplate(
 ): RenderResult {
   const filled = new Set<string>()
   const missing = new Set<string>()
+  // Tokens bind to questionnaire field ids, which are lowercase by convention —
+  // the canonical engine (lib/templates/render.ts, Contract H) lowercases before
+  // lookup. A template body can legitimately carry UPPERCASE tokens (e.g.
+  // {{COMPANY_NAME}} from an imported/attorney-authored OA), so match
+  // case-insensitively here too. Without this, every uppercase token renders as a
+  // MISSING marker even when the client answered the matching question.
   const markdown = templateText.replace(SLOT_RE, (_match, field: string) => {
-    const value = data[field]
+    const key = field.toLowerCase()
+    const value = data[key]
     if (value != null && String(value).trim() !== '') {
-      filled.add(field)
+      filled.add(key)
       return String(value)
     }
-    missing.add(field)
+    missing.add(key)
     return `[[MISSING: ${field}]]`
   })
   return { markdown, filledFields: [...filled], missingFields: [...missing] }

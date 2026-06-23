@@ -418,6 +418,46 @@ function KindEditor({
     }
   }
 
+  const pdfInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Import a PDF as this document's body: read it as base64, parse to markdown via
+  // the core (legal.template.import_pdf), seed the editor, then the attorney saves.
+  async function importPdf(file: File) {
+    if (text.trim() && !window.confirm('Replace this document body with the imported PDF?')) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(reader.error ?? new Error('Could not read the file'))
+        reader.readAsDataURL(file)
+      })
+      const pdfBase64 = dataUrl.split(',')[1] ?? ''
+      const r = await callAttorneyMcp<{
+        bodyMd: string
+        detectedVariables: string[]
+        pageCount: number
+      }>({
+        toolName: 'legal.template.import_pdf',
+        input: { pdfBase64, filename: file.name },
+      })
+      setText(r.bodyMd)
+      setSeedHtml(markdownToHtml(r.bodyMd))
+      setEditorKey((k) => k + 1)
+      setSaved(false)
+      const n = r.detectedVariables.length
+      setLibNote(
+        `Imported ${r.pageCount} page${r.pageCount === 1 ? '' : 's'}, ${n} field${n === 1 ? '' : 's'} detected. Review, then Save new version.`,
+      )
+      setTimeout(() => setLibNote(null), 6000)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const tokens = extractTokens(text)
   const fieldIds = new Set(fields.map((f) => f.id))
   const orphans = tokens.filter((tok) => !fieldIds.has(tok))
@@ -511,6 +551,20 @@ function KindEditor({
             ))}
           </select>
         )}
+        <button type="button" onClick={() => pdfInputRef.current?.click()} disabled={busy}>
+          Import PDF…
+        </button>
+        <input
+          ref={pdfInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            e.target.value = ''
+            if (f) void importPdf(f)
+          }}
+        />
         <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !text.trim()}>
           Save to library
         </button>

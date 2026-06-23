@@ -6,9 +6,11 @@ import {
   updateTemplate,
   archiveTemplate,
   aiDraftTemplate,
+  importPdfTemplate,
   type StandaloneTemplate,
   type CreateTemplateInput,
   type UpdateTemplateInput,
+  type ImportPdfResult,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -135,9 +137,35 @@ const aiDraftTool: Tool<
   handler: async (ctx: ActionContext, input) => aiDraftTemplate(ctx, input),
 }
 
+// Import a PDF into a template body (Obj 9 follow-up). Parses the upload to
+// markdown and surfaces the {{variables}} it found, for the attorney to review in
+// the editor and SAVE (that save — create/update, or a service template update —
+// is the recorded write). Mirrors ai_draft: a parse-only generation that persists
+// nothing itself, kept mode:'write' so it stays attorney-scoped.
+const importPdfTool: Tool<{ pdfBase64: string; filename?: string }, ImportPdfResult> = {
+  name: 'legal.template.import_pdf',
+  description:
+    'Parse an uploaded PDF into a markdown template body. Returns { displayName, bodyMd, bodyHtml, detectedVariables, pageCount, characterCount }; {{variable}} placeholders in the PDF are detected and preserved. Persists nothing — the attorney reviews the body in the editor and saves it (that save is the recorded write).',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pdfBase64: { type: 'string', description: 'Base64-encoded contents of the PDF file.' },
+      filename: {
+        type: 'string',
+        description: 'Optional original filename, used to suggest a display name.',
+      },
+    },
+    required: ['pdfBase64'],
+    additionalProperties: false,
+  },
+  handler: async (_ctx: ActionContext, input) => importPdfTemplate(input),
+}
+
 registerTool(listTool)
 registerTool(getTool)
 registerTool(createTool)
 registerTool(updateTool)
 registerTool(archiveTool)
 registerTool(aiDraftTool)
+registerTool(importPdfTool)
