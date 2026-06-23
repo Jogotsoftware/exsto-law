@@ -9,6 +9,7 @@ import {
   quoteClientRequest,
   createClientRequest,
   listClientRequests,
+  submitClientPortalFeedback,
   isRequestType,
   type ClientMatterTimeline,
   type ClientMatterListItem,
@@ -198,6 +199,30 @@ const requestListTool: Tool<RequestListInput, { requests: ClientRequestSummary[]
   }),
 }
 
+// ── Feedback (the portal chat widget) ────────────────────────────────────────
+// Client leaves feedback ABOUT the portal; recorded into the same triage channel
+// as attorney beta feedback (tagged client/client_portal). clientContactId is
+// stamped by the authed route. Pure capture — no model call, no matter context.
+interface FeedbackInput {
+  message: string
+  category?: string | null
+  pageContext?: Record<string, unknown> | null
+  clientContactId: string
+}
+
+const feedbackSubmitTool: Tool<FeedbackInput, { eventId: string }> = {
+  name: 'legal.client.feedback_submit',
+  description: 'Submit the signed-in client’s feedback about the portal (the portal chat widget).',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    submitClientPortalFeedback(ctx, {
+      clientContactId: input.clientContactId,
+      message: input.message,
+      category: input.category ?? null,
+      pageContext: input.pageContext ?? null,
+    }),
+}
+
 registerTool(matterTimelineTool)
 registerTool(mattersTool)
 registerTool(threadGetTool)
@@ -207,3 +232,4 @@ registerTool(invoiceGetTool)
 registerTool(requestQuoteTool)
 registerTool(requestCreateTool)
 registerTool(requestListTool)
+registerTool(feedbackSubmitTool)

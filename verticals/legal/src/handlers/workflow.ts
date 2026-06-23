@@ -22,10 +22,7 @@
 // 'adjustment'. The action kind's default_autonomy_tier is 'notify'.
 import { registerActionHandler } from '@exsto/substrate'
 import { insertAttribute, insertEvent, lookupKindId } from './common.js'
-import {
-  getWorkflowInstanceForMatter,
-  resolveBoundWorkflowById,
-} from '../lifecycle/binding.js'
+import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
 import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
 import type { GateKind } from '../lifecycle/types.js'
@@ -64,9 +61,7 @@ registerActionHandler('legal.matter.advance', async (ctx, client, payload, actio
   // Resolve the bound graph (the version this matter runs; invariant 17). A
   // per-instance override supersedes the bound version for this matter.
   let graph =
-    instance.statesOverride && instance.statesOverride.length > 0
-      ? instance.statesOverride
-      : []
+    instance.statesOverride && instance.statesOverride.length > 0 ? instance.statesOverride : []
   if (graph.length === 0) {
     const bound = await resolveBoundWorkflowById(
       client,

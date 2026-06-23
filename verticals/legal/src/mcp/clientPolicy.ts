@@ -49,6 +49,7 @@ export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.client.request_quote', // price a request type before submitting (no write)
   'legal.client.request_create', // submit a cost-accepted request on one of the client's matters
   'legal.client.request_list', // list the signed-in client's own requests + status
+  'legal.client.feedback_submit', // the portal chat widget: client feedback about the portal
   'legal.esign.portal.list', // the client's documents awaiting their signature
   'legal.esign.portal.documents', // ALL of the client's documents (to-sign + signed)
   'legal.esign.portal.load', // load one of the client's signing requests (+ their fields)

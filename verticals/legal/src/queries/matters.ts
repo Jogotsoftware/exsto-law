@@ -1,9 +1,6 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
-import {
-  getWorkflowInstanceForMatter,
-  resolveBoundWorkflowById,
-} from '../lifecycle/binding.js'
+import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import type { Lifecycle } from '../lifecycle/types.js'
 
 // Bitemporal read discipline (exsto-query-substrate): current attribute state =

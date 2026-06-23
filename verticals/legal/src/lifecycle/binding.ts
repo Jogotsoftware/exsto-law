@@ -138,8 +138,6 @@ export async function getWorkflowInstanceForMatter(
     currentState: row.current_state,
     stateHistory: Array.isArray(row.state_history) ? row.state_history : [],
     status: row.status,
-    statesOverride: Array.isArray(row.states_override)
-      ? (row.states_override as Lifecycle)
-      : null,
+    statesOverride: Array.isArray(row.states_override) ? (row.states_override as Lifecycle) : null,
   }
 }
