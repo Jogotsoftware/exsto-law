@@ -4232,12 +4232,81 @@ main.book-main {
   gap: 0.6rem;
   margin-top: 0.8rem;
 }
+/* Inline AI-enhance panel on a service document (mirrors the library modal's
+   controls, but lives inline under the document header). */
+.tpl-ai-panel {
+  margin: 0.2rem 0 0.7rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2, #fafafa);
+}
+.tpl-ai-instr {
+  width: 100%;
+  resize: vertical;
+  min-height: 3.2rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+.tpl-ai-skillarea {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
 /* Draft-with-AI options: model selector + a compact searchable skill picker. */
 .tpl-ai-opts {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
   margin-top: 0.7rem;
+}
+
+/* Attach-a-reference-document control in the Draft-with-AI modal. */
+.tpl-ai-attach {
+  margin-top: 0.6rem;
+}
+.tpl-ai-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px dashed var(--border-strong, var(--border));
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.tpl-ai-attach-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-attorney);
+}
+.tpl-ai-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+.tpl-ai-attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 18rem;
+}
+.tpl-ai-attach-x {
+  display: inline-flex;
+  color: var(--muted);
+  padding: 0;
+  line-height: 1;
+}
+.tpl-ai-attach-x:hover {
+  color: var(--danger);
 }
 .tpl-ai-opt {
   display: flex;
