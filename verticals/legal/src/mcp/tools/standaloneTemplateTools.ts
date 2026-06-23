@@ -162,7 +162,8 @@ const aiEnhanceTool: Tool<AiEnhanceTemplateInput, { body: string }> = {
     properties: {
       currentBody: {
         type: 'string',
-        description: 'The current template body to improve. Empty string ⇒ draft from instructions.',
+        description:
+          'The current template body to improve. Empty string ⇒ draft from instructions.',
       },
       instructions: {
         type: 'string',

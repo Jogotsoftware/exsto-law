@@ -184,7 +184,8 @@ export async function aiEnhanceTemplate(
   const model = input.modelId ? resolveAssistantModel(input.modelId)?.model : undefined
   const userMsg = currentBody
     ? `Current template:\n\n${currentBody}\n\n---\nRevision request: ${
-        instructions || 'Polish and tighten the language, fix structure and formatting, keep all merge tokens.'
+        instructions ||
+        'Polish and tighten the language, fix structure and formatting, keep all merge tokens.'
       }`
     : `Draft a new ${kind} template. Request: ${instructions}`
   const { reply } = await chatWithAssistantDetailed(
