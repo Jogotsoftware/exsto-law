@@ -413,7 +413,6 @@ function WorkflowWindow({
 // step bodies; the current stage additionally gets the Continue advance affordance.
 function WorkflowStepWindow({
   matter,
-  workflow,
   stage,
   isCurrent,
   onClose,
@@ -487,7 +486,13 @@ function WorkflowStepWindow({
       >
         {advanceErr && <div className="alert alert-error">{advanceErr}</div>}
         <ApproveBody matter={matter} onChanged={onChanged} onClose={onClose} />
-        <div style={{ marginTop: 'var(--space-5)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
+        <div
+          style={{
+            marginTop: 'var(--space-5)',
+            borderTop: '1px solid var(--border)',
+            paddingTop: 'var(--space-4)',
+          }}
+        >
           <ClientBody matter={matter} />
         </div>
         {waitsOnSystem && <WaitingNote />}
@@ -505,7 +510,11 @@ function WorkflowStepWindow({
         title={stage.label}
         extraFooter={
           <>
-            {advanceErr && <span className="text-sm" style={{ color: 'var(--danger)' }}>{advanceErr}</span>}
+            {advanceErr && (
+              <span className="text-sm" style={{ color: 'var(--danger)' }}>
+                {advanceErr}
+              </span>
+            )}
             {continueButton}
           </>
         }
@@ -526,8 +535,8 @@ function WorkflowStepWindow({
 function WaitingNote() {
   return (
     <p className="text-muted text-sm" style={{ marginTop: 'var(--space-4)' }}>
-      This step advances automatically when its event arrives (e.g. the invoice is
-      paid). There’s nothing to do here by hand.
+      This step advances automatically when its event arrives (e.g. the invoice is paid). There’s
+      nothing to do here by hand.
     </p>
   )
 }
@@ -554,8 +563,8 @@ function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDet
   if (kind === 'await_payment') {
     return (
       <p className="text-sm">
-        Waiting for the client’s payment. Once the invoice is marked paid, the matter
-        moves on automatically.
+        Waiting for the client’s payment. Once the invoice is marked paid, the matter moves on
+        automatically.
       </p>
     )
   }
@@ -569,8 +578,8 @@ function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDet
   if (kind === 'generate_document') {
     return (
       <p className="text-sm">
-        Generate this step’s document from the <strong>Documents</strong> tab; it will
-        appear here once drafted.
+        Generate this step’s document from the <strong>Documents</strong> tab; it will appear here
+        once drafted.
       </p>
     )
   }
@@ -581,7 +590,10 @@ function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDet
       {stage.documents && stage.documents.length > 0 && (
         <>
           {' — '}
-          {stage.documents.map((d) => d.label ?? d.docKind).filter(Boolean).join(', ')}
+          {stage.documents
+            .map((d) => d.label ?? d.docKind)
+            .filter(Boolean)
+            .join(', ')}
         </>
       )}
     </p>
