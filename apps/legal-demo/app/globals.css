@@ -5074,6 +5074,58 @@ button.danger.outline:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent-soft);
 }
+/* A document the assistant produced — a downloadable deliverable shown as a
+   distinct card (not a chat bubble), with a preview + download/save actions. */
+.uac-doc-card {
+  margin: 0.5rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface);
+  overflow: hidden;
+}
+.uac-doc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  background: var(--surface-2, #f6f8fb);
+  border-bottom: 1px solid var(--border);
+}
+.uac-doc-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--fg);
+}
+.uac-doc-toggle {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.uac-doc-toggle:hover {
+  color: var(--fg);
+}
+/* The rendered document preview — paper-like, scrollable when long. */
+.uac-doc-body {
+  padding: 0.7rem 0.9rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+.uac-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  justify-content: flex-end;
+  padding: 0.45rem 0.7rem;
+  border-top: 1px solid var(--border);
+}
 .feedback-error {
   margin: 0;
   font-size: 0.82rem;
