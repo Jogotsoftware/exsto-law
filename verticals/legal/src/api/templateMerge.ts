@@ -39,8 +39,13 @@ export function renderTemplate(
 ): RenderResult {
   const filled = new Set<string>()
   const missing = new Set<string>()
+  // Case-insensitive field lookup: a hand-typed {{Client_Name}} fills a
+  // `client_name` field. Token/field ids are snake_case slugs, so letter case is
+  // never meaningful — match it the way the live preview already does.
+  const byLower = new Map<string, string | undefined>()
+  for (const [k, v] of Object.entries(data)) byLower.set(k.toLowerCase(), v)
   const markdown = templateText.replace(SLOT_RE, (_match, field: string) => {
-    const value = data[field]
+    const value = data[field] ?? byLower.get(field.toLowerCase())
     if (value != null && String(value).trim() !== '') {
       filled.add(field)
       return String(value)
