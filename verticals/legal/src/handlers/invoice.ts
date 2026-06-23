@@ -135,6 +135,30 @@ async function loadSourceEvent(
   return { kindName: r.kind_name, matterId: r.primary_entity_id, payload: r.payload ?? {} }
 }
 
+// Distinct matter ids an invoice touches, read from its lines' line_matter_id.
+// Lets the invoice lifecycle events (sent/paid) name the matter(s) as secondary
+// entities so a matter-scoped timeline (getMatterHistory) sees them natively —
+// invoice.issued/sent/paid are primary=invoice, so without this the matter can't
+// observe them.
+async function loadInvoiceMatterIds(
+  client: DbClient,
+  tenantId: string,
+  invoiceId: string,
+): Promise<string[]> {
+  const res = await client.query<{ matter_id: string | null }>(
+    `SELECT DISTINCT amm.value #>> '{}' AS matter_id
+       FROM attribute aii
+       JOIN attribute_kind_definition kii ON kii.id = aii.attribute_kind_id
+        AND kii.kind_name = 'line_invoice_id'
+       JOIN attribute amm ON amm.entity_id = aii.entity_id AND amm.valid_to IS NULL
+       JOIN attribute_kind_definition kmm ON kmm.id = amm.attribute_kind_id
+        AND kmm.kind_name = 'line_matter_id'
+      WHERE aii.tenant_id = $1 AND aii.valid_to IS NULL AND aii.value #>> '{}' = $2`,
+    [tenantId, invoiceId],
+  )
+  return res.rows.map((r) => r.matter_id).filter((m): m is string => !!m)
+}
+
 // hours = round(minutes / 60, 2); amount = round(hours * rate). Billing on
 // 2-dp hours keeps quantity x rate === amount exactly to the cent on the invoice.
 function priceTimeLine(
@@ -534,12 +558,16 @@ registerActionHandler('invoice.issue', async (ctx, client, payload, actionId) =>
   }
 
   // ── Invoice issued (lifecycle event) ─────────────────────────────────────────
+  // Secondary names the client AND every matter the lines touch, so a matter's
+  // timeline (getMatterHistory) sees "invoice created" without joining through
+  // the *.billed events.
+  const issuedMatterIds = [...new Set(priced.map((l) => l.matterId))]
   await insertEvent(client, {
     tenantId: ctx.tenantId,
     actionId,
     eventKindName: 'invoice.issued',
     primaryEntityId: invoiceId,
-    secondaryEntityIds: [clientEntityId],
+    secondaryEntityIds: [clientEntityId, ...issuedMatterIds],
     sourceType: 'human',
     sourceRef: ctx.actorId,
     data: { total: centsToAmount(totalCents), currency, line_count: priced.length },
@@ -598,13 +626,14 @@ registerActionHandler('invoice.send', async (ctx, client, payload, actionId) => 
   }
 
   const delivered = p.delivered !== false
+  const matterIds = await loadInvoiceMatterIds(client, ctx.tenantId, invoiceId)
 
   await insertEvent(client, {
     tenantId: ctx.tenantId,
     actionId,
     eventKindName: 'invoice.sent',
     primaryEntityId: invoiceId,
-    secondaryEntityIds: clientEntityId ? [clientEntityId] : [],
+    secondaryEntityIds: [...(clientEntityId ? [clientEntityId] : []), ...matterIds],
     sourceType: 'human',
     sourceRef: ctx.actorId,
     data: {
@@ -626,4 +655,78 @@ registerActionHandler('invoice.send', async (ctx, client, payload, actionId) => 
   })
 
   return { sent: true, delivered, to: (p.to ?? '').trim() || null, invoiceNumber: number }
+})
+
+interface PayInvoicePayload {
+  invoice_entity_id: string
+  // 'manual' (attorney recorded a payment) or a processor name (a webhook will
+  // call this same action later); defaults to 'manual'.
+  method?: string | null
+  amount?: string | null // decimal string; defaults to the invoice total
+  currency?: string | null
+  reference?: string | null // check #, processor charge id, etc.
+  paid_date?: string | null // YYYY-MM-DD; defaults to today
+  note?: string | null
+}
+
+// Record a payment against an issued/sent invoice (invoice.paid event +
+// invoice_status='paid') through the core. ONE action records payment whatever
+// the source: the v1 caller is a manual "Mark paid", a payment processor webhook
+// will call the SAME action later with method/reference set. Recording is
+// reversible_with_state_decay (no un-pay handler in v1).
+registerActionHandler('invoice.pay', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as PayInvoicePayload
+  const invoiceId = (p.invoice_entity_id ?? '').trim()
+  if (!invoiceId) throw new Error('invoice_entity_id is required.')
+
+  const get = (kind: string) =>
+    getLatestAttributeValue<string>(client, ctx.tenantId, invoiceId, kind)
+  const number = await get('invoice_number')
+  const status = await get('invoice_status')
+  const clientEntityId = await get('invoice_client_id')
+  const total = await get('invoice_total')
+  const currency = await get('invoice_currency')
+  if (!number || !status) throw new Error('Invoice not found.')
+  if (status === 'paid') throw new Error(`Invoice ${number} is already marked paid.`)
+  if (status !== 'issued' && status !== 'sent') {
+    throw new Error(
+      `Invoice ${number} is ${status}; only an issued or sent invoice can be marked paid.`,
+    )
+  }
+
+  const matterIds = await loadInvoiceMatterIds(client, ctx.tenantId, invoiceId)
+  const method = (p.method ?? '').trim() || 'manual'
+  const amount = (p.amount ?? '').trim() || total || null
+  const paidDate = (p.paid_date ?? '').trim() || new Date().toISOString().slice(0, 10)
+
+  await insertEvent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    eventKindName: 'invoice.paid',
+    primaryEntityId: invoiceId,
+    // Client + every matter the invoice touches, so each matter's timeline sees
+    // "Invoice Paid" natively.
+    secondaryEntityIds: [...(clientEntityId ? [clientEntityId] : []), ...matterIds],
+    sourceType: 'human',
+    sourceRef: ctx.actorId,
+    data: {
+      method,
+      amount,
+      currency: (p.currency ?? '').trim() || currency || 'USD',
+      reference: (p.reference ?? '').trim() || null,
+      paid_date: paidDate,
+      note: (p.note ?? '').trim() || null,
+    },
+  })
+
+  await setAttr(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    entityId: invoiceId,
+    kind: 'invoice_status',
+    value: 'paid',
+  })
+
+  return { paid: true, invoiceNumber: number, status: 'paid', method, amount, paidDate }
 })

@@ -2,6 +2,7 @@ import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   issueInvoice,
   sendInvoice,
+  payInvoice,
   listUnbilled,
   listInvoices,
   listMatterInvoiced,
@@ -24,6 +25,8 @@ import {
   type IssuedInvoice,
   type SendInvoiceInput,
   type SentInvoice,
+  type PayInvoiceInput,
+  type PaidInvoice,
   type UnbilledClient,
   type InvoiceSummary,
   type InvoiceDetail,
@@ -151,6 +154,31 @@ registerTool({
   },
   handler: async (ctx: ActionContext, input) => await sendInvoice(ctx, input),
 } satisfies Tool<SendInvoiceInput, SentInvoice>)
+
+registerTool({
+  name: 'legal.invoice.pay',
+  description:
+    'Record a payment against an issued or sent invoice: marks it paid (invoice_status=paid) and emits invoice.paid through the core. v1 is a manual mark-paid; a payment processor can call this same path later. Errors clearly if the invoice is not issued/sent or is already paid.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      invoiceEntityId: { type: 'string' },
+      method: {
+        type: 'string',
+        description:
+          "Payment method, e.g. 'manual', 'check', 'transfer', or a processor name. Defaults to 'manual'.",
+      },
+      amount: { type: 'string', description: 'Decimal string; defaults to the invoice total.' },
+      reference: { type: 'string', description: 'Check number, processor charge id, etc.' },
+      paidDate: { type: 'string', description: 'YYYY-MM-DD; defaults to today.' },
+      note: { type: 'string' },
+    },
+    required: ['invoiceEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await payInvoice(ctx, input),
+} satisfies Tool<PayInvoiceInput, PaidInvoice>)
 
 // ── Flat fees (Phase 2) ───────────────────────────────────────────────────────
 // Document fees accrue automatically on document approval and service fees on
