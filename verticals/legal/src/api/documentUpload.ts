@@ -14,6 +14,11 @@ export interface RecordUploadInput {
   sizeBytes: number
   sha256Hex: string
   documentKind?: string
+  // 'uploaded' = the firm uploaded it (default); 'client_uploaded' = a portal client
+  // uploaded it (provenance is recorded as the client_contact, not the firm actor).
+  documentSource?: 'uploaded' | 'client_uploaded'
+  // Required when documentSource = 'client_uploaded' (ADR 0035 provenance).
+  clientContactId?: string | null
 }
 
 export async function recordUploadedDocument(
@@ -31,6 +36,8 @@ export async function recordUploadedDocument(
       size_bytes: input.sizeBytes,
       sha256_hex: input.sha256Hex,
       document_kind: input.documentKind,
+      document_source: input.documentSource ?? 'uploaded',
+      client_contact_id: input.clientContactId ?? null,
     },
   })
   const eff = res.effects[0] as { documentEntityId: string; documentVersionId: string }

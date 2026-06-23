@@ -43,6 +43,8 @@ export interface ClientInvoiceSummary {
   dueDate: string | null
 }
 export interface ClientInvoiceDetail extends ClientInvoiceSummary {
+  /** The client's own name (the "Bill to" on their invoice). */
+  clientName: string
   lines: ClientInvoiceLine[]
 }
 
@@ -117,9 +119,14 @@ export async function getClientInvoiceByNumber(
   const matterIds = await resolveClientMatterIds(ctx.tenantId, clientContactId)
   if (matterIds.length === 0) return null
   return withActionContext(ctx, async (client) => {
-    const head = await client.query<InvoiceHeadRow>(
+    const head = await client.query<InvoiceHeadRow & { client_name: string | null }>(
       `${ATTRS_CTE}
-       SELECT ${HEAD_COLUMNS}
+       SELECT ${HEAD_COLUMNS},
+         (SELECT (SELECT value #>> '{}' FROM attrs WHERE entity_id = r.target_entity_id AND kind_name = 'client_name')
+            FROM relationship r
+            JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+            WHERE r.tenant_id = $1 AND r.source_entity_id = e.id AND rkd.kind_name = 'invoice_of'
+              AND (r.valid_to IS NULL OR r.valid_to > now()) LIMIT 1) AS client_name
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1 AND ekd.kind_name = 'invoice' AND e.status = 'active'
@@ -150,6 +157,7 @@ export async function getClientInvoiceByNumber(
 
     return {
       ...toSummary(h),
+      clientName: h.client_name ?? '',
       lines: linesRes.rows.map((r) => ({
         description: r.description ?? '',
         amount: r.amount ?? '0.00',

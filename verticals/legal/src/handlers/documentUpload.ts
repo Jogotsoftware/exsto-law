@@ -28,6 +28,10 @@ interface DocumentUploadPayload {
   // sha256 of the file BYTES, hex.
   sha256_hex: string
   document_kind?: string
+  // 'uploaded' (firm) | 'client_uploaded' (portal client). Drives provenance.
+  document_source?: string
+  // The uploading client_contact, when document_source = 'client_uploaded'.
+  client_contact_id?: string | null
 }
 
 registerActionHandler('document.upload', async (ctx, client, payload, actionId) => {
@@ -36,6 +40,15 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
   if (!p.object_key) throw new Error('object_key is required')
   const filename = (p.original_filename ?? '').trim() || 'document'
   const documentKind = (p.document_kind ?? '').trim() || 'uploaded'
+
+  // Provenance (ADR 0035): a client upload is attributed to the client_contact, not
+  // the firm actor, so history honestly shows the client provided the file. The firm
+  // upload keeps the actor as source_ref. The action's actor is the system actor
+  // either way (the portal route runs as the public-intake actor).
+  const isClientUpload = p.document_source === 'client_uploaded' && !!p.client_contact_id
+  const docSource = isClientUpload ? 'client_uploaded' : 'uploaded'
+  const provenanceRef = isClientUpload ? `client_contact:${p.client_contact_id}` : ctx.actorId
+  const uploadedBy = isClientUpload ? { uploaded_by_client_contact_id: p.client_contact_id } : {}
 
   // content_blob.body = the storage object key (a pointer); the hash + size
   // describe the real file bytes, passed explicitly.
@@ -57,8 +70,10 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
   const docEntityId = await insertEntity(client, ctx.tenantId, actionId, entityKindId, filename, {
     document_kind: documentKind,
     document_class: 'uploaded',
+    document_source: docSource,
     original_filename: filename,
     content_type: p.content_type,
+    ...uploadedBy,
   })
 
   const sourceAttrId = await lookupKindId(
@@ -72,10 +87,10 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
     actionId,
     entityId: docEntityId,
     attributeKindId: sourceAttrId,
-    value: 'uploaded',
+    value: docSource,
     confidence: 1.0,
     sourceType: 'human',
-    sourceRef: ctx.actorId,
+    sourceRef: provenanceRef,
   })
 
   const versionId = await insertDocumentVersion(client, {
@@ -87,13 +102,14 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
     status: 'approved',
     reasoningTraceId: null,
     metadata: {
-      document_source: 'uploaded',
+      document_source: docSource,
       storage_bucket: 'matter-documents',
       object_key: p.object_key,
       content_type: p.content_type,
       size_bytes: p.size_bytes,
       original_filename: filename,
       document_kind: documentKind,
+      ...uploadedBy,
     },
   })
 
@@ -109,7 +125,7 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
     sourceEntityId: docEntityId,
     targetEntityId: p.matter_entity_id,
     relationshipKindId: documentOfId,
-    properties: { document_kind: documentKind, document_source: 'uploaded' },
+    properties: { document_kind: documentKind, document_source: docSource },
   })
 
   await insertEvent(client, {
@@ -125,9 +141,11 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
       size_bytes: p.size_bytes,
       original_filename: filename,
       document_kind: documentKind,
+      document_source: docSource,
+      ...uploadedBy,
     },
     sourceType: 'human',
-    sourceRef: ctx.actorId,
+    sourceRef: provenanceRef,
   })
 
   return { documentEntityId: docEntityId, documentVersionId: versionId, objectKey: p.object_key }

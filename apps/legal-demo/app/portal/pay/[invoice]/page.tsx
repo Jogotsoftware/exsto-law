@@ -35,13 +35,57 @@ function money(amount: string, currency: string): string {
   }
 }
 
+interface InvoicePdf {
+  filename: string
+  contentType: string
+  base64: string
+}
+
+// base64 → a Blob object URL the browser can view/download (no server round-trip
+// for the bytes beyond the one MCP call). Caller must URL.revokeObjectURL it.
+function base64ToBlobUrl(base64: string, contentType: string): string {
+  const bin = atob(base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return URL.createObjectURL(new Blob([bytes], { type: contentType }))
+}
+
 export default function InvoicePayPage({ params }: { params: Promise<{ invoice: string }> }) {
   const { invoice } = use(params)
   const invoiceNumber = decodeURIComponent(invoice)
   const [data, setData] = useState<ClientInvoiceDetail | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [pdf, setPdf] = useState<{ url: string; filename: string } | null>(null)
+  const [pdfBusy, setPdfBusy] = useState(false)
   const provider = useMemo(() => getPaymentProvider(), [])
+
+  // Revoke the blob URL when it changes or the page unmounts (no leaked object URLs).
+  useEffect(() => {
+    return () => {
+      if (pdf?.url) URL.revokeObjectURL(pdf.url)
+    }
+  }, [pdf])
+
+  async function viewPdf() {
+    if (pdfBusy) return
+    setPdfBusy(true)
+    try {
+      const r = await callClientPortalMcp<{ pdf: InvoicePdf | null }>({
+        toolName: 'legal.client.invoice_pdf',
+        input: { invoiceNumber },
+      })
+      if (r.pdf) {
+        setPdf({ url: base64ToBlobUrl(r.pdf.base64, r.pdf.contentType), filename: r.pdf.filename })
+      }
+    } catch (e) {
+      if (!(e instanceof PortalSessionExpiredError)) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    } finally {
+      setPdfBusy(false)
+    }
+  }
 
   useEffect(() => {
     callClientPortalMcp<{ invoice: ClientInvoiceDetail | null }>({
@@ -118,7 +162,38 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                   ))}
                 </ul>
               )}
+
+              <div style={{ display: 'flex', gap: '0.6rem', marginTop: 'var(--space-3)' }}>
+                {!pdf ? (
+                  <button
+                    type="button"
+                    className="pdash-btn pdash-btn-sm"
+                    disabled={pdfBusy}
+                    onClick={viewPdf}
+                  >
+                    {pdfBusy ? 'Preparing PDF…' : 'View / download PDF'}
+                  </button>
+                ) : (
+                  <a className="pdash-btn pdash-btn-sm" href={pdf.url} download={pdf.filename}>
+                    Download PDF
+                  </a>
+                )}
+              </div>
             </div>
+
+            {pdf && (
+              <iframe
+                title="Invoice PDF"
+                src={pdf.url}
+                style={{
+                  width: '100%',
+                  height: '70vh',
+                  marginTop: 'var(--space-3)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-md, 10px)',
+                }}
+              />
+            )}
 
             {data.status === 'paid' ? (
               <p className="text-muted" style={{ marginTop: 'var(--space-4)' }}>
