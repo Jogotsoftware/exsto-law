@@ -42,10 +42,15 @@ export async function parseUploadedDocument(file: File): Promise<string> {
   let text: string
   try {
     if (name.endsWith('.pdf') || type === 'application/pdf') {
-      const { PDFParse } = await import('pdf-parse')
-      const parser = new PDFParse({ data: new Uint8Array(buffer) })
-      const result = await parser.getText()
-      text = result.text ?? ''
+      // unpdf bundles a serverless-safe pdfjs build that extracts text WITHOUT the
+      // DOM globals (DOMMatrix, etc.) the stock pdfjs reaches for — those don't
+      // exist in a Node/Netlify function, so a content-rich PDF otherwise fails with
+      // "DOMMatrix is not defined". (Plain text PDFs happened to skip that path,
+      // which is why it looked fine in dev.)
+      const { extractText, getDocumentProxy } = await import('unpdf')
+      const pdf = await getDocumentProxy(new Uint8Array(buffer))
+      const { text: pdfText } = await extractText(pdf, { mergePages: true })
+      text = Array.isArray(pdfText) ? pdfText.join('\n\n') : (pdfText ?? '')
     } else if (
       name.endsWith('.docx') ||
       type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
