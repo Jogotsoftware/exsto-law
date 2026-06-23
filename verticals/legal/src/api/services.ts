@@ -16,7 +16,11 @@ import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
 import { signBookingManageToken } from './bookingManageToken.js'
 import type { GenerationMode } from './generateDraft.js'
-import { deriveLifecycleFromService, validateLifecycle, type Lifecycle } from '../lifecycle/index.js'
+import {
+  deriveLifecycleFromService,
+  validateLifecycle,
+  type Lifecycle,
+} from '../lifecycle/index.js'
 
 export interface ServiceField {
   id: string
@@ -315,12 +319,15 @@ export async function getService(
   })
 }
 
-// The service's matter lifecycle as data (ADR 0045). Reads workflow_definition.states
-// for the active version — so an attorney's edits (PR4) take effect immediately — and
-// falls back to deriving it from the service's route/booking when states is empty or
-// invalid. The fallback makes the engine robust whether or not the one-time backfill
-// has run, and equals the backfilled data by construction (the equality invariant).
-export async function getServiceLifecycle(
+// The service's EFFECTIVE matter lifecycle as data (ADR 0045). Reads
+// workflow_definition.states for the active version — so an attorney's edits take
+// effect immediately — and falls back to DERIVING it from the service's route/booking
+// when states is empty or invalid. The fallback makes the engine robust whether or
+// not a service has been authored yet, and equals the backfilled data by construction
+// (the equality invariant). Distinct from serviceLifecycle.getServiceLifecycle, which
+// is the read-only authored-graph accessor ({graph,version}|null, no derive fallback)
+// the builder/AI authoring path uses; this resolver is what the worker/engine read.
+export async function resolveServiceLifecycle(
   ctx: ActionContext,
   serviceKey: string,
 ): Promise<Lifecycle | null> {

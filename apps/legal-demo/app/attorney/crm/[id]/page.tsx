@@ -8,7 +8,7 @@
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { ChevronLeftIcon } from '@/components/icons'
+import { BackButton } from '@/components/BackButton'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
 
 type BillingType = '' | 'hourly' | 'fixed'
@@ -118,9 +118,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   return (
     <>
-      <Link href="/attorney/crm" className="back-link">
-        <ChevronLeftIcon size={14} /> Clients
-      </Link>
+      <BackButton fallback="/attorney/crm" />
 
       {error && <div className="alert alert-error">{error}</div>}
       {notFound ? (

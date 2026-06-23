@@ -7,6 +7,9 @@ import './handlers/index.js'
 export * from './api/index.js'
 export * from './queries/index.js'
 export * from './templates/loader.js'
+// Platform control plane (ADR 0046) — cross-tenant operations behind guarded
+// private.cp_* functions; the admin console's operation core.
+export * from './controlPlane/index.js'
 // Matter lifecycle engine (ADR 0045) — read-only resolver + derivation. Shadow in
 // PR2 (nothing reads workflow_definition.states yet).
 export * from './lifecycle/index.js'

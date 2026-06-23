@@ -65,8 +65,11 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
   })
 }
 
-// The latest draft version per draft document of a matter — for the mail-attachment
-// picker (any status; one row per draft document). Scoped to the matter via draft_of.
+// The latest draft version per draft document of a matter (one row per draft
+// document, any status — the caller decides what to do with rejected /
+// revision_requested versions). Used by the mail-attachment picker and by the
+// assistant's matter context (which surfaces the status to the attorney).
+// Scoped to the matter via draft_of.
 export async function listMatterDraftVersions(
   ctx: ActionContext,
   matterEntityId: string,

@@ -55,6 +55,8 @@ turndown.keep((node) => {
   if (el.nodeName === 'U') return true
   // The signature-line block.
   if (el.nodeName === 'DIV' && el.classList?.contains('sig-line')) return true
+  // The page-break block.
+  if (el.nodeName === 'DIV' && el.classList?.contains('page-break')) return true
   return false
 })
 

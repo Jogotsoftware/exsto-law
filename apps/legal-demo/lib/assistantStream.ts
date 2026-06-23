@@ -39,12 +39,25 @@ export interface StreamDone {
   model: string
 }
 
+// A workflow lifecycle the assistant proposed this turn (PR5) — surfaced as an
+// inline approval card; the live write happens only on attorney approve.
+export interface WorkflowProposalEvent {
+  serviceKey: string
+  graph: unknown[]
+  summary: string
+  confidence: number
+}
+
 export interface AssistantStreamHandlers {
   onMeta?: (meta: StreamMeta) => void
   onThinking?: (text: string) => void
   onText?: (text: string) => void
   // The assistant loaded a specialized skill (playbook) for this turn.
   onSkill?: (skill: { slug: string; name: string }) => void
+  // The assistant produced a downloadable document (a deliverable, not the prose).
+  onDocument?: (doc: { title: string; markdown: string }) => void
+  // The assistant proposed a service workflow (PR5) — render an approval card.
+  onWorkflowProposal?: (proposal: WorkflowProposalEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -118,6 +131,20 @@ export async function streamAssistant(
         break
       case 'skill':
         handlers.onSkill?.({ slug: String(evt.slug ?? ''), name: String(evt.name ?? '') })
+        break
+      case 'document':
+        handlers.onDocument?.({
+          title: String(evt.title ?? 'Document'),
+          markdown: String(evt.markdown ?? ''),
+        })
+        break
+      case 'workflow_proposal':
+        handlers.onWorkflowProposal?.({
+          serviceKey: String(evt.serviceKey ?? ''),
+          graph: Array.isArray(evt.graph) ? (evt.graph as unknown[]) : [],
+          summary: String(evt.summary ?? ''),
+          confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
+        })
         break
       case 'done':
         handlers.onDone?.(evt as unknown as StreamDone)

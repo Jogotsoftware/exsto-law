@@ -159,10 +159,10 @@ export async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: stri
   // is `automatic` exactly for auto-route services — so this is the data-defined
   // equivalent of the old `route === 'auto'` check, with NO behavior change, and it
   // honors an attorney's edited lifecycle (PR4) once states is populated.
-  const { getService, getServiceLifecycle } = await import('./services.js')
+  const { getService, resolveServiceLifecycle } = await import('./services.js')
   const { hasAutomaticTransition } = await import('../lifecycle/index.js')
   const lifecycle = matterRoute?.service_key
-    ? await getServiceLifecycle(ctx, matterRoute.service_key)
+    ? await resolveServiceLifecycle(ctx, matterRoute.service_key)
     : null
   if (!lifecycle || !hasAutomaticTransition(lifecycle, 'consulted')) return
 

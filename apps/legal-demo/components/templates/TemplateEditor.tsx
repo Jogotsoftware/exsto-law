@@ -8,6 +8,8 @@ import TextAlign from '@tiptap/extension-text-align'
 import { useEffect, useRef, type MutableRefObject, type ReactNode } from 'react'
 import { TemplateVariable, type VariableStatus } from './TemplateVariableNode'
 import { SignatureLine } from './SignatureLineNode'
+import { PageBreak } from './PageBreakNode'
+import { VariableSuggestion } from './VariableSuggestion'
 import { useFitToWidth } from '@/lib/useFitToWidth'
 import {
   BoldIcon,
@@ -21,6 +23,7 @@ import {
   AlignRightIcon,
   AlignJustifyIcon,
   SignatureIcon,
+  PageBreakIcon,
   RedoIcon,
   UndoIcon,
 } from '@/components/icons'
@@ -42,6 +45,9 @@ interface Props {
   // Classify a {{variable}} for coloring (matched/orphaned/unknown). Read live
   // through a ref, so updating the reference sets just recolors (no remount).
   validateVariable?: (name: string) => VariableStatus
+  // Known variable names offered by the `{{` autocomplete. Read live (the
+  // reference sets load asynchronously) so updates need no remount.
+  variableNames?: string[]
 }
 
 // Word-style font choices. Values are full CSS stacks (so the document renders
@@ -65,12 +71,18 @@ export function TemplateEditor({
   onChange,
   editorRef,
   validateVariable,
+  variableNames,
 }: Props) {
   // The variable classifier read live by the node's coloring plugin. Configured
   // once (below) as a stable closure over this ref; updating the ref + nudging
   // the editor recolors without recreating it.
   const resolveRef = useRef(validateVariable)
   resolveRef.current = validateVariable
+
+  // The autocomplete's candidate list, read live by the suggestion plugin (same
+  // stable-closure-over-a-ref trick, so the list can load in without a remount).
+  const namesRef = useRef(variableNames ?? [])
+  namesRef.current = variableNames ?? []
 
   const editor = useEditor({
     extensions: [
@@ -90,7 +102,11 @@ export function TemplateEditor({
       TemplateVariable.configure({
         resolve: (name: string) => resolveRef.current?.(name) ?? 'matched',
       }),
+      VariableSuggestion.configure({
+        items: () => namesRef.current,
+      }),
       SignatureLine,
+      PageBreak,
     ],
     content: initialHtml || '<p></p>',
     immediatelyRender: false,
@@ -309,6 +325,13 @@ function Toolbar({ editor }: { editor: Editor }) {
         'Insert signature line',
         () => editor.chain().focus().insertSignatureLine('Signature').run(),
         { toggle: false, title: 'Insert signature line' },
+      )}
+      {btn(
+        false,
+        <PageBreakIcon size={15} />,
+        'Insert page break',
+        () => editor.chain().focus().insertPageBreak().run(),
+        { toggle: false, title: 'Insert page break' },
       )}
 
       <div className="tpl-tb-sep" aria-hidden="true" />

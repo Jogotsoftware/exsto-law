@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
+import { WorkflowProposalCard, type WorkflowProposal } from '@/components/WorkflowProposalCard'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import {
@@ -18,7 +19,8 @@ import {
   XIcon,
   CopyIcon,
   CheckIcon,
-  LockIcon,
+  LayersIcon,
+  ShieldCheckIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -48,6 +50,13 @@ interface AssistantModel {
   webSearchInherent: boolean
 }
 
+// A finished document the assistant produced (a deliverable to download/save),
+// distinct from the prose reply.
+interface ProducedDoc {
+  title: string
+  markdown: string
+}
+
 interface DisplayTurn {
   role: 'user' | 'assistant'
   content: string
@@ -55,6 +64,11 @@ interface DisplayTurn {
   model?: string
   // Names of documents attached to a user turn (shown as chips on the bubble).
   attachments?: string[]
+  // Documents the assistant produced on an assistant turn — shown as download cards.
+  documents?: ProducedDoc[]
+  // Workflow proposals the assistant captured on an assistant turn — shown as inline
+  // approval cards (PR5). The live write happens only when the attorney approves.
+  workflowProposals?: WorkflowProposal[]
 }
 
 // One legal skill (playbook) the attorney can pick from the /skills menu.
@@ -73,6 +87,8 @@ interface ThreadTurn {
   model: string
   citations: string[]
   attachmentNames?: string[]
+  documents?: ProducedDoc[]
+  workflowProposals?: WorkflowProposal[]
 }
 
 // A document attached to the next message: an uploaded file (parsed to text) or a
@@ -112,13 +128,34 @@ const WORK_RATES: Array<{ value: WorkRate; label: string; hint: string }> = [
   { value: 'thorough', label: 'Thorough', hint: 'Deeper thinking, slower' },
 ]
 
-// How much matter/client history the assistant reads each turn. More = better
-// grounded answers, but a larger, slower, pricier prompt.
-const CONTEXT_DEPTHS: Array<{ value: ContextDepth; label: string; hint: string }> = [
+// The single "context" control in the chat toolbar. Three are depth levels (how
+// much of the matter/client the assistant reads each turn) and Secure is a mode —
+// full context to the firm's own model, but never used for web search or any
+// external call. Maps onto the existing depth ('lean'|'balanced'|'generous') +
+// secureMode pair: Full ⇒ generous, Secure ⇒ generous + locked.
+type ContextLevel = 'lean' | 'balanced' | 'full' | 'secure'
+const CONTEXT_LEVELS: Array<{ value: ContextLevel; label: string; hint: string }> = [
   { value: 'lean', label: 'Lean', hint: 'Less history — fastest, cheapest' },
-  { value: 'balanced', label: 'Balanced', hint: 'Default — recent emails, transcript, intake' },
-  { value: 'generous', label: 'Generous', hint: 'Most history + draft — slower, pricier' },
+  {
+    value: 'balanced',
+    label: 'Balanced',
+    hint: 'Default — recent emails, transcript, intake, tasks',
+  },
+  {
+    value: 'full',
+    label: 'Full',
+    hint: 'Everything on the matter — emails, transcript, intake, documents, tasks, meetings, billing',
+  },
+  {
+    value: 'secure',
+    label: 'Secure',
+    hint: 'Full context, but never used for web search or any external call',
+  },
 ]
+function depthToLevel(depth: ContextDepth, secure: boolean): ContextLevel {
+  if (secure) return 'secure'
+  return depth === 'generous' ? 'full' : depth
+}
 
 const FEEDBACK_CATEGORIES: Array<{ value: FeedbackCategory; label: string }> = [
   { value: 'ui', label: 'UI / design' },
@@ -152,21 +189,38 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-// Whether a reply is an actual DOCUMENT worth downloading (a draft/letter/memo),
-// vs. a quick conversational answer. Gates the PDF/Word buttons so they don't show
-// on every chat — only when the assistant produced something document-shaped:
-// substantial length AND some structure (a heading, several paragraphs, or
-// letter/agreement phrasing).
-function looksLikeDocument(md: string): boolean {
-  const t = md.trim()
-  if (t.length < 500) return false
-  const paragraphs = t.split(/\n\s*\n/).filter((p) => p.trim()).length
-  const hasHeading = /^#{1,6}\s/m.test(t)
-  const letterish =
-    /\b(Dear\b|Sincerely|Regards,|Re:|RE:|WHEREAS|AGREEMENT|This .{0,40}Agreement|MEMORANDUM)\b/.test(
-      t,
-    )
-  return hasHeading || paragraphs >= 3 || letterish
+function slugifyTitle(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'document'
+  )
+}
+
+// Snapshot the VISIBLE content of the current page so the assistant can answer
+// about "what's on this page / this matter screen / this invoice / these entries".
+// It reads the #main region — the chat panel is a sibling of #main in the layout,
+// so the conversation itself is never fed back in. Whitespace is collapsed and the
+// text is bounded (the server bounds it again). Claude-only; the caller skips this
+// for the external research model so page content never leaves the firm.
+const MAX_PAGE_CONTENT_CHARS = 14000
+function capturePageContent(): string | undefined {
+  if (typeof document === 'undefined') return undefined
+  const main = document.getElementById('main')
+  if (!main) return undefined
+  // innerText (not textContent) ≈ what's actually visible: it respects hidden
+  // elements and line breaks, so the model sees the page roughly as the attorney does.
+  const text = (main.innerText ?? '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  if (!text) return undefined
+  return text.length > MAX_PAGE_CONTENT_CHARS
+    ? `${text.slice(0, MAX_PAGE_CONTENT_CHARS).trimEnd()} …[truncated]`
+    : text
 }
 
 // Pick the first usable (connected + available) model, else the first available.
@@ -236,17 +290,13 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-// Save an assistant reply onto the current matter as a document draft (pending
-// review). Transient saving/saved/failed states; only rendered for matter-scoped,
-// document-like replies.
-function SaveToMatterButton({
-  matterEntityId,
-  markdown,
-}: {
-  matterEntityId: string
-  markdown: string
-}) {
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+// A document the assistant produced this turn — rendered as a distinct card (so
+// it reads as a deliverable, not a chat bubble) with the document preview and the
+// download/save actions. This is where downloads live now: on a real produced
+// document, never on every reply.
+function DocumentCard({ doc, matterEntityId }: { doc: ProducedDoc; matterEntityId?: string }) {
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [expanded, setExpanded] = useState(true)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
     () => () => {
@@ -254,37 +304,85 @@ function SaveToMatterButton({
     },
     [],
   )
+  const filename = slugifyTitle(doc.title)
   async function save() {
-    setState('saving')
+    if (!matterEntityId) return
+    setSaveState('saving')
     try {
       await callAttorneyMcp({
         toolName: 'legal.assistant.save_reply',
-        input: { matterEntityId, markdown },
+        input: {
+          matterEntityId,
+          markdown: doc.markdown,
+          documentKind: filename.replace(/-/g, '_'),
+        },
       })
-      setState('saved')
+      setSaveState('saved')
     } catch {
-      setState('error')
+      setSaveState('error')
     }
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setState('idle'), 2200)
+    timer.current = setTimeout(() => setSaveState('idle'), 2200)
   }
   return (
-    <button
-      type="button"
-      className={`uac-reply-btn${state === 'saved' ? ' copied' : ''}`}
-      onClick={save}
-      disabled={state === 'saving'}
-      title="Save this reply to the matter's drafts (for review)"
-    >
-      {state === 'saved' ? <CheckIcon size={12} /> : <FileTextIcon size={12} />}{' '}
-      {state === 'saving'
-        ? 'Saving…'
-        : state === 'saved'
-          ? 'Saved'
-          : state === 'error'
-            ? 'Failed'
-            : 'Save to matter'}
-    </button>
+    <div className="uac-doc-card">
+      <div className="uac-doc-head">
+        <span className="uac-doc-title">
+          <FileTextIcon size={14} /> {doc.title}
+        </span>
+        <button
+          type="button"
+          className="uac-doc-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? 'Collapse the document' : 'Show the document'}
+        >
+          {expanded ? 'Hide' : 'Show'}
+        </button>
+      </div>
+      {expanded && (
+        <div
+          className="uac-doc-body assistant-md"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(doc.markdown) }}
+        />
+      )}
+      <div className="uac-doc-actions">
+        <button
+          type="button"
+          className="uac-reply-btn"
+          onClick={() => downloadAsPdf(doc.markdown, doc.title)}
+          title="Download as PDF"
+        >
+          <FileTextIcon size={12} /> PDF
+        </button>
+        <button
+          type="button"
+          className="uac-reply-btn"
+          onClick={() => downloadAsWord(doc.markdown, filename)}
+          title="Download as Word"
+        >
+          <FileTextIcon size={12} /> Word
+        </button>
+        <CopyButton text={doc.markdown} />
+        {matterEntityId && (
+          <button
+            type="button"
+            className={`uac-reply-btn${saveState === 'saved' ? ' copied' : ''}`}
+            onClick={save}
+            disabled={saveState === 'saving'}
+            title="Save this document to the matter's drafts (for review)"
+          >
+            {saveState === 'saved' ? <CheckIcon size={12} /> : <FileTextIcon size={12} />}{' '}
+            {saveState === 'saving'
+              ? 'Saving…'
+              : saveState === 'saved'
+                ? 'Saved'
+                : saveState === 'error'
+                  ? 'Failed'
+                  : 'Save to matter'}
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -307,6 +405,8 @@ export function UnifiedAssistantChat({
     thinking: string
     text: string
     skills: { slug: string; name: string }[]
+    documents: ProducedDoc[]
+    workflowProposals: WorkflowProposal[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -334,6 +434,20 @@ export function UnifiedAssistantChat({
   const [secureMode, setSecureMode] = useState(false)
   const [useContext, setUseContext] = useState(true)
   const [contextDepth, setContextDepth] = useState<ContextDepth>('balanced')
+  // The unified context control (toolbar). Derives from depth + secureMode; setting
+  // a level updates both. Full ⇒ generous depth; Secure ⇒ generous depth + locked.
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  const contextLevel = depthToLevel(contextDepth, secureMode)
+  const setContextLevel = useCallback((level: ContextLevel) => {
+    if (level === 'secure') {
+      setSecureMode(true)
+      setContextDepth('generous')
+    } else {
+      setSecureMode(false)
+      setContextDepth(level === 'full' ? 'generous' : level)
+    }
+    setContextMenuOpen(false)
+  }, [])
 
   // Beta-feedback form.
   const [fbCategory, setFbCategory] = useState<FeedbackCategory>('other')
@@ -455,7 +569,14 @@ export function UnifiedAssistantChat({
         const display: DisplayTurn[] = r.turns.map((t) =>
           t.role === 'user'
             ? { role: 'user', content: t.message, attachments: t.attachmentNames }
-            : { role: 'assistant', content: t.reply, citations: t.citations, model: t.model },
+            : {
+                role: 'assistant',
+                content: t.reply,
+                citations: t.citations,
+                model: t.model,
+                documents: t.documents,
+                workflowProposals: t.workflowProposals,
+              },
         )
         setTurns(display)
       } catch (e) {
@@ -676,7 +797,13 @@ export function UnifiedAssistantChat({
     setAttachMenuOpen(false)
 
     // Accumulate deltas locally; each handler hands React a fresh object.
-    const partial = { thinking: '', text: '', skills: [] as { slug: string; name: string }[] }
+    const partial = {
+      thinking: '',
+      text: '',
+      skills: [] as { slug: string; name: string }[],
+      documents: [] as ProducedDoc[],
+      workflowProposals: [] as WorkflowProposal[],
+    }
     setStreaming({ ...partial })
     let finished = false
 
@@ -701,8 +828,17 @@ export function UnifiedAssistantChat({
           attachments: sentAttachments.length
             ? sentAttachments.map((a) => ({ name: a.name, text: a.text }))
             : undefined,
+          // Path + a live snapshot of what's on screen, so the assistant can
+          // answer about the page/matter the attorney is looking at — not just know
+          // its route. Page content is Claude-only (the firm's own model); never
+          // captured for the external research model.
           pageContext:
-            typeof window !== 'undefined' ? { path: window.location.pathname } : undefined,
+            typeof window !== 'undefined'
+              ? {
+                  path: window.location.pathname,
+                  content: isClaude ? capturePageContent() : undefined,
+                }
+              : undefined,
         },
         {
           onThinking: (t) => {
@@ -720,12 +856,33 @@ export function UnifiedAssistantChat({
             if (s.slug && !partial.skills.some((x) => x.slug === s.slug)) partial.skills.push(s)
             setStreaming({ ...partial, skills: [...partial.skills] })
           },
+          onDocument: (doc) => {
+            if (!live()) return
+            if (doc.markdown.trim()) partial.documents.push(doc)
+            setStreaming({ ...partial, documents: [...partial.documents] })
+          },
+          onWorkflowProposal: (p) => {
+            if (!live()) return
+            if (p.serviceKey && Array.isArray(p.graph) && p.graph.length) {
+              partial.workflowProposals.push(p as unknown as WorkflowProposal)
+            }
+            setStreaming({ ...partial, workflowProposals: [...partial.workflowProposals] })
+          },
           onDone: (d) => {
             if (!live()) return
             finished = true
             setTurns((prev) => [
               ...prev,
-              { role: 'assistant', content: d.reply, citations: d.citations, model: d.model },
+              {
+                role: 'assistant',
+                content: d.reply,
+                citations: d.citations,
+                model: d.model,
+                documents: partial.documents.length ? partial.documents : undefined,
+                workflowProposals: partial.workflowProposals.length
+                  ? partial.workflowProposals
+                  : undefined,
+              },
             ])
             setStreaming(null)
           },
@@ -750,10 +907,26 @@ export function UnifiedAssistantChat({
 
     // Reconcile a stream that ended without a terminal event (e.g. a drop):
     // keep whatever streamed rather than losing it.
-    if (!finished && (partial.text || partial.thinking)) {
+    if (
+      !finished &&
+      (partial.text ||
+        partial.thinking ||
+        partial.documents.length ||
+        partial.workflowProposals.length)
+    ) {
       setTurns((prev) => [
         ...prev,
-        { role: 'assistant', content: partial.text || '(no response)', model: modelId },
+        {
+          role: 'assistant',
+          content:
+            partial.text ||
+            (partial.documents.length || partial.workflowProposals.length ? '' : '(no response)'),
+          model: modelId,
+          documents: partial.documents.length ? partial.documents : undefined,
+          workflowProposals: partial.workflowProposals.length
+            ? partial.workflowProposals
+            : undefined,
+        },
       ])
     }
     setStreaming(null)
@@ -996,30 +1169,8 @@ export function UnifiedAssistantChat({
             )}
           </div>
 
-          {scoped && (
-            <div className="uac-setting">
-              <label className="uac-setting-label">Context depth</label>
-              <div className="uac-segmented" role="group" aria-label="Context depth">
-                {CONTEXT_DEPTHS.map((d) => (
-                  <button
-                    key={d.value}
-                    type="button"
-                    className={`uac-seg${contextDepth === d.value ? ' active' : ''}`}
-                    disabled={!useContext}
-                    title={d.hint}
-                    onClick={() => setContextDepth(d.value)}
-                  >
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-              <p className="uac-hint">
-                {useContext
-                  ? 'How much of the current matter/client the assistant reads each message.'
-                  : 'Turn the context toggle on to ground the assistant in this matter/client.'}
-              </p>
-            </div>
-          )}
+          {/* Context depth lives in the toolbar "Context" control now (lean /
+              balanced / full / secure) — see the layers icon by the composer. */}
 
           <div className="uac-setting uac-setting-row">
             <label className="uac-setting-label">Web search</label>
@@ -1146,40 +1297,26 @@ export function UnifiedAssistantChat({
                 markup. User turns stay verbatim. */}
             {t.role === 'assistant' ? (
               <>
-                <div
-                  className="assistant-md"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
-                />
+                {t.content.trim() && (
+                  <div
+                    className="assistant-md"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
+                  />
+                )}
+                {/* Documents the assistant produced — downloadable deliverables
+                    (PDF/Word + save to matter), not the prose. Downloads attach
+                    here, never to an ordinary reply. */}
+                {t.documents?.map((doc, di) => (
+                  <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
+                ))}
+                {/* Workflow proposals (PR5) — inline approval cards. Approving is the
+                    live write; nothing was saved by the turn that proposed them. */}
+                {t.workflowProposals?.map((p, pi) => (
+                  <WorkflowProposalCard key={pi} proposal={p} />
+                ))}
                 {t.content.trim() && (
                   <div className="uac-reply-actions">
                     <CopyButton text={t.content} />
-                    {/* Downloads only when the reply is an actual document. */}
-                    {looksLikeDocument(t.content) && (
-                      <>
-                        <button
-                          type="button"
-                          className="uac-reply-btn"
-                          onClick={() => downloadAsPdf(t.content, 'Assistant reply')}
-                          title="Download as PDF"
-                        >
-                          <FileTextIcon size={12} /> PDF
-                        </button>
-                        <button
-                          type="button"
-                          className="uac-reply-btn"
-                          onClick={() => downloadAsWord(t.content, 'assistant-reply')}
-                          title="Download as Word"
-                        >
-                          <FileTextIcon size={12} /> Word
-                        </button>
-                        {activeScope.matterEntityId && (
-                          <SaveToMatterButton
-                            matterEntityId={activeScope.matterEntityId}
-                            markdown={t.content}
-                          />
-                        )}
-                      </>
-                    )}
                   </div>
                 )}
               </>
@@ -1234,13 +1371,21 @@ export function UnifiedAssistantChat({
                 <div className="uac-thinking-body">{streaming.thinking}</div>
               </div>
             )}
-            {!streaming.text && !streaming.thinking && (
+            {!streaming.text && !streaming.thinking && streaming.documents.length === 0 && (
               <span className="uac-typing" aria-label="Thinking">
                 <span />
                 <span />
                 <span />
               </span>
             )}
+            {/* A document produced mid-stream appears as a card right away. */}
+            {streaming.documents.map((doc, di) => (
+              <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
+            ))}
+            {/* A workflow proposed mid-stream appears as an approval card right away. */}
+            {streaming.workflowProposals.map((p, pi) => (
+              <WorkflowProposalCard key={pi} proposal={p} />
+            ))}
             {streaming.text && (
               <div
                 className="assistant-md"
@@ -1447,20 +1592,51 @@ export function UnifiedAssistantChat({
                 </button>
               )}
               {isClaude && (
-                <button
-                  type="button"
-                  className={`uac-tool-btn${secureMode ? ' secure-on' : ''}`}
-                  onClick={() => setSecureMode((v) => !v)}
-                  aria-label={secureMode ? 'Secure mode on' : 'Secure mode off'}
-                  aria-pressed={secureMode}
-                  title={
-                    secureMode
-                      ? 'Secure mode ON — this context will not be used for web search'
-                      : 'Secure mode — keep sensitive matter/client context out of web search'
-                  }
-                >
-                  <LockIcon size={16} />
-                </button>
+                <div className="uac-ctxmenu-wrap">
+                  <button
+                    type="button"
+                    className={`uac-tool-btn${contextMenuOpen ? ' active' : ''}${secureMode ? ' secure-on' : ''}`}
+                    onClick={() => setContextMenuOpen((o) => !o)}
+                    aria-haspopup="menu"
+                    aria-expanded={contextMenuOpen}
+                    aria-label={`Context: ${contextLevel}`}
+                    title={`Context: ${
+                      CONTEXT_LEVELS.find((l) => l.value === contextLevel)?.label ?? 'Balanced'
+                    } — how much of the matter the assistant reads (Secure = never used for web search)`}
+                  >
+                    {secureMode ? <ShieldCheckIcon size={16} /> : <LayersIcon size={16} />}
+                  </button>
+                  {contextMenuOpen && (
+                    <div className="uac-ctxmenu" role="menu" aria-label="Context level">
+                      <div className="uac-ctxmenu-head">Context</div>
+                      {CONTEXT_LEVELS.map((l) => (
+                        <button
+                          key={l.value}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={contextLevel === l.value}
+                          className={`uac-ctxmenu-item${contextLevel === l.value ? ' is-on' : ''}`}
+                          onClick={() => setContextLevel(l.value)}
+                        >
+                          <span className="uac-ctxmenu-icon">
+                            {l.value === 'secure' ? (
+                              <ShieldCheckIcon size={14} />
+                            ) : (
+                              <LayersIcon size={14} />
+                            )}
+                          </span>
+                          <span className="uac-ctxmenu-text">
+                            <span className="uac-ctxmenu-name">
+                              {l.label}
+                              {contextLevel === l.value && <CheckIcon size={13} />}
+                            </span>
+                            <span className="uac-ctxmenu-hint">{l.hint}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
             <button

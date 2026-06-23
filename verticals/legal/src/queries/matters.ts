@@ -1,5 +1,7 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
+import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
+import type { Lifecycle } from '../lifecycle/types.js'
 
 // Bitemporal read discipline (exsto-query-substrate): current attribute state =
 // latest valid_from with valid_to open; relationships current via valid_to.
@@ -30,6 +32,18 @@ export interface MatterDetail extends MatterSummary {
   // The client PARENT entity (matter_of, migration 0020), for linking a matter to
   // its client page. Null when the matter isn't grouped under a client yet.
   clientEntityId: string | null
+  // The matter's RUNNING workflow instance + the graph of the version it is bound
+  // to (ADR 0045 PR3). Null when the matter has no instance — the default today
+  // (engine flag off at open, or a service with no authored lifecycle). The read
+  // is additive and best-effort: a workflow read NEVER breaks getMatter (see
+  // loadWorkflow's try/catch), so the no-workflow path is unchanged.
+  workflow: {
+    instanceId: string
+    definitionId: string
+    graph: Lifecycle
+    currentState: string
+    status: string
+  } | null
 }
 
 export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> {
@@ -159,6 +173,8 @@ export async function getMatter(
       [ctx.tenantId, matterEntityId],
     )
 
+    const workflow = await loadWorkflow(client, ctx.tenantId, matterEntityId)
+
     return {
       matterEntityId,
       matterNumber: base.name,
@@ -177,8 +193,42 @@ export async function getMatter(
       latestDraftStatus: latestDraft.rows[0]?.status ?? null,
       clientEmail: clientEmail ?? null,
       clientEntityId: clientParent.rows[0]?.id ?? null,
+      workflow,
     }
   })
+}
+
+// The matter's running workflow instance + the graph of the version it is bound to
+// (invariant 17: re-read THAT version by id, never re-resolve "latest"). A
+// per-instance states_override supersedes the bound version for this matter.
+// Best-effort by contract: any failure returns null so getMatter's existing shape
+// is never broken by the workflow read — the no-workflow path stays exactly as it
+// was before PR3.
+async function loadWorkflow(
+  client: DbClient,
+  tenantId: string,
+  matterEntityId: string,
+): Promise<MatterDetail['workflow']> {
+  try {
+    const instance = await getWorkflowInstanceForMatter(client, tenantId, matterEntityId)
+    if (!instance) return null
+    let graph: Lifecycle
+    if (instance.statesOverride && instance.statesOverride.length > 0) {
+      graph = instance.statesOverride
+    } else {
+      const bound = await resolveBoundWorkflowById(client, tenantId, instance.workflowDefinitionId)
+      graph = bound?.graph ?? []
+    }
+    return {
+      instanceId: instance.id,
+      definitionId: instance.workflowDefinitionId,
+      graph,
+      currentState: instance.currentState,
+      status: instance.status,
+    }
+  } catch {
+    return null
+  }
 }
 
 async function loadCurrentAttributes(

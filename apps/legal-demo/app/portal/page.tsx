@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { ScaleIcon } from '@/components/icons'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 
 interface MeResponse {
@@ -34,6 +35,25 @@ interface ClientDocument {
   documentTitle: string | null
   state: 'awaiting_you' | 'signed' | 'declined' | 'in_progress'
   rawStatus: string
+}
+interface ApprovedDocument {
+  documentVersionId: string
+  documentKind: string
+  matterNumber: string
+  versionNumber: number
+  approvedAt: string
+}
+interface UploadedDocument {
+  documentVersionId: string
+  originalFilename: string
+  contentType: string
+  sizeBytes: number
+  matterNumber: string
+  uploadedAt: string
+}
+
+function humanizeKind(kind: string): string {
+  return kind.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 interface PortalMessage {
   author: 'client' | 'attorney'
@@ -69,14 +89,23 @@ interface ClientRequest {
   createdAt: string
 }
 
-// Signed-in client portal — one secure place for matters, upcoming events,
-// documents, and attorney messaging. All identity comes from the httpOnly
-// cookie; this page sends no identity (the server derives + authorizes it).
+type Tab = 'matters' | 'documents' | 'billing' | 'messages'
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'matters', label: 'Matters' },
+  { key: 'documents', label: 'Documents' },
+  { key: 'billing', label: 'Billing' },
+  { key: 'messages', label: 'Messages & Requests' },
+]
+
+// Signed-in client portal — a tabbed shell (header + nav + wide content) over the
+// client's matters, documents, billing, and messaging/requests. All identity comes
+// from the httpOnly cookie; this page sends no identity (the server derives it).
 export default function ClientPortalPage() {
   const [me, setMe] = useState<MeResponse | null>(null)
   const [matters, setMatters] = useState<MatterListItem[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<Timeline | null>(null)
+  const [tab, setTab] = useState<Tab>('matters')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -119,106 +148,134 @@ export default function ClientPortalPage() {
       })
   }, [selected])
 
-  if (error) {
-    return (
-      <main className="pdash">
-        <div className="alert alert-error" role="alert">
-          {error}
-        </div>
-      </main>
-    )
-  }
-  if (!me || !matters) {
-    return (
-      <main className="pdash">
-        <div className="loading-block" role="status">
-          <span className="spinner" /> Loading…
-        </div>
-      </main>
-    )
-  }
+  const matterScoped = tab === 'matters' || tab === 'messages' || tab === 'documents'
 
   return (
-    <main className="pdash">
-      <header className="pdash-head">
-        <div>
-          <div className="pdash-firm">Pacheco Law</div>
-          <h1 className="pdash-title">Your client portal</h1>
-          <div className="pdash-who">
-            Signed in as {me.displayName} ({me.email})
+    <div className="cp-shell">
+      <header className="cp-top">
+        <div className="cp-top-inner">
+          <div className="cp-brand">
+            <span className="cp-crest" aria-hidden>
+              <ScaleIcon size={18} />
+            </span>
+            <span className="cp-brand-text">
+              <span className="cp-brand-name">Pacheco Law</span>
+              <span className="cp-brand-sub">Client Portal</span>
+            </span>
+          </div>
+          <div className="cp-top-right">
+            {me && (
+              <span className="cp-who" title={me.email}>
+                {me.displayName}
+              </span>
+            )}
+            <a href="/api/client/auth/logout" className="cp-signout">
+              Sign out
+            </a>
           </div>
         </div>
-        <a href="/api/client/auth/logout" className="pdash-signout">
-          Sign out
-        </a>
+        <nav className="cp-nav" aria-label="Portal sections">
+          <div className="cp-nav-inner">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className={`cp-tab ${tab === t.key ? 'active' : ''}`}
+                aria-current={tab === t.key ? 'page' : undefined}
+                onClick={() => setTab(t.key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </nav>
       </header>
 
-      {matters.length === 0 ? (
-        <div className="pdash-card pdash-empty">
-          You don&apos;t have any matters with the firm yet. Once you book a consultation,
-          it&apos;ll appear here.
-        </div>
-      ) : (
-        <>
-          {matters.length > 1 && (
-            <div className="pdash-switch">
-              <label htmlFor="matter-switch">Matter</label>
-              <select
-                id="matter-switch"
-                value={selected ?? ''}
-                onChange={(e) => setSelected(e.target.value)}
-              >
-                {matters.map((m) => (
-                  <option key={m.matterEntityId} value={m.matterEntityId}>
-                    {m.matterNumber} — {m.statusLabel}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+      <main className="cp-main">
+        {error && (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
 
-          {!timeline ? (
-            <div className="loading-block" role="status" style={{ marginTop: 'var(--space-4)' }}>
-              <span className="spinner" /> Loading matter…
-            </div>
-          ) : (
-            <>
-              {timeline.scheduledAt && <UpcomingEventCard timeline={timeline} />}
+        {!me || !matters ? (
+          <div className="loading-block" role="status">
+            <span className="spinner" /> Loading…
+          </div>
+        ) : matters.length === 0 ? (
+          <div className="pdash-card pdash-empty">
+            You don&apos;t have any matters with the firm yet. Once you book a consultation,
+            it&apos;ll appear here.
+          </div>
+        ) : (
+          <>
+            {matterScoped && matters.length > 1 && (
+              <div className="cp-switch">
+                <label htmlFor="matter-switch">Matter</label>
+                <select
+                  id="matter-switch"
+                  value={selected ?? ''}
+                  onChange={(e) => setSelected(e.target.value)}
+                >
+                  {matters.map((m) => (
+                    <option key={m.matterEntityId} value={m.matterEntityId}>
+                      {m.matterNumber} — {m.statusLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-              <section className="pdash-card">
-                <div className="pdash-card-head">
-                  <h2>Matter {timeline.matterNumber}</h2>
-                  <span className="pdash-badge">{timeline.statusLabel}</span>
+            {tab === 'matters' &&
+              (!timeline ? (
+                <div className="loading-block" role="status">
+                  <span className="spinner" /> Loading matter…
                 </div>
-                <h3 className="pdash-subhead">Timeline</h3>
-                {timeline.milestones.length === 0 ? (
-                  <p className="text-muted">No updates yet.</p>
-                ) : (
-                  <ol className="pdash-timeline">
-                    {timeline.milestones.map((m, i) => (
-                      <li key={`${m.key}-${i}`}>
-                        <span className="pdash-dot" aria-hidden />
-                        <div>
-                          <div>{m.label}</div>
-                          <div className="text-sm text-muted">
-                            {new Date(m.occurredAt).toLocaleDateString()}
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </section>
-            </>
-          )}
+              ) : (
+                <>
+                  {timeline.scheduledAt && <UpcomingEventCard timeline={timeline} />}
+                  <section className="pdash-card">
+                    <div className="pdash-card-head">
+                      <h2>Matter {timeline.matterNumber}</h2>
+                      <span className="pdash-badge">{timeline.statusLabel}</span>
+                    </div>
+                    <h3 className="pdash-subhead">Timeline</h3>
+                    {timeline.milestones.length === 0 ? (
+                      <p className="text-muted">No updates yet.</p>
+                    ) : (
+                      <ol className="pdash-timeline">
+                        {timeline.milestones.map((m, i) => (
+                          <li key={`${m.key}-${i}`}>
+                            <span className="pdash-dot" aria-hidden />
+                            <div>
+                              <div>{m.label}</div>
+                              <div className="text-sm text-muted">
+                                {new Date(m.occurredAt).toLocaleDateString()}
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </section>
+                </>
+              ))}
 
-          <DocumentsPanel />
-          <InvoicesPanel />
-          {selected && <RequestsPanel matterEntityId={selected} />}
-          {selected && <MessagesPanel matterEntityId={selected} />}
-        </>
-      )}
-    </main>
+            {tab === 'documents' && <DocumentsPanel matterEntityId={selected} />}
+            {tab === 'billing' && <InvoicesPanel />}
+            {tab === 'messages' &&
+              (selected ? (
+                <>
+                  <RequestsPanel matterEntityId={selected} />
+                  <MessagesPanel matterEntityId={selected} />
+                </>
+              ) : (
+                <p className="text-muted">Select a matter to message the firm.</p>
+              ))}
+          </>
+        )}
+      </main>
+    </div>
   )
 }
 
@@ -248,10 +305,34 @@ function UpcomingEventCard({ timeline }: { timeline: Timeline }) {
   )
 }
 
-// All of the client's documents (to-sign and already signed), across matters.
-function DocumentsPanel() {
+function formatBytes(n: number): string {
+  if (!n) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const UPLOAD_ACCEPT = '.pdf,.doc,.docx,.png,.jpg,.jpeg,.tif,.tiff,.txt'
+
+// All of the client's documents: approved by the attorney (read via the shared-draft
+// page), e-sign documents (to-sign / signed), and documents the client uploads to
+// the selected matter.
+function DocumentsPanel({ matterEntityId }: { matterEntityId: string | null }) {
   const [docs, setDocs] = useState<ClientDocument[] | null>(null)
+  const [approved, setApproved] = useState<ApprovedDocument[] | null>(null)
+  const [uploads, setUploads] = useState<UploadedDocument[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadErr, setUploadErr] = useState<string | null>(null)
+
+  const loadUploads = useCallback(() => {
+    callClientPortalMcp<{ documents: UploadedDocument[] }>({ toolName: 'legal.client.uploads' })
+      .then((r) => setUploads(r.documents))
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return
+        setUploads([])
+      })
+  }, [])
 
   useEffect(() => {
     callClientPortalMcp<{ documents: ClientDocument[] }>({
@@ -263,7 +344,44 @@ function DocumentsPanel() {
         setError(e instanceof Error ? e.message : String(e))
         setDocs([])
       })
-  }, [])
+    callClientPortalMcp<{ documents: ApprovedDocument[] }>({ toolName: 'legal.client.documents' })
+      .then((r) => setApproved(r.documents))
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return
+        setApproved([])
+      })
+    loadUploads()
+  }, [loadUploads])
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file later
+    if (!file || !matterEntityId) return
+    setUploading(true)
+    setUploadErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`/api/client/portal/matters/${matterEntityId}/documents/upload`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: fd,
+      })
+      if (res.status === 401) {
+        window.location.href = '/portal/login'
+        return
+      }
+      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      if (!res.ok) throw new Error(data?.error ?? 'Upload failed.')
+      loadUploads()
+    } catch (err) {
+      setUploadErr(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const loading = docs === null || approved === null || uploads === null
 
   return (
     <section className="pdash-card">
@@ -275,30 +393,117 @@ function DocumentsPanel() {
           {error}
         </div>
       )}
-      {docs === null ? (
+
+      {/* Upload */}
+      <div style={{ margin: '0 0 var(--space-3)' }}>
+        <label
+          className={`pdash-btn pdash-btn-sm ${uploading || !matterEntityId ? 'is-disabled' : ''}`}
+        >
+          {uploading ? 'Uploading…' : 'Upload a document'}
+          <input
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            onChange={onFile}
+            disabled={uploading || !matterEntityId}
+            style={{ display: 'none' }}
+          />
+        </label>
+        <span className="text-sm text-muted" style={{ marginLeft: '0.6rem' }}>
+          PDF, Word, images, or text · up to 25 MB
+        </span>
+        {uploadErr && (
+          <div className="alert alert-error" role="alert" style={{ marginTop: '0.5rem' }}>
+            {uploadErr}
+          </div>
+        )}
+      </div>
+
+      {loading ? (
         <div className="loading-block" role="status">
           <span className="spinner" /> Loading documents…
         </div>
-      ) : docs.length === 0 ? (
-        <p className="text-muted">
-          No documents yet. We&apos;ll post them here when they&apos;re ready.
-        </p>
       ) : (
-        <ul className="pdash-docs">
-          {docs.map((d) => (
-            <li key={d.requestId} className="pdash-doc">
-              <div>
-                <div className="pdash-doc-title">{d.documentTitle ?? 'Document'}</div>
-                <DocStateBadge state={d.state} />
-              </div>
-              {d.state === 'awaiting_you' && (
-                <a className="pdash-btn pdash-btn-sm" href={`/portal/sign/${d.requestId}`}>
-                  Review &amp; sign
-                </a>
-              )}
-            </li>
-          ))}
-        </ul>
+        <>
+          {approved && approved.length > 0 && (
+            <>
+              <h4 className="pdash-subhead" style={{ marginTop: 0 }}>
+                From your attorney
+              </h4>
+              <ul className="pdash-docs">
+                {approved.map((d) => (
+                  <li key={d.documentVersionId} className="pdash-doc">
+                    <div>
+                      <div className="pdash-doc-title">{humanizeKind(d.documentKind)}</div>
+                      <span className="text-sm text-muted">
+                        {d.matterNumber} · approved {new Date(d.approvedAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <a
+                      className="pdash-btn pdash-btn-sm"
+                      href={`/d/${d.documentVersionId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {docs && docs.length > 0 && (
+            <>
+              <h4 className="pdash-subhead">To sign &amp; signed</h4>
+              <ul className="pdash-docs">
+                {docs.map((d) => (
+                  <li key={d.requestId} className="pdash-doc">
+                    <div>
+                      <div className="pdash-doc-title">{d.documentTitle ?? 'Document'}</div>
+                      <DocStateBadge state={d.state} />
+                    </div>
+                    {d.state === 'awaiting_you' && (
+                      <a className="pdash-btn pdash-btn-sm" href={`/portal/sign/${d.requestId}`}>
+                        Review &amp; sign
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {uploads && uploads.length > 0 && (
+            <>
+              <h4 className="pdash-subhead">You&apos;ve uploaded</h4>
+              <ul className="pdash-docs">
+                {uploads.map((u) => (
+                  <li key={u.documentVersionId} className="pdash-doc">
+                    <div>
+                      <div className="pdash-doc-title">{u.originalFilename}</div>
+                      <span className="text-sm text-muted">
+                        {u.matterNumber} · {formatBytes(u.sizeBytes)} · uploaded{' '}
+                        {new Date(u.uploadedAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {approved &&
+            approved.length === 0 &&
+            docs &&
+            docs.length === 0 &&
+            uploads &&
+            uploads.length === 0 && (
+              <p className="text-muted">
+                No documents yet. Upload one above, or we&apos;ll post documents here when
+                they&apos;re ready.
+              </p>
+            )}
+        </>
       )}
     </section>
   )
