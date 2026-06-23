@@ -106,6 +106,11 @@ export default function TemplatesPage() {
   // AI drafting state — the brief is entered in a modal "Draft with AI" window.
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
+  // A document attached as context for the AI draft — parsed to text and folded
+  // into the brief (not inserted into the body).
+  const [aiAttachName, setAiAttachName] = useState('')
+  const [aiAttachText, setAiAttachText] = useState('')
+  const [aiAttaching, setAiAttaching] = useState(false)
   const [showAi, setShowAi] = useState(false)
   // "Draft with AI" options: model (defaults to cheapest) + optional forced skills.
   const [aiModelId, setAiModelId] = useState('')
@@ -290,10 +295,17 @@ export default function TemplatesPage() {
     setAiBusy(true)
     setError(null)
     try {
+      // Fold any attached reference document into the brief, so the AI drafts from
+      // it. ai_draft is unchanged — the document rides along in `instructions`.
+      const instructions = aiAttachText.trim()
+        ? `${aiPrompt.trim()}\n\n--- Reference document${
+            aiAttachName ? ` (${aiAttachName})` : ''
+          } ---\n${aiAttachText.trim()}`
+        : aiPrompt.trim()
       const r = await callAttorneyMcp<{ body: string }>({
         toolName: 'legal.template.ai_draft',
         input: {
-          instructions: aiPrompt.trim(),
+          instructions,
           category: draft.category,
           skillSlugs: aiSkillSlugs.length ? aiSkillSlugs : undefined,
           modelId: aiModelId || undefined,
@@ -310,9 +322,32 @@ export default function TemplatesPage() {
     }
   }
 
-  // Import a document (PDF / Word / text) into the body. The file is parsed
-  // server-side (/api/attorney/templates/import) to plain text and appended to
-  // the canvas. Dev forwards the demo-session headers exactly like callAttorneyMcp.
+  // Parse an uploaded file (PDF / Word / text) to plain text via the shared server
+  // route (/api/attorney/templates/import). Reused by "import into body" and
+  // "attach as AI-draft context". Dev forwards the demo-session headers.
+  async function parseFileToText(file: File): Promise<string> {
+    const headers: Record<string, string> = {}
+    if (process.env.NODE_ENV !== 'production') {
+      const dev = readDevSession()
+      if (dev) {
+        headers['x-actor-id'] = dev.actorId
+        headers['x-tenant-id'] = dev.tenantId
+      }
+    }
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await fetch('/api/attorney/templates/import', {
+      method: 'POST',
+      headers,
+      credentials: 'same-origin',
+      body: fd,
+    })
+    const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
+    if (!res.ok || !data.text) throw new Error(data.error || `Import failed (${res.status}).`)
+    return data.text
+  }
+
+  // Import a document into the body (appended to the canvas).
   async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = '' // allow re-importing the same file
@@ -320,31 +355,32 @@ export default function TemplatesPage() {
     setImporting(true)
     setError(null)
     try {
-      const headers: Record<string, string> = {}
-      if (process.env.NODE_ENV !== 'production') {
-        const dev = readDevSession()
-        if (dev) {
-          headers['x-actor-id'] = dev.actorId
-          headers['x-tenant-id'] = dev.tenantId
-        }
-      }
-      const fd = new FormData()
-      fd.append('file', file)
-      const res = await fetch('/api/attorney/templates/import', {
-        method: 'POST',
-        headers,
-        credentials: 'same-origin',
-        body: fd,
-      })
-      const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
-      if (!res.ok || !data.text) throw new Error(data.error || `Import failed (${res.status}).`)
-      const text = data.text
+      const text = await parseFileToText(file)
       setDraft((d) => (d ? { ...d, body: d.body ? `${d.body}\n\n${text}` : text } : d))
       setSeedKey((k) => k + 1) // imported content appended → re-seed the editor
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setImporting(false)
+    }
+  }
+
+  // Attach a document as CONTEXT for the AI draft — its text is folded into the
+  // brief sent to legal.template.ai_draft (NOT inserted into the body), so the AI
+  // can draft from a sample/source document.
+  async function onAttachAiFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setAiAttaching(true)
+    setError(null)
+    try {
+      setAiAttachText(await parseFileToText(file))
+      setAiAttachName(file.name)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAiAttaching(false)
     }
   }
 
@@ -699,6 +735,44 @@ export default function TemplatesPage() {
                       : 'Describe the document to draft — e.g. “a mutual NDA for a NC LLC, 2-year term”. The draft will use {{tokens}} for anything filled in per client or matter.'
                   }
                 />
+                {/* Attach a reference document — its text is folded into the brief
+                    so the AI drafts from it (it is NOT inserted into the body). */}
+                <div className="tpl-ai-attach">
+                  <input
+                    id="tpl-ai-attach-input"
+                    type="file"
+                    accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                    style={{ display: 'none' }}
+                    onChange={onAttachAiFile}
+                  />
+                  {aiAttachName ? (
+                    <span className="tpl-ai-attach-chip" title={aiAttachName}>
+                      <FileTextIcon size={13} />
+                      <span className="tpl-ai-attach-name">{aiAttachName}</span>
+                      <button
+                        type="button"
+                        className="tpl-ai-attach-x"
+                        aria-label="Remove attached document"
+                        onClick={() => {
+                          setAiAttachName('')
+                          setAiAttachText('')
+                        }}
+                      >
+                        <XIcon size={12} />
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="tpl-ai-attach-btn"
+                      disabled={aiBusy || aiAttaching}
+                      onClick={() => document.getElementById('tpl-ai-attach-input')?.click()}
+                    >
+                      <FileTextIcon size={14} />
+                      {aiAttaching ? 'Reading…' : 'Attach a document (optional)'}
+                    </button>
+                  )}
+                </div>
                 {!aiBusy && (
                   <div className="tpl-ai-opts">
                     <label className="tpl-ai-opt">
