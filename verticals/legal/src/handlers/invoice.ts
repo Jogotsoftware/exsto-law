@@ -9,6 +9,7 @@ import {
   getLatestAttributeValue,
 } from './common.js'
 import { readFirmDefaultRate } from './firmSettings.js'
+import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Billing handlers (Session 4): invoice.issue + invoice.send.
@@ -727,6 +728,14 @@ registerActionHandler('invoice.pay', async (ctx, client, payload, actionId) => {
     kind: 'invoice_status',
     value: 'paid',
   })
+
+  // ADR 0045 — drive any matter whose lifecycle waits ON invoice.paid (the NC_SMLLC
+  // 'approved → closed' system edge). Flag-guarded no-op when the engine is off; a
+  // no-op too for any matter with no instance / no waiting edge. We dispatch with
+  // THIS action's id so the advance commits in the same transaction as the payment.
+  for (const matterId of matterIds) {
+    await dispatchLifecycleEvent(client, ctx, matterId, 'invoice.paid', actionId)
+  }
 
   return { paid: true, invoiceNumber: number, status: 'paid', method, amount, paidDate }
 })

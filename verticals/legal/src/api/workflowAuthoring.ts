@@ -77,6 +77,20 @@ export async function loadWorkflowAuthoringContext(
   }
 }
 
+// The set of document-template entity ids a graph's stages reference by
+// templateEntityId. Shared by the AI proposal validator (below) and the manual
+// set_lifecycle handler's dangling-ref check, so both reject the same way and can
+// never drift. Pure (no DB).
+export function collectReferencedTemplateIds(graph: Lifecycle): string[] {
+  const ids = new Set<string>()
+  for (const s of graph) {
+    for (const d of s.documents ?? []) {
+      if (d.templateEntityId) ids.add(d.templateEntityId)
+    }
+  }
+  return [...ids]
+}
+
 // Validate a PROPOSED graph the way the authoring path will write it: structural
 // validity (incl. the closed action-kind vocabulary), linear-only, and — because
 // documents must come from the EXISTING library (decision 2) — every referenced
@@ -92,12 +106,7 @@ export async function validateProposedLifecycle(
 
   // Referenced template ids must exist in the firm's document library. Collect the
   // ids the graph references, then check them against the real library in one read.
-  const referencedIds = new Set<string>()
-  for (const s of graph) {
-    for (const d of s.documents ?? []) {
-      if (d.templateEntityId) referencedIds.add(d.templateEntityId)
-    }
-  }
+  const referencedIds = new Set<string>(collectReferencedTemplateIds(graph))
   if (referencedIds.size > 0) {
     const library = await listStandaloneTemplates(ctx)
     const known = new Set(

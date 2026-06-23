@@ -8,6 +8,7 @@ import {
   insertRelationship,
   lookupKindId,
 } from './common.js'
+import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // call.ingest — project a (raw_event_log'd) Granola payload into call_session
@@ -210,6 +211,15 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
     sourceRef,
     occurredAt: p.ended_at ?? null,
   })
+
+  // ADR 0045 — drive any matter whose lifecycle waits ON transcript.received. ONLY
+  // for a matched matter (an unmatched transcript has no instance to advance). This
+  // is lifecycle advance ONLY — drafting still happens via api/granolaIngestion's
+  // own auto-draft path, so we do NOT double-fire it here. Flag-guarded no-op when
+  // the engine is off / the matter has no waiting edge; commits in this transaction.
+  if (p.matter_entity_id) {
+    await dispatchLifecycleEvent(client, ctx, p.matter_entity_id, 'transcript.received', actionId)
+  }
 
   return {
     callEntityId,

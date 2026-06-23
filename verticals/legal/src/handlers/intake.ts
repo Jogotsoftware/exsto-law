@@ -334,7 +334,31 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
     } catch (err) {
       // Roll back ONLY the engine work; the matter is opened either way.
       await client.query('ROLLBACK TO SAVEPOINT workflow_engine')
+      const reason = err instanceof Error ? err.message : String(err)
       console.error('[legal.matter.open] workflow instance creation skipped:', err)
+      // Leave a QUERYABLE signal so a matter the engine silently skipped is
+      // detectable (not just a log line): an `observation` event (core-seeded,
+      // is_state_change=false — it does NOT touch matter_status) on the matter,
+      // tagged workflow_engine_skipped with the reason. Wrapped so this diagnostic
+      // can itself never fail matter.open; the rollback above left the transaction
+      // usable so this INSERT runs cleanly.
+      try {
+        await insertEvent(client, {
+          tenantId: ctx.tenantId,
+          actionId,
+          eventKindName: 'observation',
+          primaryEntityId: matterEntityId,
+          data: {
+            kind: 'workflow_engine_skipped',
+            service_key: p.service_key,
+            reason,
+          },
+          sourceType: 'system',
+          sourceRef: 'system:workflow_engine',
+        })
+      } catch (signalErr) {
+        console.error('[legal.matter.open] could not record workflow-skip signal:', signalErr)
+      }
     }
   }
 

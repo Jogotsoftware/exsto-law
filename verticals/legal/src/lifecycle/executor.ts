@@ -18,6 +18,7 @@ import {
   resolveBoundWorkflowById,
   type MatterWorkflowInstance,
 } from './binding.js'
+import { workflowEngineEnabled } from './flags.js'
 import { advanceWorkflowInstance } from './instance.js'
 import { edgesFrom, stageByKey } from './resolve.js'
 import type { Lifecycle, LifecycleEdge } from './types.js'
@@ -151,4 +152,24 @@ export async function signalEvent(
     actionId,
   })
   await advanceMatter(client, ctx, matterEntityId, actionId)
+}
+
+// The small, EXPLICIT dispatch helper the real handlers call right after they
+// insert the event that a system/automatic edge waits `on`. NOT an event bus: it is
+// a direct, synchronous, in-transaction call so the lifecycle advance commits with
+// the same action that produced the signal (invariant 9). It is a PURE NO-OP unless
+// the engine flag is on, so every call site stays a day-one no-op until the flag
+// flips — the caller wraps it in its own real actionId (no placeholder) and resolves
+// the matter/subject entity id first. signalEvent itself is a no-op when the matter
+// has no instance or no edge waits on this event, so a handler can dispatch
+// unconditionally without first knowing whether THIS matter runs a lifecycle.
+export async function dispatchLifecycleEvent(
+  client: DbClient,
+  ctx: Ctx,
+  matterEntityId: string,
+  eventKind: string,
+  actionId: string,
+): Promise<void> {
+  if (!workflowEngineEnabled()) return
+  await signalEvent(client, ctx, matterEntityId, eventKind, actionId)
 }
