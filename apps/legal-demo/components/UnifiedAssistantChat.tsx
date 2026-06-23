@@ -239,7 +239,13 @@ function CopyButton({ text }: { text: string }) {
 // Save an assistant reply onto the current matter as a document draft (pending
 // review). Transient saving/saved/failed states; only rendered for matter-scoped,
 // document-like replies.
-function SaveToMatterButton({ matterEntityId, markdown }: { matterEntityId: string; markdown: string }) {
+function SaveToMatterButton({
+  matterEntityId,
+  markdown,
+}: {
+  matterEntityId: string
+  markdown: string
+}) {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
@@ -251,7 +257,10 @@ function SaveToMatterButton({ matterEntityId, markdown }: { matterEntityId: stri
   async function save() {
     setState('saving')
     try {
-      await callAttorneyMcp({ toolName: 'legal.assistant.save_reply', input: { matterEntityId, markdown } })
+      await callAttorneyMcp({
+        toolName: 'legal.assistant.save_reply',
+        input: { matterEntityId, markdown },
+      })
       setState('saved')
     } catch {
       setState('error')
