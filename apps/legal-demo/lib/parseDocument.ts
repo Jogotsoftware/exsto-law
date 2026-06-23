@@ -55,13 +55,62 @@ export async function parseUploadedDocument(file: File): Promise<string> {
       name.endsWith('.docx') ||
       type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ) {
-      // Structured: convert to HTML (preserving headings/bold/italic/lists), then
-      // to markdown via the editor's bridge so the import matches what the editor
-      // round-trips. (extractRawText would flatten all formatting to bare text.)
+      // Structured: convert to HTML (preserving headings/bold/italic/underline/
+      // lists/alignment), then to markdown via the editor's bridge so the import
+      // matches what the editor round-trips. (extractRawText would flatten all
+      // formatting to bare text.)
       const mammothMod = await import('mammoth')
       const mammoth = mammothMod.default ?? mammothMod
-      const result = await mammoth.convertToHtml({ buffer })
-      text = htmlToMarkdown(result.value ?? '')
+
+      // Word stores paragraph alignment as a direct property (`w:jc`) that
+      // mammoth's HTML writer drops, and underline as a run property it ignores
+      // by default — so "centered", "right", and "underline" silently vanished on
+      // import. mammoth can only emit a CSS *class* via a style map, never an
+      // inline style, and it can't match on the alignment property itself. So we
+      // relabel each aligned paragraph to a synthetic style name, map that name to
+      // an `align-*` class, then rewrite the class to the inline `text-align`
+      // style the editor bridge actually preserves (templateBody.ts alignedBlock).
+      // Headings keep their semantic style so they still map to <h1>/<h2> (a
+      // centered real-Heading loses its centering — rare, and it stays bold/large).
+      const ALIGN_STYLE: Record<string, string> = {
+        center: 'AlignCenter',
+        end: 'AlignRight',
+        right: 'AlignRight',
+        both: 'AlignJustify',
+        justify: 'AlignJustify',
+      }
+      // `mammoth.transforms` is a real runtime API but absent from the bundled
+      // types, so reach it through a focused cast.
+      type MammothParagraph = { alignment?: string; styleId?: string; styleName?: string }
+      const paragraphTransform = (
+        mammoth as unknown as {
+          transforms: {
+            paragraph: (fn: (p: MammothParagraph) => MammothParagraph) => (doc: unknown) => unknown
+          }
+        }
+      ).transforms.paragraph
+      const transformDocument = paragraphTransform((p: MammothParagraph) => {
+        const aligned = p.alignment ? ALIGN_STYLE[p.alignment] : undefined
+        if (!aligned) return p
+        const isHeading = /heading/i.test(p.styleName ?? '') || /heading/i.test(p.styleId ?? '')
+        return isHeading ? p : { ...p, styleId: aligned, styleName: aligned }
+      })
+      const styleMap = [
+        "p[style-name='AlignCenter'] => p.align-center:fresh",
+        "p[style-name='AlignRight'] => p.align-right:fresh",
+        "p[style-name='AlignJustify'] => p.align-justify:fresh",
+        // mammoth ignores underline by default (ambiguous with links); keep it.
+        'u => u',
+      ]
+      const result = await mammoth.convertToHtml(
+        { buffer },
+        { transformDocument, styleMap, includeDefaultStyleMap: true },
+      )
+      const html = (result.value ?? '')
+        .replace(/<p class="align-center">/g, '<p style="text-align:center">')
+        .replace(/<p class="align-right">/g, '<p style="text-align:right">')
+        .replace(/<p class="align-justify">/g, '<p style="text-align:justify">')
+      text = htmlToMarkdown(html)
     } else if (name.endsWith('.doc')) {
       throw new DocumentParseError(
         'Legacy .doc isn’t supported — save it as .docx or PDF and try again.',
