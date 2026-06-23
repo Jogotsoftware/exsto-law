@@ -169,6 +169,29 @@ function looksLikeDocument(md: string): boolean {
   return hasHeading || paragraphs >= 3 || letterish
 }
 
+// Snapshot the VISIBLE content of the current page so the assistant can answer
+// about "what's on this page / this matter screen / this invoice / these entries".
+// It reads the #main region — the chat panel is a sibling of #main in the layout,
+// so the conversation itself is never fed back in. Whitespace is collapsed and the
+// text is bounded (the server bounds it again). Claude-only; the caller skips this
+// for the external research model so page content never leaves the firm.
+const MAX_PAGE_CONTENT_CHARS = 14000
+function capturePageContent(): string | undefined {
+  if (typeof document === 'undefined') return undefined
+  const main = document.getElementById('main')
+  if (!main) return undefined
+  // innerText (not textContent) ≈ what's actually visible: it respects hidden
+  // elements and line breaks, so the model sees the page roughly as the attorney does.
+  const text = (main.innerText ?? '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  if (!text) return undefined
+  return text.length > MAX_PAGE_CONTENT_CHARS
+    ? `${text.slice(0, MAX_PAGE_CONTENT_CHARS).trimEnd()} …[truncated]`
+    : text
+}
+
 // Pick the first usable (connected + available) model, else the first available.
 function pickDefault(models: AssistantModel[]): string | null {
   const usable = models.find((m) => m.available && m.connected)
@@ -701,8 +724,17 @@ export function UnifiedAssistantChat({
           attachments: sentAttachments.length
             ? sentAttachments.map((a) => ({ name: a.name, text: a.text }))
             : undefined,
+          // Path + a live snapshot of what's on screen, so the assistant can
+          // answer about the page/matter the attorney is looking at — not just know
+          // its route. Page content is Claude-only (the firm's own model); never
+          // captured for the external research model.
           pageContext:
-            typeof window !== 'undefined' ? { path: window.location.pathname } : undefined,
+            typeof window !== 'undefined'
+              ? {
+                  path: window.location.pathname,
+                  content: isClaude ? capturePageContent() : undefined,
+                }
+              : undefined,
         },
         {
           onThinking: (t) => {
