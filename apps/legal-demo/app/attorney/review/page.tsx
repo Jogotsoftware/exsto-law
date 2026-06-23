@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { formatDateTime } from '@/lib/datetime'
 
 // Shared with the detail page: a step-through review session is the ordered list of
 // selected draft ids + where we are in it, kept in sessionStorage (per tab) and
@@ -44,6 +45,43 @@ interface ItemResult {
 
 function humanizeKind(kind: string): string {
   return kind.replace(/_/g, ' ')
+}
+
+// A clickable column header that sorts the queue by `sortKey`. Clicking the
+// active column flips direction; an arrow shows the current state (▲/▼), and a
+// faint ↕ marks the other sortable columns. aria-sort keeps it accessible.
+function SortHeader({
+  label,
+  columnKey,
+  activeKey,
+  asc,
+  onSort,
+}: {
+  label: string
+  columnKey: SortKey
+  activeKey: SortKey
+  asc: boolean
+  onSort: (k: SortKey) => void
+}) {
+  const active = activeKey === columnKey
+  return (
+    <th
+      className="sortable-th"
+      role="button"
+      tabIndex={0}
+      aria-sort={active ? (asc ? 'ascending' : 'descending') : 'none'}
+      title={`Sort by ${label}`}
+      onClick={() => onSort(columnKey)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSort(columnKey)
+        }
+      }}
+    >
+      {label} <span className="sort-arrow">{active ? (asc ? '▲' : '▼') : '↕'}</span>
+    </th>
+  )
 }
 
 export default function ReviewQueue() {
@@ -134,6 +172,17 @@ export default function ReviewQueue() {
     })
   }
 
+  // Click a column header to sort by it; clicking the active column flips
+  // direction. Date defaults to newest-first; text columns to A→Z.
+  function sortBy(key: SortKey) {
+    if (key === sortKey) {
+      setSortAsc((v) => !v)
+    } else {
+      setSortKey(key)
+      setSortAsc(key !== 'recordedAt')
+    }
+  }
+
   const notesRequired = batchAction === 'request_revision'
   const canRun =
     !running && selectedVisible.length > 0 && (!notesRequired || batchNotes.trim().length > 0)
@@ -209,7 +258,7 @@ export default function ReviewQueue() {
 
       {drafts && drafts.length > 0 && (
         <>
-          {/* Filter / sort toolbar */}
+          {/* Filter toolbar. Sorting lives on the clickable column headers below. */}
           <div className="row" style={{ marginBottom: 'var(--space-3)' }}>
             <input
               type="text"
@@ -231,19 +280,6 @@ export default function ReviewQueue() {
                 </option>
               ))}
             </select>
-            <select
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as SortKey)}
-              style={{ width: 'auto' }}
-              aria-label="Sort by"
-            >
-              <option value="recordedAt">Sort: Generated</option>
-              <option value="matterNumber">Sort: Matter</option>
-              <option value="documentKind">Sort: Document kind</option>
-            </select>
-            <button onClick={() => setSortAsc((v) => !v)} title="Toggle sort direction">
-              {sortAsc ? '↑ Asc' : '↓ Desc'}
-            </button>
             <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)', marginLeft: 'auto' }}>
               {visible.length} of {drafts.length} shown
             </span>
@@ -333,10 +369,28 @@ export default function ReviewQueue() {
                       style={{ width: 'auto' }}
                     />
                   </th>
-                  <th>Matter</th>
-                  <th>Document kind</th>
+                  <SortHeader
+                    label="Matter"
+                    columnKey="matterNumber"
+                    activeKey={sortKey}
+                    asc={sortAsc}
+                    onSort={sortBy}
+                  />
+                  <SortHeader
+                    label="Document kind"
+                    columnKey="documentKind"
+                    activeKey={sortKey}
+                    asc={sortAsc}
+                    onSort={sortBy}
+                  />
                   <th>Version</th>
-                  <th>Generated</th>
+                  <SortHeader
+                    label="Generated"
+                    columnKey="recordedAt"
+                    activeKey={sortKey}
+                    asc={sortAsc}
+                    onSort={sortBy}
+                  />
                   <th>Result</th>
                   <th></th>
                 </tr>
@@ -359,7 +413,7 @@ export default function ReviewQueue() {
                       <td>{d.matterNumber}</td>
                       <td>{humanizeKind(d.documentKind)}</td>
                       <td>v{d.versionNumber}</td>
-                      <td>{new Date(d.recordedAt).toLocaleString()}</td>
+                      <td>{formatDateTime(d.recordedAt)}</td>
                       <td>
                         {r?.state === 'running' && <span className="spinner" />}
                         {r?.state === 'queued' && (
