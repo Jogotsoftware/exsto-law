@@ -306,6 +306,13 @@ export default function TemplatesPage() {
     setSeedKey((k) => k + 1)
   }
 
+  // Start a fresh draft and open the AI brief — the list-view "Draft with AI"
+  // entry point (the in-editor button just opens the modal on the open draft).
+  function startAiDraft() {
+    newDraft()
+    setShowAi(true)
+  }
+
   // Open the "how do you want to start?" chooser; lazy-load questionnaires once.
   function openNewChooser() {
     setShowNew(true)
@@ -441,17 +448,23 @@ export default function TemplatesPage() {
     return data.text
   }
 
-  // Import a document into the body (appended to the canvas).
+  // Import a document into the body (appended to the canvas). Works from the list
+  // view too: if no draft is open yet, the import starts a fresh one.
   async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = '' // allow re-importing the same file
-    if (!file || !draft) return
+    if (!file) return
+    const hadDraft = Boolean(draft)
     setImporting(true)
     setError(null)
     try {
       const text = await parseFileToText(file)
-      setDraft((d) => (d ? { ...d, body: d.body ? `${d.body}\n\n${text}` : text } : d))
-      setSeedKey((k) => k + 1) // imported content appended → re-seed the editor
+      setDraft((d) => {
+        const base = d ?? { ...EMPTY_DRAFT }
+        return { ...base, body: base.body ? `${base.body}\n\n${text}` : text }
+      })
+      if (!hadDraft) loadPageSetup(null) // fresh draft → default page setup
+      setSeedKey((k) => k + 1) // imported content → re-seed the editor
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -583,11 +596,39 @@ export default function TemplatesPage() {
       >
         <h1>Templates</h1>
         {!draft && (
-          <button className="primary" onClick={openNewChooser}>
-            New template
-          </button>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <button className="primary" onClick={openNewChooser}>
+              New template
+            </button>
+            <button
+              type="button"
+              className="tpl-ai-btn"
+              onClick={startAiDraft}
+              title="Start a new template and draft it with AI (uses your Anthropic key)"
+            >
+              <SparklesIcon size={15} /> Draft with AI
+            </button>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={importing}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+            >
+              <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
+            </button>
+          </div>
         )}
       </div>
+
+      {/* One hidden file input for BOTH the header and the in-editor "Import file"
+          buttons, mounted at page level so import works from the list view too. */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+        style={{ display: 'none' }}
+        onChange={onImportFile}
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -707,13 +748,6 @@ export default function TemplatesPage() {
               >
                 <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
               </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                style={{ display: 'none' }}
-                onChange={onImportFile}
-              />
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem' }}>
               <button
