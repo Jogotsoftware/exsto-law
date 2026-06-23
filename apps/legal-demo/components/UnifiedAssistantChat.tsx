@@ -18,7 +18,8 @@ import {
   XIcon,
   CopyIcon,
   CheckIcon,
-  LockIcon,
+  LayersIcon,
+  ShieldCheckIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -122,13 +123,34 @@ const WORK_RATES: Array<{ value: WorkRate; label: string; hint: string }> = [
   { value: 'thorough', label: 'Thorough', hint: 'Deeper thinking, slower' },
 ]
 
-// How much matter/client history the assistant reads each turn. More = better
-// grounded answers, but a larger, slower, pricier prompt.
-const CONTEXT_DEPTHS: Array<{ value: ContextDepth; label: string; hint: string }> = [
+// The single "context" control in the chat toolbar. Three are depth levels (how
+// much of the matter/client the assistant reads each turn) and Secure is a mode —
+// full context to the firm's own model, but never used for web search or any
+// external call. Maps onto the existing depth ('lean'|'balanced'|'generous') +
+// secureMode pair: Full ⇒ generous, Secure ⇒ generous + locked.
+type ContextLevel = 'lean' | 'balanced' | 'full' | 'secure'
+const CONTEXT_LEVELS: Array<{ value: ContextLevel; label: string; hint: string }> = [
   { value: 'lean', label: 'Lean', hint: 'Less history — fastest, cheapest' },
-  { value: 'balanced', label: 'Balanced', hint: 'Default — recent emails, transcript, intake' },
-  { value: 'generous', label: 'Generous', hint: 'Most history + draft — slower, pricier' },
+  {
+    value: 'balanced',
+    label: 'Balanced',
+    hint: 'Default — recent emails, transcript, intake, tasks',
+  },
+  {
+    value: 'full',
+    label: 'Full',
+    hint: 'Everything on the matter — emails, transcript, intake, documents, tasks, meetings, billing',
+  },
+  {
+    value: 'secure',
+    label: 'Secure',
+    hint: 'Full context, but never used for web search or any external call',
+  },
 ]
+function depthToLevel(depth: ContextDepth, secure: boolean): ContextLevel {
+  if (secure) return 'secure'
+  return depth === 'generous' ? 'full' : depth
+}
 
 const FEEDBACK_CATEGORIES: Array<{ value: FeedbackCategory; label: string }> = [
   { value: 'ui', label: 'UI / design' },
@@ -406,6 +428,20 @@ export function UnifiedAssistantChat({
   const [secureMode, setSecureMode] = useState(false)
   const [useContext, setUseContext] = useState(true)
   const [contextDepth, setContextDepth] = useState<ContextDepth>('balanced')
+  // The unified context control (toolbar). Derives from depth + secureMode; setting
+  // a level updates both. Full ⇒ generous depth; Secure ⇒ generous depth + locked.
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  const contextLevel = depthToLevel(contextDepth, secureMode)
+  const setContextLevel = useCallback((level: ContextLevel) => {
+    if (level === 'secure') {
+      setSecureMode(true)
+      setContextDepth('generous')
+    } else {
+      setSecureMode(false)
+      setContextDepth(level === 'full' ? 'generous' : level)
+    }
+    setContextMenuOpen(false)
+  }, [])
 
   // Beta-feedback form.
   const [fbCategory, setFbCategory] = useState<FeedbackCategory>('other')
@@ -1104,30 +1140,8 @@ export function UnifiedAssistantChat({
             )}
           </div>
 
-          {scoped && (
-            <div className="uac-setting">
-              <label className="uac-setting-label">Context depth</label>
-              <div className="uac-segmented" role="group" aria-label="Context depth">
-                {CONTEXT_DEPTHS.map((d) => (
-                  <button
-                    key={d.value}
-                    type="button"
-                    className={`uac-seg${contextDepth === d.value ? ' active' : ''}`}
-                    disabled={!useContext}
-                    title={d.hint}
-                    onClick={() => setContextDepth(d.value)}
-                  >
-                    {d.label}
-                  </button>
-                ))}
-              </div>
-              <p className="uac-hint">
-                {useContext
-                  ? 'How much of the current matter/client the assistant reads each message.'
-                  : 'Turn the context toggle on to ground the assistant in this matter/client.'}
-              </p>
-            </div>
-          )}
+          {/* Context depth lives in the toolbar "Context" control now (lean /
+              balanced / full / secure) — see the layers icon by the composer. */}
 
           <div className="uac-setting uac-setting-row">
             <label className="uac-setting-label">Web search</label>
@@ -1540,20 +1554,51 @@ export function UnifiedAssistantChat({
                 </button>
               )}
               {isClaude && (
-                <button
-                  type="button"
-                  className={`uac-tool-btn${secureMode ? ' secure-on' : ''}`}
-                  onClick={() => setSecureMode((v) => !v)}
-                  aria-label={secureMode ? 'Secure mode on' : 'Secure mode off'}
-                  aria-pressed={secureMode}
-                  title={
-                    secureMode
-                      ? 'Secure mode ON — this context will not be used for web search'
-                      : 'Secure mode — keep sensitive matter/client context out of web search'
-                  }
-                >
-                  <LockIcon size={16} />
-                </button>
+                <div className="uac-ctxmenu-wrap">
+                  <button
+                    type="button"
+                    className={`uac-tool-btn${contextMenuOpen ? ' active' : ''}${secureMode ? ' secure-on' : ''}`}
+                    onClick={() => setContextMenuOpen((o) => !o)}
+                    aria-haspopup="menu"
+                    aria-expanded={contextMenuOpen}
+                    aria-label={`Context: ${contextLevel}`}
+                    title={`Context: ${
+                      CONTEXT_LEVELS.find((l) => l.value === contextLevel)?.label ?? 'Balanced'
+                    } — how much of the matter the assistant reads (Secure = never used for web search)`}
+                  >
+                    {secureMode ? <ShieldCheckIcon size={16} /> : <LayersIcon size={16} />}
+                  </button>
+                  {contextMenuOpen && (
+                    <div className="uac-ctxmenu" role="menu" aria-label="Context level">
+                      <div className="uac-ctxmenu-head">Context</div>
+                      {CONTEXT_LEVELS.map((l) => (
+                        <button
+                          key={l.value}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={contextLevel === l.value}
+                          className={`uac-ctxmenu-item${contextLevel === l.value ? ' is-on' : ''}`}
+                          onClick={() => setContextLevel(l.value)}
+                        >
+                          <span className="uac-ctxmenu-icon">
+                            {l.value === 'secure' ? (
+                              <ShieldCheckIcon size={14} />
+                            ) : (
+                              <LayersIcon size={14} />
+                            )}
+                          </span>
+                          <span className="uac-ctxmenu-text">
+                            <span className="uac-ctxmenu-name">
+                              {l.label}
+                              {contextLevel === l.value && <CheckIcon size={13} />}
+                            </span>
+                            <span className="uac-ctxmenu-hint">{l.hint}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
             <button
