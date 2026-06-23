@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
 import dns from 'node:dns'
-import { exchangeGoogleCode } from '@exsto/legal'
+import { exchangeGoogleCode, resolvePlatformAdminByEmail } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { signSession, buildSessionCookie } from '@/lib/session'
+import { signAdminSession, buildAdminSessionCookie } from '@/lib/adminSession'
 
 export const runtime = 'nodejs'
 
@@ -49,6 +50,33 @@ export async function GET(request: Request) {
       // same-origin paths (a naive startsWith('/') lets //host through as a
       // protocol-relative open redirect).
       const safeReturnTo = safeInternalPath(result.returnTo)
+
+      // Admin-console sign-in (ADR 0046): resolve the verified Google email to a
+      // PLATFORM admin (cp_resolve_admin_by_email), then mint the SEPARATE admin
+      // session cookie. Never the attorney session. Unknown / non-admin emails are
+      // rejected to the admin sign-in page.
+      if (result.mode === 'admin') {
+        const admin = await resolvePlatformAdminByEmail(result.accountEmail)
+        if (!admin) {
+          return NextResponse.redirect(
+            `${BASE_URL}/admin?error=${encodeURIComponent(
+              `${result.accountEmail} is not a platform admin.`,
+            )}`,
+          )
+        }
+        const candidate = safeInternalPath(result.returnTo, '/admin')
+        // An admin sign-in must land inside /admin — never the attorney app.
+        const adminReturnTo = candidate.startsWith('/admin') ? candidate : '/admin'
+        const token = signAdminSession({
+          actorId: admin.actorId,
+          tenantId: admin.tenantId,
+          email: result.accountEmail,
+          displayName: admin.displayName ?? result.accountEmail,
+        })
+        const redirect = NextResponse.redirect(`${BASE_URL}${adminReturnTo}`)
+        redirect.headers.set('Set-Cookie', buildAdminSessionCookie(token))
+        return redirect
+      }
 
       // A connect (calendar or mail mode) just confirms the connection — no
       // session change. Both now request the full Google scope set, so either
