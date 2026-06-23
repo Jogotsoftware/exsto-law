@@ -3,3 +3,6 @@
 export * from './types.js'
 export * from './resolve.js'
 export * from './derive.js'
+// PR3 — the step-action catalog (builder/AI guardrail) + authored product workflows.
+export * from './catalog.js'
+export * from './authored.js'
