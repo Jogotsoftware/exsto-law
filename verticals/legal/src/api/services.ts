@@ -1356,6 +1356,7 @@ export async function submitBooking(
       intentKind: 'enforcement',
       payload: {
         matter_entity_id: matterEntityId,
+        matter_number: matterNumber,
         scheduled_at: input.scheduledAtIso,
         scheduled_end: input.scheduledEndIso ?? null,
         google_event_id: googleEvent?.eventId ?? null,
