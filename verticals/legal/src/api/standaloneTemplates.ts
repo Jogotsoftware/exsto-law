@@ -128,6 +128,76 @@ export async function aiDraftTemplate(
   return { body: reply.trim() }
 }
 
+// AI-enhance an EXISTING template body: revise/polish it (or draft from scratch
+// when the body is empty), preserving the {{merge_tokens}} already in it and
+// preferring to bind new fill-ins to the bound questionnaire's fields. Same
+// Settings-managed Anthropic key + skill-awareness + anti-hallucination standard
+// as aiDraftTemplate. Pure generation — returns text the attorney reviews and
+// saves; writes nothing to the substrate (the SAVE is the recorded write).
+export interface AiEnhanceTemplateInput {
+  // The current template body to improve. Empty ⇒ draft fresh from instructions.
+  currentBody: string
+  // What to change ("add a severability clause", "make it more formal"). Optional:
+  // omitted ⇒ a general polish/tighten pass.
+  instructions?: string
+  category: StandaloneTemplateCategory
+  // Field ids on the bound questionnaire — the model reuses these exact tokens for
+  // fill-ins instead of inventing new ones (keeps the template's bindings intact).
+  fieldIds?: string[]
+  skillSlugs?: string[]
+  modelId?: string
+}
+
+export async function aiEnhanceTemplate(
+  ctx: ActionContext,
+  input: AiEnhanceTemplateInput,
+): Promise<{ body: string }> {
+  const currentBody = input.currentBody?.trim() ?? ''
+  const instructions = input.instructions?.trim()
+  if (!currentBody && !instructions)
+    throw new Error('Nothing to work from — write a draft or describe what you want.')
+  const kind = input.category === 'email' ? 'email' : 'legal document'
+  const fieldList = (input.fieldIds ?? []).map((f) => f.trim()).filter(Boolean)
+  const baseSystem = [
+    `You revise reusable ${kind} TEMPLATES for a US law firm.`,
+    'Output the REVISED template body ONLY — no preamble, no explanation, no markdown code fences.',
+    'Preserve every existing {{merge_token}} that still applies; keep their exact snake_case names.',
+    'Wherever a value is filled in per client or matter, use a {{merge_token}} in double curly braces',
+    'with a snake_case name, e.g. {{client_name}}, {{effective_date}}; reuse a token name when a value recurs.',
+    fieldList.length
+      ? `When a fill-in matches one of these existing questionnaire fields, bind to it by reusing its exact token: ${fieldList
+          .map((f) => `{{${f}}}`)
+          .join(', ')}.`
+      : '',
+    'Keep clear headings and short paragraphs; practical and ready to edit.',
+    // Anti-hallucination — the same standard the chatbot and aiDraft hold.
+    'Never fabricate statutes, code sections, case names, or citations. Where a specific legal',
+    'citation would go, prefer a {{citation}} merge token or general phrasing the attorney can',
+    'verify; do not invent a section number.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const { system: catalogSystem, clientTools } = await withSkills(ctx, baseSystem)
+  const forced = await loadForcedSkills(ctx, input.skillSlugs)
+  const activeText = buildActiveSkillsText(forced)
+  const system = activeText ? `${catalogSystem}\n\n${activeText}` : catalogSystem
+  const model = input.modelId ? resolveAssistantModel(input.modelId)?.model : undefined
+  const userMsg = currentBody
+    ? `Current template:\n\n${currentBody}\n\n---\nRevision request: ${
+        instructions || 'Polish and tighten the language, fix structure and formatting, keep all merge tokens.'
+      }`
+    : `Draft a new ${kind} template. Request: ${instructions}`
+  const { reply } = await chatWithAssistantDetailed(
+    ctx.tenantId,
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: userMsg },
+    ],
+    { clientTools, model },
+  )
+  return { body: reply.trim() }
+}
+
 // Archive a standalone template through the core entity.archive action (status
 // 'archived' — kept as history, dropped from active listings). Append-only.
 export async function archiveTemplate(
