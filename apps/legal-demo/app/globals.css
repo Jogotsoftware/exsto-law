@@ -4236,6 +4236,99 @@ main.book-main {
   padding: 0.2rem;
   line-height: 0;
 }
+/* "New template" start-options chooser (scratch / clone / from questionnaire). */
+.tpl-new-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.tpl-new-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: 'icon title' 'icon desc';
+  column-gap: 0.7rem;
+  align-items: center;
+  text-align: left;
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border, #d9d9d9);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2, #f7f8fa);
+  cursor: pointer;
+}
+.tpl-new-option:hover {
+  border-color: var(--ring, #c9a227);
+}
+.tpl-new-option > svg {
+  grid-area: icon;
+  color: var(--navy, #1a2b4a);
+}
+.tpl-new-option-t {
+  grid-area: title;
+  font-weight: var(--weight-semibold, 600);
+}
+.tpl-new-option-d {
+  grid-area: desc;
+  font-size: 0.82rem;
+  color: var(--muted, #667);
+}
+.tpl-new-group-h {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #667);
+  margin-bottom: 0.45rem;
+}
+.tpl-new-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+.tpl-new-pick {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface, #fff);
+  cursor: pointer;
+  font: inherit;
+}
+.tpl-new-pick:hover {
+  border-color: var(--ring, #c9a227);
+  background: var(--surface-2, #f7f8fa);
+}
+.tpl-new-pick-name {
+  font-weight: var(--weight-medium, 500);
+  color: var(--navy, #1a2b4a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tpl-new-pick-meta {
+  flex: none;
+  font-size: 0.76rem;
+  color: var(--muted, #889);
+}
+.tpl-new-empty {
+  font-size: 0.84rem;
+  color: var(--muted, #889);
+  margin: 0;
+}
 .tpl-modal-input {
   width: 100%;
   min-height: 8.5rem;
@@ -4528,6 +4621,79 @@ main.book-main {
   outline: 2px solid var(--ring);
   outline-offset: 3px;
   border-radius: 2px;
+}
+/* Page break: a full-width dashed rule (the node's <hr>) with a centered
+   "Page break" caption. In print/export it forces an actual page break and the
+   marker is hidden. */
+.page-break {
+  position: relative;
+  text-align: center;
+  margin: 1.6em 0;
+  break-after: page;
+  page-break-after: always;
+}
+.page-break hr {
+  border: 0;
+  border-top: 1px dashed #c0c4cc;
+  margin: 0;
+}
+.page-break::after {
+  content: 'Page break';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 0 0.6em;
+  background: #fff;
+  font-size: 0.66em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9aa0a6;
+}
+.tpl-editor-content .page-break.ProseMirror-selectednode {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+@media print {
+  .page-break hr {
+    border-top: 0;
+  }
+  .page-break::after {
+    content: '';
+  }
+}
+/* `{{` variable autocomplete dropdown (appended to <body>, positioned at the
+   caret). Keyboard-driven; the active item is highlighted. */
+.tpl-var-suggest {
+  position: fixed;
+  z-index: 1000;
+  min-width: 12rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border, #d9d9d9);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+}
+.tpl-var-suggest-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--navy, #1a2b4a);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tpl-var-suggest-item.active,
+.tpl-var-suggest-item:hover {
+  background: var(--surface-2, #f1f3f6);
 }
 /* The "desk" — a soft grey surround the page floats on; scrolls long documents
    while the toolbar stays put above it. */
@@ -7601,6 +7767,142 @@ button.danger.outline:hover:not(:disabled) {
 }
 .tpl-newfield input {
   width: 12rem;
+}
+/* Service "Documents" manager — a clean header + pills + one add row (replaces
+   the old cramped, dual-control "documents this service produces" block). */
+.tpl-docs {
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: var(--radius-md, 10px);
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--surface, #fff);
+}
+.tpl-docs-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+.tpl-docs-title {
+  font-size: 1rem;
+  margin: 0;
+}
+.tpl-docs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+}
+.tpl-docs-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.3rem 0.25rem 0.65rem;
+  background: var(--surface-2, #f1f3f6);
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.tpl-docs-pill button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted, #889);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 1rem;
+}
+.tpl-docs-pill button:hover {
+  background: rgba(176, 0, 32, 0.12);
+  color: #b00020;
+}
+.tpl-docs-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+.tpl-docs-select,
+.tpl-docs-new {
+  height: 2.1rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border, #d9d9d9);
+  border-radius: var(--radius-sm, 8px);
+  font: inherit;
+  font-size: 0.88rem;
+  background: var(--surface, #fff);
+}
+.tpl-docs-new {
+  flex: 1;
+  min-width: 12rem;
+}
+.tpl-docs-addbtn {
+  height: 2.1rem;
+  padding: 0 0.9rem;
+  border: 1px solid var(--border, #d9d9d9);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2, #f1f3f6);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tpl-docs-addbtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Collapsible "Insert a field" — a toggle header + a hidden body (default
+   collapsed); typing `{{` in the editor is the primary path. */
+.tpl-insert-collapsible {
+  display: block;
+}
+.tpl-insert-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 0;
+  background: transparent;
+  padding: 0.2rem 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+.tpl-insert-caret {
+  display: inline-block;
+  transition: transform 0.12s ease;
+  font-size: 0.8rem;
+  color: var(--muted, #889);
+}
+.tpl-insert-caret.open {
+  transform: rotate(90deg);
+}
+.tpl-insert-count {
+  font-weight: 600;
+  font-size: 0.72rem;
+  background: var(--surface-2, #eef1f5);
+  color: var(--muted, #667);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+}
+.tpl-insert-hint {
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--muted, #99a);
+}
+.tpl-insert-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
 }
 /* Document-styled template canvas — a white page on a soft "desk", so a template
    reads like a Word document rather than a bare text box. Shared by the standalone

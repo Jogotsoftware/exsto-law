@@ -9,7 +9,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
-import { SparklesIcon, FileTextIcon, EyeIcon, LayersIcon, XIcon } from '@/components/icons'
+import {
+  SparklesIcon,
+  FileTextIcon,
+  EyeIcon,
+  LayersIcon,
+  XIcon,
+  PlusIcon,
+  CopyIcon,
+  LayoutGridIcon,
+} from '@/components/icons'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
@@ -50,6 +59,15 @@ interface AiSkillOpt {
   slug: string
   name: string
   practiceArea: string
+}
+
+// A questionnaire from the firm library — used to seed a new template with its
+// fields as {{variables}}. Only the bits the chooser consumes are typed.
+interface QuestionnaireOpt {
+  questionnaireTemplateId: string
+  name: string
+  fieldCount: number
+  schema?: { sections?: Array<{ fields?: Array<{ id?: string; label?: string }> }> }
 }
 
 const EMPTY_DRAFT: Draft = {
@@ -121,6 +139,10 @@ export default function TemplatesPage() {
   const [importing, setImporting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [showFields, setShowFields] = useState(false)
+  // "New template" start-options chooser: scratch / clone existing / from a
+  // questionnaire. Questionnaires load lazily the first time the chooser opens.
+  const [showNew, setShowNew] = useState(false)
+  const [questionnaires, setQuestionnaires] = useState<QuestionnaireOpt[] | null>(null)
   // Page setup (paper size + font scale) — a per-template VIEW/print preference,
   // persisted client-side (localStorage), so the canvas + preview render true to
   // the chosen page. Not substrate state (it never affects what's stored).
@@ -201,6 +223,17 @@ export default function TemplatesPage() {
       hasQuestion.has(name) ? 'matched' : known.has(name) ? 'orphaned' : 'unknown'
   }, [libraryTokens, draft?.variables])
 
+  // Candidate names for the editor's `{{` autocomplete: the question library, the
+  // standard merge tokens, and the template's own defined variables.
+  const suggestVariables = useMemo(() => {
+    const set = new Set<string>([
+      ...libraryTokens,
+      ...STANDARD_TOKENS.map((t) => t.id),
+      ...Object.keys(draft?.variables ?? {}),
+    ])
+    return [...set].sort()
+  }, [libraryTokens, draft?.variables])
+
   // Escape closes the "Draft with AI" modal (and restores focus to its trigger).
   useEffect(() => {
     if (!showAi) return
@@ -270,6 +303,67 @@ export default function TemplatesPage() {
     setAiPrompt('')
     loadPageSetup(null)
     setDraft({ ...EMPTY_DRAFT })
+    setSeedKey((k) => k + 1)
+  }
+
+  // Open the "how do you want to start?" chooser; lazy-load questionnaires once.
+  function openNewChooser() {
+    setShowNew(true)
+    if (questionnaires === null) {
+      callAttorneyMcp<{ questionnaires: QuestionnaireOpt[] }>({
+        toolName: 'legal.questionnaire_template.list',
+      })
+        .then((r) => setQuestionnaires(r.questionnaires ?? []))
+        .catch(() => setQuestionnaires([]))
+    }
+  }
+
+  // Start from scratch (the original behavior), now routed through the chooser.
+  function startFromScratch() {
+    setShowNew(false)
+    newDraft()
+  }
+
+  // Clone an existing template into a brand-new, unsaved draft (no entity id).
+  function startFromClone(t: Template) {
+    setShowNew(false)
+    setAiPrompt('')
+    loadPageSetup(null)
+    setDraft({
+      templateEntityId: null,
+      name: `${t.name} (copy)`,
+      category: t.category,
+      body: t.body,
+      docKind: t.docKind ?? '',
+      variables: t.variables ?? {},
+    })
+    setSeedKey((k) => k + 1)
+  }
+
+  // Seed a new draft from a questionnaire: each field becomes a {{token}} in the
+  // body (labelled) and a defined text variable, so the document is pre-wired to
+  // the intake answers.
+  function startFromQuestionnaire(q: QuestionnaireOpt) {
+    setShowNew(false)
+    const fields = (q.schema?.sections ?? []).flatMap((s) => s.fields ?? [])
+    const variables: TemplateVariables = {}
+    const lines: string[] = []
+    for (const f of fields) {
+      const tok = (f.id ?? '').trim().toLowerCase()
+      if (!tok || variables[tok]) continue
+      variables[tok] = { type: 'text' }
+      lines.push(`${f.label?.trim() || humanize(tok)}: {{${tok}}}`)
+    }
+    setAiPrompt('')
+    loadPageSetup(null)
+    setDraft({
+      templateEntityId: null,
+      name: q.name ? `${q.name} — document` : '',
+      category: 'document',
+      body: lines.join('\n\n'),
+      docKind: '',
+      variables,
+    })
     setSeedKey((k) => k + 1)
   }
 
@@ -489,13 +583,98 @@ export default function TemplatesPage() {
       >
         <h1>Templates</h1>
         {!draft && (
-          <button className="primary" onClick={newDraft}>
+          <button className="primary" onClick={openNewChooser}>
             New template
           </button>
         )}
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      {showNew && (
+        <div className="tpl-modal-backdrop" onClick={() => setShowNew(false)}>
+          <div
+            className="tpl-modal tpl-new-modal"
+            role="dialog"
+            aria-label="New template"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="tpl-modal-head">
+              <PlusIcon size={16} />
+              <span>New template</span>
+              <button
+                type="button"
+                className="tpl-modal-x"
+                onClick={() => setShowNew(false)}
+                aria-label="Close"
+              >
+                <XIcon size={16} />
+              </button>
+            </div>
+            <div className="tpl-new-body">
+              <button type="button" className="tpl-new-option" onClick={startFromScratch}>
+                <FileTextIcon size={18} />
+                <span className="tpl-new-option-t">Start from scratch</span>
+                <span className="tpl-new-option-d">A blank document you build yourself.</span>
+              </button>
+
+              <div className="tpl-new-group">
+                <div className="tpl-new-group-h">
+                  <CopyIcon size={15} /> Clone an existing template
+                </div>
+                {templates && templates.length > 0 ? (
+                  <ul className="tpl-new-list">
+                    {templates.map((t) => (
+                      <li key={t.templateEntityId}>
+                        <button
+                          type="button"
+                          className="tpl-new-pick"
+                          onClick={() => startFromClone(t)}
+                        >
+                          <span className="tpl-new-pick-name">{t.name || 'Untitled'}</span>
+                          <span className="tpl-new-pick-meta">{t.category}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="tpl-new-empty">No templates yet.</p>
+                )}
+              </div>
+
+              <div className="tpl-new-group">
+                <div className="tpl-new-group-h">
+                  <LayoutGridIcon size={15} /> Start from a questionnaire
+                </div>
+                {questionnaires === null ? (
+                  <p className="tpl-new-empty">Loading questionnaires…</p>
+                ) : questionnaires.length > 0 ? (
+                  <ul className="tpl-new-list">
+                    {questionnaires.map((q) => (
+                      <li key={q.questionnaireTemplateId}>
+                        <button
+                          type="button"
+                          className="tpl-new-pick"
+                          onClick={() => startFromQuestionnaire(q)}
+                        >
+                          <span className="tpl-new-pick-name">
+                            {q.name || 'Untitled questionnaire'}
+                          </span>
+                          <span className="tpl-new-pick-meta">
+                            {q.fieldCount} field{q.fieldCount === 1 ? '' : 's'}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="tpl-new-empty">No questionnaires in the library.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {draft && (
         <section style={{ marginBottom: '1.5rem' }}>
@@ -688,6 +867,7 @@ export default function TemplatesPage() {
                 onChange={onEditorChange}
                 editorRef={editorRef}
                 validateVariable={validateVariable}
+                variableNames={suggestVariables}
               />
             </div>
             {showPreview && (

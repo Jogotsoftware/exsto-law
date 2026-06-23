@@ -16,9 +16,24 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
+import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { EyeIcon } from '@/components/icons'
 import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
+
+// Standard merge tokens available in every document (filled at generation time
+// from the client/matter), so the `{{` autocomplete and chip coloring recognize
+// them even when they aren't bound to a questionnaire field.
+const STANDARD_TOKENS = [
+  'client_name',
+  'client_email',
+  'client_address',
+  'matter_number',
+  'firm_name',
+  'attorney_name',
+  'effective_date',
+  'today',
+]
 
 interface ServiceDefinition {
   serviceKey: string
@@ -392,12 +407,6 @@ export default function TemplateEditorPage() {
 
   return (
     <>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.2rem' }}>
-        Choose which documents this service produces, then write each one. Insert a field by
-        clicking a question below — that places a marker bound to the answer. Generating a document
-        fills those markers from the client&rsquo;s answers; no AI is involved.
-      </p>
-
       {error && <div className="alert alert-error">{error}</div>}
       {note && (
         <div
@@ -495,34 +504,40 @@ function DocumentsManager({
   const available = library.filter((l) => !docs.includes(l.docKind))
 
   return (
-    <section style={{ borderLeft: '3px solid var(--border)' }}>
-      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Documents this service produces</span>
+    <section className="tpl-docs">
+      <div className="tpl-docs-head">
+        <h2 className="tpl-docs-title">Documents</h2>
+        <Link href="/attorney/templates" className="back-link">
+          Open template library →
+        </Link>
+      </div>
       {err && (
         <div className="alert alert-error" style={{ marginTop: '0.4rem' }}>
           {err}
         </div>
       )}
-      <div className="qb-pills">
-        {docs.map((d) => (
-          <span key={d} className="qb-pill">
-            {humanKind(d)}
-            <button
-              type="button"
-              title="Remove"
-              disabled={busy}
-              onClick={() => void persist(docs.filter((x) => x !== d))}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-        {docs.length === 0 && (
-          <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>None yet</span>
-        )}
-      </div>
-      <div className="qb-pill-add">
+      {docs.length > 0 && (
+        <div className="tpl-docs-pills">
+          {docs.map((d) => (
+            <span key={d} className="tpl-docs-pill">
+              {humanKind(d)}
+              <button
+                type="button"
+                title="Remove this document"
+                aria-label={`Remove ${humanKind(d)}`}
+                disabled={busy}
+                onClick={() => void persist(docs.filter((x) => x !== d))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="tpl-docs-add">
         {available.length > 0 && (
           <select
+            className="tpl-docs-select"
             value=""
             aria-label="Add a document from the template library"
             disabled={busy}
@@ -530,7 +545,7 @@ function DocumentsManager({
               if (e.target.value) add(e.target.value)
             }}
           >
-            <option value="">Add from template library…</option>
+            <option value="">+ Add from library…</option>
             {available.map((l) => (
               <option key={l.docKind} value={l.docKind}>
                 {l.name}
@@ -539,6 +554,7 @@ function DocumentsManager({
           </select>
         )}
         <input
+          className="tpl-docs-new"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -547,14 +563,16 @@ function DocumentsManager({
               add(draft)
             }
           }}
-          placeholder="or type a new one, e.g. operating agreement"
+          placeholder="or name a new document…"
         />
-        <button type="button" onClick={() => add(draft)} disabled={busy || !draft.trim()}>
+        <button
+          type="button"
+          className="tpl-docs-addbtn"
+          onClick={() => add(draft)}
+          disabled={busy || !draft.trim()}
+        >
           Add
         </button>
-        <Link href="/attorney/templates" className="back-link" style={{ marginLeft: 'auto' }}>
-          Open template library →
-        </Link>
       </div>
     </section>
   )
@@ -583,6 +601,9 @@ function KindEditor({
   const [libNote, setLibNote] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [showAi, setShowAi] = useState(false)
+  // "Insert a field" collapses by default so the field list doesn't eat vertical
+  // space — typing `{{` in the editor is the primary way to drop a field anyway.
+  const [showFields, setShowFields] = useState(false)
   const editorRef = useRef<TemplateEditorHandle | null>(null)
   // HTML seed for the rich editor + a key that remounts it when the body is
   // replaced wholesale (loading a library template). Normal typing flows through
@@ -623,6 +644,13 @@ function KindEditor({
   const tokens = extractTokens(text)
   const fieldIds = new Set(fields.map((f) => f.id))
   const orphans = tokens.filter((tok) => !fieldIds.has(tok))
+
+  // Editor `{{` autocomplete + chip coloring: a bound questionnaire field is
+  // "matched", a standard merge token is recognized but unbound ("orphaned"),
+  // anything else is "unknown" (and surfaces in the orphans warning below).
+  const suggestVariables = [...new Set([...fields.map((f) => f.id), ...STANDARD_TOKENS])].sort()
+  const validateVariable = (name: string): VariableStatus =>
+    fieldIds.has(name) ? 'matched' : STANDARD_TOKENS.includes(name) ? 'orphaned' : 'unknown'
 
   // Insert a bound field as an atomic {{marker}} chip at the cursor. The editor's
   // onChange then refreshes `text` (the markdown source of truth).
@@ -745,30 +773,53 @@ function KindEditor({
         {libNote && <span style={{ color: '#166534', fontSize: '0.82rem' }}>{libNote}</span>}
       </div>
 
-      <div className="tpl-insert">
-        <span className="tpl-insert-label">Insert a field:</span>
-        {fields.length === 0 && <span className="text-muted">No questions yet — add one →</span>}
-        {fields.map((f) => (
-          <button key={f.id} className="qb-pill" type="button" onClick={() => insertField(f.id)}>
-            {f.label}
-          </button>
-        ))}
-        <span className="tpl-newfield">
-          <input
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                void addNewField()
-              }
-            }}
-            placeholder="New field label…"
-          />
-          <button type="button" onClick={() => void addNewField()} disabled={!newLabel.trim()}>
-            + Add &amp; insert
-          </button>
-        </span>
+      <div className="tpl-insert tpl-insert-collapsible">
+        <button
+          type="button"
+          className="tpl-insert-toggle"
+          aria-expanded={showFields}
+          onClick={() => setShowFields((s) => !s)}
+        >
+          <span className={`tpl-insert-caret${showFields ? ' open' : ''}`} aria-hidden="true">
+            ▸
+          </span>
+          Insert a field
+          {fields.length > 0 && <span className="tpl-insert-count">{fields.length}</span>}
+          <span className="tpl-insert-hint">or just type {'{{'} in the document</span>
+        </button>
+        {showFields && (
+          <div className="tpl-insert-body">
+            {fields.length === 0 && (
+              <span className="text-muted">No questions yet — add one →</span>
+            )}
+            {fields.map((f) => (
+              <button
+                key={f.id}
+                className="qb-pill"
+                type="button"
+                onClick={() => insertField(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+            <span className="tpl-newfield">
+              <input
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void addNewField()
+                  }
+                }}
+                placeholder="New field label…"
+              />
+              <button type="button" onClick={() => void addNewField()} disabled={!newLabel.trim()}>
+                + Add &amp; insert
+              </button>
+            </span>
+          </div>
+        )}
       </div>
 
       {orphans.length > 0 && (
@@ -800,7 +851,9 @@ function KindEditor({
               key={editorKey}
               initialHtml={seedHtml}
               editorRef={editorRef}
-              placeholder="Write the document. Click a field above to insert it as a marker…"
+              placeholder="Write the document. Type {{ to insert a field…"
+              validateVariable={validateVariable}
+              variableNames={suggestVariables}
               onChange={(html) => {
                 setText(htmlToMarkdown(html))
                 setSaved(false)
