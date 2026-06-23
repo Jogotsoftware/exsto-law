@@ -242,3 +242,71 @@ export async function sendInvoice(
     messageId: mail.messageId,
   }
 }
+
+export interface PayInvoiceInput {
+  invoiceEntityId: string
+  // 'manual' (attorney recorded a payment) or a processor name; defaults to
+  // 'manual'. A payment-processor webhook will call this with its own method +
+  // reference later — the same path.
+  method?: string | null
+  amount?: string | null // decimal string; defaults to the invoice total
+  reference?: string | null // check number, processor charge id, etc.
+  paidDate?: string | null // YYYY-MM-DD; defaults to today (in the handler)
+  note?: string | null
+}
+
+export interface PaidInvoice {
+  paid: boolean
+  invoiceNumber: string
+  status: string
+  method: string
+  amount: string | null
+  paidDate: string
+}
+
+// Record a payment against an issued/sent invoice (invoice_status='paid' +
+// invoice.paid) through the core. v1 is a manual "Mark paid"; a payment-processor
+// webhook will call the same action later. The status guard mirrors the handler
+// so the UI gets a clean error before an action is even submitted.
+export async function payInvoice(ctx: ActionContext, input: PayInvoiceInput): Promise<PaidInvoice> {
+  if (!input.invoiceEntityId?.trim()) throw new Error('invoiceEntityId is required.')
+  const invoice = await getInvoice(ctx, input.invoiceEntityId)
+  if (!invoice) throw new Error('Invoice not found.')
+  if (invoice.status === 'paid') {
+    throw new Error(`Invoice ${invoice.invoiceNumber} is already marked paid.`)
+  }
+  if (invoice.status !== 'issued' && invoice.status !== 'sent') {
+    throw new Error(
+      `Invoice ${invoice.invoiceNumber} is ${invoice.status}; only an issued or sent invoice can be marked paid.`,
+    )
+  }
+  const res = await submitAction(ctx, {
+    actionKindName: 'invoice.pay',
+    intentKind: 'adjustment',
+    payload: {
+      invoice_entity_id: input.invoiceEntityId,
+      method: input.method ?? null,
+      amount: input.amount ?? null,
+      reference: input.reference ?? null,
+      paid_date: input.paidDate ?? null,
+      note: input.note ?? null,
+    },
+  })
+  const effect = res.effects[0] as
+    | {
+        invoiceNumber: string
+        status: string
+        method: string
+        amount: string | null
+        paidDate: string
+      }
+    | undefined
+  return {
+    paid: true,
+    invoiceNumber: effect?.invoiceNumber ?? invoice.invoiceNumber,
+    status: effect?.status ?? 'paid',
+    method: effect?.method ?? (input.method?.trim() || 'manual'),
+    amount: effect?.amount ?? input.amount ?? invoice.total,
+    paidDate: effect?.paidDate ?? input.paidDate ?? '',
+  }
+}

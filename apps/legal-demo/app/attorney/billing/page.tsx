@@ -447,6 +447,7 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [pdf, setPdf] = useState<{ url: string; filename: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [paying, setPaying] = useState<string | null>(null)
   const linkStyle: React.CSSProperties = {
     background: 'none',
     border: 'none',
@@ -530,6 +531,26 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
     }
   }
 
+  // Manual "Mark paid" — records a payment through the same core action a payment
+  // processor will call later. v1 has no amount prompt: it records the full total.
+  async function markPaid(inv: InvoiceSummary) {
+    setPaying(inv.invoiceEntityId)
+    setError(null)
+    setNotice(null)
+    try {
+      await callAttorneyMcp<{ paid: boolean }>({
+        toolName: 'legal.invoice.pay',
+        input: { invoiceEntityId: inv.invoiceEntityId, method: 'manual' },
+      })
+      setNotice(`${inv.invoiceNumber} marked paid.`)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPaying(null)
+    }
+  }
+
   if (error && invoices === null) return <div className="alert alert-error">{error}</div>
   if (invoices === null)
     return (
@@ -571,8 +592,10 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                   </td>
                   <td>{inv.clientName}</td>
                   <td>
-                    <span className={`badge ${inv.status === 'sent' ? 'ok' : 'info'}`}>
-                      {inv.status}
+                    <span
+                      className={`badge ${inv.status === 'paid' || inv.status === 'sent' ? 'ok' : 'info'}`}
+                    >
+                      {inv.status === 'paid' ? '✓ paid' : inv.status}
                     </span>
                   </td>
                   <td>{fmtDate(inv.issuedDate)}</td>
@@ -585,13 +608,26 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                     >
                       {openId === inv.invoiceEntityId ? 'Hide' : 'View'}
                     </button>
-                    <button
-                      className="primary"
-                      disabled={busy === inv.invoiceEntityId}
-                      onClick={() => send(inv)}
-                    >
-                      {busy === inv.invoiceEntityId ? '…' : 'Send'}
-                    </button>
+                    {inv.status === 'paid' ? (
+                      <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Paid</span>
+                    ) : (
+                      <>
+                        <button
+                          style={{ ...linkStyle, marginRight: '0.7rem' }}
+                          disabled={paying === inv.invoiceEntityId}
+                          onClick={() => markPaid(inv)}
+                        >
+                          {paying === inv.invoiceEntityId ? '…' : 'Mark paid'}
+                        </button>
+                        <button
+                          className="primary"
+                          disabled={busy === inv.invoiceEntityId}
+                          onClick={() => send(inv)}
+                        >
+                          {busy === inv.invoiceEntityId ? '…' : 'Send'}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
                 {openId === inv.invoiceEntityId && (
