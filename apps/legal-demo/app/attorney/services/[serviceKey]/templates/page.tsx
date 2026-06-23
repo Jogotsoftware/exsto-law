@@ -78,6 +78,207 @@ function humanKind(k: string): string {
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+interface AiModelOpt {
+  id: string
+  label: string
+  available: boolean
+  provider: string
+  model: string
+}
+interface AiSkillOpt {
+  slug: string
+  name: string
+  practiceArea: string
+}
+
+// Skill-aware AI assist for a service document. Revises the current body (or drafts
+// fresh when empty) via legal.template.ai_enhance — same Anthropic key, skill
+// auto-routing, and anti-hallucination standard as the standalone library and the
+// chatbot. It returns text the attorney reviews and saves; nothing is persisted
+// until "Save new version". The model + forced skills are pickable; the default is
+// the cheapest available Claude (Haiku), since a polish pass is simple.
+function AiEnhancePanel({
+  currentBody,
+  fieldIds,
+  onResult,
+  onClose,
+}: {
+  currentBody: string
+  fieldIds: string[]
+  onResult: (body: string) => void
+  onClose: () => void
+}) {
+  const [instr, setInstr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [models, setModels] = useState<AiModelOpt[]>([])
+  const [modelId, setModelId] = useState('')
+  const [skills, setSkills] = useState<AiSkillOpt[]>([])
+  const [skillSlugs, setSkillSlugs] = useState<string[]>([])
+  const [skillQuery, setSkillQuery] = useState('')
+  const hasBody = currentBody.trim().length > 0
+
+  useEffect(() => {
+    let cancelled = false
+    callAttorneyMcp<{ models: AiModelOpt[] }>({ toolName: 'legal.assistant.models' })
+      .then((r) => {
+        if (cancelled) return
+        const claude = (r.models ?? []).filter((m) => m.provider === 'anthropic' && m.available)
+        setModels(claude)
+        const rank = (m: AiModelOpt) =>
+          /haiku/i.test(m.model) ? 0 : /sonnet/i.test(m.model) ? 1 : /opus/i.test(m.model) ? 2 : 3
+        const cheapest = [...claude].sort((a, b) => rank(a) - rank(b))[0]
+        setModelId((cur) => cur || cheapest?.id || '')
+      })
+      .catch(() => {})
+    callAttorneyMcp<{ skills: AiSkillOpt[] }>({ toolName: 'legal.skill.list' })
+      .then((r) => {
+        if (!cancelled) setSkills(r.skills ?? [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function run() {
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await callAttorneyMcp<{ body: string }>({
+        toolName: 'legal.template.ai_enhance',
+        input: {
+          currentBody,
+          instructions: instr.trim() || undefined,
+          category: 'document',
+          fieldIds: fieldIds.length ? fieldIds : undefined,
+          skillSlugs: skillSlugs.length ? skillSlugs : undefined,
+          modelId: modelId || undefined,
+        },
+      })
+      if (r.body?.trim()) {
+        onResult(r.body.trim())
+        onClose()
+      } else {
+        setErr('The model returned nothing — try again.')
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const q = skillQuery.trim().toLowerCase()
+  const skillMatches = q
+    ? skills
+        .filter(
+          (s) =>
+            !skillSlugs.includes(s.slug) &&
+            (s.name.toLowerCase().includes(q) ||
+              s.slug.toLowerCase().includes(q) ||
+              s.practiceArea.toLowerCase().includes(q)),
+        )
+        .slice(0, 8)
+    : []
+
+  return (
+    <div className="tpl-ai-panel">
+      <textarea
+        className="tpl-ai-instr"
+        value={instr}
+        onChange={(e) => setInstr(e.target.value)}
+        rows={3}
+        disabled={busy}
+        placeholder={
+          hasBody
+            ? 'What should change? e.g. “add a severability clause”, “make it more formal” — or leave blank for a polish pass.'
+            : 'Describe the document to draft, e.g. “a simple mutual NDA for a North Carolina LLC”.'
+        }
+      />
+      {!busy && (
+        <div className="tpl-ai-opts">
+          <label className="tpl-ai-opt">
+            <span className="tpl-ai-opt-lbl">Model</span>
+            <select
+              className="tpl-ai-opt-select"
+              value={modelId}
+              onChange={(e) => setModelId(e.target.value)}
+            >
+              {models.length === 0 && <option value="">Default</option>}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="tpl-ai-skillpick">
+            <span className="tpl-ai-opt-lbl">Skills (optional — force a playbook)</span>
+            {skillSlugs.length > 0 && (
+              <div className="tpl-ai-skillchips">
+                {skillSlugs.map((slug) => (
+                  <span key={slug} className="tpl-ai-skillchip">
+                    {skills.find((x) => x.slug === slug)?.name ?? slug}
+                    <button
+                      type="button"
+                      onClick={() => setSkillSlugs((p) => p.filter((x) => x !== slug))}
+                      aria-label="Remove skill"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <input
+              className="tpl-ai-skillsearch"
+              value={skillQuery}
+              onChange={(e) => setSkillQuery(e.target.value)}
+              placeholder="Search legal skills to force…"
+            />
+            {q && (
+              <div className="tpl-ai-skilllist">
+                {skillMatches.length === 0 ? (
+                  <div className="tpl-ai-skillempty">No matching skills.</div>
+                ) : (
+                  skillMatches.map((s) => (
+                    <button
+                      key={s.slug}
+                      type="button"
+                      className="tpl-ai-skillopt"
+                      onClick={() => {
+                        setSkillSlugs((p) => [...p, s.slug])
+                        setSkillQuery('')
+                      }}
+                    >
+                      <span>{s.name}</span>
+                      <span className="tpl-ai-skillarea">{s.practiceArea}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {err && (
+        <div className="alert alert-error" style={{ marginTop: '0.4rem' }}>
+          {err}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+        <button type="button" className="primary" onClick={() => void run()} disabled={busy}>
+          {busy ? 'Working…' : hasBody ? 'Enhance with AI' : 'Draft with AI'}
+        </button>
+        <button type="button" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function TemplateEditorPage() {
   const params = useParams<{ serviceKey: string }>()
   const serviceKey = params.serviceKey
@@ -381,6 +582,7 @@ function KindEditor({
   const [newLabel, setNewLabel] = useState('')
   const [libNote, setLibNote] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(false)
+  const [showAi, setShowAi] = useState(false)
   const editorRef = useRef<TemplateEditorHandle | null>(null)
   // HTML seed for the rich editor + a key that remounts it when the body is
   // replaced wholesale (loading a library template). Normal typing flows through
@@ -465,13 +667,22 @@ function KindEditor({
         <strong>{humanKind(template.documentKind)}</strong>
         <button
           type="button"
-          className={showPreview ? 'primary' : undefined}
+          className={showAi ? 'primary' : undefined}
           style={{
             marginLeft: 'auto',
             display: 'inline-flex',
             alignItems: 'center',
             gap: '0.35rem',
           }}
+          onClick={() => setShowAi((v) => !v)}
+          title="Draft or revise this document with skill-aware AI"
+        >
+          ✨ AI
+        </button>
+        <button
+          type="button"
+          className={showPreview ? 'primary' : undefined}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
           onClick={() => setShowPreview((v) => !v)}
           title="Preview the finished document with sample data, side by side"
         >
@@ -481,6 +692,23 @@ function KindEditor({
           {busy ? 'Saving…' : 'Save new version'}
         </button>
       </div>
+
+      {showAi && (
+        <AiEnhancePanel
+          currentBody={text}
+          fieldIds={fields.map((f) => f.id)}
+          onClose={() => setShowAi(false)}
+          onResult={(body) => {
+            // Replace the body with the AI revision; remount the editor to re-seed
+            // (typing flows through onChange, but a wholesale swap must re-seed HTML).
+            setText(body)
+            setSeedHtml(markdownToHtml(body))
+            setEditorKey((k) => k + 1)
+            setSaved(false)
+            setErr(null)
+          }}
+        />
+      )}
 
       <div className="tpl-insert" style={{ marginBottom: '0.5rem' }}>
         <span className="tpl-insert-label">Library:</span>
