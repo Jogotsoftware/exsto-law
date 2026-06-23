@@ -7,6 +7,9 @@ import './handlers/index.js'
 export * from './api/index.js'
 export * from './queries/index.js'
 export * from './templates/loader.js'
+// Matter lifecycle engine (ADR 0045) — read-only resolver + derivation. Shadow in
+// PR2 (nothing reads workflow_definition.states yet).
+export * from './lifecycle/index.js'
 // Contract H — deterministic template merge (WP2.5). `renderTemplate` +
 // `RenderResult` are exported by api/templateMerge (the wired draft.merge render),
 // so re-export only this module's editor utilities here to avoid the duplicate
