@@ -19,9 +19,18 @@ interface ModelPrice {
 }
 
 const PRICE_BY_FAMILY: Array<{ match: RegExp; price: ModelPrice }> = [
-  { match: /opus/i, price: { inputPer1M: 15, outputPer1M: 75, cacheWritePer1M: 18.75, cacheReadPer1M: 1.5 } },
-  { match: /sonnet/i, price: { inputPer1M: 3, outputPer1M: 15, cacheWritePer1M: 3.75, cacheReadPer1M: 0.3 } },
-  { match: /haiku/i, price: { inputPer1M: 1, outputPer1M: 5, cacheWritePer1M: 1.25, cacheReadPer1M: 0.1 } },
+  {
+    match: /opus/i,
+    price: { inputPer1M: 15, outputPer1M: 75, cacheWritePer1M: 18.75, cacheReadPer1M: 1.5 },
+  },
+  {
+    match: /sonnet/i,
+    price: { inputPer1M: 3, outputPer1M: 15, cacheWritePer1M: 3.75, cacheReadPer1M: 0.3 },
+  },
+  {
+    match: /haiku/i,
+    price: { inputPer1M: 1, outputPer1M: 5, cacheWritePer1M: 1.25, cacheReadPer1M: 0.1 },
+  },
 ]
 
 function priceFor(model: string): ModelPrice | null {
@@ -185,7 +194,9 @@ export async function getAiUsageSummary(
     totalCacheReadTokens: totals.cacheReadTokens,
     estimatedCostUsd: round2(estimatedCostUsd),
     pricedCoverage: totalTurns ? pricedTurns / totalTurns : 1,
-    byModel: [...byModel.values()].sort((a, b) => (b.estimatedCostUsd ?? 0) - (a.estimatedCostUsd ?? 0)),
+    byModel: [...byModel.values()].sort(
+      (a, b) => (b.estimatedCostUsd ?? 0) - (a.estimatedCostUsd ?? 0),
+    ),
     byDay: [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
   }
 }

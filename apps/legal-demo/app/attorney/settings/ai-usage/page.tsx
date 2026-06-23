@@ -44,9 +44,14 @@ const WINDOWS = [
 ]
 
 const fmtInt = (n: number) => n.toLocaleString('en-US')
-const fmtUsd = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtUsd = (n: number) =>
+  `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtTokens = (n: number) =>
-  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n)
+  n >= 1_000_000
+    ? `${(n / 1_000_000).toFixed(1)}M`
+    : n >= 1_000
+      ? `${(n / 1_000).toFixed(1)}k`
+      : String(n)
 
 function humanModel(model: string): string {
   if (/opus/i.test(model)) return 'Claude Opus'
@@ -128,8 +133,16 @@ export default function AiUsagePage() {
               marginBottom: '1.2rem',
             }}
           >
-            <StatCard label={`Estimated cost · ${summary.sinceDays}d`} value={fmtUsd(summary.estimatedCostUsd)} accent />
-            <StatCard label="Total tokens" value={fmtTokens(totalTokens)} sub={`${fmtInt(totalTokens)} tokens`} />
+            <StatCard
+              label={`Estimated cost · ${summary.sinceDays}d`}
+              value={fmtUsd(summary.estimatedCostUsd)}
+              accent
+            />
+            <StatCard
+              label="Total tokens"
+              value={fmtTokens(totalTokens)}
+              sub={`${fmtInt(totalTokens)} tokens`}
+            />
             <StatCard label="Assistant turns" value={fmtInt(summary.totalTurns)} />
           </div>
 
@@ -145,8 +158,8 @@ export default function AiUsagePage() {
               className="alert"
               style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}
             >
-              Cost shown for {Math.round(summary.pricedCoverage * 100)}% of turns — some usage is on a
-              model without a price in the estimate table.
+              Cost shown for {Math.round(summary.pricedCoverage * 100)}% of turns — some usage is on
+              a model without a price in the estimate table.
             </div>
           )}
 
@@ -190,7 +203,9 @@ export default function AiUsagePage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {summary.byDay.map((d) => (
                   <div key={d.day} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span style={{ width: 92, fontSize: '0.8rem', color: 'var(--muted)' }}>{d.day}</span>
+                    <span style={{ width: 92, fontSize: '0.8rem', color: 'var(--muted)' }}>
+                      {d.day}
+                    </span>
                     <div
                       style={{
                         flex: 1,
