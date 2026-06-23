@@ -139,9 +139,8 @@ export async function runGranolaProjection(
 // Manual-route matters get nothing here — the attorney email is their path (WP6).
 export async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: string): Promise<void> {
   const matterRoute = await withActionContext(ctx, async (client) => {
-    const res = await client.query<{ route: string | null; service_key: string | null }>(
-      `SELECT e.metadata->>'workflow_route' AS route,
-              (SELECT a.value #>> '{}'
+    const res = await client.query<{ service_key: string | null }>(
+      `SELECT (SELECT a.value #>> '{}'
                  FROM attribute a
                  JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
                 WHERE a.tenant_id = e.tenant_id AND a.entity_id = e.id
@@ -153,12 +152,23 @@ export async function enqueueAutoDrafts(ctx: ActionContext, matterEntityId: stri
     )
     return res.rows[0] ?? null
   })
-  if (matterRoute?.route !== 'auto') return
+
+  // Auto-draft is now data-driven (ADR 0045): this transcript-ingest hook drafts
+  // automatically iff the service's lifecycle has an automatic transition out of the
+  // `consulted` stage (the stage a matter is in when its transcript lands). That edge
+  // is `automatic` exactly for auto-route services — so this is the data-defined
+  // equivalent of the old `route === 'auto'` check, with NO behavior change, and it
+  // honors an attorney's edited lifecycle (PR4) once states is populated.
+  const { getService, resolveServiceLifecycle } = await import('./services.js')
+  const { hasAutomaticTransition } = await import('../lifecycle/index.js')
+  const lifecycle = matterRoute?.service_key
+    ? await resolveServiceLifecycle(ctx, matterRoute.service_key)
+    : null
+  if (!lifecycle || !hasAutomaticTransition(lifecycle, 'consulted')) return
 
   // Resolve the document kinds from the service config. Fall back to the OA when
   // the service is auto but lists no documents, so an auto service is never silent.
-  const { getService } = await import('./services.js')
-  const service = matterRoute.service_key ? await getService(ctx, matterRoute.service_key) : null
+  const service = matterRoute?.service_key ? await getService(ctx, matterRoute.service_key) : null
   const configured = service?.documents ?? []
   const documentKinds = configured.length > 0 ? configured : ['operating_agreement']
 
