@@ -84,6 +84,16 @@ export interface AssistantChatInput {
   pageContext?: { path?: string; [k: string]: unknown }
 }
 
+// A finished document the assistant produced this turn (via the produce_document
+// tool) — a deliverable the attorney can download (PDF/Word) or save to the
+// matter, distinct from the prose reply. This is the "chat produces a document"
+// path (beta ask e17ce80c): downloads attach to a produced document, NOT to every
+// chat reply.
+export interface ProducedDocument {
+  title: string
+  markdown: string
+}
+
 // One event of a streamed assistant turn, sent to the chat UI over SSE. `meta`
 // lands first (so the UI can show the model + a "cites sources" hint), then
 // thinking/text deltas, then a terminal `done` carrying the persisted eventId
@@ -102,6 +112,9 @@ export type AssistantChatStreamEvent =
   // The assistant loaded a specialized skill (playbook) for this turn — the UI
   // shows a "using <skill>" chip while it works.
   | { type: 'skill'; slug: string; name: string }
+  // The assistant produced a finished document — the UI shows it as a downloadable
+  // card (PDF/Word + save to matter), separate from the prose reply.
+  | { type: 'document'; title: string; markdown: string }
   | {
       type: 'done'
       eventId: string
@@ -121,6 +134,9 @@ export interface AssistantChatReply {
   model: string
   kind: AssistantTurnKind
   scope: AssistantScope
+  // Documents the assistant produced this turn (deliverables to download/save),
+  // distinct from the prose reply. Empty for ordinary answers.
+  documents?: ProducedDocument[]
 }
 
 export interface AssistantThreadEntry {
@@ -136,6 +152,9 @@ export interface AssistantThreadEntry {
   // Names of documents attached to this turn (on the user side), so a reopened
   // thread still shows what was attached.
   attachmentNames?: string[]
+  // Documents the assistant produced on this turn (assistant side), so a reopened
+  // thread still shows the downloadable document cards.
+  documents?: ProducedDocument[]
 }
 
 const SYSTEM_PROMPT = [
@@ -155,6 +174,10 @@ const SYSTEM_PROMPT = [
   // so the rule is: cite when confident, name-and-flag when not, never guess a number.
   'CITE THE GOVERNING LAW — when you state a legal rule or conclusion, name the controlling authority (the statute, regulation, or case) so the attorney can check it. Give a specific citation — a statute by name AND code section (e.g., "the Lanham Act, 15 U.S.C. § 1051 et seq."), or a case by name — ONLY when you are confident it is correct. If you are not certain of the exact section, subsection, pincite, or case name, name the statute or body of law generally (e.g., "the North Carolina Wage and Hour Act") and say the precise citation must be verified against the primary source. NEVER guess or invent a code section, subsection number, case name, date, or pincite to look authoritative — a wrong citation is worse than no citation. When web search is available, use it to confirm a citation before giving it.',
   'You also collect product feedback. When the attorney shares a complaint, idea, or praise: if it is vague or missing actionable detail (which screen, what they expected, the steps to reproduce), ask ONE short clarifying question first. Once you have a clear, specific item, CALL the log_feedback tool to file it with the right category, then tell the attorney it is logged and share the reference id the tool returns. Use the tool only for genuine product feedback, not for ordinary questions.',
+  // Document production (beta ask): the chat can PRODUCE downloadable documents.
+  // The deliverable goes through the tool (surfaced as a download card), never
+  // duplicated in prose — so downloads attach to real documents, not every reply.
+  'PRODUCING DOCUMENTS — when the attorney asks you to draft, write, or produce a DOCUMENT (a letter, memo, engagement letter, agreement, NDA, contract, notice, resolution, etc.) — as opposed to answering a question or explaining something — generate the COMPLETE document and deliver it by CALLING the produce_document tool with a concise title and the full document in markdown. The attorney then sees it as a downloadable card (PDF/Word) they can save to the matter. Do this ONLY for genuine document deliverables, never for ordinary answers, analysis, or advice. Put the document text ONLY in the tool call — your chat reply must then be a SINGLE short sentence pointing them to it (e.g. "Here\'s the engagement letter — download it or save it to the matter below."), never the document itself. All the accuracy and citation rules above apply fully to documents you produce.',
   'Keep replies focused and concise.',
 ].join(' ')
 
@@ -205,6 +228,52 @@ function buildFeedbackTool(ctx: ActionContext, input: AssistantChatInput): Clien
         pageContext: input.pageContext,
       })
       return `Feedback logged for the team. Reference id: ${eventId}.`
+    },
+  }
+}
+
+// Definition advertised to the model for the produce_document client tool. The
+// assistant calls it when the attorney asks it to PRODUCE a document (letter,
+// memo, agreement, NDA, …) — the document is surfaced as a downloadable card, not
+// pasted into the prose reply. Executed by buildProduceDocumentTool below.
+const PRODUCE_DOCUMENT_TOOL_DEF = {
+  name: 'produce_document',
+  description:
+    'Produce a finished, downloadable DOCUMENT (a letter, memo, agreement, NDA, contract, notice, resolution, etc.) when the attorney asks you to draft, write, or produce one. Pass a short title and the COMPLETE document as markdown. The attorney sees it as a downloadable card (PDF/Word) they can also save to the matter. Call this ONLY for a genuine document deliverable — never for ordinary answers, explanations, analysis, or advice. Put the document text ONLY in this tool call, not in your chat reply.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: {
+        type: 'string',
+        description: 'A concise document title, e.g. "Mutual NDA" or "Engagement Letter".',
+      },
+      document_markdown: {
+        type: 'string',
+        description:
+          'The COMPLETE document body in markdown (headings, paragraphs, signature blocks). This is the only place the document text should appear.',
+      },
+    },
+    required: ['title', 'document_markdown'],
+    additionalProperties: false,
+  },
+}
+
+// Build the produce_document ClientTool for this turn. Its run() captures the
+// produced document into `captured` (read back by the caller to surface the
+// downloadable card and to record it on the turn) and returns a short ack telling
+// the model not to repeat the document in prose. No substrate write here — saving
+// to a matter is the attorney's explicit, separate action on the card.
+function buildProduceDocumentTool(captured: ProducedDocument[]): ClientTool {
+  return {
+    definition: PRODUCE_DOCUMENT_TOOL_DEF,
+    name: 'produce_document',
+    run: async (raw) => {
+      const args = (raw ?? {}) as { title?: string; document_markdown?: string }
+      const title = (args.title ?? '').trim() || 'Document'
+      const markdown = (args.document_markdown ?? '').trim()
+      if (!markdown) return 'No document content was provided, so nothing was produced.'
+      captured.push({ title, markdown })
+      return `The document "${title}" is ready and shown to the attorney with download (PDF/Word) and save-to-matter options. Reply with ONE short sentence pointing them to it; do NOT repeat the document text.`
     },
   }
 }
@@ -401,6 +470,9 @@ export async function recordAssistantTurn(
     // Names of any documents the attorney attached to this turn (names only — the
     // text already shaped the reply; keeping it out of the event avoids bloat).
     attachmentNames?: string[] | null
+    // Documents the assistant produced this turn (title + markdown), recorded so a
+    // reopened thread can re-show the downloadable cards. Additive payload field.
+    producedDocuments?: ProducedDocument[] | null
     // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
     // Recorded additively in the event payload; powers the AI usage/cost view.
     usage?: AssistantUsage | null
@@ -428,6 +500,12 @@ export async function recordAssistantTurn(
         category: input.kind === 'feedback' ? (input.category ?? 'other') : null,
         page_context: input.pageContext ?? null,
         attachment_names: input.attachmentNames ?? null,
+        // Documents produced this turn (assistant deliverables), so a reopened
+        // thread re-shows the download cards. Null when none were produced.
+        produced_documents:
+          input.producedDocuments && input.producedDocuments.length
+            ? input.producedDocuments
+            : null,
         // Token usage (snake_case to match the rest of the payload), null when the
         // provider doesn't report it. The actor is captured as source_ref above, so
         // the usage view can attribute cost per attorney.
@@ -471,6 +549,8 @@ export async function assistantChat(
 
   let reply: string
   let citations: string[] = []
+  // Documents the model produces this turn (Claude only, via produce_document).
+  const producedDocuments: ProducedDocument[] = []
   // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
   let usage: AssistantUsage | null = null
 
@@ -510,8 +590,12 @@ export async function assistantChat(
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
       clientTools: catalog.length
-        ? [buildFeedbackTool(ctx, input), buildSkillTool(ctx)]
-        : [buildFeedbackTool(ctx, input)],
+        ? [
+            buildFeedbackTool(ctx, input),
+            buildSkillTool(ctx),
+            buildProduceDocumentTool(producedDocuments),
+          ]
+        : [buildFeedbackTool(ctx, input), buildProduceDocumentTool(producedDocuments)],
     })
     reply = result.reply
     citations = result.citations
@@ -530,10 +614,20 @@ export async function assistantChat(
     category: input.category ?? null,
     pageContext: input.pageContext ?? null,
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
+    producedDocuments,
     usage,
   })
 
-  return { eventId, reply, citations, provider: model.provider, model: model.model, kind, scope }
+  return {
+    eventId,
+    reply,
+    citations,
+    provider: model.provider,
+    model: model.model,
+    kind,
+    scope,
+    documents: producedDocuments.length ? producedDocuments : undefined,
+  }
 }
 
 // Streaming counterpart of assistantChat: yields meta → thinking/text deltas →
@@ -564,6 +658,9 @@ export async function* assistantChatStream(
 
   let reply = ''
   let citations: string[] = []
+  // Documents the model produces this turn (Claude only, via produce_document);
+  // captured by the tool's run() so they can be recorded on the turn.
+  const producedDocuments: ProducedDocument[] = []
   let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
@@ -608,8 +705,12 @@ export async function* assistantChatStream(
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
       clientTools: catalog.length
-        ? [buildFeedbackTool(ctx, input), buildSkillTool(ctx)]
-        : [buildFeedbackTool(ctx, input)],
+        ? [
+            buildFeedbackTool(ctx, input),
+            buildSkillTool(ctx),
+            buildProduceDocumentTool(producedDocuments),
+          ]
+        : [buildFeedbackTool(ctx, input), buildProduceDocumentTool(producedDocuments)],
     })) {
       if (chunk.type === 'text') {
         reply += chunk.text
@@ -625,6 +726,14 @@ export async function* assistantChatStream(
         const slug = ((chunk.input ?? {}) as { slug?: string }).slug ?? ''
         const name = catalog.find((s) => s.slug === slug)?.name ?? slug
         if (slug) yield { type: 'skill', slug, name }
+      } else if (chunk.type === 'tool' && chunk.name === 'produce_document') {
+        // The model produced a document — surface it as a downloadable card now
+        // (the prose lead-in streams right after). The tool's run() also captures
+        // it into producedDocuments for the recorded turn.
+        const inp = (chunk.input ?? {}) as { title?: string; document_markdown?: string }
+        const title = (inp.title ?? '').trim() || 'Document'
+        const markdown = (inp.document_markdown ?? '').trim()
+        if (markdown) yield { type: 'document', title, markdown }
       }
     }
   }
@@ -641,6 +750,7 @@ export async function* assistantChatStream(
     category: input.category ?? null,
     pageContext: input.pageContext ?? null,
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
+    producedDocuments,
     usage,
   })
 
@@ -717,6 +827,7 @@ export async function listAssistantThread(
         kind?: AssistantTurnKind
         citations?: string[]
         attachment_names?: string[] | null
+        produced_documents?: ProducedDocument[] | null
       }
       occurred_at: string
     }>(
@@ -750,7 +861,13 @@ export async function listAssistantThread(
           reply: '',
           attachmentNames: r.payload.attachment_names ?? undefined,
         },
-        { ...base, role: 'assistant' as const, message: '', reply: r.payload.reply ?? '' },
+        {
+          ...base,
+          role: 'assistant' as const,
+          message: '',
+          reply: r.payload.reply ?? '',
+          documents: r.payload.produced_documents ?? undefined,
+        },
       ]
     })
   })
