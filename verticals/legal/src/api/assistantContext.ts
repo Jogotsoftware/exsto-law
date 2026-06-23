@@ -26,7 +26,10 @@
 import type { ActionContext } from '@exsto/substrate'
 import { getMatter, type MatterDetail } from '../queries/matters.js'
 import { getContact } from '../queries/contacts.js'
-import { getDraftVersion } from '../queries/drafts.js'
+import { getDraftVersion, listMatterDraftVersions } from '../queries/drafts.js'
+import { listTasksByMatter } from '../queries/tasks.js'
+import { listMeetingsForMatter } from '../queries/meetings.js'
+import { listMatterInvoiced } from '../queries/billing.js'
 import { matterCommunicationBodies, type MatterMessageBody } from './mailWorkspace.js'
 
 export interface AssistantContext {
@@ -54,6 +57,12 @@ interface DepthBudget {
   transcriptChars: number
   intakeChars: number
   draftChars: number // 0 ⇒ omit the draft
+  // Matter sub-resources (short list items — cheap, so even lean includes the
+  // essentials). 0 ⇒ omit that section.
+  taskCount: number
+  documentCount: number
+  meetingCount: number
+  invoicedCount: number
   // Contact scope: how many of the contact's matters to expand.
   contactMaxMatters: number
 }
@@ -67,6 +76,10 @@ const DEPTH_BUDGETS: Record<ContextDepth, DepthBudget> = {
     transcriptChars: 1500,
     intakeChars: 800,
     draftChars: 0,
+    taskCount: 8,
+    documentCount: 6,
+    meetingCount: 0,
+    invoicedCount: 0,
     contactMaxMatters: 2,
   },
   balanced: {
@@ -75,6 +88,10 @@ const DEPTH_BUDGETS: Record<ContextDepth, DepthBudget> = {
     transcriptChars: 4000,
     intakeChars: 1500,
     draftChars: 2000,
+    taskCount: 20,
+    documentCount: 15,
+    meetingCount: 8,
+    invoicedCount: 15,
     contactMaxMatters: 3,
   },
   generous: {
@@ -83,6 +100,10 @@ const DEPTH_BUDGETS: Record<ContextDepth, DepthBudget> = {
     transcriptChars: 12000,
     intakeChars: 4000,
     draftChars: 8000,
+    taskCount: 60,
+    documentCount: 50,
+    meetingCount: 25,
+    invoicedCount: 60,
     contactMaxMatters: 6,
   },
 }
@@ -96,6 +117,10 @@ function perMatterBudget(b: DepthBudget): DepthBudget {
     emailBodyChars: Math.max(400, Math.round(b.emailBodyChars / 2)),
     transcriptChars: Math.max(800, Math.round(b.transcriptChars / 2)),
     draftChars: 0, // never dump drafts across every matter of a contact
+    taskCount: Math.max(4, Math.round(b.taskCount / 2)),
+    documentCount: Math.max(3, Math.round(b.documentCount / 2)),
+    meetingCount: Math.round(b.meetingCount / 2),
+    invoicedCount: Math.round(b.invoicedCount / 2),
     contactMaxMatters: b.contactMaxMatters,
   }
 }
@@ -143,6 +168,63 @@ function renderEmails(bodies: MatterMessageBody[]): string {
       return `- ${who}${when} — subject "${m.subject}":\n${body || '(no body)'}`
     })
     .join('\n\n')
+}
+
+function fmtDate(iso: string | null | undefined): string {
+  return iso ? iso.slice(0, 10) : ''
+}
+
+function renderTasks(tasks: Awaited<ReturnType<typeof listTasksByMatter>>): string {
+  return tasks
+    .map((t) => {
+      const due = t.dueDate ? `, due ${fmtDate(t.dueDate)}` : ''
+      const billing =
+        t.billingMode === 'hours' && t.hours
+          ? `, ${t.hours}h${t.invoiceId ? ' (invoiced)' : ' (unbilled)'}`
+          : t.billingMode === 'fixed' && t.feeAmount
+            ? `, fee ${t.feeAmount}${t.invoiceId ? ' (invoiced)' : ' (unbilled)'}`
+            : ''
+      return `- [${t.status}] ${safeField(t.title)}${due}${billing}`
+    })
+    .join('\n')
+}
+
+function renderDocuments(docs: Awaited<ReturnType<typeof listMatterDraftVersions>>): string {
+  return docs
+    .map(
+      (d) =>
+        `- ${safeField(d.documentKind)} v${d.versionNumber} — ${d.status}${d.recordedAt ? ` (${fmtDate(d.recordedAt)})` : ''}`,
+    )
+    .join('\n')
+}
+
+function renderMeetings(meetings: Awaited<ReturnType<typeof listMeetingsForMatter>>): string {
+  return meetings
+    .map((m) => {
+      const when = m.startIso ? fmtDate(m.startIso) : 'unscheduled'
+      const who = m.attendeeEmails.length ? ` — with ${m.attendeeEmails.slice(0, 5).join(', ')}` : ''
+      return `- ${when}: ${safeField(m.title)}${who}`
+    })
+    .join('\n')
+}
+
+function renderInvoiced(items: MatterInvoicedItemLite[]): string {
+  return items
+    .map(
+      (i) =>
+        `- ${safeField(i.description) || i.kind} — ${i.quantity} × ${i.rate} = ${i.amount} (invoice ${safeField(i.invoiceNumber)}, ${i.invoiceStatus})`,
+    )
+    .join('\n')
+}
+
+type MatterInvoicedItemLite = {
+  kind: string
+  description: string
+  quantity: string
+  rate: string
+  amount: string
+  invoiceNumber: string
+  invoiceStatus: string
 }
 
 function renderIntake(responses: Record<string, unknown>, maxChars: number): string {
@@ -201,6 +283,64 @@ async function gatherMatterMaterial(
       }
     } catch {
       // Draft is best-effort context.
+    }
+  }
+
+  // All documents/drafts on the matter (names + status), so the assistant knows the
+  // full document set, not just the latest draft body above.
+  if (budget.documentCount > 0) {
+    try {
+      const docs = await listMatterDraftVersions(ctx, matterEntityId)
+      if (docs.length) {
+        sections.push(
+          `## Documents on this matter (${docs.length})\n${renderDocuments(docs.slice(0, budget.documentCount))}`,
+        )
+      }
+    } catch {
+      // Best-effort.
+    }
+  }
+
+  // Tasks / workflow steps on the matter — what's to do, done, and its billing state.
+  if (budget.taskCount > 0) {
+    try {
+      const tasks = await listTasksByMatter(ctx, matterEntityId)
+      if (tasks.length) {
+        sections.push(
+          `## Tasks on this matter (${tasks.length})\n${renderTasks(tasks.slice(0, budget.taskCount))}`,
+        )
+      }
+    } catch {
+      // Best-effort.
+    }
+  }
+
+  // Meetings/calendar events tied to the matter.
+  if (budget.meetingCount > 0) {
+    try {
+      const meetings = await listMeetingsForMatter(ctx, matterEntityId)
+      if (meetings.length) {
+        sections.push(
+          `## Meetings on this matter (${meetings.length})\n${renderMeetings(meetings.slice(0, budget.meetingCount))}`,
+        )
+      }
+    } catch {
+      // Best-effort.
+    }
+  }
+
+  // Billing already invoiced on the matter (line items + which invoice). Unbilled
+  // work shows on the tasks above via each task's invoiced/unbilled flag.
+  if (budget.invoicedCount > 0) {
+    try {
+      const { items, currency } = await listMatterInvoiced(ctx, matterEntityId)
+      if (items.length) {
+        sections.push(
+          `## Billing invoiced on this matter (${currency})\n${renderInvoiced(items.slice(0, budget.invoicedCount))}`,
+        )
+      }
+    } catch {
+      // Best-effort.
     }
   }
 
