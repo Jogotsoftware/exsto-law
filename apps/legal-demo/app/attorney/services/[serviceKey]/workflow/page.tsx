@@ -326,11 +326,31 @@ export default function ServiceWorkflowPage() {
     // attorney a known-good 5-step starting point to tweak rather than a blank page.
     const tmpl: BuilderStep[] = [
       mk('Client Intake', 'view_intake', 'client', 'booking.create', true, 'Intake'),
-      mk('Client Consultation', 'view_consultation', 'attorney', 'legal.matter.advance', false, 'Consultation'),
-      mk('Review & Send document', 'review_send_document', 'attorney', 'draft.approve', true, 'Document review', [
-        { docKind: 'operating_agreement', label: 'Operating Agreement' },
-      ]),
-      mk('Approve & Send invoice', 'approve_send_invoice', 'system', 'invoice.paid', true, 'Invoice'),
+      mk(
+        'Client Consultation',
+        'view_consultation',
+        'attorney',
+        'legal.matter.advance',
+        false,
+        'Consultation',
+      ),
+      mk(
+        'Review & Send document',
+        'review_send_document',
+        'attorney',
+        'draft.approve',
+        true,
+        'Document review',
+        [{ docKind: 'operating_agreement', label: 'Operating Agreement' }],
+      ),
+      mk(
+        'Approve & Send invoice',
+        'approve_send_invoice',
+        'system',
+        'invoice.paid',
+        true,
+        'Invoice',
+      ),
       mk('Invoice paid — Matter complete', 'complete_matter', 'system', '', false, 'Complete'),
     ]
     mutate(tmpl)
@@ -395,7 +415,9 @@ export default function ServiceWorkflowPage() {
           </div>
         </div>
       ) : (
-        <ol style={{ listStyle: 'none', margin: '0.6rem 0 0', padding: 0, display: 'grid', gap: 0 }}>
+        <ol
+          style={{ listStyle: 'none', margin: '0.6rem 0 0', padding: 0, display: 'grid', gap: 0 }}
+        >
           {steps.map((s, i) => (
             <li key={s.uid}>
               <StepCard
@@ -419,13 +441,14 @@ export default function ServiceWorkflowPage() {
       {steps.length > 0 && (
         <div style={{ marginTop: '0.6rem' }}>
           {adding ? (
-            <AddPalette
-              catalog={catalog}
-              onPick={addStep}
-              onCancel={() => setAdding(false)}
-            />
+            <AddPalette catalog={catalog} onPick={addStep} onCancel={() => setAdding(false)} />
           ) : (
-            <button type="button" className="outline" onClick={() => setAdding(true)} disabled={!catalog}>
+            <button
+              type="button"
+              className="outline"
+              onClick={() => setAdding(true)}
+              disabled={!catalog}
+            >
               + Add step
             </button>
           )}
@@ -454,7 +477,17 @@ function mk(
   clientLabel = '',
   documents: WfDocumentRef[] = [],
 ): BuilderStep {
-  return { uid: nextUid(), key: '', label, clientLabel, actionKind, gate, trigger, blocking, documents }
+  return {
+    uid: nextUid(),
+    key: '',
+    label,
+    clientLabel,
+    actionKind,
+    gate,
+    trigger,
+    blocking,
+    documents,
+  }
 }
 
 function Connector() {
@@ -591,7 +624,8 @@ function StepCard({
             {actionLabel}
             {' · '}
             {isLast ? 'terminal' : `gate: ${step.gate}`}
-            {step.documents.length > 0 && ` · ${step.documents.length} doc${step.documents.length > 1 ? 's' : ''}`}
+            {step.documents.length > 0 &&
+              ` · ${step.documents.length} doc${step.documents.length > 1 ? 's' : ''}`}
             {!step.blocking && ' · non-blocking'}
           </div>
         </div>
@@ -636,9 +670,7 @@ function StepCard({
         </div>
       </div>
 
-      {open && (
-        <StepEditor step={step} isLast={isLast} catalog={catalog} onChange={onChange} />
-      )}
+      {open && <StepEditor step={step} isLast={isLast} catalog={catalog} onChange={onChange} />}
     </div>
   )
 }
@@ -705,7 +737,10 @@ function StepEditor({
           <legend>Advance to the next step</legend>
           <label>
             <span>Gate — who or what advances it</span>
-            <select value={step.gate} onChange={(e) => onChange({ gate: e.target.value as WfGate })}>
+            <select
+              value={step.gate}
+              onChange={(e) => onChange({ gate: e.target.value as WfGate })}
+            >
               {gates.map((g) => (
                 <option key={g} value={g}>
                   {GATE_LABELS[g]}
@@ -733,10 +768,7 @@ function StepEditor({
         </p>
       )}
 
-      <DocumentRows
-        documents={step.documents}
-        onChange={(documents) => onChange({ documents })}
-      />
+      <DocumentRows documents={step.documents} onChange={(documents) => onChange({ documents })} />
     </div>
   )
 }
