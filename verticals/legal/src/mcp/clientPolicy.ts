@@ -44,6 +44,11 @@ export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.client.matter_timeline', // status + whitelisted milestone timeline for one matter
   'legal.client.thread_get', // read the client↔attorney portal thread for one matter
   'legal.client.message_post', // post a message to the attorney on one of the client's matters
+  'legal.client.invoices', // list the signed-in client's own invoices (client-safe fields)
+  'legal.client.invoice_get', // one of the client's own invoices by number, with line items
+  'legal.client.request_quote', // price a request type before submitting (no write)
+  'legal.client.request_create', // submit a cost-accepted request on one of the client's matters
+  'legal.client.request_list', // list the signed-in client's own requests + status
   'legal.esign.portal.list', // the client's documents awaiting their signature
   'legal.esign.portal.documents', // ALL of the client's documents (to-sign + signed)
   'legal.esign.portal.load', // load one of the client's signing requests (+ their fields)

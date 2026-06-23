@@ -19,6 +19,7 @@ import {
   type ChatMessage,
   type ClientTool,
   type WorkRate,
+  type AssistantUsage,
 } from '../adapters/claude.js'
 import { runPerplexityResearch, streamPerplexityResearch } from '../adapters/perplexity.js'
 import { resolveAssistantModel, type AssistantProvider } from './assistantModels.js'
@@ -445,6 +446,9 @@ export async function recordAssistantTurn(
     // Documents the assistant produced this turn (title + markdown), recorded so a
     // reopened thread can re-show the downloadable cards. Additive payload field.
     producedDocuments?: ProducedDocument[] | null
+    // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
+    // Recorded additively in the event payload; powers the AI usage/cost view.
+    usage?: AssistantUsage | null
   },
 ): Promise<{ eventId: string }> {
   const res = await submitAction(ctx, {
@@ -475,6 +479,17 @@ export async function recordAssistantTurn(
           input.producedDocuments && input.producedDocuments.length
             ? input.producedDocuments
             : null,
+        // Token usage (snake_case to match the rest of the payload), null when the
+        // provider doesn't report it. The actor is captured as source_ref above, so
+        // the usage view can attribute cost per attorney.
+        usage: input.usage
+          ? {
+              input_tokens: input.usage.inputTokens,
+              output_tokens: input.usage.outputTokens,
+              cache_creation_tokens: input.usage.cacheCreationTokens,
+              cache_read_tokens: input.usage.cacheReadTokens,
+            }
+          : null,
       },
     },
   })
@@ -509,6 +524,8 @@ export async function assistantChat(
   let citations: string[] = []
   // Documents the model produces this turn (Claude only, via produce_document).
   const producedDocuments: ProducedDocument[] = []
+  // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
+  let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
     // External research: only the non-confidential framing leaves the firm —
@@ -555,6 +572,7 @@ export async function assistantChat(
     })
     reply = result.reply
     citations = result.citations
+    usage = result.usage
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -570,6 +588,7 @@ export async function assistantChat(
     pageContext: input.pageContext ?? null,
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
     producedDocuments,
+    usage,
   })
 
   return {
@@ -615,6 +634,7 @@ export async function* assistantChatStream(
   // Documents the model produces this turn (Claude only, via produce_document);
   // captured by the tool's run() so they can be recorded on the turn.
   const producedDocuments: ProducedDocument[] = []
+  let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
     // External research: only the non-confidential framing leaves the firm.
@@ -672,6 +692,8 @@ export async function* assistantChatStream(
         yield { type: 'thinking', text: chunk.text }
       } else if (chunk.type === 'citations') {
         citations = chunk.citations
+      } else if (chunk.type === 'usage') {
+        usage = chunk.usage
       } else if (chunk.type === 'tool' && chunk.name === 'load_skill') {
         // Surface the loaded skill so the UI can show a "using <skill>" chip.
         const slug = ((chunk.input ?? {}) as { slug?: string }).slug ?? ''
@@ -702,6 +724,7 @@ export async function* assistantChatStream(
     pageContext: input.pageContext ?? null,
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
     producedDocuments,
+    usage,
   })
 
   yield {

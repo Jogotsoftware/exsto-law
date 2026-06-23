@@ -4,9 +4,20 @@ import {
   listClientMatters,
   getMatterThread,
   postClientMessage,
+  listClientInvoices,
+  getClientInvoiceByNumber,
+  quoteClientRequest,
+  createClientRequest,
+  listClientRequests,
+  isRequestType,
   type ClientMatterTimeline,
   type ClientMatterListItem,
   type PortalMessage,
+  type ClientInvoiceSummary,
+  type ClientInvoiceDetail,
+  type RequestQuote,
+  type RequestType,
+  type ClientRequestSummary,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -90,7 +101,109 @@ const messagePostTool: Tool<MessagePostInput, { posted: boolean }> = {
   },
 }
 
+// ── Invoices (view) ─────────────────────────────────────────────────────────
+// Client-safe: scoped to the signed-in client's own matters, issued/sent/paid
+// only (never a draft), public fields only (no rates, source events, or notes).
+// clientContactId is stamped by the authed route from the session cookie.
+
+interface InvoicesInput {
+  clientContactId: string
+}
+
+const invoicesTool: Tool<InvoicesInput, { invoices: ClientInvoiceSummary[] }> = {
+  name: 'legal.client.invoices',
+  description: "List the signed-in client's invoices (number, total, status, dates).",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    invoices: await listClientInvoices(ctx, input.clientContactId),
+  }),
+}
+
+interface InvoiceGetInput {
+  invoiceNumber: string
+  clientContactId: string
+}
+
+const invoiceGetTool: Tool<InvoiceGetInput, { invoice: ClientInvoiceDetail | null }> = {
+  name: 'legal.client.invoice_get',
+  description:
+    "Fetch one of the signed-in client's own invoices by number, with line descriptions + amounts.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    invoice: await getClientInvoiceByNumber(ctx, input.clientContactId, input.invoiceNumber),
+  }),
+}
+
+// ── Requests (cost-gated self-serve) ─────────────────────────────────────────
+// quote = price only (no write); create = the client accepted the price (write).
+// The route stamps clientContactId and asserts matterEntityId ∈ session.matterIds.
+
+interface RequestQuoteInput {
+  requestType: RequestType
+  durationMinutes?: number | null
+}
+
+const requestQuoteTool: Tool<RequestQuoteInput, { quote: RequestQuote }> = {
+  name: 'legal.client.request_quote',
+  description:
+    'Get the price for a client request type (meeting, document, review) before submitting it.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => {
+    if (!isRequestType(input.requestType)) throw new Error('Unknown request type.')
+    return {
+      quote: await quoteClientRequest(ctx, {
+        requestType: input.requestType,
+        durationMinutes: input.durationMinutes ?? null,
+      }),
+    }
+  },
+}
+
+interface RequestCreateInput {
+  matterEntityId: string
+  requestType: RequestType
+  durationMinutes?: number | null
+  description?: string | null
+  // Stamped by the authed route from the session cookie's clientContactId.
+  clientContactId: string
+}
+
+const requestCreateTool: Tool<RequestCreateInput, { requestId: string; quote: RequestQuote }> = {
+  name: 'legal.client.request_create',
+  description:
+    'Create a client request on one of the client’s own matters after they accept the quoted price.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => {
+    if (!isRequestType(input.requestType)) throw new Error('Unknown request type.')
+    return createClientRequest(ctx, {
+      clientContactId: input.clientContactId,
+      matterEntityId: input.matterEntityId,
+      requestType: input.requestType,
+      durationMinutes: input.durationMinutes ?? null,
+      description: input.description ?? null,
+    })
+  },
+}
+
+interface RequestListInput {
+  clientContactId: string
+}
+
+const requestListTool: Tool<RequestListInput, { requests: ClientRequestSummary[] }> = {
+  name: 'legal.client.request_list',
+  description: "List the signed-in client's own requests and their status.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    requests: await listClientRequests(ctx, input.clientContactId),
+  }),
+}
+
 registerTool(matterTimelineTool)
 registerTool(mattersTool)
 registerTool(threadGetTool)
 registerTool(messagePostTool)
+registerTool(invoicesTool)
+registerTool(invoiceGetTool)
+registerTool(requestQuoteTool)
+registerTool(requestCreateTool)
+registerTool(requestListTool)

@@ -6,6 +6,7 @@ import {
   listAssistantThreads,
   listAssistantModels,
   listAssistantFeedback,
+  getAiUsageSummary,
   saveAssistantReplyToMatter,
   type AssistantChatInput,
   type AssistantChatReply,
@@ -14,6 +15,7 @@ import {
   type AssistantThreadSummary,
   type AssistantModel,
   type AssistantFeedbackEntry,
+  type AiUsageSummary,
   type SaveAssistantReplyInput,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
@@ -185,6 +187,25 @@ registerTool({
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => ({ feedback: await listAssistantFeedback(ctx) }),
 } satisfies Tool<Record<string, never>, { feedback: AssistantFeedbackEntry[] }>)
+
+registerTool({
+  name: 'legal.assistant.usage',
+  description:
+    "Firm-wide AI token usage and ESTIMATED cost over the trailing window (sinceDays, default 30), broken down by model and by day. Reads the token usage recorded on each Claude assistant.turn event; Perplexity turns don't report tokens. Cost is an estimate from list prices. Powers the Settings → AI usage tab.",
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      sinceDays: {
+        type: 'number',
+        description: 'Trailing window in days (1–365). Default 30.',
+      },
+    },
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) =>
+    getAiUsageSummary(ctx, { sinceDays: input?.sinceDays }),
+} satisfies Tool<{ sinceDays?: number }, AiUsageSummary>)
 
 registerTool({
   name: 'legal.assistant.save_reply',

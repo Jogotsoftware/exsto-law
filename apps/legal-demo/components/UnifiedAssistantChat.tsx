@@ -261,7 +261,11 @@ function DocumentCard({ doc, matterEntityId }: { doc: ProducedDoc; matterEntityI
     try {
       await callAttorneyMcp({
         toolName: 'legal.assistant.save_reply',
-        input: { matterEntityId, markdown: doc.markdown, documentKind: filename.replace(/-/g, '_') },
+        input: {
+          matterEntityId,
+          markdown: doc.markdown,
+          documentKind: filename.replace(/-/g, '_'),
+        },
       })
       setSaveState('saved')
     } catch {

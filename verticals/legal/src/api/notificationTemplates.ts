@@ -59,6 +59,41 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `If you didn't request this, you can safely ignore this email.`,
     ].join('\n'),
   }),
+  'client-portal-invite': (v) => ({
+    subject: `Set up your Pacheco Law client portal`,
+    bodyText: [
+      `Hi ${s(v.client_full_name, 'there')},`,
+      ``,
+      `Pacheco Law has set up secure portal access for you. Use the link below to`,
+      `choose a password — then you can sign in any time to view your matters,`,
+      `documents, and invoices, and message the firm. The link expires in 7 days.`,
+      ``,
+      `${s(v.portal_url, '(set-up link unavailable)')}`,
+      ``,
+      `If you weren't expecting this, you can safely ignore this email.`,
+    ].join('\n'),
+  }),
+  'attorney-new-request': (v) => ({
+    subject: `New client request — ${s(v.request_type, 'request')}`,
+    bodyText: [
+      `A client submitted a new request through the portal and accepted the cost.`,
+      ``,
+      `Type: ${s(v.request_type, '—')}`,
+      `Accepted price: ${s(v.amount, '—')} ${s(v.currency, 'USD')}`,
+      ``,
+      `Open your requests to accept and work it: ${s(v.requests_url, '(set NEXT_PUBLIC_BASE_URL)')}`,
+    ].join('\n'),
+  }),
+  'client-request-update': (v) => ({
+    subject: `Update on your ${s(v.request_type, 'request')} — Pacheco Law`,
+    bodyText: [
+      `Hi there,`,
+      ``,
+      `Your ${s(v.request_type, 'request')} is now: ${s(v.status, 'updated')}.`,
+      ``,
+      `Sign in to your client portal for details: ${s(v.portal_url, '(portal link unavailable)')}`,
+    ].join('\n'),
+  }),
   'esign-sign-request': (v) => ({
     subject: `Please sign: ${s(v.document_title, 'your document')} — Pacheco Law`,
     bodyText: [
@@ -137,6 +172,9 @@ const TEMPLATE_TITLES: Record<string, string> = {
   'attorney-draft-completed': 'Attorney — draft ready for review',
   'prospect-intake-confirmation': 'Prospect — intake received',
   'client-portal-magic-link': 'Client — portal sign-in link',
+  'client-portal-invite': 'Client — portal set-up invite',
+  'attorney-new-request': 'Attorney — new client request',
+  'client-request-update': 'Client — request status update',
   'esign-sign-request': 'Signer — e-signature request (link)',
   'esign-sign-request-portal': 'Signer — e-signature request (portal)',
   'attorney-portal-message': 'Attorney — new client message',
