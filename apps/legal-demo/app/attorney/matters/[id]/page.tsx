@@ -9,7 +9,13 @@ import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
-import { CheckCircleIcon, ClockIcon, ChevronRightIcon, FileTextIcon } from '@/components/icons'
+import {
+  CheckCircleIcon,
+  ClockIcon,
+  ChevronRightIcon,
+  FileTextIcon,
+  EditIcon,
+} from '@/components/icons'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 import {
   humanizeService,
@@ -27,6 +33,7 @@ import {
   type MatterWorkflow,
 } from './shared'
 import { MatterTasks } from './MatterTasks'
+import { WorkflowEditor } from './WorkflowEditor'
 
 const GENERATABLE: Array<{ kind: string; label: string }> = [
   { kind: 'operating_agreement', label: 'operating agreement' },
@@ -358,13 +365,27 @@ function WorkflowWindow({
   onChanged: () => Promise<void>
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null)
+  // PR6: the "Edit steps for this matter" mode (per-matter workflow customization).
+  const [editing, setEditing] = useState(false)
   const steps = workflowStepStates(workflow.graph, workflow.currentState)
   const openEntry = openKey ? steps.find((s) => s.stage.key === openKey) : null
 
   return (
     <>
       <section>
-        <h2>Workflow</h2>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 'var(--space-3)',
+          }}
+        >
+          <h2 style={{ margin: 0 }}>Workflow</h2>
+          <button type="button" className="button" onClick={() => setEditing(true)}>
+            <EditIcon size={16} /> Edit steps for this matter
+          </button>
+        </div>
         <div className="step-list">
           {steps.map(({ stage, state }) => {
             const stripState = workflowStripState(state)
@@ -403,6 +424,15 @@ function WorkflowWindow({
           isCurrent={openEntry.state === 'current'}
           onClose={() => setOpenKey(null)}
           onChanged={onChanged}
+        />
+      )}
+
+      {editing && (
+        <WorkflowEditor
+          matterEntityId={matter.matterEntityId}
+          workflow={workflow}
+          onClose={() => setEditing(false)}
+          onSaved={onChanged}
         />
       )}
     </>

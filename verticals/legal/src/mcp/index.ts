@@ -11,6 +11,10 @@ import './tools/createMatter.js'
 // ADR 0045 PR3: the thin write tool the matter Workflow window calls to advance a
 // matter one step through its bound lifecycle (delegates to the action handler).
 import './tools/matterAdvanceTools.js'
+// ADR 0045 PR6: customize ONE matter's workflow (add/reorder/remove a step) without
+// altering the service default — writes workflow_instance.states_override. Attorney
+// -only (deliberately NOT in clientPolicy.ts allowlists).
+import './tools/matterWorkflowTools.js'
 import './tools/calendarCategoriesTools.js'
 import './tools/matterAccessTools.js'
 import './tools/documentUploadTools.js'
