@@ -73,7 +73,8 @@ registerActionHandler('legal.client_request.create', async (ctx, client, payload
   const contactId = (p.client_contact_id ?? '').trim()
   if (!matterId) throw new Error('matter_entity_id is required.')
   if (!contactId) throw new Error('client_contact_id is required.')
-  if (!REQUEST_TYPES.has(p.request_type)) throw new Error(`Unknown request type "${p.request_type}".`)
+  if (!REQUEST_TYPES.has(p.request_type))
+    throw new Error(`Unknown request type "${p.request_type}".`)
   const amount = (p.price_amount ?? '').trim()
   if (!MONEY_RE.test(amount)) throw new Error('A request must carry a valid accepted price.')
 
@@ -126,10 +127,19 @@ registerActionHandler('legal.client_request.create', async (ctx, client, payload
     attrs.push({ kind: 'request_description', value: String(p.description).trim() })
   }
   if (p.duration_minutes != null && Number.isFinite(Number(p.duration_minutes))) {
-    attrs.push({ kind: 'request_duration_minutes', value: String(Math.round(Number(p.duration_minutes))) })
+    attrs.push({
+      kind: 'request_duration_minutes',
+      value: String(Math.round(Number(p.duration_minutes))),
+    })
   }
   for (const a of attrs) {
-    await setAttr(client, { tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, entityId: requestId, ...a })
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: requestId,
+      ...a,
+    })
   }
 
   await insertEvent(client, {
@@ -207,15 +217,27 @@ registerActionHandler('legal.client_request.fulfill', async (ctx, client, payloa
     throw new Error(`A ${current} request cannot be fulfilled.`)
   }
 
-  const amount = (await getLatestAttributeValue<string>(client, ctx.tenantId, requestId, 'request_price_amount')) ?? '0'
+  const amount =
+    (await getLatestAttributeValue<string>(
+      client,
+      ctx.tenantId,
+      requestId,
+      'request_price_amount',
+    )) ?? '0'
   const requestType =
-    (await getLatestAttributeValue<string>(client, ctx.tenantId, requestId, 'request_type')) ?? 'request'
+    (await getLatestAttributeValue<string>(client, ctx.tenantId, requestId, 'request_type')) ??
+    'request'
   const matterId = await getRelatedTarget(client, ctx.tenantId, requestId, 'client_request_of')
 
   // Book the fee (service_fee.recorded) when there's a matter + a positive amount.
   let billedEventId: string | null = null
   if (matterId && /^\d+(\.\d{1,2})?$/.test(amount) && Number(amount) > 0) {
-    const serviceKey = await getLatestAttributeValue<string>(client, ctx.tenantId, matterId, 'service_key')
+    const serviceKey = await getLatestAttributeValue<string>(
+      client,
+      ctx.tenantId,
+      matterId,
+      'service_key',
+    )
     billedEventId = await insertEvent(client, {
       tenantId: ctx.tenantId,
       actionId,
@@ -232,10 +254,18 @@ registerActionHandler('legal.client_request.fulfill', async (ctx, client, payloa
     })
   }
 
-  const updates: Array<{ kind: string; value: unknown }> = [{ kind: 'request_status', value: 'fulfilled' }]
+  const updates: Array<{ kind: string; value: unknown }> = [
+    { kind: 'request_status', value: 'fulfilled' },
+  ]
   if (billedEventId) updates.push({ kind: 'request_billed_event_id', value: billedEventId })
   for (const u of updates) {
-    await setAttr(client, { tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, entityId: requestId, ...u })
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: requestId,
+      ...u,
+    })
   }
 
   await insertEvent(client, {
@@ -271,7 +301,11 @@ async function getRelatedTarget(
   return res.rows[0]?.target ?? null
 }
 
-async function getStatus(client: DbClient, tenantId: string, requestId: string): Promise<string | null> {
+async function getStatus(
+  client: DbClient,
+  tenantId: string,
+  requestId: string,
+): Promise<string | null> {
   const res = await client.query<{ value: string }>(
     `SELECT a.value #>> '{}' AS value
        FROM attribute a

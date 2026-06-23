@@ -106,11 +106,18 @@ export default function ClientRequestsPage() {
           {requests.map((r) => {
             const busy = busyId === r.requestEntityId
             return (
-              <div key={r.requestEntityId} className="matter-row" style={{ alignItems: 'flex-start' }}>
+              <div
+                key={r.requestEntityId}
+                className="matter-row"
+                style={{ alignItems: 'flex-start' }}
+              >
                 <div style={{ flex: 1 }}>
                   <div className="matter-row-title">
                     {TYPE_LABEL[r.requestType] ?? r.requestType} · {money(r.amount, r.currency)}
-                    <span className="text-sm text-muted"> · {STATUS_LABEL[r.status] ?? r.status}</span>
+                    <span className="text-sm text-muted">
+                      {' '}
+                      · {STATUS_LABEL[r.status] ?? r.status}
+                    </span>
                   </div>
                   <div className="matter-row-sub">
                     {r.clientName || 'Client'}

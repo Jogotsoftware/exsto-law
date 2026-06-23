@@ -99,7 +99,11 @@ export async function listClientRequests(
 export async function listPendingRequests(ctx: ActionContext): Promise<AttorneyRequestItem[]> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<
-      HeadRow & { matter_id: string | null; matter_number: string | null; client_name: string | null }
+      HeadRow & {
+        matter_id: string | null
+        matter_number: string | null
+        client_name: string | null
+      }
     >(
       `${ATTRS_CTE}
        SELECT ${SELECT_COLS},

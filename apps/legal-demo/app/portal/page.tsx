@@ -345,7 +345,9 @@ function InvoicesPanel() {
           <span className="spinner" /> Loading invoices…
         </div>
       ) : invoices.length === 0 ? (
-        <p className="text-muted">No invoices yet. They&apos;ll appear here once the firm sends one.</p>
+        <p className="text-muted">
+          No invoices yet. They&apos;ll appear here once the firm sends one.
+        </p>
       ) : (
         <ul className="pdash-docs">
           {invoices.map((inv) => (

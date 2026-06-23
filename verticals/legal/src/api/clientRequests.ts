@@ -109,7 +109,7 @@ async function notifyClientOfUpdate(
     routeKindName: 'client_request_update',
     to: email,
     variables: {
-      request_type: TYPE_LABEL[(rec.requestType as RequestType)] ?? rec.requestType,
+      request_type: TYPE_LABEL[rec.requestType as RequestType] ?? rec.requestType,
       status,
       portal_url: `${BASE_URL}/portal`,
     },

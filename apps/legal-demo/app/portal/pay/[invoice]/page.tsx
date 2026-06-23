@@ -81,8 +81,8 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
 
         {state === 'notfound' && (
           <div className="alert">
-            We couldn&apos;t find this invoice on your account. If you think this is a mistake, reply
-            to the invoice email or contact the firm.
+            We couldn&apos;t find this invoice on your account. If you think this is a mistake,
+            reply to the invoice email or contact the firm.
           </div>
         )}
 

@@ -12,7 +12,11 @@
 // The client is signed straight in, and email+password works on every later visit.
 import { NextResponse } from 'next/server'
 import '@exsto/legal/mcp'
-import { verifyPortalInviteToken, loadClientContactEmail, isClientContactActive } from '@exsto/legal'
+import {
+  verifyPortalInviteToken,
+  loadClientContactEmail,
+  isClientContactActive,
+} from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
@@ -51,7 +55,10 @@ export async function POST(request: Request) {
   } | null
   const token = typeof body?.token === 'string' ? body.token : null
   const password = typeof body?.password === 'string' ? body.password : ''
-  const dest = safeInternalPath(typeof body?.continue === 'string' ? body.continue : null, '/portal')
+  const dest = safeInternalPath(
+    typeof body?.continue === 'string' ? body.continue : null,
+    '/portal',
+  )
 
   if (password.length < MIN_PASSWORD_LENGTH) {
     return NextResponse.json(
