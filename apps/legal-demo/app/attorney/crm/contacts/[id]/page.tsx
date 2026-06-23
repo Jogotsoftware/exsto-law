@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { BackButton } from '@/components/BackButton'
 
 type CrmBucket = 'active' | 'prospective' | 'prior'
 
@@ -102,6 +103,7 @@ export default function ContactDetailPage() {
 
   return (
     <>
+      <BackButton fallback="/attorney/crm/contacts" />
       <div
         className="attorney-page-head"
         style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
@@ -115,9 +117,6 @@ export default function ContactDetailPage() {
             {standing.label}
           </span>
         )}
-        <Link href="/attorney/crm/contacts" className="back-link" style={{ marginLeft: 'auto' }}>
-          Back to contacts
-        </Link>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}

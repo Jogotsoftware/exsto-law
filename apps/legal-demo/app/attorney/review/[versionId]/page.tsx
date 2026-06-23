@@ -8,6 +8,7 @@ import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 import { formatDateTime } from '@/lib/datetime'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
+import { BackButton } from '@/components/BackButton'
 
 // Step-through review session (started from the queue's "Begin review"): the ordered
 // draft ids to walk, in sessionStorage, flagged on the URL with ?review=session.
@@ -301,13 +302,18 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     <main className="review-page">
       <div className="review-topbar">
         {sessionPos >= 0 && sessionIds ? (
-          <button type="button" className="review-back" onClick={exitSession}>
-            ← Exit review ({sessionPos + 1} of {sessionIds.length})
-          </button>
+          <BackButton
+            label={`Exit review (${sessionPos + 1} of ${sessionIds.length})`}
+            onBack={exitSession}
+            className="review-back"
+            style={{ marginBottom: 0 }}
+          />
         ) : (
-          <Link href="/attorney/review" className="review-back">
-            ← Review queue
-          </Link>
+          <BackButton
+            fallback="/attorney/review"
+            className="review-back"
+            style={{ marginBottom: 0 }}
+          />
         )}
         <Link href={`/attorney/matters/${draft.matterEntityId}`} className="review-back">
           Matter {draft.matterNumber}
