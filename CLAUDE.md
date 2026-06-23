@@ -99,12 +99,16 @@ Many Claude sessions work in parallel and a **merge manager** integrates every P
 
 4. **Keep your branch mergeable.** When `main` moves under you, merge it in (or rebase) and resolve conflicts yourself — keeping BOTH your changes and what landed. Smaller, focused PRs reconcile far more cleanly than large ones that touch hot files (e.g. `verticals/legal/src/api/assistantChat.ts`, `apps/legal-demo/app/globals.css`).
 
-## Beta feedback — close the loop on everything you ship
+## Beta feedback — claim before you start, close the loop when you ship
 
-Beta feedback is captured as `assistant.turn` events (`kind = 'feedback'`) in the substrate — each carries `category`, `page_context.path`, and the message/reply. (The old `feedback.recorded` kind is unused; ignore it.) Most of the work this product is shipping comes from this backlog, and it drifts out of date — reading as all-open — unless every session closes the loop on what it ships. Two required steps whenever a change addresses a feedback item:
+Beta feedback is captured as `assistant.turn` events (`kind = 'feedback'`) in the substrate — each carries `category`, `page_context.path`, and the message/reply. (The old `feedback.recorded` kind is unused; ignore it.) Most of the work this product is shipping comes from this backlog, and it drifts out of date — reading as all-open — unless every session both claims what it picks up and closes the loop on what it ships.
+
+**Before you start — claim it.** Many sessions run in parallel and keep picking up the same item (this has caused real collisions, e.g. two sessions independently building the same `task` primitive). Before working a feedback item, call `legal.assistant.feedback_backlog` (MCP) to see what is already taken, then `legal.assistant.feedback_claim { feedbackEventId, claimedBy: '<your branch>' }` so other sessions skip it — and `legal.assistant.feedback_release` if you abandon it. Status is three-state: **open → in_progress (claimed) → resolved** (migration 0089). The branch list alone is not enough; claim on the item so the signal lives where the backlog is read.
+
+Then, two required steps whenever a change addresses a feedback item:
 
 1. **Reference it in the commit.** Add a `Beta-Feedback:` trailer listing the `assistant.turn` event id(s) — e.g. `Beta-Feedback: a436b8c6, 86bc2170` (append `(partial)` if it only partly addresses the item). This makes the code↔feedback link greppable: `git log --grep=<id>`.
 
 2. **Resolve the event the same session you ship it** — through the action layer (hard rule 1; never a raw INSERT into `event`): `legal.assistant.feedback_resolve` (MCP) or `resolveAssistantFeedback(ctx, { feedbackEventId, summary, note? })` from `@exsto/legal`. Resolving is what removes the item from the open backlog; a shipped-but-unresolved item looks open and gets re-worked by another session.
 
-Do both — they're not interchangeable. The merge manager resolves from your `Beta-Feedback:` trailers at merge time as a backstop, but the source of truth is you marking the item when you ship it. To see what's still open, read the unresolved `assistant.turn` feedback rows (the manager keeps the backlog current as PRs land).
+Claim up front, then do both of the above when you ship — they're not interchangeable. The merge manager resolves from your `Beta-Feedback:` trailers at merge time as a backstop, but the source of truth is you marking the item when you ship it. To see what's still open, read the unresolved `assistant.turn` feedback rows (the manager keeps the backlog current as PRs land).
