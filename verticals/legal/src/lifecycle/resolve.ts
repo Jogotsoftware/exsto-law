@@ -10,6 +10,10 @@ import {
   type LifecycleStage,
   type LifecycleValidation,
 } from './types.js'
+// The closed set of step-action kinds (catalog.ts). validateLifecycle rejects any
+// stage.action.kind outside it — the same guardrail the builder/AI compose from,
+// now enforced structurally so a graph with a made-up action can never be saved.
+import { STEP_ACTION_KINDS } from './catalog.js'
 
 export function stageByKey(lc: Lifecycle, key: string): LifecycleStage | null {
   return lc.find((s) => s.key === key) ?? null
@@ -86,6 +90,11 @@ export function validateLifecycle(lc: Lifecycle): LifecycleValidation {
   for (const s of lc) {
     if (!s.key) errors.push('every stage needs a key')
     if (!s.label) errors.push(`stage "${s.key}" needs a label`)
+    // action is OPTIONAL (legacy/seeded graphs and existing fixtures may omit it),
+    // so only validate the kind WHEN action is present. A made-up action.kind (e.g.
+    // free-form AI output) is rejected against the closed catalog before any write.
+    if (s.action && !STEP_ACTION_KINDS.includes(s.action.kind))
+      errors.push(`stage "${s.key}" has an unknown action kind "${s.action.kind}"`)
     if (s.terminal && s.advances_to.length > 0)
       errors.push(`terminal stage "${s.key}" must have no outgoing edges`)
     for (const e of s.advances_to) {
@@ -104,6 +113,24 @@ export function validateLifecycle(lc: Lifecycle): LifecycleValidation {
     errors.push('no terminal stage is reachable from the entry stage')
   }
 
+  return { ok: errors.length === 0, errors }
+}
+
+// Linear-only guard (PR5, decision 3) — branching stays reserved in the type, but
+// the authoring path (the chatbot proposal + legal.service.set_lifecycle) forbids
+// it: each non-terminal stage must have EXACTLY ONE outgoing advances_to edge. This
+// is intentionally separate from validateLifecycle (which still permits a branching
+// graph structurally) so only the authored path is constrained. Returns the same
+// validation shape so callers can compose the two checks.
+export function validateLinearLifecycle(lc: Lifecycle): LifecycleValidation {
+  const errors: string[] = []
+  for (const s of lc) {
+    if (s.terminal) continue
+    if (s.advances_to.length > 1)
+      errors.push(
+        `stage "${s.key}" has ${s.advances_to.length} outgoing edges — workflows must be linear (one step leads to one next step)`,
+      )
+  }
   return { ok: errors.length === 0, errors }
 }
 

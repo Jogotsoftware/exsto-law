@@ -5,6 +5,8 @@ import {
   createWorkflowStepTemplate,
   updateWorkflowStepTemplate,
   archiveWorkflowStepTemplate,
+  STEP_ACTION_KINDS,
+  GATE_KINDS,
   type WorkflowStepTemplate,
   type CreateWorkflowStepTemplateInput,
   type UpdateWorkflowStepTemplateInput,
@@ -31,11 +33,14 @@ const STAGE_PROP = {
     label: { type: 'string' as const },
     client_label: { type: 'string' as const },
     blocking: { type: 'boolean' as const },
-    gate: { type: 'string' as const, enum: ['automatic', 'attorney', 'client', 'system'] },
+    // Closed vocabulary (PR5): the gate is one of GATE_KINDS and the action kind is
+    // one of STEP_ACTION_KINDS — the same guardrail validateLifecycle enforces, now
+    // on the tool surface so a saved step can never carry an out-of-catalog kind.
+    gate: { type: 'string' as const, enum: GATE_KINDS as unknown as string[] },
     action: {
       type: 'object' as const,
       properties: {
-        kind: { type: 'string' as const },
+        kind: { type: 'string' as const, enum: STEP_ACTION_KINDS },
         config: { type: 'object' as const, additionalProperties: true },
       },
       required: ['kind'],

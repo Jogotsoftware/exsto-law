@@ -24,7 +24,7 @@ import type { DbClient } from '@exsto/shared'
 import { completenessFromTransitions } from '../api/services.js'
 // Pure lifecycle validator + the graph type (ADR 0045). The lifecycle module is
 // substrate-free (no DB, no handlers), so importing it here introduces no cycle.
-import { validateLifecycle, type Lifecycle } from '../lifecycle/index.js'
+import { validateLifecycle, validateLinearLifecycle, type Lifecycle } from '../lifecycle/index.js'
 
 interface ServiceTransitions {
   route?: string
@@ -352,9 +352,18 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
   if (!p.service_key) throw new Error('service_key is required')
 
   // Guard FIRST — an invalid graph must never be saved or backfilled (ADR 0045).
+  // This now also rejects an out-of-catalog stage.action.kind (closed vocabulary).
   const validation = validateLifecycle(p.graph)
   if (!validation.ok) {
     throw new Error(`Invalid workflow lifecycle: ${validation.errors.join('; ')}`)
+  }
+  // Linear-only guard (PR5, decision 3): every saved service workflow is linear —
+  // a stage may not fan out to more than one next step. Branching stays reserved in
+  // the type but is never authored. Defense in depth: the AI proposal validator and
+  // the propose tool reject it too, but the handler is the last line before a write.
+  const linear = validateLinearLifecycle(p.graph)
+  if (!linear.ok) {
+    throw new Error(`Invalid workflow lifecycle: ${linear.errors.join('; ')}`)
   }
 
   const prior = await currentActive(client, ctx.tenantId, p.service_key)

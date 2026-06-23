@@ -39,6 +39,11 @@ import {
   buildActiveSkillsText,
   loadForcedSkills,
 } from './skillContext.js'
+import {
+  buildWorkflowContextTool,
+  buildProposeWorkflowTool,
+  type WorkflowProposal,
+} from './workflowAuthoringTools.js'
 
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
 export type AssistantScope = 'matter' | 'contact' | 'global'
@@ -115,6 +120,16 @@ export type AssistantChatStreamEvent =
   // The assistant produced a finished document — the UI shows it as a downloadable
   // card (PDF/Word + save to matter), separate from the prose reply.
   | { type: 'document'; title: string; markdown: string }
+  // The assistant PROPOSED a workflow lifecycle for a service (PR5). The UI renders
+  // it as an inline approval card; the live write happens only when the attorney
+  // approves (decision 1). Nothing is persisted by this turn.
+  | {
+      type: 'workflow_proposal'
+      serviceKey: string
+      graph: WorkflowProposal['graph']
+      summary: string
+      confidence: number
+    }
   | {
       type: 'done'
       eventId: string
@@ -137,6 +152,9 @@ export interface AssistantChatReply {
   // Documents the assistant produced this turn (deliverables to download/save),
   // distinct from the prose reply. Empty for ordinary answers.
   documents?: ProducedDocument[]
+  // Workflow proposals captured this turn (PR5) — approval cards the attorney acts
+  // on. Empty for ordinary answers.
+  workflowProposals?: WorkflowProposal[]
 }
 
 export interface AssistantThreadEntry {
@@ -155,6 +173,9 @@ export interface AssistantThreadEntry {
   // Documents the assistant produced on this turn (assistant side), so a reopened
   // thread still shows the downloadable document cards.
   documents?: ProducedDocument[]
+  // Workflow proposals captured on this turn (assistant side), so a reopened thread
+  // still shows the approval cards.
+  workflowProposals?: WorkflowProposal[]
 }
 
 const SYSTEM_PROMPT = [
@@ -178,6 +199,10 @@ const SYSTEM_PROMPT = [
   // The deliverable goes through the tool (surfaced as a download card), never
   // duplicated in prose — so downloads attach to real documents, not every reply.
   'PRODUCING DOCUMENTS — when the attorney asks you to draft, write, or produce a DOCUMENT (a letter, memo, engagement letter, agreement, NDA, contract, notice, resolution, etc.) — as opposed to answering a question or explaining something — generate the COMPLETE document and deliver it by CALLING the produce_document tool with a concise title and the full document in markdown. The attorney then sees it as a downloadable card (PDF/Word) they can save to the matter. Do this ONLY for genuine document deliverables, never for ordinary answers, analysis, or advice. Put the document text ONLY in the tool call — your chat reply must then be a SINGLE short sentence pointing them to it (e.g. "Here\'s the engagement letter — download it or save it to the matter below."), never the document itself. All the accuracy and citation rules above apply fully to documents you produce.',
+  // Workflow authoring (PR5). The chat can build/edit a service's step-by-step
+  // workflow — but only as a PROPOSAL the attorney must approve, composed strictly
+  // from the closed catalog, linear, and never written directly by the turn.
+  'BUILDING SERVICE WORKFLOWS — when the attorney asks you to build, add a step to, reorder, or change the WORKFLOW for one of their existing SERVICES (e.g. "build the workflow for NC SMLLC", "add a consultation step before review"), you compose a step-by-step workflow for them. ALWAYS call get_workflow_context FIRST to load the closed catalog of step actions you may use, the edge gates, the service\'s current workflow, and the firm\'s available document templates. Compose the workflow ONLY from those step-action kinds and gates — never invent a step kind or a gate. The workflow MUST be LINEAR: each step leads to exactly one next step (one entry step, one final step; no branching). You may attach documents to a step ONLY by referencing an existing firm template\'s templateEntityId from get_workflow_context — never invent a document or a template id. You only ever MODIFY existing services; you do not create new services. When you have a complete, valid workflow, deliver it by CALLING the propose_workflow tool — this does NOT save anything; it shows the attorney an approval card, and the workflow goes live only when THEY approve it. Put the workflow ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to the proposal to review, never the steps themselves.',
   'Keep replies focused and concise.',
 ].join(' ')
 
@@ -276,6 +301,30 @@ function buildProduceDocumentTool(captured: ProducedDocument[]): ClientTool {
       return `The document "${title}" is ready and shown to the attorney with download (PDF/Word) and save-to-matter options. Reply with ONE short sentence pointing them to it; do NOT repeat the document text.`
     },
   }
+}
+
+// The client tools an attorney CLAUDE turn registers. Centralised so the streaming
+// and non-streaming paths stay identical: log_feedback + produce_document always;
+// load_skill only when there's a skill catalog; and the two PR5 workflow-authoring
+// tools (read-only context + capture-only propose). These ride the attorney-only,
+// Claude-only chat path (legal.assistant.chat is not a client-portal tool, and the
+// Perplexity branch never reaches here), so workflow authoring is never offered on a
+// client-portal or external-research turn.
+function buildAttorneyClientTools(
+  ctx: ActionContext,
+  input: AssistantChatInput,
+  capture: {
+    catalog: { slug: string; name: string }[]
+    producedDocuments: ProducedDocument[]
+    workflowProposals: WorkflowProposal[]
+  },
+): ClientTool[] {
+  const tools: ClientTool[] = [buildFeedbackTool(ctx, input)]
+  if (capture.catalog.length) tools.push(buildSkillTool(ctx))
+  tools.push(buildProduceDocumentTool(capture.producedDocuments))
+  tools.push(buildWorkflowContextTool(ctx))
+  tools.push(buildProposeWorkflowTool(ctx, capture.workflowProposals))
+  return tools
 }
 
 // The skill-awareness helpers (catalog text, the load_skill tool, active-skills
@@ -476,6 +525,9 @@ export async function recordAssistantTurn(
     // Documents the assistant produced this turn (title + markdown), recorded so a
     // reopened thread can re-show the downloadable cards. Additive payload field.
     producedDocuments?: ProducedDocument[] | null
+    // Workflow proposals the assistant captured this turn (PR5), recorded so a
+    // reopened thread can re-show the approval cards. Additive payload field.
+    workflowProposals?: WorkflowProposal[] | null
     // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
     // Recorded additively in the event payload; powers the AI usage/cost view.
     usage?: AssistantUsage | null
@@ -508,6 +560,12 @@ export async function recordAssistantTurn(
         produced_documents:
           input.producedDocuments && input.producedDocuments.length
             ? input.producedDocuments
+            : null,
+        // Workflow proposals captured this turn (approval cards), so a reopened
+        // thread re-shows them. Null when none were proposed.
+        workflow_proposals:
+          input.workflowProposals && input.workflowProposals.length
+            ? input.workflowProposals
             : null,
         // Token usage (snake_case to match the rest of the payload), null when the
         // provider doesn't report it. The actor is captured as source_ref above, so
@@ -554,6 +612,9 @@ export async function assistantChat(
   let citations: string[] = []
   // Documents the model produces this turn (Claude only, via produce_document).
   const producedDocuments: ProducedDocument[] = []
+  // Workflow proposals captured this turn (Claude only, via propose_workflow). Not
+  // persisted here — surfaced as approval cards; the live write is the approve route.
+  const workflowProposals: WorkflowProposal[] = []
   // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
   let usage: AssistantUsage | null = null
 
@@ -592,13 +653,11 @@ export async function assistantChat(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      clientTools: catalog.length
-        ? [
-            buildFeedbackTool(ctx, input),
-            buildSkillTool(ctx),
-            buildProduceDocumentTool(producedDocuments),
-          ]
-        : [buildFeedbackTool(ctx, input), buildProduceDocumentTool(producedDocuments)],
+      clientTools: buildAttorneyClientTools(ctx, input, {
+        catalog,
+        producedDocuments,
+        workflowProposals,
+      }),
     })
     reply = result.reply
     citations = result.citations
@@ -618,6 +677,7 @@ export async function assistantChat(
     pageContext: input.pageContext ?? null,
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
     producedDocuments,
+    workflowProposals,
     usage,
   })
 
@@ -630,6 +690,7 @@ export async function assistantChat(
     kind,
     scope,
     documents: producedDocuments.length ? producedDocuments : undefined,
+    workflowProposals: workflowProposals.length ? workflowProposals : undefined,
   }
 }
 
@@ -664,6 +725,8 @@ export async function* assistantChatStream(
   // Documents the model produces this turn (Claude only, via produce_document);
   // captured by the tool's run() so they can be recorded on the turn.
   const producedDocuments: ProducedDocument[] = []
+  // Workflow proposals captured this turn (Claude only, via propose_workflow).
+  const workflowProposals: WorkflowProposal[] = []
   let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
@@ -707,13 +770,11 @@ export async function* assistantChatStream(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      clientTools: catalog.length
-        ? [
-            buildFeedbackTool(ctx, input),
-            buildSkillTool(ctx),
-            buildProduceDocumentTool(producedDocuments),
-          ]
-        : [buildFeedbackTool(ctx, input), buildProduceDocumentTool(producedDocuments)],
+      clientTools: buildAttorneyClientTools(ctx, input, {
+        catalog,
+        producedDocuments,
+        workflowProposals,
+      }),
     })) {
       if (chunk.type === 'text') {
         reply += chunk.text
@@ -738,6 +799,20 @@ export async function* assistantChatStream(
         const markdown = (inp.document_markdown ?? '').trim()
         if (markdown) yield { type: 'document', title, markdown }
       }
+      // propose_workflow is intentionally NOT surfaced from the raw chunk input: the
+      // graph must be VALIDATED before it becomes an approval card. The tool's run()
+      // validates + captures it into workflowProposals; we emit the validated
+      // proposals after the loop (below), so an invalid graph never renders a card.
+    }
+    // Surface validated workflow proposals captured this turn as approval cards.
+    for (const p of workflowProposals) {
+      yield {
+        type: 'workflow_proposal',
+        serviceKey: p.serviceKey,
+        graph: p.graph,
+        summary: p.summary,
+        confidence: p.confidence,
+      }
     }
   }
 
@@ -754,6 +829,7 @@ export async function* assistantChatStream(
     pageContext: input.pageContext ?? null,
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
     producedDocuments,
+    workflowProposals,
     usage,
   })
 
@@ -831,6 +907,7 @@ export async function listAssistantThread(
         citations?: string[]
         attachment_names?: string[] | null
         produced_documents?: ProducedDocument[] | null
+        workflow_proposals?: WorkflowProposal[] | null
       }
       occurred_at: string
     }>(
@@ -870,6 +947,7 @@ export async function listAssistantThread(
           message: '',
           reply: r.payload.reply ?? '',
           documents: r.payload.produced_documents ?? undefined,
+          workflowProposals: r.payload.workflow_proposals ?? undefined,
         },
       ]
     })
