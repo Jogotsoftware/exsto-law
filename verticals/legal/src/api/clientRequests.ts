@@ -132,13 +132,22 @@ async function transition(
   return { ok: true, status }
 }
 
-export async function acceptClientRequest(ctx: ActionContext, requestId: string) {
+export async function acceptClientRequest(
+  ctx: ActionContext,
+  requestId: string,
+): Promise<{ ok: boolean; status: RequestStatus }> {
   return transition(ctx, requestId, 'accept', 'accepted')
 }
-export async function startClientRequest(ctx: ActionContext, requestId: string) {
+export async function startClientRequest(
+  ctx: ActionContext,
+  requestId: string,
+): Promise<{ ok: boolean; status: RequestStatus }> {
   return transition(ctx, requestId, 'start', 'in_progress')
 }
-export async function declineClientRequest(ctx: ActionContext, requestId: string) {
+export async function declineClientRequest(
+  ctx: ActionContext,
+  requestId: string,
+): Promise<{ ok: boolean; status: RequestStatus }> {
   return transition(ctx, requestId, 'decline', 'declined')
 }
 

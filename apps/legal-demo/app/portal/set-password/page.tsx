@@ -10,12 +10,10 @@ import { safeInternalPath } from '@/lib/safeRedirect'
 // confirmed Supabase Auth password, and signs them straight in. On every later
 // visit they use email + password at /portal/login.
 
-type Phase = 'form' | 'working' | 'error'
 const MIN_PASSWORD_LENGTH = 8
 
 export default function SetPasswordPage() {
   const router = useRouter()
-  const [phase, setPhase] = useState<Phase>('form')
   const [token, setToken] = useState<string | null>(null)
   const [continueParam, setContinueParam] = useState('/portal')
   const [password, setPassword] = useState('')
@@ -61,25 +59,6 @@ export default function SetPasswordPage() {
       setError(err instanceof Error ? err.message : String(err))
       setSubmitting(false)
     }
-  }
-
-  if (phase === 'working') {
-    return (
-      <Shell>
-        <div className="loading-block" style={{ marginTop: '2rem' }}>
-          <span className="spinner" /> Setting up your account…
-        </div>
-      </Shell>
-    )
-  }
-  if (phase === 'error') {
-    return (
-      <Shell>
-        <div className="alert alert-error" style={{ marginTop: 'var(--space-3)' }}>
-          {error}
-        </div>
-      </Shell>
-    )
   }
 
   return (
