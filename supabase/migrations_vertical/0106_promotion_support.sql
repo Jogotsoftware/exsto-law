@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0100: promotion support — cross-tenant service reader (ADR 0046 §6)
+-- Vertical migration 0106: promotion support — cross-tenant service reader (ADR 0046 §6)
 --
 -- Promotion ("build a service in the sandbox, push it to production tenants")
 -- works by REPLAY, never cross-tenant SQL copy: the control plane reads a service
@@ -13,7 +13,7 @@
 -- (the writes go through existing handlers). No new tables. Guarded by
 -- is_platform_admin, exactly like the other private.cp_* functions.
 --
--- Number 0100 = next after 0099.
+-- Number 0106 = next after 0105.
 -- =============================================================================
 
 -- Active workflow definitions (services) for any tenant — platform admins only.
