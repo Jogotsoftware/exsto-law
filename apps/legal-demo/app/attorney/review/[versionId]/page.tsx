@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { formatDateTime } from '@/lib/datetime'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 
@@ -319,7 +320,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           <span className="review-version">v{draft.versionNumber}</span>
           <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
         </div>
-        <span className="review-meta">Generated {new Date(draft.recordedAt).toLocaleString()}</span>
+        <span className="review-meta">Generated {formatDateTime(draft.recordedAt)}</span>
       </header>
 
       <div className="review-toolbar">

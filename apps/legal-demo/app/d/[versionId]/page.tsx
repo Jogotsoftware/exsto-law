@@ -3,6 +3,7 @@
 import { use, useEffect, useState } from 'react'
 import { callClientMcp } from '@/lib/mcpClient'
 import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { formatDate } from '@/lib/datetime'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 
 interface DraftPayload {
@@ -65,7 +66,7 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
           <h1 style={{ margin: 'var(--space-1) 0 0' }}>{title}</h1>
           <div className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
             Matter {draft.matterNumber} · v{draft.versionNumber} · generated{' '}
-            {new Date(draft.recordedAt).toLocaleDateString()}
+            {formatDate(draft.recordedAt)}
           </div>
         </div>
         <div className="public-draft-actions">
