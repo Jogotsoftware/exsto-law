@@ -345,6 +345,37 @@ export async function getServiceLifecycle(
   })
 }
 
+// Save an edited matter lifecycle (ADR 0045 PR4). Folds into the existing
+// service-save (Joe's Q3): validates the graph, then submits legal.service.upsert
+// with the new `states` — sealing the prior version and inserting version+1 like
+// every other tab's save. Returns the resolved lifecycle so the editor re-renders
+// from the saved truth.
+export async function updateServiceLifecycle(
+  ctx: ActionContext,
+  serviceKey: string,
+  states: unknown,
+): Promise<Lifecycle> {
+  const lc = states as Lifecycle
+  const v = validateLifecycle(lc)
+  if (!v.ok) throw new Error(`Invalid lifecycle: ${v.errors.join('; ')}`)
+  const current = await getService(ctx, serviceKey)
+  if (!current) throw new Error(`Service not found: ${serviceKey}`)
+
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: serviceKey,
+      display_name: current.displayName,
+      states: lc,
+    },
+  })
+
+  const saved = await getServiceLifecycle(ctx, serviceKey)
+  if (!saved) throw new Error(`Lifecycle not found after update: ${serviceKey}`)
+  return saved
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Service Library (PR1): admin read + versioned writes.
 // listServices / getService above stay active-only and unchanged so the public

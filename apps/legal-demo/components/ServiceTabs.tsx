@@ -22,6 +22,7 @@ export function ServiceTabs({
   const base = `/attorney/services/${serviceKey}`
   const tabs: Array<{ href: string; label: string }> = [
     { href: base, label: 'Settings' },
+    { href: `${base}/workflow`, label: 'Workflow' },
     { href: `${base}/questionnaire`, label: 'Questionnaire' },
     { href: `${base}/templates`, label: 'Templates' },
     ...(generationMode === 'ai_draft' ? [{ href: `${base}/prompt`, label: 'Prompt' }] : []),

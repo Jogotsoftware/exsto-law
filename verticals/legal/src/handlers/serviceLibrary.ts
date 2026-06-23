@@ -22,6 +22,10 @@ import type { DbClient } from '@exsto/shared'
 // handlers. The gate logic lives in ONE place so the handler guard and the UI's
 // readiness check can never drift apart.
 import { completenessFromTransitions } from '../api/services.js'
+// Lifecycle graph validation (ADR 0045). Editing the workflow rides this same
+// service-save (Joe's Q3): a provided `states` is validated here and written as part
+// of the new version — no separate action.
+import { validateLifecycle, type Lifecycle } from '../lifecycle/index.js'
 
 interface ServiceTransitions {
   route?: string
@@ -135,6 +139,10 @@ interface ServiceUpsertPayload {
   // preserved keys (intake_form_id/route/documents/on_transcript) always win
   // from the prior row unless explicitly overridden here.
   transitions_patch?: Record<string, unknown>
+  // The matter lifecycle stage graph (ADR 0045). When provided, it is validated and
+  // written into workflow_definition.states as part of this version; when omitted,
+  // the prior row's states is carried forward verbatim.
+  states?: unknown
 }
 
 registerActionHandler('legal.service.upsert', async (ctx, client, payload, actionId) => {
@@ -166,7 +174,15 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
   // template merge; 'ai_draft' stays available but opt-in (never the default).
   if (merged.generation_mode === undefined) merged.generation_mode = 'template_merge'
 
-  const states = prior ? prior.states : []
+  // Lifecycle (ADR 0045): a provided graph is validated and written; otherwise the
+  // prior row's states is carried forward (an edit to another tab never disturbs it).
+  let states: unknown = prior ? prior.states : []
+  if (p.states !== undefined) {
+    const lc = p.states as Lifecycle
+    const v = validateLifecycle(lc)
+    if (!v.ok) throw new Error(`Invalid lifecycle: ${v.errors.join('; ')}`)
+    states = lc
+  }
   const participating = prior
     ? prior.participating_entity_kinds
     : ['matter', 'client_contact', 'questionnaire_response', 'call_session', 'transcript']

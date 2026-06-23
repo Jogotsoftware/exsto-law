@@ -11,6 +11,7 @@ import {
   getDocumentTemplate,
   getDraftingPrompt,
   getQuestionnaire,
+  getServiceLifecycle,
   listServicesIncludingInactive,
   retireService,
   serviceCompleteness,
@@ -19,11 +20,13 @@ import {
   updateDocumentTemplate,
   updateDraftingPrompt,
   updateQuestionnaire,
+  updateServiceLifecycle,
   updateServiceMetadata,
   type CreateServiceInput,
   type SetServiceCostInput,
   type DocumentTemplateDoc,
   type DraftingPromptDoc,
+  type Lifecycle,
   type QuestionnaireDoc,
   type ServiceCompleteness,
   type ServiceDefinition,
@@ -249,6 +252,33 @@ const templateUpdateTool: Tool<
   }),
 }
 
+// Matter-lifecycle editor (ADR 0045 PR4). get resolves the stage graph from
+// workflow_definition.states (or the derive-fallback); update validates and saves it
+// through the SAME service-save action (legal.service.upsert) — no dedicated action
+// (Joe's Q3). Attorney-only: not in CLIENT_PORTAL_TOOLS (clientPolicy.ts default-deny).
+const lifecycleGetTool: Tool<{ serviceKey: string }, { lifecycle: Lifecycle | null }> = {
+  name: 'legal.service.lifecycle.get',
+  description:
+    "Get a service offering's matter lifecycle — the ordered stage graph (stages + gated transitions) a matter of this service moves through. Returns the saved graph if one exists, otherwise the one derived from the service's route/booking.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    lifecycle: await getServiceLifecycle(ctx, input.serviceKey),
+  }),
+}
+
+const lifecycleUpdateTool: Tool<
+  { serviceKey: string; states: unknown },
+  { lifecycle: Lifecycle }
+> = {
+  name: 'legal.service.lifecycle.update',
+  description:
+    "Save a service offering's matter lifecycle (the stage/transition graph). Validates the graph (one entry, a reachable terminal, no dangling edges, valid gates), then writes a NEW immutable version of the service (the prior is sealed) via the service-save action. New matters of this service follow the new lifecycle; in-flight matters keep the version they opened under.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    lifecycle: await updateServiceLifecycle(ctx, input.serviceKey, input.states),
+  }),
+}
+
 registerTool(listAllTool)
 registerTool(createTool)
 registerTool(updateTool)
@@ -263,3 +293,5 @@ registerTool(promptGetTool)
 registerTool(promptUpdateTool)
 registerTool(templateGetTool)
 registerTool(templateUpdateTool)
+registerTool(lifecycleGetTool)
+registerTool(lifecycleUpdateTool)
