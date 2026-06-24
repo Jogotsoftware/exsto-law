@@ -234,6 +234,12 @@ function addUsage(acc: AssistantUsage, usage: Anthropic.Message['usage'] | undef
 export type AssistantStreamChunk =
   | { type: 'thinking'; text: string }
   | { type: 'text'; text: string }
+  // The model is generating a TOOL INPUT (e.g. drafting a document body or a
+  // questionnaire into a propose_* call). Those deltas are input_json, not text, so
+  // without this the stream goes silent for the whole (long) generation — the UI looks
+  // frozen and the connection can idle out. Forwarding a throttled `drafting` pulse
+  // keeps the SSE warm AND lets the UI show a live "drafting" animation.
+  | { type: 'drafting' }
   | { type: 'citations'; citations: string[] }
   // The model invoked a client tool (e.g. load_skill). Surfaced so the UI can
   // show what the assistant is doing — "using NDA review" — while the tool runs.
@@ -540,15 +546,30 @@ export async function* streamChatWithAssistant(
       body as unknown as Anthropic.MessageCreateParamsStreaming,
     )
     let final: Anthropic.Message
+    // Throttle the `drafting` pulse: input_json deltas arrive rapidly, so emit one
+    // every Nth (≈ one pulse per second of active generation) — enough to keep the
+    // connection warm and drive the animation, without flooding the stream.
+    let draftDeltas = 0
+    const DRAFT_PULSE_EVERY = 6
     try {
       for await (const event of stream) {
         if (event.type !== 'content_block_delta') continue
-        // SDK 0.32 doesn't type thinking_delta; read defensively.
-        const delta = event.delta as { type?: string; text?: string; thinking?: string }
+        // SDK 0.32 doesn't type thinking_delta / input_json_delta; read defensively.
+        const delta = event.delta as {
+          type?: string
+          text?: string
+          thinking?: string
+          partial_json?: string
+        }
         if (delta.type === 'text_delta' && delta.text) {
           yield { type: 'text', text: delta.text }
         } else if (delta.type === 'thinking_delta' && delta.thinking) {
           yield { type: 'thinking', text: delta.thinking }
+        } else if (delta.type === 'input_json_delta') {
+          // The model is building a tool call's input (e.g. a document body). Pulse so
+          // the stream isn't silent during a long generation.
+          if (draftDeltas % DRAFT_PULSE_EVERY === 0) yield { type: 'drafting' }
+          draftDeltas++
         }
       }
       final = await stream.finalMessage()

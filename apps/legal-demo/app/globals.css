@@ -5880,6 +5880,21 @@ button.danger.outline:hover:not(:disabled) {
   color: var(--muted);
   font-size: 0.82rem;
 }
+/* Drafting indicator (Build wizard) — the model is generating a document/questionnaire,
+   an otherwise-silent phase. A shimmering "Drafting…" with the typing dots so a long
+   generation feels alive rather than frozen. */
+.uac-drafting {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--accent);
+  font-size: 0.82rem;
+  margin: 0.1rem 0 0.25rem;
+}
+.uac-drafting-label {
+  font-weight: 600;
+  animation: uac-shimmer 1.6s ease-in-out infinite;
+}
 .uac-thinking-head {
   display: inline-flex;
   align-items: center;

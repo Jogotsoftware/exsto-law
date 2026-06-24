@@ -454,6 +454,9 @@ export function UnifiedAssistantChat({
   const [streaming, setStreaming] = useState<{
     thinking: string
     text: string
+    // The model is drafting a tool input (a document body / questionnaire) — show a
+    // live "drafting" animation during the otherwise-silent generation.
+    drafting: boolean
     skills: { slug: string; name: string }[]
     documents: ProducedDoc[]
     workflowProposals: WorkflowProposal[]
@@ -939,6 +942,7 @@ export function UnifiedAssistantChat({
     const partial = {
       thinking: '',
       text: '',
+      drafting: false,
       skills: [] as { slug: string; name: string }[],
       documents: [] as ProducedDoc[],
       workflowProposals: [] as WorkflowProposal[],
@@ -991,8 +995,15 @@ export function UnifiedAssistantChat({
             partial.thinking += t
             setStreaming({ ...partial })
           },
+          onDrafting: () => {
+            if (!live()) return
+            partial.drafting = true
+            setStreaming({ ...partial })
+          },
           onText: (t) => {
             if (!live()) return
+            // Real reply text means the silent drafting phase is over.
+            partial.drafting = false
             partial.text += t
             setStreaming({ ...partial })
           },
@@ -1712,13 +1723,39 @@ export function UnifiedAssistantChat({
                 <div className="uac-thinking-body">{streaming.thinking}</div>
               </div>
             )}
-            {!streaming.text && !streaming.thinking && streaming.documents.length === 0 && (
-              <span className="uac-typing" aria-label="Thinking">
-                <span />
-                <span />
-                <span />
-              </span>
-            )}
+            {/* Drafting animation: the model is generating a document/questionnaire into
+                a tool call (a long, otherwise-silent phase). Shown until the first text
+                or an artifact card appears, so the build feels alive, never frozen. */}
+            {!streaming.text &&
+              streaming.drafting &&
+              streaming.documents.length === 0 &&
+              streaming.workflowProposals.length === 0 &&
+              streaming.serviceProposals.length === 0 &&
+              streaming.questionnaireProposals.length === 0 &&
+              streaming.templateProposals.length === 0 &&
+              streaming.costProposals.length === 0 &&
+              streaming.enableProposals.length === 0 &&
+              streaming.buildQuestions.length === 0 && (
+                <div className="uac-drafting" aria-label="Drafting" role="status">
+                  <SparklesIcon size={12} />
+                  <span className="uac-drafting-label">Drafting…</span>
+                  <span className="uac-typing" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                </div>
+              )}
+            {!streaming.text &&
+              !streaming.thinking &&
+              !streaming.drafting &&
+              streaming.documents.length === 0 && (
+                <span className="uac-typing" aria-label="Thinking">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              )}
             {/* A document produced mid-stream appears as a card right away. */}
             {streaming.documents.map((doc, di) => (
               <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />

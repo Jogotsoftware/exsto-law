@@ -130,6 +130,9 @@ export interface AssistantStreamHandlers {
   onMeta?: (meta: StreamMeta) => void
   onThinking?: (text: string) => void
   onText?: (text: string) => void
+  // The assistant is generating a tool input (drafting a document/questionnaire into a
+  // propose_* call) — a heartbeat shown as a live "drafting" animation.
+  onDrafting?: () => void
   // The assistant loaded a specialized skill (playbook) for this turn.
   onSkill?: (skill: { slug: string; name: string }) => void
   // The assistant produced a downloadable document (a deliverable, not the prose).
@@ -218,6 +221,9 @@ export async function streamAssistant(
         break
       case 'text':
         handlers.onText?.(String(evt.text ?? ''))
+        break
+      case 'drafting':
+        handlers.onDrafting?.()
         break
       case 'skill':
         handlers.onSkill?.({ slug: String(evt.slug ?? ''), name: String(evt.name ?? '') })
