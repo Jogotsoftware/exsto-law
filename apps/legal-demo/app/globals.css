@@ -4361,6 +4361,41 @@ main.book-main {
   border-radius: var(--radius-sm);
   font: inherit;
 }
+/* Live streaming preview while the AI drafts/revises a template (so a long
+   document streams in instead of blocking past the gateway timeout). */
+.tpl-ai-stream {
+  margin-top: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2, #fafafa);
+  overflow: hidden;
+}
+.tpl-ai-stream-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.tpl-ai-stream-body {
+  margin: 0;
+  padding: 0.6rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.tpl-ai-stream-wait {
+  padding: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
 .tpl-ai-skillarea {
   color: var(--muted);
   font-size: 0.78rem;
@@ -8241,6 +8276,50 @@ input[type='number'] {
   margin-top: 0;
 }
 
+/* Inline document editor (review page): the paper surface becomes editable. A
+   markdown textarea so the attorney can fix a clause/name directly; Save records
+   a new version (document.edit). Shares the paper's framing for continuity. */
+.doc-editor.doc-paper {
+  background: #fff;
+  max-width: 8.5in;
+  width: 100%;
+  margin-inline: auto;
+  padding: clamp(1.25rem, 4%, 2.5rem);
+  border-radius: 2px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 14px 40px rgba(15, 23, 42, 0.13);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.doc-editor-area {
+  width: 100%;
+  min-height: 60vh;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: #161616;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.1rem;
+  background: #fcfcfd;
+}
+.doc-editor-note {
+  width: 100%;
+}
+.doc-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.doc-editor-hint {
+  color: var(--muted);
+  font-size: var(--text-sm, 0.85rem);
+}
+
 /* Review decision panel */
 .review-decision {
   border: 1px solid var(--border);
@@ -8278,6 +8357,95 @@ input[type='number'] {
   gap: 1rem;
   animation: trace-slide-in 0.18s ease-out;
 }
+
+/* Compare-versions drawer: wider than the trace drawer to fit the line diff. */
+.vcmp-drawer {
+  width: min(760px, 96vw);
+}
+.vcmp-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.vcmp-pick {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.92rem;
+}
+.vcmp-pick select {
+  width: auto;
+}
+.vcmp-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.vcmp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+.vcmp-toggle input {
+  width: auto;
+}
+.vcmp-stat {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.vcmp-stat-add {
+  color: #15803d;
+}
+.vcmp-stat-del {
+  color: #b91c1c;
+}
+.vdiff {
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.vdiff-line {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 0.4rem;
+}
+.vdiff-sign {
+  flex: 0 0 1ch;
+  user-select: none;
+  opacity: 0.7;
+}
+.vdiff-text {
+  flex: 1 1 auto;
+}
+.vdiff-add {
+  background: #e7f6ec;
+  color: #14532d;
+}
+.vdiff-del {
+  background: #fbe9e9;
+  color: #7f1d1d;
+}
+.vdiff-same {
+  color: var(--muted);
+}
+.vdiff-gap {
+  text-align: center;
+  color: var(--muted);
+  user-select: none;
+  padding: 0.15rem 0;
+}
+
 @keyframes trace-slide-in {
   from {
     transform: translateX(20px);
@@ -8843,6 +9011,57 @@ input[type='number'] {
   border-top: 2px solid #ef4444;
   z-index: 5;
   pointer-events: none;
+}
+/* ── Combobox (searchable single-select; matter/contact pickers) ───────────── */
+.cbx {
+  position: relative;
+  width: 100%;
+}
+.cbx-input {
+  width: 100%;
+}
+.cbx-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px -12px rgba(11, 27, 58, 0.3);
+}
+.cbx-option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cbx-option.active,
+.cbx-option:hover {
+  background: var(--surface-2, #eef2f7);
+}
+.cbx-option[aria-selected='true'] {
+  font-weight: 600;
+}
+.cbx-option-label {
+  font-size: 0.9rem;
+}
+.cbx-option-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.cbx-empty {
+  padding: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
 }
 /* ── Client portal sign-in (email+password / Google / magic-link) ──────────── */
 .cauth-shell {

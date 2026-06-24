@@ -1,6 +1,6 @@
 import { submitAction, type ActionContext } from '@exsto/substrate'
 import { archiveEntity } from '@exsto/primitives'
-import { chatWithAssistantDetailed } from '../adapters/claude.js'
+import { chatWithAssistantDetailed, streamChatWithAssistant } from '../adapters/claude.js'
 import { withSkills, loadForcedSkills, buildActiveSkillsText } from './skillContext.js'
 import { resolveAssistantModel } from './assistantModels.js'
 import {
@@ -71,11 +71,16 @@ export async function updateTemplate(
   return updated
 }
 
-// AI-draft a template body from a plain-language description, using the firm's
-// Settings-managed Anthropic key (claude.ts owns all Anthropic traffic). Pure
-// generation — it returns text the attorney reviews and saves; it writes nothing
-// to the substrate, so there is no action/reasoning trace here (the SAVE is the
-// recorded write). The model is instructed to emit {{merge_tokens}} for fill-ins.
+// AI template generation — drafting from a description OR enhancing an existing
+// body — uses the firm's Settings-managed Anthropic key (claude.ts owns all
+// Anthropic traffic). Pure generation: it returns text the attorney reviews and
+// saves; it writes nothing to the substrate (the SAVE is the recorded write). The
+// model is instructed to emit {{merge_tokens}} for fill-ins.
+//
+// IMPORTANT (504 fix): a full document (e.g. an Operating Agreement) takes far
+// longer to generate than a serverless gateway will hold a synchronous request,
+// so the UI uses the STREAMING path (streamTemplateAi) over SSE. The synchronous
+// aiDraftTemplate/aiEnhanceTemplate remain for the MCP tools and short outputs.
 export interface AiDraftTemplateInput {
   instructions: string
   category: StandaloneTemplateCategory
@@ -87,53 +92,6 @@ export interface AiDraftTemplateInput {
   modelId?: string
 }
 
-export async function aiDraftTemplate(
-  ctx: ActionContext,
-  input: AiDraftTemplateInput,
-): Promise<{ body: string }> {
-  const instructions = input.instructions?.trim()
-  if (!instructions) throw new Error('Describe the template you want drafted.')
-  const kind = input.category === 'email' ? 'email' : 'legal document'
-  const baseSystem = [
-    `You draft reusable ${kind} TEMPLATES for a US law firm.`,
-    'Output the template body ONLY — no preamble, no explanation, no markdown code fences.',
-    'Wherever a value is filled in per client or matter, insert a merge token in double',
-    'curly braces with a snake_case name, e.g. {{client_name}}, {{firm_name}},',
-    '{{matter_number}}, {{effective_date}}. Reuse the same token name when a value recurs.',
-    'Use clear headings and short paragraphs; keep it practical and ready to edit.',
-    // Anti-hallucination — the same standard the chatbot holds (beta ask).
-    'Never fabricate statutes, code sections, case names, or citations. Where a specific',
-    'legal citation would go, prefer a {{citation}} merge token or general phrasing the',
-    'attorney can verify; do not invent a section number.',
-  ].join(' ')
-  // Make the draft skill-aware: the model can pull a relevant legal playbook
-  // (NDA, MSA, demand letter, …) via load_skill, exactly like the chatbot.
-  const { system: catalogSystem, clientTools } = await withSkills(ctx, baseSystem)
-  // Plus any skills the attorney explicitly picked — force-loaded for this draft.
-  const forced = await loadForcedSkills(ctx, input.skillSlugs)
-  const activeText = buildActiveSkillsText(forced)
-  const system = activeText ? `${catalogSystem}\n\n${activeText}` : catalogSystem
-  // The chosen model (falls back to the firm default inside the adapter). Only the
-  // Claude path is used here, so a non-Claude id resolves to its model string and
-  // the adapter still drives Anthropic — the modal only offers Claude models.
-  const model = input.modelId ? resolveAssistantModel(input.modelId)?.model : undefined
-  const { reply } = await chatWithAssistantDetailed(
-    ctx.tenantId,
-    [
-      { role: 'system', content: system },
-      { role: 'user', content: instructions },
-    ],
-    { clientTools, model },
-  )
-  return { body: reply.trim() }
-}
-
-// AI-enhance an EXISTING template body: revise/polish it (or draft from scratch
-// when the body is empty), preserving the {{merge_tokens}} already in it and
-// preferring to bind new fill-ins to the bound questionnaire's fields. Same
-// Settings-managed Anthropic key + skill-awareness + anti-hallucination standard
-// as aiDraftTemplate. Pure generation — returns text the attorney reviews and
-// saves; writes nothing to the substrate (the SAVE is the recorded write).
 export interface AiEnhanceTemplateInput {
   // The current template body to improve. Empty ⇒ draft fresh from instructions.
   currentBody: string
@@ -148,46 +106,151 @@ export interface AiEnhanceTemplateInput {
   modelId?: string
 }
 
-export async function aiEnhanceTemplate(
+// Unified streaming input: draft (from instructions) or enhance (revise a body).
+export interface TemplateAiStreamInput {
+  mode: 'draft' | 'enhance'
+  category: StandaloneTemplateCategory
+  instructions?: string
+  currentBody?: string
+  fieldIds?: string[]
+  skillSlugs?: string[]
+  modelId?: string
+}
+
+// Build the system prompt + user message + tools + model for a template-AI run.
+// Single source of truth for the draft and enhance prompts so the streaming and
+// synchronous paths are identical.
+async function buildTemplateAiPrompt(
   ctx: ActionContext,
-  input: AiEnhanceTemplateInput,
-): Promise<{ body: string }> {
-  const currentBody = input.currentBody?.trim() ?? ''
-  const instructions = input.instructions?.trim()
-  if (!currentBody && !instructions)
-    throw new Error('Nothing to work from — write a draft or describe what you want.')
+  input: TemplateAiStreamInput,
+): Promise<{
+  system: string
+  userMsg: string
+  clientTools: Awaited<ReturnType<typeof withSkills>>['clientTools']
+  model: string | undefined
+}> {
   const kind = input.category === 'email' ? 'email' : 'legal document'
+  const instructions = input.instructions?.trim()
+  const currentBody = input.currentBody?.trim() ?? ''
   const fieldList = (input.fieldIds ?? []).map((f) => f.trim()).filter(Boolean)
-  const baseSystem = [
-    `You revise reusable ${kind} TEMPLATES for a US law firm.`,
-    'Output the REVISED template body ONLY — no preamble, no explanation, no markdown code fences.',
-    'Preserve every existing {{merge_token}} that still applies; keep their exact snake_case names.',
-    'Wherever a value is filled in per client or matter, use a {{merge_token}} in double curly braces',
-    'with a snake_case name, e.g. {{client_name}}, {{effective_date}}; reuse a token name when a value recurs.',
-    fieldList.length
-      ? `When a fill-in matches one of these existing questionnaire fields, bind to it by reusing its exact token: ${fieldList
-          .map((f) => `{{${f}}}`)
-          .join(', ')}.`
-      : '',
-    'Keep clear headings and short paragraphs; practical and ready to edit.',
-    // Anti-hallucination — the same standard the chatbot and aiDraft hold.
-    'Never fabricate statutes, code sections, case names, or citations. Where a specific legal',
-    'citation would go, prefer a {{citation}} merge token or general phrasing the attorney can',
-    'verify; do not invent a section number.',
-  ]
-    .filter(Boolean)
-    .join(' ')
+
+  let baseSystem: string
+  let userMsg: string
+  if (input.mode === 'enhance') {
+    if (!currentBody && !instructions)
+      throw new Error('Nothing to work from — write a draft or describe what you want.')
+    baseSystem = [
+      `You revise reusable ${kind} TEMPLATES for a US law firm.`,
+      'Output the REVISED template body ONLY — no preamble, no explanation, no markdown code fences.',
+      'Preserve every existing {{merge_token}} that still applies; keep their exact snake_case names.',
+      'Wherever a value is filled in per client or matter, use a {{merge_token}} in double curly braces',
+      'with a snake_case name, e.g. {{client_name}}, {{effective_date}}; reuse a token name when a value recurs.',
+      fieldList.length
+        ? `When a fill-in matches one of these existing questionnaire fields, bind to it by reusing its exact token: ${fieldList
+            .map((f) => `{{${f}}}`)
+            .join(', ')}.`
+        : '',
+      'Keep clear headings and short paragraphs; practical and ready to edit.',
+      'Never fabricate statutes, code sections, case names, or citations. Where a specific legal',
+      'citation would go, prefer a {{citation}} merge token or general phrasing the attorney can',
+      'verify; do not invent a section number.',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    userMsg = currentBody
+      ? `Current template:\n\n${currentBody}\n\n---\nRevision request: ${
+          instructions ||
+          'Polish and tighten the language, fix structure and formatting, keep all merge tokens.'
+        }`
+      : `Draft a new ${kind} template. Request: ${instructions}`
+  } else {
+    if (!instructions) throw new Error('Describe the template you want drafted.')
+    baseSystem = [
+      `You draft reusable ${kind} TEMPLATES for a US law firm.`,
+      'Output the template body ONLY — no preamble, no explanation, no markdown code fences.',
+      'Wherever a value is filled in per client or matter, insert a merge token in double',
+      'curly braces with a snake_case name, e.g. {{client_name}}, {{firm_name}},',
+      '{{matter_number}}, {{effective_date}}. Reuse the same token name when a value recurs.',
+      fieldList.length
+        ? `Prefer these existing questionnaire field tokens for fill-ins: ${fieldList
+            .map((f) => `{{${f}}}`)
+            .join(', ')}.`
+        : '',
+      'Use clear headings and short paragraphs; keep it practical and ready to edit.',
+      'Never fabricate statutes, code sections, case names, or citations. Where a specific',
+      'legal citation would go, prefer a {{citation}} merge token or general phrasing the',
+      'attorney can verify; do not invent a section number.',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    userMsg = instructions
+  }
+
+  // Skill-aware (load_skill auto-routing) + any force-picked skills.
   const { system: catalogSystem, clientTools } = await withSkills(ctx, baseSystem)
   const forced = await loadForcedSkills(ctx, input.skillSlugs)
   const activeText = buildActiveSkillsText(forced)
   const system = activeText ? `${catalogSystem}\n\n${activeText}` : catalogSystem
   const model = input.modelId ? resolveAssistantModel(input.modelId)?.model : undefined
-  const userMsg = currentBody
-    ? `Current template:\n\n${currentBody}\n\n---\nRevision request: ${
-        instructions ||
-        'Polish and tighten the language, fix structure and formatting, keep all merge tokens.'
-      }`
-    : `Draft a new ${kind} template. Request: ${instructions}`
+  return { system, userMsg, clientTools, model }
+}
+
+// STREAMING template generation (the path the UI uses). Yields the body text as it
+// is produced, so the gateway never times out on a long document and the attorney
+// sees progress. Drops thinking/tool/citation chunks — only the body text matters.
+export async function* streamTemplateAi(
+  ctx: ActionContext,
+  input: TemplateAiStreamInput,
+): AsyncGenerator<{ type: 'text'; text: string } | { type: 'thinking'; text: string }> {
+  const { system, userMsg, clientTools, model } = await buildTemplateAiPrompt(ctx, input)
+  for await (const chunk of streamChatWithAssistant(
+    ctx.tenantId,
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: userMsg },
+    ],
+    { clientTools, model },
+  )) {
+    if (chunk.type === 'text') yield { type: 'text', text: chunk.text }
+    else if (chunk.type === 'thinking') yield { type: 'thinking', text: chunk.text }
+  }
+}
+
+export async function aiDraftTemplate(
+  ctx: ActionContext,
+  input: AiDraftTemplateInput,
+): Promise<{ body: string }> {
+  const { system, userMsg, clientTools, model } = await buildTemplateAiPrompt(ctx, {
+    mode: 'draft',
+    category: input.category,
+    instructions: input.instructions,
+    skillSlugs: input.skillSlugs,
+    modelId: input.modelId,
+  })
+  const { reply } = await chatWithAssistantDetailed(
+    ctx.tenantId,
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: userMsg },
+    ],
+    { clientTools, model },
+  )
+  return { body: reply.trim() }
+}
+
+export async function aiEnhanceTemplate(
+  ctx: ActionContext,
+  input: AiEnhanceTemplateInput,
+): Promise<{ body: string }> {
+  const { system, userMsg, clientTools, model } = await buildTemplateAiPrompt(ctx, {
+    mode: 'enhance',
+    category: input.category,
+    instructions: input.instructions,
+    currentBody: input.currentBody,
+    fieldIds: input.fieldIds,
+    skillSlugs: input.skillSlugs,
+    modelId: input.modelId,
+  })
   const { reply } = await chatWithAssistantDetailed(
     ctx.tenantId,
     [

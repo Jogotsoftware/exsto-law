@@ -10,6 +10,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
+import { Modal } from '@/components/Modal'
+import { ActionsMenu, type ActionItem } from '@/components/ActionsMenu'
+import { Combobox, type ComboboxOption } from '@/components/Combobox'
 
 interface WorkspaceEvent {
   eventId: string
@@ -22,6 +25,8 @@ interface WorkspaceEvent {
   status: string
   matterEntityId: string | null
   matterNumber: string | null
+  // The matter's chosen call-type palette key, for color-coding (PR1).
+  categoryKey: string | null
   managedByApp: boolean
 }
 
@@ -29,6 +34,13 @@ interface MatterOption {
   matterEntityId: string
   matterNumber: string
   clientName: string
+}
+
+// The firm's configurable call-type palette (firm.calendar_categories).
+interface Category {
+  key: string
+  label: string
+  color: string
 }
 
 type View = 'day' | 'week' | 'month' | 'list'
@@ -157,6 +169,19 @@ export default function CalendarPage() {
   const [assignFor, setAssignFor] = useState<{ eventId: string; matterEntityId: string } | null>(
     null,
   )
+  // The firm's call-type palette (color-coding) + the two per-event modals it
+  // feeds: categorize (set call-type) and email-guests (invite attendees).
+  const [categories, setCategories] = useState<Category[]>([])
+  const [categorizeFor, setCategorizeFor] = useState<{
+    matterEntityId: string
+    matterNumber: string
+    categoryKey: string
+  } | null>(null)
+  const [attendeesFor, setAttendeesFor] = useState<{
+    matterEntityId: string
+    matterNumber: string
+  } | null>(null)
+  const [attendeeInput, setAttendeeInput] = useState('')
   // The hourly grid scrolls the full 24h; open it near the workday.
   const gridScrollRef = useRef<HTMLDivElement>(null)
 
@@ -185,6 +210,17 @@ export default function CalendarPage() {
       setMatters(m.matters)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    }
+    // The palette is only color-coding — a hiccup here must not error the whole
+    // calendar, so it loads independently and degrades to no colors.
+    try {
+      const cats = await callAttorneyMcp<{ categories: Category[] }>({
+        toolName: 'legal.calendar.categories.get',
+        input: {},
+      })
+      setCategories(cats.categories)
+    } catch {
+      setCategories([])
     }
   }
 
@@ -225,17 +261,110 @@ export default function CalendarPage() {
     )
   }, [matters])
 
-  async function run(toolName: string, input: Record<string, unknown>) {
+  async function run(toolName: string, input: Record<string, unknown>): Promise<boolean> {
     setBusy(true)
     setError(null)
     try {
       await callAttorneyMcp({ toolName, input })
       setPanel(null)
       await load()
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     } finally {
       setBusy(false)
+    }
+  }
+
+  // Matters as searchable combobox options (matter # + client name, both matched).
+  const matterOptions: ComboboxOption[] = useMemo(
+    () =>
+      matters.map((m) => ({
+        value: m.matterEntityId,
+        label: m.matterNumber,
+        hint: m.clientName || undefined,
+      })),
+    [matters],
+  )
+
+  // Palette key → hex color, for color-coding events by their call-type.
+  const categoryColor = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of categories) m.set(c.key, c.color)
+    return m
+  }, [categories])
+
+  // The palette color for an event (by its matter's call-type), or null when
+  // uncategorized — callers fall back to the app-managed gold / external grey.
+  function eventColor(e: WorkspaceEvent): string | null {
+    return e.categoryKey ? (categoryColor.get(e.categoryKey) ?? null) : null
+  }
+
+  // The consolidated per-event action menu (beta feedback: every event should have
+  // an edit menu — reschedule / cancel / email guests / categorize / view matter).
+  function eventMenuItems(e: WorkspaceEvent): ActionItem[] {
+    return [
+      {
+        label: 'Reschedule',
+        onClick: () =>
+          setPanel({ kind: 'reschedule', matterEntityId: e.matterEntityId!, start: '', end: '' }),
+      },
+      {
+        label: 'Email guests',
+        onClick: () => {
+          setAttendeeInput('')
+          setAttendeesFor({ matterEntityId: e.matterEntityId!, matterNumber: e.matterNumber ?? '' })
+        },
+      },
+      {
+        label: 'Categorize',
+        onClick: () =>
+          setCategorizeFor({
+            matterEntityId: e.matterEntityId!,
+            matterNumber: e.matterNumber ?? '',
+            categoryKey: e.categoryKey ?? '',
+          }),
+      },
+      { label: 'View matter', href: `/attorney/matters/${e.matterEntityId}` },
+      {
+        label: 'Cancel event',
+        onClick: () => {
+          if (window.confirm(`Cancel the consultation for ${e.matterNumber}?`)) {
+            run('legal.booking.cancel', { matterEntityId: e.matterEntityId })
+          }
+        },
+      },
+    ]
+  }
+
+  async function submitAttendees() {
+    if (!attendeesFor) return
+    const emails = attendeeInput
+      .split(/[,\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (emails.length === 0) return
+    if (
+      await run('legal.booking.add_attendees', {
+        matterEntityId: attendeesFor.matterEntityId,
+        attendeeEmails: emails,
+      })
+    ) {
+      setAttendeesFor(null)
+      setAttendeeInput('')
+    }
+  }
+
+  async function submitCategorize(categoryKey: string) {
+    if (!categorizeFor) return
+    if (
+      await run('legal.booking.categorize', {
+        matterEntityId: categorizeFor.matterEntityId,
+        categoryKey,
+      })
+    ) {
+      setCategorizeFor(null)
     }
   }
 
@@ -289,17 +418,21 @@ export default function CalendarPage() {
       .sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1))
 
   // Full event card — used by day and week views (month uses a compact chip).
-  // Matter-linked events are color-coded (gold left border) to stand out from the
-  // attorney's other Google events (muted border).
+  // Matter-linked events are color-coded by call-type (palette), falling back to a
+  // gold left border; the attorney's other Google events use a muted border.
   function renderEvent(e: WorkspaceEvent) {
+    const color = eventColor(e)
+    const borderLeft = color
+      ? `3px solid ${color}`
+      : e.managedByApp
+        ? '3px solid var(--primary, #1e3a5f)'
+        : '3px solid var(--border)'
     return (
       <div
         key={e.eventId}
         style={{
           border: '1px solid var(--border)',
-          borderLeft: e.managedByApp
-            ? '3px solid var(--primary, #1e3a5f)'
-            : '3px solid var(--border)',
+          borderLeft,
           borderRadius: 6,
           padding: 'var(--space-2)',
           fontSize: '0.85rem',
@@ -315,34 +448,12 @@ export default function CalendarPage() {
         </div>
         <div>{e.summary}</div>
         {e.matterEntityId ? (
-          <div style={{ marginTop: 4 }}>
+          <div
+            className="row"
+            style={{ marginTop: 4, gap: 'var(--space-2)', alignItems: 'center' }}
+          >
             <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
-            <div className="row" style={{ gap: 'var(--space-1)', marginTop: 4 }}>
-              <button
-                style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
-                onClick={() =>
-                  setPanel({
-                    kind: 'reschedule',
-                    matterEntityId: e.matterEntityId!,
-                    start: '',
-                    end: '',
-                  })
-                }
-              >
-                Reschedule
-              </button>
-              <button
-                style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
-                disabled={busy}
-                onClick={() => {
-                  if (window.confirm(`Cancel the consultation for ${e.matterNumber}?`)) {
-                    run('legal.booking.cancel', { matterEntityId: e.matterEntityId })
-                  }
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+            <ActionsMenu label="Actions" align="left" items={eventMenuItems(e)} />
           </div>
         ) : (
           <div className="text-muted text-sm" style={{ marginTop: 4 }}>
@@ -361,19 +472,14 @@ export default function CalendarPage() {
                   className="row"
                   style={{ gap: 'var(--space-1)', marginTop: 4, flexWrap: 'wrap' }}
                 >
-                  <select
-                    value={assignFor.matterEntityId}
-                    style={{ fontSize: '0.75rem' }}
-                    onChange={(ev) =>
-                      setAssignFor({ eventId: e.eventId, matterEntityId: ev.target.value })
-                    }
-                  >
-                    {matters.map((m) => (
-                      <option key={m.matterEntityId} value={m.matterEntityId}>
-                        {m.matterNumber}
-                      </option>
-                    ))}
-                  </select>
+                  <div style={{ minWidth: 180 }}>
+                    <Combobox
+                      ariaLabel="Matter to assign"
+                      options={matterOptions}
+                      value={assignFor.matterEntityId}
+                      onChange={(v) => setAssignFor({ eventId: e.eventId, matterEntityId: v })}
+                    />
+                  </div>
                   <button
                     style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
                     disabled={busy || !assignFor.matterEntityId}
@@ -445,8 +551,15 @@ export default function CalendarPage() {
   // the matter; other Google events open in Google; both are color-coded (gold
   // left border = app-managed). Reschedule/cancel/assign stay on the List view.
   function renderGridEvent(e: WorkspaceEvent, top: number, height: number, inset: number) {
+    const color = eventColor(e)
     const cls = `cal-event${e.managedByApp ? ' managed' : ''}`
-    const style = { top, height, left: `calc(3px + ${inset * 12}px)`, zIndex: 2 + inset }
+    const style = {
+      top,
+      height,
+      left: `calc(3px + ${inset * 12}px)`,
+      zIndex: 2 + inset,
+      ...(color ? { borderLeft: `3px solid ${color}`, background: `${color}1a` } : {}),
+    }
     const inner = (
       <>
         <span className="cal-event-time">
@@ -668,67 +781,167 @@ export default function CalendarPage() {
       </section>
 
       {panel && (
-        <section>
-          <h3>{panel.kind === 'create' ? 'Book a consultation' : 'Reschedule consultation'}</h3>
-          <div
-            className="row"
-            style={{ gap: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'end' }}
-          >
+        <Modal
+          title={panel.kind === 'create' ? 'New event' : 'Reschedule consultation'}
+          onClose={() => setPanel(null)}
+          footer={
+            <>
+              <button onClick={() => setPanel(null)}>Cancel</button>
+              <button
+                className="primary"
+                disabled={
+                  busy ||
+                  !panel.start ||
+                  !panel.end ||
+                  (panel.kind === 'create' && !panel.matterEntityId)
+                }
+                onClick={() =>
+                  run(
+                    panel.kind === 'create'
+                      ? 'legal.booking.create_for_matter'
+                      : 'legal.booking.reschedule',
+                    {
+                      matterEntityId: panel.matterEntityId,
+                      startIso: new Date(panel.start).toISOString(),
+                      endIso: new Date(panel.end).toISOString(),
+                    },
+                  )
+                }
+              >
+                {busy
+                  ? 'Saving…'
+                  : panel.kind === 'create'
+                    ? 'Book + sync to Google'
+                    : 'Reschedule'}
+              </button>
+            </>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             {panel.kind === 'create' && (
-              <label>
-                Matter
-                <br />
-                <select
-                  value={panel.matterEntityId}
-                  onChange={(e) => setPanel({ ...panel, matterEntityId: e.target.value })}
-                >
-                  {matters.map((m) => (
-                    <option key={m.matterEntityId} value={m.matterEntityId}>
-                      {m.matterNumber} — {m.clientName || 'client'}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div>
+                <div className="kv-label" style={{ marginBottom: 4 }}>
+                  Matter
+                </div>
+                <Combobox
+                  ariaLabel="Matter"
+                  options={matterOptions}
+                  value={panel.matterEntityId ?? null}
+                  onChange={(v) => setPanel({ ...panel, matterEntityId: v })}
+                  placeholder="Search matters or clients…"
+                />
+              </div>
             )}
-            <label>
-              Start
-              <br />
+            <div>
+              <div className="kv-label" style={{ marginBottom: 4 }}>
+                Start
+              </div>
               <input
                 type="datetime-local"
+                style={{ width: '100%' }}
                 value={panel.start}
                 onChange={(e) => setPanel({ ...panel, start: e.target.value })}
               />
-            </label>
-            <label>
-              End
-              <br />
+            </div>
+            <div>
+              <div className="kv-label" style={{ marginBottom: 4 }}>
+                End
+              </div>
               <input
                 type="datetime-local"
+                style={{ width: '100%' }}
                 value={panel.end}
                 onChange={(e) => setPanel({ ...panel, end: e.target.value })}
               />
-            </label>
-            <button
-              className="primary"
-              disabled={busy || !panel.start || !panel.end}
-              onClick={() =>
-                run(
-                  panel.kind === 'create'
-                    ? 'legal.booking.create_for_matter'
-                    : 'legal.booking.reschedule',
-                  {
-                    matterEntityId: panel.matterEntityId,
-                    startIso: new Date(panel.start).toISOString(),
-                    endIso: new Date(panel.end).toISOString(),
-                  },
-                )
-              }
-            >
-              {busy ? 'Saving…' : panel.kind === 'create' ? 'Book + sync to Google' : 'Reschedule'}
-            </button>
-            <button onClick={() => setPanel(null)}>Cancel</button>
+            </div>
           </div>
-        </section>
+        </Modal>
+      )}
+
+      {categorizeFor && (
+        <Modal
+          title={`Categorize — ${categorizeFor.matterNumber}`}
+          onClose={() => setCategorizeFor(null)}
+          footer={<button onClick={() => setCategorizeFor(null)}>Done</button>}
+        >
+          <p className="text-muted text-sm" style={{ marginTop: 0 }}>
+            Pick the call-type. It color-codes the event everywhere it appears.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+            {categories.map((c) => (
+              <button
+                key={c.key}
+                className="row"
+                style={{
+                  justifyContent: 'flex-start',
+                  gap: 'var(--space-2)',
+                  alignItems: 'center',
+                  padding: 'var(--space-2)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  background:
+                    categorizeFor.categoryKey === c.key ? 'var(--surface, #f6f6f6)' : 'transparent',
+                  fontWeight: categorizeFor.categoryKey === c.key ? 700 : 400,
+                  cursor: 'pointer',
+                }}
+                disabled={busy}
+                onClick={() => submitCategorize(c.key)}
+              >
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: 3,
+                    background: c.color,
+                    flex: '0 0 auto',
+                  }}
+                />
+                {c.label}
+                {categorizeFor.categoryKey === c.key ? ' ✓' : ''}
+              </button>
+            ))}
+            {categorizeFor.categoryKey && (
+              <button
+                style={{ marginTop: 'var(--space-1)' }}
+                disabled={busy}
+                onClick={() => submitCategorize('')}
+              >
+                Clear category
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {attendeesFor && (
+        <Modal
+          title={`Email guests — ${attendeesFor.matterNumber}`}
+          onClose={() => setAttendeesFor(null)}
+          footer={
+            <>
+              <button onClick={() => setAttendeesFor(null)}>Cancel</button>
+              <button
+                className="primary"
+                disabled={busy || !attendeeInput.trim()}
+                onClick={submitAttendees}
+              >
+                {busy ? 'Sending…' : 'Invite + email'}
+              </button>
+            </>
+          }
+        >
+          <p className="text-muted text-sm" style={{ marginTop: 0 }}>
+            Add guests to this consultation. Google emails them the invite. Separate multiple
+            addresses with a comma or new line.
+          </p>
+          <textarea
+            rows={3}
+            style={{ width: '100%' }}
+            placeholder="guest@example.com, another@example.com"
+            value={attendeeInput}
+            onChange={(e) => setAttendeeInput(e.target.value)}
+          />
+        </Modal>
       )}
 
       {view === 'day' && (
@@ -834,9 +1047,10 @@ export default function CalendarPage() {
                         style={{
                           textAlign: 'left',
                           border: 'none',
-                          borderLeft: e.managedByApp
-                            ? '3px solid var(--primary, #1e3a5f)'
-                            : '3px solid var(--border)',
+                          borderLeft: `3px solid ${
+                            eventColor(e) ??
+                            (e.managedByApp ? 'var(--primary, #1e3a5f)' : 'var(--border)')
+                          }`,
                           borderRadius: 3,
                           background: 'var(--surface, #f6f6f6)',
                           padding: '1px 4px',
@@ -884,9 +1098,9 @@ export default function CalendarPage() {
                   alignItems: 'center',
                   gap: 'var(--space-3)',
                   border: '1px solid var(--border)',
-                  borderLeft: e.managedByApp
-                    ? '3px solid var(--primary, #1e3a5f)'
-                    : '3px solid var(--border)',
+                  borderLeft: `3px solid ${
+                    eventColor(e) ?? (e.managedByApp ? 'var(--primary, #1e3a5f)' : 'var(--border)')
+                  }`,
                   borderRadius: 6,
                   padding: 'var(--space-2) var(--space-3)',
                 }}
@@ -905,7 +1119,10 @@ export default function CalendarPage() {
                 </div>
                 <div className="row" style={{ gap: 'var(--space-2)', alignItems: 'center' }}>
                   {e.matterEntityId ? (
-                    <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
+                    <>
+                      <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
+                      <ActionsMenu label="Actions" align="right" items={eventMenuItems(e)} />
+                    </>
                   ) : (
                     e.htmlLink && (
                       <a href={e.htmlLink} target="_blank" rel="noreferrer" className="text-sm">

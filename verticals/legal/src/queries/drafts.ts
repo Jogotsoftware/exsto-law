@@ -118,6 +118,63 @@ export async function listMatterDraftVersions(
   })
 }
 
+export interface DocumentVersionSummary {
+  documentVersionId: string
+  versionNumber: number
+  status: string
+  recordedAt: string
+  // How this version came to be: the first draft, an AI (re)generation, or a
+  // manual attorney edit (document.edit). Drives the compare-version labels.
+  source: 'original' | 'generated' | 'edited'
+  // The attorney's edit note, when source === 'edited'.
+  note: string | null
+}
+
+// Every version of ONE document (resolved from any of its version ids), newest
+// first — the version history behind the review-page "Compare versions" view.
+// Tenant-scoped; source is derived from the version's lineage metadata.
+export async function listDocumentVersions(
+  ctx: ActionContext,
+  documentVersionId: string,
+): Promise<DocumentVersionSummary[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      version_id: string
+      version_number: number
+      status: string
+      recorded_at: string
+      ai_generated: boolean
+      edited_from: string | null
+      note: string | null
+    }>(
+      `WITH target AS (
+         SELECT document_entity_id FROM document_version
+         WHERE tenant_id = $1 AND id = $2
+       )
+       SELECT dv.id AS version_id,
+              dv.version_number,
+              dv.status,
+              to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at,
+              (dv.reasoning_trace_id IS NOT NULL) AS ai_generated,
+              dv.metadata->>'edited_from_version_id' AS edited_from,
+              dv.metadata->>'note' AS note
+       FROM document_version dv
+       JOIN target t ON t.document_entity_id = dv.document_entity_id
+       WHERE dv.tenant_id = $1
+       ORDER BY dv.version_number DESC`,
+      [ctx.tenantId, documentVersionId],
+    )
+    return res.rows.map((row) => ({
+      documentVersionId: row.version_id,
+      versionNumber: row.version_number,
+      status: row.status,
+      recordedAt: row.recorded_at,
+      source: row.version_number === 1 ? 'original' : row.edited_from ? 'edited' : 'generated',
+      note: row.note,
+    }))
+  })
+}
+
 export interface SharedDraftView extends PendingDraftSummary {
   bodyMarkdown: string
 }

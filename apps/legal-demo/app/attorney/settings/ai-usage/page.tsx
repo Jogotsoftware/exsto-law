@@ -1,10 +1,11 @@
 'use client'
 
-// AI usage & cost (Settings → AI usage). A firm-wide view of how much the AI
-// assistant is being used and what it roughly costs, read from the token usage
-// recorded on every Claude assistant.turn event (legal.assistant.usage). Cost is
-// an ESTIMATE from list prices; Perplexity research turns don't report tokens, so
-// they're not counted. Usage accrues from when token instrumentation went live.
+// AI usage & cost (Settings → AI usage). A firm-wide view of how much AI is used
+// and what it roughly costs, read from the token usage recorded on Claude
+// assistant.turn (chat) and draft.generate (document drafting) events
+// (legal.assistant.usage), broken down by source. Cost is an ESTIMATE from list
+// prices; Perplexity research turns don't report tokens, so they're not counted.
+// Each source counts only from when its token instrumentation went live.
 import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
@@ -24,6 +25,15 @@ interface DayRow {
   totalTokens: number
   estimatedCostUsd: number
 }
+interface SourceRow {
+  source: 'chat' | 'drafting'
+  turns: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  estimatedCostUsd: number
+}
 interface UsageSummary {
   sinceDays: number
   totalTurns: number
@@ -34,6 +44,7 @@ interface UsageSummary {
   estimatedCostUsd: number
   pricedCoverage: number
   byModel: ModelRow[]
+  bySource: SourceRow[]
   byDay: DayRow[]
 }
 
@@ -57,7 +68,14 @@ function humanModel(model: string): string {
   if (/opus/i.test(model)) return 'Claude Opus'
   if (/sonnet/i.test(model)) return 'Claude Sonnet'
   if (/haiku/i.test(model)) return 'Claude Haiku'
+  if (/fable/i.test(model)) return 'Claude Fable'
   return model
+}
+
+function humanSource(source: string): string {
+  if (source === 'chat') return 'Chat assistant'
+  if (source === 'drafting') return 'Document drafting'
+  return source
 }
 
 export default function AiUsagePage() {
@@ -98,7 +116,7 @@ export default function AiUsagePage() {
     <div>
       <PageHead
         title="AI usage & cost"
-        description="How much the AI assistant is used across the firm, and a rough cost estimate."
+        description="How much AI is used across the firm — the chat assistant and document drafting — with a rough cost estimate."
       />
 
       <div style={{ display: 'flex', gap: 4, margin: '0.4rem 0 1rem' }}>
@@ -161,6 +179,38 @@ export default function AiUsagePage() {
               Cost shown for {Math.round(summary.pricedCoverage * 100)}% of turns — some usage is on
               a model without a price in the estimate table.
             </div>
+          )}
+
+          {summary.bySource.length > 0 && (
+            <section style={{ marginBottom: '1.4rem' }}>
+              <h3 style={{ marginBottom: '0.5rem' }}>By source</h3>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Source</th>
+                      <th style={{ textAlign: 'right' }}>Turns</th>
+                      <th style={{ textAlign: 'right' }}>Input</th>
+                      <th style={{ textAlign: 'right' }}>Output</th>
+                      <th style={{ textAlign: 'right' }}>Est. cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.bySource.map((s) => (
+                      <tr key={s.source}>
+                        <td>{humanSource(s.source)}</td>
+                        <td style={{ textAlign: 'right' }}>{fmtInt(s.turns)}</td>
+                        <td style={{ textAlign: 'right' }}>{fmtTokens(s.inputTokens)}</td>
+                        <td style={{ textAlign: 'right' }}>{fmtTokens(s.outputTokens)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                          {fmtUsd(s.estimatedCostUsd)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
 
           {summary.byModel.length > 0 && (
@@ -235,9 +285,10 @@ export default function AiUsagePage() {
 
           <p className="text-muted" style={{ fontSize: '0.8rem', lineHeight: 1.5 }}>
             Cost is an estimate from published list prices (input, output, and prompt-cache tokens),
-            not your actual Anthropic invoice. Perplexity research turns aren&rsquo;t counted — that
-            provider doesn&rsquo;t report token usage. Figures cover only turns recorded after token
-            tracking went live.
+            not your actual Anthropic invoice. Covers the chat assistant and document drafting;
+            Perplexity research turns aren&rsquo;t counted (that provider doesn&rsquo;t report token
+            usage). Each source counts only from when its token tracking went live, so older
+            activity &mdash; and any drafting before this release &mdash; isn&rsquo;t included.
           </p>
         </>
       ) : null}

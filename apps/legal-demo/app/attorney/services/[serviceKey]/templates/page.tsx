@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { streamTemplateAi } from '@/lib/templateAiStream'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
@@ -125,6 +126,7 @@ function AiEnhancePanel({
 }) {
   const [instr, setInstr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [streamed, setStreamed] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [models, setModels] = useState<AiModelOpt[]>([])
   const [modelId, setModelId] = useState('')
@@ -159,24 +161,39 @@ function AiEnhancePanel({
   async function run() {
     setBusy(true)
     setErr(null)
+    setStreamed('')
+    // Stream the generation (vs. one blocking call): a full document outlasts the
+    // serverless gateway timeout — that was the 504 on "Enhance with AI". Streaming
+    // keeps the connection alive and shows the body as it's written.
+    let acc = ''
     try {
-      const r = await callAttorneyMcp<{ body: string }>({
-        toolName: 'legal.template.ai_enhance',
-        input: {
-          currentBody,
-          instructions: instr.trim() || undefined,
+      await streamTemplateAi(
+        {
+          mode: hasBody ? 'enhance' : 'draft',
           category: 'document',
+          instructions: instr.trim() || undefined,
+          currentBody: hasBody ? currentBody : undefined,
           fieldIds: fieldIds.length ? fieldIds : undefined,
           skillSlugs: skillSlugs.length ? skillSlugs : undefined,
           modelId: modelId || undefined,
         },
-      })
-      if (r.body?.trim()) {
-        onResult(r.body.trim())
-        onClose()
-      } else {
-        setErr('The model returned nothing — try again.')
-      }
+        {
+          onText: (t) => {
+            acc += t
+            setStreamed(acc)
+          },
+          onDone: () => {
+            const out = acc.trim()
+            if (out) {
+              onResult(out)
+              onClose()
+            } else {
+              setErr('The model returned nothing — try again.')
+            }
+          },
+          onError: (m) => setErr(m),
+        },
+      )
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
@@ -275,6 +292,18 @@ function AiEnhancePanel({
               </div>
             )}
           </div>
+        </div>
+      )}
+      {busy && (
+        <div className="tpl-ai-stream" aria-live="polite">
+          <div className="tpl-ai-stream-head">
+            <span className="spinner" /> {hasBody ? 'Revising…' : 'Drafting…'}
+          </div>
+          {streamed ? (
+            <pre className="tpl-ai-stream-body">{streamed}</pre>
+          ) : (
+            <div className="tpl-ai-stream-wait">Working with the model…</div>
+          )}
         </div>
       )}
       {err && (

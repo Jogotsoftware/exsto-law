@@ -680,6 +680,13 @@ registerActionHandler('invoice.pay', async (ctx, client, payload, actionId) => {
   const invoiceId = (p.invoice_entity_id ?? '').trim()
   if (!invoiceId) throw new Error('invoice_entity_id is required.')
 
+  // Serialize all payments of one invoice (manual mark-paid AND pay-from-trust)
+  // so two concurrent paths can't both mark it paid (mirrors booking.ts lockSlot;
+  // trust.transfer_earned takes the same lock key).
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, [
+    `${ctx.tenantId}|invoice_pay|${invoiceId}`,
+  ])
+
   const get = (kind: string) =>
     getLatestAttributeValue<string>(client, ctx.tenantId, invoiceId, kind)
   const number = await get('invoice_number')

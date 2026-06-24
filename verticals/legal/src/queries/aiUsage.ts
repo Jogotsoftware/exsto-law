@@ -20,8 +20,9 @@ interface ModelPrice {
 
 const PRICE_BY_FAMILY: Array<{ match: RegExp; price: ModelPrice }> = [
   {
+    // Opus 4.x list price: $5/$25 per 1M (cache write 1.25x input, read 0.1x).
     match: /opus/i,
-    price: { inputPer1M: 15, outputPer1M: 75, cacheWritePer1M: 18.75, cacheReadPer1M: 1.5 },
+    price: { inputPer1M: 5, outputPer1M: 25, cacheWritePer1M: 6.25, cacheReadPer1M: 0.5 },
   },
   {
     match: /sonnet/i,
@@ -30,6 +31,10 @@ const PRICE_BY_FAMILY: Array<{ match: RegExp; price: ModelPrice }> = [
   {
     match: /haiku/i,
     price: { inputPer1M: 1, outputPer1M: 5, cacheWritePer1M: 1.25, cacheReadPer1M: 0.1 },
+  },
+  {
+    match: /fable/i,
+    price: { inputPer1M: 10, outputPer1M: 50, cacheWritePer1M: 12.5, cacheReadPer1M: 1 },
   },
 ]
 
@@ -68,6 +73,17 @@ export interface AiUsageDayRow {
   estimatedCostUsd: number
 }
 
+// Where the spend came from: the chat assistant (assistant.turn events) vs
+// document drafting (draft.generate events). Each is instrumented separately and
+// counts from when its tracking went live.
+export type AiUsageSource = 'chat' | 'drafting'
+
+export interface AiUsageSourceRow extends TokenCounts {
+  source: AiUsageSource
+  turns: number
+  estimatedCostUsd: number
+}
+
 export interface AiUsageSummary {
   sinceDays: number
   totalTurns: number
@@ -80,10 +96,19 @@ export interface AiUsageSummary {
   // usage is uncosted (an unrecognized model slips the estimate).
   pricedCoverage: number
   byModel: AiUsageModelRow[]
+  bySource: AiUsageSourceRow[]
   byDay: AiUsageDayRow[]
 }
 
+// assistant.turn → chat, draft.generate → drafting. Both carry the same snake_case
+// usage object in their payload.
+const SOURCE_BY_KIND: Record<string, AiUsageSource> = {
+  'assistant.turn': 'chat',
+  'draft.generate': 'drafting',
+}
+
 interface UsageEventRow {
+  kind: string
   model: string | null
   usage: {
     input_tokens?: number
@@ -95,9 +120,11 @@ interface UsageEventRow {
 }
 
 // Firm-wide AI token usage + estimated cost over the trailing `sinceDays` window
-// (default 30, clamped 1..365), broken down by model and by day. Reads only the
-// Claude assistant.turn events that carry a usage object (`payload->>'usage'` is a
-// JSON object — json-null and pre-instrumentation events are excluded).
+// (default 30, clamped 1..365), broken down by model, by source (chat vs
+// drafting), and by day. Reads the Claude assistant.turn (chat) and draft.generate
+// (drafting) events that carry a usage object (`payload->>'usage'` is a JSON object
+// — json-null and pre-instrumentation events are excluded). Drafting uses
+// model_identity for the model; chat uses model — COALESCE picks whichever is set.
 export async function getAiUsageSummary(
   ctx: ActionContext,
   opts: { sinceDays?: number } = {},
@@ -106,13 +133,14 @@ export async function getAiUsageSummary(
 
   const rows = await withActionContext(ctx, async (client) => {
     const res = await client.query<UsageEventRow>(
-      `SELECT e.payload->>'model' AS model,
+      `SELECT ekd.kind_name AS kind,
+              COALESCE(e.payload->>'model', e.payload->>'model_identity') AS model,
               e.payload->'usage' AS usage,
               to_char(e.occurred_at, 'YYYY-MM-DD') AS day
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
        WHERE e.tenant_id = $1
-         AND ekd.kind_name = 'assistant.turn'
+         AND ekd.kind_name IN ('assistant.turn', 'draft.generate')
          AND e.payload->>'usage' IS NOT NULL
          AND e.occurred_at >= now() - make_interval(days => $2)
        ORDER BY e.occurred_at ASC`,
@@ -131,6 +159,7 @@ export async function getAiUsageSummary(
   let estimatedCostUsd = 0
   let pricedTurns = 0
   const byModel = new Map<string, AiUsageModelRow>()
+  const bySource = new Map<AiUsageSource, AiUsageSourceRow>()
   const byDay = new Map<string, AiUsageDayRow>()
 
   for (const r of rows) {
@@ -177,12 +206,31 @@ export async function getAiUsageSummary(
     d.totalTokens += rowTokens
     d.estimatedCostUsd += cost ?? 0
     byDay.set(r.day, d)
+
+    const source = SOURCE_BY_KIND[r.kind] ?? 'chat'
+    const s = bySource.get(source) ?? {
+      source,
+      turns: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      estimatedCostUsd: 0,
+    }
+    s.turns += 1
+    s.inputTokens += t.inputTokens
+    s.outputTokens += t.outputTokens
+    s.cacheCreationTokens += t.cacheCreationTokens
+    s.cacheReadTokens += t.cacheReadTokens
+    s.estimatedCostUsd += cost ?? 0
+    bySource.set(source, s)
   }
 
   // Round money to cents to avoid float dust leaking into the UI.
   const round2 = (n: number) => Math.round(n * 100) / 100
   for (const m of byModel.values())
     if (m.estimatedCostUsd !== null) m.estimatedCostUsd = round2(m.estimatedCostUsd)
+  for (const s of bySource.values()) s.estimatedCostUsd = round2(s.estimatedCostUsd)
   for (const d of byDay.values()) d.estimatedCostUsd = round2(d.estimatedCostUsd)
 
   return {
@@ -197,6 +245,7 @@ export async function getAiUsageSummary(
     byModel: [...byModel.values()].sort(
       (a, b) => (b.estimatedCostUsd ?? 0) - (a.estimatedCostUsd ?? 0),
     ),
+    bySource: [...bySource.values()].sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd),
     byDay: [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
   }
 }

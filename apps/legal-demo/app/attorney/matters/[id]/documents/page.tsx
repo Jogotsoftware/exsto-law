@@ -8,6 +8,7 @@ import { use, useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { formatDate } from '@/lib/datetime'
 import { humanizeKind, humanizeStatus, type MatterDetail } from '../shared'
 
 interface DraftPayload {
@@ -187,7 +188,7 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
               <h3 style={{ margin: 0 }}>Latest draft — {humanizeKind(draft.documentKind)}</h3>
               <span className="text-sm text-muted">
                 v{draft.versionNumber} · {humanizeStatus(draft.status)} ·{' '}
-                {new Date(draft.recordedAt).toLocaleDateString()}
+                {formatDate(draft.recordedAt)}
               </span>
             </div>
             <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
