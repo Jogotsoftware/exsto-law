@@ -310,11 +310,14 @@ export async function createTemplateAI(
   const body = validateDocumentTemplate(input.body)
 
   // Read the current row to MERGE into its document_templates (so other kinds'
-  // bodies survive) and to get the display_name the upsert requires.
+  // bodies survive), its `documents` list (the doc kinds the service produces — a
+  // template MUST register its kind there or an auto-route service never has a
+  // document to draft and fails completeness/Enable), and the display_name the
+  // upsert requires.
   const row = await withActionContext(ctx, async (client) => {
     const res = await client.query<{
       display_name: string
-      transitions: { document_templates?: DocumentTemplateConfig }
+      transitions: { document_templates?: DocumentTemplateConfig; documents?: string[] }
     }>(
       `SELECT display_name, transitions FROM workflow_definition
         WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
@@ -331,6 +334,11 @@ export async function createTemplateAI(
     template_version: nextVersion,
     templates: { ...(existing.templates ?? {}), [docKind]: body },
   }
+  // Register the kind in the service's `documents` list (idempotent) so an auto-route
+  // service has a document to draft — without this it fails completeness ("auto-route
+  // service needs at least one document to draft") and can never be Enabled.
+  const existingDocs = Array.isArray(row.transitions.documents) ? row.transitions.documents : []
+  const documents = existingDocs.includes(docKind) ? existingDocs : [...existingDocs, docKind]
 
   // The write is AS THE AGENT — the trace, the action source, and the
   // configuration_change all attribute the authoring to the Claude agent actor.
@@ -349,7 +357,7 @@ export async function createTemplateAI(
     payload: {
       service_key: serviceKey,
       display_name: row.display_name,
-      transitions_patch: { document_templates: merged },
+      transitions_patch: { document_templates: merged, documents },
     },
   })
 
