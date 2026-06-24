@@ -1,11 +1,12 @@
 'use client'
 
-import { use, useEffect, useMemo, useState } from 'react'
+import { use, useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 import { formatDateTime } from '@/lib/datetime'
+import { lineDiff, diffStats, type DiffOp } from '@/lib/lineDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { BackButton } from '@/components/BackButton'
@@ -82,6 +83,55 @@ function humanizeKind(kind: string): string {
   return kind.replace(/_/g, ' ')
 }
 
+interface VersionSummary {
+  documentVersionId: string
+  versionNumber: number
+  status: string
+  recordedAt: string
+  source: 'original' | 'generated' | 'edited'
+  note: string | null
+}
+
+// Short label for where a version came from, shown in the compare picker.
+function versionSourceLabel(s: VersionSummary['source']): string {
+  if (s === 'original') return 'original'
+  if (s === 'edited') return 'edited'
+  return 'regenerated'
+}
+
+// Renders a line diff: removed lines (red), added lines (green), and — unless
+// hidden — unchanged lines (muted), with a "···" marker standing in for a
+// collapsed run of unchanged lines.
+function VersionDiff({ ops, showUnchanged }: { ops: DiffOp[]; showUnchanged: boolean }) {
+  const rows: ReactNode[] = []
+  let collapsed = false
+  ops.forEach((op, i) => {
+    if (op.type === 'same' && !showUnchanged) {
+      if (!collapsed) {
+        rows.push(
+          <div key={`gap-${i}`} className="vdiff-gap" aria-hidden>
+            ···
+          </div>,
+        )
+        collapsed = true
+      }
+      return
+    }
+    collapsed = false
+    const cls = op.type === 'add' ? 'vdiff-add' : op.type === 'del' ? 'vdiff-del' : 'vdiff-same'
+    const sign = op.type === 'add' ? '+' : op.type === 'del' ? '−' : ' '
+    rows.push(
+      <div key={i} className={`vdiff-line ${cls}`}>
+        <span className="vdiff-sign" aria-hidden>
+          {sign}
+        </span>
+        <span className="vdiff-text">{op.line || ' '}</span>
+      </div>,
+    )
+  })
+  return <>{rows}</>
+}
+
 export default function DraftReviewPage({ params }: { params: Promise<{ versionId: string }> }) {
   const { versionId } = use(params)
   const router = useRouter()
@@ -93,6 +143,13 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   // document) — opened from a toolbar button instead of crowding the page.
   const [traceOpen, setTraceOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  // Compare-versions drawer: the document's version history + a line diff of a
+  // chosen earlier version against this one.
+  const [compareOpen, setCompareOpen] = useState(false)
+  const [versions, setVersions] = useState<VersionSummary[] | null>(null)
+  const [baseVersionId, setBaseVersionId] = useState<string | null>(null)
+  const [baseMarkdown, setBaseMarkdown] = useState<string | null>(null)
+  const [showUnchanged, setShowUnchanged] = useState(true)
   // Regenerate modal: an editable prompt (prefilled with the revision notes) + a
   // skills picker, so the redraft acts on exactly what the attorney asked.
   const [regenOpen, setRegenOpen] = useState(false)
@@ -147,15 +204,68 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     }
   }, [versionId])
 
-  // Esc closes the reasoning-trace drawer.
+  // Esc closes whichever drawer is open.
   useEffect(() => {
-    if (!traceOpen) return
+    if (!traceOpen && !compareOpen) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setTraceOpen(false)
+      if (e.key === 'Escape') {
+        setTraceOpen(false)
+        setCompareOpen(false)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [traceOpen])
+  }, [traceOpen, compareOpen])
+
+  // Open the compare drawer: load the version history (once) and default the
+  // base to the immediate predecessor of the version being viewed.
+  async function openCompare() {
+    setCompareOpen(true)
+    if (versions) return
+    try {
+      const res = await callAttorneyMcp<{ versions: VersionSummary[] }>({
+        toolName: 'legal.draft.versions',
+        input: { documentVersionId: versionId },
+      })
+      setVersions(res.versions)
+      const current = res.versions.find((v) => v.documentVersionId === versionId)
+      const predecessor = res.versions
+        .filter((v) => !current || v.versionNumber < current.versionNumber)
+        .sort((a, b) => b.versionNumber - a.versionNumber)[0]
+      if (predecessor) setBaseVersionId(predecessor.documentVersionId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // Fetch the chosen base version's markdown whenever the selection changes.
+  useEffect(() => {
+    if (!baseVersionId) {
+      setBaseMarkdown(null)
+      return
+    }
+    let live = true
+    callAttorneyMcp<{ draft: { bodyMarkdown: string } | null }>({
+      toolName: 'legal.draft.get',
+      input: { documentVersionId: baseVersionId },
+    })
+      .then((res) => {
+        if (live) setBaseMarkdown(res.draft?.bodyMarkdown ?? null)
+      })
+      .catch(() => {
+        if (live) setBaseMarkdown(null)
+      })
+    return () => {
+      live = false
+    }
+  }, [baseVersionId])
+
+  // The line diff of the base version against the one being viewed.
+  const diffOps = useMemo(
+    () => (baseMarkdown != null && draft ? lineDiff(baseMarkdown, draft.bodyMarkdown) : []),
+    [baseMarkdown, draft],
+  )
+  const diffSummary = useMemo(() => diffStats(diffOps), [diffOps])
 
   const sessionPos = sessionIds ? sessionIds.indexOf(versionId) : -1
 
@@ -401,6 +511,16 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             shareUrl: shareUrlFor(draft.documentVersionId),
           }}
         />
+        {draft.versionNumber > 1 && (
+          <button
+            type="button"
+            className="review-trace-btn"
+            onClick={openCompare}
+            title="See what changed between this version and an earlier one."
+          >
+            ⇄ Compare versions
+          </button>
+        )}
         {hasTrace && (
           <button
             type="button"
@@ -619,6 +739,93 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
                   ))}
                 </div>
               </div>
+            )}
+          </aside>
+        </div>
+      )}
+
+      {/* Compare-versions drawer: pick an earlier version, see a line diff. */}
+      {compareOpen && (
+        <div
+          className="trace-drawer-backdrop"
+          onClick={() => setCompareOpen(false)}
+          role="presentation"
+        >
+          <aside
+            className="trace-drawer vcmp-drawer"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Compare versions"
+          >
+            <div className="trace-drawer-head">
+              <h2>Compare versions</h2>
+              <button
+                type="button"
+                className="trace-drawer-close"
+                onClick={() => setCompareOpen(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            {versions === null ? (
+              <p className="trace-drawer-intro">
+                <span className="spinner" /> Loading version history…
+              </p>
+            ) : versions.length < 2 ? (
+              <p className="trace-drawer-intro">
+                This document has only one version — nothing to compare yet.
+              </p>
+            ) : (
+              <>
+                <div className="vcmp-controls">
+                  <label className="vcmp-pick">
+                    <span>Compare</span>
+                    <select
+                      value={baseVersionId ?? ''}
+                      onChange={(e) => setBaseVersionId(e.target.value || null)}
+                      aria-label="Earlier version to compare"
+                    >
+                      {versions
+                        .filter((v) => v.documentVersionId !== versionId)
+                        .map((v) => (
+                          <option key={v.documentVersionId} value={v.documentVersionId}>
+                            v{v.versionNumber} · {versionSourceLabel(v.source)} ·{' '}
+                            {formatDateTime(v.recordedAt)}
+                          </option>
+                        ))}
+                    </select>
+                    <span>with v{draft.versionNumber} (this one)</span>
+                  </label>
+                  <div className="vcmp-meta">
+                    <label className="vcmp-toggle">
+                      <input
+                        type="checkbox"
+                        checked={showUnchanged}
+                        onChange={(e) => setShowUnchanged(e.target.checked)}
+                      />
+                      Show unchanged
+                    </label>
+                    <span className="vcmp-stat">
+                      <span className="vcmp-stat-add">+{diffSummary.added}</span>{' '}
+                      <span className="vcmp-stat-del">−{diffSummary.removed}</span>
+                    </span>
+                  </div>
+                </div>
+
+                {baseMarkdown === null ? (
+                  <p className="trace-drawer-intro">
+                    <span className="spinner" /> Loading…
+                  </p>
+                ) : diffSummary.added === 0 && diffSummary.removed === 0 ? (
+                  <p className="trace-drawer-intro">These two versions are identical.</p>
+                ) : (
+                  <div className="vdiff">
+                    <VersionDiff ops={diffOps} showUnchanged={showUnchanged} />
+                  </div>
+                )}
+              </>
             )}
           </aside>
         </div>
