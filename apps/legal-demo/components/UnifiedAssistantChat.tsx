@@ -743,26 +743,24 @@ export function UnifiedAssistantChat({
     setHistoryOpen(false)
     setFeedbackMode(false)
     setSkillMenuOpen(false)
-    // The guided build needs strong reasoning + reliable structured tool use; Haiku is
-    // too weak for it (it loses the platform model and drifts back to plain prose). If
-    // the attorney is on a model that can't honor the work-rate knob (Haiku), upgrade
-    // this session to the recommended Claude model — transparently: the picker updates
-    // to show it. Sonnet/Opus are left as-is. (Anthropic `connected` is per-provider, so
-    // if the picker offered Haiku, the stronger Claude models are connected too.)
-    const current = models?.find((m) => m.id === modelId)
-    const strong =
+    // The guided build is the most complex thing the assistant does (multi-step
+    // interview + tool contracts + legal drafting) and runs INFREQUENTLY, so use the
+    // STRONGEST model available — Opus — regardless of the picker's current selection;
+    // the quality is worth far more than the token cost on this path. Fall back to the
+    // recommended model (Sonnet), then any work-rate-capable Claude model, if Opus isn't
+    // connected. The switch is transparent (the picker updates) and reversible. (Claude
+    // `connected` is per-provider, so if the picker offered any Claude model, Opus is
+    // connected too.)
+    const claudeWorkRate = (pred: (m: AssistantModel) => boolean): AssistantModel | undefined =>
       models?.find(
         (m) =>
-          m.provider === 'anthropic' &&
-          m.available &&
-          m.connected &&
-          m.supportsWorkRate &&
-          m.isDefault,
-      ) ??
-      models?.find(
-        (m) => m.provider === 'anthropic' && m.available && m.connected && m.supportsWorkRate,
+          m.provider === 'anthropic' && m.available && m.connected && m.supportsWorkRate && pred(m),
       )
-    const buildModelId = current && !current.supportsWorkRate && strong ? strong.id : modelId
+    const strong =
+      claudeWorkRate((m) => m.model === 'claude-opus-4-8') ?? // strongest
+      claudeWorkRate((m) => m.isDefault) ?? // recommended (Sonnet)
+      claudeWorkRate(() => true) // any capable Claude model
+    const buildModelId = strong?.id ?? modelId
     if (buildModelId !== modelId) setModelId(buildModelId)
     // The priming message reads like a build request so the server force-loads the
     // build-service orchestrator (BUILD_REQUEST_RE) and the wizard tools are live. It's
