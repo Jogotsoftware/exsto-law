@@ -32,7 +32,6 @@ import {
   type WfStepState,
   type MatterWorkflow,
 } from './shared'
-import { MatterTasks } from './MatterTasks'
 import { WorkflowEditor } from './WorkflowEditor'
 
 const GENERATABLE: Array<{ kind: string; label: string }> = [
@@ -216,8 +215,6 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
           </p>
         </section>
       )}
-
-      <MatterTasks matterEntityId={id} />
 
       {!matter.workflow && openStep === 'intake' && (
         <Modal

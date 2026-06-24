@@ -1368,6 +1368,64 @@ async function isSlotTaken(ctx: ActionContext, startIso: string, endIso: string)
 // that doesn't translate.
 const SLOT_TAKEN_MESSAGE = 'SLOT_TAKEN: That time slot was just booked. Please pick another time.'
 
+export interface OpenMatterInput {
+  clientFullName: string
+  clientEmail: string
+  clientCompanyName?: string
+  serviceKey: string
+}
+
+// Open a matter MANUALLY (attorney-initiated, no booked consultation) — the
+// walk-in / started-outside-the-portal path that the Matters page's "New matter"
+// button uses. Mirrors the booking flow's intake.submit → matter.open, minus
+// booking.create (there's no scheduled slot). Uses only the registered Phase-0
+// actions; the matter id + number are server-generated exactly like a booked
+// matter, and the client_contact + (empty) questionnaire are created via intake.
+export async function openMatter(
+  ctx: ActionContext,
+  input: OpenMatterInput,
+): Promise<{ matterEntityId: string; matterNumber: string }> {
+  const matterEntityId = randomUUID()
+  const matterNumber = `M-${Date.now().toString(36).toUpperCase()}`
+  const service = await getService(ctx, input.serviceKey)
+
+  const intake = await submitAction(ctx, {
+    actionKindName: 'intake.submit',
+    intentKind: 'enforcement',
+    payload: {
+      client_full_name: input.clientFullName,
+      client_email: input.clientEmail,
+      client_phone: null,
+      client_company_name: input.clientCompanyName ?? null,
+      service_key: input.serviceKey,
+      intake_form_id: service?.intakeFormId ?? null,
+      intake_responses: {},
+    },
+  })
+  const intakeEffects = (intake.effects[0] ?? {}) as {
+    clientEntityId?: string
+    questionnaireEntityId?: string
+  }
+
+  await submitAction(ctx, {
+    actionKindName: 'matter.open',
+    intentKind: 'enforcement',
+    payload: {
+      matter_entity_id: matterEntityId,
+      matter_number: matterNumber,
+      service_key: input.serviceKey,
+      workflow_route: service?.route ?? 'manual',
+      attribution_source: 'attorney_manual',
+      client_entity_id: intakeEffects.clientEntityId,
+      questionnaire_entity_id: intakeEffects.questionnaireEntityId,
+      intake_action_id: intake.actionId,
+      client_display_name: input.clientCompanyName ?? input.clientFullName,
+    },
+  })
+
+  return { matterEntityId, matterNumber }
+}
+
 export async function submitBooking(
   ctx: ActionContext,
   input: SubmitBookingInput,
