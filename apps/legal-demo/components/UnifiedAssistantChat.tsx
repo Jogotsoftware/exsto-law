@@ -1089,7 +1089,6 @@ export function UnifiedAssistantChat({
     },
     // send/busy are stable enough for this driver; intentionally not re-created per
     // keystroke (send reads the latest input/turns from closure at call time).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [busy],
   )
 
