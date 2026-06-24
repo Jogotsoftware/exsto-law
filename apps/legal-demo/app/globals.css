@@ -9681,8 +9681,7 @@ input[type='number'] {
    Shared UI primitives (UI consistency sweep). Additive only — these dedupe
    patterns previously hand-rolled inline across many pages, and fix a few class
    names that pages already reference but were never defined. All values use the
-   canonical --space-*/
---radius-*/--text-*/--weight-* tokens.
+   canonical --space-, --radius-, --text-, and --weight- tokens.
    ========================================================================== */
 
 /* `.table-wrap` is used on every data table but had no definition (silent
