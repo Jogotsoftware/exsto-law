@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0110: trust (IOLTA) accounting — per-client ledger kinds
+-- Vertical migration 0111: trust (IOLTA) accounting — per-client ledger kinds
 --
 -- A law firm holds client funds (retainers/advances) in a POOLED trust account
 -- (IOLTA), accounted for with a SEPARATE sub-ledger per client (NC State Bar

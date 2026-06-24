@@ -1,5 +1,5 @@
 // Trust (IOLTA) accounting through the REAL action layer (live DB; gated on
-// migration 0110 — the trust.* kinds). Proves the compliance guardrails:
+// migration 0111 — the trust.* kinds). Proves the compliance guardrails:
 //   • a deposit raises the client's trust balance,
 //   • a disbursement beyond the balance is REJECTED (no overdraft),
 //   • applying trust to an issued invoice atomically pays it (method=trust) and

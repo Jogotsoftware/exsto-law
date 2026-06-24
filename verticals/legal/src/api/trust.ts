@@ -1,4 +1,4 @@
-// Trust (IOLTA) write-path (migration 0110). Every write goes THROUGH THE CORE
+// Trust (IOLTA) write-path (migration 0111). Every write goes THROUGH THE CORE
 // via submitAction; the handlers (handlers/trust.ts) do the guarded transactional
 // writes (no client overdraft; atomic earned transfer). Reads live in
 // queries/trust.ts.

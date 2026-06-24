@@ -3,7 +3,7 @@ import type { DbClient } from '@exsto/shared'
 import { insertEvent, insertAttribute, lookupKindId, getLatestAttributeValue } from './common.js'
 
 // ───────────────────────────────────────────────────────────────────────────
-// Trust (IOLTA) ledger handlers (migration 0110).
+// Trust (IOLTA) ledger handlers (migration 0111).
 //
 // Client funds are held in a POOLED trust account, accounted with a SEPARATE
 // sub-ledger per client (NC State Bar minimum). A client's balance is DERIVED
