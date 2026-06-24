@@ -1,10 +1,39 @@
-import { Pool, type PoolClient } from 'pg'
+import { Pool, type PoolClient, type PoolConfig } from 'pg'
 import type { ActorId, TenantId } from './types.js'
 
 // Lazy pool init: the env check is deferred until first use so Next.js build
 // / static analysis can import @exsto/shared without DATABASE_URL set. Runtime
 // callers see the same singleton.
 let _pool: Pool | undefined
+
+// Bound the pool and let idle connections drop. The app runs as many short-lived
+// serverless instances (Netlify Functions / AWS Lambda), each with its own pool;
+// against Supabase's session-mode pooler (a hard 15-client cap) an unbounded
+// per-instance pool exhausts connections fast — the "max clients reached in session
+// mode - max clients are limited to pool_size: 15" 500s on the dashboard. So:
+//   • keep each serverless instance's pool tiny (it only serves one request at a
+//     time anyway) and reap idle connections quickly so they return to the pooler;
+//   • the long-running worker is a single process, so it can hold a few more.
+// DATABASE_POOL_MAX overrides either default. (The durable fix is to point the
+// prod DATABASE_URL at the TRANSACTION-mode pooler — port 6543 — which multiplexes
+// instead of capping clients; this config just keeps us well-behaved either way.)
+function buildPoolConfig(connectionString: string): PoolConfig {
+  const serverless = Boolean(
+    process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY || process.env.VERCEL,
+  )
+  const envMax = Number(process.env.DATABASE_POOL_MAX)
+  const max = Number.isFinite(envMax) && envMax > 0 ? Math.floor(envMax) : serverless ? 3 : 10
+  return {
+    connectionString,
+    max,
+    // Free idle connections back to the pooler rather than holding the slot.
+    idleTimeoutMillis: 10_000,
+    // Fail fast instead of hanging a request when the pooler is saturated.
+    connectionTimeoutMillis: 10_000,
+    // Don't let an idle pool keep a frozen Lambda's connections alive.
+    allowExitOnIdle: serverless,
+  }
+}
 
 function getPool(): Pool {
   if (_pool) return _pool
@@ -20,7 +49,7 @@ function getPool(): Pool {
       'DATABASE_URL is required. In Netlify, set DATABASE_URL (or SUPABASE_DATABASE_URL) to the exsto-wedge pooler URL with the DB password.',
     )
   }
-  _pool = new Pool({ connectionString: databaseUrl })
+  _pool = new Pool(buildPoolConfig(databaseUrl))
   return _pool
 }
 
