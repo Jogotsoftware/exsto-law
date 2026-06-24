@@ -21,7 +21,7 @@ import { NC_SMLLC_AUTHORED } from '@exsto/legal'
 import '@exsto/legal'
 
 const TENANT_ID = '00000000-0000-0000-0000-000000000001'
-const OWNER_ACTOR_ID = 'a392ee27-08dc-4845-9990-01af013d5dab' // Juan Carlos (firm owner), tenant zero
+const OWNER_ACTOR_ID = '00000000-0000-0000-0001-000000000004' // Claude agent actor — set_lifecycle is the agent-sourced authoring path (PR5); humans lack the action scope for the freshly-seeded kind
 const SERVICE_KEY = 'nc_single_member_llc_formation'
 
 const ctx: ActionContext = { tenantId: TENANT_ID, actorId: OWNER_ACTOR_ID }
