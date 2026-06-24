@@ -57,11 +57,17 @@ export function TemplateProposalCard({
 
   const orphans = new Set((proposal.orphanTokens ?? []).map((t) => t.toLowerCase()))
   const reusable = new Set((proposal.reusableFromFirm ?? []).map((t) => t.toLowerCase()))
+  // REUSE-AWARE: a token that already exists as a question elsewhere in the firm is NOT
+  // missing — it has a definition to adopt. So the genuinely-missing set is the orphans
+  // that are NOT reusable. Reusable tokens must never appear red or in the [[MISSING]]
+  // warning; they are surfaced positively in the reuse note below.
+  const missing = new Set([...orphans].filter((t) => !reusable.has(t)))
   // FLOW-AWARE FRAMING (Phase 7): a token with no question is only a real, alarming
   // problem once the service HAS a questionnaire. Before that, the questionnaire is
   // built FROM these tokens in the next step — so they are forward-looking, not broken.
-  // Only paint tokens red / show the [[MISSING]] warning when a questionnaire exists.
-  const showOrphanError = proposal.hasQuestionnaire && orphans.size > 0
+  // Only paint tokens red / show the [[MISSING]] warning when a questionnaire exists AND
+  // there is a genuinely-missing (non-reusable) token.
+  const showOrphanError = proposal.hasQuestionnaire && missing.size > 0
   const preview =
     proposal.body.length > PREVIEW_CHARS
       ? `${proposal.body.slice(0, PREVIEW_CHARS).trimEnd()}…`
@@ -160,7 +166,7 @@ export function TemplateProposalCard({
                 {i > 0 && ', '}
                 <code
                   style={
-                    showOrphanError && orphans.has(t.toLowerCase())
+                    showOrphanError && missing.has(t.toLowerCase())
                       ? { color: 'var(--danger)' }
                       : undefined
                   }
@@ -178,15 +184,15 @@ export function TemplateProposalCard({
           "missing/broken". Only once a questionnaire exists is an orphan a real gap. */}
       {showOrphanError ? (
         <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
-          {orphans.size} token{orphans.size === 1 ? '' : 's'} have NO matching question and would
-          render [[MISSING]]: <strong>{[...orphans].join(', ')}</strong>. Add those questions to the
+          {missing.size} token{missing.size === 1 ? '' : 's'} have NO matching question and would
+          render [[MISSING]]: <strong>{[...missing].join(', ')}</strong>. Add those questions to the
           questionnaire before sending documents.
         </div>
       ) : (
-        orphans.size > 0 && (
+        missing.size > 0 && (
           <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-            These {orphans.size} field{orphans.size === 1 ? '' : 's'} will become the
-            questionnaire’s questions in the next step: <strong>{[...orphans].join(', ')}</strong>.
+            These {missing.size} field{missing.size === 1 ? '' : 's'} will become the
+            questionnaire’s questions in the next step: <strong>{[...missing].join(', ')}</strong>.
           </div>
         )
       )}

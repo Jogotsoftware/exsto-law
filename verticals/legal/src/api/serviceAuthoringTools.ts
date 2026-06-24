@@ -70,13 +70,13 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         type: 'string',
         enum: SERVICE_ROUTES as unknown as string[],
         description:
-          "How the matter is worked: 'manual' (the attorney drives it) or 'auto' (documents draft from intake). Defaults to 'manual' when omitted.",
+          "How the matter is worked: 'manual' (the attorney drives it) or 'auto' (documents draft from intake). REQUIRED — ASK the attorney which they want (via ask_build_question) before proposing; NEVER assume 'manual'.",
       },
       generation_mode: {
         type: 'string',
         enum: SERVICE_GENERATION_MODES as unknown as string[],
         description:
-          "How documents are produced: 'template_merge' (deterministic merge, no AI) or 'ai_draft' (AI drafting). Defaults to 'template_merge' when omitted.",
+          "How documents are produced: 'template_merge' (deterministic merge, no AI) or 'ai_draft' (AI drafting). REQUIRED — ASK the attorney which they want (via ask_build_question) before proposing; NEVER assume 'template_merge'.",
       },
       summary: {
         type: 'string',
@@ -88,7 +88,7 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description: 'Your honest confidence in this proposal, 0–1 (never 1.0).',
       },
     },
-    required: ['display_name'],
+    required: ['display_name', 'route', 'generation_mode'],
     additionalProperties: false,
   },
 }
@@ -117,10 +117,15 @@ export function buildProposeServiceTool(
       if (!displayName) {
         return 'A display_name is required to propose a service; nothing was captured.'
       }
-      // Default the closed-vocab fields the same way the write path does, so the
-      // validator (and the model) see the value that will actually be written.
-      const route = (args.route ?? 'manual') as WorkflowRoute
-      const generationMode = (args.generation_mode ?? 'template_merge') as GenerationMode
+      // Route + generation mode are REQUIRED — NEVER defaulted. Defaulting to
+      // 'manual'/'template_merge' is the founder-reported bug; the attorney must choose
+      // both in the interview. If the model omits either, refuse to capture and tell it
+      // to ASK, rather than silently birthing a manual, template-merge service.
+      const route = (args.route ?? '').trim() as WorkflowRoute
+      const generationMode = (args.generation_mode ?? '').trim() as GenerationMode
+      if (!route || !generationMode) {
+        return 'route and generation_mode are REQUIRED and must NOT be assumed — ask the attorney which they want (via ask_build_question: route = manual or auto; documents = template_merge or ai_draft) before proposing. Nothing was captured.'
+      }
 
       // Uniqueness needs the existing keys — one read, shared with the validation.
       const context = await loadServiceAuthoringContext(ctx)
