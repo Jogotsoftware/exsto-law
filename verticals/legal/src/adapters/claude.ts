@@ -42,6 +42,10 @@ export interface ClaudeDraftResult {
   reasoningTrace: ClaudeDraftReasoningTrace
   modelIdentity: string
   rawResponse: string
+  // Per-call token usage (a draft is one non-streaming call) so the AI usage &
+  // cost view counts drafting spend alongside chat. Always present — drafting
+  // always runs on Claude. See AssistantUsage below.
+  usage: AssistantUsage
 }
 
 // Key precedence: the tenant's Settings-managed key (Vault, via the
@@ -140,11 +144,15 @@ export async function callClaudeDrafter(
   const raw = textBlock.text
   const { documentMarkdown, reasoningTrace } = splitDocumentAndTrace(raw)
 
+  const usage = emptyUsage()
+  addUsage(usage, response.usage)
+
   return {
     documentMarkdown,
     reasoningTrace,
     modelIdentity: response.model,
     rawResponse: raw,
+    usage,
   }
 }
 
