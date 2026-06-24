@@ -262,8 +262,9 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 'var(--space-2)',
-              marginBottom: 'var(--space-2)',
+              gap: 'var(--space-3)',
+              flexWrap: 'wrap',
+              marginBottom: 'var(--space-3)',
             }}
           >
             <h3 style={{ margin: 0 }}>{c.clientName}</h3>
@@ -271,18 +272,34 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
               {c.billableRate ? `${money(c.billableRate, currency)}/hr` : 'no rate set'}
               {c.billingType ? ` · ${c.billingType}` : ''}
             </span>
-            <strong style={{ marginLeft: 'auto' }}>Unbilled {money(c.total, currency)}</strong>
+            <strong style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+              Unbilled {money(c.total, currency)}
+            </strong>
+            {/* A LABELED select-all, not a bare floating checkbox (beta: read as a
+                "stray empty text box" at the top of the page). */}
             {(() => {
               const ids = clientEntryIds(c)
               const allSelected = ids.length > 0 && ids.every((id) => selected[id])
               const someSelected = ids.some((id) => selected[id])
               return (
-                <SelectAllCheckbox
-                  checked={allSelected}
-                  indeterminate={someSelected}
-                  onChange={(v) => setClientSelection(c, v)}
-                  title={`Select all unbilled entries for ${c.clientName}`}
-                />
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-1)',
+                    fontSize: 'var(--text-sm)',
+                    color: 'var(--muted)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <SelectAllCheckbox
+                    checked={allSelected}
+                    indeterminate={someSelected}
+                    onChange={(v) => setClientSelection(c, v)}
+                    title={`Select all unbilled entries for ${c.clientName}`}
+                  />
+                  Select all
+                </label>
               )
             })()}
             <button
@@ -975,7 +992,7 @@ export default function BillingPage() {
     <main>
       <PageHead
         title="Billing"
-        description="Roll unbilled time and expenses up into invoices, then send them. No payments or trust/IOLTA accounting in this version."
+        description="Roll unbilled time and expenses into invoices, then send them to clients."
       />
       <Tabs
         tabs={[
