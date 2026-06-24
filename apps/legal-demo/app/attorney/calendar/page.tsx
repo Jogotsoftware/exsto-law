@@ -165,6 +165,38 @@ function layoutTimed(
   })
 }
 
+// ── Drag-to-schedule geometry (PR3) ─────────────────────────────────────────
+// Times snap to quarter-hours while dragging; a dragged block can't be shorter
+// than MIN_DUR_MIN. All math is within one day column (Y ↔ minutes-from-midnight,
+// in LOCAL time, matching layoutTimed).
+const SNAP_MIN = 15
+const MIN_DUR_MIN = 15
+const snapMin = (min: number) => Math.round(min / SNAP_MIN) * SNAP_MIN
+const clampTopPx = (px: number) => Math.max(0, Math.min(px, 24 * HOUR_PX))
+const pxToMin = (px: number) => (px / HOUR_PX) * 60
+const minToPx = (min: number) => (min / 60) * HOUR_PX
+function dayAtMinutes(day: Date, minutes: number): Date {
+  const d = startOfDay(day)
+  d.setMinutes(Math.max(0, Math.min(24 * 60, minutes)))
+  return d
+}
+
+// An in-progress grid drag: paint a new event (create), move an event to a new
+// time, or resize its end. `moved` distinguishes a real drag from a plain click
+// (which must still navigate / open the 1h creator).
+type DragState =
+  | { kind: 'create'; day: Date; y0: number; y1: number }
+  | {
+      kind: 'move'
+      e: WorkspaceEvent
+      day: Date
+      top: number
+      height: number
+      grabDy: number
+      moved: boolean
+    }
+  | { kind: 'resize'; e: WorkspaceEvent; day: Date; top: number; height: number; moved: boolean }
+
 export default function CalendarPage() {
   const [anchor, setAnchor] = useState(() => new Date())
   const [view, setView] = useState<View>('week')
@@ -207,6 +239,14 @@ export default function CalendarPage() {
     matterNumber: string
   } | null>(null)
   const [attendeeInput, setAttendeeInput] = useState('')
+  // Drag-to-schedule on the time grid (create / move / resize). `drag` drives the
+  // visual; `dragRef` mirrors it synchronously for the global mouseup; `dragColRef`
+  // is the column being dragged in; `movedRef` suppresses click-navigation after a
+  // real drag.
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const dragRef = useRef<DragState | null>(null)
+  const dragColRef = useRef<HTMLElement | null>(null)
+  const movedRef = useRef(false)
   // The hourly grid scrolls the full 24h; open it near the workday.
   const gridScrollRef = useRef<HTMLDivElement>(null)
 
@@ -500,15 +540,119 @@ export default function CalendarPage() {
     })
   }
 
-  // Click an empty slot on the hourly grid → open the creator prefilled to that
-  // hour (default 1h block). Needs Google connected; a personal block needs no matter.
-  function openCreateAt(day: Date, hour: number) {
-    if (source !== 'google') return
-    const start = startOfDay(day)
-    start.setHours(hour, 0, 0, 0)
-    const end = new Date(start.getTime() + 60 * 60 * 1000)
-    openCreate(toLocalInput(start), toLocalInput(end))
+  // Reschedule by the event's identity: a meeting (calendar_event) goes through the
+  // meeting action, a consultation through booking — same split as the menu.
+  async function rescheduleEventTo(e: WorkspaceEvent, startIso: string, endIso: string) {
+    if (e.meetingEntityId) {
+      await run('legal.meeting.reschedule', {
+        calendarEventEntityId: e.meetingEntityId,
+        googleEventId: e.eventId,
+        startIso,
+        endIso,
+      })
+    } else if (e.matterEntityId) {
+      await run('legal.booking.reschedule', { matterEntityId: e.matterEntityId, startIso, endIso })
+    }
   }
+
+  // Start a drag: paint a new range on empty grid (create), move an event block, or
+  // resize its bottom edge. dragColRef captures the column so move tracking survives
+  // a scroll; movedRef is reset so a no-move "drag" still counts as a click.
+  function beginCreateDrag(ev: React.MouseEvent, day: Date) {
+    if (source !== 'google') return
+    if ((ev.target as HTMLElement).closest('.cal-event')) return // the event handles itself
+    ev.preventDefault()
+    const col = ev.currentTarget as HTMLElement
+    const relY = clampTopPx(ev.clientY - col.getBoundingClientRect().top)
+    dragColRef.current = col
+    movedRef.current = false
+    const ds: DragState = { kind: 'create', day, y0: relY, y1: relY }
+    dragRef.current = ds
+    setDrag(ds)
+  }
+  function beginMoveDrag(
+    ev: React.MouseEvent,
+    e: WorkspaceEvent,
+    day: Date,
+    top: number,
+    height: number,
+  ) {
+    ev.stopPropagation() // don't also start a create-drag on the column
+    const col = (ev.currentTarget as HTMLElement).closest('.cal-grid-col') as HTMLElement | null
+    if (!col) return
+    const relY = clampTopPx(ev.clientY - col.getBoundingClientRect().top)
+    dragColRef.current = col
+    movedRef.current = false
+    const ds: DragState = { kind: 'move', e, day, top, height, grabDy: relY - top, moved: false }
+    dragRef.current = ds
+    setDrag(ds)
+  }
+  function beginResizeDrag(
+    ev: React.MouseEvent,
+    e: WorkspaceEvent,
+    day: Date,
+    top: number,
+    height: number,
+  ) {
+    ev.stopPropagation()
+    ev.preventDefault()
+    const col = (ev.currentTarget as HTMLElement).closest('.cal-grid-col') as HTMLElement | null
+    if (!col) return
+    dragColRef.current = col
+    movedRef.current = false
+    const ds: DragState = { kind: 'resize', e, day, top, height, moved: false }
+    dragRef.current = ds
+    setDrag(ds)
+  }
+
+  // Global move/up listeners while a drag is active (so it keeps tracking outside
+  // the column). On drop, times snap to 15m: create opens the dialog prefilled to
+  // the painted range (a plain click → a 1h block); move/resize reschedule.
+  const dragging = drag !== null
+  useEffect(() => {
+    if (!dragging) return
+    function onMove(ev: MouseEvent) {
+      const d = dragRef.current
+      const col = dragColRef.current
+      if (!d || !col) return
+      const relY = clampTopPx(ev.clientY - col.getBoundingClientRect().top)
+      let next: DragState
+      if (d.kind === 'create') next = { ...d, y1: relY }
+      else if (d.kind === 'move') next = { ...d, top: clampTopPx(relY - d.grabDy), moved: true }
+      else next = { ...d, height: Math.max(minToPx(MIN_DUR_MIN), relY - d.top), moved: true }
+      if (d.kind !== 'create') movedRef.current = true
+      dragRef.current = next
+      setDrag(next)
+    }
+    async function onUp() {
+      const d = dragRef.current
+      dragRef.current = null
+      dragColRef.current = null
+      setDrag(null)
+      if (!d) return
+      if (d.kind === 'create') {
+        const a = snapMin(pxToMin(Math.min(d.y0, d.y1)))
+        const b = snapMin(pxToMin(Math.max(d.y0, d.y1)))
+        const end = b - a < MIN_DUR_MIN ? a + 60 : b // a plain click → a default 1h block
+        openCreate(toLocalInput(dayAtMinutes(d.day, a)), toLocalInput(dayAtMinutes(d.day, end)))
+        return
+      }
+      if (!d.moved) return // a click on the block — its own onClick handles it
+      const startMin = snapMin(pxToMin(d.top))
+      const endMin = startMin + Math.max(MIN_DUR_MIN, snapMin(pxToMin(d.height)))
+      await rescheduleEventTo(
+        d.e,
+        dayAtMinutes(d.day, startMin).toISOString(),
+        dayAtMinutes(d.day, endMin).toISOString(),
+      )
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [dragging])
 
   // WP3.2 — assign an unlinked Google event to a matter (legal.meeting.assign).
   // Passes the event fields the capture needs; app-booked consultations are
@@ -682,18 +826,33 @@ export default function CalendarPage() {
     )
   }
 
-  // A positioned event block in the hourly grid. Matter-linked events deep-link to
-  // the matter; other Google events open in Google; both are color-coded (gold
-  // left border = app-managed). Reschedule/cancel/assign stay on the List view.
-  function renderGridEvent(e: WorkspaceEvent, top: number, height: number, inset: number) {
+  // A positioned event block in the hourly grid. App-managed events (a matter
+  // consultation or a contact/personal meeting) are DRAGGABLE — drag the body to
+  // reschedule the time, drag the bottom edge to change the end. Matter blocks still
+  // deep-link to the matter on a plain click; the attorney's other Google events
+  // open in Google (not draggable — we don't own them). Color = call-type palette,
+  // falling back to the gold "managed" border.
+  function renderGridEvent(
+    e: WorkspaceEvent,
+    day: Date,
+    top: number,
+    height: number,
+    inset: number,
+  ) {
     const color = eventColor(e)
-    const cls = `cal-event${e.managedByApp ? ' managed' : ''}`
+    const draggable = Boolean(e.matterEntityId || e.meetingEntityId) && source === 'google'
+    const d = drag
+    const isThis = !!d && (d.kind === 'move' || d.kind === 'resize') && d.e.eventId === e.eventId
+    const dispTop = isThis ? d.top : top
+    const dispHeight = isThis ? d.height : height
+    const cls = `cal-event${e.managedByApp ? ' managed' : ''}${isThis ? ' dragging' : ''}`
     const style = {
-      top,
-      height,
+      top: dispTop,
+      height: dispHeight,
       left: `calc(3px + ${inset * 12}px)`,
-      zIndex: 2 + inset,
+      zIndex: isThis ? 50 : 2 + inset,
       ...(color ? { borderLeft: `3px solid ${color}`, background: `${color}1a` } : {}),
+      ...(draggable ? { cursor: isThis ? 'grabbing' : 'grab' } : {}),
     }
     const inner = (
       <>
@@ -704,19 +863,49 @@ export default function CalendarPage() {
           })}
         </span>
         <span className="cal-event-title">{e.summary || '(no title)'}</span>
+        {draggable && (
+          <span
+            className="cal-event-resize"
+            onMouseDown={(ev) => beginResizeDrag(ev, e, day, dispTop, dispHeight)}
+            title="Drag to change the end time"
+          />
+        )}
       </>
     )
-    if (e.matterEntityId) {
+    if (draggable && e.matterEntityId) {
       return (
         <Link
           key={e.eventId}
           href={`/attorney/matters/${e.matterEntityId}`}
           className={cls}
           style={style}
-          title={`${e.summary} — ${e.matterNumber}`}
+          title={`${e.summary} — ${e.matterNumber} · drag to reschedule`}
+          draggable={false}
+          onMouseDown={(ev) => beginMoveDrag(ev, e, day, dispTop, dispHeight)}
+          onClick={(ev) => {
+            // Suppress the deep-link navigation when this was a drag, not a click.
+            if (movedRef.current) {
+              ev.preventDefault()
+              movedRef.current = false
+            }
+          }}
         >
           {inner}
         </Link>
+      )
+    }
+    if (draggable) {
+      // A contact/personal meeting — draggable, but no navigation target.
+      return (
+        <div
+          key={e.eventId}
+          className={cls}
+          style={style}
+          title={`${e.summary} · drag to reschedule`}
+          onMouseDown={(ev) => beginMoveDrag(ev, e, day, dispTop, dispHeight)}
+        >
+          {inner}
+        </div>
       )
     }
     if (e.htmlLink) {
@@ -804,7 +993,7 @@ export default function CalendarPage() {
 
         <div className="cal-grid-scroll" ref={gridScrollRef}>
           <div
-            className="cal-grid-body"
+            className={`cal-grid-body${dragging ? ' dragging' : ''}`}
             style={{ gridTemplateColumns: cols, height: 24 * HOUR_PX }}
           >
             <div className="cal-grid-axis">
@@ -820,30 +1009,31 @@ export default function CalendarPage() {
                 ? ((now.getTime() - startOfDay(now).getTime()) / 3600_000) * HOUR_PX
                 : null
               const canCreate = source === 'google'
+              const ghost =
+                drag?.kind === 'create' && drag.day.toDateString() === day.toDateString()
+                  ? { top: Math.min(drag.y0, drag.y1), height: Math.abs(drag.y1 - drag.y0) }
+                  : null
               return (
                 <div
                   key={day.toISOString()}
                   className={`cal-grid-col${canCreate ? ' cal-grid-col-clickable' : ''}`}
-                  onClick={(ev) => {
-                    // Only empty grid space schedules — clicks on an event block
-                    // (Link/anchor/div.cal-event) are theirs to handle.
-                    if (!canCreate) return
-                    if ((ev.target as HTMLElement).closest('.cal-event')) return
-                    const rect = ev.currentTarget.getBoundingClientRect()
-                    const hour = Math.max(
-                      0,
-                      Math.min(23, Math.floor((ev.clientY - rect.top) / HOUR_PX)),
-                    )
-                    openCreateAt(day, hour)
-                  }}
-                  title={canCreate ? 'Click an empty slot to add an event' : undefined}
+                  // Mouse DOWN starts a create-drag; a plain click (no movement) still
+                  // opens the creator with a default 1h block (handled on mouseup).
+                  onMouseDown={(ev) => beginCreateDrag(ev, day)}
+                  title={canCreate ? 'Click or drag an empty slot to add an event' : undefined}
                 >
                   {hours.map((h) => (
                     <div key={h} className="cal-grid-hline" style={{ height: HOUR_PX }} />
                   ))}
                   {nowTop !== null && <div className="cal-grid-now" style={{ top: nowTop }} />}
+                  {ghost && (
+                    <div
+                      className="cal-grid-ghost"
+                      style={{ top: ghost.top, height: ghost.height }}
+                    />
+                  )}
                   {timed(day).map(({ e, top, height, inset }) =>
-                    renderGridEvent(e, top, height, inset),
+                    renderGridEvent(e, day, top, height, inset),
                   )}
                 </div>
               )
