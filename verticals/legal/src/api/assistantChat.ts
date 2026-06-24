@@ -150,6 +150,10 @@ export type AssistantChatStreamEvent =
     }
   | { type: 'thinking'; text: string }
   | { type: 'text'; text: string }
+  // A heartbeat while the assistant is generating a tool input (e.g. drafting a
+  // document body into a propose_* call). Keeps the SSE connection warm during an
+  // otherwise-silent long generation and drives a "drafting" animation in the UI.
+  | { type: 'drafting' }
   // The assistant loaded a specialized skill (playbook) for this turn — the UI
   // shows a "using <skill>" chip while it works.
   | { type: 'skill'; slug: string; name: string }
@@ -1113,7 +1117,9 @@ export async function* assistantChatStream(
         buildQuestions,
       }),
     })) {
-      if (chunk.type === 'text') {
+      if (chunk.type === 'drafting') {
+        yield { type: 'drafting' }
+      } else if (chunk.type === 'text') {
         reply += chunk.text
         yield { type: 'text', text: chunk.text }
       } else if (chunk.type === 'thinking') {
