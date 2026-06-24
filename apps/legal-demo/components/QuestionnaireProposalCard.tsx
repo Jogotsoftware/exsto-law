@@ -152,7 +152,7 @@ export function QuestionnaireProposalCard({
       <div className="uac-doc-actions">
         <button
           type="button"
-          className={`uac-reply-btn${approveState === 'approved' ? ' copied' : ''}`}
+          className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
           onClick={approve}
           disabled={approveState === 'approving' || approveState === 'approved'}
           title="Approve this questionnaire — this writes the service's intake form"

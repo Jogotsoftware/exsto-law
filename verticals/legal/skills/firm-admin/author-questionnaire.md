@@ -17,6 +17,8 @@ Apply `firm-admin.platform-discipline`: the questionnaire is a proposal the atto
 
 You cannot build this questionnaire correctly without the enumerated token list from `firm-admin.author-template`. If you do not have it, get it first. The questionnaire's job is to COVER every template token: no missing tokens (a missing token renders `[[MISSING: token]]` in the client's document), and minimal extra fields (a field no template uses is wasted client effort).
 
+**Full coverage is enforced, and reuse comes first.** `propose_questionnaire` will REFUSE any questionnaire that leaves a template token uncovered — so you cannot hand the attorney a form with holes to patch by hand; cover every token before you propose. Before authoring a new field, check `get_questionnaire_context` for a question the firm ALREADY defines for that token (same id) on another service and REUSE its definition (id / label / type) rather than re-inventing it.
+
 ## The binding contract (read this first)
 
 `field.id` IS the merge token. When a matter runs, the deterministic engine flattens every answer into a `{{field_id}} → value` map and fills the templates. So:
