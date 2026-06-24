@@ -50,6 +50,14 @@ run('ADR 0046: platform control plane', () => {
     expect(all.rows[0]!.n).toBeGreaterThan(0)
   })
 
+  it('cp_list_templates: a non-admin sees ZERO templates (the guard holds for the promotion reader too)', async () => {
+    const none = await pool.query<{ n: number }>(
+      'SELECT count(*)::int AS n FROM private.cp_list_templates($1, $2)',
+      [NON_ADMIN_ACTOR, '00000000-0000-0000-0000-000000000001'],
+    )
+    expect(none.rows[0]!.n).toBe(0)
+  })
+
   it('cp_resolve_admin_by_email resolves the seeded admin actor', async () => {
     const r = await pool.query<{ id: string }>(
       'SELECT actor_id::text AS id FROM private.cp_resolve_admin_by_email($1)',

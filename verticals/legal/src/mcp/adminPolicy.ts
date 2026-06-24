@@ -23,10 +23,14 @@ export const ADMIN_CONSOLE_TOOLS: ReadonlySet<string> = new Set([
   'admin.module.enablement',
   'admin.module.enable',
   'admin.module.disable',
-  // Sandbox / promotion
+  // Sandbox / promotion — services
   'admin.promote.export',
   'admin.promote.diff',
   'admin.promote.run',
+  // Sandbox / promotion — document/email template library
+  'admin.promote.templates.export',
+  'admin.promote.templates.diff',
+  'admin.promote.templates.run',
   // Access (per target tenant)
   'admin.access.users',
   'admin.access.roles',
