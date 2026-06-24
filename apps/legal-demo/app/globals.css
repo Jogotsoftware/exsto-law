@@ -5319,6 +5319,31 @@ button.danger.outline:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent-soft);
 }
+/* Primary action variant — the APPROVE button on a proposal card. Filled and larger
+   so the main "approve & save" action is obvious, not hidden among the muted text
+   buttons (founder: "the Approve buttons are a little too hidden"). */
+.uac-reply-btn.uac-reply-btn-primary {
+  padding: 0.4rem 0.85rem;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.8rem;
+}
+.uac-reply-btn.uac-reply-btn-primary:hover:not(:disabled) {
+  background: var(--accent-strong, var(--navy));
+  border-color: var(--accent-strong, var(--navy));
+  color: #fff;
+}
+.uac-reply-btn.uac-reply-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* Once approved, the primary button reads as a calm success, not a loud CTA. */
+.uac-reply-btn.uac-reply-btn-primary.copied {
+  background: var(--accent-attorney-soft, var(--surface-2));
+  border-color: var(--accent-soft);
+  color: var(--accent);
+}
 /* A document the assistant produced — a downloadable deliverable shown as a
    distinct card (not a chat bubble), with a preview + download/save actions. */
 .uac-doc-card {

@@ -743,12 +743,34 @@ export function UnifiedAssistantChat({
     setHistoryOpen(false)
     setFeedbackMode(false)
     setSkillMenuOpen(false)
+    // The guided build needs strong reasoning + reliable structured tool use; Haiku is
+    // too weak for it (it loses the platform model and drifts back to plain prose). If
+    // the attorney is on a model that can't honor the work-rate knob (Haiku), upgrade
+    // this session to the recommended Claude model — transparently: the picker updates
+    // to show it. Sonnet/Opus are left as-is. (Anthropic `connected` is per-provider, so
+    // if the picker offered Haiku, the stronger Claude models are connected too.)
+    const current = models?.find((m) => m.id === modelId)
+    const strong =
+      models?.find(
+        (m) =>
+          m.provider === 'anthropic' &&
+          m.available &&
+          m.connected &&
+          m.supportsWorkRate &&
+          m.isDefault,
+      ) ??
+      models?.find(
+        (m) => m.provider === 'anthropic' && m.available && m.connected && m.supportsWorkRate,
+      )
+    const buildModelId = current && !current.supportsWorkRate && strong ? strong.id : modelId
+    if (buildModelId !== modelId) setModelId(buildModelId)
     // The priming message reads like a build request so the server force-loads the
     // build-service orchestrator (BUILD_REQUEST_RE) and the wizard tools are live. It's
-    // hidden — the attorney sees the AI's first question card, not this nudge.
+    // hidden — the attorney sees the AI's first question card, not this nudge. Pass the
+    // (possibly upgraded) model explicitly: setModelId hasn't flushed yet this tick.
     void send(
       "I want to build a new service. Start the guided build interview now: ask me your first question with ask_build_question (what the service is called and what the client gets), and don't assume any automation choices — ask me the route and generation mode, and per-step who performs each workflow step.",
-      { hidden: true },
+      { hidden: true, model: buildModelId },
     )
   }
 
@@ -874,11 +896,15 @@ export function UnifiedAssistantChat({
   // continuations no longer show a fake "✓ created — continue…" user message (founder
   // flagged that as bad UX). The thinking indicator still shows because streaming state
   // is set immediately below, so a hidden continuation isn't a silent gap (fix #5).
-  async function send(overrideMessage?: string, opts?: { hidden?: boolean }) {
+  async function send(overrideMessage?: string, opts?: { hidden?: boolean; model?: string }) {
     const isContinuation = typeof overrideMessage === 'string'
     const hidden = isContinuation && opts?.hidden === true
     const message = isContinuation ? overrideMessage.trim() : input.trim()
-    if (!message || busy || !modelId) return
+    // A caller may force the model for this turn (build mode upgrades Haiku → the
+    // recommended Claude model). Default to the picker's selection. Needed because
+    // setModelId() won't have flushed by the time enterBuildMode fires its priming send.
+    const turnModelId = opts?.model ?? modelId
+    if (!message || busy || !turnModelId) return
     const gen = ++genRef.current // this exchange's generation; stale callbacks no-op
     const live = () => genRef.current === gen
     setError(null)
@@ -932,7 +958,7 @@ export function UnifiedAssistantChat({
       await streamAssistant(
         {
           message,
-          modelId,
+          modelId: turnModelId,
           history,
           ...scope,
           workRate,
@@ -1148,8 +1174,19 @@ export function UnifiedAssistantChat({
       const key = `${info.serviceKey}:${info.artifact}`
       if (continuedRef.current.has(key)) return // already continued from this approval
       continuedRef.current.add(key)
-      // Enable is the LAST step — going live ends the build; do not auto-continue.
-      if (info.artifact === 'enable') return
+      // Enable is the TERMINAL step — approving it makes the service live and ENDS the
+      // build. Leave build mode (the banner goes away) and fire ONE final wrap-up so the
+      // wizard FINISHES cleanly instead of just stopping: confirm it's live, point to the
+      // service, and close warmly — never start another step.
+      if (info.artifact === 'enable') {
+        setBuildMode(false)
+        if (busy) return
+        void send(
+          `✓ The service is now LIVE: ${info.label} (${info.link}). The build is COMPLETE — do NOT start another step or propose anything else. Give the attorney a short, warm wrap-up: confirm the service is built and live, point them to it with that link to review, mention they can share their booking link so clients can book it, and close with "Let me know how else I can help!"`,
+          { hidden: true },
+        )
+        return
+      }
       // Don't stack continuations on top of an in-flight turn; if one is mid-stream the
       // attorney can nudge it manually. (Approvals are inherently sequential here.)
       if (busy) return

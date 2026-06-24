@@ -178,6 +178,15 @@ export function buildProposeQuestionnaireTool(
       if (!validation.ok) {
         return `The proposed questionnaire is not valid and was NOT captured. Fix these and call propose_questionnaire again: ${validation.errors.join('; ')}`
       }
+      // HARD RULE (the variable contract): the questionnaire MUST collect EVERY value the
+      // document templates reference. If a template uses a token, the form has to capture
+      // it — add a NEW question, or REUSE an existing firm question by giving the field
+      // that token's id. Refuse to capture a questionnaire that leaves any token
+      // uncovered, so the build never hands the attorney a form with [[MISSING]] gaps to
+      // patch by hand. (No templates yet ⇒ no tokens ⇒ nothing to enforce.)
+      if (validation.missingForTokens.length > 0) {
+        return `The questionnaire does NOT yet collect every value the document templates need, so it was NOT captured. The contract is: every template token must have a matching question. Add a field for EACH of these tokens — the field id must EXACTLY equal the token (reuse an existing firm question's definition when one matches by id; otherwise add a new question) — then call propose_questionnaire again: ${validation.missingForTokens.join(', ')}. Do not propose a questionnaire that leaves any of these uncovered.`
+      }
       const confidence =
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
@@ -260,7 +269,7 @@ const PROPOSE_TEMPLATE_TOOL_DEF = {
       doc_kind: {
         type: 'string',
         description:
-          "The document kind this template produces, snake_case (e.g. 'engagement_letter', 'operating_agreement'). This is the binding key in the service.",
+          "The document kind this template produces — the actual DELIVERABLE the client receives, snake_case (e.g. 'engagement_letter', 'operating_agreement', 'mutual_nda'). This is the binding key in the service. It must NEVER be a prompt or instruction: do NOT create a separate '<kind>_drafting_prompt' (or similar) document — the AI drafting prompt is handled automatically when you author the body, so author ONLY the real document(s) the client gets.",
       },
       summary: {
         type: 'string',

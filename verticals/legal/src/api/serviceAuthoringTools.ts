@@ -64,7 +64,8 @@ const PROPOSE_SERVICE_TOOL_DEF = {
       },
       description: {
         type: 'string',
-        description: 'A one-line description of what the service does (optional).',
+        description:
+          "The CLIENT-FACING blurb shown on the public booking page. Write it for the CLIENT in plain language about WHAT they get and the value (e.g. 'A mutual non-disclosure agreement to protect confidential information shared between two parties, prepared under North Carolina law.'). NEVER describe HOW it is produced internally — no mention of the workflow, the system, automation, 'auto-generated', 'template merge', intake mechanics, or attorney review steps. Describe the deliverable, not the assembly line.",
       },
       route: {
         type: 'string',
@@ -117,6 +118,17 @@ export function buildProposeServiceTool(
       if (!displayName) {
         return 'A display_name is required to propose a service; nothing was captured.'
       }
+      // The description is CLIENT-FACING (it shows on the public booking page). The firm
+      // rule: it must never expose internal mechanics. Reject the most unambiguous
+      // leaks — automation/workflow/assembly language — so the model rewrites it in
+      // plain client terms rather than capturing "auto-generated from intake …".
+      const description = (args.description ?? '').trim()
+      const internalLeak = description.match(
+        /\bauto-?generat\w*|\btemplate[ -]?merge\b|\bworkflow\b|\bintake\b|\bthe system\b|\bgeneration mode\b/i,
+      )
+      if (internalLeak) {
+        return `The description was NOT captured: it is shown to CLIENTS on the booking page, so it must not mention internal mechanics ("${internalLeak[0]}"). Rewrite it in plain client-facing language about WHAT the client gets and its value — never how it is produced — then call propose_service again.`
+      }
       // Route + generation mode are REQUIRED — NEVER defaulted. Defaulting to
       // 'manual'/'template_merge' is the founder-reported bug; the attorney must choose
       // both in the interview. If the model omits either, refuse to capture and tell it
@@ -144,7 +156,7 @@ export function buildProposeServiceTool(
       captured.push({
         displayName,
         derivedKey,
-        description: (args.description ?? '').trim() || null,
+        description: description || null,
         route,
         generationMode,
         summary: (args.summary ?? '').trim() || `Proposed new service "${displayName}".`,

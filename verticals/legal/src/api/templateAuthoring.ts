@@ -38,6 +38,7 @@ import {
   listServiceDocumentTemplates,
   listServicesIncludingInactive,
   type DocumentTemplateConfig,
+  type DraftingConfig,
   type ServiceField,
   type QuestionnaireDoc,
 } from './services.js'
@@ -386,6 +387,30 @@ async function persistReasoningTrace(
   return id
 }
 
+// A sound DEFAULT drafting prompt for an auto-route document kind, seeded when a
+// template is authored (see createTemplateAI). It carries the three REQUIRED_DRAFTING_
+// SLOTS the completeness gate checks ({{questionnaire_responses_json}},
+// {{transcript_text}}, {{operating_agreement_template}}) and instructs the model to
+// fill the firm's body template from the client's intake answers — so an ai_draft
+// service produces real, answer-driven documents and a template_merge service simply
+// satisfies the gate (its worker never reads this). The attorney can refine it later in
+// the service editor.
+function defaultDraftingPrompt(docKind: string): string {
+  const label = docKind.replace(/_/g, ' ')
+  return [
+    `You are drafting a ${label} under North Carolina law (and applicable U.S. federal law). Complete the firm's template below using the client's intake answers; fill every field the answers provide and follow the template's structure exactly. Where a required value is genuinely missing, leave a clearly marked placeholder for the attorney rather than inventing it. Output the final document only — no commentary. This is the BASE guidance: if the attorney adds specific instructions for this draft (appended below these inputs), FOLLOW THEM — attorney instructions always take precedence over this base prompt wherever they conflict.`,
+    ``,
+    `The client's intake answers (use these to fill the document):`,
+    `{{questionnaire_responses_json}}`,
+    ``,
+    `Consultation notes, if any (additional context):`,
+    `{{transcript_text}}`,
+    ``,
+    `The document template to complete:`,
+    `{{operating_agreement_template}}`,
+  ].join('\n')
+}
+
 // The AI write path (the live write happens ONLY on attorney approve). Validates the
 // body (non-empty), persists the reasoning_trace FIRST, then submits the template
 // write AS THE AGENT ACTOR with intent 'exploration' and the trace id. The write is
@@ -409,12 +434,18 @@ export async function createTemplateAI(
   // Read the current row to MERGE into its document_templates (so other kinds'
   // bodies survive), its `documents` list (the doc kinds the service produces — a
   // template MUST register its kind there or an auto-route service never has a
-  // document to draft and fails completeness/Enable), and the display_name the
-  // upsert requires.
+  // document to draft and fails completeness/Enable), its route + drafting config
+  // (to seed the per-kind drafting prompt completeness needs), and the display_name
+  // the upsert requires.
   const row = await withActionContext(ctx, async (client) => {
     const res = await client.query<{
       display_name: string
-      transitions: { document_templates?: DocumentTemplateConfig; documents?: string[] }
+      transitions: {
+        document_templates?: DocumentTemplateConfig
+        documents?: string[]
+        route?: string
+        drafting?: DraftingConfig
+      }
     }>(
       `SELECT display_name, transitions FROM workflow_definition
         WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
@@ -437,6 +468,32 @@ export async function createTemplateAI(
   const existingDocs = Array.isArray(row.transitions.documents) ? row.transitions.documents : []
   const documents = existingDocs.includes(docKind) ? existingDocs : [...existingDocs, docKind]
 
+  // SEED THE DRAFTING PROMPT (the bug fix): an auto-route service's completeness gate
+  // requires a per-kind drafting prompt in transitions.drafting.prompts[kind] (with the
+  // required slots) — but the wizard has no separate "propose drafting prompt" tool, so
+  // the model used to misfile the prompt as a second document template (a phantom
+  // "<kind>_drafting_prompt" doc) and the service could never enable. Here, when we
+  // author a document body for an auto service that has NO prompt for this kind yet, we
+  // seed a sound default prompt in the RIGHT place so the service is actually
+  // enableable; the attorney can refine it in the editor. (template_merge never reads
+  // it; it just satisfies the gate. Manual-route services need no prompt.)
+  const route = row.transitions.route === 'auto' ? 'auto' : 'manual'
+  const existingDrafting: DraftingConfig = row.transitions.drafting ?? {}
+  const hasPrompt = !!(existingDrafting.prompts ?? {})[docKind]?.trim?.()
+  const draftingPatch: DraftingConfig | undefined =
+    route === 'auto' && !hasPrompt
+      ? {
+          prompt_version:
+            (typeof existingDrafting.prompt_version === 'number'
+              ? existingDrafting.prompt_version
+              : 0) + 1,
+          prompts: {
+            ...(existingDrafting.prompts ?? {}),
+            [docKind]: defaultDraftingPrompt(docKind),
+          },
+        }
+      : undefined
+
   // The write is AS THE AGENT — the trace, the action source, and the
   // configuration_change all attribute the authoring to the Claude agent actor.
   const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
@@ -454,7 +511,11 @@ export async function createTemplateAI(
     payload: {
       service_key: serviceKey,
       display_name: row.display_name,
-      transitions_patch: { document_templates: merged, documents },
+      transitions_patch: {
+        document_templates: merged,
+        documents,
+        ...(draftingPatch ? { drafting: draftingPatch } : {}),
+      },
     },
   })
 
