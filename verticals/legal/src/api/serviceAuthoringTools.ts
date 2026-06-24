@@ -24,7 +24,7 @@ import {
   SERVICE_GENERATION_MODES,
   type ServiceProposal,
 } from './serviceAuthoring.js'
-import type { WorkflowRoute } from './services.js'
+import { serviceCompleteness, type WorkflowRoute } from './services.js'
 import type { GenerationMode } from './generateDraft.js'
 
 const SERVICE_CONTEXT_TOOL_DEF = {
@@ -146,6 +146,49 @@ export function buildProposeServiceTool(
         confidence,
       })
       return `The proposed service "${displayName}" (key "${derivedKey}") is shown to the attorney as an approval card; it is NOT created until they approve. Reply with ONE short sentence pointing them to it; do NOT repeat the proposal details in prose.`
+    },
+  }
+}
+
+// ─── Completeness (read-only) ───────────────────────────────────────────────
+//
+// The build-wizard orchestrator needs to know, mid-build, whether a service is
+// enableable yet — the SAME gate the "Enable service" button uses. This wraps the
+// existing legal.service.completeness READ (serviceCompleteness) so the model can
+// check readiness before it ever tells the attorney the service is live. It is
+// READ-ONLY: no capture, no write, no proposal — it just returns { serviceKey,
+// ready, missing } so the model can read back the missing reasons and loop.
+const SERVICE_COMPLETENESS_TOOL_DEF = {
+  name: 'get_service_completeness',
+  description:
+    'Check whether a service is complete enough to ENABLE (make bookable). Returns { serviceKey, ready, missing }: `ready` is true only when the service has a questionnaire and — for auto-route services — every document kind has a drafting prompt with all required slots and a resolvable body template; `missing` lists the human-readable reasons it is not yet enableable. Call this DURING a guided service build before you ever tell the attorney the service is ready or live — NEVER claim a service is live unless this returns ready:true. It does NOT change anything.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      service_key: {
+        type: 'string',
+        description:
+          "The kind_name of the service to check (e.g. 'nc_single_member_llc_formation').",
+      },
+    },
+    required: ['service_key'],
+    additionalProperties: false,
+  },
+}
+
+// Read-only completeness tool. Returns the { serviceKey, ready, missing } shape as
+// JSON. No capture, no write — it delegates to serviceCompleteness, the single
+// source of truth the Enable gate also uses.
+export function buildServiceCompletenessTool(ctx: ActionContext): ClientTool {
+  return {
+    definition: SERVICE_COMPLETENESS_TOOL_DEF,
+    name: 'get_service_completeness',
+    run: async (raw) => {
+      const args = (raw ?? {}) as { service_key?: string }
+      const serviceKey = (args.service_key ?? '').trim()
+      if (!serviceKey) return 'A service_key is required to check service completeness.'
+      const completeness = await serviceCompleteness(ctx, serviceKey)
+      return JSON.stringify(completeness)
     },
   }
 }

@@ -44,7 +44,11 @@ import {
   buildProposeWorkflowTool,
   type WorkflowProposal,
 } from './workflowAuthoringTools.js'
-import { buildServiceContextTool, buildProposeServiceTool } from './serviceAuthoringTools.js'
+import {
+  buildServiceContextTool,
+  buildProposeServiceTool,
+  buildServiceCompletenessTool,
+} from './serviceAuthoringTools.js'
 import type { ServiceProposal } from './serviceAuthoring.js'
 import {
   buildQuestionnaireContextTool,
@@ -379,7 +383,10 @@ function buildProduceDocumentTool(captured: ProducedDocument[]): ClientTool {
 // Claude-only chat path (legal.assistant.chat is not a client-portal tool, and the
 // Perplexity branch never reaches here), so workflow authoring is never offered on a
 // client-portal or external-research turn.
-function buildAttorneyClientTools(
+// Exported for the dormancy/activation test (Phase 4): it asserts which tools are
+// registered with the build-wizard flag off vs on. Pure construction — no DB/model
+// touched here (each tool's run() is lazy), so the test can pass a minimal ctx.
+export function buildAttorneyClientTools(
   ctx: ActionContext,
   input: AssistantChatInput,
   capture: {
@@ -394,11 +401,17 @@ function buildAttorneyClientTools(
   const tools: ClientTool[] = [buildFeedbackTool(ctx, input)]
   if (capture.catalog.length) tools.push(buildSkillTool(ctx))
   tools.push(buildProduceDocumentTool(capture.producedDocuments))
+  // The workflow-authoring pair is ALWAYS registered (PR5 — editing an existing
+  // service's workflow is a standalone, unflagged capability). The build-wizard
+  // (Phase 4) COMPOSES this same pair as its workflow step, so the orchestrator
+  // gets propose_workflow for free without a second registration.
   tools.push(buildWorkflowContextTool(ctx))
   tools.push(buildProposeWorkflowTool(ctx, capture.workflowProposals))
-  // Build-Wizard (Phases 1–3): the authoring tools are dormant unless the
+  // Build-Wizard (Phases 1–4): the authoring tools are dormant unless the
   // LEGAL_BUILD_WIZARD flag is on. With the flag off they're never registered (and
-  // the system prompt below says nothing about them), so this whole path is a no-op.
+  // the orchestrator system-prompt block below is absent), so the chatbot is
+  // byte-for-byte unchanged — this whole path is a no-op. Phase 4 registers the
+  // full set TOGETHER so the model can run one end-to-end guided build.
   if (buildWizardEnabled()) {
     // Phase 1: propose a new service shell.
     tools.push(buildServiceContextTool(ctx))
@@ -409,6 +422,9 @@ function buildAttorneyClientTools(
     // Phase 3: propose a service's document template (orphan tokens surfaced).
     tools.push(buildTemplateContextTool(ctx))
     tools.push(buildProposeTemplateTool(ctx, capture.templateProposals))
+    // Phase 4: read-only completeness check so the orchestrator can verify a
+    // service is enableable BEFORE it ever tells the attorney it's live.
+    tools.push(buildServiceCompletenessTool(ctx))
   }
   return tools
 }
@@ -431,7 +447,9 @@ const SCREEN_END = '«END SCREEN»'
 // assistant can refer them back to it. Then the attorney-selected active skills and
 // the skills catalog. Claude is the firm's own model, so the route/id is safe; the
 // external research path never receives any of it.
-function buildClaudeSystem(
+// Exported for the dormancy/activation test (Phase 4): it asserts the orchestrator
+// block is present/absent per the flag. Pure string building.
+export function buildClaudeSystem(
   scope: AssistantScope,
   primaryEntityId: string | null,
   context: AssistantContext | null,
@@ -486,6 +504,22 @@ function buildClaudeSystem(
       '\n\nCREATING A NEW SERVICE — when the attorney asks you to create, set up, or add a new SERVICE offering (e.g. "create an NC SMLLC formation service", "add a trademark filing service"), you propose an empty service SHELL for them to approve. ALWAYS call get_service_context FIRST to load the existing service keys (so your proposed key is unique) and the closed route + generation_mode vocabularies. Pick a route and generation_mode ONLY from those — never invent one. When you have a name and a valid choice, deliver it by CALLING the propose_service tool — this does NOT save anything; it shows the attorney an approval card, and the service is created (as a disabled draft) only when THEY approve it. Put the proposal ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to it to review.'
     system +=
       "\n\nBUILDING A SERVICE'S INTAKE QUESTIONNAIRE AND DOCUMENTS — when the attorney asks you to build the intake form (questionnaire) or a document template for an EXISTING service, you propose them for approval, bound by the VARIABLE CONTRACT: every document {{token}} must map to a questionnaire field id, or it renders [[MISSING]]. For a QUESTIONNAIRE: call get_questionnaire_context FIRST (it gives the closed field types, the current form, and the {{tokens}} the service's documents reference) and build a form that collects a field for EACH template token (matching ids), then CALL propose_questionnaire. For a TEMPLATE: call get_template_context FIRST (it gives the questionnaire's field ids) and write a markdown body whose {{tokens}} are flat snake_case and bind to those field ids — never invent a dotted path — then CALL propose_template. Both tools only show an approval card; nothing is saved until the attorney approves. The card surfaces coverage gaps (template tokens with no question, or questions no document uses) so the attorney never approves a broken contract — point those out. Put the proposal ONLY in the tool call; your reply is a SINGLE short sentence pointing them to it (flag any coverage gap)."
+    // Build-Wizard Phase 4 — the ORCHESTRATOR. When the attorney wants a WHOLE new
+    // service (not just one piece), you run the full guided interview that composes
+    // the propose_* tools above into one end-to-end build. This block encodes the
+    // load-bearing FLOW INLINE (so the wizard works even if the playbook skill isn't
+    // loaded); the firm-admin.build-service skill carries the full detail and you
+    // should load_skill it for substance. The order below is NOT optional — each
+    // artifact depends on the one before it.
+    system +=
+      '\n\nBUILDING A SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a WHOLE new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service", "set up a trademark filing offering"), you RUN A GUIDED INTERVIEW, not a form. Load the firm-admin.build-service playbook with load_skill for the full detail; the core flow is: ' +
+      '(1) INTERVIEW the attorney about how they actually deliver this work — ask 2–4 plain-language questions at a time (what it is called, what the client gets, jurisdiction — default North Carolina + federal, pricing), reflect their answer back, then ask the next small batch. Never dump a wall of questions. ' +
+      '(2) Propose the SERVICE SHELL FIRST with propose_service — a service must exist before anything can bind to it (templates attach to it, the questionnaire saves onto it, the workflow is its lifecycle). It is created disabled. ' +
+      '(3) Then DOCUMENTS → VARIABLES → QUESTIONNAIRE, in that order (a HARD RULE): for each document the client receives, load the relevant firm legal skill with load_skill so the draft is real NC/federal work product, then propose_template; ENUMERATE every {{token}} the approved templates need; then propose_questionnaire to collect EXACTLY those tokens (field id == token name). Never build the questionnaire first — it is reverse-engineered from what the documents require. ' +
+      "(4) Then the WORKFLOW: interview their real step-by-step process (who does each part — attorney, client, or system; what waits on something external), then propose_workflow composed from get_workflow_context's closed catalog, linear, attaching the templates that now exist. " +
+      '(5) Then check get_service_completeness. It returns { ready, missing }. NEVER tell the attorney the service is ready or live unless ready is true — if it is false, read back the missing reasons in plain language and loop to fix them. ' +
+      '(6) Guide ENABLE last: once completeness is ready, tell the attorney to set billing and Enable the service from the service editor (/attorney/services) — only after it is actually enabled is it bookable. ' +
+      'THROUGHOUT: each artifact is its OWN propose→approve card the attorney owns — never batch-write a finished service, never claim certainty (honest confidence < 1.0), always call the matching get_*_context read tool before each propose so you only use real kinds, ids, and tokens. After each propose tool call, your chat reply is ONE short sentence pointing the attorney at the current card to review; the artifact lives only in the tool call, never repeated in prose.'
   }
   if (activeSkillsText) system += `\n\n${activeSkillsText}`
   if (skillCatalogText) system += `\n\n${skillCatalogText}`
