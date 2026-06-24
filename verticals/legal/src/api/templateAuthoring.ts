@@ -36,11 +36,13 @@ import {
   getQuestionnaire,
   getDocumentTemplate,
   listServiceDocumentTemplates,
+  listServicesIncludingInactive,
   type DocumentTemplateConfig,
   type ServiceField,
   type QuestionnaireDoc,
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
+import { listStandaloneTemplates } from '../queries/templates.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
 // the SAME id intakeAuthoring.ts / serviceAuthoring.ts source their writes to.
@@ -52,9 +54,26 @@ export interface ExistingTemplateSummary {
   tokens: string[]
 }
 
+// One template anywhere in the FIRM (Phase 5 — reuse), summarized so the model can
+// ADAPT an existing body instead of re-drafting from scratch. `source` is either a
+// service key (a body authored on that service's document_templates store) or
+// 'library' (a standalone Templates-tab entry). The body is excerpted, not full —
+// enough to recognize a match and decide to reuse; the model can request more by
+// loading the library entry if needed.
+export interface FirmTemplateSummary {
+  // Where it lives: a service kind_name, or 'library' for a standalone template.
+  source: string
+  documentKind: string | null
+  name: string
+  tokens: string[]
+  // A leading excerpt of the body so the model can judge fit (capped, see EXCERPT).
+  bodyExcerpt: string
+}
+
 // The read-only context the chat tool hands the model to PROPOSE a template: the
 // service's current questionnaire field ids (the tokens it may bind to), its
-// existing templates, and the docKind registry across the firm's templates.
+// existing templates, the FIRM-WIDE template library (to reuse/adapt — Phase 5),
+// and the docKind registry across the firm's templates.
 export interface TemplateAuthoringContext {
   serviceKey: string
   // The service's current questionnaire field ids — the model reuses these EXACT
@@ -63,9 +82,24 @@ export interface TemplateAuthoringContext {
   // The service's existing document templates (by docKind) + their tokens, so the
   // model doesn't propose a duplicate or clash with an authored body.
   existingTemplates: ExistingTemplateSummary[]
+  // Phase 5 — EVERY document template across the firm (the standalone library AND
+  // each service's authored bodies), so the model can REUSE/ADAPT an existing one
+  // (start from its content) instead of re-drafting a document it already has.
+  templateLibrary: FirmTemplateSummary[]
   // Distinct document kinds across the FIRM's service templates — the docKind
   // registry a proposed template's kind should come from (or extend deliberately).
   docKinds: string[]
+}
+
+// How much of a template body to carry into the reuse context. Enough to recognize
+// a match and judge fit; the full body is reachable via the library entry on adapt.
+const BODY_EXCERPT_CHARS = 600
+
+function bodyExcerpt(body: string): string {
+  const trimmed = body.trim()
+  return trimmed.length > BODY_EXCERPT_CHARS
+    ? `${trimmed.slice(0, BODY_EXCERPT_CHARS).trimEnd()} …[truncated]`
+    : trimmed
 }
 
 // Every field id in a questionnaire schema, including members_repeater member
@@ -89,9 +123,51 @@ function collectFieldIds(schema: QuestionnaireDoc | null): string[] {
   return ids
 }
 
+// The FIRM-WIDE document-template library (Phase 5 — reuse). Composes the standalone
+// Templates-tab library AND every service's authored document_templates into one flat
+// list the model can search to ADAPT an existing body instead of re-drafting. Each
+// entry carries its source (service key or 'library'), docKind, name, tokens, and a
+// body excerpt. Read-only — composes existing list queries.
+export async function loadFirmTemplateLibrary(ctx: ActionContext): Promise<FirmTemplateSummary[]> {
+  const library: FirmTemplateSummary[] = []
+  // 1) The standalone library (Templates tab) — document templates only (email
+  //    templates are for notifications, not the wizard's document deliverables).
+  for (const t of await listStandaloneTemplates(ctx)) {
+    if (t.category !== 'document') continue
+    library.push({
+      source: 'library',
+      documentKind: t.docKind,
+      name: t.name,
+      tokens: extractRenderedTokens(t.body),
+      bodyExcerpt: bodyExcerpt(t.body),
+    })
+  }
+  // 2) Every service's authored document templates (the bodies bound onto a service's
+  //    document_templates store) — resolved in parallel to stay within budget.
+  const services = await listServicesIncludingInactive(ctx)
+  const perService = await Promise.all(
+    services.map(async (s) => {
+      const docs = await listServiceDocumentTemplates(ctx, s.serviceKey)
+      return docs.map(
+        (d): FirmTemplateSummary => ({
+          source: s.serviceKey,
+          documentKind: d.documentKind,
+          // Service-bound bodies have no standalone name; the docKind is the label.
+          name: d.documentKind,
+          tokens: extractRenderedTokens(d.body),
+          bodyExcerpt: bodyExcerpt(d.body),
+        }),
+      )
+    }),
+  )
+  for (const docs of perService) library.push(...docs)
+  return library
+}
+
 // Load everything the model needs to PROPOSE a document template for a service: the
-// questionnaire field ids (the tokens it may bind to), the existing templates, and
-// the docKind registry. Read-only.
+// questionnaire field ids (the tokens it may bind to), the service's existing
+// templates, the FIRM-WIDE template library (to reuse/adapt — Phase 5), and the
+// docKind registry. Read-only.
 export async function loadTemplateContext(
   ctx: ActionContext,
   serviceKey: string,
@@ -103,10 +179,18 @@ export async function loadTemplateContext(
     documentKind: d.documentKind,
     tokens: extractRenderedTokens(d.body),
   }))
+  const templateLibrary = await loadFirmTemplateLibrary(ctx)
   // The firm-wide docKind registry: every kind any service has authored a template
-  // for (this service's included). De-duplicated and sorted for a stable list.
-  const docKinds = [...new Set(existingTemplates.map((t) => t.documentKind))].sort()
-  return { serviceKey, questionnaireFieldIds, existingTemplates, docKinds }
+  // for (the standalone library + this service's included). De-duped and sorted.
+  const docKinds = [
+    ...new Set(
+      [
+        ...existingTemplates.map((t) => t.documentKind),
+        ...templateLibrary.map((t) => t.documentKind).filter((k): k is string => !!k),
+      ].filter(Boolean),
+    ),
+  ].sort()
+  return { serviceKey, questionnaireFieldIds, existingTemplates, templateLibrary, docKinds }
 }
 
 // The result of validating a proposed template: the shape error (from the SAME

@@ -39,7 +39,10 @@ import {
   type ServiceField,
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
-import { listQuestionnaireTemplates } from '../queries/questionnaireLibrary.js'
+import {
+  listQuestionnaireTemplates,
+  type QuestionnaireSchema,
+} from '../queries/questionnaireLibrary.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
 // the SAME id serviceAuthoring.ts / workflowAuthoring.ts source their writes to.
@@ -52,12 +55,25 @@ export interface TemplateTokenSummary {
   tokens: string[]
 }
 
+// One field of a saved library questionnaire, surfaced so a close-match form can
+// actually be REUSED (Phase 5) — the model can see the field ids/labels it would
+// inherit, not just a count.
+export interface LibraryFieldSummary {
+  id: string
+  label: string
+  type: string
+}
+
 // A reusable questionnaire the firm has saved, surfaced so the model can mirror an
-// existing form's structure instead of inventing one from scratch.
+// existing form's structure instead of inventing one from scratch. Phase 5 adds the
+// FIELDS (id/label/type) so a close match can be reused field-for-field, not just
+// recognized by name.
 export interface LibraryQuestionnaireSummary {
   questionnaireTemplateId: string
   name: string
   fieldCount: number
+  // The library questionnaire's fields — enough to reuse its structure directly.
+  fields: LibraryFieldSummary[]
 }
 
 // The read-only context the chat tool hands the model to PROPOSE a questionnaire:
@@ -77,8 +93,14 @@ export interface QuestionnaireAuthoringContext {
   // Every distinct token across all the service's templates — the union the
   // questionnaire must cover (so the model sees the full target at a glance).
   templateTokens: string[]
-  // The firm's saved questionnaires, to reuse instead of inventing structure.
+  // The firm's saved questionnaires (with their fields — Phase 5), to reuse instead
+  // of inventing structure. A close match can be reused field-for-field.
   library: LibraryQuestionnaireSummary[]
+  // Phase 5 — the firm's reusable QUESTION library: the distinct fields (by id)
+  // across every saved questionnaire, so the model can pull an individual question
+  // (matching id/label/type) rather than re-authoring it. Derived from `library`
+  // (there is no separate question-catalog entity), de-duplicated by field id.
+  questionLibrary: LibraryFieldSummary[]
 }
 
 // All distinct flat {{tokens}} referenced by a service's configured document
@@ -114,11 +136,27 @@ export async function loadQuestionnaireContext(
 ): Promise<QuestionnaireAuthoringContext> {
   const currentSchema = await getQuestionnaire(ctx, serviceKey)
   const { templates, tokens } = await loadServiceTemplateTokens(ctx, serviceKey)
-  const library = (await listQuestionnaireTemplates(ctx)).map((q) => ({
+  // Phase 5 — surface each library questionnaire's FIELDS (not just a count) so a
+  // close match can be reused field-for-field, and derive a de-duplicated QUESTION
+  // library (the distinct fields across every saved form) the model can pull from.
+  const templatesQ = await listQuestionnaireTemplates(ctx)
+  const library: LibraryQuestionnaireSummary[] = templatesQ.map((q) => ({
     questionnaireTemplateId: q.questionnaireTemplateId,
     name: q.name,
     fieldCount: q.fieldCount,
+    fields: libraryFieldsOf(q.schema),
   }))
+  const seen = new Set<string>()
+  const questionLibrary: LibraryFieldSummary[] = []
+  for (const q of library) {
+    for (const f of q.fields) {
+      const key = f.id.toLowerCase()
+      if (f.id && !seen.has(key)) {
+        seen.add(key)
+        questionLibrary.push(f)
+      }
+    }
+  }
   return {
     serviceKey,
     fieldTypes: KNOWN_FIELD_TYPES,
@@ -126,7 +164,24 @@ export async function loadQuestionnaireContext(
     templates,
     templateTokens: tokens,
     library,
+    questionLibrary,
   }
+}
+
+// Flatten a saved library questionnaire's schema into a flat field list (id/label/
+// type). The library schema shape is the questionnaire-library QuestionnaireSchema
+// ({ sections: [{ fields: [{ id, label, type }] }] }) — distinct from the service
+// QuestionnaireDoc, so it is walked here rather than via collectFieldIds.
+function libraryFieldsOf(schema: QuestionnaireSchema | null | undefined): LibraryFieldSummary[] {
+  if (!schema) return []
+  const out: LibraryFieldSummary[] = []
+  for (const sec of schema.sections ?? []) {
+    for (const f of sec.fields ?? []) {
+      if (!f.id) continue
+      out.push({ id: f.id, label: f.label ?? '', type: f.type ?? 'text' })
+    }
+  }
+  return out
 }
 
 // Every field id in a questionnaire schema, including the member fields of a
