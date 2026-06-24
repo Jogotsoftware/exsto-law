@@ -191,7 +191,7 @@ registerTool({
 registerTool({
   name: 'legal.assistant.usage',
   description:
-    "Firm-wide AI token usage and ESTIMATED cost over the trailing window (sinceDays, default 30), broken down by model and by day. Reads the token usage recorded on each Claude assistant.turn event; Perplexity turns don't report tokens. Cost is an estimate from list prices. Powers the Settings → AI usage tab.",
+    "Firm-wide AI token usage and ESTIMATED cost over the trailing window (sinceDays, default 30), broken down by model, by source (chat assistant vs document drafting), and by day. Reads token usage recorded on Claude assistant.turn (chat) and draft.generate (drafting) events; Perplexity turns don't report tokens. Cost is an estimate from list prices. Powers the Settings → AI usage tab.",
   mode: 'read',
   inputSchema: {
     type: 'object',
