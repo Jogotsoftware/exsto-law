@@ -7,6 +7,7 @@
 // timeline collapsible & collapsed by default, drop the research section.)
 import { use, useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { formatDateTime } from '@/lib/datetime'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
 import {
   WeeklyCalendar,
@@ -167,7 +168,7 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
                 {feed.map((item) =>
                   item.kind === 'action' ? (
                     <tr key={item.id}>
-                      <td>{new Date(item.ts).toLocaleString()}</td>
+                      <td>{formatDateTime(item.ts)}</td>
                       <td>
                         <code>{item.a.kindName}</code>
                       </td>
@@ -183,7 +184,7 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
                     </tr>
                   ) : (
                     <tr key={item.id}>
-                      <td>{new Date(item.ts).toLocaleString()}</td>
+                      <td>{formatDateTime(item.ts)}</td>
                       <td>
                         <span className="badge">{humanizeKind(item.e.kindName)}</span>
                       </td>
@@ -295,7 +296,7 @@ function MessagesSection({ matterEntityId }: { matterEntityId: string }) {
                 {m.body}
               </div>
               <div className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
-                {m.author === 'attorney' ? 'You' : 'Client'} · {new Date(m.sentAt).toLocaleString()}
+                {m.author === 'attorney' ? 'You' : 'Client'} · {formatDateTime(m.sentAt)}
               </div>
             </div>
           ))}
