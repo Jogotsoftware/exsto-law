@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
 import { FileTextIcon, CheckIcon, LayersIcon } from '@/components/icons'
+import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // CONSTRAINT (mirrors the workflow builder page): no server-package imports. These
 // shapes are a structural mirror of verticals/legal/src/lifecycle/types.ts — the
@@ -91,13 +92,20 @@ function diffGraphs(current: WfLifecycle | null, proposed: WfLifecycle): GraphDi
 // proposed graph to the approve route, which is the only place a live version write
 // happens. Each stage also offers "Save to step library" (legal.workflow_step_template
 // .create) so a useful step becomes reusable. Visual style mirrors DocumentCard.
-export function WorkflowProposalCard({ proposal }: { proposal: WorkflowProposal }) {
+export function WorkflowProposalCard({
+  proposal,
+  onApproved,
+}: {
+  proposal: WorkflowProposal
+  onApproved?: OnApproved
+}) {
   const [current, setCurrent] = useState<WfLifecycle | null>(null)
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
   const [version, setVersion] = useState<number | null>(null)
+  const [link, setLink] = useState<string | null>(null)
 
   const ordered = orderStages(proposal.graph)
 
@@ -149,11 +157,24 @@ export function WorkflowProposalCard({ proposal }: { proposal: WorkflowProposal 
       )
       const data = (await res.json().catch(() => null)) as {
         result?: { version?: number }
+        serviceKey?: string
+        link?: string
+        label?: string
         error?: string
       } | null
       if (!res.ok) throw new Error(data?.error || `Approve failed (${res.status})`)
       setVersion(data?.result?.version ?? null)
+      setLink(data?.link ?? null)
       setApproveState('approved')
+      // Continue the guided build to the next step (Phase 6).
+      if (data?.link) {
+        onApproved?.({
+          artifact: 'workflow',
+          link: data.link,
+          serviceKey: data.serviceKey || proposal.serviceKey,
+          label: data.label || 'Workflow',
+        })
+      }
     } catch (e) {
       setApproveState('error')
       setApproveError(e instanceof Error ? e.message : String(e))
@@ -233,6 +254,11 @@ export function WorkflowProposalCard({ proposal }: { proposal: WorkflowProposal 
                 : 'Approved'
               : 'Approve & save workflow'}
         </button>
+        {link && (
+          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
+            View workflow →
+          </a>
+        )}
       </div>
       {approveError && (
         <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>

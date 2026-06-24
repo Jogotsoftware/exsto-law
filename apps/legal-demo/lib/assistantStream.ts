@@ -86,6 +86,26 @@ export interface TemplateProposalEvent {
   orphanTokens: string[]
 }
 
+// A service's BILLING (fee model) the assistant proposed this turn (Build-Wizard
+// Phase 6) — surfaced as an inline approval card; the cost write happens only on
+// approve.
+export interface CostProposalEvent {
+  serviceKey: string
+  costType: 'hourly' | 'fixed'
+  amount: string
+  hours: number | null
+  summary: string
+  confidence: number
+}
+
+// An ENABLE request the assistant proposed this turn (Build-Wizard Phase 6 — the
+// terminal step) — surfaced as the final approval card; the status flip to active
+// happens only on approve.
+export interface EnableProposalEvent {
+  serviceKey: string
+  summary: string
+}
+
 export interface AssistantStreamHandlers {
   onMeta?: (meta: StreamMeta) => void
   onThinking?: (text: string) => void
@@ -102,6 +122,10 @@ export interface AssistantStreamHandlers {
   onQuestionnaireProposal?: (proposal: QuestionnaireProposalEvent) => void
   // The assistant proposed a document template (Build-Wizard Phase 3).
   onTemplateProposal?: (proposal: TemplateProposalEvent) => void
+  // The assistant proposed the billing/fee model (Build-Wizard Phase 6).
+  onCostProposal?: (proposal: CostProposalEvent) => void
+  // The assistant proposed enabling the service (Build-Wizard Phase 6 — terminal).
+  onEnableProposal?: (proposal: EnableProposalEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -223,6 +247,22 @@ export async function streamAssistant(
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
           tokens: Array.isArray(evt.tokens) ? (evt.tokens as string[]) : [],
           orphanTokens: Array.isArray(evt.orphanTokens) ? (evt.orphanTokens as string[]) : [],
+        })
+        break
+      case 'cost_proposal':
+        handlers.onCostProposal?.({
+          serviceKey: String(evt.serviceKey ?? ''),
+          costType: evt.costType === 'hourly' ? 'hourly' : 'fixed',
+          amount: String(evt.amount ?? ''),
+          hours: typeof evt.hours === 'number' ? evt.hours : null,
+          summary: String(evt.summary ?? ''),
+          confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
+        })
+        break
+      case 'enable_proposal':
+        handlers.onEnableProposal?.({
+          serviceKey: String(evt.serviceKey ?? ''),
+          summary: String(evt.summary ?? ''),
         })
         break
       case 'done':

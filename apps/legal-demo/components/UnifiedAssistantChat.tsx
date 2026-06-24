@@ -4,12 +4,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
 import { WorkflowProposalCard, type WorkflowProposal } from '@/components/WorkflowProposalCard'
-import { ServiceProposalCard, type ServiceProposal } from '@/components/ServiceProposalCard'
+import {
+  ServiceProposalCard,
+  type ServiceProposal,
+  type OnApproved,
+} from '@/components/ServiceProposalCard'
 import {
   QuestionnaireProposalCard,
   type QuestionnaireProposal,
 } from '@/components/QuestionnaireProposalCard'
 import { TemplateProposalCard, type TemplateProposal } from '@/components/TemplateProposalCard'
+import { CostProposalCard, type CostProposal } from '@/components/CostProposalCard'
+import { EnableProposalCard, type EnableProposal } from '@/components/EnableProposalCard'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import {
@@ -82,6 +88,10 @@ interface DisplayTurn {
   questionnaireProposals?: QuestionnaireProposal[]
   // Document-template proposals captured (Build-Wizard Phase 3) — inline approval cards.
   templateProposals?: TemplateProposal[]
+  // Billing proposals captured (Build-Wizard Phase 6) — inline approval cards.
+  costProposals?: CostProposal[]
+  // Enable proposals captured (Build-Wizard Phase 6, terminal) — the final approval card.
+  enableProposals?: EnableProposal[]
 }
 
 // One legal skill (playbook) the attorney can pick from the /skills menu.
@@ -105,6 +115,8 @@ interface ThreadTurn {
   serviceProposals?: ServiceProposal[]
   questionnaireProposals?: QuestionnaireProposal[]
   templateProposals?: TemplateProposal[]
+  costProposals?: CostProposal[]
+  enableProposals?: EnableProposal[]
 }
 
 // A document attached to the next message: an uploaded file (parsed to text) or a
@@ -433,6 +445,8 @@ export function UnifiedAssistantChat({
     serviceProposals: ServiceProposal[]
     questionnaireProposals: QuestionnaireProposal[]
     templateProposals: TemplateProposal[]
+    costProposals: CostProposal[]
+    enableProposals: EnableProposal[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -605,6 +619,8 @@ export function UnifiedAssistantChat({
                 serviceProposals: t.serviceProposals,
                 questionnaireProposals: t.questionnaireProposals,
                 templateProposals: t.templateProposals,
+                costProposals: t.costProposals,
+                enableProposals: t.enableProposals,
               },
         )
         setTurns(display)
@@ -631,6 +647,7 @@ export function UnifiedAssistantChat({
     setHistoryOpen(false)
     setActiveScope(target)
     setTurns([])
+    continuedRef.current.clear() // fresh thread ⇒ forget which approvals already auto-continued
     setStreaming(null)
     setError(null)
     setInput('')
@@ -674,6 +691,7 @@ export function UnifiedAssistantChat({
   function newChat() {
     genRef.current++ // abandon any in-flight stream
     setTurns([])
+    continuedRef.current.clear() // new conversation ⇒ forget which approvals already auto-continued
     setStreaming(null)
     setError(null)
     setInput('')
@@ -801,8 +819,15 @@ export function UnifiedAssistantChat({
     }
   }
 
-  async function send() {
-    const message = input.trim()
+  // `overrideMessage` drives an AUTO-CONTINUATION turn (Build-Wizard Phase 6): the
+  // guided build sends a short "✓ … created — <link>. Continue." message on the
+  // attorney's behalf after each approval, so the AI proceeds to the next step without
+  // the attorney having to prompt it. When set, `send` uses it verbatim (not the input
+  // box) and never touches the input/attachments. An ordinary send passes nothing and
+  // reads the input box as before — so flag-off / non-wizard behaviour is unchanged.
+  async function send(overrideMessage?: string) {
+    const isContinuation = typeof overrideMessage === 'string'
+    const message = isContinuation ? overrideMessage.trim() : input.trim()
     if (!message || busy || !modelId) return
     const gen = ++genRef.current // this exchange's generation; stale callbacks no-op
     const live = () => genRef.current === gen
@@ -811,8 +836,9 @@ export function UnifiedAssistantChat({
     setSettingsOpen(false)
     // The model history the server expects: prior user/assistant turns as text.
     const history = turns.map((t) => ({ role: t.role, content: t.content }))
-    // Attachments are per-message and Claude-only; snapshot then clear them.
-    const sentAttachments = canAttach ? attachments : []
+    // Attachments are per-message and Claude-only; snapshot then clear them. A
+    // continuation carries no attachments (it's a system nudge, not a user upload).
+    const sentAttachments = isContinuation ? [] : canAttach ? attachments : []
     setTurns((t) => [
       ...t,
       {
@@ -821,9 +847,13 @@ export function UnifiedAssistantChat({
         attachments: sentAttachments.length ? sentAttachments.map((a) => a.name) : undefined,
       },
     ])
-    setInput('')
-    setAttachments([])
-    setAttachMenuOpen(false)
+    // Only an ordinary send clears the input box / attachments; a continuation must
+    // leave whatever the attorney is mid-typing untouched.
+    if (!isContinuation) {
+      setInput('')
+      setAttachments([])
+      setAttachMenuOpen(false)
+    }
 
     // Accumulate deltas locally; each handler hands React a fresh object.
     const partial = {
@@ -835,6 +865,8 @@ export function UnifiedAssistantChat({
       serviceProposals: [] as ServiceProposal[],
       questionnaireProposals: [] as QuestionnaireProposal[],
       templateProposals: [] as TemplateProposal[],
+      costProposals: [] as CostProposal[],
+      enableProposals: [] as EnableProposal[],
     }
     setStreaming({ ...partial })
     let finished = false
@@ -922,6 +954,16 @@ export function UnifiedAssistantChat({
             }
             setStreaming({ ...partial, templateProposals: [...partial.templateProposals] })
           },
+          onCostProposal: (p) => {
+            if (!live()) return
+            if (p.serviceKey && p.amount) partial.costProposals.push(p as unknown as CostProposal)
+            setStreaming({ ...partial, costProposals: [...partial.costProposals] })
+          },
+          onEnableProposal: (p) => {
+            if (!live()) return
+            if (p.serviceKey) partial.enableProposals.push(p as unknown as EnableProposal)
+            setStreaming({ ...partial, enableProposals: [...partial.enableProposals] })
+          },
           onDone: (d) => {
             if (!live()) return
             finished = true
@@ -944,6 +986,10 @@ export function UnifiedAssistantChat({
                   : undefined,
                 templateProposals: partial.templateProposals.length
                   ? partial.templateProposals
+                  : undefined,
+                costProposals: partial.costProposals.length ? partial.costProposals : undefined,
+                enableProposals: partial.enableProposals.length
+                  ? partial.enableProposals
                   : undefined,
               },
             ])
@@ -978,14 +1024,18 @@ export function UnifiedAssistantChat({
         partial.workflowProposals.length ||
         partial.serviceProposals.length ||
         partial.questionnaireProposals.length ||
-        partial.templateProposals.length)
+        partial.templateProposals.length ||
+        partial.costProposals.length ||
+        partial.enableProposals.length)
     ) {
       const hasCards =
         partial.documents.length ||
         partial.workflowProposals.length ||
         partial.serviceProposals.length ||
         partial.questionnaireProposals.length ||
-        partial.templateProposals.length
+        partial.templateProposals.length ||
+        partial.costProposals.length ||
+        partial.enableProposals.length
       setTurns((prev) => [
         ...prev,
         {
@@ -1003,12 +1053,45 @@ export function UnifiedAssistantChat({
           templateProposals: partial.templateProposals.length
             ? partial.templateProposals
             : undefined,
+          costProposals: partial.costProposals.length ? partial.costProposals : undefined,
+          enableProposals: partial.enableProposals.length ? partial.enableProposals : undefined,
         },
       ])
     }
     setStreaming(null)
     setBusy(false)
   }
+
+  // Tracks approvals we've already auto-continued from, so a re-render of an approved
+  // card never fires the continuation twice (the card also disables its own button on
+  // success — this is belt-and-suspenders). Keyed by serviceKey+artifact.
+  const continuedRef = useRef<Set<string>>(new Set())
+
+  // The CONTINUOUS-FLOW driver (Build-Wizard Phase 6): a proposal card calls this on a
+  // SUCCESSFUL approve. We auto-send a short continuation turn on the attorney's behalf
+  // ("✓ <label> created — <link>. Continue the guided build: do the next step now.")
+  // so the AI proceeds to the next step by itself — interview, propose, share the link
+  // — never stalling after an approval. The TERMINAL Enable step does NOT continue: the
+  // build is complete once the service is live, so we stop the loop there.
+  const handleApproved = useCallback<OnApproved>(
+    (info) => {
+      const key = `${info.serviceKey}:${info.artifact}`
+      if (continuedRef.current.has(key)) return // already continued from this approval
+      continuedRef.current.add(key)
+      // Enable is the LAST step — going live ends the build; do not auto-continue.
+      if (info.artifact === 'enable') return
+      // Don't stack continuations on top of an in-flight turn; if one is mid-stream the
+      // attorney can nudge it manually. (Approvals are inherently sequential here.)
+      if (busy) return
+      void send(
+        `✓ ${info.label} created — ${info.link}. Continue the guided build: do the next step now (interview if needed, then propose it and share its link). If the whole service is complete, propose Enable.`,
+      )
+    },
+    // send/busy are stable enough for this driver; intentionally not re-created per
+    // keystroke (send reads the latest input/turns from closure at call time).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [busy],
+  )
 
   // Log the whole feedback-mode conversation as ONE feedback record (the attorney
   // and the assistant fleshed it out together), with the page + scope context.
@@ -1389,25 +1472,36 @@ export function UnifiedAssistantChat({
                 {/* Workflow proposals (PR5) — inline approval cards. Approving is the
                     live write; nothing was saved by the turn that proposed them. */}
                 {t.workflowProposals?.map((p, pi) => (
-                  <WorkflowProposalCard key={pi} proposal={p} />
+                  <WorkflowProposalCard key={pi} proposal={p} onApproved={handleApproved} />
                 ))}
                 {/* New-service proposals (Build-Wizard Phase 1) — inline approval
                     cards. Approving creates the (disabled) service; nothing was saved
                     by the turn that proposed it. */}
                 {t.serviceProposals?.map((p, pi) => (
-                  <ServiceProposalCard key={pi} proposal={p} />
+                  <ServiceProposalCard key={pi} proposal={p} onApproved={handleApproved} />
                 ))}
                 {/* Questionnaire proposals (Build-Wizard Phase 2) — inline approval
                     cards surfacing the variable-contract coverage. Approving writes
                     the service's intake form; nothing was saved by the proposing turn. */}
                 {t.questionnaireProposals?.map((p, pi) => (
-                  <QuestionnaireProposalCard key={pi} proposal={p} />
+                  <QuestionnaireProposalCard key={pi} proposal={p} onApproved={handleApproved} />
                 ))}
                 {/* Template proposals (Build-Wizard Phase 3) — inline approval cards
                     flagging orphan tokens. Approving writes the service's document
                     template; nothing was saved by the proposing turn. */}
                 {t.templateProposals?.map((p, pi) => (
-                  <TemplateProposalCard key={pi} proposal={p} />
+                  <TemplateProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                ))}
+                {/* Billing proposals (Build-Wizard Phase 6) — inline approval cards.
+                    Approving writes the service's fee model; nothing was saved by the
+                    proposing turn. */}
+                {t.costProposals?.map((p, pi) => (
+                  <CostProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                ))}
+                {/* Enable proposals (Build-Wizard Phase 6, terminal) — the final card.
+                    Approving flips the service to active/bookable; this ends the build. */}
+                {t.enableProposals?.map((p, pi) => (
+                  <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
                 ))}
                 {t.content.trim() && (
                   <div className="uac-reply-actions">
@@ -1479,19 +1573,27 @@ export function UnifiedAssistantChat({
             ))}
             {/* A workflow proposed mid-stream appears as an approval card right away. */}
             {streaming.workflowProposals.map((p, pi) => (
-              <WorkflowProposalCard key={pi} proposal={p} />
+              <WorkflowProposalCard key={pi} proposal={p} onApproved={handleApproved} />
             ))}
             {/* A service proposed mid-stream appears as an approval card right away. */}
             {streaming.serviceProposals.map((p, pi) => (
-              <ServiceProposalCard key={pi} proposal={p} />
+              <ServiceProposalCard key={pi} proposal={p} onApproved={handleApproved} />
             ))}
             {/* A questionnaire proposed mid-stream appears as an approval card. */}
             {streaming.questionnaireProposals.map((p, pi) => (
-              <QuestionnaireProposalCard key={pi} proposal={p} />
+              <QuestionnaireProposalCard key={pi} proposal={p} onApproved={handleApproved} />
             ))}
             {/* A template proposed mid-stream appears as an approval card. */}
             {streaming.templateProposals.map((p, pi) => (
-              <TemplateProposalCard key={pi} proposal={p} />
+              <TemplateProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+            ))}
+            {/* A billing proposal mid-stream appears as an approval card (Phase 6). */}
+            {streaming.costProposals.map((p, pi) => (
+              <CostProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+            ))}
+            {/* The terminal Enable card mid-stream (Phase 6). */}
+            {streaming.enableProposals.map((p, pi) => (
+              <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
             ))}
             {streaming.text && (
               <div

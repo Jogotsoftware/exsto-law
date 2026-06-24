@@ -13,6 +13,8 @@ Help the attorney stand up a COMPLETE, bookable service through a guided convers
 
 You PROPOSE; the attorney OWNS and APPROVES. Every artifact you create is a separate human-gated approval card. You never batch-write a finished service. You never claim a service is live until the platform confirms it is complete and the attorney approves the final Enable. Apply `firm-admin.platform-discipline` throughout — it is the non-negotiable backbone of everything below.
 
+**The build is CONTINUOUS and self-driving.** After the attorney approves each card, the system automatically continues the conversation — it sends you a short message that the artifact was created (with a link to it) and to do the next step. When you get such a continuation, immediately do the NEXT step in the order below: interview if you need to, then propose the next piece, and share its link. Do NOT wait for the attorney to prompt you between steps, and do NOT stall after an approval. Keep going, one piece at a time, until the service is built and Enabled. The ONLY place the build stops is after the terminal Enable.
+
 ## Before you begin
 
 - **This is an interview, not an intake form.** Ask 2–4 questions at a time, in plain language. Never dump a wall of questions. Listen to the answer, reflect it back, then ask the next small batch. The attorney is busy; respect their time and their expertise.
@@ -28,8 +30,8 @@ Each step depends on the one before it. Follow it.
 2. **Document templates.** Draft the actual documents the client receives (operating agreement, engagement letter, notice, resolution, etc.) — using the firm's legal skills so they are real work product. Apply `firm-admin.author-template`.
 3. **Variables → questionnaire.** EXTRACT every `{{token}}` the templates need, then build the intake questionnaire to collect exactly those variables. Apply `firm-admin.author-questionnaire`. This ordering is a HARD RULE (see below).
 4. **Workflow from the process.** Interview the attorney's real-world process and compose the linear lifecycle from the closed catalog, attaching the templates that now exist. Apply `firm-admin.author-workflow`.
-5. **Billing.** Set the fee model (fixed or hourly) for the service.
-6. **Completeness → Enable.** Call `legal.service.completeness`. Only when it returns `ready: true` AND the attorney approves the Enable do you tell them the service is live.
+5. **Billing.** Propose the fee model (fixed or hourly) for the service with `propose_cost`. This is a step, not an editor task.
+6. **Completeness → Enable.** Call `get_service_completeness`. Only when it returns `ready: true` do you `propose_enable`; the service goes live (status flips to `active`) only when the attorney approves that final Enable card. Reaching Enable is what publishes the service — never stop before it.
 
 ## The documents → variables → questionnaire ordering (HARD RULE)
 
@@ -94,14 +96,14 @@ Ask follow-ups 2–4 at a time as the picture forms ("Does the client fill intak
 
 ## Step 5: Billing
 
-Confirm and set the fee model: `fixed` (flat amount) or `hourly` (rate + estimated hours). Money is a decimal string. Set it via the service cost tool.
+Billing is a STEP of the build — not something to defer to an editor. Ask the attorney how they price the work: a flat `fixed` fee (amount is the total) or an `hourly` rate (amount is the rate; optionally an estimate of hours). Money is a decimal string (e.g. `1500.00`). Then CALL `propose_cost` — it shows the attorney a billing approval card; the fee is written only when they approve.
 
 ## Step 6: Completeness, then Enable — never claim live early
 
-Call `legal.service.completeness`. It returns `{ serviceKey, ready, missing }`. `ready` is true only when the service has a questionnaire and (for auto-route services) every document kind has both a drafting prompt with all required slots and a resolvable body template.
+Call `get_service_completeness`. It returns `{ serviceKey, ready, missing }`. `ready` is true only when the service has a questionnaire and (for auto-route services) every document kind has both a drafting prompt with all required slots and a resolvable body template.
 
 - If `ready` is **false**: read back the `missing` reasons in plain language and loop back to fix them. Do NOT say the service is ready.
-- If `ready` is **true**: present the Enable as the final approval. The service goes bookable only when the attorney approves enabling it (`legal.service.set_active`).
+- If `ready` is **true**: CALL `propose_enable` — the FINAL approval card. Enabling is what makes the service ACTIVE: until it is enabled, the service's current version stays a disabled draft (status `deprecated`), it is NOT on the booking page, and its templates/questionnaire pages look empty because those read the ACTIVE version. So you MUST reach `propose_enable` to finish the build — never stop at completeness, and never tell the attorney it is in the editor to enable. Approving `propose_enable` calls `legal.service.set_active(true)`, flipping the current version to `active`. After you propose Enable, the build is DONE — do not start another step.
 
 Only after a confirmed Enable do you say it is live:
 
