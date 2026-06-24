@@ -103,6 +103,11 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   // After "Request revision", nudge the attorney to regenerate now with those very
   // notes — closing the loop between asking for changes and producing them.
   const [revisionNudge, setRevisionNudge] = useState(false)
+  // Inline edit: swap the rendered document for a markdown editor so the attorney
+  // can fix a clause/name directly. Saving creates a NEW version (document.edit).
+  const [editing, setEditing] = useState(false)
+  const [editMarkdown, setEditMarkdown] = useState('')
+  const [editNote, setEditNote] = useState('')
   // The ordered ids of an in-progress step-through review, or null for a normal
   // single visit. Loaded only when the URL carries ?review=session.
   const [sessionIds, setSessionIds] = useState<string[] | null>(null)
@@ -260,6 +265,49 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     }
   }
 
+  // Enter the inline editor, seeded with the current document markdown.
+  function openEdit() {
+    if (!draft) return
+    setEditMarkdown(draft.bodyMarkdown)
+    setEditNote('')
+    setError(null)
+    setNotice(null)
+    setEditing(true)
+  }
+
+  // Save the edited markdown as a NEW version (document.edit), then open that
+  // version — append-only, so the original is preserved and lands in history.
+  async function saveEdit() {
+    if (!draft || !editMarkdown.trim()) return
+    setBusy('edit')
+    setError(null)
+    setNotice(null)
+    try {
+      const result = await callAttorneyMcp<{
+        effects: Array<{ documentVersionId?: string }>
+      }>({
+        toolName: 'legal.draft.edit',
+        input: {
+          documentVersionId: versionId,
+          documentMarkdown: editMarkdown,
+          note: editNote.trim() || undefined,
+        },
+      })
+      const newId = result.effects?.find((e) => e.documentVersionId)?.documentVersionId
+      setEditing(false)
+      if (newId && newId !== versionId) {
+        // Drop any step-through session: this edit is a deliberate detour.
+        router.push(`/attorney/review/${newId}`)
+      } else {
+        await load()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const evidence = useMemo(() => draft?.reasoningTrace?.evidence ?? [], [draft])
   const alternatives = useMemo(() => draft?.reasoningTrace?.alternatives_considered ?? [], [draft])
   const ambiguities = useMemo(() => draft?.reasoningTrace?.ambiguities ?? [], [draft])
@@ -330,6 +378,13 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       </header>
 
       <div className="review-toolbar">
+        <button
+          onClick={openEdit}
+          disabled={busy !== null || editing}
+          title="Edit the document text directly — saves as a new version; the original is kept."
+        >
+          Edit document
+        </button>
         <button onClick={() => downloadAsPdf(draft.bodyMarkdown, docFileBase)}>Download PDF</button>
         <button onClick={() => downloadAsWord(draft.bodyMarkdown, docFileBase)}>
           Download Word
@@ -366,12 +421,48 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         </a>
       </div>
 
-      {/* The document, as a page. */}
+      {/* The document, as a page — or the inline editor when editing. */}
       <div className="review-canvas">
-        <article
-          className="doc-rendered doc-paper"
-          dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
-        />
+        {editing ? (
+          <div className="doc-editor doc-paper">
+            <textarea
+              className="doc-editor-area"
+              value={editMarkdown}
+              onChange={(e) => setEditMarkdown(e.target.value)}
+              spellCheck
+              aria-label="Document markdown"
+            />
+            <input
+              type="text"
+              className="doc-editor-note"
+              value={editNote}
+              onChange={(e) => setEditNote(e.target.value)}
+              placeholder="Optional: note what you changed (kept in version history)"
+              disabled={busy === 'edit'}
+            />
+            <div className="doc-editor-actions">
+              <button
+                className="primary"
+                onClick={saveEdit}
+                disabled={busy === 'edit' || !editMarkdown.trim()}
+              >
+                {busy === 'edit' && <span className="spinner" />}
+                {busy === 'edit' ? 'Saving…' : 'Save as new version'}
+              </button>
+              <button onClick={() => setEditing(false)} disabled={busy === 'edit'}>
+                Cancel
+              </button>
+              <span className="doc-editor-hint">
+                Saving creates a new version; the original is preserved.
+              </span>
+            </div>
+          </div>
+        ) : (
+          <article
+            className="doc-rendered doc-paper"
+            dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
+          />
+        )}
       </div>
 
       <section className="review-decision">
@@ -413,7 +504,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         <div className="review-actions">
           <button
             className="ok"
-            disabled={busy !== null || draft.status === 'approved'}
+            disabled={busy !== null || editing || draft.status === 'approved'}
             onClick={() => review('legal.draft.approve', 'approve', false)}
           >
             {busy === 'approve' && <span className="spinner" />}
@@ -421,7 +512,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           </button>
           <button
             className="warn"
-            disabled={busy !== null}
+            disabled={busy !== null || editing}
             onClick={() => review('legal.draft.request_revision', 'revision', true)}
           >
             {busy === 'revision' && <span className="spinner" />}
@@ -429,7 +520,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           </button>
           <button
             className="danger"
-            disabled={busy !== null || draft.status === 'rejected'}
+            disabled={busy !== null || editing || draft.status === 'rejected'}
             onClick={() => review('legal.draft.reject', 'reject', false)}
           >
             {busy === 'reject' && <span className="spinner" />}
@@ -437,7 +528,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           </button>
           <span style={{ marginLeft: 'auto' }} />
           <button
-            disabled={busy !== null}
+            disabled={busy !== null || editing}
             onClick={openRegen}
             title="Redraft this document with the live model — add instructions and pick legal skills first."
           >

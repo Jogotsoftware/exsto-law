@@ -8241,6 +8241,50 @@ input[type='number'] {
   margin-top: 0;
 }
 
+/* Inline document editor (review page): the paper surface becomes editable. A
+   markdown textarea so the attorney can fix a clause/name directly; Save records
+   a new version (document.edit). Shares the paper's framing for continuity. */
+.doc-editor.doc-paper {
+  background: #fff;
+  max-width: 8.5in;
+  width: 100%;
+  margin-inline: auto;
+  padding: clamp(1.25rem, 4%, 2.5rem);
+  border-radius: 2px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 14px 40px rgba(15, 23, 42, 0.13);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.doc-editor-area {
+  width: 100%;
+  min-height: 60vh;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: #161616;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.1rem;
+  background: #fcfcfd;
+}
+.doc-editor-note {
+  width: 100%;
+}
+.doc-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.doc-editor-hint {
+  color: var(--muted);
+  font-size: var(--text-sm, 0.85rem);
+}
+
 /* Review decision panel */
 .review-decision {
   border: 1px solid var(--border);
