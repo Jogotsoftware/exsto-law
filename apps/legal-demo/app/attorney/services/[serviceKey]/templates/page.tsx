@@ -13,7 +13,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
-import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamTemplateAi } from '@/lib/templateAiStream'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
@@ -307,11 +306,11 @@ function AiEnhancePanel({
         </div>
       )}
       {err && (
-        <div className="alert alert-error" style={{ marginTop: '0.4rem' }}>
+        <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {err}
         </div>
       )}
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
         <button type="button" className="primary" onClick={() => void run()} disabled={busy}>
           {busy ? 'Working…' : hasBody ? 'Enhance with AI' : 'Draft with AI'}
         </button>
@@ -437,14 +436,7 @@ export default function TemplateEditorPage() {
   return (
     <>
       {error && <div className="alert alert-error">{error}</div>}
-      {note && (
-        <div
-          className="alert"
-          style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-        >
-          {note}
-        </div>
-      )}
+      {note && <div className="alert alert-success">{note}</div>}
 
       {!service ? (
         <div className="loading-block">
@@ -459,7 +451,7 @@ export default function TemplateEditorPage() {
             onChanged={load}
           />
           {templates.length === 0 ? (
-            <p className="text-muted" style={{ marginTop: '1rem' }}>
+            <p className="text-muted" style={{ marginTop: 'var(--space-4)' }}>
               No documents yet — add one above to start writing its template.
             </p>
           ) : (
@@ -534,14 +526,8 @@ function DocumentsManager({
 
   return (
     <section className="tpl-docs">
-      <div className="tpl-docs-head">
-        <h2 className="tpl-docs-title">Documents</h2>
-        <Link href="/attorney/templates" className="back-link">
-          Open template library →
-        </Link>
-      </div>
       {err && (
-        <div className="alert alert-error" style={{ marginTop: '0.4rem' }}>
+        <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {err}
         </div>
       )}
@@ -720,7 +706,14 @@ function KindEditor({
 
   return (
     <section style={{ borderLeft: '3px solid var(--border)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          marginBottom: 'var(--space-2)',
+        }}
+      >
         <strong>{humanKind(template.documentKind)}</strong>
         <button
           type="button"
@@ -729,7 +722,7 @@ function KindEditor({
             marginLeft: 'auto',
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '0.35rem',
+            gap: 'var(--space-1)',
           }}
           onClick={() => setShowAi((v) => !v)}
           title="Draft or revise this document with skill-aware AI"
@@ -739,7 +732,7 @@ function KindEditor({
         <button
           type="button"
           className={showPreview ? 'primary' : undefined}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
           onClick={() => setShowPreview((v) => !v)}
           title="Preview the finished document with sample data, side by side"
         >
@@ -767,7 +760,7 @@ function KindEditor({
         />
       )}
 
-      <div className="tpl-insert" style={{ marginBottom: '0.5rem' }}>
+      <div className="tpl-insert" style={{ marginBottom: 'var(--space-2)' }}>
         <span className="tpl-insert-label">Library:</span>
         {library.length > 0 && (
           <select
@@ -799,7 +792,7 @@ function KindEditor({
         <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !text.trim()}>
           Save to library
         </button>
-        {libNote && <span style={{ color: '#166534', fontSize: '0.82rem' }}>{libNote}</span>}
+        {libNote && <span className="badge ok">{libNote}</span>}
       </div>
 
       <div className="tpl-insert tpl-insert-collapsible">
@@ -852,17 +845,14 @@ function KindEditor({
       </div>
 
       {orphans.length > 0 && (
-        <div
-          className="alert"
-          style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}
-        >
+        <div className="alert alert-warn">
           Unbound markers (no matching question):{' '}
           {orphans.map((o) => (
-            <code key={o} style={{ marginRight: '0.4rem' }}>{`{{${o}}}`}</code>
+            <code key={o} style={{ marginRight: 'var(--space-2)' }}>{`{{${o}}}`}</code>
           ))}
           <button
             type="button"
-            style={{ marginLeft: '0.5rem' }}
+            style={{ marginLeft: 'var(--space-2)' }}
             onClick={() => void onAddFields(orphans.map((o) => ({ id: o, label: humanize(o) })))}
           >
             Add {orphans.length === 1 ? 'it' : 'them all'} as questions
@@ -870,8 +860,11 @@ function KindEditor({
         </div>
       )}
 
-      <div style={{ marginTop: '0.6rem' }}>
-        <span className="tpl-insert-label" style={{ display: 'block', marginBottom: '0.35rem' }}>
+      <div style={{ marginTop: 'var(--space-2)' }}>
+        <span
+          className="tpl-insert-label"
+          style={{ display: 'block', marginBottom: 'var(--space-1)' }}
+        >
           Document
         </span>
         <div className="tpl-split">
@@ -899,20 +892,12 @@ function KindEditor({
       </div>
 
       {err && (
-        <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>
+        <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {err}
         </div>
       )}
       {saved && (
-        <div
-          className="alert"
-          style={{
-            marginTop: '0.5rem',
-            background: 'var(--ok-soft)',
-            color: '#166534',
-            border: '1px solid #86efac',
-          }}
-        >
+        <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
           Saved a new version.
         </div>
       )}

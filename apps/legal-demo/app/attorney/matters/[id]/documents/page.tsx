@@ -219,17 +219,8 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
             </div>
             {emailStatus && (
               <div
-                className={`alert ${emailStatus.kind === 'ok' ? '' : 'alert-error'}`}
-                style={
-                  emailStatus.kind === 'ok'
-                    ? {
-                        background: 'var(--ok-soft)',
-                        color: '#166534',
-                        border: '1px solid #86efac',
-                        marginTop: 'var(--space-3)',
-                      }
-                    : { marginTop: 'var(--space-3)' }
-                }
+                className={`alert ${emailStatus.kind === 'ok' ? 'alert-success' : 'alert-error'}`}
+                style={{ marginTop: 'var(--space-3)' }}
               >
                 {emailStatus.msg}
               </div>
@@ -248,7 +239,7 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
             gap: 'var(--space-3)',
           }}
         >
-          <h2 style={{ margin: 0 }}>Uploaded documents</h2>
+          <h2>Uploaded documents</h2>
           <button
             className="primary"
             disabled={uploadBusy}
@@ -274,8 +265,8 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
         {uploads.length === 0 ? (
           <p className="text-muted">No uploaded documents yet.</p>
         ) : (
-          <div style={{ overflowX: 'auto', marginTop: 'var(--space-2)' }}>
-            <table>
+          <div className="table-wrap" style={{ marginTop: 'var(--space-2)' }}>
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>File</th>

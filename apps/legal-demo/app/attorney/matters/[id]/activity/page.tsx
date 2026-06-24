@@ -154,8 +154,8 @@ export default function MatterActivityPage({ params }: { params: Promise<{ id: s
         ) : feed.length === 0 ? (
           <p className="text-muted">Nothing recorded yet.</p>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
+          <div className="table-wrap">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>When</th>
@@ -284,11 +284,9 @@ function MessagesSection({ matterEntityId }: { matterEntityId: string }) {
                 alignSelf: m.author === 'attorney' ? 'flex-end' : 'flex-start',
                 maxWidth: '80%',
                 padding: 'var(--space-2) var(--space-3)',
-                borderRadius: '10px',
+                borderRadius: 'var(--radius-md)',
                 background:
-                  m.author === 'attorney'
-                    ? 'var(--accent-soft, #e0e7ff)'
-                    : 'var(--surface, #f4f4f5)',
+                  m.author === 'attorney' ? 'var(--accent-attorney-soft)' : 'var(--surface)',
                 border: '1px solid var(--border)',
               }}
             >

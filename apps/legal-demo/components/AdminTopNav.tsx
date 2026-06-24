@@ -31,13 +31,13 @@ export function AdminTopNav() {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '1rem',
-        padding: '0.75rem 1.5rem',
-        borderBottom: '1px solid var(--border, #e5e7eb)',
-        background: 'var(--surface, #fff)',
+        gap: 'var(--space-4)',
+        padding: 'var(--space-3) var(--space-5)',
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--surface)',
       }}
     >
-      <strong style={{ marginRight: '1rem' }}>Exsto Platform</strong>
+      <strong style={{ marginRight: 'var(--space-4)' }}>Exsto Platform</strong>
       {LINKS.map((l) => {
         const active = pathname === l.href || pathname?.startsWith(l.href + '/')
         return (
@@ -47,7 +47,7 @@ export function AdminTopNav() {
             style={{
               textDecoration: 'none',
               fontWeight: active ? 700 : 400,
-              color: active ? 'var(--accent, #2563eb)' : 'inherit',
+              color: active ? 'var(--accent)' : 'inherit',
             }}
           >
             {l.label}
@@ -57,7 +57,7 @@ export function AdminTopNav() {
       <span style={{ marginLeft: 'auto', color: 'var(--muted)', fontSize: '0.85rem' }}>
         {email ?? ''}
       </span>
-      <button className="secondary" onClick={signOut} style={{ fontSize: '0.85rem' }}>
+      <button onClick={signOut} style={{ fontSize: '0.85rem' }}>
         Sign out
       </button>
     </nav>

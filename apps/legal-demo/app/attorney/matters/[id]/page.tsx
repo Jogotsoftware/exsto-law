@@ -381,7 +381,7 @@ function WorkflowWindow({
             gap: 'var(--space-3)',
           }}
         >
-          <h2 style={{ margin: 0 }}>Workflow</h2>
+          <h2>Workflow</h2>
           <button type="button" className="button" onClick={() => setEditing(true)}>
             <EditIcon size={16} /> Edit steps for this matter
           </button>
@@ -948,14 +948,7 @@ function ClientBody({ matter }: { matter: MatterDetail }) {
   return (
     <>
       {status && (
-        <div
-          className={`alert ${status.kind === 'ok' ? '' : 'alert-error'}`}
-          style={
-            status.kind === 'ok'
-              ? { background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }
-              : undefined
-          }
-        >
+        <div className={`alert ${status.kind === 'ok' ? 'alert-success' : 'alert-error'}`}>
           {status.msg}
         </div>
       )}
@@ -1148,14 +1141,7 @@ function BillStep({
   return (
     <Modal title={title} onClose={onClose} footer={extraFooter ?? null}>
       {err && <div className="alert alert-error">{err}</div>}
-      {notice && (
-        <div
-          className="alert"
-          style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-        >
-          {notice}
-        </div>
-      )}
+      {notice && <div className="alert alert-success">{notice}</div>}
       {loading ? (
         <p className="text-muted text-sm">
           <span className="spinner" /> Loading billing…
@@ -1183,8 +1169,8 @@ function BillStep({
               accrues the flat fee; or log time on the Billing tab.
             </p>
           ) : (
-            <div style={{ overflowX: 'auto', marginTop: 'var(--space-2)' }}>
-              <table>
+            <div className="table-wrap" style={{ marginTop: 'var(--space-2)' }}>
+              <table className="data-table">
                 <thead>
                   <tr>
                     <th>Type</th>
@@ -1226,8 +1212,8 @@ function BillStep({
           {invoices.length > 0 && (
             <div style={{ marginTop: 'var(--space-5)' }}>
               <span className="kv-label">Invoices</span>
-              <div style={{ overflowX: 'auto', marginTop: 'var(--space-2)' }}>
-                <table>
+              <div className="table-wrap" style={{ marginTop: 'var(--space-2)' }}>
+                <table className="data-table">
                   <thead>
                     <tr>
                       <th>Invoice</th>

@@ -407,11 +407,11 @@ function DocumentsPanel({ matterEntityId }: { matterEntityId: string | null }) {
             style={{ display: 'none' }}
           />
         </label>
-        <span className="text-sm text-muted" style={{ marginLeft: '0.6rem' }}>
+        <span className="text-sm text-muted" style={{ marginLeft: 'var(--space-2)' }}>
           PDF, Word, images, or text · up to 25 MB
         </span>
         {uploadErr && (
-          <div className="alert alert-error" role="alert" style={{ marginTop: '0.5rem' }}>
+          <div className="alert alert-error" role="alert" style={{ marginTop: 'var(--space-2)' }}>
             {uploadErr}
           </div>
         )}
@@ -568,7 +568,7 @@ function InvoicesPanel() {
                   {inv.status === 'paid' ? 'Paid' : 'Due'}
                 </span>
                 {inv.dueDate && inv.status !== 'paid' && (
-                  <span className="text-sm text-muted" style={{ marginLeft: '0.5rem' }}>
+                  <span className="text-sm text-muted" style={{ marginLeft: 'var(--space-2)' }}>
                     due {new Date(inv.dueDate).toLocaleDateString()}
                   </span>
                 )}
@@ -744,7 +744,7 @@ function RequestsPanel({ matterEntityId }: { matterEntityId: string }) {
             <div>
               <strong>{formatMoney(quote.amount, quote.currency)}</strong> — {quote.basis}
             </div>
-            <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.6rem' }}>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
               <button type="button" className="cauth-primary" disabled={busy} onClick={accept}>
                 {busy ? 'Submitting…' : 'Accept & submit'}
               </button>

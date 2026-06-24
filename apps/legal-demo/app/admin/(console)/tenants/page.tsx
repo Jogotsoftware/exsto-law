@@ -11,10 +11,10 @@ interface TenantSummary {
   reserved: boolean
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active: '#16a34a',
-  suspended: '#d97706',
-  archived: '#6b7280',
+const STATUS_BADGE: Record<string, string> = {
+  active: 'ok',
+  suspended: 'warn',
+  archived: 'info',
 }
 
 export default function AdminTenantsPage() {
@@ -81,24 +81,20 @@ export default function AdminTenantsPage() {
 
   return (
     <main style={{ maxWidth: 960 }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>Tenants</h1>
+      <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Tenants</h1>
       <p style={{ color: 'var(--muted)', marginTop: 0 }}>
         Every firm on the platform. Bootstrap a new one, or change a firm&apos;s status.
       </p>
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <section
-        style={{
-          border: '1px solid var(--border, #e5e7eb)',
-          borderRadius: 8,
-          padding: '1rem',
-          marginBottom: '1.5rem',
-        }}
-      >
-        <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Create a tenant</h2>
+      <section style={{ marginBottom: 'var(--space-5)' }}>
+        <h2 style={{ fontSize: '1.1rem' }}>Create a tenant</h2>
         {createMsg && <div className="alert alert-success">{createMsg}</div>}
-        <form onSubmit={createTenant} style={{ display: 'grid', gap: '0.75rem', maxWidth: 480 }}>
+        <form
+          onSubmit={createTenant}
+          style={{ display: 'grid', gap: 'var(--space-3)', maxWidth: 480 }}
+        >
           <label>
             Firm / tenant name
             <input
@@ -147,83 +143,62 @@ export default function AdminTenantsPage() {
         </div>
       )}
       {tenants && (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border, #e5e7eb)' }}>
-              <th style={{ padding: '0.5rem' }}>Name</th>
-              <th style={{ padding: '0.5rem' }}>Status</th>
-              <th style={{ padding: '0.5rem' }}>Created</th>
-              <th style={{ padding: '0.5rem' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tenants.map((t) => (
-              <tr key={t.id} style={{ borderBottom: '1px solid var(--border, #eee)' }}>
-                <td style={{ padding: '0.5rem' }}>
-                  {t.name}
-                  {t.reserved && (
-                    <span
-                      style={{
-                        marginLeft: 8,
-                        fontSize: '0.7rem',
-                        color: 'var(--muted)',
-                        border: '1px solid var(--border,#ddd)',
-                        borderRadius: 4,
-                        padding: '1px 5px',
-                      }}
-                    >
-                      reserved
-                    </span>
-                  )}
-                  <div style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>{t.id}</div>
-                </td>
-                <td style={{ padding: '0.5rem' }}>
-                  <span style={{ color: STATUS_COLORS[t.status] ?? 'inherit', fontWeight: 600 }}>
-                    {t.status}
-                  </span>
-                </td>
-                <td style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
-                  {new Date(t.createdAt).toLocaleDateString()}
-                </td>
-                <td style={{ padding: '0.5rem' }}>
-                  {t.reserved ? (
-                    <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>—</span>
-                  ) : (
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      {t.status !== 'active' && (
-                        <button
-                          className="secondary"
-                          disabled={busy}
-                          onClick={() => setStatus(t.id, 'active')}
-                        >
-                          Activate
-                        </button>
-                      )}
-                      {t.status !== 'suspended' && (
-                        <button
-                          className="secondary"
-                          disabled={busy}
-                          onClick={() => setStatus(t.id, 'suspended')}
-                        >
-                          Suspend
-                        </button>
-                      )}
-                      {t.status !== 'archived' && (
-                        <button
-                          className="secondary"
-                          disabled={busy}
-                          onClick={() => setStatus(t.id, 'archived')}
-                        >
-                          Archive
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </td>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {tenants.map((t) => (
+                <tr key={t.id}>
+                  <td>
+                    {t.name}
+                    {t.reserved && (
+                      <span className="badge info" style={{ marginLeft: 'var(--space-2)' }}>
+                        reserved
+                      </span>
+                    )}
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>{t.id}</div>
+                  </td>
+                  <td>
+                    <span className={`badge ${STATUS_BADGE[t.status] ?? 'info'}`}>{t.status}</span>
+                  </td>
+                  <td style={{ fontSize: 'var(--text-sm)' }}>
+                    {new Date(t.createdAt).toLocaleDateString()}
+                  </td>
+                  <td>
+                    {t.reserved ? (
+                      <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>—</span>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                        {t.status !== 'active' && (
+                          <button disabled={busy} onClick={() => setStatus(t.id, 'active')}>
+                            Activate
+                          </button>
+                        )}
+                        {t.status !== 'suspended' && (
+                          <button disabled={busy} onClick={() => setStatus(t.id, 'suspended')}>
+                            Suspend
+                          </button>
+                        )}
+                        {t.status !== 'archived' && (
+                          <button disabled={busy} onClick={() => setStatus(t.id, 'archived')}>
+                            Archive
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </main>
   )

@@ -9,6 +9,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Tabs } from '@/components/Tabs'
+import { PageHead } from '@/components/PageHead'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
 // A select-all checkbox for a table/group header: checked when every row is
@@ -256,9 +257,14 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
       )}
 
       {billable.map((c) => (
-        <section key={c.clientEntityId} style={{ marginBottom: '1.4rem', padding: '1rem' }}>
+        <section key={c.clientEntityId} style={{ marginBottom: 'var(--space-5)' }}>
           <div
-            style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.6rem' }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              marginBottom: 'var(--space-2)',
+            }}
           >
             <h3 style={{ margin: 0 }}>{c.clientName}</h3>
             <span className="badge info">
@@ -288,151 +294,156 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
             </button>
           </div>
           {c.matters.map((m) => (
-            <div key={m.matterEntityId} style={{ marginBottom: '0.8rem' }}>
+            <div key={m.matterEntityId} style={{ marginBottom: 'var(--space-3)' }}>
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'baseline',
-                  gap: '0.4rem',
-                  marginBottom: '0.2rem',
+                  gap: 'var(--space-2)',
+                  marginBottom: 'var(--space-1)',
                 }}
               >
                 {m.matterSummary ? (
                   <>
                     <span style={{ fontWeight: 600 }}>{m.matterSummary}</span>
-                    <span style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+                    <span style={{ color: 'var(--muted)', fontSize: 'var(--text-xs)' }}>
                       {m.matterNumber}
                     </span>
                   </>
                 ) : (
-                  <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                  <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
                     {m.matterNumber}
                   </span>
                 )}
-                <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
                   · {money(m.total, currency)}
                 </span>
               </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: '2rem' }}>
-                      {(() => {
-                        const allSelected =
-                          m.entries.length > 0 && m.entries.every((e) => selected[e.sourceEventId])
-                        const someSelected = m.entries.some((e) => selected[e.sourceEventId])
-                        return (
-                          <SelectAllCheckbox
-                            checked={allSelected}
-                            indeterminate={someSelected}
-                            onChange={(v) => setMatterSelection(m, v)}
-                            title="Select all entries in this matter"
-                          />
-                        )
-                      })()}
-                    </th>
-                    <th>Date</th>
-                    <th>Kind</th>
-                    <th>Description</th>
-                    <th style={{ textAlign: 'right' }}>Qty</th>
-                    <th style={{ textAlign: 'right' }}>Rate</th>
-                    <th style={{ textAlign: 'right' }}>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {m.entries.map((e) => (
-                    <tr key={e.sourceEventId}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={!!selected[e.sourceEventId]}
-                          onChange={() => toggle(e.sourceEventId)}
-                          aria-label="select entry"
-                        />
-                      </td>
-                      <td>{fmtDate(e.date)}</td>
-                      <td>
-                        <span className={kindBadgeClass(e.kind)}>{kindLabel(e.kind)}</span>
-                      </td>
-                      <td>{e.description}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        {e.kind === 'time'
-                          ? `${e.quantity}h`
-                          : e.kind === 'service_fee' || e.kind === 'document_fee'
-                            ? '—'
-                            : e.quantity}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        {e.rate ? (
-                          money(e.rate, currency)
-                        ) : e.kind === 'time' ? (
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="rate"
-                            value={rateOverrides[e.sourceEventId] ?? ''}
-                            onChange={(ev) =>
-                              setRateOverrides((s) => ({
-                                ...s,
-                                [e.sourceEventId]: ev.target.value,
-                              }))
-                            }
-                            style={{ width: '5rem', textAlign: 'right' }}
-                          />
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>{money(e.amount, currency)}</td>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '2rem' }}>
+                        {(() => {
+                          const allSelected =
+                            m.entries.length > 0 &&
+                            m.entries.every((e) => selected[e.sourceEventId])
+                          const someSelected = m.entries.some((e) => selected[e.sourceEventId])
+                          return (
+                            <SelectAllCheckbox
+                              checked={allSelected}
+                              indeterminate={someSelected}
+                              onChange={(v) => setMatterSelection(m, v)}
+                              title="Select all entries in this matter"
+                            />
+                          )
+                        })()}
+                      </th>
+                      <th>Date</th>
+                      <th>Kind</th>
+                      <th>Description</th>
+                      <th style={{ textAlign: 'right' }}>Qty</th>
+                      <th style={{ textAlign: 'right' }}>Rate</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {m.entries.map((e) => (
+                      <tr key={e.sourceEventId}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={!!selected[e.sourceEventId]}
+                            onChange={() => toggle(e.sourceEventId)}
+                            aria-label="select entry"
+                          />
+                        </td>
+                        <td>{fmtDate(e.date)}</td>
+                        <td>
+                          <span className={kindBadgeClass(e.kind)}>{kindLabel(e.kind)}</span>
+                        </td>
+                        <td>{e.description}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          {e.kind === 'time'
+                            ? `${e.quantity}h`
+                            : e.kind === 'service_fee' || e.kind === 'document_fee'
+                              ? '—'
+                              : e.quantity}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {e.rate ? (
+                            money(e.rate, currency)
+                          ) : e.kind === 'time' ? (
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="rate"
+                              value={rateOverrides[e.sourceEventId] ?? ''}
+                              onChange={(ev) =>
+                                setRateOverrides((s) => ({
+                                  ...s,
+                                  [e.sourceEventId]: ev.target.value,
+                                }))
+                              }
+                              style={{ width: '5rem', textAlign: 'right' }}
+                            />
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{money(e.amount, currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ))}
         </section>
       ))}
 
       {orphans.map((c) => (
-        <section key="__none__" style={{ marginBottom: '1.4rem', padding: '1rem', opacity: 0.9 }}>
+        <section key="__none__" style={{ marginBottom: 'var(--space-5)', opacity: 0.9 }}>
           <h3 style={{ marginTop: 0 }}>{c.clientName}</h3>
-          <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: 0 }}>
+          <p style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)', marginTop: 0 }}>
             These matters aren’t linked to a client yet, so they can’t be invoiced. Set up billing
             to create the client from the matter’s contact and make it invoiceable. Unbilled{' '}
             {money(c.total, currency)}.
           </p>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Matter</th>
-                <th>Contact</th>
-                <th style={{ textAlign: 'right' }}>Unbilled</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {c.matters.map((m) => (
-                <tr key={m.matterEntityId}>
-                  <td>{m.matterNumber}</td>
-                  <td>{m.contactName ?? '—'}</td>
-                  <td style={{ textAlign: 'right' }}>{money(m.total, currency)}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {m.contactEntityId ? (
-                      <button
-                        className="primary"
-                        disabled={setupBusy === m.matterEntityId}
-                        onClick={() => setupBilling(m)}
-                      >
-                        {setupBusy === m.matterEntityId ? '…' : 'Set up billing'}
-                      </button>
-                    ) : (
-                      <span style={{ color: 'var(--muted)' }}>no contact</span>
-                    )}
-                  </td>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Matter</th>
+                  <th>Contact</th>
+                  <th style={{ textAlign: 'right' }}>Unbilled</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {c.matters.map((m) => (
+                  <tr key={m.matterEntityId}>
+                    <td>{m.matterNumber}</td>
+                    <td>{m.contactName ?? '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{money(m.total, currency)}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {m.contactEntityId ? (
+                        <button
+                          className="primary"
+                          disabled={setupBusy === m.matterEntityId}
+                          onClick={() => setupBilling(m)}
+                        >
+                          {setupBusy === m.matterEntityId ? '…' : 'Set up billing'}
+                        </button>
+                      ) : (
+                        <span style={{ color: 'var(--muted)' }}>no contact</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ))}
     </div>
@@ -451,7 +462,7 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
   const linkStyle: React.CSSProperties = {
     background: 'none',
     border: 'none',
-    color: 'var(--accent, #1a3a6b)',
+    color: 'var(--accent)',
     cursor: 'pointer',
     padding: 0,
     font: 'inherit',
@@ -566,105 +577,109 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
       {invoices.length === 0 ? (
         <div className="loading-block">No invoices yet. Generate one from the Unbilled tab.</div>
       ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Invoice</th>
-              <th>Client</th>
-              <th>Status</th>
-              <th>Issued</th>
-              <th style={{ textAlign: 'right' }}>Lines</th>
-              <th style={{ textAlign: 'right' }}>Total</th>
-              <th style={{ textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {invoices.map((inv) => (
-              <Fragment key={inv.invoiceEntityId}>
-                <tr>
-                  <td>
-                    <button
-                      style={linkStyle}
-                      onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
-                    >
-                      <strong>{inv.invoiceNumber}</strong>
-                    </button>
-                  </td>
-                  <td>{inv.clientName}</td>
-                  <td>
-                    <span
-                      className={`badge ${inv.status === 'paid' || inv.status === 'sent' ? 'ok' : 'info'}`}
-                    >
-                      {inv.status === 'paid' ? '✓ paid' : inv.status}
-                    </span>
-                  </td>
-                  <td>{fmtDate(inv.issuedDate)}</td>
-                  <td style={{ textAlign: 'right' }}>{inv.lineCount}</td>
-                  <td style={{ textAlign: 'right' }}>{money(inv.total, inv.currency)}</td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button
-                      style={{ ...linkStyle, marginRight: '0.7rem' }}
-                      onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
-                    >
-                      {openId === inv.invoiceEntityId ? 'Hide' : 'View'}
-                    </button>
-                    {inv.status === 'paid' ? (
-                      <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Paid</span>
-                    ) : (
-                      <>
-                        <button
-                          style={{ ...linkStyle, marginRight: '0.7rem' }}
-                          disabled={paying === inv.invoiceEntityId}
-                          onClick={() => markPaid(inv)}
-                        >
-                          {paying === inv.invoiceEntityId ? '…' : 'Mark paid'}
-                        </button>
-                        <button
-                          className="primary"
-                          disabled={busy === inv.invoiceEntityId}
-                          onClick={() => send(inv)}
-                        >
-                          {busy === inv.invoiceEntityId ? '…' : 'Send'}
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-                {openId === inv.invoiceEntityId && (
-                  <tr key={`${inv.invoiceEntityId}-detail`}>
-                    <td
-                      colSpan={7}
-                      style={{ background: 'var(--surface-2, #f7f7fa)', padding: '0.8rem' }}
-                    >
-                      {pdf === null ? (
-                        <div className="loading-block">
-                          <span className="spinner" /> Rendering invoice…
-                        </div>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Client</th>
+                <th>Status</th>
+                <th>Issued</th>
+                <th style={{ textAlign: 'right' }}>Lines</th>
+                <th style={{ textAlign: 'right' }}>Total</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv) => (
+                <Fragment key={inv.invoiceEntityId}>
+                  <tr>
+                    <td>
+                      <button
+                        style={linkStyle}
+                        onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
+                      >
+                        <strong>{inv.invoiceNumber}</strong>
+                      </button>
+                    </td>
+                    <td>{inv.clientName}</td>
+                    <td>
+                      <span
+                        className={`badge ${inv.status === 'paid' || inv.status === 'sent' ? 'ok' : 'info'}`}
+                      >
+                        {inv.status === 'paid' ? '✓ paid' : inv.status}
+                      </span>
+                    </td>
+                    <td>{fmtDate(inv.issuedDate)}</td>
+                    <td style={{ textAlign: 'right' }}>{inv.lineCount}</td>
+                    <td style={{ textAlign: 'right' }}>{money(inv.total, inv.currency)}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button
+                        style={{ ...linkStyle, marginRight: 'var(--space-3)' }}
+                        onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
+                      >
+                        {openId === inv.invoiceEntityId ? 'Hide' : 'View'}
+                      </button>
+                      {inv.status === 'paid' ? (
+                        <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
+                          Paid
+                        </span>
                       ) : (
-                        <div>
-                          <div style={{ marginBottom: '0.5rem' }}>
-                            <a href={pdf.url} download={pdf.filename} style={linkStyle}>
-                              Download PDF
-                            </a>
-                          </div>
-                          <iframe
-                            title={`Invoice ${inv.invoiceNumber}`}
-                            src={pdf.url}
-                            style={{
-                              width: '100%',
-                              height: 560,
-                              border: '1px solid var(--border)',
-                            }}
-                          />
-                        </div>
+                        <>
+                          <button
+                            style={{ ...linkStyle, marginRight: 'var(--space-3)' }}
+                            disabled={paying === inv.invoiceEntityId}
+                            onClick={() => markPaid(inv)}
+                          >
+                            {paying === inv.invoiceEntityId ? '…' : 'Mark paid'}
+                          </button>
+                          <button
+                            className="primary"
+                            disabled={busy === inv.invoiceEntityId}
+                            onClick={() => send(inv)}
+                          >
+                            {busy === inv.invoiceEntityId ? '…' : 'Send'}
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                  {openId === inv.invoiceEntityId && (
+                    <tr key={`${inv.invoiceEntityId}-detail`}>
+                      <td
+                        colSpan={7}
+                        style={{ background: 'var(--surface-2)', padding: 'var(--space-3)' }}
+                      >
+                        {pdf === null ? (
+                          <div className="loading-block">
+                            <span className="spinner" /> Rendering invoice…
+                          </div>
+                        ) : (
+                          <div>
+                            <div style={{ marginBottom: 'var(--space-2)' }}>
+                              <a href={pdf.url} download={pdf.filename} style={linkStyle}>
+                                Download PDF
+                              </a>
+                            </div>
+                            <iframe
+                              title={`Invoice ${inv.invoiceNumber}`}
+                              src={pdf.url}
+                              style={{
+                                width: '100%',
+                                height: 560,
+                                border: '1px solid var(--border)',
+                              }}
+                            />
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
@@ -751,7 +766,12 @@ function RatesTab() {
       {notice && <div className="alert">{notice}</div>}
 
       <div
-        style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '0.5rem' }}
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-2)',
+        }}
       >
         <label style={{ flex: '0 0 auto' }}>
           <span>Firm default hourly rate (USD)</span>
@@ -787,150 +807,162 @@ function RatesTab() {
         everywhere.
       </p>
 
-      <h3 style={{ marginBottom: '0.4rem' }}>Client hourly rates</h3>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Client</th>
-            <th style={{ textAlign: 'right' }}>Rate (USD/hr)</th>
-            <th style={{ textAlign: 'right', width: '8rem' }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {view.clients.length === 0 && (
+      <h3 style={{ marginBottom: 'var(--space-1)' }}>Client hourly rates</h3>
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
             <tr>
-              <td colSpan={3} style={{ color: 'var(--muted)' }}>
-                No clients yet.
-              </td>
+              <th>Client</th>
+              <th style={{ textAlign: 'right' }}>Rate (USD/hr)</th>
+              <th style={{ textAlign: 'right', width: '8rem' }}>Actions</th>
             </tr>
-          )}
-          {view.clients.map((c) => {
-            const current = c.ownRate ?? ''
-            const val = clientDraft[c.clientEntityId] ?? current
-            const dirty = val.trim() !== current && val.trim() !== ''
-            return (
-              <tr key={c.clientEntityId}>
-                <td>
-                  <strong>{c.name}</strong>
-                </td>
-                <td style={{ textAlign: 'right' }}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    placeholder={
-                      c.inheritsFirmDefault ? `${view.firmDefaultRate ?? '—'} (firm default)` : ''
-                    }
-                    value={val}
-                    onChange={(e) =>
-                      setClientDraft((s) => ({ ...s, [c.clientEntityId]: e.target.value }))
-                    }
-                    style={{ width: '8rem', textAlign: 'right' }}
-                  />
-                </td>
-                <td style={{ textAlign: 'right' }}>
-                  <button
-                    disabled={busy === `c:${c.clientEntityId}` || !dirty}
-                    onClick={() =>
-                      run(
-                        `c:${c.clientEntityId}`,
-                        () =>
-                          callAttorneyMcp({
-                            toolName: 'legal.rates.set_client',
-                            input: { clientEntityId: c.clientEntityId, rate: val.trim() },
-                          }),
-                        `Saved rate for ${c.name}.`,
-                      )
-                    }
-                  >
-                    {busy === `c:${c.clientEntityId}` ? '…' : 'Save'}
-                  </button>
+          </thead>
+          <tbody>
+            {view.clients.length === 0 && (
+              <tr>
+                <td colSpan={3} style={{ color: 'var(--muted)' }}>
+                  No clients yet.
                 </td>
               </tr>
-            )
-          })}
-        </tbody>
-      </table>
+            )}
+            {view.clients.map((c) => {
+              const current = c.ownRate ?? ''
+              const val = clientDraft[c.clientEntityId] ?? current
+              const dirty = val.trim() !== current && val.trim() !== ''
+              return (
+                <tr key={c.clientEntityId}>
+                  <td>
+                    <strong>{c.name}</strong>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      placeholder={
+                        c.inheritsFirmDefault ? `${view.firmDefaultRate ?? '—'} (firm default)` : ''
+                      }
+                      value={val}
+                      onChange={(e) =>
+                        setClientDraft((s) => ({ ...s, [c.clientEntityId]: e.target.value }))
+                      }
+                      style={{ width: '8rem', textAlign: 'right' }}
+                    />
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button
+                      disabled={busy === `c:${c.clientEntityId}` || !dirty}
+                      onClick={() =>
+                        run(
+                          `c:${c.clientEntityId}`,
+                          () =>
+                            callAttorneyMcp({
+                              toolName: 'legal.rates.set_client',
+                              input: { clientEntityId: c.clientEntityId, rate: val.trim() },
+                            }),
+                          `Saved rate for ${c.name}.`,
+                        )
+                      }
+                    >
+                      {busy === `c:${c.clientEntityId}` ? '…' : 'Save'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
 
-      <h3 style={{ marginTop: '1.2rem', marginBottom: '0.4rem' }}>Service &amp; document fees</h3>
-      <p style={{ color: 'var(--muted)', marginTop: 0, fontSize: '0.85rem' }}>
+      <h3 style={{ marginTop: 'var(--space-5)', marginBottom: 'var(--space-1)' }}>
+        Service &amp; document fees
+      </h3>
+      <p style={{ color: 'var(--muted)', marginTop: 0, fontSize: 'var(--text-sm)' }}>
         A service’s fixed fee bills when the service is marked complete. Per-document fees (billed
         when a document is approved) are set on each service’s Billing tab and shown here.
       </p>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Service</th>
-            <th style={{ textAlign: 'right' }}>Fixed fee (USD)</th>
-            <th style={{ textAlign: 'right', width: '8rem' }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {view.services.length === 0 && (
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
             <tr>
-              <td colSpan={3} style={{ color: 'var(--muted)' }}>
-                No services configured.
-              </td>
+              <th>Service</th>
+              <th style={{ textAlign: 'right' }}>Fixed fee (USD)</th>
+              <th style={{ textAlign: 'right', width: '8rem' }}>Actions</th>
             </tr>
-          )}
-          {view.services.map((s) => {
-            const current = s.fixedFee ?? ''
-            const val = serviceDraft[s.serviceKey] ?? current
-            const dirty = val.trim() !== current && val.trim() !== ''
-            return (
-              <tr key={s.serviceKey}>
-                <td>
-                  <strong>{s.displayName}</strong>
-                  <div style={{ color: 'var(--muted)', fontSize: '0.78rem', marginTop: '0.15rem' }}>
-                    {Object.keys(s.documentFees).length > 0
-                      ? `Document fees: ${Object.entries(s.documentFees)
-                          .map(([k, v]) => `${k.replace(/_/g, ' ')} ${money(v)}`)
-                          .join(', ')} · `
-                      : ''}
-                    <Link
-                      href={`/attorney/services/${s.serviceKey}/billing`}
-                      style={{ color: 'var(--accent, #1a3a6b)' }}
-                    >
-                      {Object.keys(s.documentFees).length > 0
-                        ? 'edit document fees'
-                        : 'set document fees →'}
-                    </Link>
-                  </div>
-                </td>
-                <td style={{ textAlign: 'right' }}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    placeholder="—"
-                    value={val}
-                    onChange={(e) =>
-                      setServiceDraft((st) => ({ ...st, [s.serviceKey]: e.target.value }))
-                    }
-                    style={{ width: '8rem', textAlign: 'right' }}
-                  />
-                </td>
-                <td style={{ textAlign: 'right' }}>
-                  <button
-                    disabled={busy === `s:${s.serviceKey}` || !dirty}
-                    onClick={() =>
-                      run(
-                        `s:${s.serviceKey}`,
-                        () =>
-                          callAttorneyMcp({
-                            toolName: 'legal.rates.set_service',
-                            input: { serviceKey: s.serviceKey, fixedFee: val.trim() },
-                          }),
-                        `Saved fee for ${s.displayName}.`,
-                      )
-                    }
-                  >
-                    {busy === `s:${s.serviceKey}` ? '…' : 'Save'}
-                  </button>
+          </thead>
+          <tbody>
+            {view.services.length === 0 && (
+              <tr>
+                <td colSpan={3} style={{ color: 'var(--muted)' }}>
+                  No services configured.
                 </td>
               </tr>
-            )
-          })}
-        </tbody>
-      </table>
+            )}
+            {view.services.map((s) => {
+              const current = s.fixedFee ?? ''
+              const val = serviceDraft[s.serviceKey] ?? current
+              const dirty = val.trim() !== current && val.trim() !== ''
+              return (
+                <tr key={s.serviceKey}>
+                  <td>
+                    <strong>{s.displayName}</strong>
+                    <div
+                      style={{
+                        color: 'var(--muted)',
+                        fontSize: 'var(--text-xs)',
+                        marginTop: 'var(--space-1)',
+                      }}
+                    >
+                      {Object.keys(s.documentFees).length > 0
+                        ? `Document fees: ${Object.entries(s.documentFees)
+                            .map(([k, v]) => `${k.replace(/_/g, ' ')} ${money(v)}`)
+                            .join(', ')} · `
+                        : ''}
+                      <Link
+                        href={`/attorney/services/${s.serviceKey}/billing`}
+                        style={{ color: 'var(--accent)' }}
+                      >
+                        {Object.keys(s.documentFees).length > 0
+                          ? 'edit document fees'
+                          : 'set document fees →'}
+                      </Link>
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      placeholder="—"
+                      value={val}
+                      onChange={(e) =>
+                        setServiceDraft((st) => ({ ...st, [s.serviceKey]: e.target.value }))
+                      }
+                      style={{ width: '8rem', textAlign: 'right' }}
+                    />
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button
+                      disabled={busy === `s:${s.serviceKey}` || !dirty}
+                      onClick={() =>
+                        run(
+                          `s:${s.serviceKey}`,
+                          () =>
+                            callAttorneyMcp({
+                              toolName: 'legal.rates.set_service',
+                              input: { serviceKey: s.serviceKey, fixedFee: val.trim() },
+                            }),
+                          `Saved fee for ${s.displayName}.`,
+                        )
+                      }
+                    >
+                      {busy === `s:${s.serviceKey}` ? '…' : 'Save'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -941,13 +973,10 @@ export default function BillingPage() {
 
   return (
     <main>
-      <div className="attorney-page-head">
-        <h1 style={{ margin: 0 }}>Billing</h1>
-      </div>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
-        Roll unbilled time and expenses up into invoices, then send them. No payments or trust/IOLTA
-        accounting in this version.
-      </p>
+      <PageHead
+        title="Billing"
+        description="Roll unbilled time and expenses up into invoices, then send them. No payments or trust/IOLTA accounting in this version."
+      />
       <Tabs
         tabs={[
           {

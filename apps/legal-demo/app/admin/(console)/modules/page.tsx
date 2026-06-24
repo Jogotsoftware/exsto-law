@@ -69,19 +69,19 @@ export default function AdminModulesPage() {
 
   return (
     <main style={{ maxWidth: 860 }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>Modules</h1>
+      <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Modules</h1>
       <p style={{ color: 'var(--muted)', marginTop: 0 }}>
         Turn feature bundles on or off for a firm. Disabling hides the feature&apos;s UI but keeps
         its data.
       </p>
       {error && <div className="alert alert-error">{error}</div>}
 
-      <label style={{ display: 'block', marginBottom: '1rem' }}>
+      <label style={{ display: 'block', marginBottom: 'var(--space-4)' }}>
         Tenant
         <select
           value={tenantId}
           onChange={(e) => setTenantId(e.target.value)}
-          style={{ display: 'block', minWidth: 320, marginTop: 4 }}
+          style={{ display: 'block', minWidth: 320, marginTop: 'var(--space-1)' }}
         >
           <option value="">Select a firm…</option>
           {tenants
@@ -95,39 +95,39 @@ export default function AdminModulesPage() {
       </label>
 
       {modules && (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border, #e5e7eb)' }}>
-              <th style={{ padding: '0.5rem' }}>Module</th>
-              <th style={{ padding: '0.5rem' }}>Status</th>
-              <th style={{ padding: '0.5rem' }}>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {modules.map((m) => (
-              <tr key={m.moduleKey} style={{ borderBottom: '1px solid var(--border, #eee)' }}>
-                <td style={{ padding: '0.5rem' }}>
-                  <strong>{m.displayName}</strong>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>{m.description}</div>
-                </td>
-                <td style={{ padding: '0.5rem' }}>
-                  <span style={{ color: m.enabled ? '#16a34a' : '#6b7280', fontWeight: 600 }}>
-                    {m.enabled ? 'Enabled' : 'Disabled'}
-                  </span>
-                </td>
-                <td style={{ padding: '0.5rem' }}>
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => toggle(m.moduleKey, m.enabled)}
-                  >
-                    {m.enabled ? 'Disable' : 'Enable'}
-                  </button>
-                </td>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Module</th>
+                <th>Status</th>
+                <th>Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {modules.map((m) => (
+                <tr key={m.moduleKey}>
+                  <td>
+                    <strong>{m.displayName}</strong>
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
+                      {m.description}
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`badge ${m.enabled ? 'ok' : 'info'}`}>
+                      {m.enabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </td>
+                  <td>
+                    <button disabled={busy} onClick={() => toggle(m.moduleKey, m.enabled)}>
+                      {m.enabled ? 'Disable' : 'Enable'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </main>
   )

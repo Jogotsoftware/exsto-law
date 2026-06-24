@@ -241,7 +241,11 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
                   </div>
                 )}
 
-                <div className="bk-selected" aria-live="polite" style={{ marginBottom: 20 }}>
+                <div
+                  className="bk-selected"
+                  aria-live="polite"
+                  style={{ marginBottom: 'var(--space-5)' }}
+                >
                   <span className="bk-selected-icon">
                     <ClockIcon size={18} />
                   </span>
@@ -262,7 +266,7 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
                     <Link
                       href="/book"
                       className="bk-btn bk-btn-primary bk-btn-wide"
-                      style={{ marginTop: 16 }}
+                      style={{ marginTop: 'var(--space-4)' }}
                     >
                       Book a consultation
                     </Link>

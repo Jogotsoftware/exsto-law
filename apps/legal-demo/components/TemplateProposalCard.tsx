@@ -87,27 +87,32 @@ export function TemplateProposalCard({ proposal }: { proposal: TemplateProposal 
         <span className="uac-doc-title">
           <LayersIcon size={14} /> Proposed template — {proposal.name}
         </span>
-        <span className="text-muted" style={{ fontSize: 12 }}>
+        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
           {proposal.serviceKey} · {proposal.docKind}
         </span>
       </div>
 
       {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
           {proposal.summary}
         </div>
       )}
 
       <div
         className="uac-doc-body"
-        style={{ fontSize: 12, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto' }}
+        style={{
+          fontSize: 'var(--text-xs)',
+          whiteSpace: 'pre-wrap',
+          maxHeight: 200,
+          overflow: 'auto',
+        }}
       >
         {preview}
       </div>
 
       {/* The variable contract — the {{tokens}} the body merges, orphans flagged. An
           orphan has no question, so it would render [[MISSING]] in the document. */}
-      <div className="uac-doc-body" style={{ fontSize: 12 }}>
+      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {proposal.tokens.length === 0 ? (
           <div className="text-muted">No merge tokens — this is a static document.</div>
         ) : (
@@ -116,13 +121,7 @@ export function TemplateProposalCard({ proposal }: { proposal: TemplateProposal 
             {proposal.tokens.map((t, i) => (
               <span key={t}>
                 {i > 0 && ', '}
-                <code
-                  style={
-                    orphans.has(t.toLowerCase())
-                      ? { color: 'var(--color-danger, #b00)' }
-                      : undefined
-                  }
-                >
+                <code style={orphans.has(t.toLowerCase()) ? { color: 'var(--danger)' } : undefined}>
                   {`{{${t}}}`}
                 </code>
               </span>
@@ -132,7 +131,7 @@ export function TemplateProposalCard({ proposal }: { proposal: TemplateProposal 
       </div>
 
       {orphans.size > 0 && (
-        <div role="alert" className="alert alert-warn" style={{ fontSize: 12 }}>
+        <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
           {orphans.size} token{orphans.size === 1 ? '' : 's'} have NO matching question and would
           render [[MISSING]]: <strong>{[...orphans].join(', ')}</strong>. Add those questions to the
           questionnaire before sending documents.
@@ -156,7 +155,7 @@ export function TemplateProposalCard({ proposal }: { proposal: TemplateProposal 
         </button>
       </div>
       {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
+        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
       )}

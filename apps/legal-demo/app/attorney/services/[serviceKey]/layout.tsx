@@ -1,27 +1,19 @@
 'use client'
 
 // Service editor shell — one <main>, a persistent header (service name + status),
-// and the shared navigation, wrapping every panel of a service (Settings,
-// Questionnaire, Templates, Prompt, Billing). Replaces the old top-right "Edit
-// questionnaire / Edit prompt / Edit templates" link soup: the sub-pages are now
-// tabs under this layout, so each child renders its panel content only (no own
-// <main>, no back-to-service link).
-//
-// While a service is still being SET UP (not yet enabled) the plain tab bar is
-// replaced by a guided stepper (ServiceSetupGuide) with a "Continue →" footer, so
-// creating a service walks the attorney through each tab in order. Once the service
-// is enabled, it shows the normal ServiceTabs for free navigation. The create flow
-// (/attorney/services/new) has no service yet, so it shows just the create form.
+// and the shared tab bar (ServiceTabs) wrapping every panel of a service
+// (Settings · Questionnaire · Templates · [Prompt, AI-draft only] · Workflow ·
+// Billing). The tabs are ALWAYS shown so the attorney can move freely between
+// panels whether or not the service is enabled yet — there is no separate setup
+// stepper that hides them (removed per beta feedback: the setup checklist was
+// redundant and made the tabs disappear mid-setup). Enablement readiness lives on
+// the Settings panel. The create flow (/attorney/services/new) has no service yet,
+// so it shows just the create form.
 import { useEffect, useState } from 'react'
 import { useParams, usePathname } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { ServiceTabs } from '@/components/ServiceTabs'
 import { BackButton } from '@/components/BackButton'
-import {
-  ServiceSetupGuide,
-  ServiceSetupContinue,
-  buildSetupSteps,
-} from '@/components/ServiceSetupGuide'
 
 type GenerationMode = 'template_merge' | 'ai_draft'
 interface ServiceHead {
@@ -30,10 +22,6 @@ interface ServiceHead {
   generationMode: GenerationMode
   isActive: boolean
 }
-interface Completeness {
-  ready: boolean
-  missing: string[]
-}
 
 export default function ServiceEditorLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ serviceKey: string }>()
@@ -41,28 +29,18 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
   const serviceKey = params.serviceKey
   const isNew = serviceKey === 'new'
   const [svc, setSvc] = useState<ServiceHead | null>(null)
-  const [completeness, setCompleteness] = useState<Completeness | null>(null)
 
   useEffect(() => {
     if (isNew) return
     let cancelled = false
-    // Read the service + its completeness together so the setup stepper can mark
-    // each step done. Re-read on tab navigation so a route/generation-mode change or
-    // a just-saved questionnaire/template updates the stepper without a reload.
-    Promise.all([
-      callAttorneyMcp<{ service: ServiceHead | null }>({
-        toolName: 'legal.service.get',
-        input: { serviceKey },
-      }),
-      callAttorneyMcp<Completeness>({
-        toolName: 'legal.service.completeness',
-        input: { serviceKey },
-      }).catch(() => null),
-    ])
-      .then(([s, c]) => {
-        if (cancelled) return
-        if (s.service) setSvc(s.service)
-        if (c) setCompleteness(c)
+    // Re-read on tab navigation so a generation-mode change (which adds/removes the
+    // Prompt tab) or an enable/disable updates the header + tabs without a reload.
+    callAttorneyMcp<{ service: ServiceHead | null }>({
+      toolName: 'legal.service.get',
+      input: { serviceKey },
+    })
+      .then((s) => {
+        if (!cancelled && s.service) setSvc(s.service)
       })
       .catch(() => {})
     return () => {
@@ -73,10 +51,10 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
   if (isNew) {
     return (
       <main>
-        <BackButton fallback="/attorney/services" />
+        <BackButton fallback="/attorney/services" forceFallback />
         <div
           className="attorney-page-head"
-          style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}
         >
           <h1 style={{ margin: 0 }}>New service</h1>
         </div>
@@ -85,20 +63,12 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
     )
   }
 
-  // Setup mode: the service exists but is not yet enabled, and we have the
-  // completeness read to mark step progress. Otherwise show the normal tab bar.
-  const inSetup = svc != null && !svc.isActive && completeness != null
-  const steps =
-    inSetup && svc
-      ? buildSetupSteps(serviceKey, svc.generationMode, svc.route, completeness!.missing)
-      : null
-
   return (
     <main>
       <BackButton fallback="/attorney/services" />
       <div
         className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}
       >
         <h1 style={{ margin: 0 }}>{svc?.displayName ?? 'Service'}</h1>
         {svc && (
@@ -107,16 +77,11 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
           </span>
         )}
       </div>
-      {steps ? (
-        <ServiceSetupGuide steps={steps} />
-      ) : (
-        <ServiceTabs
-          serviceKey={serviceKey}
-          generationMode={svc?.generationMode ?? 'template_merge'}
-        />
-      )}
+      <ServiceTabs
+        serviceKey={serviceKey}
+        generationMode={svc?.generationMode ?? 'template_merge'}
+      />
       {children}
-      {steps && <ServiceSetupContinue steps={steps} serviceKey={serviceKey} />}
     </main>
   )
 }

@@ -74,18 +74,18 @@ export function ServiceProposalCard({ proposal }: { proposal: ServiceProposal })
         <span className="uac-doc-title">
           <LayersIcon size={14} /> Proposed service — {proposal.displayName}
         </span>
-        <span className="text-muted" style={{ fontSize: 12 }}>
+        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
           key: {proposal.derivedKey}
         </span>
       </div>
 
       {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
           {proposal.summary}
         </div>
       )}
 
-      <div className="uac-doc-body" style={{ fontSize: 12 }}>
+      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {proposal.description && (
           <div>
             <strong>Description:</strong> {proposal.description}
@@ -118,7 +118,7 @@ export function ServiceProposalCard({ proposal }: { proposal: ServiceProposal })
         </button>
       </div>
       {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
+        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
       )}

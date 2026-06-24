@@ -166,20 +166,20 @@ export function WorkflowProposalCard({ proposal }: { proposal: WorkflowProposal 
         <span className="uac-doc-title">
           <LayersIcon size={14} /> Proposed workflow — {proposal.serviceKey}
         </span>
-        <span className="text-muted" style={{ fontSize: 12 }}>
+        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
           {ordered.length} steps
         </span>
       </div>
 
       {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
           {proposal.summary}
         </div>
       )}
 
       {/* Diff vs the current workflow. */}
       {(diff.added.length > 0 || diff.removed.length > 0 || diff.reordered) && (
-        <div className="uac-doc-body" style={{ fontSize: 12 }}>
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
           {diff.added.length > 0 && (
             <div>
               <strong>Added:</strong> {diff.added.join(', ')}

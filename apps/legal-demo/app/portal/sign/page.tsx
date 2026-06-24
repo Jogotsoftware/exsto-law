@@ -25,13 +25,13 @@ export default function PortalSignList() {
 
   if (error)
     return (
-      <div className="page">
+      <div className="cp-main">
         <div className="alert alert-error">{error}</div>
       </div>
     )
   if (!sigs)
     return (
-      <div className="page">
+      <div className="cp-main">
         <div className="loading-block">
           <span className="spinner" /> Loading…
         </div>
@@ -39,24 +39,20 @@ export default function PortalSignList() {
     )
 
   return (
-    <div className="page">
+    <div className="cp-main">
       <h1>Documents to sign</h1>
       {sigs.length === 0 ? (
         <div className="alert">You have no documents awaiting your signature.</div>
       ) : (
-        <ul className="card-list" style={{ marginTop: 'var(--space-3)' }}>
+        <ul className="pdash-docs" style={{ marginTop: 'var(--space-3)' }}>
           {sigs.map((s) => (
-            <li
-              key={s.requestId}
-              className="card row"
-              style={{ justifyContent: 'space-between', alignItems: 'center' }}
-            >
+            <li key={s.requestId} className="pdash-doc">
               <div>
-                <div style={{ fontWeight: 600 }}>{s.documentTitle ?? 'Document'}</div>
+                <div className="pdash-doc-title">{s.documentTitle ?? 'Document'}</div>
                 <div className="text-sm text-muted">Status: {s.status}</div>
               </div>
               <Link href={`/portal/sign/${s.requestId}`}>
-                <button className="primary">Review &amp; sign →</button>
+                <button className="pdash-btn pdash-btn-sm">Review &amp; sign →</button>
               </Link>
             </li>
           ))}

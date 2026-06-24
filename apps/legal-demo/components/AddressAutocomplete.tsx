@@ -256,10 +256,10 @@ export function AddressAutocomplete({ label, required, value, onChange }: Props)
               margin: '2px 0 0',
               padding: 0,
               listStyle: 'none',
-              background: 'var(--surface, #fff)',
-              border: '1px solid var(--border, #d1d5db)',
-              borderRadius: 8,
-              boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              boxShadow: 'var(--shadow-lg)',
               maxHeight: 240,
               overflowY: 'auto',
             }}
@@ -275,10 +275,12 @@ export function AddressAutocomplete({ label, required, value, onChange }: Props)
                   e.preventDefault()
                   void select(s)
                 }}
-                style={{ padding: '0.5rem 0.7rem', cursor: 'pointer', fontSize: '0.9rem' }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = 'var(--surface-2, #f3f4f6)')
-                }
+                style={{
+                  padding: 'var(--space-2) var(--space-3)',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
                 {s.label}

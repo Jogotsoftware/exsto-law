@@ -10,6 +10,8 @@ import { lineDiff, diffStats, type DiffOp } from '@/lib/lineDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { BackButton } from '@/components/BackButton'
+import { PageHead } from '@/components/PageHead'
+import { SparklesIcon, XIcon } from '@/components/icons'
 
 // Step-through review session (started from the queue's "Begin review"): the ordered
 // draft ids to walk, in sessionStorage, flagged on the URL with ?review=session.
@@ -478,14 +480,16 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         </Link>
       </div>
 
-      <header className="review-header">
-        <div className="review-header-main">
-          <h1>{humanizeKind(draft.documentKind)}</h1>
-          <span className="review-version">v{draft.versionNumber}</span>
-          <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
-        </div>
-        <span className="review-meta">Generated {formatDateTime(draft.recordedAt)}</span>
-      </header>
+      <PageHead
+        title={humanizeKind(draft.documentKind)}
+        description={`Generated ${formatDateTime(draft.recordedAt)}`}
+        actions={
+          <>
+            <span className="review-version">v{draft.versionNumber}</span>
+            <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
+          </>
+        }
+      />
 
       <div className="review-toolbar">
         <button
@@ -528,7 +532,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             onClick={() => setTraceOpen(true)}
             title="How the AI drafted this — your context, not part of the document."
           >
-            ✦ Reasoning trace
+            <SparklesIcon size={14} /> Reasoning trace
           </button>
         )}
         <a
@@ -618,7 +622,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="What needs to change, or anything to flag for the client?"
-            style={{ marginTop: '0.35rem' }}
+            style={{ marginTop: 'var(--space-1)' }}
           />
         </label>
         <div className="review-actions">
@@ -678,7 +682,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
                 onClick={() => setTraceOpen(false)}
                 aria-label="Close"
               >
-                ×
+                <XIcon size={16} />
               </button>
             </div>
             <p className="trace-drawer-intro">
@@ -842,18 +846,18 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             aria-label="Regenerate draft"
           >
             <div className="modal-head">
-              <h2 style={{ margin: 0 }}>Regenerate draft</h2>
+              <h2>Regenerate draft</h2>
               <button
                 type="button"
                 className="modal-close"
                 onClick={() => setRegenOpen(false)}
                 aria-label="Close"
               >
-                ×
+                <XIcon size={16} />
               </button>
             </div>
             <div className="modal-body">
-              <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+              <p className="text-muted" style={{ marginTop: 0 }}>
                 Redraft this {humanizeKind(draft.documentKind)} with the live model. Your
                 instructions and any selected legal skills guide the new version; the matter&apos;s
                 questionnaire and transcript are always included.
@@ -965,7 +969,7 @@ function EvidenceCardView({ item }: { item: EvidenceItem }) {
 function AlternativeCardView({ item }: { item: Alternative }) {
   return (
     <div className="alt-card">
-      <h4>{item.decision_point ?? 'Decision'}</h4>
+      <h3>{item.decision_point ?? 'Decision'}</h3>
       <div className="alt-options">
         {item.alternatives?.map((opt, i) => (
           <span key={i} className={opt === item.selected ? 'selected' : ''}>

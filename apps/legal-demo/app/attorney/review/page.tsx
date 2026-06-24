@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
+import { PageHead } from '@/components/PageHead'
 
 // Shared with the detail page: a step-through review session is the ordered list of
 // selected draft ids + where we are in it, kept in sessionStorage (per tab) and
@@ -240,7 +241,10 @@ export default function ReviewQueue() {
 
   return (
     <main>
-      <h1>Review queue</h1>
+      <PageHead
+        title="Review queue"
+        description="Approve, request revisions on, or reject drafts pending attorney review."
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -337,7 +341,7 @@ export default function ReviewQueue() {
                     value={batchNotes}
                     onChange={(e) => setBatchNotes(e.target.value)}
                     placeholder="What needs to change across these drafts?"
-                    style={{ marginTop: '0.35rem' }}
+                    style={{ marginTop: 'var(--space-1)' }}
                     disabled={running}
                   />
                 </label>
@@ -357,7 +361,7 @@ export default function ReviewQueue() {
           )}
 
           <section style={{ padding: 0, overflow: 'hidden' }}>
-            <table>
+            <table className="data-table">
               <thead>
                 <tr>
                   <th style={{ width: '2.5rem' }}>
