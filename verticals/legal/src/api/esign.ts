@@ -315,6 +315,10 @@ export interface EnvelopeStatus {
   status: string | null
   subject: string | null
   signers: EnvelopeSignerStatus[]
+  // The document this envelope executes, and — once `completed` — the executed
+  // copy (a document_version with metadata.executed = 'true') for the review step.
+  documentEntityId: string | null
+  executedDocumentVersionId: string | null
 }
 
 export async function getEnvelopeStatus(
@@ -324,6 +328,23 @@ export async function getEnvelopeStatus(
   return withActionContext(ctx, async (client) => {
     const subject = await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_subject')
     const status = await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_status')
+    const doc = await client.query<{
+      document_entity_id: string
+      executed_version_id: string | null
+    }>(
+      `SELECT r.target_entity_id AS document_entity_id,
+              (SELECT dv.id FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') = 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS executed_version_id
+         FROM relationship r
+         JOIN relationship_kind_definition rkd
+           ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
+        WHERE r.tenant_id = $1 AND r.source_entity_id = $2
+          AND (r.valid_to IS NULL OR r.valid_to > now())
+        LIMIT 1`,
+      [ctx.tenantId, envelopeId],
+    )
     const a = (k: string) =>
       `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
           ON akd.id = a.attribute_kind_id AND akd.kind_name = '${k}'
@@ -355,6 +376,8 @@ export async function getEnvelopeStatus(
       envelopeId,
       status,
       subject,
+      documentEntityId: doc.rows[0]?.document_entity_id ?? null,
+      executedDocumentVersionId: doc.rows[0]?.executed_version_id ?? null,
       signers: res.rows.map((row) => ({
         requestId: row.request_id,
         name: row.name,

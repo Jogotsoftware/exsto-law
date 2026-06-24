@@ -7,9 +7,13 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 
 export type TaskStatus = 'open' | 'in_progress' | 'blocked' | 'done'
 export type TaskBillingMode = 'none' | 'hours' | 'fixed'
+// A signature task (kind 'signature') carries a document and opens the e-signature
+// experience; a plain to-do is 'todo' (the default for tasks created before 0113).
+export type TaskKind = 'todo' | 'signature'
 
 export const TASK_STATUSES: TaskStatus[] = ['open', 'in_progress', 'blocked', 'done']
 export const TASK_BILLING_MODES: TaskBillingMode[] = ['none', 'hours', 'fixed']
+export const TASK_KINDS: TaskKind[] = ['todo', 'signature']
 
 export interface Task {
   taskId: string
@@ -26,6 +30,13 @@ export interface Task {
   // Set to the invoice entity id once the task's cost is placed on an invoice —
   // this LOCKS it (it stops showing as unbilled and can't be un-billed).
   invoiceId: string | null
+  // Signature-task fields (migration 0113). kind defaults to 'todo'. When kind is
+  // 'signature', documentVersionId is the attached doc; esignEnvelopeId is set once
+  // sent; reviewedAt is the gate the attorney must clear before status can go done.
+  kind: TaskKind
+  documentVersionId: string | null
+  esignEnvelopeId: string | null
+  reviewedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -41,6 +52,10 @@ type TaskRow = {
   hours: string | null
   fee_amount: string | null
   invoice_id: string | null
+  kind: string | null
+  document_version_id: string | null
+  esign_envelope_id: string | null
+  reviewed_at: string | null
   created_at: Date
   updated_at: Date | null
 }
@@ -69,6 +84,10 @@ const TASK_SELECT = `
     (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_hours')             AS hours,
     (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_fee_amount')        AS fee_amount,
     (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_invoice_id')        AS invoice_id,
+    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_kind')                AS kind,
+    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_document_version_id') AS document_version_id,
+    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_esign_envelope_id')   AS esign_envelope_id,
+    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_reviewed_at')          AS reviewed_at,
     e.created_at,
     (SELECT max(a.valid_from) FROM attribute a WHERE a.tenant_id = $1 AND a.entity_id = e.id)          AS updated_at
   FROM entity e
@@ -80,6 +99,9 @@ function asStatus(s: string | null): TaskStatus {
 }
 function asMode(m: string | null): TaskBillingMode {
   return (TASK_BILLING_MODES as string[]).includes(m ?? '') ? (m as TaskBillingMode) : 'none'
+}
+function asKind(k: string | null): TaskKind {
+  return (TASK_KINDS as string[]).includes(k ?? '') ? (k as TaskKind) : 'todo'
 }
 
 function mapTask(r: TaskRow): Task {
@@ -94,6 +116,10 @@ function mapTask(r: TaskRow): Task {
     hours: r.hours,
     feeAmount: r.fee_amount,
     invoiceId: r.invoice_id,
+    kind: asKind(r.kind),
+    documentVersionId: r.document_version_id,
+    esignEnvelopeId: r.esign_envelope_id,
+    reviewedAt: r.reviewed_at,
     createdAt: r.created_at.toISOString(),
     updatedAt: (r.updated_at ?? r.created_at).toISOString(),
   }

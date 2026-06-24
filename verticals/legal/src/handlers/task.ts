@@ -73,6 +73,52 @@ function costAttrs(
   ]
 }
 
+// Attach a document to a task (migration 0113): mark it a signature task, link it
+// to the document entity (derived from the version id), and pin the exact version.
+async function attachDocument(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    taskId: string
+    documentVersionId: string
+  },
+): Promise<void> {
+  const dv = await client.query<{ document_entity_id: string }>(
+    `SELECT document_entity_id FROM document_version WHERE id = $1 AND tenant_id = $2`,
+    [args.documentVersionId, args.tenantId],
+  )
+  const documentEntityId = dv.rows[0]?.document_entity_id
+  if (!documentEntityId) throw new Error('Attached document version not found.')
+
+  const relKindId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    args.tenantId,
+    'task_document',
+  )
+  await insertRelationship(client, {
+    tenantId: args.tenantId,
+    actionId: args.actionId,
+    sourceEntityId: args.taskId,
+    targetEntityId: documentEntityId,
+    relationshipKindId: relKindId,
+  })
+  const base = {
+    tenantId: args.tenantId,
+    actionId: args.actionId,
+    actorId: args.actorId,
+    entityId: args.taskId,
+  }
+  await setAttr(client, { ...base, kind: 'task_kind', value: 'signature' })
+  await setAttr(client, {
+    ...base,
+    kind: 'task_document_version_id',
+    value: args.documentVersionId,
+  })
+}
+
 interface CreatePayload {
   matter_entity_id: string
   title: string
@@ -82,6 +128,8 @@ interface CreatePayload {
   billing_mode?: string
   hours?: string | null
   fee_amount?: string | null
+  // Optional: when present, the task is a signature task carrying this document.
+  document_version_id?: string | null
 }
 
 registerActionHandler('legal.task.create', async (ctx, client, payload, actionId) => {
@@ -137,6 +185,17 @@ registerActionHandler('legal.task.create', async (ctx, client, payload, actionId
       entityId: taskId,
       kind: a.kind,
       value: a.value,
+    })
+  }
+
+  // A task created with a document is a signature task from the start.
+  if (p.document_version_id != null && String(p.document_version_id).trim()) {
+    await attachDocument(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      taskId,
+      documentVersionId: String(p.document_version_id).trim(),
     })
   }
 
@@ -196,4 +255,69 @@ registerActionHandler('legal.task.update', async (ctx, client, payload, actionId
   }
 
   return { taskId: p.task_id, updated: updates.map((u) => u.kind) }
+})
+
+// ── signature-task actions (migration 0113) ──────────────────────────────────
+
+interface AttachPayload {
+  task_id: string
+  document_version_id: string
+}
+
+registerActionHandler('legal.task.attach_document', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as AttachPayload
+  if (!p.task_id) throw new Error('task_id is required.')
+  if (!p.document_version_id) throw new Error('document_version_id is required.')
+  await attachDocument(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    taskId: p.task_id,
+    documentVersionId: p.document_version_id,
+  })
+  return { taskId: p.task_id }
+})
+
+interface LinkEnvelopePayload {
+  task_id: string
+  envelope_id: string
+}
+
+registerActionHandler('legal.task.link_envelope', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as LinkEnvelopePayload
+  if (!p.task_id) throw new Error('task_id is required.')
+  if (!p.envelope_id) throw new Error('envelope_id is required.')
+  await setAttr(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    entityId: p.task_id,
+    kind: 'task_esign_envelope_id',
+    value: p.envelope_id,
+  })
+  return { taskId: p.task_id }
+})
+
+interface ReviewPayload {
+  task_id: string
+  reviewed_at: string
+}
+
+// The review gate: records the attorney's review of the executed copy AND moves the
+// task to `done`. The caller (api/tasks.reviewTask) verifies the envelope is
+// `completed` before submitting, so a task never completes while signatures are open.
+registerActionHandler('legal.task.review', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as ReviewPayload
+  if (!p.task_id) throw new Error('task_id is required.')
+  const reviewedAt = (p.reviewed_at ?? '').trim()
+  if (!reviewedAt) throw new Error('reviewed_at is required.')
+  const base = {
+    tenantId: ctx.tenantId,
+    actionId,
+    actorId: ctx.actorId,
+    entityId: p.task_id,
+  }
+  await setAttr(client, { ...base, kind: 'task_reviewed_at', value: reviewedAt })
+  await setAttr(client, { ...base, kind: 'task_status', value: 'done' })
+  return { taskId: p.task_id }
 })
