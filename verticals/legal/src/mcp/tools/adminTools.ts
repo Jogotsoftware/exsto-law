@@ -18,6 +18,9 @@ import {
   listPromotableServices,
   diffServices,
   promoteServices,
+  listPromotableTemplates,
+  diffTemplates,
+  promoteTemplates,
   listTenantUsers,
   listTenantRoles,
   inviteTenantUser,
@@ -31,6 +34,9 @@ import {
   type ServiceDef,
   type ServiceDiff,
   type PromoteResult,
+  type TemplateDef,
+  type TemplateDiff,
+  type TemplatePromoteResult,
 } from '../../controlPlane/index.js'
 import type { FirmUser, FirmRole } from '../../api/users.js'
 
@@ -196,6 +202,61 @@ registerTool({
 } satisfies Tool<
   { sourceTenantId?: string; targetTenantIds: string[]; kindNames: string[] },
   { results: PromoteResult[] }
+>)
+
+registerTool({
+  name: 'admin.promote.templates.export',
+  description:
+    'List the document/email templates available to promote from a source tenant (default: the sandbox). Platform admin only.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      sourceTenantId: { type: 'string', description: 'Defaults to the sandbox tenant' },
+    },
+  },
+  handler: async (ctx: ActionContext, input: { sourceTenantId?: string }) => ({
+    templates: await listPromotableTemplates(ctx, input?.sourceTenantId),
+  }),
+} satisfies Tool<{ sourceTenantId?: string }, { templates: TemplateDef[] }>)
+
+registerTool({
+  name: 'admin.promote.templates.diff',
+  description:
+    'Dry-run: classify each source template as new / changed / identical against a target tenant. Platform admin only.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { sourceTenantId: { type: 'string' }, targetTenantId: { type: 'string' } },
+    required: ['sourceTenantId', 'targetTenantId'],
+  },
+  handler: async (
+    ctx: ActionContext,
+    input: { sourceTenantId: string; targetTenantId: string },
+  ) => ({ diff: await diffTemplates(ctx, input.sourceTenantId, input.targetTenantId) }),
+} satisfies Tool<{ sourceTenantId: string; targetTenantId: string }, { diff: TemplateDiff[] }>)
+
+registerTool({
+  name: 'admin.promote.templates.run',
+  description:
+    'Promote selected templates (by "category::name" key) from a source tenant (default: sandbox) into one or more target tenants — create/update/skip-identical. Platform admin only.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      sourceTenantId: { type: 'string' },
+      targetTenantIds: { type: 'array', items: { type: 'string' } },
+      keys: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['targetTenantIds', 'keys'],
+  },
+  handler: async (
+    ctx: ActionContext,
+    input: { sourceTenantId?: string; targetTenantIds: string[]; keys: string[] },
+  ) => ({ results: await promoteTemplates(ctx, input) }),
+} satisfies Tool<
+  { sourceTenantId?: string; targetTenantIds: string[]; keys: string[] },
+  { results: TemplatePromoteResult[] }
 >)
 
 registerTool({
