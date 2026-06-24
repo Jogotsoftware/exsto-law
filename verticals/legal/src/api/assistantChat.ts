@@ -44,6 +44,9 @@ import {
   buildProposeWorkflowTool,
   type WorkflowProposal,
 } from './workflowAuthoringTools.js'
+import { buildServiceContextTool, buildProposeServiceTool } from './serviceAuthoringTools.js'
+import type { ServiceProposal } from './serviceAuthoring.js'
+import { buildWizardEnabled } from '../lifecycle/flags.js'
 
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
 export type AssistantScope = 'matter' | 'contact' | 'global'
@@ -130,6 +133,19 @@ export type AssistantChatStreamEvent =
       summary: string
       confidence: number
     }
+  // The assistant PROPOSED a NEW service shell (Build-Wizard Phase 1). The UI renders
+  // it as an inline approval card; the version-1 row is created only when the
+  // attorney approves. Nothing is persisted by this turn. Flag-gated (LEGAL_BUILD_WIZARD).
+  | {
+      type: 'service_proposal'
+      displayName: string
+      derivedKey: string
+      description: string | null
+      route: ServiceProposal['route']
+      generationMode: ServiceProposal['generationMode']
+      summary: string
+      confidence: number
+    }
   | {
       type: 'done'
       eventId: string
@@ -155,6 +171,9 @@ export interface AssistantChatReply {
   // Workflow proposals captured this turn (PR5) — approval cards the attorney acts
   // on. Empty for ordinary answers.
   workflowProposals?: WorkflowProposal[]
+  // New-service proposals captured this turn (Build-Wizard Phase 1) — approval
+  // cards. Empty for ordinary answers and whenever the wizard flag is off.
+  serviceProposals?: ServiceProposal[]
 }
 
 export interface AssistantThreadEntry {
@@ -176,6 +195,9 @@ export interface AssistantThreadEntry {
   // Workflow proposals captured on this turn (assistant side), so a reopened thread
   // still shows the approval cards.
   workflowProposals?: WorkflowProposal[]
+  // New-service proposals captured on this turn (assistant side), so a reopened
+  // thread still shows the approval cards.
+  serviceProposals?: ServiceProposal[]
 }
 
 const SYSTEM_PROMPT = [
@@ -317,6 +339,7 @@ function buildAttorneyClientTools(
     catalog: { slug: string; name: string }[]
     producedDocuments: ProducedDocument[]
     workflowProposals: WorkflowProposal[]
+    serviceProposals: ServiceProposal[]
   },
 ): ClientTool[] {
   const tools: ClientTool[] = [buildFeedbackTool(ctx, input)]
@@ -324,6 +347,13 @@ function buildAttorneyClientTools(
   tools.push(buildProduceDocumentTool(capture.producedDocuments))
   tools.push(buildWorkflowContextTool(ctx))
   tools.push(buildProposeWorkflowTool(ctx, capture.workflowProposals))
+  // Build-Wizard Phase 1: the new-service authoring tools are dormant unless the
+  // LEGAL_BUILD_WIZARD flag is on. With the flag off they're never registered (and
+  // the system prompt below says nothing about them), so this whole path is a no-op.
+  if (buildWizardEnabled()) {
+    tools.push(buildServiceContextTool(ctx))
+    tools.push(buildProposeServiceTool(ctx, capture.serviceProposals))
+  }
   return tools
 }
 
@@ -390,6 +420,14 @@ function buildClaudeSystem(
         : null
   if (entityPath && entityPath !== currentPath) {
     system += `\n\nThis conversation is about the ${scope} at ${entityPath} — link to it with a markdown link when referring the attorney back to it.`
+  }
+  // Build-Wizard Phase 1 (flag-gated): only when LEGAL_BUILD_WIZARD is on does the
+  // assistant learn it can propose a NEW service. With the flag off this note is
+  // absent and the propose_service/get_service_context tools aren't registered, so
+  // the model has no way to (and is never told to) create services.
+  if (buildWizardEnabled()) {
+    system +=
+      '\n\nCREATING A NEW SERVICE — when the attorney asks you to create, set up, or add a new SERVICE offering (e.g. "create an NC SMLLC formation service", "add a trademark filing service"), you propose an empty service SHELL for them to approve. ALWAYS call get_service_context FIRST to load the existing service keys (so your proposed key is unique) and the closed route + generation_mode vocabularies. Pick a route and generation_mode ONLY from those — never invent one. When you have a name and a valid choice, deliver it by CALLING the propose_service tool — this does NOT save anything; it shows the attorney an approval card, and the service is created (as a disabled draft) only when THEY approve it. Put the proposal ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to it to review.'
   }
   if (activeSkillsText) system += `\n\n${activeSkillsText}`
   if (skillCatalogText) system += `\n\n${skillCatalogText}`
@@ -528,6 +566,9 @@ export async function recordAssistantTurn(
     // Workflow proposals the assistant captured this turn (PR5), recorded so a
     // reopened thread can re-show the approval cards. Additive payload field.
     workflowProposals?: WorkflowProposal[] | null
+    // New-service proposals the assistant captured this turn (Build-Wizard Phase 1),
+    // recorded so a reopened thread can re-show the approval cards. Additive field.
+    serviceProposals?: ServiceProposal[] | null
     // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
     // Recorded additively in the event payload; powers the AI usage/cost view.
     usage?: AssistantUsage | null
@@ -567,6 +608,10 @@ export async function recordAssistantTurn(
           input.workflowProposals && input.workflowProposals.length
             ? input.workflowProposals
             : null,
+        // New-service proposals captured this turn (approval cards), so a reopened
+        // thread re-shows them. Null when none were proposed.
+        service_proposals:
+          input.serviceProposals && input.serviceProposals.length ? input.serviceProposals : null,
         // Token usage (snake_case to match the rest of the payload), null when the
         // provider doesn't report it. The actor is captured as source_ref above, so
         // the usage view can attribute cost per attorney.
@@ -615,6 +660,10 @@ export async function assistantChat(
   // Workflow proposals captured this turn (Claude only, via propose_workflow). Not
   // persisted here — surfaced as approval cards; the live write is the approve route.
   const workflowProposals: WorkflowProposal[] = []
+  // New-service proposals captured this turn (Claude only, via propose_service, and
+  // only when the build-wizard flag is on). Surfaced as approval cards; the live
+  // version-1 write is the create-from-ai approve route.
+  const serviceProposals: ServiceProposal[] = []
   // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
   let usage: AssistantUsage | null = null
 
@@ -657,6 +706,7 @@ export async function assistantChat(
         catalog,
         producedDocuments,
         workflowProposals,
+        serviceProposals,
       }),
     })
     reply = result.reply
@@ -678,6 +728,7 @@ export async function assistantChat(
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
     producedDocuments,
     workflowProposals,
+    serviceProposals,
     usage,
   })
 
@@ -691,6 +742,7 @@ export async function assistantChat(
     scope,
     documents: producedDocuments.length ? producedDocuments : undefined,
     workflowProposals: workflowProposals.length ? workflowProposals : undefined,
+    serviceProposals: serviceProposals.length ? serviceProposals : undefined,
   }
 }
 
@@ -727,6 +779,9 @@ export async function* assistantChatStream(
   const producedDocuments: ProducedDocument[] = []
   // Workflow proposals captured this turn (Claude only, via propose_workflow).
   const workflowProposals: WorkflowProposal[] = []
+  // New-service proposals captured this turn (Claude only, via propose_service,
+  // flag-gated). Surfaced as approval cards after the model loop.
+  const serviceProposals: ServiceProposal[] = []
   let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
@@ -774,6 +829,7 @@ export async function* assistantChatStream(
         catalog,
         producedDocuments,
         workflowProposals,
+        serviceProposals,
       }),
     })) {
       if (chunk.type === 'text') {
@@ -814,6 +870,21 @@ export async function* assistantChatStream(
         confidence: p.confidence,
       }
     }
+    // Surface validated new-service proposals captured this turn (Build-Wizard
+    // Phase 1). Like propose_workflow these are validated by the tool's run() before
+    // capture, so emitting them only after the loop means an invalid one never cards.
+    for (const p of serviceProposals) {
+      yield {
+        type: 'service_proposal',
+        displayName: p.displayName,
+        derivedKey: p.derivedKey,
+        description: p.description,
+        route: p.route,
+        generationMode: p.generationMode,
+        summary: p.summary,
+        confidence: p.confidence,
+      }
+    }
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -830,6 +901,7 @@ export async function* assistantChatStream(
     attachmentNames: input.attachments?.map((a) => a.name) ?? null,
     producedDocuments,
     workflowProposals,
+    serviceProposals,
     usage,
   })
 
@@ -908,6 +980,7 @@ export async function listAssistantThread(
         attachment_names?: string[] | null
         produced_documents?: ProducedDocument[] | null
         workflow_proposals?: WorkflowProposal[] | null
+        service_proposals?: ServiceProposal[] | null
       }
       occurred_at: string
     }>(
@@ -948,6 +1021,7 @@ export async function listAssistantThread(
           reply: r.payload.reply ?? '',
           documents: r.payload.produced_documents ?? undefined,
           workflowProposals: r.payload.workflow_proposals ?? undefined,
+          serviceProposals: r.payload.service_proposals ?? undefined,
         },
       ]
     })

@@ -48,6 +48,18 @@ export interface WorkflowProposalEvent {
   confidence: number
 }
 
+// A NEW service the assistant proposed this turn (Build-Wizard Phase 1) — surfaced
+// as an inline approval card; the version-1 (disabled) write happens only on approve.
+export interface ServiceProposalEvent {
+  displayName: string
+  derivedKey: string
+  description: string | null
+  route: 'auto' | 'manual'
+  generationMode: 'template_merge' | 'ai_draft'
+  summary: string
+  confidence: number
+}
+
 export interface AssistantStreamHandlers {
   onMeta?: (meta: StreamMeta) => void
   onThinking?: (text: string) => void
@@ -58,6 +70,8 @@ export interface AssistantStreamHandlers {
   onDocument?: (doc: { title: string; markdown: string }) => void
   // The assistant proposed a service workflow (PR5) — render an approval card.
   onWorkflowProposal?: (proposal: WorkflowProposalEvent) => void
+  // The assistant proposed a NEW service (Build-Wizard Phase 1) — render a card.
+  onServiceProposal?: (proposal: ServiceProposalEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -142,6 +156,17 @@ export async function streamAssistant(
         handlers.onWorkflowProposal?.({
           serviceKey: String(evt.serviceKey ?? ''),
           graph: Array.isArray(evt.graph) ? (evt.graph as unknown[]) : [],
+          summary: String(evt.summary ?? ''),
+          confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
+        })
+        break
+      case 'service_proposal':
+        handlers.onServiceProposal?.({
+          displayName: String(evt.displayName ?? ''),
+          derivedKey: String(evt.derivedKey ?? ''),
+          description: typeof evt.description === 'string' ? evt.description : null,
+          route: evt.route === 'auto' ? 'auto' : 'manual',
+          generationMode: evt.generationMode === 'ai_draft' ? 'ai_draft' : 'template_merge',
           summary: String(evt.summary ?? ''),
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
         })
