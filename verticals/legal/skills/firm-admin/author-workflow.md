@@ -21,7 +21,9 @@ Apply `firm-admin.platform-discipline`: this is propose→approve, agent-sourced
 
 ## Step 1: Interview the real process
 
-Map the attorney's words to steps. Ask how the work actually flows — what happens first, then what, and who does each part (client, attorney, system, or automatic). Let their answer drive the graph; do not impose a generic flow.
+Map the attorney's words to steps. Ask how the work actually flows with `ask_build_question` — what happens first, then what. Let their answer drive the graph; do not impose a generic flow.
+
+**ASK the gate per step — never assume.** For EACH step, ask the attorney who advances it with an `ask_build_question` whose choices are the four gates: `automatic` (the system advances it), `attorney` (an attorney action advances it), `client` (a client action advances it), `system` (an external event advances it — payment, e-sign, filing). Each step's gate comes from the attorney's answer, not from a silent default. (The table below lists each step kind's *natural* default only as a fallback hint when the attorney genuinely has no preference — always ask first.)
 
 ## Step 2: Map each real step to a catalog STEP_ACTION_KIND
 

@@ -1,4 +1,5 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
+import { buildWizardEnabled } from '../../lifecycle/flags.js'
 import {
   assistantChat,
   submitAssistantFeedback,
@@ -29,11 +30,17 @@ import type { ActionContext } from '@exsto/substrate'
 registerTool({
   name: 'legal.assistant.models',
   description:
-    'List the AI models the attorney can chat with, each flagged with whether its provider integration is connected and whether the app has an adapter for it. Powers the model switcher.',
+    'List the AI models the attorney can chat with, each flagged with whether its provider integration is connected and whether the app has an adapter for it. Powers the model switcher. Also returns `buildWizard`: whether the guided service-build wizard is enabled for this deployment (LEGAL_BUILD_WIZARD), so the chat can show the "Build a service" control only when it is on.',
   mode: 'read',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-  handler: async (ctx: ActionContext) => ({ models: await listAssistantModels(ctx) }),
-} satisfies Tool<Record<string, never>, { models: AssistantModel[] }>)
+  // buildWizard rides on the models response (already fetched on mount) so the client
+  // learns the server-side flag without a second round-trip — and the control stays
+  // dormant (and byte-for-byte unchanged) whenever the flag is off.
+  handler: async (ctx: ActionContext) => ({
+    models: await listAssistantModels(ctx),
+    buildWizard: buildWizardEnabled(),
+  }),
+} satisfies Tool<Record<string, never>, { models: AssistantModel[]; buildWizard: boolean }>)
 
 registerTool({
   name: 'legal.assistant.chat',

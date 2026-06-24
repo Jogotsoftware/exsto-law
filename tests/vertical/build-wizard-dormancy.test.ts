@@ -29,6 +29,8 @@ function emptyCapture() {
     // Phase 6 (billing + the terminal Enable) — empty buckets, like the rest.
     costProposals: [],
     enableProposals: [],
+    // Phase 7 (the structured interview) — empty bucket, like the rest.
+    buildQuestions: [],
   }
 }
 
@@ -51,6 +53,9 @@ const WIZARD_ONLY_TOOLS = [
   // propose_cost sets the fee model; propose_enable flips the service to active.
   'propose_cost',
   'propose_enable',
+  // Phase 7 — the structured interview. ask_build_question turns each interview question
+  // into a click-to-answer card (the headline "make it feel like a wizard" fix).
+  'ask_build_question',
 ]
 
 // The orchestrator block's load-bearing heading — present only when the wizard is on.
@@ -60,6 +65,12 @@ const ORCHESTRATOR_MARKER = 'BUILDING A SERVICE (the guided wizard)'
 // that make the build self-driving and actually go live. Present only flag-on.
 const CONTINUOUS_FLOW_MARKER = 'CONTINUOUS, SELF-DRIVING FLOW'
 const ENABLE_MARKER = 'CALL propose_enable'
+
+// Phase 7 load-bearing orchestrator text — the structured-interview + ask-don't-assume
+// rules (the headline UX fix: every question via ask_build_question, no defaulted
+// automation choices). Present only flag-on.
+const ASK_DONT_ASSUME_MARKER = "ASK, DON'T ASSUME"
+const ASK_TOOL_MARKER = 'ask_build_question'
 
 describe('build wizard dormancy (LEGAL_BUILD_WIZARD off)', () => {
   afterEach(() => {
@@ -81,6 +92,10 @@ describe('build wizard dormancy (LEGAL_BUILD_WIZARD off)', () => {
     // Phase 6 — the continuous-flow + Enable instructions are gated too.
     expect(system).not.toContain(CONTINUOUS_FLOW_MARKER)
     expect(system).not.toContain(ENABLE_MARKER)
+    // Phase 7 — the structured-interview + ask-don't-assume rules are gated too, and
+    // the ask_build_question tool is never even named with the flag off.
+    expect(system).not.toContain(ASK_DONT_ASSUME_MARKER)
+    expect(system).not.toContain(ASK_TOOL_MARKER)
   })
 
   it('keeps the always-on, non-wizard tools regardless of the flag (no regression)', () => {
@@ -121,5 +136,19 @@ describe('build wizard activation (LEGAL_BUILD_WIZARD on)', () => {
     expect(system).toContain(CONTINUOUS_FLOW_MARKER)
     expect(system).toContain('propose_cost')
     expect(system).toContain(ENABLE_MARKER)
+    // Phase 7 — the structured-interview + ask-don't-assume rules (the headline UX
+    // fix): every interview question via ask_build_question, no defaulted automation.
+    expect(system).toContain(ASK_DONT_ASSUME_MARKER)
+    expect(system).toContain(ASK_TOOL_MARKER)
+  })
+
+  it('frames the documents→questionnaire flow as forward-looking + reuse-aware (Phase 7)', () => {
+    process.env.LEGAL_BUILD_WIZARD = '1'
+    const system = buildClaudeSystem('global', null, null)
+    // Flow-aware: tokens before a questionnaire exists are NOT "missing/broken".
+    expect(system).toContain('DOCUMENTS COME BEFORE THE QUESTIONNAIRE')
+    // Reuse-aware: existing firm questions are reused, not re-invented.
+    expect(system).toContain('REUSE EXISTING FIRM QUESTIONS')
+    expect(system).toContain('firmFieldLibrary')
   })
 })

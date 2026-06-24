@@ -84,6 +84,26 @@ export interface TemplateProposalEvent {
   confidence: number
   tokens: string[]
   orphanTokens: string[]
+  // Phase 7 — flow-aware framing: whether a questionnaire exists yet (so orphans read
+  // as forward-looking vs. broken) and which orphan tokens already exist firm-wide.
+  hasQuestionnaire: boolean
+  reusableFromFirm: string[]
+}
+
+// A structured interview QUESTION the assistant asked this turn (Build-Wizard Phase 7)
+// — surfaced as a click-to-answer QuestionCard; the answer rides back as a HIDDEN
+// continuation so the build feels like a wizard, not free chat.
+export interface BuildQuestionChoice {
+  value: string
+  label: string
+  hint?: string
+}
+export interface BuildQuestionEvent {
+  key: string
+  question: string
+  choices: BuildQuestionChoice[]
+  allowFreeText: boolean
+  multiSelect: boolean
 }
 
 // A service's BILLING (fee model) the assistant proposed this turn (Build-Wizard
@@ -126,6 +146,8 @@ export interface AssistantStreamHandlers {
   onCostProposal?: (proposal: CostProposalEvent) => void
   // The assistant proposed enabling the service (Build-Wizard Phase 6 — terminal).
   onEnableProposal?: (proposal: EnableProposalEvent) => void
+  // The assistant asked a structured interview question (Build-Wizard Phase 7).
+  onBuildQuestion?: (question: BuildQuestionEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -247,6 +269,10 @@ export async function streamAssistant(
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
           tokens: Array.isArray(evt.tokens) ? (evt.tokens as string[]) : [],
           orphanTokens: Array.isArray(evt.orphanTokens) ? (evt.orphanTokens as string[]) : [],
+          hasQuestionnaire: evt.hasQuestionnaire === true,
+          reusableFromFirm: Array.isArray(evt.reusableFromFirm)
+            ? (evt.reusableFromFirm as string[])
+            : [],
         })
         break
       case 'cost_proposal':
@@ -263,6 +289,21 @@ export async function streamAssistant(
         handlers.onEnableProposal?.({
           serviceKey: String(evt.serviceKey ?? ''),
           summary: String(evt.summary ?? ''),
+        })
+        break
+      case 'build_question':
+        handlers.onBuildQuestion?.({
+          key: String(evt.key ?? ''),
+          question: String(evt.question ?? ''),
+          choices: Array.isArray(evt.choices)
+            ? (evt.choices as Array<Record<string, unknown>>).map((c) => ({
+                value: String(c.value ?? ''),
+                label: String(c.label ?? ''),
+                hint: typeof c.hint === 'string' && c.hint ? c.hint : undefined,
+              }))
+            : [],
+          allowFreeText: evt.allowFreeText === true,
+          multiSelect: evt.multiSelect === true,
         })
         break
       case 'done':

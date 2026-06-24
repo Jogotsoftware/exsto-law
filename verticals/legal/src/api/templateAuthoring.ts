@@ -54,6 +54,17 @@ export interface ExistingTemplateSummary {
   tokens: string[]
 }
 
+// One reusable QUESTION the firm already defines somewhere (Phase 7 — reuse-aware
+// orphan handling). When a proposed template token matches a field id already used by
+// ANOTHER service's questionnaire, the build should REUSE that question's definition
+// instead of re-inventing it (or calling it "missing"). `services` lists which service
+// keys already define this field id, so the model can point the attorney at the source.
+export interface FirmQuestionSummary {
+  fieldId: string
+  // The service keys whose current questionnaire already defines this field id.
+  services: string[]
+}
+
 // One template anywhere in the FIRM (Phase 5 — reuse), summarized so the model can
 // ADAPT an existing body instead of re-drafting from scratch. `source` is either a
 // service key (a body authored on that service's document_templates store) or
@@ -79,6 +90,17 @@ export interface TemplateAuthoringContext {
   // The service's current questionnaire field ids — the model reuses these EXACT
   // tokens for its {{fill-ins}} so the template binds to real questions (no orphans).
   questionnaireFieldIds: string[]
+  // Whether THIS service has authored a questionnaire yet (Phase 7). Drives flow-aware
+  // framing: when false, a template token with no question is NOT an error — it will
+  // BECOME a question in the next build step. The orphan warning is only real once a
+  // questionnaire exists. (questionnaireFieldIds is empty in both the "no questionnaire
+  // yet" and the "empty questionnaire" cases, so this flag disambiguates them.)
+  hasQuestionnaire: boolean
+  // Phase 7 — every questionnaire field id already defined across the FIRM's OTHER
+  // services, so the model REUSES an existing question definition (company_name,
+  // effective_date, principal_office_address, …) instead of re-inventing it. A
+  // proposed token that matches one of these is reusable, NOT missing.
+  firmFieldLibrary: FirmQuestionSummary[]
   // The service's existing document templates (by docKind) + their tokens, so the
   // model doesn't propose a duplicate or clash with an authored body.
   existingTemplates: ExistingTemplateSummary[]
@@ -164,16 +186,49 @@ export async function loadFirmTemplateLibrary(ctx: ActionContext): Promise<FirmT
   return library
 }
 
+// The FIRM-WIDE question library (Phase 7 — reuse-aware orphans). Every questionnaire
+// field id already defined by ANOTHER service's questionnaire, with the service keys
+// that define it — so a proposed template token matching one of these is REUSABLE
+// (the model should adopt that question's definition), not "missing". Excludes the
+// service being authored (its own ids are questionnaireFieldIds). Read-only — composes
+// the existing per-service questionnaire reads.
+export async function loadFirmFieldLibrary(
+  ctx: ActionContext,
+  excludeServiceKey: string,
+): Promise<FirmQuestionSummary[]> {
+  const services = await listServicesIncludingInactive(ctx)
+  // fieldId (lower-cased) → the set of service keys that define it.
+  const byField = new Map<string, Set<string>>()
+  const schemas = await Promise.all(
+    services
+      .filter((s) => s.serviceKey !== excludeServiceKey)
+      .map(async (s) => ({ key: s.serviceKey, schema: await getQuestionnaire(ctx, s.serviceKey) })),
+  )
+  for (const { key, schema } of schemas) {
+    for (const id of collectFieldIds(schema)) {
+      const set = byField.get(id) ?? new Set<string>()
+      set.add(key)
+      byField.set(id, set)
+    }
+  }
+  return [...byField.entries()]
+    .map(([fieldId, set]) => ({ fieldId, services: [...set].sort() }))
+    .sort((a, b) => a.fieldId.localeCompare(b.fieldId))
+}
+
 // Load everything the model needs to PROPOSE a document template for a service: the
-// questionnaire field ids (the tokens it may bind to), the service's existing
-// templates, the FIRM-WIDE template library (to reuse/adapt — Phase 5), and the
-// docKind registry. Read-only.
+// questionnaire field ids (the tokens it may bind to), whether this service has a
+// questionnaire yet, the FIRM-WIDE question library (to reuse existing questions —
+// Phase 7), the service's existing templates, the FIRM-WIDE template library (to
+// reuse/adapt — Phase 5), and the docKind registry. Read-only.
 export async function loadTemplateContext(
   ctx: ActionContext,
   serviceKey: string,
 ): Promise<TemplateAuthoringContext> {
   const schema = await getQuestionnaire(ctx, serviceKey)
   const questionnaireFieldIds = collectFieldIds(schema)
+  const hasQuestionnaire = schema !== null
+  const firmFieldLibrary = await loadFirmFieldLibrary(ctx, serviceKey)
   const docs = await listServiceDocumentTemplates(ctx, serviceKey)
   const existingTemplates = docs.map((d) => ({
     documentKind: d.documentKind,
@@ -190,7 +245,15 @@ export async function loadTemplateContext(
       ].filter(Boolean),
     ),
   ].sort()
-  return { serviceKey, questionnaireFieldIds, existingTemplates, templateLibrary, docKinds }
+  return {
+    serviceKey,
+    questionnaireFieldIds,
+    hasQuestionnaire,
+    firmFieldLibrary,
+    existingTemplates,
+    templateLibrary,
+    docKinds,
+  }
 }
 
 // The result of validating a proposed template: the shape error (from the SAME
@@ -201,9 +264,21 @@ export interface ProposedTemplateValidation {
   errors: string[]
   // Every distinct {{token}} the body references (flat snake_case, first-seen order).
   tokens: string[]
-  // Tokens with NO matching questionnaire field id — would render [[MISSING]]. A
-  // broken half of the variable contract; surfaced on the card before approval.
+  // Tokens with NO matching questionnaire field id on THIS service. Note: with the
+  // documents→variables→questionnaire flow, this is normally EVERY token when the
+  // questionnaire hasn't been built yet — those are NOT broken, they are the fields the
+  // questionnaire will collect next. Only when a questionnaire already exists does an
+  // orphan mean a genuinely missing question (renders [[MISSING]]). hasQuestionnaire
+  // disambiguates; the card frames it accordingly.
   orphanTokens: string[]
+  // Phase 7 — whether this service already has an authored questionnaire. When false,
+  // orphanTokens are forward-looking ("these will become the questionnaire's
+  // questions"); when true, an orphan is a real gap.
+  hasQuestionnaire: boolean
+  // Phase 7 — of the orphan tokens, those a field id already defines somewhere ELSE in
+  // the firm. The build should REUSE those question definitions (don't re-invent, don't
+  // call them missing). Subset of orphanTokens.
+  reusableFromFirm: string[]
 }
 
 // Validate a proposed template body the write path will persist: non-empty text
@@ -211,10 +286,17 @@ export interface ProposedTemplateValidation {
 // extract its {{tokens}} via the real flat extractor and flag the orphans against
 // the supplied questionnaire field ids. An orphan is NOT a hard error (the attorney
 // may approve a body whose questions come later), so `ok` reflects only the shape.
+//
+// Phase 7: `hasQuestionnaire` controls the framing (forward-looking vs. broken) and
+// `firmFieldIds` (every field id defined elsewhere in the firm) lets the card surface
+// which orphans are REUSABLE existing questions rather than ones to invent.
 export function validateProposedTemplate(
   body: unknown,
   fieldIds: readonly string[],
+  opts?: { hasQuestionnaire?: boolean; firmFieldIds?: readonly string[] },
 ): ProposedTemplateValidation {
+  const hasQuestionnaire = opts?.hasQuestionnaire ?? fieldIds.length > 0
+  const firmKnown = new Set((opts?.firmFieldIds ?? []).map((f) => f.toLowerCase()))
   const errors: string[] = []
   let validated: string | null = null
   try {
@@ -223,12 +305,27 @@ export function validateProposedTemplate(
     errors.push(e instanceof Error ? e.message : String(e))
   }
   if (validated === null) {
-    return { ok: false, errors, tokens: [], orphanTokens: [] }
+    return {
+      ok: false,
+      errors,
+      tokens: [],
+      orphanTokens: [],
+      hasQuestionnaire,
+      reusableFromFirm: [],
+    }
   }
   const tokens = extractRenderedTokens(validated)
   const known = new Set(fieldIds.map((f) => f.toLowerCase()))
   const orphanTokens = tokens.filter((t) => !known.has(t.toLowerCase()))
-  return { ok: errors.length === 0, errors, tokens, orphanTokens }
+  const reusableFromFirm = orphanTokens.filter((t) => firmKnown.has(t.toLowerCase()))
+  return {
+    ok: errors.length === 0,
+    errors,
+    tokens,
+    orphanTokens,
+    hasQuestionnaire,
+    reusableFromFirm,
+  }
 }
 
 // Reasoning summary the approve route carries from the chat turn that produced the
