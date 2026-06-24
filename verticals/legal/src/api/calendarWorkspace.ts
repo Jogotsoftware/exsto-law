@@ -43,6 +43,9 @@ export function cleanGoogleError(err: unknown): string {
 export interface WorkspaceCalendarEvent extends WorkspaceEvent {
   matterEntityId: string | null
   matterNumber: string | null
+  // The matter's chosen call-type (consultation_category palette key), if set —
+  // drives color-coding on the calendar page. Null for external/uncategorized.
+  categoryKey: string | null
   managedByApp: boolean
 }
 
@@ -70,16 +73,32 @@ export async function listWorkspaceEvents(
 
   const ids = events.map((e) => e.eventId)
   const links = await withActionContext(ctx, async (client) => {
-    if (ids.length === 0) return new Map<string, { id: string; name: string }>()
-    const res = await client.query<{ event_id: string; id: string; name: string }>(
-      `SELECT e.metadata->>'google_event_id' AS event_id, e.id, e.name
+    if (ids.length === 0)
+      return new Map<string, { id: string; name: string; categoryKey: string | null }>()
+    const res = await client.query<{
+      event_id: string
+      id: string
+      name: string
+      category_key: string | null
+    }>(
+      // Latest consultation_category attribute on the matter rides along so the
+      // calendar page can color the event by its call-type (same attribute the
+      // dashboard feed reads — see calendar.ts).
+      `SELECT e.metadata->>'google_event_id' AS event_id, e.id, e.name,
+              (SELECT a2.value #>> '{}' FROM attribute a2
+                 JOIN attribute_kind_definition k2 ON k2.id = a2.attribute_kind_id
+                WHERE a2.tenant_id = $1 AND a2.entity_id = e.id
+                  AND k2.kind_name = 'consultation_category' AND a2.valid_to IS NULL
+                ORDER BY a2.valid_from DESC LIMIT 1) AS category_key
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1 AND ekd.kind_name = 'matter' AND e.status = 'active'
          AND e.metadata->>'google_event_id' = ANY($2)`,
       [ctx.tenantId, ids],
     )
-    return new Map(res.rows.map((r) => [r.event_id, { id: r.id, name: r.name }]))
+    return new Map(
+      res.rows.map((r) => [r.event_id, { id: r.id, name: r.name, categoryKey: r.category_key }]),
+    )
   })
 
   return {
@@ -89,6 +108,7 @@ export async function listWorkspaceEvents(
         ...e,
         matterEntityId: m?.id ?? null,
         matterNumber: m?.name ?? null,
+        categoryKey: m?.categoryKey ?? null,
         managedByApp: Boolean(m),
       }
     }),

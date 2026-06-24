@@ -9012,6 +9012,57 @@ input[type='number'] {
   z-index: 5;
   pointer-events: none;
 }
+/* ── Combobox (searchable single-select; matter/contact pickers) ───────────── */
+.cbx {
+  position: relative;
+  width: 100%;
+}
+.cbx-input {
+  width: 100%;
+}
+.cbx-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px -12px rgba(11, 27, 58, 0.3);
+}
+.cbx-option {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cbx-option.active,
+.cbx-option:hover {
+  background: var(--surface-2, #eef2f7);
+}
+.cbx-option[aria-selected='true'] {
+  font-weight: 600;
+}
+.cbx-option-label {
+  font-size: 0.9rem;
+}
+.cbx-option-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.cbx-empty {
+  padding: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
 /* ── Client portal sign-in (email+password / Google / magic-link) ──────────── */
 .cauth-shell {
   display: flex;
