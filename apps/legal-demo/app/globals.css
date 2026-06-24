@@ -1660,6 +1660,32 @@ pre {
   gap: var(--space-3);
   flex-wrap: wrap;
 }
+
+/* Inline service rename (service-editor header). The pencil is a quiet affordance
+   that warms to gold on hover; the editor input mirrors the h1's size. */
+.svc-rename-btn {
+  border: none;
+  background: none;
+  padding: 0 0.15rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.6;
+}
+.svc-rename-btn:hover {
+  color: var(--accent, #b8860b);
+  opacity: 1;
+}
+.svc-name-edit {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.1rem 0.4rem;
+  width: auto;
+  min-width: min(22rem, 70vw);
+  max-width: 100%;
+}
 .page-head-titles {
   flex: 1 1 auto;
   min-width: 0;

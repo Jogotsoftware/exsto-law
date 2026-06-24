@@ -42,6 +42,33 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
   const isNew = serviceKey === 'new'
   const [svc, setSvc] = useState<ServiceHead | null>(null)
   const [completeness, setCompleteness] = useState<Completeness | null>(null)
+  // Inline rename of the service from the header — so the display name is editable
+  // from any tab, not only by digging into the Settings form.
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [savingName, setSavingName] = useState(false)
+
+  async function saveName() {
+    const next = nameDraft.trim()
+    if (!svc || !next || next === svc.displayName) {
+      setEditingName(false)
+      return
+    }
+    setSavingName(true)
+    try {
+      // legal.service.update merges: only displayName changes, the rest carries forward.
+      await callAttorneyMcp({
+        toolName: 'legal.service.update',
+        input: { serviceKey, displayName: next },
+      })
+      setSvc({ ...svc, displayName: next })
+      setEditingName(false)
+    } catch {
+      // Keep the editor open so the attorney can retry; the value is preserved.
+    } finally {
+      setSavingName(false)
+    }
+  }
 
   useEffect(() => {
     if (isNew) return
@@ -73,7 +100,7 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
   if (isNew) {
     return (
       <main>
-        <BackButton fallback="/attorney/services" />
+        <BackButton fallback="/attorney/services" forceFallback />
         <div
           className="attorney-page-head"
           style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
@@ -95,12 +122,44 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
 
   return (
     <main>
-      <BackButton fallback="/attorney/services" />
+      <BackButton fallback="/attorney/services" forceFallback />
       <div
         className="attorney-page-head"
         style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
       >
-        <h1 style={{ margin: 0 }}>{svc?.displayName ?? 'Service'}</h1>
+        {editingName ? (
+          <input
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={saveName}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') saveName()
+              else if (e.key === 'Escape') setEditingName(false)
+            }}
+            disabled={savingName}
+            aria-label="Service display name"
+            className="svc-name-edit"
+          />
+        ) : (
+          <h1 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+            {svc?.displayName ?? 'Service'}
+            {svc && (
+              <button
+                type="button"
+                className="svc-rename-btn"
+                title="Rename service"
+                aria-label="Rename service"
+                onClick={() => {
+                  setNameDraft(svc.displayName)
+                  setEditingName(true)
+                }}
+              >
+                ✎
+              </button>
+            )}
+          </h1>
+        )}
         {svc && (
           <span className={`badge ${svc.isActive ? 'ok' : ''}`}>
             {svc.isActive ? 'Enabled' : 'Disabled'}
