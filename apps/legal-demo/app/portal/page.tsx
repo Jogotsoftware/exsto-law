@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ScaleIcon } from '@/components/icons'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
+import { formatDate, formatDateTime } from '@/lib/datetime'
 
 interface MeResponse {
   email: string
@@ -249,9 +250,7 @@ export default function ClientPortalPage() {
                             <span className="pdash-dot" aria-hidden />
                             <div>
                               <div>{m.label}</div>
-                              <div className="text-sm text-muted">
-                                {new Date(m.occurredAt).toLocaleDateString()}
-                              </div>
+                              <div className="text-sm text-muted">{formatDate(m.occurredAt)}</div>
                             </div>
                           </li>
                         ))}
@@ -435,7 +434,7 @@ function DocumentsPanel({ matterEntityId }: { matterEntityId: string | null }) {
                     <div>
                       <div className="pdash-doc-title">{humanizeKind(d.documentKind)}</div>
                       <span className="text-sm text-muted">
-                        {d.matterNumber} · approved {new Date(d.approvedAt).toLocaleDateString()}
+                        {d.matterNumber} · approved {formatDate(d.approvedAt)}
                       </span>
                     </div>
                     <a
@@ -483,7 +482,7 @@ function DocumentsPanel({ matterEntityId }: { matterEntityId: string | null }) {
                       <div className="pdash-doc-title">{u.originalFilename}</div>
                       <span className="text-sm text-muted">
                         {u.matterNumber} · {formatBytes(u.sizeBytes)} · uploaded{' '}
-                        {new Date(u.uploadedAt).toLocaleDateString()}
+                        {formatDate(u.uploadedAt)}
                       </span>
                     </div>
                   </li>
@@ -874,8 +873,7 @@ function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
             >
               <div className="pdash-msg-body">{m.body}</div>
               <div className="pdash-msg-meta">
-                {m.author === 'client' ? 'You' : 'Pacheco Law'} ·{' '}
-                {new Date(m.sentAt).toLocaleString()}
+                {m.author === 'client' ? 'You' : 'Pacheco Law'} · {formatDateTime(m.sentAt)}
               </div>
             </div>
           ))}

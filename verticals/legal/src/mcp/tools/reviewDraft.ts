@@ -3,7 +3,9 @@ import {
   approveDraft,
   rejectDraft,
   requestDraftRevision,
+  editDraft,
   type DraftReviewInput,
+  type DraftEditInput,
 } from '../../index.js'
 import type { ActionContext, ActionResult } from '@exsto/substrate'
 
@@ -28,6 +30,15 @@ const rejectTool: Tool<DraftReviewInput, ActionResult> = {
   handler: (ctx: ActionContext, input) => rejectDraft(ctx, input),
 }
 
+const editTool: Tool<DraftEditInput, ActionResult> = {
+  name: 'legal.draft.edit',
+  description:
+    'Attorney inline edit of a draft: saves the revised document markdown as a NEW version (append-only — the prior version is preserved). The new version inherits the source status. Returns the new documentVersionId in its effects.',
+  mode: 'write',
+  handler: (ctx: ActionContext, input) => editDraft(ctx, input),
+}
+
 registerTool(approveTool)
 registerTool(requestRevisionTool)
 registerTool(rejectTool)
+registerTool(editTool)

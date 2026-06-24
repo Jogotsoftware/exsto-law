@@ -275,6 +275,15 @@ export async function runDraftGeneration(
       reasoning_trace_id: reasoningTraceId,
       jurisdiction: 'NC',
       confidence: clampConfidence(result.reasoningTrace.confidence),
+      // Token usage (snake_case, same shape recordAssistantTurn writes on
+      // assistant.turn) so the AI usage & cost view counts drafting spend. Read
+      // back by getAiUsageSummary; model is read from model_identity above.
+      usage: {
+        input_tokens: result.usage.inputTokens,
+        output_tokens: result.usage.outputTokens,
+        cache_creation_tokens: result.usage.cacheCreationTokens,
+        cache_read_tokens: result.usage.cacheReadTokens,
+      },
     },
   })
 
