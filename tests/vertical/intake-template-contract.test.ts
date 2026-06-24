@@ -131,3 +131,45 @@ describe('validateProposedTemplate — orphan tokens (pure)', () => {
     expect(res.tokens).toEqual([])
   })
 })
+
+describe('validateProposedTemplate — flow-aware + reuse-aware orphans (Phase 7, pure)', () => {
+  // A body whose tokens split three ways against the service's OWN questionnaire
+  // (company_name) and the firm-wide library (registered_agent exists elsewhere):
+  //   company_name      → covered by this service's question (not an orphan)
+  //   registered_agent  → orphan here, but REUSABLE from another service
+  //   principal_office  → orphan here, and brand-new (genuinely missing/forward-looking)
+  const body = '{{company_name}} — {{registered_agent}} — {{principal_office}}'
+  const fieldIds = ['company_name']
+  const firmFieldIds = ['registered_agent', 'effective_date'] // effective_date is unused here
+
+  it('computes reusableFromFirm as the subset of orphans defined elsewhere in the firm', () => {
+    const res = validateProposedTemplate(body, fieldIds, { hasQuestionnaire: true, firmFieldIds })
+    expect(res.orphanTokens).toEqual(['registered_agent', 'principal_office'])
+    // Only the orphan that exists firm-wide is reusable; the brand-new one is not.
+    expect(res.reusableFromFirm).toEqual(['registered_agent'])
+  })
+
+  it('never marks the service’s own covered tokens as orphan or reusable', () => {
+    const res = validateProposedTemplate(body, fieldIds, { hasQuestionnaire: true, firmFieldIds })
+    expect(res.orphanTokens).not.toContain('company_name')
+    expect(res.reusableFromFirm).not.toContain('company_name')
+  })
+
+  it('is case-insensitive when matching reusable tokens to the firm library', () => {
+    const res = validateProposedTemplate('{{Registered_Agent}}', [], {
+      hasQuestionnaire: true,
+      firmFieldIds: ['registered_agent'],
+    })
+    expect(res.reusableFromFirm).toEqual(['registered_agent'])
+  })
+
+  it('honors hasQuestionnaire (forward-looking when false) and defaults reuse to empty', () => {
+    const before = validateProposedTemplate(body, [], { hasQuestionnaire: false })
+    expect(before.hasQuestionnaire).toBe(false)
+    expect(before.reusableFromFirm).toEqual([]) // no firm library passed → nothing reusable
+    // With no opts at all, hasQuestionnaire infers from whether any field ids were given.
+    const inferred = validateProposedTemplate(body, fieldIds)
+    expect(inferred.hasQuestionnaire).toBe(true)
+    expect(inferred.reusableFromFirm).toEqual([])
+  })
+})

@@ -289,8 +289,19 @@ export async function createServiceAI(
   reasoning: ServiceReasoning,
 ): Promise<{ serviceKey: string; version: number }> {
   const displayName = (input.displayName ?? '').trim()
-  const route: WorkflowRoute = input.route ?? 'manual'
-  const generationMode: GenerationMode = input.generationMode ?? 'template_merge'
+  // Route + generation mode are NEVER defaulted here. Defaulting to 'manual' /
+  // 'template_merge' is exactly the bug the founder reported ("it's defaulting to
+  // manual"): the attorney must CHOOSE both in the build interview (ask_build_question),
+  // and the propose_service tool requires them, so by the time we write they are set.
+  // If they are somehow absent we fail loudly rather than silently birthing a manual,
+  // template-merge service.
+  if (!input.route || !input.generationMode) {
+    throw new Error(
+      'route and generation_mode must both be chosen by the attorney (in the build interview) — they are never defaulted; a service must not be silently created as manual/template_merge.',
+    )
+  }
+  const route: WorkflowRoute = input.route
+  const generationMode: GenerationMode = input.generationMode
 
   // Validate BEFORE any write (incl. the trace) so an invalid proposal leaves no
   // trace row behind. Check uniqueness against ALL versions (matching the handler).
