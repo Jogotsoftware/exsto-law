@@ -27,6 +27,11 @@ interface WorkspaceEvent {
   matterNumber: string | null
   // The matter's chosen call-type palette key, for color-coding (PR1).
   categoryKey: string | null
+  // App-created meetings (PR2): the calendar_event id + linked contact, so the
+  // page can reschedule/cancel via the meeting actions. Null for consultations.
+  meetingEntityId: string | null
+  contactEntityId: string | null
+  contactName: string | null
   managedByApp: boolean
 }
 
@@ -35,6 +40,17 @@ interface MatterOption {
   matterNumber: string
   clientName: string
 }
+
+interface ContactOption {
+  contactEntityId: string
+  fullName: string
+  email: string
+}
+
+// What kind of event the create dialog is making: tied to a matter (a
+// consultation, via the booking path), with a contact (invites them), or a
+// personal block (no invites). Matter/contact/neither — the beta-feedback ask.
+type CreateMode = 'matter' | 'contact' | 'personal'
 
 // The firm's configurable call-type palette (firm.calendar_categories).
 interface Category {
@@ -156,12 +172,21 @@ export default function CalendarPage() {
   const [source, setSource] = useState<'google' | 'disconnected' | 'error' | null>(null)
   const [googleError, setGoogleError] = useState<string | null>(null)
   const [matters, setMatters] = useState<MatterOption[]>([])
+  const [contacts, setContacts] = useState<ContactOption[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // Inline panel state for create/reschedule.
+  // Dialog state for create/reschedule. create carries the chosen mode (matter /
+  // contact / personal) + a title (for contact/personal — consultations auto-title)
+  // and the picked matter/contact. reschedule carries the event's identity so the
+  // submit routes to booking.reschedule (consultations) or meeting.reschedule
+  // (app-created meetings).
   const [panel, setPanel] = useState<{
     kind: 'create' | 'reschedule'
+    mode?: CreateMode
+    summary?: string
     matterEntityId?: string
+    contactEntityId?: string
+    meeting?: { calendarEventEntityId: string; googleEventId: string | null }
     start: string
     end: string
   } | null>(null)
@@ -208,6 +233,11 @@ export default function CalendarPage() {
         input: {},
       })
       setMatters(m.matters)
+      const c = await callAttorneyMcp<{ contacts: ContactOption[] }>({
+        toolName: 'legal.contact.list',
+        input: {},
+      })
+      setContacts(c.contacts)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -252,6 +282,8 @@ export default function CalendarPage() {
         ? prev
         : {
             kind: 'create',
+            mode: 'matter',
+            summary: '',
             matterEntityId:
               (matterId && matters.find((m) => m.matterEntityId === matterId)?.matterEntityId) ||
               matters[0]?.matterEntityId,
@@ -288,6 +320,17 @@ export default function CalendarPage() {
     [matters],
   )
 
+  // Contacts as searchable combobox options (name + email, both matched).
+  const contactOptions: ComboboxOption[] = useMemo(
+    () =>
+      contacts.map((c) => ({
+        value: c.contactEntityId,
+        label: c.fullName || c.email,
+        hint: c.fullName ? c.email : undefined,
+      })),
+    [contacts],
+  )
+
   // Palette key → hex color, for color-coding events by their call-type.
   const categoryColor = useMemo(() => {
     const m = new Map<string, string>()
@@ -302,8 +345,39 @@ export default function CalendarPage() {
   }
 
   // The consolidated per-event action menu (beta feedback: every event should have
-  // an edit menu — reschedule / cancel / email guests / categorize / view matter).
+  // an edit menu). Two flavors: an app-created MEETING (contact/personal — routes to
+  // the meeting actions) vs a matter CONSULTATION (the booking actions, with email
+  // guests + categorize). Reschedule opens the dialog carrying the event's identity.
   function eventMenuItems(e: WorkspaceEvent): ActionItem[] {
+    if (e.meetingEntityId) {
+      const items: ActionItem[] = [
+        {
+          label: 'Reschedule',
+          onClick: () =>
+            setPanel({
+              kind: 'reschedule',
+              meeting: { calendarEventEntityId: e.meetingEntityId!, googleEventId: e.eventId },
+              start: '',
+              end: '',
+            }),
+        },
+      ]
+      if (e.matterEntityId)
+        items.push({ label: 'View matter', href: `/attorney/matters/${e.matterEntityId}` })
+      items.push({
+        label: 'Cancel event',
+        onClick: () => {
+          const who = e.contactName ? ` with ${e.contactName}` : ''
+          if (window.confirm(`Cancel this meeting${who}?`)) {
+            run('legal.meeting.cancel', {
+              calendarEventEntityId: e.meetingEntityId,
+              googleEventId: e.eventId,
+            })
+          }
+        },
+      })
+      return items
+    }
     return [
       {
         label: 'Reschedule',
@@ -338,6 +412,50 @@ export default function CalendarPage() {
     ]
   }
 
+  // Submit the create dialog: matter → booking (a consultation); contact/personal →
+  // a calendar_event meeting (contact invites them, personal is a private hold).
+  async function submitCreate() {
+    if (!panel || panel.kind !== 'create' || !panel.start || !panel.end) return
+    const startIso = new Date(panel.start).toISOString()
+    const endIso = new Date(panel.end).toISOString()
+    if (panel.mode === 'matter') {
+      await run('legal.booking.create_for_matter', {
+        matterEntityId: panel.matterEntityId,
+        startIso,
+        endIso,
+      })
+    } else {
+      await run('legal.meeting.create', {
+        summary: panel.summary?.trim() || (panel.mode === 'contact' ? 'Meeting' : 'Personal block'),
+        startIso,
+        endIso,
+        contactEntityId: panel.mode === 'contact' ? panel.contactEntityId : undefined,
+      })
+    }
+  }
+
+  // Submit the reschedule dialog: route to the matching action by the event's
+  // identity captured when the dialog opened.
+  async function submitReschedule() {
+    if (!panel || panel.kind !== 'reschedule' || !panel.start || !panel.end) return
+    const startIso = new Date(panel.start).toISOString()
+    const endIso = new Date(panel.end).toISOString()
+    if (panel.meeting) {
+      await run('legal.meeting.reschedule', {
+        calendarEventEntityId: panel.meeting.calendarEventEntityId,
+        googleEventId: panel.meeting.googleEventId,
+        startIso,
+        endIso,
+      })
+    } else {
+      await run('legal.booking.reschedule', {
+        matterEntityId: panel.matterEntityId,
+        startIso,
+        endIso,
+      })
+    }
+  }
+
   async function submitAttendees() {
     if (!attendeesFor) return
     const emails = attendeeInput
@@ -368,19 +486,28 @@ export default function CalendarPage() {
     }
   }
 
+  // Open the create dialog with a default mode: matter when the firm has matters,
+  // else a personal block (which needs none). Pre-selects the first matter/contact.
+  function openCreate(start: string, end: string) {
+    setPanel({
+      kind: 'create',
+      mode: matters.length > 0 ? 'matter' : 'personal',
+      summary: '',
+      matterEntityId: matters[0]?.matterEntityId,
+      contactEntityId: contacts[0]?.contactEntityId,
+      start,
+      end,
+    })
+  }
+
   // Click an empty slot on the hourly grid → open the creator prefilled to that
-  // hour (default 1h block). Needs Google connected + at least one matter to book.
+  // hour (default 1h block). Needs Google connected; a personal block needs no matter.
   function openCreateAt(day: Date, hour: number) {
-    if (source !== 'google' || matters.length === 0) return
+    if (source !== 'google') return
     const start = startOfDay(day)
     start.setHours(hour, 0, 0, 0)
     const end = new Date(start.getTime() + 60 * 60 * 1000)
-    setPanel({
-      kind: 'create',
-      matterEntityId: matters[0]?.matterEntityId,
-      start: toLocalInput(start),
-      end: toLocalInput(end),
-    })
+    openCreate(toLocalInput(start), toLocalInput(end))
   }
 
   // WP3.2 — assign an unlinked Google event to a matter (legal.meeting.assign).
@@ -453,6 +580,14 @@ export default function CalendarPage() {
             style={{ marginTop: 4, gap: 'var(--space-2)', alignItems: 'center' }}
           >
             <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
+            <ActionsMenu label="Actions" align="left" items={eventMenuItems(e)} />
+          </div>
+        ) : e.meetingEntityId ? (
+          <div
+            className="row"
+            style={{ marginTop: 4, gap: 'var(--space-2)', alignItems: 'center' }}
+          >
+            {e.contactName && <span className="text-muted text-sm">with {e.contactName}</span>}
             <ActionsMenu label="Actions" align="left" items={eventMenuItems(e)} />
           </div>
         ) : (
@@ -684,7 +819,7 @@ export default function CalendarPage() {
               const nowTop = isToday
                 ? ((now.getTime() - startOfDay(now).getTime()) / 3600_000) * HOUR_PX
                 : null
-              const canCreate = source === 'google' && matters.length > 0
+              const canCreate = source === 'google'
               return (
                 <div
                   key={day.toISOString()}
@@ -701,7 +836,7 @@ export default function CalendarPage() {
                     )
                     openCreateAt(day, hour)
                   }}
-                  title={canCreate ? 'Click an empty slot to book a consultation' : undefined}
+                  title={canCreate ? 'Click an empty slot to add an event' : undefined}
                 >
                   {hours.map((h) => (
                     <div key={h} className="cal-grid-hline" style={{ height: HOUR_PX }} />
@@ -765,15 +900,8 @@ export default function CalendarPage() {
           <button
             className="primary"
             style={{ marginLeft: 'auto' }}
-            disabled={source !== 'google' || matters.length === 0}
-            onClick={() =>
-              setPanel({
-                kind: 'create',
-                matterEntityId: matters[0]?.matterEntityId,
-                start: '',
-                end: '',
-              })
-            }
+            disabled={source !== 'google'}
+            onClick={() => openCreate('', '')}
           >
             + Event
           </button>
@@ -782,7 +910,7 @@ export default function CalendarPage() {
 
       {panel && (
         <Modal
-          title={panel.kind === 'create' ? 'New event' : 'Reschedule consultation'}
+          title={panel.kind === 'create' ? 'New event' : 'Reschedule'}
           onClose={() => setPanel(null)}
           footer={
             <>
@@ -793,25 +921,15 @@ export default function CalendarPage() {
                   busy ||
                   !panel.start ||
                   !panel.end ||
-                  (panel.kind === 'create' && !panel.matterEntityId)
+                  (panel.kind === 'create' && panel.mode === 'matter' && !panel.matterEntityId) ||
+                  (panel.kind === 'create' && panel.mode === 'contact' && !panel.contactEntityId)
                 }
-                onClick={() =>
-                  run(
-                    panel.kind === 'create'
-                      ? 'legal.booking.create_for_matter'
-                      : 'legal.booking.reschedule',
-                    {
-                      matterEntityId: panel.matterEntityId,
-                      startIso: new Date(panel.start).toISOString(),
-                      endIso: new Date(panel.end).toISOString(),
-                    },
-                  )
-                }
+                onClick={() => (panel.kind === 'create' ? submitCreate() : submitReschedule())}
               >
                 {busy
                   ? 'Saving…'
                   : panel.kind === 'create'
-                    ? 'Book + sync to Google'
+                    ? 'Create + sync to Google'
                     : 'Reschedule'}
               </button>
             </>
@@ -819,18 +937,75 @@ export default function CalendarPage() {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             {panel.kind === 'create' && (
-              <div>
-                <div className="kv-label" style={{ marginBottom: 4 }}>
-                  Matter
+              <>
+                {/* Mode: tie to a matter, a contact, or neither (personal block). */}
+                <div className="row" style={{ gap: 0 }}>
+                  {(['matter', 'contact', 'personal'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      className={panel.mode === mode ? 'primary' : ''}
+                      disabled={mode === 'matter' && matters.length === 0}
+                      title={
+                        mode === 'matter' && matters.length === 0
+                          ? 'No matters yet'
+                          : mode === 'matter'
+                            ? 'A consultation on a matter'
+                            : mode === 'contact'
+                              ? 'A meeting with a client (they get an invite)'
+                              : 'A private block on your calendar'
+                      }
+                      onClick={() => setPanel({ ...panel, mode })}
+                    >
+                      {mode === 'matter' ? 'Matter' : mode === 'contact' ? 'Contact' : 'Personal'}
+                    </button>
+                  ))}
                 </div>
-                <Combobox
-                  ariaLabel="Matter"
-                  options={matterOptions}
-                  value={panel.matterEntityId ?? null}
-                  onChange={(v) => setPanel({ ...panel, matterEntityId: v })}
-                  placeholder="Search matters or clients…"
-                />
-              </div>
+
+                {panel.mode === 'matter' && (
+                  <div>
+                    <div className="kv-label" style={{ marginBottom: 4 }}>
+                      Matter
+                    </div>
+                    <Combobox
+                      ariaLabel="Matter"
+                      options={matterOptions}
+                      value={panel.matterEntityId ?? null}
+                      onChange={(v) => setPanel({ ...panel, matterEntityId: v })}
+                      placeholder="Search matters or clients…"
+                    />
+                  </div>
+                )}
+
+                {panel.mode === 'contact' && (
+                  <div>
+                    <div className="kv-label" style={{ marginBottom: 4 }}>
+                      Contact
+                    </div>
+                    <Combobox
+                      ariaLabel="Contact"
+                      options={contactOptions}
+                      value={panel.contactEntityId ?? null}
+                      onChange={(v) => setPanel({ ...panel, contactEntityId: v })}
+                      placeholder="Search contacts…"
+                    />
+                  </div>
+                )}
+
+                {panel.mode !== 'matter' && (
+                  <div>
+                    <div className="kv-label" style={{ marginBottom: 4 }}>
+                      Title
+                    </div>
+                    <input
+                      type="text"
+                      style={{ width: '100%' }}
+                      placeholder={panel.mode === 'contact' ? 'Meeting' : 'Personal block'}
+                      value={panel.summary ?? ''}
+                      onChange={(e) => setPanel({ ...panel, summary: e.target.value })}
+                    />
+                  </div>
+                )}
+              </>
             )}
             <div>
               <div className="kv-label" style={{ marginBottom: 4 }}>
@@ -1121,6 +1296,11 @@ export default function CalendarPage() {
                   {e.matterEntityId ? (
                     <>
                       <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
+                      <ActionsMenu label="Actions" align="right" items={eventMenuItems(e)} />
+                    </>
+                  ) : e.meetingEntityId ? (
+                    <>
+                      {e.contactName && <span className="text-muted text-sm">{e.contactName}</span>}
                       <ActionsMenu label="Actions" align="right" items={eventMenuItems(e)} />
                     </>
                   ) : (

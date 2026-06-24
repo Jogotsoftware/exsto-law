@@ -15,6 +15,9 @@ import {
   listMeetingsForMatter,
   listMeetingsForContact,
   listUnassignedMeetings,
+  createMeeting,
+  rescheduleMeeting,
+  cancelMeeting,
 } from '@exsto/legal'
 import { withSuperuser, closeDbPool } from '@exsto/shared'
 import type { ActionContext } from '@exsto/substrate'
@@ -147,5 +150,81 @@ run('Calendar meetings (live DB)', { timeout: 120_000 }, () => {
         (x) => x.calendarEventEntityId === meetingId,
       ),
     ).toBe(true)
+  })
+
+  // PR2: the attorney CREATES events (contact / personal) from the Calendar tab.
+  // No Google creds in test, so the event is substrate-only (google_event_id null);
+  // we assert the handler's writes directly.
+  async function latestAttr(entityId: string, kind: string): Promise<string | null> {
+    return withSuperuser(async (client) => {
+      const r = await client.query<{ v: string }>(
+        `SELECT a.value #>> '{}' AS v FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id AND akd.kind_name = $3
+         WHERE a.tenant_id = $1 AND a.entity_id = $2 AND a.valid_to IS NULL
+         ORDER BY a.valid_from DESC LIMIT 1`,
+        [TENANT, entityId, kind],
+      )
+      return r.rows[0]?.v ?? null
+    })
+  }
+  async function openRelTarget(sourceId: string, kind: string): Promise<string | null> {
+    return withSuperuser(async (client) => {
+      const r = await client.query<{ t: string }>(
+        `SELECT r.target_entity_id AS t FROM relationship r
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = $3
+         WHERE r.tenant_id = $1 AND r.source_entity_id = $2 AND r.valid_to IS NULL LIMIT 1`,
+        [TENANT, sourceId, kind],
+      )
+      return r.rows[0]?.t ?? null
+    })
+  }
+
+  it('creates a CONTACT meeting (meeting_with), reschedules, and cancels', async () => {
+    const m = await bookMatter(`${tag} Hal`, `${tag}-hal@mtg.test`, 8)
+    const c = await contactFor(m)
+    const s = slot(9)
+
+    const created = await createMeeting(attorneyCtx, {
+      summary: 'Intro call',
+      startIso: s.startIso,
+      endIso: s.endIso,
+      contactEntityId: c,
+    })
+    const ceId = created.calendarEventEntityId!
+    expect(created.contactEntityId).toBe(c)
+    // meeting_with link to the contact; human-sourced title.
+    expect(await openRelTarget(ceId, 'meeting_with')).toBe(c)
+    expect(await latestAttr(ceId, 'meeting_title')).toBe('Intro call')
+    expect(await latestAttr(ceId, 'meeting_event_status')).toBe('confirmed')
+
+    // Reschedule appends a new start time.
+    const s2 = slot(11)
+    await rescheduleMeeting(attorneyCtx, {
+      calendarEventEntityId: ceId,
+      googleEventId: null,
+      startIso: s2.startIso,
+      endIso: s2.endIso,
+    })
+    expect(new Date(await latestAttr(ceId, 'meeting_started_at')!).getTime()).toBe(
+      new Date(s2.startIso).getTime(),
+    )
+
+    // Cancel marks it cancelled (append-only).
+    await cancelMeeting(attorneyCtx, { calendarEventEntityId: ceId, googleEventId: null })
+    expect(await latestAttr(ceId, 'meeting_event_status')).toBe('cancelled')
+  })
+
+  it('creates a PERSONAL block (no matter, no contact)', async () => {
+    const s = slot(13)
+    const created = await createMeeting(attorneyCtx, {
+      summary: 'Focus block',
+      startIso: s.startIso,
+      endIso: s.endIso,
+    })
+    const ceId = created.calendarEventEntityId!
+    expect(created.contactEntityId ?? null).toBeNull()
+    expect(await openRelTarget(ceId, 'meeting_with')).toBeNull()
+    expect(await openRelTarget(ceId, 'meeting_of')).toBeNull()
+    expect(await latestAttr(ceId, 'meeting_title')).toBe('Focus block')
   })
 })

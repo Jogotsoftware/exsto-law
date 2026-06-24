@@ -1,7 +1,15 @@
 import { submitAction, type ActionContext, type ActionResult } from '@exsto/substrate'
-import { getCalendarEvent, type WorkspaceEvent } from '../adapters/googleCalendar.js'
+import {
+  getCalendarEvent,
+  createCalendarEvent,
+  rescheduleEvent,
+  cancelEvent,
+  loadCredentials,
+  type WorkspaceEvent,
+} from '../adapters/googleCalendar.js'
 import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import { listMeetingsToReconcile, type MeetingSummary } from '../queries/meetings.js'
+import { getContact } from '../queries/contacts.js'
 
 // Write API for meetings (beta sprint Obj 8). The attorney picks a live Google
 // event (already surfaced by legal.calendar.events) and assigns it to a matter;
@@ -64,6 +72,123 @@ export async function unassignMeeting(
     actionKindName: 'legal.meeting.unassign',
     intentKind: 'adjustment',
     payload: { calendar_event_entity_id: calendarEventEntityId },
+  })
+}
+
+// ── Create / reschedule / cancel app-created meetings (matter / contact / personal)
+// The attorney creates an event from the Calendar tab. The Google event is created
+// FIRST (so the substrate captures its id), then legal.meeting.create records it.
+// Contact meetings invite the contact; personal blocks invite no one.
+
+export interface CreateMeetingInput {
+  summary: string
+  startIso: string
+  endIso: string
+  // A meeting may be with a contact, on a matter, or neither (a personal hold).
+  // The Calendar tab uses contact + personal here; matter consultations keep
+  // flowing through the booking path (legal.booking.create_for_matter).
+  contactEntityId?: string | null
+  matterEntityId?: string | null
+}
+
+export interface CreateMeetingResult {
+  calendarEventEntityId?: string
+  googleEventId?: string | null
+  matterEntityId?: string | null
+  contactEntityId?: string | null
+}
+
+export async function createMeeting(
+  ctx: ActionContext,
+  input: CreateMeetingInput,
+): Promise<CreateMeetingResult> {
+  const summary = input.summary?.trim() || 'Meeting'
+  // Resolve the contact's email SERVER-SIDE (never trust a client-passed address).
+  let contactEmail: string | null = null
+  if (input.contactEntityId) {
+    const contact = await getContact(ctx, input.contactEntityId)
+    if (!contact) throw new Error('Contact not found.')
+    contactEmail = contact.email || null
+  }
+
+  const creds = await loadCredentials(ctx.tenantId, ctx.actorId)
+  let googleEventId: string | null = null
+  let htmlLink: string | null = null
+  if (creds) {
+    const created = await createCalendarEvent({
+      tenantId: ctx.tenantId,
+      actorId: ctx.actorId,
+      summary,
+      startIso: input.startIso,
+      endIso: input.endIso,
+      attorneyEmail: creds.accountEmail,
+      attendeeEmails: contactEmail ? [contactEmail] : [],
+    })
+    googleEventId = created.eventId
+    htmlLink = created.htmlLink
+  }
+
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.meeting.create',
+    intentKind: 'adjustment',
+    payload: {
+      google_event_id: googleEventId,
+      summary,
+      started_at: input.startIso,
+      ended_at: input.endIso,
+      all_day: false,
+      attendee_emails: contactEmail ? [contactEmail] : [],
+      html_link: htmlLink,
+      event_status: 'confirmed',
+      matter_entity_id: input.matterEntityId ?? null,
+      contact_entity_id: input.contactEntityId ?? null,
+    },
+  })
+  return res.effects[0] as CreateMeetingResult
+}
+
+export async function rescheduleMeeting(
+  ctx: ActionContext,
+  input: {
+    calendarEventEntityId: string
+    googleEventId?: string | null
+    startIso: string
+    endIso: string
+  },
+): Promise<ActionResult> {
+  if (input.googleEventId) {
+    await rescheduleEvent(
+      ctx.tenantId,
+      input.googleEventId,
+      input.startIso,
+      input.endIso,
+      ctx.actorId,
+    )
+  }
+  return submitAction(ctx, {
+    actionKindName: 'legal.meeting.reschedule',
+    intentKind: 'adjustment',
+    payload: {
+      calendar_event_entity_id: input.calendarEventEntityId,
+      started_at: input.startIso,
+      ended_at: input.endIso,
+    },
+  })
+}
+
+export async function cancelMeeting(
+  ctx: ActionContext,
+  input: { calendarEventEntityId: string; googleEventId?: string | null },
+): Promise<ActionResult> {
+  if (input.googleEventId) {
+    await cancelEvent(ctx.tenantId, input.googleEventId, ctx.actorId).catch(() => {
+      // Already gone in Google — the substrate cancel still records.
+    })
+  }
+  return submitAction(ctx, {
+    actionKindName: 'legal.meeting.cancel',
+    intentKind: 'adjustment',
+    payload: { calendar_event_entity_id: input.calendarEventEntityId },
   })
 }
 

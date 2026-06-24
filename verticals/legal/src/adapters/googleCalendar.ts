@@ -684,6 +684,62 @@ ${input.descriptionHtml}
   }
 }
 
+// Create a GENERIC calendar event (not a consultation): the attorney's app-created
+// matter / contact / personal meeting. Personal = no attendees (a private hold,
+// sendUpdates 'none'); contact = the contact is invited (sendUpdates 'all' so
+// Google emails them). The attorney is always the organizer.
+export interface CreateCalendarEventInput {
+  tenantId: string
+  actorId?: string | null
+  summary: string
+  description?: string
+  startIso: string
+  endIso: string
+  attorneyEmail: string
+  // Guests to invite. Empty = a private hold on the attorney's own calendar.
+  attendeeEmails: string[]
+}
+
+export async function createCalendarEvent(input: CreateCalendarEventInput): Promise<CreatedEvent> {
+  const { oauth2, creds } = await authedClient(input.tenantId, input.actorId)
+  const calendar = google.calendar({ version: 'v3', auth: oauth2 })
+
+  const guests = input.attendeeEmails
+    .map((e) => e.trim())
+    .filter((e) => e.includes('@') && e !== input.attorneyEmail)
+  const hasGuests = guests.length > 0
+
+  const event: calendar_v3.Schema$Event = {
+    summary: input.summary,
+    description: input.description ?? '',
+    start: { dateTime: input.startIso },
+    end: { dateTime: input.endIso },
+    // Only attach an attendee list when there ARE guests — a private hold has none.
+    attendees: hasGuests
+      ? [
+          { email: input.attorneyEmail, responseStatus: 'accepted', organizer: true },
+          ...guests.map((email) => ({ email })),
+        ]
+      : undefined,
+    reminders: { useDefault: true },
+    guestsCanInviteOthers: false,
+    guestsCanSeeOtherGuests: false,
+    visibility: 'private',
+  }
+
+  const res = await calendar.events.insert({
+    calendarId: creds.calendarId,
+    requestBody: event,
+    sendUpdates: hasGuests ? 'all' : 'none',
+  })
+
+  return {
+    eventId: res.data.id!,
+    htmlLink: res.data.htmlLink ?? '',
+    iCalUid: res.data.iCalUID,
+  }
+}
+
 export async function rescheduleEvent(
   tenantId: string,
   eventId: string,

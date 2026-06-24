@@ -46,6 +46,12 @@ export interface WorkspaceCalendarEvent extends WorkspaceEvent {
   // The matter's chosen call-type (consultation_category palette key), if set —
   // drives color-coding on the calendar page. Null for external/uncategorized.
   categoryKey: string | null
+  // For app-CREATED meetings (legal.meeting.create — contact/personal events): the
+  // calendar_event entity id, plus the linked contact. Null for consultations and
+  // external Google events. Lets the page reschedule/cancel via the meeting actions.
+  meetingEntityId: string | null
+  contactEntityId: string | null
+  contactName: string | null
   managedByApp: boolean
 }
 
@@ -72,18 +78,31 @@ export async function listWorkspaceEvents(
   }
 
   const ids = events.map((e) => e.eventId)
-  const links = await withActionContext(ctx, async (client) => {
-    if (ids.length === 0)
-      return new Map<string, { id: string; name: string; categoryKey: string | null }>()
-    const res = await client.query<{
+  const emptyMatter = () =>
+    new Map<string, { id: string; name: string; categoryKey: string | null }>()
+  const emptyMeeting = () =>
+    new Map<
+      string,
+      {
+        calendarEventId: string
+        matterId: string | null
+        matterName: string | null
+        contactId: string | null
+        contactName: string | null
+      }
+    >()
+
+  const { matterLinks, meetingLinks } = await withActionContext(ctx, async (client) => {
+    if (ids.length === 0) return { matterLinks: emptyMatter(), meetingLinks: emptyMeeting() }
+
+    // (1) Consultations: a matter carries its booked Google event id in metadata.
+    // Latest consultation_category rides along to color the event by call-type.
+    const matterRes = await client.query<{
       event_id: string
       id: string
       name: string
       category_key: string | null
     }>(
-      // Latest consultation_category attribute on the matter rides along so the
-      // calendar page can color the event by its call-type (same attribute the
-      // dashboard feed reads — see calendar.ts).
       `SELECT e.metadata->>'google_event_id' AS event_id, e.id, e.name,
               (SELECT a2.value #>> '{}' FROM attribute a2
                  JOIN attribute_kind_definition k2 ON k2.id = a2.attribute_kind_id
@@ -96,20 +115,81 @@ export async function listWorkspaceEvents(
          AND e.metadata->>'google_event_id' = ANY($2)`,
       [ctx.tenantId, ids],
     )
-    return new Map(
-      res.rows.map((r) => [r.event_id, { id: r.id, name: r.name, categoryKey: r.category_key }]),
+
+    // (2) App-created meetings: a calendar_event holds its Google id in the
+    // meeting_google_event_id attribute, with its matter (meeting_of) and/or
+    // contact (meeting_with) open links. Personal blocks have neither.
+    const meetingRes = await client.query<{
+      event_id: string
+      calendar_event_id: string
+      matter_id: string | null
+      matter_name: string | null
+      contact_id: string | null
+      contact_name: string | null
+    }>(
+      `SELECT gid.value #>> '{}' AS event_id,
+              ce.id AS calendar_event_id,
+              m.id AS matter_id, m.name AS matter_name,
+              ct.id AS contact_id, cn.value #>> '{}' AS contact_name
+       FROM entity ce
+       JOIN entity_kind_definition cek ON cek.id = ce.entity_kind_id AND cek.kind_name = 'calendar_event'
+       JOIN attribute gid ON gid.entity_id = ce.id AND gid.valid_to IS NULL
+       JOIN attribute_kind_definition gidk ON gidk.id = gid.attribute_kind_id
+            AND gidk.kind_name = 'meeting_google_event_id'
+       LEFT JOIN relationship rof ON rof.tenant_id = $1 AND rof.source_entity_id = ce.id
+            AND rof.valid_to IS NULL
+            AND rof.relationship_kind_id IN
+              (SELECT id FROM relationship_kind_definition WHERE tenant_id = $1 AND kind_name = 'meeting_of')
+       LEFT JOIN entity m ON m.id = rof.target_entity_id AND m.status = 'active'
+       LEFT JOIN relationship rw ON rw.tenant_id = $1 AND rw.source_entity_id = ce.id
+            AND rw.valid_to IS NULL
+            AND rw.relationship_kind_id IN
+              (SELECT id FROM relationship_kind_definition WHERE tenant_id = $1 AND kind_name = 'meeting_with')
+       LEFT JOIN entity ct ON ct.id = rw.target_entity_id AND ct.status = 'active'
+       LEFT JOIN attribute cn ON cn.entity_id = ct.id AND cn.valid_to IS NULL
+            AND cn.attribute_kind_id IN
+              (SELECT id FROM attribute_kind_definition WHERE tenant_id = $1 AND kind_name = 'full_name')
+       WHERE ce.tenant_id = $1 AND ce.status = 'active'
+         AND gid.value #>> '{}' = ANY($2)`,
+      [ctx.tenantId, ids],
     )
+
+    return {
+      matterLinks: new Map(
+        matterRes.rows.map((r) => [
+          r.event_id,
+          { id: r.id, name: r.name, categoryKey: r.category_key },
+        ]),
+      ),
+      meetingLinks: new Map(
+        meetingRes.rows.map((r) => [
+          r.event_id,
+          {
+            calendarEventId: r.calendar_event_id,
+            matterId: r.matter_id,
+            matterName: r.matter_name,
+            contactId: r.contact_id,
+            contactName: r.contact_name,
+          },
+        ]),
+      ),
+    }
   })
 
   return {
     events: events.map((e) => {
-      const m = links.get(e.eventId)
+      const m = matterLinks.get(e.eventId)
+      // A consultation (matter metadata) wins; otherwise an app-created meeting.
+      const mt = m ? undefined : meetingLinks.get(e.eventId)
       return {
         ...e,
-        matterEntityId: m?.id ?? null,
-        matterNumber: m?.name ?? null,
+        matterEntityId: m?.id ?? mt?.matterId ?? null,
+        matterNumber: m?.name ?? mt?.matterName ?? null,
         categoryKey: m?.categoryKey ?? null,
-        managedByApp: Boolean(m),
+        meetingEntityId: mt?.calendarEventId ?? null,
+        contactEntityId: mt?.contactId ?? null,
+        contactName: mt?.contactName ?? null,
+        managedByApp: Boolean(m) || Boolean(mt),
       }
     }),
     source: 'google',
