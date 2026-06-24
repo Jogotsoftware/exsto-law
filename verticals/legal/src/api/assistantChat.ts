@@ -46,6 +46,14 @@ import {
 } from './workflowAuthoringTools.js'
 import { buildServiceContextTool, buildProposeServiceTool } from './serviceAuthoringTools.js'
 import type { ServiceProposal } from './serviceAuthoring.js'
+import {
+  buildQuestionnaireContextTool,
+  buildProposeQuestionnaireTool,
+  buildTemplateContextTool,
+  buildProposeTemplateTool,
+  type QuestionnaireProposal,
+  type TemplateProposal,
+} from './intakeTemplateTools.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
@@ -146,6 +154,33 @@ export type AssistantChatStreamEvent =
       summary: string
       confidence: number
     }
+  // The assistant PROPOSED an intake QUESTIONNAIRE for a service (Build-Wizard
+  // Phase 2). The UI renders it as an inline approval card surfacing the variable-
+  // contract coverage (missingForTokens); the live write happens only on approve.
+  // Flag-gated (LEGAL_BUILD_WIZARD).
+  | {
+      type: 'questionnaire_proposal'
+      serviceKey: string
+      schema: unknown
+      summary: string
+      confidence: number
+      missingForTokens: string[]
+      unusedFields: string[]
+    }
+  // The assistant PROPOSED a document TEMPLATE for a service (Build-Wizard Phase 3).
+  // The UI renders it as an inline approval card surfacing the orphan tokens (tokens
+  // with no question). The live write happens only on approve. Flag-gated.
+  | {
+      type: 'template_proposal'
+      serviceKey: string
+      name: string
+      body: string
+      docKind: string
+      summary: string
+      confidence: number
+      tokens: string[]
+      orphanTokens: string[]
+    }
   | {
       type: 'done'
       eventId: string
@@ -174,6 +209,12 @@ export interface AssistantChatReply {
   // New-service proposals captured this turn (Build-Wizard Phase 1) — approval
   // cards. Empty for ordinary answers and whenever the wizard flag is off.
   serviceProposals?: ServiceProposal[]
+  // Questionnaire proposals captured this turn (Build-Wizard Phase 2) — approval
+  // cards. Empty for ordinary answers and whenever the wizard flag is off.
+  questionnaireProposals?: QuestionnaireProposal[]
+  // Template proposals captured this turn (Build-Wizard Phase 3) — approval cards.
+  // Empty for ordinary answers and whenever the wizard flag is off.
+  templateProposals?: TemplateProposal[]
 }
 
 export interface AssistantThreadEntry {
@@ -198,6 +239,12 @@ export interface AssistantThreadEntry {
   // New-service proposals captured on this turn (assistant side), so a reopened
   // thread still shows the approval cards.
   serviceProposals?: ServiceProposal[]
+  // Questionnaire proposals captured on this turn (assistant side), so a reopened
+  // thread still shows the approval cards.
+  questionnaireProposals?: QuestionnaireProposal[]
+  // Template proposals captured on this turn (assistant side), so a reopened thread
+  // still shows the approval cards.
+  templateProposals?: TemplateProposal[]
 }
 
 const SYSTEM_PROMPT = [
@@ -340,6 +387,8 @@ function buildAttorneyClientTools(
     producedDocuments: ProducedDocument[]
     workflowProposals: WorkflowProposal[]
     serviceProposals: ServiceProposal[]
+    questionnaireProposals: QuestionnaireProposal[]
+    templateProposals: TemplateProposal[]
   },
 ): ClientTool[] {
   const tools: ClientTool[] = [buildFeedbackTool(ctx, input)]
@@ -347,12 +396,19 @@ function buildAttorneyClientTools(
   tools.push(buildProduceDocumentTool(capture.producedDocuments))
   tools.push(buildWorkflowContextTool(ctx))
   tools.push(buildProposeWorkflowTool(ctx, capture.workflowProposals))
-  // Build-Wizard Phase 1: the new-service authoring tools are dormant unless the
+  // Build-Wizard (Phases 1–3): the authoring tools are dormant unless the
   // LEGAL_BUILD_WIZARD flag is on. With the flag off they're never registered (and
   // the system prompt below says nothing about them), so this whole path is a no-op.
   if (buildWizardEnabled()) {
+    // Phase 1: propose a new service shell.
     tools.push(buildServiceContextTool(ctx))
     tools.push(buildProposeServiceTool(ctx, capture.serviceProposals))
+    // Phase 2: propose a service's intake questionnaire (token-symmetry surfaced).
+    tools.push(buildQuestionnaireContextTool(ctx))
+    tools.push(buildProposeQuestionnaireTool(ctx, capture.questionnaireProposals))
+    // Phase 3: propose a service's document template (orphan tokens surfaced).
+    tools.push(buildTemplateContextTool(ctx))
+    tools.push(buildProposeTemplateTool(ctx, capture.templateProposals))
   }
   return tools
 }
@@ -428,6 +484,8 @@ function buildClaudeSystem(
   if (buildWizardEnabled()) {
     system +=
       '\n\nCREATING A NEW SERVICE — when the attorney asks you to create, set up, or add a new SERVICE offering (e.g. "create an NC SMLLC formation service", "add a trademark filing service"), you propose an empty service SHELL for them to approve. ALWAYS call get_service_context FIRST to load the existing service keys (so your proposed key is unique) and the closed route + generation_mode vocabularies. Pick a route and generation_mode ONLY from those — never invent one. When you have a name and a valid choice, deliver it by CALLING the propose_service tool — this does NOT save anything; it shows the attorney an approval card, and the service is created (as a disabled draft) only when THEY approve it. Put the proposal ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to it to review.'
+    system +=
+      "\n\nBUILDING A SERVICE'S INTAKE QUESTIONNAIRE AND DOCUMENTS — when the attorney asks you to build the intake form (questionnaire) or a document template for an EXISTING service, you propose them for approval, bound by the VARIABLE CONTRACT: every document {{token}} must map to a questionnaire field id, or it renders [[MISSING]]. For a QUESTIONNAIRE: call get_questionnaire_context FIRST (it gives the closed field types, the current form, and the {{tokens}} the service's documents reference) and build a form that collects a field for EACH template token (matching ids), then CALL propose_questionnaire. For a TEMPLATE: call get_template_context FIRST (it gives the questionnaire's field ids) and write a markdown body whose {{tokens}} are flat snake_case and bind to those field ids — never invent a dotted path — then CALL propose_template. Both tools only show an approval card; nothing is saved until the attorney approves. The card surfaces coverage gaps (template tokens with no question, or questions no document uses) so the attorney never approves a broken contract — point those out. Put the proposal ONLY in the tool call; your reply is a SINGLE short sentence pointing them to it (flag any coverage gap)."
   }
   if (activeSkillsText) system += `\n\n${activeSkillsText}`
   if (skillCatalogText) system += `\n\n${skillCatalogText}`
@@ -569,6 +627,12 @@ export async function recordAssistantTurn(
     // New-service proposals the assistant captured this turn (Build-Wizard Phase 1),
     // recorded so a reopened thread can re-show the approval cards. Additive field.
     serviceProposals?: ServiceProposal[] | null
+    // Questionnaire proposals captured this turn (Build-Wizard Phase 2), recorded so
+    // a reopened thread can re-show the approval cards. Additive field.
+    questionnaireProposals?: QuestionnaireProposal[] | null
+    // Template proposals captured this turn (Build-Wizard Phase 3), recorded so a
+    // reopened thread can re-show the approval cards. Additive field.
+    templateProposals?: TemplateProposal[] | null
     // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
     // Recorded additively in the event payload; powers the AI usage/cost view.
     usage?: AssistantUsage | null
@@ -612,6 +676,18 @@ export async function recordAssistantTurn(
         // thread re-shows them. Null when none were proposed.
         service_proposals:
           input.serviceProposals && input.serviceProposals.length ? input.serviceProposals : null,
+        // Questionnaire proposals captured this turn (approval cards), so a reopened
+        // thread re-shows them. Null when none were proposed.
+        questionnaire_proposals:
+          input.questionnaireProposals && input.questionnaireProposals.length
+            ? input.questionnaireProposals
+            : null,
+        // Template proposals captured this turn (approval cards), so a reopened
+        // thread re-shows them. Null when none were proposed.
+        template_proposals:
+          input.templateProposals && input.templateProposals.length
+            ? input.templateProposals
+            : null,
         // Token usage (snake_case to match the rest of the payload), null when the
         // provider doesn't report it. The actor is captured as source_ref above, so
         // the usage view can attribute cost per attorney.
@@ -664,6 +740,10 @@ export async function assistantChat(
   // only when the build-wizard flag is on). Surfaced as approval cards; the live
   // version-1 write is the create-from-ai approve route.
   const serviceProposals: ServiceProposal[] = []
+  // Questionnaire/template proposals captured this turn (Claude only, build-wizard
+  // flag on). Surfaced as approval cards; the live writes are the approve routes.
+  const questionnaireProposals: QuestionnaireProposal[] = []
+  const templateProposals: TemplateProposal[] = []
   // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
   let usage: AssistantUsage | null = null
 
@@ -707,6 +787,8 @@ export async function assistantChat(
         producedDocuments,
         workflowProposals,
         serviceProposals,
+        questionnaireProposals,
+        templateProposals,
       }),
     })
     reply = result.reply
@@ -729,6 +811,8 @@ export async function assistantChat(
     producedDocuments,
     workflowProposals,
     serviceProposals,
+    questionnaireProposals,
+    templateProposals,
     usage,
   })
 
@@ -743,6 +827,8 @@ export async function assistantChat(
     documents: producedDocuments.length ? producedDocuments : undefined,
     workflowProposals: workflowProposals.length ? workflowProposals : undefined,
     serviceProposals: serviceProposals.length ? serviceProposals : undefined,
+    questionnaireProposals: questionnaireProposals.length ? questionnaireProposals : undefined,
+    templateProposals: templateProposals.length ? templateProposals : undefined,
   }
 }
 
@@ -782,6 +868,10 @@ export async function* assistantChatStream(
   // New-service proposals captured this turn (Claude only, via propose_service,
   // flag-gated). Surfaced as approval cards after the model loop.
   const serviceProposals: ServiceProposal[] = []
+  // Questionnaire/template proposals captured this turn (Claude only, flag-gated).
+  // Surfaced as approval cards after the model loop.
+  const questionnaireProposals: QuestionnaireProposal[] = []
+  const templateProposals: TemplateProposal[] = []
   let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
@@ -830,6 +920,8 @@ export async function* assistantChatStream(
         producedDocuments,
         workflowProposals,
         serviceProposals,
+        questionnaireProposals,
+        templateProposals,
       }),
     })) {
       if (chunk.type === 'text') {
@@ -885,6 +977,35 @@ export async function* assistantChatStream(
         confidence: p.confidence,
       }
     }
+    // Surface validated questionnaire proposals captured this turn (Build-Wizard
+    // Phase 2) — the tool's run() validated the shape + computed token-symmetry
+    // before capture, so emitting after the loop means a malformed one never cards.
+    for (const p of questionnaireProposals) {
+      yield {
+        type: 'questionnaire_proposal',
+        serviceKey: p.serviceKey,
+        schema: p.schema,
+        summary: p.summary,
+        confidence: p.confidence,
+        missingForTokens: p.missingForTokens,
+        unusedFields: p.unusedFields,
+      }
+    }
+    // Surface validated template proposals captured this turn (Build-Wizard Phase 3),
+    // with the orphan tokens the tool's run() computed.
+    for (const p of templateProposals) {
+      yield {
+        type: 'template_proposal',
+        serviceKey: p.serviceKey,
+        name: p.name,
+        body: p.body,
+        docKind: p.docKind,
+        summary: p.summary,
+        confidence: p.confidence,
+        tokens: p.tokens,
+        orphanTokens: p.orphanTokens,
+      }
+    }
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -902,6 +1023,8 @@ export async function* assistantChatStream(
     producedDocuments,
     workflowProposals,
     serviceProposals,
+    questionnaireProposals,
+    templateProposals,
     usage,
   })
 
@@ -981,6 +1104,8 @@ export async function listAssistantThread(
         produced_documents?: ProducedDocument[] | null
         workflow_proposals?: WorkflowProposal[] | null
         service_proposals?: ServiceProposal[] | null
+        questionnaire_proposals?: QuestionnaireProposal[] | null
+        template_proposals?: TemplateProposal[] | null
       }
       occurred_at: string
     }>(
@@ -1022,6 +1147,8 @@ export async function listAssistantThread(
           documents: r.payload.produced_documents ?? undefined,
           workflowProposals: r.payload.workflow_proposals ?? undefined,
           serviceProposals: r.payload.service_proposals ?? undefined,
+          questionnaireProposals: r.payload.questionnaire_proposals ?? undefined,
+          templateProposals: r.payload.template_proposals ?? undefined,
         },
       ]
     })

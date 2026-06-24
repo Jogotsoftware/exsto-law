@@ -808,6 +808,32 @@ export async function getQuestionnaire(
   })
 }
 
+// Every field id in a service's current questionnaire (lower-cased), including the
+// member fields of a members_repeater (those bind tokens too). The set a document
+// template's {{tokens}} are checked against for the variable contract (the build
+// wizard's orphan-token detection). Empty when the service has no questionnaire.
+export async function collectQuestionnaireFieldIds(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<string[]> {
+  const schema = await getQuestionnaire(ctx, serviceKey)
+  if (!schema) return []
+  const ids: string[] = []
+  const seen = new Set<string>()
+  const visit = (fields: ServiceField[] | undefined): void => {
+    for (const f of fields ?? []) {
+      const id = (f.id ?? '').toLowerCase()
+      if (id && !seen.has(id)) {
+        seen.add(id)
+        ids.push(id)
+      }
+      if (f.memberFields) visit(f.memberFields)
+    }
+  }
+  for (const s of schema.sections ?? []) visit(s.fields)
+  return ids
+}
+
 // Coerce a partial/loaded doc into the full QuestionnaireDoc shape. The id/version
 // defaults keep the booking page and downstream readers happy even when an edited
 // schema omitted the header fields.
@@ -1264,6 +1290,37 @@ export async function updateDocumentTemplate(
   const saved = await getDocumentTemplate(ctx, serviceKey, documentKind)
   if (!saved) throw new Error(`Document template not found after update: ${serviceKey}`)
   return saved
+}
+
+// A service's CONFIGURED body templates (transitions.document_templates) — one
+// entry per document kind the attorney has authored, with the raw body. Read-only;
+// used by the build-wizard's intake/template authoring to compute the variable
+// contract (the {{tokens}} a questionnaire must cover). Only config-stored bodies
+// are returned (repo-bundled fallbacks are not part of the firm's authored
+// contract); empty array when the service has no configured templates.
+export interface ServiceDocumentTemplate {
+  documentKind: string
+  body: string
+}
+
+export async function listServiceDocumentTemplates(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<ServiceDocumentTemplate[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    const r = res.rows[0]
+    if (!r) return []
+    const templates = r.transitions.document_templates?.templates ?? {}
+    return Object.entries(templates)
+      .filter(([, body]) => typeof body === 'string' && body.trim())
+      .map(([documentKind, body]) => ({ documentKind, body: body as string }))
+  })
 }
 
 export interface SubmitBookingInput {
