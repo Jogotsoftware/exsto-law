@@ -210,6 +210,57 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
   return (
     <>
       <section>
+        <h2>Invoiced</h2>
+        <p className="text-muted text-sm">
+          Line items already billed on this matter, with the status of each invoice.
+        </p>
+        {invoiced.length === 0 ? (
+          <p className="text-muted" style={{ marginTop: 'var(--space-3)' }}>
+            Nothing invoiced on this matter yet.
+          </p>
+        ) : (
+          <div className="table-wrap" style={{ marginTop: 'var(--space-3)' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Issued</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th>Amount</th>
+                  <th>Invoice</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoiced.map((i) => (
+                  <tr key={i.lineEntityId}>
+                    <td>{fmtDate(i.issuedDate)}</td>
+                    <td>
+                      <span className={`badge ${i.kind === 'time' ? 'info' : ''}`}>
+                        {humanizeKind(i.kind)}
+                      </span>
+                    </td>
+                    <td>{i.description || '—'}</td>
+                    <td>{money(i.amount, currency)}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {i.invoiceNumber}{' '}
+                      <span className={invoiceStatusClass(i.invoiceStatus)}>{i.invoiceStatus}</span>
+                    </td>
+                  </tr>
+                ))}
+                <tr>
+                  <td colSpan={3} style={{ textAlign: 'right', fontWeight: 600 }}>
+                    Total invoiced
+                  </td>
+                  <td style={{ fontWeight: 600 }}>{money(invoicedTotal, currency)}</td>
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section>
         <h2>Unbilled</h2>
         <p className="text-muted text-sm">
           {matter?.clientName ? (
@@ -365,57 +416,6 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
                     Total unbilled
                   </td>
                   <td style={{ fontWeight: 600 }}>{money(unbilled?.total ?? '0.00', currency)}</td>
-                  <td />
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section>
-        <h2>Invoiced</h2>
-        <p className="text-muted text-sm">
-          Line items already billed on this matter, with the status of each invoice.
-        </p>
-        {invoiced.length === 0 ? (
-          <p className="text-muted" style={{ marginTop: 'var(--space-3)' }}>
-            Nothing invoiced on this matter yet.
-          </p>
-        ) : (
-          <div className="table-wrap" style={{ marginTop: 'var(--space-3)' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Issued</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                  <th>Amount</th>
-                  <th>Invoice</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoiced.map((i) => (
-                  <tr key={i.lineEntityId}>
-                    <td>{fmtDate(i.issuedDate)}</td>
-                    <td>
-                      <span className={`badge ${i.kind === 'time' ? 'info' : ''}`}>
-                        {humanizeKind(i.kind)}
-                      </span>
-                    </td>
-                    <td>{i.description || '—'}</td>
-                    <td>{money(i.amount, currency)}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      {i.invoiceNumber}{' '}
-                      <span className={invoiceStatusClass(i.invoiceStatus)}>{i.invoiceStatus}</span>
-                    </td>
-                  </tr>
-                ))}
-                <tr>
-                  <td colSpan={3} style={{ textAlign: 'right', fontWeight: 600 }}>
-                    Total invoiced
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{money(invoicedTotal, currency)}</td>
                   <td />
                 </tr>
               </tbody>
