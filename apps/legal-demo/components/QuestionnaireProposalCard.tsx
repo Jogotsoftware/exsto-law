@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { LayersIcon, CheckIcon } from '@/components/icons'
+import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the QuestionnaireProposal captured in
@@ -38,11 +39,18 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 // Approve POSTs the schema to the questionnaire approve-from-ai route, the only place
 // the form is written. The card surfaces the variable contract — how many template
 // tokens the form covers — so the attorney never approves an incomplete form.
-export function QuestionnaireProposalCard({ proposal }: { proposal: QuestionnaireProposal }) {
+export function QuestionnaireProposalCard({
+  proposal,
+  onApproved,
+}: {
+  proposal: QuestionnaireProposal
+  onApproved?: OnApproved
+}) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
+  const [link, setLink] = useState<string | null>(null)
 
   const sections = proposal.schema?.sections ?? []
   const fieldCount = sections.reduce((n, s) => n + (s.fields?.length ?? 0), 0)
@@ -73,9 +81,24 @@ export function QuestionnaireProposalCard({ proposal }: { proposal: Questionnair
           }),
         },
       )
-      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      const data = (await res.json().catch(() => null)) as {
+        serviceKey?: string
+        link?: string
+        label?: string
+        error?: string
+      } | null
       if (!res.ok) throw new Error(data?.error || `Approve failed (${res.status})`)
+      setLink(data?.link ?? null)
       setApproveState('approved')
+      // Continue the guided build to the next step (Phase 6).
+      if (data?.link) {
+        onApproved?.({
+          artifact: 'questionnaire',
+          link: data.link,
+          serviceKey: data.serviceKey || proposal.serviceKey,
+          label: data.label || 'Questionnaire',
+        })
+      }
     } catch (e) {
       setApproveState('error')
       setApproveError(e instanceof Error ? e.message : String(e))
@@ -141,6 +164,11 @@ export function QuestionnaireProposalCard({ proposal }: { proposal: Questionnair
               ? 'Saved'
               : 'Approve & save questionnaire'}
         </button>
+        {link && (
+          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
+            View questionnaire →
+          </a>
+        )}
       </div>
       {approveError && (
         <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>

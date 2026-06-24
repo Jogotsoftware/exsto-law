@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { LayersIcon, CheckIcon } from '@/components/icons'
+import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the TemplateProposal captured in
@@ -33,11 +34,18 @@ const PREVIEW_CHARS = 600
 // is written (bound to the service by docKind). The card lists the {{tokens}} and
 // flags any ORPHAN (a token with no question) so the attorney never approves a body
 // that would render [[MISSING]].
-export function TemplateProposalCard({ proposal }: { proposal: TemplateProposal }) {
+export function TemplateProposalCard({
+  proposal,
+  onApproved,
+}: {
+  proposal: TemplateProposal
+  onApproved?: OnApproved
+}) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
+  const [link, setLink] = useState<string | null>(null)
 
   const orphans = new Set((proposal.orphanTokens ?? []).map((t) => t.toLowerCase()))
   const preview =
@@ -72,9 +80,24 @@ export function TemplateProposalCard({ proposal }: { proposal: TemplateProposal 
           }),
         },
       )
-      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      const data = (await res.json().catch(() => null)) as {
+        serviceKey?: string
+        link?: string
+        label?: string
+        error?: string
+      } | null
       if (!res.ok) throw new Error(data?.error || `Approve failed (${res.status})`)
+      setLink(data?.link ?? null)
       setApproveState('approved')
+      // Continue the guided build to the next step (Phase 6).
+      if (data?.link) {
+        onApproved?.({
+          artifact: 'template',
+          link: data.link,
+          serviceKey: data.serviceKey || proposal.serviceKey,
+          label: data.label || `Template "${proposal.name}"`,
+        })
+      }
     } catch (e) {
       setApproveState('error')
       setApproveError(e instanceof Error ? e.message : String(e))
@@ -154,6 +177,11 @@ export function TemplateProposalCard({ proposal }: { proposal: TemplateProposal 
               ? 'Saved'
               : 'Approve & save template'}
         </button>
+        {link && (
+          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
+            View templates →
+          </a>
+        )}
       </div>
       {approveError && (
         <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
