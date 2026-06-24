@@ -6170,25 +6170,6 @@ button.danger.outline:hover:not(:disabled) {
   color: #fff;
 }
 
-/* "Build a service" composer control (Phase 7) — a labelled pill (wider than the
-   icon-only tools) so it reads as a clear call to action to start the wizard. */
-.uac-build-btn {
-  width: auto;
-  gap: 6px;
-  padding: 0 10px;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--accent);
-}
-.uac-build-btn:hover:not(:disabled),
-.uac-build-btn.active {
-  background: var(--accent);
-  color: #fff;
-}
-.uac-build-btn-label {
-  white-space: nowrap;
-}
-
 /* Build-mode banner (Phase 7) — the light cue the dock is mid-build. Mirrors the
    feedback-mode banner's shape so the two modes feel consistent. */
 .uac-buildmode {
@@ -6309,21 +6290,34 @@ button.danger.outline:hover:not(:disabled) {
   opacity: 0.5;
   cursor: default;
 }
-/* The tidy answer chip shown after answering — replaces the buttons (no raw user
-   bubble), so the answered question reads as a clean record of the choice. */
+/* The answered state — replaces the buttons/input (no raw user bubble), so the
+   answered question reads as a clean record of what was chosen or typed. NOT a pill:
+   a free-text answer can be a full paragraph, so this is a left-aligned rounded block
+   that wraps naturally and reads at any length (a one-word choice still looks tidy). */
 .uac-qcard-answered {
   display: flex;
 }
 .uac-qcard-answerchip {
   display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 999px;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
   background: var(--accent-attorney-soft);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The check stays a small accent tick, aligned to the answer's first line. */
+.uac-qcard-answerchip svg {
+  flex: 0 0 auto;
+  margin-top: 3px;
   color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 600;
 }
 /* The toolbar "Context" control popover (lean / balanced / full / secure). */
 .uac-ctxmenu-wrap {

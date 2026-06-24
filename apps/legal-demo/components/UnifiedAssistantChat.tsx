@@ -1968,22 +1968,22 @@ export function UnifiedAssistantChat({
                   )}
                 </div>
               )}
-              {/* Build a service (Phase 7) — enters BUILD MODE and kicks off the guided
-                  interview. Only when the wizard flag is on; Claude-only (the wizard
-                  tools ride the Claude path). When already in build mode it reads as an
-                  active state rather than a second launch. */}
+              {/* Build with AI (Phase 7) — enters BUILD MODE and kicks off the guided
+                  interview. An icon-only tool that matches the others (paperclip /
+                  skills / context); the tooltip names it. Only when the wizard flag is
+                  on; Claude-only (the wizard tools ride the Claude path). When already
+                  in build mode it reads as an active state rather than a second launch. */}
               {isClaude && buildWizard && (
                 <button
                   type="button"
-                  className={`uac-tool-btn uac-build-btn${buildMode ? ' active' : ''}`}
+                  className={`uac-tool-btn${buildMode ? ' active' : ''}`}
                   onClick={enterBuildMode}
                   disabled={busy}
                   aria-pressed={buildMode}
-                  aria-label="Build a service"
-                  title="Build a service — start the guided setup wizard"
+                  aria-label="Build with AI"
+                  title="Build with AI — start the guided service setup"
                 >
                   <WandIcon size={16} />
-                  <span className="uac-build-btn-label">Build a service</span>
                 </button>
               )}
             </div>

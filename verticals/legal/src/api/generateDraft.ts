@@ -11,7 +11,11 @@ import { loadDraftingPrompt } from '../templates/loader.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
 import { renderTemplate, buildMergeData } from './templateMerge.js'
-import { loadForcedSkills, buildActiveSkillsText } from './skillContext.js'
+import {
+  loadForcedSkills,
+  buildActiveSkillsText,
+  resolveJurisdictionSkillSlugs,
+} from './skillContext.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent).
 const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
@@ -222,10 +226,19 @@ export async function runDraftGeneration(
   const promptSource = resolved?.promptText ? resolved.source : 'repo'
   const promptVersion = resolved?.promptText ? resolved.promptVersion : null
 
-  // Attorney-selected legal skills (playbooks) force-applied to this draft, and
-  // the attorney's free-text instructions (revision notes from the review screen).
-  // Both shape the redraft; either may be empty on a first draft.
-  const forcedSkills = await loadForcedSkills(agentCtx, input.skillSlugs)
+  // Skills applied to this draft = attorney-selected (force-applied) PLUS the right
+  // jurisdiction playbook auto-resolved from the document kind, so a draft always gets
+  // the correct legal skill even when the attorney picked none. Jurisdiction mirrors
+  // the draft.generate binding below (NC). The resolver is conservative — it returns
+  // nothing unless a skill strongly matches the document kind — so a first draft with
+  // no good match behaves exactly as before. Attorney picks lead; auto picks are
+  // appended and de-duped.
+  const autoSkillSlugs = await resolveJurisdictionSkillSlugs(agentCtx, {
+    documentKind: input.documentKind,
+    jurisdiction: 'NC',
+  })
+  const skillSlugs = [...new Set([...(input.skillSlugs ?? []), ...autoSkillSlugs])]
+  const forcedSkills = await loadForcedSkills(agentCtx, skillSlugs)
   const activeSkillsText = buildActiveSkillsText(forcedSkills)
 
   const prompt = assembleDraftingPrompt({

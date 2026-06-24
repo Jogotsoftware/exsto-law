@@ -101,6 +101,94 @@ export async function loadForcedSkills(
   return loaded.filter((s): s is Skill => s != null)
 }
 
+// ── Auto-resolve the jurisdiction skill for a draft ──────────────────────────
+//
+// The AI drafter should apply the RIGHT legal playbook for the document even when the
+// attorney didn't hand-pick one (founder ask: "the right jurisdiction skill"). This is
+// a deterministic relevance match over the skill catalog (skills are data, so this is
+// a generic matcher, not hard-coded business logic). It is deliberately CONSERVATIVE:
+// a skill qualifies only on a STRONG document-kind match (the full kind phrase, or ≥2
+// of its words), with a small jurisdiction bonus; jurisdiction alone never qualifies.
+// When nothing matches well it returns [] — so a weak/irrelevant skill is never forced
+// into a draft and drafting behaves exactly as before.
+
+// A 2-letter US jurisdiction code → full state name, so a skill that spells out the
+// state ("North Carolina LLC …") still earns the jurisdiction bonus. Only the codes we
+// actually operate in need entries; anything else falls back to the code-as-word match.
+const JURISDICTION_NAMES: Record<string, string> = {
+  nc: 'north carolina',
+  ca: 'california',
+  ny: 'new york',
+  tx: 'texas',
+  de: 'delaware',
+  fl: 'florida',
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Does the skill's searchable text reference this jurisdiction? Matches the full state
+// name (e.g. "north carolina") or the 2-letter code as a whole word (e.g. "nc", never
+// "ncis"). A bonus signal only — never sufficient on its own.
+function matchesJurisdiction(haystack: string, jurisdiction: string): boolean {
+  const j = jurisdiction.toLowerCase().trim()
+  if (!j) return false
+  if (j.length > 2 && haystack.includes(j)) return true
+  if (/^[a-z]{2}$/.test(j) && new RegExp(`\\b${j}\\b`).test(haystack)) return true
+  const full = JURISDICTION_NAMES[j]
+  return full ? haystack.includes(full) : false
+}
+
+// Rank catalog skills for a given document kind + jurisdiction and return the best
+// slug(s). PURE (takes the catalog, no DB) so it is unit-tested without a database.
+// A skill QUALIFIES only on a strong document-kind match: the full kind phrase appears
+// (e.g. "operating agreement"), OR every word of the kind appears (so "engagement
+// letter" needs both "engagement" AND "letter", and a single-word kind like "nda"
+// needs that word). Jurisdiction NEVER qualifies a skill on its own — it is only a
+// tie-breaking bonus. Scoring (for ordering): full phrase = +5; each distinct kind
+// word (≥3 chars) present = +1; a jurisdiction reference = +2. Returns at most `limit`
+// (default 1) slugs, best first; [] when nothing matches (a draft is then unchanged).
+export function rankSkillsForDraft(
+  catalog: SkillCatalogEntry[],
+  opts: { documentKind: string; jurisdiction?: string; limit?: number },
+): string[] {
+  const kind = (opts.documentKind ?? '').toLowerCase().trim()
+  if (!kind) return []
+  const phrase = kind.replace(/_/g, ' ').trim()
+  const kindWords = [...new Set(phrase.split(/\s+/).filter((w) => w.length >= 3))]
+  if (!kindWords.length) return []
+  const jurisdiction = (opts.jurisdiction ?? '').trim()
+
+  const scored = catalog
+    .filter((s) => s.slug && s.userInvocable)
+    .map((s) => {
+      const hay = `${s.slug} ${s.name} ${s.whenToUse} ${s.description}`.toLowerCase()
+      const phraseHit = phrase.includes(' ') && hay.includes(phrase)
+      const wordHits = kindWords.filter((w) =>
+        new RegExp(`\\b${escapeRegExp(w)}\\b`).test(hay),
+      ).length
+      const jurisHit = matchesJurisdiction(hay, jurisdiction)
+      const score = (phraseHit ? 5 : 0) + wordHits + (jurisHit ? 2 : 0)
+      // Strong match required: the contiguous phrase, or ALL of the kind's words.
+      const qualifies = phraseHit || wordHits === kindWords.length
+      return { slug: s.slug, score, qualifies }
+    })
+    .filter((s) => s.qualifies)
+    // Highest score first; stable by slug for deterministic ties.
+    .sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug))
+  return scored.slice(0, Math.max(1, opts.limit ?? 1)).map((s) => s.slug)
+}
+
+// DB-backed wrapper: load the catalog (tenant-scoped) and rank it. Read-only.
+export async function resolveJurisdictionSkillSlugs(
+  ctx: ActionContext,
+  opts: { documentKind: string; jurisdiction?: string; limit?: number },
+): Promise<string[]> {
+  const catalog = await listSkillCatalog(ctx)
+  return rankSkillsForDraft(catalog, opts)
+}
+
 // One-call convenience for any AI feature: take a base system prompt and return
 // it augmented with the skills catalog, plus the load_skill tool to pass to
 // chatWithAssistantDetailed. If the tenant has no skills, the system is unchanged
