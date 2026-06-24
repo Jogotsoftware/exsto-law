@@ -27,7 +27,22 @@ const nextConfig = {
   // (and mammoth) so they're require()'d natively at runtime — the documented fix,
   // and the same approach used for pg / the Anthropic SDK. Powers the document
   // upload in the Templates importer and the assistant chat's attach-a-file.
-  serverExternalPackages: ['pg', '@anthropic-ai/sdk', 'pdf-parse', 'pdfjs-dist', 'mammoth'],
+  //
+  // @react-pdf/renderer ships the standard-14 font metrics (Helvetica AFM) and
+  // fontkit's binary data as data files. Webpack-bundling it into the function
+  // strips those files, so at runtime the font lookup returns undefined and the
+  // render dies with "Cannot read properties of undefined (reading 'S')" — the
+  // invoice-template preview 500 on Settings, and every server-rendered invoice
+  // PDF. Externalize it so it (and its @react-pdf/* + fontkit subtree) is required
+  // natively at runtime with its data files intact.
+  serverExternalPackages: [
+    'pg',
+    '@anthropic-ai/sdk',
+    'pdf-parse',
+    'pdfjs-dist',
+    'mammoth',
+    '@react-pdf/renderer',
+  ],
   eslint: { ignoreDuringBuilds: true },
 }
 
