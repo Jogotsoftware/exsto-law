@@ -32,8 +32,12 @@ import {
   loadServiceTemplateTokens,
   validateProposedQuestionnaire,
 } from './intakeAuthoring.js'
-import { loadTemplateContext, validateProposedTemplate } from './templateAuthoring.js'
-import { collectQuestionnaireFieldIds } from './services.js'
+import {
+  loadTemplateContext,
+  loadFirmFieldLibrary,
+  validateProposedTemplate,
+} from './templateAuthoring.js'
+import { collectQuestionnaireFieldIds, getQuestionnaire } from './services.js'
 
 // A questionnaire proposal captured this turn — the proposed schema plus the model's
 // reasoning and the token-symmetry coverage. The chat surfaces it as an inline card;
@@ -59,10 +63,18 @@ export interface TemplateProposal {
   docKind: string
   summary: string
   confidence: number
-  // The {{tokens}} the body references, and the orphans (no matching question) —
-  // the broken half of the contract the attorney must see before approving.
+  // The {{tokens}} the body references, and the orphans (no matching question on THIS
+  // service). With the documents→variables→questionnaire flow, orphans before the
+  // questionnaire exists are NOT broken — they're the fields the questionnaire will
+  // collect next; hasQuestionnaire tells the card which framing to use.
   tokens: string[]
   orphanTokens: string[]
+  // Phase 7 — whether this service already has a questionnaire (drives the card's
+  // framing: forward-looking "will become questions" vs. red "missing → [[MISSING]]").
+  hasQuestionnaire: boolean
+  // Phase 7 — orphan tokens that already exist as questions ELSEWHERE in the firm; the
+  // questionnaire step should REUSE those definitions rather than re-invent them.
+  reusableFromFirm: string[]
 }
 
 // ─── Questionnaire context + propose ────────────────────────────────────────
@@ -293,9 +305,20 @@ export function buildProposeTemplateTool(
         return 'A service_key is required to propose a template; nothing was captured.'
       if (!docKind) return 'A doc_kind is required to propose a template; nothing was captured.'
       // The questionnaire field ids are the contract target — one read, shared with
-      // the validation (and used to flag orphan tokens on the card).
-      const fieldIds = await collectQuestionnaireFieldIds(ctx, serviceKey)
-      const validation = validateProposedTemplate(args.body, fieldIds)
+      // the validation (and used to flag orphan tokens on the card). Whether this
+      // service has a questionnaire YET (flow-aware framing) + the firm-wide field
+      // library (reuse-aware orphans) are read in parallel (Phase 7).
+      const [fieldIds, schema, firmFields] = await Promise.all([
+        collectQuestionnaireFieldIds(ctx, serviceKey),
+        getQuestionnaire(ctx, serviceKey),
+        loadFirmFieldLibrary(ctx, serviceKey),
+      ])
+      const hasQuestionnaire = schema !== null
+      const firmFieldIds = firmFields.map((f) => f.fieldId)
+      const validation = validateProposedTemplate(args.body, fieldIds, {
+        hasQuestionnaire,
+        firmFieldIds,
+      })
       if (!validation.ok) {
         return `The proposed template is not valid and was NOT captured. Fix these and call propose_template again: ${validation.errors.join('; ')}`
       }
@@ -313,11 +336,25 @@ export function buildProposeTemplateTool(
         confidence,
         tokens: validation.tokens,
         orphanTokens: validation.orphanTokens,
+        hasQuestionnaire,
+        reusableFromFirm: validation.reusableFromFirm,
       })
-      const orphanNote = validation.orphanTokens.length
-        ? `WARNING: these tokens have NO matching question and would render [[MISSING]]: ${validation.orphanTokens.join(', ')}. The attorney should add those questions (or you can propose them).`
-        : 'Every token maps to a question — the contract is complete.'
-      return `The proposed template "${name || docKind}" is shown to the attorney as an approval card; it is NOT saved until they approve. ${orphanNote} Reply with ONE short sentence pointing them to it (flag any orphan tokens); do NOT repeat the body in prose.`
+      // Flow-aware ack (Phase 7): before a questionnaire exists, orphan tokens are NOT
+      // broken — they are the fields the questionnaire step will collect next, so frame
+      // them forward-looking. Only flag a real [[MISSING]] gap once a questionnaire
+      // exists. Either way, surface which tokens ALREADY exist firm-wide to reuse.
+      const reuseNote = validation.reusableFromFirm.length
+        ? ` These already exist as questions on other services — REUSE those definitions when you build the questionnaire: ${validation.reusableFromFirm.join(', ')}.`
+        : ''
+      let tokenNote: string
+      if (validation.orphanTokens.length === 0) {
+        tokenNote = 'Every token maps to a question — the contract is complete.'
+      } else if (!hasQuestionnaire) {
+        tokenNote = `These ${validation.orphanTokens.length} field(s) will become the questionnaire's questions in the NEXT step (this is expected — the questionnaire is built from the template's tokens): ${validation.orphanTokens.join(', ')}.${reuseNote}`
+      } else {
+        tokenNote = `WARNING: these tokens have NO matching question and would render [[MISSING]]: ${validation.orphanTokens.join(', ')}. Add those questions to the questionnaire.${reuseNote}`
+      }
+      return `The proposed template "${name || docKind}" is shown to the attorney as an approval card; it is NOT saved until they approve. ${tokenNote} Reply with ONE short sentence pointing them to it; do NOT repeat the body in prose.`
     },
   }
 }

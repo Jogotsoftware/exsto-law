@@ -16,10 +16,18 @@ export interface TemplateProposal {
   docKind: string
   summary: string
   confidence: number
-  // The {{tokens}} the body references, and the orphans (no matching question) — the
-  // broken half of the variable contract the attorney must see before approving.
+  // The {{tokens}} the body references, and the orphans (no matching question on THIS
+  // service). With the documents→variables→questionnaire flow, orphans before the
+  // questionnaire exists are NOT broken — they're the fields the questionnaire collects
+  // next; hasQuestionnaire picks the framing.
   tokens: string[]
   orphanTokens: string[]
+  // Phase 7 — whether this service already has a questionnaire (drives the framing:
+  // forward-looking "will become questions" vs. red "missing → [[MISSING]]").
+  hasQuestionnaire: boolean
+  // Phase 7 — orphan tokens that already exist as questions elsewhere in the firm; the
+  // questionnaire step should REUSE those rather than re-invent them.
+  reusableFromFirm: string[]
 }
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
@@ -48,6 +56,12 @@ export function TemplateProposalCard({
   const [link, setLink] = useState<string | null>(null)
 
   const orphans = new Set((proposal.orphanTokens ?? []).map((t) => t.toLowerCase()))
+  const reusable = new Set((proposal.reusableFromFirm ?? []).map((t) => t.toLowerCase()))
+  // FLOW-AWARE FRAMING (Phase 7): a token with no question is only a real, alarming
+  // problem once the service HAS a questionnaire. Before that, the questionnaire is
+  // built FROM these tokens in the next step — so they are forward-looking, not broken.
+  // Only paint tokens red / show the [[MISSING]] warning when a questionnaire exists.
+  const showOrphanError = proposal.hasQuestionnaire && orphans.size > 0
   const preview =
     proposal.body.length > PREVIEW_CHARS
       ? `${proposal.body.slice(0, PREVIEW_CHARS).trimEnd()}…`
@@ -144,7 +158,13 @@ export function TemplateProposalCard({
             {proposal.tokens.map((t, i) => (
               <span key={t}>
                 {i > 0 && ', '}
-                <code style={orphans.has(t.toLowerCase()) ? { color: 'var(--danger)' } : undefined}>
+                <code
+                  style={
+                    showOrphanError && orphans.has(t.toLowerCase())
+                      ? { color: 'var(--danger)' }
+                      : undefined
+                  }
+                >
                   {`{{${t}}}`}
                 </code>
               </span>
@@ -153,11 +173,34 @@ export function TemplateProposalCard({
         )}
       </div>
 
-      {orphans.size > 0 && (
+      {/* FLOW-AWARE: before a questionnaire exists, the unmatched tokens are the fields
+          the questionnaire will collect NEXT — say so, neutral/forward-looking, never
+          "missing/broken". Only once a questionnaire exists is an orphan a real gap. */}
+      {showOrphanError ? (
         <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
           {orphans.size} token{orphans.size === 1 ? '' : 's'} have NO matching question and would
           render [[MISSING]]: <strong>{[...orphans].join(', ')}</strong>. Add those questions to the
           questionnaire before sending documents.
+        </div>
+      ) : (
+        orphans.size > 0 && (
+          <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
+            These {orphans.size} field{orphans.size === 1 ? '' : 's'} will become the
+            questionnaire’s questions in the next step: <strong>{[...orphans].join(', ')}</strong>.
+          </div>
+        )
+      )}
+
+      {/* Reuse-aware: tokens that already exist as questions on other services — the
+          build should reuse those definitions, not re-invent them (and they're never
+          "missing"). */}
+      {reusable.size > 0 && (
+        <div
+          className="uac-doc-body"
+          style={{ fontSize: 'var(--text-xs)', color: 'var(--accent)' }}
+        >
+          {reusable.size} of these already exist on other services and will be reused:{' '}
+          <strong>{[...reusable].join(', ')}</strong>.
         </div>
       )}
 
