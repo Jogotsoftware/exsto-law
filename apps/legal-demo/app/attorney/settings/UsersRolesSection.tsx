@@ -6,6 +6,7 @@
 // server-side (requireAdmin) — this page only shows/hides for convenience.
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
 
 interface FirmUser {
   actorId: string
@@ -30,7 +31,7 @@ interface WhoAmI {
   rank: number
 }
 
-export default function UsersPage() {
+export function UsersRolesSection() {
   const [me, setMe] = useState<WhoAmI | null>(null)
   const [users, setUsers] = useState<FirmUser[] | null>(null)
   const [roles, setRoles] = useState<FirmRole[]>([])
@@ -89,7 +90,7 @@ export default function UsersPage() {
   }
 
   return (
-    <main>
+    <CollapsibleSection title="Users & roles">
       {error && <div className="alert alert-error">{error}</div>}
 
       {me && !me.isAdmin && (
@@ -196,7 +197,7 @@ export default function UsersPage() {
           }}
         />
       )}
-    </main>
+    </CollapsibleSection>
   )
 }
 

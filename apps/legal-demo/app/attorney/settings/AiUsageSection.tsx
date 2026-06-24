@@ -8,7 +8,7 @@
 // Each source counts only from when its token instrumentation went live.
 import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { PageHead } from '@/components/PageHead'
+import { CollapsibleSection } from '@/components/CollapsibleSection'
 
 interface ModelRow {
   model: string
@@ -78,7 +78,7 @@ function humanSource(source: string): string {
   return source
 }
 
-export default function AiUsagePage() {
+export function AiUsageSection() {
   const [windowDays, setWindowDays] = useState(30)
   const [summary, setSummary] = useState<UsageSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -113,12 +113,7 @@ export default function AiUsagePage() {
     : 0
 
   return (
-    <div>
-      <PageHead
-        title="AI usage & cost"
-        description="How much AI is used across the firm — the chat assistant and document drafting — with a rough cost estimate."
-      />
-
+    <CollapsibleSection title="AI usage & cost">
       <div style={{ display: 'flex', gap: 4, margin: '0.4rem 0 1rem' }}>
         {WINDOWS.map((w) => {
           const active = w.days === windowDays
@@ -292,7 +287,7 @@ export default function AiUsagePage() {
           </p>
         </>
       ) : null}
-    </div>
+    </CollapsibleSection>
   )
 }
 
