@@ -55,7 +55,14 @@ export async function POST(
         confidence: typeof body?.confidence === 'number' ? body.confidence : undefined,
       },
     )
-    return NextResponse.json({ result })
+    // Return the LINK to the service's templates page + serviceKey + label so the chat
+    // can show "View templates →" and auto-continue the guided build (Phase 6).
+    return NextResponse.json({
+      result,
+      serviceKey,
+      link: `/attorney/services/${encodeURIComponent(serviceKey)}/templates`,
+      label: `Template "${(body?.name ?? '').trim() || docKind}"`,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ error: message }, { status: 500 })

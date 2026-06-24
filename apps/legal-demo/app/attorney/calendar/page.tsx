@@ -27,6 +27,11 @@ interface WorkspaceEvent {
   matterNumber: string | null
   // The matter's chosen call-type palette key, for color-coding (PR1).
   categoryKey: string | null
+  // App-created meetings (PR2): the calendar_event id + linked contact, so the
+  // page can reschedule/cancel via the meeting actions. Null for consultations.
+  meetingEntityId: string | null
+  contactEntityId: string | null
+  contactName: string | null
   managedByApp: boolean
 }
 
@@ -35,6 +40,17 @@ interface MatterOption {
   matterNumber: string
   clientName: string
 }
+
+interface ContactOption {
+  contactEntityId: string
+  fullName: string
+  email: string
+}
+
+// What kind of event the create dialog is making: tied to a matter (a
+// consultation, via the booking path), with a contact (invites them), or a
+// personal block (no invites). Matter/contact/neither — the beta-feedback ask.
+type CreateMode = 'matter' | 'contact' | 'personal'
 
 // The firm's configurable call-type palette (firm.calendar_categories).
 interface Category {
@@ -149,6 +165,38 @@ function layoutTimed(
   })
 }
 
+// ── Drag-to-schedule geometry (PR3) ─────────────────────────────────────────
+// Times snap to quarter-hours while dragging; a dragged block can't be shorter
+// than MIN_DUR_MIN. All math is within one day column (Y ↔ minutes-from-midnight,
+// in LOCAL time, matching layoutTimed).
+const SNAP_MIN = 15
+const MIN_DUR_MIN = 15
+const snapMin = (min: number) => Math.round(min / SNAP_MIN) * SNAP_MIN
+const clampTopPx = (px: number) => Math.max(0, Math.min(px, 24 * HOUR_PX))
+const pxToMin = (px: number) => (px / HOUR_PX) * 60
+const minToPx = (min: number) => (min / 60) * HOUR_PX
+function dayAtMinutes(day: Date, minutes: number): Date {
+  const d = startOfDay(day)
+  d.setMinutes(Math.max(0, Math.min(24 * 60, minutes)))
+  return d
+}
+
+// An in-progress grid drag: paint a new event (create), move an event to a new
+// time, or resize its end. `moved` distinguishes a real drag from a plain click
+// (which must still navigate / open the 1h creator).
+type DragState =
+  | { kind: 'create'; day: Date; y0: number; y1: number }
+  | {
+      kind: 'move'
+      e: WorkspaceEvent
+      day: Date
+      top: number
+      height: number
+      grabDy: number
+      moved: boolean
+    }
+  | { kind: 'resize'; e: WorkspaceEvent; day: Date; top: number; height: number; moved: boolean }
+
 export default function CalendarPage() {
   const [anchor, setAnchor] = useState(() => new Date())
   const [view, setView] = useState<View>('week')
@@ -156,12 +204,21 @@ export default function CalendarPage() {
   const [source, setSource] = useState<'google' | 'disconnected' | 'error' | null>(null)
   const [googleError, setGoogleError] = useState<string | null>(null)
   const [matters, setMatters] = useState<MatterOption[]>([])
+  const [contacts, setContacts] = useState<ContactOption[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // Inline panel state for create/reschedule.
+  // Dialog state for create/reschedule. create carries the chosen mode (matter /
+  // contact / personal) + a title (for contact/personal — consultations auto-title)
+  // and the picked matter/contact. reschedule carries the event's identity so the
+  // submit routes to booking.reschedule (consultations) or meeting.reschedule
+  // (app-created meetings).
   const [panel, setPanel] = useState<{
     kind: 'create' | 'reschedule'
+    mode?: CreateMode
+    summary?: string
     matterEntityId?: string
+    contactEntityId?: string
+    meeting?: { calendarEventEntityId: string; googleEventId: string | null }
     start: string
     end: string
   } | null>(null)
@@ -182,6 +239,14 @@ export default function CalendarPage() {
     matterNumber: string
   } | null>(null)
   const [attendeeInput, setAttendeeInput] = useState('')
+  // Drag-to-schedule on the time grid (create / move / resize). `drag` drives the
+  // visual; `dragRef` mirrors it synchronously for the global mouseup; `dragColRef`
+  // is the column being dragged in; `movedRef` suppresses click-navigation after a
+  // real drag.
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const dragRef = useRef<DragState | null>(null)
+  const dragColRef = useRef<HTMLElement | null>(null)
+  const movedRef = useRef(false)
   // The hourly grid scrolls the full 24h; open it near the workday.
   const gridScrollRef = useRef<HTMLDivElement>(null)
 
@@ -208,6 +273,11 @@ export default function CalendarPage() {
         input: {},
       })
       setMatters(m.matters)
+      const c = await callAttorneyMcp<{ contacts: ContactOption[] }>({
+        toolName: 'legal.contact.list',
+        input: {},
+      })
+      setContacts(c.contacts)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -252,6 +322,8 @@ export default function CalendarPage() {
         ? prev
         : {
             kind: 'create',
+            mode: 'matter',
+            summary: '',
             matterEntityId:
               (matterId && matters.find((m) => m.matterEntityId === matterId)?.matterEntityId) ||
               matters[0]?.matterEntityId,
@@ -288,6 +360,17 @@ export default function CalendarPage() {
     [matters],
   )
 
+  // Contacts as searchable combobox options (name + email, both matched).
+  const contactOptions: ComboboxOption[] = useMemo(
+    () =>
+      contacts.map((c) => ({
+        value: c.contactEntityId,
+        label: c.fullName || c.email,
+        hint: c.fullName ? c.email : undefined,
+      })),
+    [contacts],
+  )
+
   // Palette key → hex color, for color-coding events by their call-type.
   const categoryColor = useMemo(() => {
     const m = new Map<string, string>()
@@ -302,8 +385,39 @@ export default function CalendarPage() {
   }
 
   // The consolidated per-event action menu (beta feedback: every event should have
-  // an edit menu — reschedule / cancel / email guests / categorize / view matter).
+  // an edit menu). Two flavors: an app-created MEETING (contact/personal — routes to
+  // the meeting actions) vs a matter CONSULTATION (the booking actions, with email
+  // guests + categorize). Reschedule opens the dialog carrying the event's identity.
   function eventMenuItems(e: WorkspaceEvent): ActionItem[] {
+    if (e.meetingEntityId) {
+      const items: ActionItem[] = [
+        {
+          label: 'Reschedule',
+          onClick: () =>
+            setPanel({
+              kind: 'reschedule',
+              meeting: { calendarEventEntityId: e.meetingEntityId!, googleEventId: e.eventId },
+              start: '',
+              end: '',
+            }),
+        },
+      ]
+      if (e.matterEntityId)
+        items.push({ label: 'View matter', href: `/attorney/matters/${e.matterEntityId}` })
+      items.push({
+        label: 'Cancel event',
+        onClick: () => {
+          const who = e.contactName ? ` with ${e.contactName}` : ''
+          if (window.confirm(`Cancel this meeting${who}?`)) {
+            run('legal.meeting.cancel', {
+              calendarEventEntityId: e.meetingEntityId,
+              googleEventId: e.eventId,
+            })
+          }
+        },
+      })
+      return items
+    }
     return [
       {
         label: 'Reschedule',
@@ -338,6 +452,50 @@ export default function CalendarPage() {
     ]
   }
 
+  // Submit the create dialog: matter → booking (a consultation); contact/personal →
+  // a calendar_event meeting (contact invites them, personal is a private hold).
+  async function submitCreate() {
+    if (!panel || panel.kind !== 'create' || !panel.start || !panel.end) return
+    const startIso = new Date(panel.start).toISOString()
+    const endIso = new Date(panel.end).toISOString()
+    if (panel.mode === 'matter') {
+      await run('legal.booking.create_for_matter', {
+        matterEntityId: panel.matterEntityId,
+        startIso,
+        endIso,
+      })
+    } else {
+      await run('legal.meeting.create', {
+        summary: panel.summary?.trim() || (panel.mode === 'contact' ? 'Meeting' : 'Personal block'),
+        startIso,
+        endIso,
+        contactEntityId: panel.mode === 'contact' ? panel.contactEntityId : undefined,
+      })
+    }
+  }
+
+  // Submit the reschedule dialog: route to the matching action by the event's
+  // identity captured when the dialog opened.
+  async function submitReschedule() {
+    if (!panel || panel.kind !== 'reschedule' || !panel.start || !panel.end) return
+    const startIso = new Date(panel.start).toISOString()
+    const endIso = new Date(panel.end).toISOString()
+    if (panel.meeting) {
+      await run('legal.meeting.reschedule', {
+        calendarEventEntityId: panel.meeting.calendarEventEntityId,
+        googleEventId: panel.meeting.googleEventId,
+        startIso,
+        endIso,
+      })
+    } else {
+      await run('legal.booking.reschedule', {
+        matterEntityId: panel.matterEntityId,
+        startIso,
+        endIso,
+      })
+    }
+  }
+
   async function submitAttendees() {
     if (!attendeesFor) return
     const emails = attendeeInput
@@ -368,20 +526,133 @@ export default function CalendarPage() {
     }
   }
 
-  // Click an empty slot on the hourly grid → open the creator prefilled to that
-  // hour (default 1h block). Needs Google connected + at least one matter to book.
-  function openCreateAt(day: Date, hour: number) {
-    if (source !== 'google' || matters.length === 0) return
-    const start = startOfDay(day)
-    start.setHours(hour, 0, 0, 0)
-    const end = new Date(start.getTime() + 60 * 60 * 1000)
+  // Open the create dialog with a default mode: matter when the firm has matters,
+  // else a personal block (which needs none). Pre-selects the first matter/contact.
+  function openCreate(start: string, end: string) {
     setPanel({
       kind: 'create',
+      mode: matters.length > 0 ? 'matter' : 'personal',
+      summary: '',
       matterEntityId: matters[0]?.matterEntityId,
-      start: toLocalInput(start),
-      end: toLocalInput(end),
+      contactEntityId: contacts[0]?.contactEntityId,
+      start,
+      end,
     })
   }
+
+  // Reschedule by the event's identity: a meeting (calendar_event) goes through the
+  // meeting action, a consultation through booking — same split as the menu.
+  async function rescheduleEventTo(e: WorkspaceEvent, startIso: string, endIso: string) {
+    if (e.meetingEntityId) {
+      await run('legal.meeting.reschedule', {
+        calendarEventEntityId: e.meetingEntityId,
+        googleEventId: e.eventId,
+        startIso,
+        endIso,
+      })
+    } else if (e.matterEntityId) {
+      await run('legal.booking.reschedule', { matterEntityId: e.matterEntityId, startIso, endIso })
+    }
+  }
+
+  // Start a drag: paint a new range on empty grid (create), move an event block, or
+  // resize its bottom edge. dragColRef captures the column so move tracking survives
+  // a scroll; movedRef is reset so a no-move "drag" still counts as a click.
+  function beginCreateDrag(ev: React.MouseEvent, day: Date) {
+    if (source !== 'google') return
+    if ((ev.target as HTMLElement).closest('.cal-event')) return // the event handles itself
+    ev.preventDefault()
+    const col = ev.currentTarget as HTMLElement
+    const relY = clampTopPx(ev.clientY - col.getBoundingClientRect().top)
+    dragColRef.current = col
+    movedRef.current = false
+    const ds: DragState = { kind: 'create', day, y0: relY, y1: relY }
+    dragRef.current = ds
+    setDrag(ds)
+  }
+  function beginMoveDrag(
+    ev: React.MouseEvent,
+    e: WorkspaceEvent,
+    day: Date,
+    top: number,
+    height: number,
+  ) {
+    ev.stopPropagation() // don't also start a create-drag on the column
+    const col = (ev.currentTarget as HTMLElement).closest('.cal-grid-col') as HTMLElement | null
+    if (!col) return
+    const relY = clampTopPx(ev.clientY - col.getBoundingClientRect().top)
+    dragColRef.current = col
+    movedRef.current = false
+    const ds: DragState = { kind: 'move', e, day, top, height, grabDy: relY - top, moved: false }
+    dragRef.current = ds
+    setDrag(ds)
+  }
+  function beginResizeDrag(
+    ev: React.MouseEvent,
+    e: WorkspaceEvent,
+    day: Date,
+    top: number,
+    height: number,
+  ) {
+    ev.stopPropagation()
+    ev.preventDefault()
+    const col = (ev.currentTarget as HTMLElement).closest('.cal-grid-col') as HTMLElement | null
+    if (!col) return
+    dragColRef.current = col
+    movedRef.current = false
+    const ds: DragState = { kind: 'resize', e, day, top, height, moved: false }
+    dragRef.current = ds
+    setDrag(ds)
+  }
+
+  // Global move/up listeners while a drag is active (so it keeps tracking outside
+  // the column). On drop, times snap to 15m: create opens the dialog prefilled to
+  // the painted range (a plain click → a 1h block); move/resize reschedule.
+  const dragging = drag !== null
+  useEffect(() => {
+    if (!dragging) return
+    function onMove(ev: MouseEvent) {
+      const d = dragRef.current
+      const col = dragColRef.current
+      if (!d || !col) return
+      const relY = clampTopPx(ev.clientY - col.getBoundingClientRect().top)
+      let next: DragState
+      if (d.kind === 'create') next = { ...d, y1: relY }
+      else if (d.kind === 'move') next = { ...d, top: clampTopPx(relY - d.grabDy), moved: true }
+      else next = { ...d, height: Math.max(minToPx(MIN_DUR_MIN), relY - d.top), moved: true }
+      if (d.kind !== 'create') movedRef.current = true
+      dragRef.current = next
+      setDrag(next)
+    }
+    async function onUp() {
+      const d = dragRef.current
+      dragRef.current = null
+      dragColRef.current = null
+      setDrag(null)
+      if (!d) return
+      if (d.kind === 'create') {
+        const a = snapMin(pxToMin(Math.min(d.y0, d.y1)))
+        const b = snapMin(pxToMin(Math.max(d.y0, d.y1)))
+        const end = b - a < MIN_DUR_MIN ? a + 60 : b // a plain click → a default 1h block
+        openCreate(toLocalInput(dayAtMinutes(d.day, a)), toLocalInput(dayAtMinutes(d.day, end)))
+        return
+      }
+      if (!d.moved) return // a click on the block — its own onClick handles it
+      const startMin = snapMin(pxToMin(d.top))
+      const endMin = startMin + Math.max(MIN_DUR_MIN, snapMin(pxToMin(d.height)))
+      await rescheduleEventTo(
+        d.e,
+        dayAtMinutes(d.day, startMin).toISOString(),
+        dayAtMinutes(d.day, endMin).toISOString(),
+      )
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [dragging])
 
   // WP3.2 — assign an unlinked Google event to a matter (legal.meeting.assign).
   // Passes the event fields the capture needs; app-booked consultations are
@@ -453,6 +724,14 @@ export default function CalendarPage() {
             style={{ marginTop: 4, gap: 'var(--space-2)', alignItems: 'center' }}
           >
             <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
+            <ActionsMenu label="Actions" align="left" items={eventMenuItems(e)} />
+          </div>
+        ) : e.meetingEntityId ? (
+          <div
+            className="row"
+            style={{ marginTop: 4, gap: 'var(--space-2)', alignItems: 'center' }}
+          >
+            {e.contactName && <span className="text-muted text-sm">with {e.contactName}</span>}
             <ActionsMenu label="Actions" align="left" items={eventMenuItems(e)} />
           </div>
         ) : (
@@ -547,18 +826,33 @@ export default function CalendarPage() {
     )
   }
 
-  // A positioned event block in the hourly grid. Matter-linked events deep-link to
-  // the matter; other Google events open in Google; both are color-coded (gold
-  // left border = app-managed). Reschedule/cancel/assign stay on the List view.
-  function renderGridEvent(e: WorkspaceEvent, top: number, height: number, inset: number) {
+  // A positioned event block in the hourly grid. App-managed events (a matter
+  // consultation or a contact/personal meeting) are DRAGGABLE — drag the body to
+  // reschedule the time, drag the bottom edge to change the end. Matter blocks still
+  // deep-link to the matter on a plain click; the attorney's other Google events
+  // open in Google (not draggable — we don't own them). Color = call-type palette,
+  // falling back to the gold "managed" border.
+  function renderGridEvent(
+    e: WorkspaceEvent,
+    day: Date,
+    top: number,
+    height: number,
+    inset: number,
+  ) {
     const color = eventColor(e)
-    const cls = `cal-event${e.managedByApp ? ' managed' : ''}`
+    const draggable = Boolean(e.matterEntityId || e.meetingEntityId) && source === 'google'
+    const d = drag
+    const isThis = !!d && (d.kind === 'move' || d.kind === 'resize') && d.e.eventId === e.eventId
+    const dispTop = isThis ? d.top : top
+    const dispHeight = isThis ? d.height : height
+    const cls = `cal-event${e.managedByApp ? ' managed' : ''}${isThis ? ' dragging' : ''}`
     const style = {
-      top,
-      height,
+      top: dispTop,
+      height: dispHeight,
       left: `calc(3px + ${inset * 12}px)`,
-      zIndex: 2 + inset,
+      zIndex: isThis ? 50 : 2 + inset,
       ...(color ? { borderLeft: `3px solid ${color}`, background: `${color}1a` } : {}),
+      ...(draggable ? { cursor: isThis ? 'grabbing' : 'grab' } : {}),
     }
     const inner = (
       <>
@@ -569,19 +863,49 @@ export default function CalendarPage() {
           })}
         </span>
         <span className="cal-event-title">{e.summary || '(no title)'}</span>
+        {draggable && (
+          <span
+            className="cal-event-resize"
+            onMouseDown={(ev) => beginResizeDrag(ev, e, day, dispTop, dispHeight)}
+            title="Drag to change the end time"
+          />
+        )}
       </>
     )
-    if (e.matterEntityId) {
+    if (draggable && e.matterEntityId) {
       return (
         <Link
           key={e.eventId}
           href={`/attorney/matters/${e.matterEntityId}`}
           className={cls}
           style={style}
-          title={`${e.summary} — ${e.matterNumber}`}
+          title={`${e.summary} — ${e.matterNumber} · drag to reschedule`}
+          draggable={false}
+          onMouseDown={(ev) => beginMoveDrag(ev, e, day, dispTop, dispHeight)}
+          onClick={(ev) => {
+            // Suppress the deep-link navigation when this was a drag, not a click.
+            if (movedRef.current) {
+              ev.preventDefault()
+              movedRef.current = false
+            }
+          }}
         >
           {inner}
         </Link>
+      )
+    }
+    if (draggable) {
+      // A contact/personal meeting — draggable, but no navigation target.
+      return (
+        <div
+          key={e.eventId}
+          className={cls}
+          style={style}
+          title={`${e.summary} · drag to reschedule`}
+          onMouseDown={(ev) => beginMoveDrag(ev, e, day, dispTop, dispHeight)}
+        >
+          {inner}
+        </div>
       )
     }
     if (e.htmlLink) {
@@ -669,7 +993,7 @@ export default function CalendarPage() {
 
         <div className="cal-grid-scroll" ref={gridScrollRef}>
           <div
-            className="cal-grid-body"
+            className={`cal-grid-body${dragging ? ' dragging' : ''}`}
             style={{ gridTemplateColumns: cols, height: 24 * HOUR_PX }}
           >
             <div className="cal-grid-axis">
@@ -684,31 +1008,32 @@ export default function CalendarPage() {
               const nowTop = isToday
                 ? ((now.getTime() - startOfDay(now).getTime()) / 3600_000) * HOUR_PX
                 : null
-              const canCreate = source === 'google' && matters.length > 0
+              const canCreate = source === 'google'
+              const ghost =
+                drag?.kind === 'create' && drag.day.toDateString() === day.toDateString()
+                  ? { top: Math.min(drag.y0, drag.y1), height: Math.abs(drag.y1 - drag.y0) }
+                  : null
               return (
                 <div
                   key={day.toISOString()}
                   className={`cal-grid-col${canCreate ? ' cal-grid-col-clickable' : ''}`}
-                  onClick={(ev) => {
-                    // Only empty grid space schedules — clicks on an event block
-                    // (Link/anchor/div.cal-event) are theirs to handle.
-                    if (!canCreate) return
-                    if ((ev.target as HTMLElement).closest('.cal-event')) return
-                    const rect = ev.currentTarget.getBoundingClientRect()
-                    const hour = Math.max(
-                      0,
-                      Math.min(23, Math.floor((ev.clientY - rect.top) / HOUR_PX)),
-                    )
-                    openCreateAt(day, hour)
-                  }}
-                  title={canCreate ? 'Click an empty slot to book a consultation' : undefined}
+                  // Mouse DOWN starts a create-drag; a plain click (no movement) still
+                  // opens the creator with a default 1h block (handled on mouseup).
+                  onMouseDown={(ev) => beginCreateDrag(ev, day)}
+                  title={canCreate ? 'Click or drag an empty slot to add an event' : undefined}
                 >
                   {hours.map((h) => (
                     <div key={h} className="cal-grid-hline" style={{ height: HOUR_PX }} />
                   ))}
                   {nowTop !== null && <div className="cal-grid-now" style={{ top: nowTop }} />}
+                  {ghost && (
+                    <div
+                      className="cal-grid-ghost"
+                      style={{ top: ghost.top, height: ghost.height }}
+                    />
+                  )}
                   {timed(day).map(({ e, top, height, inset }) =>
-                    renderGridEvent(e, top, height, inset),
+                    renderGridEvent(e, day, top, height, inset),
                   )}
                 </div>
               )
@@ -765,15 +1090,8 @@ export default function CalendarPage() {
           <button
             className="primary"
             style={{ marginLeft: 'auto' }}
-            disabled={source !== 'google' || matters.length === 0}
-            onClick={() =>
-              setPanel({
-                kind: 'create',
-                matterEntityId: matters[0]?.matterEntityId,
-                start: '',
-                end: '',
-              })
-            }
+            disabled={source !== 'google'}
+            onClick={() => openCreate('', '')}
           >
             + Event
           </button>
@@ -782,7 +1100,7 @@ export default function CalendarPage() {
 
       {panel && (
         <Modal
-          title={panel.kind === 'create' ? 'New event' : 'Reschedule consultation'}
+          title={panel.kind === 'create' ? 'New event' : 'Reschedule'}
           onClose={() => setPanel(null)}
           footer={
             <>
@@ -793,25 +1111,15 @@ export default function CalendarPage() {
                   busy ||
                   !panel.start ||
                   !panel.end ||
-                  (panel.kind === 'create' && !panel.matterEntityId)
+                  (panel.kind === 'create' && panel.mode === 'matter' && !panel.matterEntityId) ||
+                  (panel.kind === 'create' && panel.mode === 'contact' && !panel.contactEntityId)
                 }
-                onClick={() =>
-                  run(
-                    panel.kind === 'create'
-                      ? 'legal.booking.create_for_matter'
-                      : 'legal.booking.reschedule',
-                    {
-                      matterEntityId: panel.matterEntityId,
-                      startIso: new Date(panel.start).toISOString(),
-                      endIso: new Date(panel.end).toISOString(),
-                    },
-                  )
-                }
+                onClick={() => (panel.kind === 'create' ? submitCreate() : submitReschedule())}
               >
                 {busy
                   ? 'Saving…'
                   : panel.kind === 'create'
-                    ? 'Book + sync to Google'
+                    ? 'Create + sync to Google'
                     : 'Reschedule'}
               </button>
             </>
@@ -819,18 +1127,75 @@ export default function CalendarPage() {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             {panel.kind === 'create' && (
-              <div>
-                <div className="kv-label" style={{ marginBottom: 4 }}>
-                  Matter
+              <>
+                {/* Mode: tie to a matter, a contact, or neither (personal block). */}
+                <div className="row" style={{ gap: 0 }}>
+                  {(['matter', 'contact', 'personal'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      className={panel.mode === mode ? 'primary' : ''}
+                      disabled={mode === 'matter' && matters.length === 0}
+                      title={
+                        mode === 'matter' && matters.length === 0
+                          ? 'No matters yet'
+                          : mode === 'matter'
+                            ? 'A consultation on a matter'
+                            : mode === 'contact'
+                              ? 'A meeting with a client (they get an invite)'
+                              : 'A private block on your calendar'
+                      }
+                      onClick={() => setPanel({ ...panel, mode })}
+                    >
+                      {mode === 'matter' ? 'Matter' : mode === 'contact' ? 'Contact' : 'Personal'}
+                    </button>
+                  ))}
                 </div>
-                <Combobox
-                  ariaLabel="Matter"
-                  options={matterOptions}
-                  value={panel.matterEntityId ?? null}
-                  onChange={(v) => setPanel({ ...panel, matterEntityId: v })}
-                  placeholder="Search matters or clients…"
-                />
-              </div>
+
+                {panel.mode === 'matter' && (
+                  <div>
+                    <div className="kv-label" style={{ marginBottom: 4 }}>
+                      Matter
+                    </div>
+                    <Combobox
+                      ariaLabel="Matter"
+                      options={matterOptions}
+                      value={panel.matterEntityId ?? null}
+                      onChange={(v) => setPanel({ ...panel, matterEntityId: v })}
+                      placeholder="Search matters or clients…"
+                    />
+                  </div>
+                )}
+
+                {panel.mode === 'contact' && (
+                  <div>
+                    <div className="kv-label" style={{ marginBottom: 4 }}>
+                      Contact
+                    </div>
+                    <Combobox
+                      ariaLabel="Contact"
+                      options={contactOptions}
+                      value={panel.contactEntityId ?? null}
+                      onChange={(v) => setPanel({ ...panel, contactEntityId: v })}
+                      placeholder="Search contacts…"
+                    />
+                  </div>
+                )}
+
+                {panel.mode !== 'matter' && (
+                  <div>
+                    <div className="kv-label" style={{ marginBottom: 4 }}>
+                      Title
+                    </div>
+                    <input
+                      type="text"
+                      style={{ width: '100%' }}
+                      placeholder={panel.mode === 'contact' ? 'Meeting' : 'Personal block'}
+                      value={panel.summary ?? ''}
+                      onChange={(e) => setPanel({ ...panel, summary: e.target.value })}
+                    />
+                  </div>
+                )}
+              </>
             )}
             <div>
               <div className="kv-label" style={{ marginBottom: 4 }}>
@@ -1121,6 +1486,11 @@ export default function CalendarPage() {
                   {e.matterEntityId ? (
                     <>
                       <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
+                      <ActionsMenu label="Actions" align="right" items={eventMenuItems(e)} />
+                    </>
+                  ) : e.meetingEntityId ? (
+                    <>
+                      {e.contactName && <span className="text-muted text-sm">{e.contactName}</span>}
                       <ActionsMenu label="Actions" align="right" items={eventMenuItems(e)} />
                     </>
                   ) : (

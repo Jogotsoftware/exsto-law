@@ -3,10 +3,9 @@
 // Shared tab bar for the service editor: Settings · Questionnaire · Templates ·
 // (Prompt, only for AI-draft services) · Workflow · Billing. Rendered by the
 // /attorney/services/[serviceKey] layout so every panel of one service feels like
-// one editor instead of separate pages. The Prompt tab appears only when the
-// service generates documents via AI drafting (template-merge services don't use
-// a prompt), so a template-merge service shows exactly five tabs. The Workflow tab
-// (ADR 0045 PR4b) composes the service's lifecycle stage graph visually.
+// one editor instead of separate pages, and always shown so the attorney can move
+// freely between panels. The Prompt tab appears only for AI-draft services. Styled
+// via the shared .nav-tabs classes (globals.css), same as MatterTabs / CrmTabs.
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -36,33 +35,17 @@ export function ServiceTabs({
     .sort((a, b) => b.href.length - a.href.length)[0]?.href
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: '0.25rem',
-        borderBottom: '1px solid var(--border)',
-        margin: '0 0 1.1rem',
-      }}
-    >
-      {tabs.map((t) => {
-        const active = t.href === activeHref
-        return (
-          <Link
-            key={t.href}
-            href={t.href}
-            style={{
-              padding: '0.5rem 0.95rem',
-              marginBottom: '-1px',
-              borderBottom: `2px solid ${active ? 'var(--text, #1a1a1a)' : 'transparent'}`,
-              color: active ? 'var(--text, #1a1a1a)' : 'var(--muted)',
-              fontWeight: active ? 600 : 400,
-              textDecoration: 'none',
-            }}
-          >
-            {t.label}
-          </Link>
-        )
-      })}
-    </div>
+    <nav className="nav-tabs" aria-label="Service editor">
+      {tabs.map((t) => (
+        <Link
+          key={t.href}
+          href={t.href}
+          className={t.href === activeHref ? 'is-active' : undefined}
+          aria-current={t.href === activeHref ? 'page' : undefined}
+        >
+          {t.label}
+        </Link>
+      ))}
+    </nav>
   )
 }

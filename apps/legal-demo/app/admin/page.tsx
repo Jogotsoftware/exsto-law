@@ -36,8 +36,8 @@ export default function AdminLoginPage() {
   return (
     <main>
       <div style={{ maxWidth: 420, margin: '4rem auto 0' }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Exsto Platform</h1>
+        <div style={{ textAlign: 'center', marginBottom: 'var(--space-6)' }}>
+          <h1 style={{ fontSize: '2rem', marginBottom: 'var(--space-2)' }}>Exsto Platform</h1>
           <p style={{ color: 'var(--muted)' }}>Admin console</p>
         </div>
         <div className="login-card">
@@ -49,7 +49,7 @@ export default function AdminLoginPage() {
             style={{
               color: 'var(--muted)',
               fontSize: '0.85rem',
-              marginTop: '1rem',
+              marginTop: 'var(--space-4)',
               textAlign: 'center',
               marginBottom: 0,
             }}

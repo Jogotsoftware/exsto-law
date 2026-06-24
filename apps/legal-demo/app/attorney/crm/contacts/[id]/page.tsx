@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { BackButton } from '@/components/BackButton'
+import { PageHead } from '@/components/PageHead'
 
 type CrmBucket = 'active' | 'prospective' | 'prior'
 
@@ -102,22 +103,28 @@ export default function ContactDetailPage() {
   const standing = contact ? BUCKET_META[contact.crmBucket] : null
 
   return (
-    <>
+    <main>
       <BackButton fallback="/attorney/crm/contacts" />
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
-      >
-        <h1 style={{ margin: 0 }}>{contact?.fullName || contact?.email || 'Contact'}</h1>
-        {standing && (
-          <span
-            className="badge"
-            style={{ background: standing.color, color: '#fff', borderColor: standing.color }}
-          >
-            {standing.label}
+      <PageHead
+        title={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+            {contact?.fullName || contact?.email || 'Contact'}
+            {standing && (
+              <span
+                className="badge"
+                style={{
+                  background: standing.color,
+                  color: 'var(--surface)',
+                  borderColor: standing.color,
+                }}
+              >
+                {standing.label}
+              </span>
+            )}
           </span>
-        )}
-      </div>
+        }
+        description="Contact details, portal access, and matters for this CRM record."
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -137,7 +144,7 @@ export default function ContactDetailPage() {
           </section>
 
           <section>
-            <h2 style={{ marginBottom: '0.5rem' }}>Portal access</h2>
+            <h2 style={{ marginBottom: 'var(--space-2)' }}>Portal access</h2>
             <p className="text-muted" style={{ marginTop: 0 }}>
               Email this client a secure link to set their password and sign in to view their
               matters, documents, and invoices, and message you. Re-sending resets their password.
@@ -151,14 +158,14 @@ export default function ContactDetailPage() {
               {inviting ? 'Sending…' : 'Invite to portal'}
             </button>
             {!contact.email && (
-              <span className="text-muted" style={{ marginLeft: '0.6rem' }}>
+              <span className="text-muted" style={{ marginLeft: 'var(--space-2)' }}>
                 Add an email first.
               </span>
             )}
             {inviteMsg && (
               <div
                 className={`alert ${inviteMsg.ok ? 'alert-success' : 'alert-error'}`}
-                style={{ marginTop: '0.6rem' }}
+                style={{ marginTop: 'var(--space-2)' }}
               >
                 {inviteMsg.text}
               </div>
@@ -166,7 +173,7 @@ export default function ContactDetailPage() {
           </section>
 
           <section>
-            <h2 style={{ marginBottom: '0.5rem' }}>
+            <h2 style={{ marginBottom: 'var(--space-2)' }}>
               Matters{' '}
               <span style={{ color: 'var(--muted)', fontWeight: 400 }}>{contact.matterCount}</span>
             </h2>
@@ -196,7 +203,7 @@ export default function ContactDetailPage() {
           </section>
         </>
       ) : null}
-    </>
+    </main>
   )
 }
 
@@ -204,7 +211,7 @@ function Field({ label, value }: { label: string; value: string }) {
   return (
     <label>
       <span>{label}</span>
-      <div style={{ padding: '0.4rem 0', fontWeight: 500 }}>{value}</div>
+      <div style={{ padding: 'var(--space-2) 0', fontWeight: 500 }}>{value}</div>
     </label>
   )
 }

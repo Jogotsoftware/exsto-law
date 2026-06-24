@@ -26,6 +26,9 @@ function emptyCapture() {
     serviceProposals: [],
     questionnaireProposals: [],
     templateProposals: [],
+    // Phase 6 (billing + the terminal Enable) — empty buckets, like the rest.
+    costProposals: [],
+    enableProposals: [],
   }
 }
 
@@ -44,10 +47,19 @@ const WIZARD_ONLY_TOOLS = [
   'get_template_context',
   'propose_template',
   'get_service_completeness',
+  // Phase 6 — billing + the terminal Enable. These complete the self-driving build:
+  // propose_cost sets the fee model; propose_enable flips the service to active.
+  'propose_cost',
+  'propose_enable',
 ]
 
 // The orchestrator block's load-bearing heading — present only when the wizard is on.
 const ORCHESTRATOR_MARKER = 'BUILDING A SERVICE (the guided wizard)'
+
+// Phase 6 load-bearing orchestrator text — the continuous-flow + Enable instructions
+// that make the build self-driving and actually go live. Present only flag-on.
+const CONTINUOUS_FLOW_MARKER = 'CONTINUOUS, SELF-DRIVING FLOW'
+const ENABLE_MARKER = 'CALL propose_enable'
 
 describe('build wizard dormancy (LEGAL_BUILD_WIZARD off)', () => {
   afterEach(() => {
@@ -66,6 +78,9 @@ describe('build wizard dormancy (LEGAL_BUILD_WIZARD off)', () => {
     expect(system).not.toContain(ORCHESTRATOR_MARKER)
     // And it teaches nothing about creating services at all (Phase 1 note absent too).
     expect(system).not.toContain('CREATING A NEW SERVICE')
+    // Phase 6 — the continuous-flow + Enable instructions are gated too.
+    expect(system).not.toContain(CONTINUOUS_FLOW_MARKER)
+    expect(system).not.toContain(ENABLE_MARKER)
   })
 
   it('keeps the always-on, non-wizard tools regardless of the flag (no regression)', () => {
@@ -101,5 +116,10 @@ describe('build wizard activation (LEGAL_BUILD_WIZARD on)', () => {
     expect(system).toContain('firm-admin.build-service')
     expect(system).toContain('DOCUMENTS → VARIABLES → QUESTIONNAIRE')
     expect(system).toContain('get_service_completeness')
+    // Phase 6 — the continuous-flow + billing + terminal Enable instructions, the
+    // headline fixes (never stall after an approval; the service must end ACTIVE).
+    expect(system).toContain(CONTINUOUS_FLOW_MARKER)
+    expect(system).toContain('propose_cost')
+    expect(system).toContain(ENABLE_MARKER)
   })
 })

@@ -45,7 +45,16 @@ export async function POST(request: Request) {
         confidence: typeof body?.confidence === 'number' ? body.confidence : undefined,
       },
     )
-    return NextResponse.json({ result })
+    // Return the LINK to the created service so the chat can show "View service →"
+    // AND auto-continue the guided build (Phase 6 continuous flow). serviceKey + a
+    // short label ride along so the continuation message reads naturally.
+    const serviceKey = result.serviceKey
+    return NextResponse.json({
+      result,
+      serviceKey,
+      link: `/attorney/services/${encodeURIComponent(serviceKey)}`,
+      label: `Service "${displayName}"`,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ error: message }, { status: 500 })

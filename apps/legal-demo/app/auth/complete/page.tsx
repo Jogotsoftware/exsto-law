@@ -23,7 +23,7 @@ export default function AuthCompletePage() {
 
   return (
     <main>
-      <div className="loading-block" style={{ marginTop: '4rem' }}>
+      <div className="loading-block" style={{ marginTop: 'var(--space-7)' }}>
         <span className="spinner" /> Finishing up{email ? ` for ${email}` : ''}…
       </div>
     </main>

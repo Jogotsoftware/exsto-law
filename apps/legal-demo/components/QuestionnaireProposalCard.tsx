@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { LayersIcon, CheckIcon } from '@/components/icons'
+import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the QuestionnaireProposal captured in
@@ -38,11 +39,18 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 // Approve POSTs the schema to the questionnaire approve-from-ai route, the only place
 // the form is written. The card surfaces the variable contract — how many template
 // tokens the form covers — so the attorney never approves an incomplete form.
-export function QuestionnaireProposalCard({ proposal }: { proposal: QuestionnaireProposal }) {
+export function QuestionnaireProposalCard({
+  proposal,
+  onApproved,
+}: {
+  proposal: QuestionnaireProposal
+  onApproved?: OnApproved
+}) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
+  const [link, setLink] = useState<string | null>(null)
 
   const sections = proposal.schema?.sections ?? []
   const fieldCount = sections.reduce((n, s) => n + (s.fields?.length ?? 0), 0)
@@ -73,9 +81,24 @@ export function QuestionnaireProposalCard({ proposal }: { proposal: Questionnair
           }),
         },
       )
-      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      const data = (await res.json().catch(() => null)) as {
+        serviceKey?: string
+        link?: string
+        label?: string
+        error?: string
+      } | null
       if (!res.ok) throw new Error(data?.error || `Approve failed (${res.status})`)
+      setLink(data?.link ?? null)
       setApproveState('approved')
+      // Continue the guided build to the next step (Phase 6).
+      if (data?.link) {
+        onApproved?.({
+          artifact: 'questionnaire',
+          link: data.link,
+          serviceKey: data.serviceKey || proposal.serviceKey,
+          label: data.label || 'Questionnaire',
+        })
+      }
     } catch (e) {
       setApproveState('error')
       setApproveError(e instanceof Error ? e.message : String(e))
@@ -88,20 +111,20 @@ export function QuestionnaireProposalCard({ proposal }: { proposal: Questionnair
         <span className="uac-doc-title">
           <LayersIcon size={14} /> Proposed questionnaire — {proposal.serviceKey}
         </span>
-        <span className="text-muted" style={{ fontSize: 12 }}>
+        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
           {fieldCount} field{fieldCount === 1 ? '' : 's'}
         </span>
       </div>
 
       {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
           {proposal.summary}
         </div>
       )}
 
-      <div className="uac-doc-body" style={{ fontSize: 12 }}>
+      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {sections.map((s, si) => (
-          <div key={s.id ?? si} style={{ marginBottom: 4 }}>
+          <div key={s.id ?? si} style={{ marginBottom: 'var(--space-1)' }}>
             <strong>{s.title || s.id || `Section ${si + 1}`}</strong>
             {s.fields && s.fields.length > 0 && (
               <span className="text-muted">
@@ -115,11 +138,11 @@ export function QuestionnaireProposalCard({ proposal }: { proposal: Questionnair
 
       {/* The variable contract — the point of the wizard. A token with no field would
           render [[MISSING]] in the document, so the attorney sees coverage first. */}
-      <div className="uac-doc-body" style={{ fontSize: 12 }}>
+      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {missing.length === 0 ? (
           <div className="text-muted">Covers every document token — no [[MISSING]] gaps.</div>
         ) : (
-          <div role="alert" className="alert alert-warn" style={{ fontSize: 12 }}>
+          <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
             Does not yet collect {missing.length} document token{missing.length === 1 ? '' : 's'}:{' '}
             <strong>{missing.join(', ')}</strong>. These would render [[MISSING]] until added.
           </div>
@@ -141,9 +164,14 @@ export function QuestionnaireProposalCard({ proposal }: { proposal: Questionnair
               ? 'Saved'
               : 'Approve & save questionnaire'}
         </button>
+        {link && (
+          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
+            View questionnaire →
+          </a>
+        )}
       </div>
       {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
+        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
       )}

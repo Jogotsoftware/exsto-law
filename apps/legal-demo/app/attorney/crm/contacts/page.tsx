@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { PageHead } from '@/components/PageHead'
 
 type CrmBucket = 'active' | 'prospective' | 'prior'
 type Tab = 'all' | CrmBucket
@@ -85,17 +86,12 @@ export default function ContactsPage() {
   }, [contacts, q, tab])
 
   return (
-    <>
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'baseline', gap: '0.6rem' }}
-      >
-        <h1 style={{ margin: 0 }}>Contacts</h1>
-        {contacts && <span style={{ color: 'var(--muted)' }}>{contacts.length}</span>}
-      </div>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.3rem' }}>
-        Everyone who&rsquo;s reached the firm, by standing (derived from their matters).
-      </p>
+    <main>
+      <PageHead
+        title="Contacts"
+        description="Everyone who’s reached the firm, by standing (derived from their matters)."
+        actions={contacts ? <span style={{ color: 'var(--muted)' }}>{contacts.length}</span> : null}
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -120,7 +116,7 @@ export default function ContactsPage() {
         placeholder="Search name, email, company, phone…"
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        style={{ width: '100%', maxWidth: 440, margin: '0.9rem 0 1.1rem' }}
+        style={{ width: '100%', maxWidth: 440, margin: 'var(--space-4) 0' }}
       />
 
       {contacts === null ? (
@@ -159,6 +155,6 @@ export default function ContactsPage() {
           ))}
         </div>
       )}
-    </>
+    </main>
   )
 }

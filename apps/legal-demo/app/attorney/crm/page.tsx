@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { PageHead } from '@/components/PageHead'
 
 interface ClientSummary {
   clientEntityId: string
@@ -87,30 +88,29 @@ export default function ClientsPage() {
   }
 
   return (
-    <>
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}
-      >
-        <h1 style={{ margin: 0 }}>Clients</h1>
-        {clients && <span style={{ color: 'var(--muted)' }}>{clients.length}</span>}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
-          {!creating && (
+    <main>
+      <PageHead
+        title={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            Clients
+            {clients && <span style={{ color: 'var(--muted)' }}>{clients.length}</span>}
+          </span>
+        }
+        description="The billing parent that groups a client’s contacts and matters."
+        actions={
+          !creating && (
             <button className="primary" onClick={() => setCreating(true)}>
               New client
             </button>
-          )}
-        </div>
-      </div>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.3rem' }}>
-        The billing parent that groups a client&rsquo;s contacts and matters.
-      </p>
+          )
+        }
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
       {creating && (
-        <section style={{ borderLeft: '3px solid var(--border)' }}>
-          <h2 style={{ marginTop: 0 }}>New client</h2>
+        <section>
+          <h2>New client</h2>
           <div className="form-grid">
             <label>
               <span>Client name</span>
@@ -144,7 +144,7 @@ export default function ClientsPage() {
               </label>
             )}
           </div>
-          <div style={{ marginTop: '0.9rem', display: 'flex', gap: '0.5rem' }}>
+          <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: 'var(--space-2)' }}>
             <button className="primary" onClick={create} disabled={busy || !name.trim()}>
               {busy ? 'Creating…' : 'Create client'}
             </button>
@@ -188,6 +188,6 @@ export default function ClientsPage() {
           ))}
         </div>
       )}
-    </>
+    </main>
   )
 }

@@ -110,7 +110,7 @@ export default function AdminAccessPage() {
         <select
           value={tenantId}
           onChange={(e) => setTenantId(e.target.value)}
-          style={{ display: 'block', minWidth: 320, marginTop: 4 }}
+          style={{ display: 'block', minWidth: 320, marginTop: 'var(--space-1)' }}
         >
           <option value="">Select a firm…</option>
           {tenants
@@ -125,16 +125,12 @@ export default function AdminAccessPage() {
 
       {loaded && (
         <>
-          <section
-            style={{
-              border: '1px solid var(--border, #e5e7eb)',
-              borderRadius: 8,
-              padding: '1rem',
-              marginBottom: '1.5rem',
-            }}
-          >
+          <section style={{ marginBottom: 'var(--space-5)' }}>
             <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Invite a user</h2>
-            <form onSubmit={invite} style={{ display: 'grid', gap: '0.6rem', maxWidth: 460 }}>
+            <form
+              onSubmit={invite}
+              style={{ display: 'grid', gap: 'var(--space-2)', maxWidth: 460 }}
+            >
               <input
                 required
                 type="email"
@@ -167,66 +163,69 @@ export default function AdminAccessPage() {
           </section>
 
           <h2 style={{ fontSize: '1.1rem' }}>Users</h2>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border, #e5e7eb)' }}>
-                <th style={{ padding: '0.5rem' }}>User</th>
-                <th style={{ padding: '0.5rem' }}>Role</th>
-                <th style={{ padding: '0.5rem' }}>Status</th>
-                <th style={{ padding: '0.5rem' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.actorId} style={{ borderBottom: '1px solid var(--border, #eee)' }}>
-                  <td style={{ padding: '0.5rem' }}>
-                    <strong>{u.displayName}</strong>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{u.email}</div>
-                  </td>
-                  <td style={{ padding: '0.5rem' }}>
-                    <select
-                      value={roles.find((r) => r.displayName === u.role)?.roleName ?? ''}
-                      disabled={busy}
-                      onChange={(e) =>
-                        act(() =>
-                          callAdminMcp({
-                            toolName: 'admin.access.assign_role',
-                            input: { tenantId, actorId: u.actorId, roleName: e.target.value },
-                          }),
-                        )
-                      }
-                    >
-                      <option value="">{u.role ?? '—'}</option>
-                      {roles.map((r) => (
-                        <option key={r.roleName} value={r.roleName}>
-                          {r.displayName}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td style={{ padding: '0.5rem' }}>{u.status}</td>
-                  <td style={{ padding: '0.5rem' }}>
-                    {u.status === 'active' && (
-                      <button
-                        className="secondary"
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.actorId}>
+                    <td>
+                      <strong>{u.displayName}</strong>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
+                        {u.email}
+                      </div>
+                    </td>
+                    <td>
+                      <select
+                        value={roles.find((r) => r.displayName === u.role)?.roleName ?? ''}
                         disabled={busy}
-                        onClick={() =>
+                        onChange={(e) =>
                           act(() =>
                             callAdminMcp({
-                              toolName: 'admin.access.deactivate',
-                              input: { tenantId, actorId: u.actorId },
+                              toolName: 'admin.access.assign_role',
+                              input: { tenantId, actorId: u.actorId, roleName: e.target.value },
                             }),
                           )
                         }
                       >
-                        Deactivate
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        <option value="">{u.role ?? '—'}</option>
+                        {roles.map((r) => (
+                          <option key={r.roleName} value={r.roleName}>
+                            {r.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>{u.status}</td>
+                    <td>
+                      {u.status === 'active' && (
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            act(() =>
+                              callAdminMcp({
+                                toolName: 'admin.access.deactivate',
+                                input: { tenantId, actorId: u.actorId },
+                              }),
+                            )
+                          }
+                        >
+                          Deactivate
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </main>
