@@ -6,7 +6,6 @@
 // server-side (requireAdmin) — this page only shows/hides for convenience.
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { PageHead } from '@/components/PageHead'
 
 interface FirmUser {
   actorId: string
@@ -91,11 +90,6 @@ export default function UsersPage() {
 
   return (
     <main>
-      <PageHead
-        title="Users & roles"
-        description="Add firm staff, assign roles, and manage access. Roles map to permission scopes enforced by the substrate."
-      />
-
       {error && <div className="alert alert-error">{error}</div>}
 
       {me && !me.isAdmin && (
@@ -105,7 +99,7 @@ export default function UsersPage() {
       )}
 
       {me?.isAdmin && (
-        <section style={{ padding: 0, overflow: 'hidden' }}>
+        <section className="section-flush">
           <div
             className="client-search-row"
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -253,13 +247,13 @@ function InviteModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2 style={{ margin: 0 }}>Invite user</h2>
+          <h2>Invite user</h2>
           <button onClick={onClose} aria-label="Close" className="modal-close">
             ×
           </button>
         </div>
         <div className="modal-body">
-          <p style={{ color: 'var(--muted)' }}>
+          <p className="text-muted">
             The email is the user’s sign-in identity (they sign in with that Google account).
           </p>
           <label>

@@ -42,7 +42,14 @@ export async function POST(
       conclusion: (body.summary ?? '').trim() || `Authored a questionnaire for ${serviceKey}.`,
       confidence: typeof body.confidence === 'number' ? body.confidence : undefined,
     })
-    return NextResponse.json({ result })
+    // Return the LINK to the service's questionnaire page + serviceKey + label so the
+    // chat can show "View questionnaire →" and auto-continue the build (Phase 6).
+    return NextResponse.json({
+      result,
+      serviceKey,
+      link: `/attorney/services/${encodeURIComponent(serviceKey)}/questionnaire`,
+      label: 'Questionnaire',
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ error: message }, { status: 500 })

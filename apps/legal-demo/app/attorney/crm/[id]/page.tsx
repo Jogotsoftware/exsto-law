@@ -9,6 +9,7 @@ import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { BackButton } from '@/components/BackButton'
+import { PageHead } from '@/components/PageHead'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
 
 type BillingType = '' | 'hourly' | 'fixed'
@@ -117,7 +118,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   }
 
   return (
-    <>
+    <main>
       <BackButton fallback="/attorney/crm" />
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -129,39 +130,39 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         </div>
       ) : (
         <>
-          <div
-            className="attorney-page-head"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
-          >
-            <h1 style={{ margin: 0 }}>{client.name || 'Client'}</h1>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.4rem' }}>
-              {!editing && <button onClick={beginEdit}>Edit</button>}
-              <button
-                onClick={() =>
-                  launchCompose({
-                    contactId: mainContact?.contactEntityId,
-                    to: mainContact?.email,
-                  })
-                }
-                disabled={!mainContact?.email}
-                title={
-                  mainContact?.email ? `Email ${mainContact.email}` : 'No contact email on file'
-                }
-              >
-                Email
-              </button>
-              <button
-                onClick={() => launchScheduler({ contactId: mainContact?.contactEntityId })}
-                title="Schedule a meeting"
-              >
-                Schedule
-              </button>
-            </div>
-          </div>
+          <PageHead
+            title={client.name || 'Client'}
+            description="Client record with its contacts and matters."
+            actions={
+              <>
+                {!editing && <button onClick={beginEdit}>Edit</button>}
+                <button
+                  onClick={() =>
+                    launchCompose({
+                      contactId: mainContact?.contactEntityId,
+                      to: mainContact?.email,
+                    })
+                  }
+                  disabled={!mainContact?.email}
+                  title={
+                    mainContact?.email ? `Email ${mainContact.email}` : 'No contact email on file'
+                  }
+                >
+                  Email
+                </button>
+                <button
+                  onClick={() => launchScheduler({ contactId: mainContact?.contactEntityId })}
+                  title="Schedule a meeting"
+                >
+                  Schedule
+                </button>
+              </>
+            }
+          />
 
           {editing && (
             <section style={{ borderLeft: '3px solid var(--border)' }}>
-              <h2 style={{ marginTop: 0 }}>Edit client</h2>
+              <h2>Edit client</h2>
               <div className="form-grid">
                 <label>
                   <span>Client name</span>
@@ -211,7 +212,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
                   </label>
                 )}
               </div>
-              <div style={{ marginTop: '0.9rem', display: 'flex', gap: '0.5rem' }}>
+              <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: 'var(--space-2)' }}>
                 <button className="primary" onClick={save} disabled={busy || !form.name.trim()}>
                   {busy ? 'Saving…' : 'Save'}
                 </button>
@@ -269,7 +270,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
                       <div className="matter-row-title">
                         {c.fullName || c.email || '(no name)'}
                         {c.isMain && (
-                          <span className="crm-pill" style={{ marginLeft: '0.5rem' }}>
+                          <span className="crm-pill" style={{ marginLeft: 'var(--space-2)' }}>
                             Main
                           </span>
                         )}
@@ -311,6 +312,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           </section>
         </>
       )}
-    </>
+    </main>
   )
 }

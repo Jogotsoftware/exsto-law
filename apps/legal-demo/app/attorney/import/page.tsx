@@ -258,7 +258,7 @@ export default function ImportPage() {
                         style={{
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '0.5rem',
+                          gap: 'var(--space-2)',
                           flexWrap: 'wrap',
                         }}
                       >
@@ -288,7 +288,11 @@ export default function ImportPage() {
           </table>
           <div
             className="row"
-            style={{ justifyContent: 'flex-end', padding: '0.85rem 1rem', gap: '0.75rem' }}
+            style={{
+              justifyContent: 'flex-end',
+              padding: 'var(--space-3) var(--space-4)',
+              gap: 'var(--space-3)',
+            }}
           >
             <span className="text-muted text-xs">{selectedCount} selected</span>
             <button
@@ -333,7 +337,10 @@ export default function ImportPage() {
                         {r.status}
                       </span>
                       {r.error && (
-                        <span className="text-muted text-xs" style={{ marginLeft: 6 }}>
+                        <span
+                          className="text-muted text-xs"
+                          style={{ marginLeft: 'var(--space-2)' }}
+                        >
                           {r.error}
                         </span>
                       )}
@@ -350,7 +357,7 @@ export default function ImportPage() {
               })}
             </tbody>
           </table>
-          <div className="row" style={{ marginTop: '0.85rem' }}>
+          <div className="row" style={{ marginTop: 'var(--space-3)' }}>
             <button
               onClick={() => {
                 setResults(null)

@@ -21,33 +21,17 @@ export function MatterTabs({ matterEntityId }: { matterEntityId: string }) {
     .sort((a, b) => b.href.length - a.href.length)[0]?.href
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: '0.25rem',
-        borderBottom: '1px solid var(--border)',
-        margin: '0 0 1.1rem',
-      }}
-    >
-      {tabs.map((t) => {
-        const active = t.href === activeHref
-        return (
-          <Link
-            key={t.href}
-            href={t.href}
-            style={{
-              padding: '0.5rem 0.95rem',
-              marginBottom: '-1px',
-              borderBottom: `2px solid ${active ? 'var(--text, #1a1a1a)' : 'transparent'}`,
-              color: active ? 'var(--text, #1a1a1a)' : 'var(--muted)',
-              fontWeight: active ? 600 : 400,
-              textDecoration: 'none',
-            }}
-          >
-            {t.label}
-          </Link>
-        )
-      })}
-    </div>
+    <nav className="nav-tabs" aria-label="Matter workspace">
+      {tabs.map((t) => (
+        <Link
+          key={t.href}
+          href={t.href}
+          className={t.href === activeHref ? 'is-active' : undefined}
+          aria-current={t.href === activeHref ? 'page' : undefined}
+        >
+          {t.label}
+        </Link>
+      ))}
+    </nav>
   )
 }

@@ -9012,6 +9012,35 @@ input[type='number'] {
   z-index: 5;
   pointer-events: none;
 }
+/* ── Drag-to-schedule (PR3): move / resize an event, paint a new one ────────── */
+/* Suppress text selection anywhere on the grid while a drag is in progress. */
+.cal-grid-body.dragging {
+  user-select: none;
+}
+/* The bottom-edge resize handle on a draggable event block. */
+.cal-event-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 7px;
+  cursor: ns-resize;
+}
+.cal-event.dragging {
+  opacity: 0.85;
+  box-shadow: 0 6px 16px -4px rgba(11, 27, 58, 0.4);
+}
+/* The translucent block painted while drag-creating a new event. */
+.cal-grid-ghost {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  background: rgba(37, 99, 235, 0.18);
+  border: 1px dashed #2563eb;
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 40;
+}
 /* ── Combobox (searchable single-select; matter/contact pickers) ───────────── */
 .cbx {
   position: relative;
@@ -9675,4 +9704,107 @@ input[type='number'] {
 .pdash-btn.is-disabled {
   opacity: 0.55;
   pointer-events: none;
+}
+
+/* ============================================================================
+   Shared UI primitives (UI consistency sweep). Additive only — these dedupe
+   patterns previously hand-rolled inline across many pages, and fix a few class
+   names that pages already reference but were never defined. All values use the
+   canonical --space-, --radius-, --text-, and --weight- tokens.
+   ========================================================================== */
+
+/* `.table-wrap` is used on every data table but had no definition (silent
+   no-op). It gives tables horizontal scroll on narrow viewports. */
+.table-wrap {
+  overflow-x: auto;
+}
+
+/* Shared nav-tab bar — dedupes the byte-identical ServiceTabs / MatterTabs /
+   CrmTabs idiom. The -1px bottom margin overlaps the active underline onto the
+   bar's border (load-bearing — do not remove). */
+.nav-tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.nav-tabs a {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: -1px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: var(--weight-medium);
+  border-bottom: 2px solid transparent;
+}
+.nav-tabs a.is-active {
+  color: var(--accent);
+  font-weight: var(--weight-semibold);
+  border-bottom-color: var(--accent);
+}
+
+/* Settings sub-nav (settings/layout.tsx) — same idiom, smaller type. */
+.settings-subnav {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.settings-tab {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  font-weight: var(--weight-medium);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.settings-tab.is-active {
+  color: var(--accent);
+  font-weight: var(--weight-semibold);
+  border-bottom-color: var(--accent);
+}
+
+/* Metric tile — replaces the per-page inline StatCard. */
+.stat-card {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.stat-card.accent {
+  background: var(--accent);
+  color: var(--surface);
+  border-color: var(--accent);
+}
+.stat-card .stat-value {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+}
+.stat-card .stat-label {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+/* Full-bleed table/content inside a <section> card (no inner padding). */
+.section-flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Left-accent card variant (repeated inline border-left idiom). */
+.section-accent {
+  border-left: 3px solid var(--border);
+}
+
+/* Link-styled button — replaces inline "background:none;border:none" resets. */
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--accent);
+  cursor: pointer;
+}
+.link-button.danger {
+  color: var(--danger);
 }

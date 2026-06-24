@@ -79,6 +79,9 @@ import './tools/esignPortalTools.js'
 // Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
 // invoices, list/inspect them, and send (activation-gated). Session 4.
 import './tools/billingTools.js'
+// Trust (IOLTA) accounting: deposit/disburse/refund, apply-to-invoice (earned
+// transfer), per-client balance + ledger, and three-way reconciliation.
+import './tools/trustTools.js'
 // S9 (tenancy & RBAC): firm user management — invite / assign role / deactivate.
 import './tools/userTools.js'
 // Skills: reusable legal playbooks (ported from claude-for-legal) the chatbot

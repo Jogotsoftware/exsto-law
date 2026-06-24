@@ -164,8 +164,8 @@ export default function PromptEditorPage() {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.5rem',
-                  marginBottom: '0.5rem',
+                  gap: 'var(--space-2)',
+                  marginBottom: 'var(--space-2)',
                 }}
               >
                 <strong>{humanKind(k.documentKind)}</strong>
@@ -186,8 +186,14 @@ export default function PromptEditorPage() {
                 </button>
               </div>
 
-              <div style={{ marginBottom: '0.6rem' }}>
-                <div style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '0.3rem' }}>
+              <div style={{ marginBottom: 'var(--space-2)' }}>
+                <div
+                  style={{
+                    fontSize: '0.82rem',
+                    color: 'var(--muted)',
+                    marginBottom: 'var(--space-1)',
+                  }}
+                >
                   Required slots
                 </div>
                 <ul
@@ -197,30 +203,22 @@ export default function PromptEditorPage() {
                     padding: 0,
                     display: 'flex',
                     flexWrap: 'wrap',
-                    gap: '0.5rem',
+                    gap: 'var(--space-2)',
                   }}
                 >
                   {REQUIRED_SLOTS.map((slot) => {
                     const present = k.text.includes(slot)
                     return (
-                      <li
-                        key={slot}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          fontSize: '0.8rem',
-                          padding: '0.2rem 0.5rem',
-                          borderRadius: '0.4rem',
-                          border: '1px solid',
-                          borderColor: present ? '#86efac' : '#fecaca',
-                          background: present ? 'var(--ok-soft)' : '#fef2f2',
-                          color: present ? '#166534' : '#991b1b',
-                        }}
-                        title={present ? 'Present' : 'Missing — add this slot'}
-                      >
-                        <span aria-hidden>{present ? '✓' : '✗'}</span>
-                        <code style={{ background: 'transparent', color: 'inherit' }}>{slot}</code>
+                      <li key={slot}>
+                        <span
+                          className={`badge ${present ? 'ok' : 'danger'}`}
+                          title={present ? 'Present' : 'Missing — add this slot'}
+                        >
+                          <span aria-hidden>{present ? '✓' : '✗'}</span>
+                          <code style={{ background: 'transparent', color: 'inherit' }}>
+                            {slot}
+                          </code>
+                        </span>
                       </li>
                     )
                   })}
@@ -247,26 +245,18 @@ export default function PromptEditorPage() {
               </label>
 
               {missing.length > 0 && (
-                <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>
+                <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
                   Missing required slot(s): {missing.join(', ')}. Saving is blocked until every slot
                   is present.
                 </div>
               )}
               {k.error && (
-                <div className="alert alert-error" style={{ marginTop: '0.5rem' }}>
+                <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
                   {k.error}
                 </div>
               )}
               {k.saved && (
-                <div
-                  className="alert"
-                  style={{
-                    marginTop: '0.5rem',
-                    background: 'var(--ok-soft)',
-                    color: '#166534',
-                    border: '1px solid #86efac',
-                  }}
-                >
+                <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
                   Saved a new version.
                 </div>
               )}

@@ -221,6 +221,196 @@ registerActionHandler('legal.meeting.assign', async (ctx, client, payload, actio
   }
 })
 
+// ───────────────────────────────────────────────────────────────────────────
+// legal.meeting.create — the attorney CREATES a calendar event from the app
+// (matter / contact / personal). The Google event is created by the API layer
+// first; this handler is a pure substrate writer that mints the calendar_event,
+// writes the snapshot, and links meeting_of (matter) and/or meeting_with (contact).
+//
+// PROVENANCE: unlike .assign (Google observed a pre-existing event → integration),
+// here the attorney ASSERTS the details, so the snapshot is HUMAN-sourced.
+// ───────────────────────────────────────────────────────────────────────────
+interface MeetingCreatePayload {
+  google_event_id: string | null
+  summary: string
+  started_at: string | null
+  ended_at: string | null
+  all_day: boolean
+  attendee_emails: string[]
+  html_link: string | null
+  event_status: string
+  matter_entity_id?: string | null
+  contact_entity_id?: string | null
+}
+
+registerActionHandler('legal.meeting.create', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as MeetingCreatePayload
+  if (p.matter_entity_id)
+    await requireActiveEntity(client, ctx.tenantId, p.matter_entity_id, 'matter')
+  if (p.contact_entity_id)
+    await requireActiveEntity(client, ctx.tenantId, p.contact_entity_id, 'client_contact')
+
+  const kindId = await lookupKindId(
+    client,
+    'entity_kind_definition',
+    ctx.tenantId,
+    CALENDAR_EVENT_KIND,
+  )
+  const calendarEventId = await insertEntity(
+    client,
+    ctx.tenantId,
+    actionId,
+    kindId,
+    `Meeting ${p.summary || p.google_event_id || ''}`.trim(),
+    { google_event_id: p.google_event_id, created_in_app: true },
+  )
+
+  const precision = p.all_day ? 'day' : 'minute'
+  const snapshot: Array<{ kind: string; value: unknown; precision?: string; know?: string }> = [
+    { kind: 'meeting_title', value: p.summary || '(no title)' },
+    { kind: 'meeting_all_day', value: Boolean(p.all_day) },
+    { kind: 'meeting_event_status', value: p.event_status || 'confirmed' },
+    {
+      kind: 'meeting_attendee_emails',
+      value: p.attendee_emails ?? [],
+      know: (p.attendee_emails?.length ?? 0) > 0 ? 'observed' : 'observed_null',
+    },
+  ]
+  if (p.google_event_id)
+    snapshot.push({ kind: 'meeting_google_event_id', value: p.google_event_id })
+  if (p.started_at) snapshot.push({ kind: 'meeting_started_at', value: p.started_at, precision })
+  if (p.ended_at) snapshot.push({ kind: 'meeting_ended_at', value: p.ended_at, precision })
+  if (p.html_link) snapshot.push({ kind: 'meeting_html_link', value: p.html_link })
+
+  for (const a of snapshot) {
+    const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: calendarEventId,
+      attributeKindId: akId,
+      value: a.value,
+      confidence: 1.0,
+      knowabilityState: a.know ?? 'observed',
+      timePrecision: a.precision ?? 'exact_instant',
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+  }
+
+  if (p.matter_entity_id) {
+    const meetingOfId = await lookupKindId(
+      client,
+      'relationship_kind_definition',
+      ctx.tenantId,
+      'meeting_of',
+    )
+    await insertRelationship(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      sourceEntityId: calendarEventId,
+      targetEntityId: p.matter_entity_id,
+      relationshipKindId: meetingOfId,
+    })
+  }
+  if (p.contact_entity_id) {
+    const meetingWithId = await lookupKindId(
+      client,
+      'relationship_kind_definition',
+      ctx.tenantId,
+      'meeting_with',
+    )
+    await insertRelationship(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      sourceEntityId: calendarEventId,
+      targetEntityId: p.contact_entity_id,
+      relationshipKindId: meetingWithId,
+    })
+  }
+
+  return {
+    calendarEventEntityId: calendarEventId,
+    googleEventId: p.google_event_id,
+    matterEntityId: p.matter_entity_id ?? null,
+    contactEntityId: p.contact_entity_id ?? null,
+  }
+})
+
+// legal.meeting.reschedule — append a new start/end snapshot (the Google patch
+// happens in the API). Human-sourced: the attorney moved it.
+interface MeetingReschedulePayload {
+  calendar_event_entity_id: string
+  started_at: string
+  ended_at: string
+  all_day?: boolean
+}
+
+registerActionHandler('legal.meeting.reschedule', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as MeetingReschedulePayload
+  if (!p.started_at || !p.ended_at) throw new Error('started_at and ended_at are required.')
+  await requireActiveEntity(client, ctx.tenantId, p.calendar_event_entity_id, 'calendar_event')
+  const precision = p.all_day ? 'day' : 'minute'
+  for (const [kind, value] of [
+    ['meeting_started_at', p.started_at],
+    ['meeting_ended_at', p.ended_at],
+  ] as const) {
+    const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, kind)
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: p.calendar_event_entity_id,
+      attributeKindId: akId,
+      value,
+      confidence: 1.0,
+      knowabilityState: 'observed',
+      timePrecision: precision,
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+  }
+  return { calendarEventEntityId: p.calendar_event_entity_id, rescheduled: true }
+})
+
+// legal.meeting.cancel — mark the snapshot cancelled (append-only, mirrors the
+// reconcile-deleted path). The Google delete happens in the API; the meeting_of/
+// meeting_with links are KEPT so a cancelled meeting still shows in history.
+interface MeetingCancelPayload {
+  calendar_event_entity_id: string
+}
+
+registerActionHandler('legal.meeting.cancel', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as MeetingCancelPayload
+  await requireActiveEntity(client, ctx.tenantId, p.calendar_event_entity_id, 'calendar_event')
+  const cur = await getLatestAttributeValue(
+    client,
+    ctx.tenantId,
+    p.calendar_event_entity_id,
+    'meeting_event_status',
+  )
+  if (cur !== 'cancelled') {
+    const akId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'meeting_event_status',
+    )
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: p.calendar_event_entity_id,
+      attributeKindId: akId,
+      value: 'cancelled',
+      confidence: 1.0,
+      knowabilityState: 'observed',
+      timePrecision: 'exact_instant',
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+  }
+  return { calendarEventEntityId: p.calendar_event_entity_id, cancelled: true }
+})
+
 interface MeetingUnassignPayload {
   calendar_event_entity_id: string
 }

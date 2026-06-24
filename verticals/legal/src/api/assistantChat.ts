@@ -58,6 +58,12 @@ import {
   type QuestionnaireProposal,
   type TemplateProposal,
 } from './intakeTemplateTools.js'
+import {
+  buildProposeCostTool,
+  buildProposeEnableTool,
+  type EnableProposal,
+} from './costEnableTools.js'
+import type { CostProposal } from './costAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 
 // When the build-wizard is on AND the attorney's message reads like a request to
@@ -199,6 +205,26 @@ export type AssistantChatStreamEvent =
       tokens: string[]
       orphanTokens: string[]
     }
+  // The assistant PROPOSED the BILLING (fee model) for a service (Build-Wizard
+  // Phase 6). The UI renders it as an inline approval card; the cost write happens
+  // only on approve. Flag-gated (LEGAL_BUILD_WIZARD).
+  | {
+      type: 'cost_proposal'
+      serviceKey: string
+      costType: CostProposal['costType']
+      amount: string
+      hours: number | null
+      summary: string
+      confidence: number
+    }
+  // The assistant PROPOSED ENABLING a completed service (Build-Wizard Phase 6 — the
+  // TERMINAL step). The UI renders it as the final Enable approval card; the status
+  // flip to 'active' happens only on approve. Flag-gated (LEGAL_BUILD_WIZARD).
+  | {
+      type: 'enable_proposal'
+      serviceKey: string
+      summary: string
+    }
   | {
       type: 'done'
       eventId: string
@@ -233,6 +259,12 @@ export interface AssistantChatReply {
   // Template proposals captured this turn (Build-Wizard Phase 3) — approval cards.
   // Empty for ordinary answers and whenever the wizard flag is off.
   templateProposals?: TemplateProposal[]
+  // Cost proposals captured this turn (Build-Wizard Phase 6 — billing) — approval
+  // cards. Empty for ordinary answers and whenever the wizard flag is off.
+  costProposals?: CostProposal[]
+  // Enable proposals captured this turn (Build-Wizard Phase 6 — the terminal Enable
+  // step) — the final approval card. Empty otherwise.
+  enableProposals?: EnableProposal[]
 }
 
 export interface AssistantThreadEntry {
@@ -263,6 +295,12 @@ export interface AssistantThreadEntry {
   // Template proposals captured on this turn (assistant side), so a reopened thread
   // still shows the approval cards.
   templateProposals?: TemplateProposal[]
+  // Cost proposals captured on this turn (assistant side, Build-Wizard Phase 6), so a
+  // reopened thread still shows the billing approval card.
+  costProposals?: CostProposal[]
+  // Enable proposals captured on this turn (assistant side, Build-Wizard Phase 6), so a
+  // reopened thread still shows the terminal Enable card.
+  enableProposals?: EnableProposal[]
 }
 
 const SYSTEM_PROMPT = [
@@ -410,6 +448,8 @@ export function buildAttorneyClientTools(
     serviceProposals: ServiceProposal[]
     questionnaireProposals: QuestionnaireProposal[]
     templateProposals: TemplateProposal[]
+    costProposals: CostProposal[]
+    enableProposals: EnableProposal[]
   },
 ): ClientTool[] {
   const tools: ClientTool[] = [buildFeedbackTool(ctx, input)]
@@ -439,6 +479,12 @@ export function buildAttorneyClientTools(
     // Phase 4: read-only completeness check so the orchestrator can verify a
     // service is enableable BEFORE it ever tells the attorney it's live.
     tools.push(buildServiceCompletenessTool(ctx))
+    // Phase 6: BILLING + ENABLE. propose_cost sets the fee model (the step Phase 4
+    // punted to "do it in the editor"); propose_enable is the TERMINAL step that flips
+    // the service to 'active' on approve — the step the old wizard never reached, which
+    // is why a wizard-built service stayed a disabled draft instead of going live.
+    tools.push(buildProposeCostTool(ctx, capture.costProposals))
+    tools.push(buildProposeEnableTool(ctx, capture.enableProposals))
   }
   return tools
 }
@@ -536,8 +582,10 @@ export function buildClaudeSystem(
       '(2) Propose the SERVICE SHELL FIRST with propose_service — a service must exist before anything can bind to it (templates attach to it, the questionnaire saves onto it, the workflow is its lifecycle). It is created disabled. ' +
       '(3) Then DOCUMENTS → VARIABLES → QUESTIONNAIRE, in that order (a HARD RULE): for each document the client receives, load the relevant firm legal skill with load_skill so the draft is real NC/federal work product, then propose_template; ENUMERATE every {{token}} the approved templates need; then propose_questionnaire to collect EXACTLY those tokens (field id == token name). Never build the questionnaire first — it is reverse-engineered from what the documents require. ' +
       "(4) Then the WORKFLOW: interview their real step-by-step process (who does each part — attorney, client, or system; what waits on something external), then propose_workflow composed from get_workflow_context's closed catalog, linear, attaching the templates that now exist. " +
-      '(5) Then check get_service_completeness. It returns { ready, missing }. NEVER tell the attorney the service is ready or live unless ready is true — if it is false, read back the missing reasons in plain language and loop to fix them. ' +
-      '(6) Guide ENABLE last: once completeness is ready, tell the attorney to set billing and Enable the service from the service editor (/attorney/services) — only after it is actually enabled is it bookable. ' +
+      '(5) Then BILLING: ask how they price the work — a flat fixed fee, or an hourly rate (and roughly how many hours) — then CALL propose_cost with the amount as a decimal string. Billing is a STEP of the build, not something to defer to an editor. ' +
+      '(6) Then check get_service_completeness. It returns { ready, missing }. NEVER tell the attorney the service is ready or live unless ready is true — if it is false, read back the missing reasons in plain language and loop to fix them. ' +
+      '(7) ENABLE LAST — this is how the service actually goes live. Once get_service_completeness returns ready:true, CALL propose_enable: this is the FINAL card; approving it flips the service to active/bookable. Until propose_enable is approved the service is a disabled DRAFT (not on the booking page, its templates/questionnaire pages look empty because those read the ACTIVE version) — so you MUST reach propose_enable; never stop at completeness, and never tell the attorney it is live until Enable is approved. After you propose_enable the build is DONE — do not start another step. ' +
+      'CONTINUOUS, SELF-DRIVING FLOW (this is how the build runs): the build advances ONE piece at a time, and after the attorney approves each card the SYSTEM AUTOMATICALLY CONTINUES the conversation with a short message telling you the artifact was created (with its link) and to do the next step — so when you receive such a continuation, immediately do the NEXT step in the order above (interview if needed, then the next propose_*), share the new artifact, and keep going. Do NOT wait for the attorney to prompt you between steps; do NOT stall after an approval. The ONLY place the build stops is after propose_enable (the terminal step). ' +
       'THROUGHOUT: each artifact is its OWN propose→approve card the attorney owns — never batch-write a finished service, never claim certainty (honest confidence < 1.0), always call the matching get_*_context read tool before each propose so you only use real kinds, ids, and tokens. After each propose tool call, your chat reply is ONE short sentence pointing the attorney at the current card to review; the artifact lives only in the tool call, never repeated in prose.'
   }
   if (activeSkillsText) system += `\n\n${activeSkillsText}`
@@ -686,6 +734,12 @@ export async function recordAssistantTurn(
     // Template proposals captured this turn (Build-Wizard Phase 3), recorded so a
     // reopened thread can re-show the approval cards. Additive field.
     templateProposals?: TemplateProposal[] | null
+    // Cost proposals captured this turn (Build-Wizard Phase 6 — billing), recorded so
+    // a reopened thread can re-show the approval cards. Additive field.
+    costProposals?: CostProposal[] | null
+    // Enable proposals captured this turn (Build-Wizard Phase 6 — the terminal Enable
+    // step), recorded so a reopened thread can re-show the approval card. Additive field.
+    enableProposals?: EnableProposal[] | null
     // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
     // Recorded additively in the event payload; powers the AI usage/cost view.
     usage?: AssistantUsage | null
@@ -741,6 +795,14 @@ export async function recordAssistantTurn(
           input.templateProposals && input.templateProposals.length
             ? input.templateProposals
             : null,
+        // Cost proposals captured this turn (billing approval cards), so a reopened
+        // thread re-shows them. Null when none were proposed.
+        cost_proposals:
+          input.costProposals && input.costProposals.length ? input.costProposals : null,
+        // Enable proposals captured this turn (the terminal Enable card), so a reopened
+        // thread re-shows them. Null when none were proposed.
+        enable_proposals:
+          input.enableProposals && input.enableProposals.length ? input.enableProposals : null,
         // Token usage (snake_case to match the rest of the payload), null when the
         // provider doesn't report it. The actor is captured as source_ref above, so
         // the usage view can attribute cost per attorney.
@@ -797,6 +859,11 @@ export async function assistantChat(
   // flag on). Surfaced as approval cards; the live writes are the approve routes.
   const questionnaireProposals: QuestionnaireProposal[] = []
   const templateProposals: TemplateProposal[] = []
+  // Cost/enable proposals captured this turn (Claude only, build-wizard flag on) —
+  // Phase 6 billing + the terminal Enable. Surfaced as approval cards; the live writes
+  // are the cost/enable approve routes.
+  const costProposals: CostProposal[] = []
+  const enableProposals: EnableProposal[] = []
   // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
   let usage: AssistantUsage | null = null
 
@@ -842,6 +909,8 @@ export async function assistantChat(
         serviceProposals,
         questionnaireProposals,
         templateProposals,
+        costProposals,
+        enableProposals,
       }),
     })
     reply = result.reply
@@ -866,6 +935,8 @@ export async function assistantChat(
     serviceProposals,
     questionnaireProposals,
     templateProposals,
+    costProposals,
+    enableProposals,
     usage,
   })
 
@@ -882,6 +953,8 @@ export async function assistantChat(
     serviceProposals: serviceProposals.length ? serviceProposals : undefined,
     questionnaireProposals: questionnaireProposals.length ? questionnaireProposals : undefined,
     templateProposals: templateProposals.length ? templateProposals : undefined,
+    costProposals: costProposals.length ? costProposals : undefined,
+    enableProposals: enableProposals.length ? enableProposals : undefined,
   }
 }
 
@@ -925,6 +998,10 @@ export async function* assistantChatStream(
   // Surfaced as approval cards after the model loop.
   const questionnaireProposals: QuestionnaireProposal[] = []
   const templateProposals: TemplateProposal[] = []
+  // Cost/enable proposals captured this turn (Claude only, build-wizard flag on) —
+  // Phase 6 billing + the terminal Enable. Surfaced as approval cards after the loop.
+  const costProposals: CostProposal[] = []
+  const enableProposals: EnableProposal[] = []
   let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
@@ -975,6 +1052,8 @@ export async function* assistantChatStream(
         serviceProposals,
         questionnaireProposals,
         templateProposals,
+        costProposals,
+        enableProposals,
       }),
     })) {
       if (chunk.type === 'text') {
@@ -1059,6 +1138,28 @@ export async function* assistantChatStream(
         orphanTokens: p.orphanTokens,
       }
     }
+    // Surface validated cost proposals captured this turn (Build-Wizard Phase 6 —
+    // billing). The tool's run() validated the money contract before capture.
+    for (const p of costProposals) {
+      yield {
+        type: 'cost_proposal',
+        serviceKey: p.serviceKey,
+        costType: p.costType,
+        amount: p.amount,
+        hours: p.hours,
+        summary: p.summary,
+        confidence: p.confidence,
+      }
+    }
+    // Surface the terminal Enable proposal captured this turn (Build-Wizard Phase 6).
+    // This is the last card of a guided build — approving it makes the service live.
+    for (const p of enableProposals) {
+      yield {
+        type: 'enable_proposal',
+        serviceKey: p.serviceKey,
+        summary: p.summary,
+      }
+    }
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -1078,6 +1179,8 @@ export async function* assistantChatStream(
     serviceProposals,
     questionnaireProposals,
     templateProposals,
+    costProposals,
+    enableProposals,
     usage,
   })
 
@@ -1159,6 +1262,8 @@ export async function listAssistantThread(
         service_proposals?: ServiceProposal[] | null
         questionnaire_proposals?: QuestionnaireProposal[] | null
         template_proposals?: TemplateProposal[] | null
+        cost_proposals?: CostProposal[] | null
+        enable_proposals?: EnableProposal[] | null
       }
       occurred_at: string
     }>(
@@ -1202,6 +1307,8 @@ export async function listAssistantThread(
           serviceProposals: r.payload.service_proposals ?? undefined,
           questionnaireProposals: r.payload.questionnaire_proposals ?? undefined,
           templateProposals: r.payload.template_proposals ?? undefined,
+          costProposals: r.payload.cost_proposals ?? undefined,
+          enableProposals: r.payload.enable_proposals ?? undefined,
         },
       ]
     })

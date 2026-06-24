@@ -6,8 +6,9 @@
 // including the live public booking link. Pricing lives on the Billing tab and the
 // document list on the Templates tab; both carry forward untouched on save here
 // (legal.service.update merges, so omitted config is preserved). Also hosts the
-// setup checklist + enable/disable. The page chrome (title, status, Back, tabs)
-// is provided by the [serviceKey] layout, so this renders panel content only.
+// enable/disable control (gated on the server completeness check). The page chrome
+// (title, status, Back, tabs) is provided by the [serviceKey] layout, so this
+// renders panel content only.
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -213,17 +214,8 @@ export default function ServiceSettingsPage() {
 
   return (
     <>
-      {!isNew && (
-        <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
-          Saving creates a new immutable version. Pricing (Billing tab), documents and questionnaire
-          (their tabs) carry forward unless changed there.
-        </p>
-      )}
-
       {!isNew && meta && (
-        <SetupChecklist
-          serviceKey={serviceKey}
-          route={meta.route}
+        <EnableGate
           isActive={meta.isActive}
           completeness={completeness}
           enabling={enabling}
@@ -232,15 +224,15 @@ export default function ServiceSettingsPage() {
         />
       )}
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {saved && (
-        <div
-          className="alert"
-          style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-        >
-          Saved a new version.
-        </div>
+      {!isNew && (
+        <p style={{ color: 'var(--muted)', marginTop: 'calc(var(--space-2) * -1)' }}>
+          Saving creates a new immutable version. Pricing (Billing tab), documents and questionnaire
+          (their tabs) carry forward unless changed there.
+        </p>
       )}
+
+      {error && <div className="alert alert-error">{error}</div>}
+      {saved && <div className="alert alert-success">Saved a new version.</div>}
 
       {!form ? (
         <div className="loading-block">
@@ -268,7 +260,7 @@ export default function ServiceSettingsPage() {
               </select>
             </label>
           </div>
-          <label style={{ display: 'block', marginTop: '0.8rem' }}>
+          <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
             <span>Booking page description</span>
             <textarea
               value={form.description}
@@ -292,7 +284,13 @@ export default function ServiceSettingsPage() {
                 <option value="ai_draft">AI draft — the assistant writes the document</option>
               </select>
             </label>
-            <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: '0.4rem 0 0' }}>
+            <p
+              style={{
+                color: 'var(--muted)',
+                fontSize: 'var(--text-sm)',
+                margin: 'var(--space-2) 0 0',
+              }}
+            >
               {form.generationMode === 'ai_draft'
                 ? 'AI draft uses the per-document instructions on the Prompt tab.'
                 : 'Template merge fills the bodies on the Templates tab — no Prompt tab needed.'}
@@ -338,7 +336,13 @@ export default function ServiceSettingsPage() {
                 url={bookingUrl}
               />
             )}
-            <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: '0.6rem 0 0' }}>
+            <p
+              style={{
+                color: 'var(--muted)',
+                fontSize: 'var(--text-sm)',
+                margin: 'var(--space-2) 0 0',
+              }}
+            >
               Days, hours and buffer are firm-wide —{' '}
               <Link href="/attorney/settings" className="back-link">
                 edit booking hours in Settings
@@ -347,7 +351,7 @@ export default function ServiceSettingsPage() {
             </p>
           </fieldset>
 
-          <div style={{ marginTop: '0.9rem' }}>
+          <div style={{ marginTop: 'var(--space-3)' }}>
             <button className="primary" onClick={save} disabled={busy || !form.displayName.trim()}>
               {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
             </button>
@@ -373,9 +377,9 @@ function BookingLink({
   const [copied, setCopied] = useState(false)
   const live = enabled && isActive
   return (
-    <div style={{ marginTop: '0.7rem' }}>
-      <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Booking link</span>
-      <div className="qb-pill-add" style={{ marginTop: '0.3rem' }}>
+    <div style={{ marginTop: 'var(--space-2)' }}>
+      <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>Booking link</span>
+      <div className="qb-pill-add" style={{ marginTop: 'var(--space-1)' }}>
         <input value={url} readOnly onFocus={(e) => e.currentTarget.select()} />
         <button
           type="button"
@@ -397,9 +401,9 @@ function BookingLink({
       </div>
       <p
         style={{
-          color: live ? '#166534' : 'var(--muted)',
-          fontSize: '0.8rem',
-          margin: '0.3rem 0 0',
+          color: live ? 'var(--ok)' : 'var(--muted)',
+          fontSize: 'var(--text-xs)',
+          margin: 'var(--space-1) 0 0',
         }}
       >
         {live
@@ -412,21 +416,17 @@ function BookingLink({
   )
 }
 
-// Setup checklist + enable gate. When the service is already enabled it collapses
-// to a single status line + Disable; when disabled it shows the remaining steps
-// (links into the relevant tabs) and gates the Enable button on the server
-// completeness check, so the UI and the set_active handler never disagree.
-function SetupChecklist({
-  serviceKey,
-  route,
+// Enable gate. When the service is already enabled it collapses to a single status
+// line + Disable; when disabled it shows the Enable button, gated on the server
+// completeness check so the UI and the set_active handler never disagree, plus the
+// remaining requirements so the attorney knows why it isn't bookable yet.
+function EnableGate({
   isActive,
   completeness,
   enabling,
   onEnable,
   onDisable,
 }: {
-  serviceKey: string
-  route: 'auto' | 'manual'
   isActive: boolean
   completeness: { ready: boolean; missing: string[] } | null
   enabling: boolean
@@ -437,13 +437,12 @@ function SetupChecklist({
     return (
       <section
         style={{
-          borderLeft: '3px solid #86efac',
           display: 'flex',
           alignItems: 'center',
-          gap: '0.7rem',
+          gap: 'var(--space-2)',
         }}
       >
-        <span style={{ color: '#166534' }}>✓ Enabled and bookable.</span>
+        <span style={{ color: 'var(--ok)' }}>✓ Enabled and bookable.</span>
         <button className="danger outline" onClick={onDisable} disabled={enabling}>
           {enabling ? '…' : 'Disable service'}
         </button>
@@ -452,62 +451,11 @@ function SetupChecklist({
   }
 
   const missing = completeness?.missing ?? []
-  const needsQuestionnaire = missing.some((m) => m.toLowerCase().includes('questionnaire'))
-  const needsPrompt = missing.some((m) => m.toLowerCase().includes('prompt'))
-  const needsTemplate = missing.some((m) => m.toLowerCase().includes('template'))
   const ready = completeness?.ready ?? false
 
-  const steps: { label: string; done: boolean; href?: string }[] = [
-    { label: 'Service details', done: true },
-    {
-      label: 'Questionnaire',
-      done: !needsQuestionnaire,
-      href: `/attorney/services/${serviceKey}/questionnaire`,
-    },
-  ]
-  if (route === 'auto') {
-    steps.push({
-      label: 'Drafting prompt',
-      done: !needsPrompt,
-      href: `/attorney/services/${serviceKey}/prompt`,
-    })
-    steps.push({
-      label: 'Document template',
-      done: !needsTemplate,
-      href: `/attorney/services/${serviceKey}/templates`,
-    })
-  }
-
   return (
-    <section style={{ borderLeft: '3px solid var(--border)' }}>
-      <strong>Setup checklist</strong>
-      <ol
-        style={{
-          listStyle: 'none',
-          margin: '0.6rem 0 0',
-          padding: 0,
-          display: 'grid',
-          gap: '0.4rem',
-        }}
-      >
-        {steps.map((s) => (
-          <li
-            key={s.label}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}
-          >
-            <span aria-hidden style={{ color: s.done ? '#166534' : 'var(--muted)' }}>
-              {s.done ? '✓' : '◯'}
-            </span>
-            <span style={{ color: s.done ? 'inherit' : 'var(--muted)' }}>{s.label}</span>
-            {s.href && (
-              <Link href={s.href} className="back-link" style={{ marginLeft: '0.4rem' }}>
-                {s.done ? 'Edit' : 'Set up'}
-              </Link>
-            )}
-          </li>
-        ))}
-      </ol>
-      <div style={{ marginTop: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+    <section>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
         <button
           className="primary"
           onClick={onEnable}
@@ -517,18 +465,18 @@ function SetupChecklist({
           {enabling ? 'Enabling…' : 'Enable service'}
         </button>
         {!ready && completeness && (
-          <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
-            Not bookable yet — complete the steps above.
+          <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
+            Not bookable yet — complete the requirements below.
           </span>
         )}
       </div>
       {missing.length > 0 && (
         <ul
           style={{
-            margin: '0.6rem 0 0',
-            paddingLeft: '1.1rem',
-            color: '#991b1b',
-            fontSize: '0.82rem',
+            margin: 'var(--space-2) 0 0',
+            paddingLeft: 'var(--space-4)',
+            color: 'var(--danger)',
+            fontSize: 'var(--text-sm)',
           }}
         >
           {missing.map((m) => (

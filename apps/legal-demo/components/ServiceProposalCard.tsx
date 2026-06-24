@@ -19,16 +19,35 @@ export interface ServiceProposal {
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
+// Fired on a SUCCESSFUL approve so the chat can continue the guided build (Phase 6):
+// it carries the artifact label + the link to it + the serviceKey so the chat can show
+// "View … →" AND auto-send a continuation turn. Shared by every proposal card.
+export type OnApproved = (info: {
+  artifact: string
+  link: string
+  serviceKey: string
+  label: string
+}) => void
+
 // The inline approval card for an AI-proposed NEW service (Build-Wizard Phase 1). It
 // is the HUMAN GATE: the proposing chat turn wrote nothing; clicking Approve POSTs
 // the proposal to the create-from-ai route, which is the only place the version-1
 // (disabled) service is created. Visual style mirrors WorkflowProposalCard.
-export function ServiceProposalCard({ proposal }: { proposal: ServiceProposal }) {
+export function ServiceProposalCard({
+  proposal,
+  onApproved,
+}: {
+  proposal: ServiceProposal
+  onApproved?: OnApproved
+}) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
   const [serviceKey, setServiceKey] = useState<string | null>(null)
+  // The link to the created service, returned by the approve route — shown as
+  // "View service →" and handed to onApproved for the auto-continuation.
+  const [link, setLink] = useState<string | null>(null)
 
   async function approve() {
     setApproveState('approving')
@@ -57,11 +76,26 @@ export function ServiceProposalCard({ proposal }: { proposal: ServiceProposal })
       })
       const data = (await res.json().catch(() => null)) as {
         result?: { serviceKey?: string }
+        serviceKey?: string
+        link?: string
+        label?: string
         error?: string
       } | null
       if (!res.ok) throw new Error(data?.error || `Approve failed (${res.status})`)
-      setServiceKey(data?.result?.serviceKey ?? null)
+      const key = data?.serviceKey ?? data?.result?.serviceKey ?? null
+      setServiceKey(key)
+      setLink(data?.link ?? null)
       setApproveState('approved')
+      // Drive the build forward: tell the chat the service is created (with its link)
+      // so it auto-continues to the next step. Fires once (approve is disabled after).
+      if (key && data?.link) {
+        onApproved?.({
+          artifact: 'service',
+          link: data.link,
+          serviceKey: key,
+          label: data.label || `Service "${proposal.displayName}"`,
+        })
+      }
     } catch (e) {
       setApproveState('error')
       setApproveError(e instanceof Error ? e.message : String(e))
@@ -74,18 +108,18 @@ export function ServiceProposalCard({ proposal }: { proposal: ServiceProposal })
         <span className="uac-doc-title">
           <LayersIcon size={14} /> Proposed service — {proposal.displayName}
         </span>
-        <span className="text-muted" style={{ fontSize: 12 }}>
+        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
           key: {proposal.derivedKey}
         </span>
       </div>
 
       {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
           {proposal.summary}
         </div>
       )}
 
-      <div className="uac-doc-body" style={{ fontSize: 12 }}>
+      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {proposal.description && (
           <div>
             <strong>Description:</strong> {proposal.description}
@@ -116,9 +150,14 @@ export function ServiceProposalCard({ proposal }: { proposal: ServiceProposal })
                 : 'Created'
               : 'Approve & create service'}
         </button>
+        {link && (
+          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
+            View service →
+          </a>
+        )}
       </div>
       {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
+        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
       )}

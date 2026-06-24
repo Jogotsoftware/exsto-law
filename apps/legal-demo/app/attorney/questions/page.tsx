@@ -9,7 +9,8 @@
 
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { HelpCircleIcon, PlusIcon, SearchIcon, XIcon } from '@/components/icons'
+import { PageHead } from '@/components/PageHead'
+import { PlusIcon, SearchIcon, XIcon } from '@/components/icons'
 
 // In lockstep with the legal API's KNOWN_FIELD_TYPES (minus members_repeater,
 // which is questionnaire-structural, not a reusable single question).
@@ -196,25 +197,20 @@ export default function QuestionLibraryPage() {
     : items
 
   return (
-    <>
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
-      >
-        <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <HelpCircleIcon size={22} />
-          Question library
-        </h1>
-        <span style={{ marginLeft: 'auto' }}>
+    <main>
+      <PageHead
+        title="Question library"
+        description="Reusable intake questions — each carries a stable {{token}} that document templates bind to."
+        actions={
           <button className="primary" onClick={startNew} disabled={busy || !!edit.new}>
             <PlusIcon size={16} /> New question
           </button>
-        </span>
-      </div>
+        }
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <div className="qlib-search" style={{ maxWidth: 420, margin: '0 0 1rem' }}>
+      <div className="qlib-search" style={{ maxWidth: 420, margin: '0 0 var(--space-4)' }}>
         <SearchIcon size={15} />
         <input
           value={q}
@@ -255,8 +251,12 @@ export default function QuestionLibraryPage() {
               busy={busy}
             />
           ) : (
-            <div key={it.questionTemplateId} className="qb-card" style={{ marginBottom: '0.6rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+            <div
+              key={it.questionTemplateId}
+              className="qb-card"
+              style={{ marginBottom: 'var(--space-2)' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600 }}>{it.label}</div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
@@ -283,7 +283,7 @@ export default function QuestionLibraryPage() {
           ),
         )
       )}
-    </>
+    </main>
   )
 }
 
@@ -301,7 +301,7 @@ function QuestionRow({
   busy: boolean
 }) {
   return (
-    <div className="qb-card" style={{ marginBottom: '0.6rem' }}>
+    <div className="qb-card" style={{ marginBottom: 'var(--space-2)' }}>
       <div className="form-grid">
         <label>
           <span>Question</span>
@@ -358,7 +358,7 @@ function QuestionRow({
           placeholder="One choice per line"
         />
       )}
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.6rem' }}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
         <button className="primary" onClick={onSave} disabled={busy}>
           {busy ? 'Saving…' : 'Save'}
         </button>

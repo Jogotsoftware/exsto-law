@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { fetchSession } from '@/lib/auth'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { PageHead } from '@/components/PageHead'
 
 type Provider = 'google_calendar' | 'anthropic' | 'openai' | 'perplexity' | 'granola' | 'docusign'
 
@@ -397,9 +398,10 @@ export default function SettingsPage() {
 
   return (
     <main>
-      <div className="attorney-page-head">
-        <h1>Settings</h1>
-      </div>
+      <PageHead
+        title="Settings"
+        description="Integrations, firm details, invoice template, email signature, and booking rules."
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -552,7 +554,7 @@ export default function SettingsPage() {
           </div>
         ) : (
           <>
-            <p style={{ color: 'var(--muted)', margin: '0 0 0.85rem' }}>
+            <p style={{ color: 'var(--muted)', margin: '0 0 var(--space-3)' }}>
               Appended automatically to every outbound client email — manual sends, replies, booking
               confirmations and invoices. Sent as <strong>{sig.sendAsDisplayName}</strong> from your
               connected Gmail.
@@ -561,8 +563,8 @@ export default function SettingsPage() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.5rem',
-                marginBottom: '0.7rem',
+                gap: 'var(--space-2)',
+                marginBottom: 'var(--space-3)',
               }}
             >
               <input
@@ -590,17 +592,21 @@ export default function SettingsPage() {
               />
             </label>
             {sigEnabled && sig.signature.isDefault && (
-              <p style={{ color: 'var(--muted)', fontSize: '0.85rem', margin: '0.4rem 0 0' }}>
+              <p
+                style={{ color: 'var(--muted)', fontSize: '0.85rem', margin: 'var(--space-2) 0 0' }}
+              >
                 Until you save your own, emails are signed with a signature derived from your firm
                 details above.
               </p>
             )}
             {!sigEnabled && (
-              <p style={{ color: 'var(--muted)', fontSize: '0.85rem', margin: '0.4rem 0 0' }}>
+              <p
+                style={{ color: 'var(--muted)', fontSize: '0.85rem', margin: 'var(--space-2) 0 0' }}
+              >
                 Outbound email will not carry a signature.
               </p>
             )}
-            <div className="firm-details-actions" style={{ marginTop: '1rem' }}>
+            <div className="firm-details-actions" style={{ marginTop: 'var(--space-4)' }}>
               <button className="primary" onClick={saveSignature} disabled={busy === 'signature'}>
                 {busy === 'signature' ? 'Saving…' : 'Save signature'}
               </button>
@@ -623,7 +629,7 @@ export default function SettingsPage() {
           <>
             <label>
               <span>Bookable days</span>
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                 {WEEKDAY_LABELS.map((label, day) => {
                   const on = bookingRules.bookableDays.includes(day)
                   return (
@@ -731,7 +737,7 @@ export default function SettingsPage() {
                 </select>
               </label>
             </div>
-            <div className="firm-details-actions" style={{ marginTop: '1rem' }}>
+            <div className="firm-details-actions" style={{ marginTop: 'var(--space-4)' }}>
               <button
                 className="primary"
                 onClick={saveBookingRules}
@@ -863,7 +869,14 @@ function InvoiceTemplateSection() {
       </p>
       {error && <div className="alert alert-error">{error}</div>}
       {saved && <div className="alert alert-success">Saved.</div>}
-      <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 'var(--space-5)',
+          flexWrap: 'wrap',
+          alignItems: 'flex-start',
+        }}
+      >
         <div style={{ flex: '1 1 320px', minWidth: 300 }}>
           <div className="form-grid">
             <label>
@@ -901,11 +914,14 @@ function InvoiceTemplateSection() {
             />
           </label>
           {cfg.logoDataUrl && (
-            <button onClick={() => set('logoDataUrl', null)} style={{ marginTop: '0.3rem' }}>
+            <button
+              onClick={() => set('logoDataUrl', null)}
+              style={{ marginTop: 'var(--space-1)' }}
+            >
               Remove logo
             </button>
           )}
-          <fieldset className="svc-fieldset" style={{ marginTop: '0.8rem' }}>
+          <fieldset className="svc-fieldset" style={{ marginTop: 'var(--space-3)' }}>
             <legend>Columns</legend>
             {(['matter', 'quantity', 'rate'] as const).map((col) => (
               <label
@@ -913,8 +929,8 @@ function InvoiceTemplateSection() {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.4rem',
-                  marginBottom: '0.3rem',
+                  gap: 'var(--space-2)',
+                  marginBottom: 'var(--space-1)',
                 }}
               >
                 <input
@@ -939,7 +955,7 @@ function InvoiceTemplateSection() {
               rows={2}
             />
           </label>
-          <div className="firm-details-actions" style={{ marginTop: '1rem' }}>
+          <div className="firm-details-actions" style={{ marginTop: 'var(--space-4)' }}>
             <button onClick={() => void preview(cfg)} disabled={busy === 'preview'}>
               {busy === 'preview' ? 'Rendering…' : 'Refresh preview'}
             </button>
@@ -1030,7 +1046,7 @@ function IntegrationCard({
             capability check. 'Connected' only ever appears after a probe passes. */}
         {status.connected && status.lastProbeAt && (
           <div
-            style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '0.3rem' }}
+            style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: 'var(--space-1)' }}
             title={status.lastProbeAt}
           >
             Last checked {new Date(status.lastProbeAt).toLocaleString()}
@@ -1158,7 +1174,7 @@ function ConnectKeyModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2 style={{ margin: 0 }}>Connect {meta.name}</h2>
+          <h2>Connect {meta.name}</h2>
           <button onClick={onClose} aria-label="Close" className="modal-close">
             ×
           </button>
@@ -1290,7 +1306,7 @@ function CalendarCategoriesSection() {
         </div>
       ) : (
         <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
             {cats.length === 0 && (
               <p className="text-muted text-sm" style={{ margin: 0 }}>
                 No categories yet. Add one below.
@@ -1299,7 +1315,12 @@ function CalendarCategoriesSection() {
             {cats.map((cat, i) => (
               <div
                 key={i}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  flexWrap: 'wrap',
+                }}
               >
                 <input
                   type="color"
@@ -1330,7 +1351,7 @@ function CalendarCategoriesSection() {
           </div>
           <div
             className="firm-details-actions"
-            style={{ marginTop: '1rem', display: 'flex', gap: '0.6rem' }}
+            style={{ marginTop: 'var(--space-4)', display: 'flex', gap: 'var(--space-2)' }}
           >
             <button type="button" onClick={add}>
               + Add category

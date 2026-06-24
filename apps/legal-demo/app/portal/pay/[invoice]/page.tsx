@@ -146,8 +146,10 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
           <>
             <div className="pdash-card">
               <div className="pdash-card-head">
-                <h2 style={{ margin: 0 }}>{money(data.total, data.currency)}</h2>
-                <span className={`pdash-badge ${data.status === 'paid' ? '' : ''}`}>
+                <h2>{money(data.total, data.currency)}</h2>
+                <span
+                  className={`pdash-badge ${data.status === 'paid' ? 'pdash-badge-ok' : 'pdash-badge-warn'}`}
+                >
                   {data.status === 'paid' ? 'Paid' : 'Amount due'}
                 </span>
               </div>
@@ -169,7 +171,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                 </ul>
               )}
 
-              <div style={{ display: 'flex', gap: '0.6rem', marginTop: 'var(--space-3)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
                 {!pdf ? (
                   <button
                     type="button"
@@ -186,7 +188,11 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                 )}
               </div>
               {pdfError && (
-                <div className="text-sm text-muted" role="alert" style={{ marginTop: '0.4rem' }}>
+                <div
+                  className="text-sm text-muted"
+                  role="alert"
+                  style={{ marginTop: 'var(--space-2)' }}
+                >
                   {pdfError}
                 </div>
               )}
@@ -201,7 +207,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                   height: '70vh',
                   marginTop: 'var(--space-3)',
                   border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md, 10px)',
+                  borderRadius: 'var(--radius-md)',
                 }}
               />
             )}

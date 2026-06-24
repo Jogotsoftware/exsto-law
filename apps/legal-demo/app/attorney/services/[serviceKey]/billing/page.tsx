@@ -136,14 +136,7 @@ export default function ServiceBillingPage() {
         What this service costs. Shown to clients on the booking page; saving writes a new version.
       </p>
       {error && <div className="alert alert-error">{error}</div>}
-      {saved && (
-        <div
-          className="alert"
-          style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-        >
-          Saved a new version.
-        </div>
-      )}
+      {saved && <div className="alert alert-success">Saved a new version.</div>}
       <fieldset className="svc-fieldset">
         <legend>Service fee</legend>
         <p className="text-muted text-sm" style={{ marginTop: '-0.2rem' }}>
@@ -188,7 +181,7 @@ export default function ServiceBillingPage() {
         </div>
       </fieldset>
 
-      <fieldset className="svc-fieldset" style={{ marginTop: '0.9rem' }}>
+      <fieldset className="svc-fieldset" style={{ marginTop: 'var(--space-4)' }}>
         <legend>Document fees</legend>
         <p className="text-muted text-sm" style={{ marginTop: '-0.2rem' }}>
           A flat fee per document this service produces — billed automatically when that document is
@@ -218,7 +211,7 @@ export default function ServiceBillingPage() {
           </div>
         )}
       </fieldset>
-      <div style={{ marginTop: '0.9rem' }}>
+      <div style={{ marginTop: 'var(--space-4)' }}>
         <button className="primary" onClick={save} disabled={busy}>
           {busy ? 'Saving…' : 'Save new version'}
         </button>

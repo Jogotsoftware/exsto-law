@@ -108,7 +108,7 @@ export default function ClientPortalLoginPage() {
   if (phase === 'working') {
     return (
       <Shell>
-        <div className="loading-block" style={{ marginTop: '2rem' }}>
+        <div className="loading-block" style={{ marginTop: 'var(--space-6)' }}>
           <span className="spinner" /> Signing you in…
         </div>
       </Shell>

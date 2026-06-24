@@ -6,8 +6,13 @@ import {
   listMeetingsForMatter,
   listMeetingsForContact,
   listUnassignedMeetings,
+  createMeeting,
+  rescheduleMeeting,
+  cancelMeeting,
   type AssignMeetingInput,
   type AssignMeetingResult,
+  type CreateMeetingInput,
+  type CreateMeetingResult,
   type MeetingSummary,
   type ReconcileSummary,
 } from '../../index.js'
@@ -116,9 +121,81 @@ const reconcileTool: Tool<Record<string, never>, ReconcileSummary> = {
   handler: (ctx: ActionContext) => reconcileAllMeetings(ctx),
 }
 
+// Create an event from the Calendar tab: contact (invites them) or personal (a
+// private hold). Matter consultations use legal.booking.create_for_matter instead.
+const createTool: Tool<CreateMeetingInput, CreateMeetingResult> = {
+  name: 'legal.meeting.create',
+  description:
+    'Create a calendar event and sync it to Google. Pass a contactEntityId to make it a meeting WITH that contact (they are invited), or neither contact nor matter for a personal hold (no invites). Returns the new calendar_event id.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string' },
+      startIso: { type: 'string' },
+      endIso: { type: 'string' },
+      contactEntityId: { type: 'string', description: 'Invite this contact (contact meeting).' },
+      matterEntityId: { type: 'string', description: 'Link to this matter (optional).' },
+    },
+    required: ['summary', 'startIso', 'endIso'],
+    additionalProperties: false,
+  },
+  handler: (ctx: ActionContext, input) => createMeeting(ctx, input),
+}
+
+const rescheduleMeetingTool: Tool<
+  {
+    calendarEventEntityId: string
+    googleEventId?: string | null
+    startIso: string
+    endIso: string
+  },
+  ActionResult
+> = {
+  name: 'legal.meeting.reschedule',
+  description:
+    'Move an app-created calendar event (contact/personal meeting) to a new time. Patches the Google event and appends the new time. For matter consultations use legal.booking.reschedule.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      calendarEventEntityId: { type: 'string' },
+      googleEventId: { type: 'string' },
+      startIso: { type: 'string' },
+      endIso: { type: 'string' },
+    },
+    required: ['calendarEventEntityId', 'startIso', 'endIso'],
+    additionalProperties: false,
+  },
+  handler: (ctx: ActionContext, input) => rescheduleMeeting(ctx, input),
+}
+
+const cancelMeetingTool: Tool<
+  { calendarEventEntityId: string; googleEventId?: string | null },
+  ActionResult
+> = {
+  name: 'legal.meeting.cancel',
+  description:
+    'Cancel an app-created calendar event (contact/personal meeting): deletes the Google event and marks it cancelled. For matter consultations use legal.booking.cancel.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      calendarEventEntityId: { type: 'string' },
+      googleEventId: { type: 'string' },
+    },
+    required: ['calendarEventEntityId'],
+    additionalProperties: false,
+  },
+  handler: (ctx: ActionContext, input) => cancelMeeting(ctx, input),
+}
+
 registerTool(assignTool)
 registerTool(unassignTool)
 registerTool(reconcileTool)
 registerTool(forMatterTool)
 registerTool(forContactTool)
 registerTool(unassignedTool)
+registerTool(createTool)
+registerTool(rescheduleMeetingTool)
+registerTool(cancelMeetingTool)

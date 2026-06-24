@@ -180,8 +180,8 @@ export function MatterTasks({ matterEntityId }: { matterEntityId: string }) {
 
   return (
     <section>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <h2 style={{ margin: 0 }}>Tasks</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+        <h2>Tasks</h2>
         {!adding && !editId && (
           <button type="button" style={{ marginLeft: 'auto' }} onClick={startAdd}>
             + Add task

@@ -219,8 +219,8 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
             Nothing invoiced on this matter yet.
           </p>
         ) : (
-          <div style={{ overflowX: 'auto', marginTop: 'var(--space-3)' }}>
-            <table>
+          <div className="table-wrap" style={{ marginTop: 'var(--space-3)' }}>
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Issued</th>
@@ -306,7 +306,7 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
           <div
             style={{
               border: '1px solid var(--border)',
-              borderRadius: 8,
+              borderRadius: 'var(--radius-sm)',
               padding: 'var(--space-3)',
               marginTop: 'var(--space-3)',
               display: 'grid',
@@ -362,8 +362,8 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
             Nothing unbilled on this matter. Log time or an expense below.
           </p>
         ) : (
-          <div style={{ overflowX: 'auto', marginTop: 'var(--space-3)' }}>
-            <table>
+          <div className="table-wrap" style={{ marginTop: 'var(--space-3)' }}>
+            <table className="data-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -399,18 +399,10 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
                       <td style={{ textAlign: 'right' }}>
                         {isFee && (
                           <button
+                            className="link-button danger"
                             onClick={() => voidFee(e.sourceEventId)}
                             disabled={busy === `void:${e.sourceEventId}`}
                             title="Void this fee"
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--danger, #b91c1c)',
-                              cursor: 'pointer',
-                              padding: 0,
-                              font: 'inherit',
-                              fontSize: '0.82rem',
-                            }}
                           >
                             {busy === `void:${e.sourceEventId}` ? '…' : 'Void'}
                           </button>

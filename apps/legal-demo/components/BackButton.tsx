@@ -46,8 +46,8 @@ export function BackButton({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: '0.3rem',
-        paddingLeft: '0.6rem',
+        gap: 'var(--space-1)',
+        paddingLeft: 'var(--space-2)',
         fontWeight: 600,
         marginBottom: 'var(--space-3)',
         ...style,

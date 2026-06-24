@@ -23,6 +23,7 @@ import { TemplateEditor, type TemplateEditorHandle } from '@/components/template
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
+import { PageHead } from '@/components/PageHead'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
 import type { TemplateVariables } from '@exsto/legal'
 
@@ -586,39 +587,35 @@ export default function TemplatesPage() {
 
   return (
     <main>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '1rem',
-        }}
-      >
-        <h1>Templates</h1>
-        {!draft && (
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <button className="primary" onClick={openNewChooser}>
-              New template
-            </button>
-            <button
-              type="button"
-              className="tpl-ai-btn"
-              onClick={startAiDraft}
-              title="Start a new template and draft it with AI (uses your Anthropic key)"
-            >
-              <SparklesIcon size={15} /> Draft with AI
-            </button>
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={importing}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-            >
-              <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
-            </button>
-          </div>
-        )}
-      </div>
+      <PageHead
+        title="Templates"
+        description="Your firm's reusable document and email templates with merge fields."
+        actions={
+          !draft ? (
+            <>
+              <button className="primary" onClick={openNewChooser}>
+                New template
+              </button>
+              <button
+                type="button"
+                className="tpl-ai-btn"
+                onClick={startAiDraft}
+                title="Start a new template and draft it with AI (uses your Anthropic key)"
+              >
+                <SparklesIcon size={15} /> Draft with AI
+              </button>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={importing}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
+              >
+                <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
+              </button>
+            </>
+          ) : undefined
+        }
+      />
 
       {/* One hidden file input for BOTH the header and the in-editor "Import file"
           buttons, mounted at page level so import works from the list view too. */}
@@ -718,19 +715,17 @@ export default function TemplatesPage() {
       )}
 
       {draft && (
-        <section style={{ marginBottom: '1.5rem' }}>
+        <section style={{ marginBottom: 'var(--space-5)' }}>
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.7rem',
-              marginBottom: '0.85rem',
+              gap: 'var(--space-3)',
+              marginBottom: 'var(--space-3)',
             }}
           >
-            <h2 style={{ margin: 0 }}>
-              {draft.templateEntityId ? 'Edit template' : 'New template'}
-            </h2>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <h2>{draft.templateEntityId ? 'Edit template' : 'New template'}</h2>
+            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
               <button
                 ref={aiTriggerRef}
                 type="button"
@@ -744,18 +739,18 @@ export default function TemplatesPage() {
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={importing}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
               >
                 <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
               </button>
             </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem' }}>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
               <button
                 type="button"
                 className={showFields ? 'primary' : undefined}
                 onClick={() => setShowFields((v) => !v)}
                 title="Configure each field's type, default, and whether it's required"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
               >
                 <LayersIcon size={15} /> Fields
               </button>
@@ -764,7 +759,7 @@ export default function TemplatesPage() {
                 className={showPreview ? 'primary' : undefined}
                 onClick={() => setShowPreview((v) => !v)}
                 title="Preview the finished document with sample data, side by side"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
               >
                 <EyeIcon size={15} /> Preview
               </button>
@@ -777,7 +772,14 @@ export default function TemplatesPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '0.85rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-4)',
+              flexWrap: 'wrap',
+              marginBottom: 'var(--space-3)',
+            }}
+          >
             <label style={{ flex: '1 1 16rem' }}>
               <span className="field-label">Name</span>
               <input
@@ -1114,36 +1116,38 @@ export default function TemplatesPage() {
         </section>
       )}
       {templates && templates.length > 0 && (
-        <section style={{ padding: 0, overflow: 'hidden' }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Document kind</th>
-                <th>Updated</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {templates.map((t) => (
-                <tr key={t.templateEntityId}>
-                  <td>{t.name || '(untitled)'}</td>
-                  <td>
-                    <span className={`badge ${t.category === 'email' ? 'info' : ''}`}>
-                      {t.category}
-                    </span>
-                  </td>
-                  <td>{t.docKind ?? '—'}</td>
-                  <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button onClick={() => edit(t)}>Edit</button>{' '}
-                    <button onClick={() => archive(t)}>Archive</button>
-                  </td>
+        <section>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Document kind</th>
+                  <th>Updated</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {templates.map((t) => (
+                  <tr key={t.templateEntityId}>
+                    <td>{t.name || '(untitled)'}</td>
+                    <td>
+                      <span className={`badge ${t.category === 'email' ? 'info' : ''}`}>
+                        {t.category}
+                      </span>
+                    </td>
+                    <td>{t.docKind ?? '—'}</td>
+                    <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button onClick={() => edit(t)}>Edit</button>{' '}
+                      <button onClick={() => archive(t)}>Archive</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </main>
