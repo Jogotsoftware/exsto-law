@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { PageHead } from '@/components/PageHead'
 
 interface AttorneyRequest {
   requestEntityId: string
@@ -84,14 +85,11 @@ export default function ClientRequestsPage() {
   )
 
   return (
-    <>
-      <div className="attorney-page-head">
-        <h1 style={{ margin: 0 }}>Client requests</h1>
-      </div>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.3rem' }}>
-        Requests clients submitted from the portal — each already cost-accepted. Fulfilling one
-        records its amount as a matter fee.
-      </p>
+    <main>
+      <PageHead
+        title="Client requests"
+        description="Requests clients submitted from the portal — each already cost-accepted. Fulfilling one records its amount as a matter fee."
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -174,6 +172,6 @@ export default function ClientRequestsPage() {
           })}
         </div>
       )}
-    </>
+    </main>
   )
 }

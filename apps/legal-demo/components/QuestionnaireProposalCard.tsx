@@ -111,20 +111,20 @@ export function QuestionnaireProposalCard({
         <span className="uac-doc-title">
           <LayersIcon size={14} /> Proposed questionnaire — {proposal.serviceKey}
         </span>
-        <span className="text-muted" style={{ fontSize: 12 }}>
+        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
           {fieldCount} field{fieldCount === 1 ? '' : 's'}
         </span>
       </div>
 
       {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
           {proposal.summary}
         </div>
       )}
 
-      <div className="uac-doc-body" style={{ fontSize: 12 }}>
+      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {sections.map((s, si) => (
-          <div key={s.id ?? si} style={{ marginBottom: 4 }}>
+          <div key={s.id ?? si} style={{ marginBottom: 'var(--space-1)' }}>
             <strong>{s.title || s.id || `Section ${si + 1}`}</strong>
             {s.fields && s.fields.length > 0 && (
               <span className="text-muted">
@@ -138,11 +138,11 @@ export function QuestionnaireProposalCard({
 
       {/* The variable contract — the point of the wizard. A token with no field would
           render [[MISSING]] in the document, so the attorney sees coverage first. */}
-      <div className="uac-doc-body" style={{ fontSize: 12 }}>
+      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {missing.length === 0 ? (
           <div className="text-muted">Covers every document token — no [[MISSING]] gaps.</div>
         ) : (
-          <div role="alert" className="alert alert-warn" style={{ fontSize: 12 }}>
+          <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
             Does not yet collect {missing.length} document token{missing.length === 1 ? '' : 's'}:{' '}
             <strong>{missing.join(', ')}</strong>. These would render [[MISSING]] until added.
           </div>
@@ -171,7 +171,7 @@ export function QuestionnaireProposalCard({
         )}
       </div>
       {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
+        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
       )}

@@ -244,9 +244,9 @@ function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '0.6rem',
+        gap: 'var(--space-2)',
         flexWrap: 'wrap',
-        margin: '0 0 1rem',
+        margin: '0 0 var(--space-4)',
       }}
     >
       {items.length > 0 && (
@@ -411,21 +411,20 @@ export default function QuestionnaireEditorPage() {
   return (
     <>
       <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          justifyContent: 'flex-end',
+          marginBottom: 'var(--space-4)',
+        }}
       >
-        <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <LayersIcon size={22} />
-          Edit questionnaire
-        </h1>
-        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !doc}>
-            Save to library
-          </button>
-          <button className="primary" onClick={save} disabled={busy || !doc}>
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </span>
+        <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !doc}>
+          Save to library
+        </button>
+        <button className="primary" onClick={save} disabled={busy || !doc}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
       </div>
 
       <StartFromLibrary
@@ -436,22 +435,8 @@ export default function QuestionnaireEditorPage() {
       />
 
       {error && <div className="alert alert-error">{error}</div>}
-      {saved && (
-        <div
-          className="alert"
-          style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-        >
-          Saved a new version.
-        </div>
-      )}
-      {notice && (
-        <div
-          className="alert"
-          style={{ background: 'var(--ok-soft)', color: '#166534', border: '1px solid #86efac' }}
-        >
-          {notice}
-        </div>
-      )}
+      {saved && <div className="alert alert-success">Saved a new version.</div>}
+      {notice && <div className="alert alert-success">{notice}</div>}
 
       {!doc ? (
         <div className="loading-block">

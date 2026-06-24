@@ -8,6 +8,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { PageHead } from '@/components/PageHead'
 import { LayersIcon, SearchIcon } from '@/components/icons'
 
 type FieldType =
@@ -381,41 +382,36 @@ export default function QuestionnaireLibraryPage() {
 
   return (
     <main>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '1rem',
-        }}
-      >
-        <h1>Questionnaires</h1>
-        {!draft && (
-          <button className="primary" onClick={() => setDraft(EMPTY_DRAFT())}>
-            New questionnaire
-          </button>
-        )}
-      </div>
-      <p className="muted" style={{ marginTop: '-0.5rem' }}>
-        Reusable intake forms for the whole firm. Build one here, then attach it to any service from
-        the service builder. Manage the reusable single questions in the{' '}
+      <PageHead
+        title="Questionnaires"
+        description="Reusable intake forms for the whole firm. Build one here, then attach it to any service from the service builder."
+        actions={
+          !draft ? (
+            <button className="primary" onClick={() => setDraft(EMPTY_DRAFT())}>
+              New questionnaire
+            </button>
+          ) : undefined
+        }
+      />
+      <p className="text-muted">
+        Manage the reusable single questions in the{' '}
         <a href="/attorney/questions">question library →</a>
       </p>
 
       {error && <div className="alert alert-error">{error}</div>}
 
       {draft && (
-        <section style={{ marginBottom: '1.5rem' }}>
+        <section style={{ marginBottom: 'var(--space-5)' }}>
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.7rem',
-              marginBottom: '0.85rem',
+              gap: 'var(--space-3)',
+              marginBottom: 'var(--space-3)',
             }}
           >
-            <h2 style={{ margin: 0 }}>{draft.id ? 'Edit questionnaire' : 'New questionnaire'}</h2>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.6rem' }}>
+            <h2>{draft.id ? 'Edit questionnaire' : 'New questionnaire'}</h2>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
               <button className="primary" onClick={save} disabled={saving}>
                 {saving ? 'Saving…' : draft.id ? 'Save changes' : 'Create questionnaire'}
               </button>
@@ -425,7 +421,14 @@ export default function QuestionnaireLibraryPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-4)',
+              flexWrap: 'wrap',
+              marginBottom: 'var(--space-4)',
+            }}
+          >
             <label style={{ flex: '1 1 18rem' }}>
               <span className="field-label">Name</span>
               <input
@@ -444,19 +447,21 @@ export default function QuestionnaireLibraryPage() {
             </label>
           </div>
 
-          <fieldset className="svc-fieldset" style={{ marginBottom: '1rem' }}>
+          <fieldset className="svc-fieldset" style={{ marginBottom: 'var(--space-4)' }}>
             <legend>Associated document templates</legend>
-            <p className="muted" style={{ fontSize: '0.82rem', margin: '-0.2rem 0 0.6rem' }}>
+            <p className="text-muted" style={{ fontSize: '0.82rem', margin: '-0.2rem 0 0.6rem' }}>
               The document template(s) this questionnaire feeds. When a client submits it, the
               answers fill the linked template(s) — and the pairing shows on both sides.
             </p>
             {templates.length === 0 ? (
-              <p className="muted" style={{ fontSize: '0.82rem', margin: 0 }}>
+              <p className="text-muted" style={{ fontSize: '0.82rem', margin: 0 }}>
                 No document templates yet — create one in{' '}
                 <a href="/attorney/templates">Templates</a>.
               </p>
             ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem 1.2rem' }}>
+              <div
+                style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2) var(--space-5)' }}
+              >
                 {templates.map((t) => {
                   const on = draft.associatedTemplateIds.includes(t.templateEntityId)
                   return (
@@ -487,7 +492,7 @@ export default function QuestionnaireLibraryPage() {
             )}
           </fieldset>
 
-          <p className="muted" style={{ fontSize: '0.82rem', margin: '-0.3rem 0 0.9rem' }}>
+          <p className="text-muted" style={{ fontSize: '0.82rem', margin: '-0.3rem 0 0.9rem' }}>
             Each question’s <strong>variable</strong> is the <code>{'{{token}}'}</code> its answer
             fills in the bound document template — set it to tie a question to a template field.
             Leave it blank to default to the question label.
@@ -547,7 +552,7 @@ export default function QuestionnaireLibraryPage() {
                         width: '7.5rem',
                         fontFamily: 'inherit',
                         fontSize: 'inherit',
-                        padding: '0.2rem 0.35rem',
+                        padding: 'var(--space-1)',
                       }}
                     />
                     {'}}'}
@@ -596,10 +601,10 @@ export default function QuestionnaireLibraryPage() {
               <div
                 style={{
                   display: 'flex',
-                  gap: '0.6rem',
+                  gap: 'var(--space-2)',
                   alignItems: 'center',
                   flexWrap: 'wrap',
-                  marginTop: '0.5rem',
+                  marginTop: 'var(--space-2)',
                 }}
               >
                 <button
@@ -637,40 +642,42 @@ export default function QuestionnaireLibraryPage() {
         </section>
       )}
       {items && items.length > 0 && (
-        <section style={{ padding: 0, overflow: 'hidden' }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Description</th>
-                <th style={{ textAlign: 'right' }}>Fields</th>
-                <th>Feeds</th>
-                <th>Updated</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((t) => (
-                <tr key={t.questionnaireTemplateId}>
-                  <td>
-                    <strong>{t.name || '(untitled)'}</strong>
-                  </td>
-                  <td className="text-muted">{t.description ?? '—'}</td>
-                  <td style={{ textAlign: 'right' }}>{t.fieldCount}</td>
-                  <td className="text-muted">
-                    {(t.associatedTemplates ?? []).length > 0
-                      ? (t.associatedTemplates ?? []).map((a) => a.name || 'untitled').join(', ')
-                      : '—'}
-                  </td>
-                  <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
-                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <button onClick={() => editFrom(t)}>Edit</button>{' '}
-                    <button onClick={() => archive(t)}>Archive</button>
-                  </td>
+        <section>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Description</th>
+                  <th style={{ textAlign: 'right' }}>Fields</th>
+                  <th>Feeds</th>
+                  <th>Updated</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {items.map((t) => (
+                  <tr key={t.questionnaireTemplateId}>
+                    <td>
+                      <strong>{t.name || '(untitled)'}</strong>
+                    </td>
+                    <td className="text-muted">{t.description ?? '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{t.fieldCount}</td>
+                    <td className="text-muted">
+                      {(t.associatedTemplates ?? []).length > 0
+                        ? (t.associatedTemplates ?? []).map((a) => a.name || 'untitled').join(', ')
+                        : '—'}
+                    </td>
+                    <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button onClick={() => editFrom(t)}>Edit</button>{' '}
+                      <button onClick={() => archive(t)}>Archive</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </main>

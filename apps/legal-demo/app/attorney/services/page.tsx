@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { SettingsIcon } from '@/components/icons'
+import { PageHead } from '@/components/PageHead'
 
 interface ServiceDefinition {
   id: string
@@ -132,24 +133,15 @@ export default function ServicesPage() {
 
   return (
     <main>
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}
-      >
-        <h1 style={{ margin: 0 }}>Services</h1>
-        <button
-          className="primary"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => router.push('/attorney/services/new')}
-        >
-          + New service
-        </button>
-      </div>
-
-      <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
-        The offerings clients can book. Toggle a service off to hide it from the booking page
-        without losing its setup; the gear menu edits, clones, or deletes it.
-      </p>
+      <PageHead
+        title="Services"
+        description="The offerings clients can book. Toggle a service off to hide it from the booking page without losing its setup; the gear menu edits, clones, or deletes it."
+        actions={
+          <button className="primary" onClick={() => router.push('/attorney/services/new')}>
+            + New service
+          </button>
+        }
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -180,7 +172,7 @@ export default function ServicesPage() {
                       <strong>{svc.displayName}</strong>
                     </Link>
                     {svc.description && (
-                      <div style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                      <div style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
                         {svc.description}
                       </div>
                     )}

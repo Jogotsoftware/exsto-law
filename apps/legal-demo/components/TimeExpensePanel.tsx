@@ -220,7 +220,7 @@ export function TimeExpensePanel({
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: 8,
+            borderRadius: 'var(--radius-sm)',
             padding: 'var(--space-3)',
             marginBottom: 'var(--space-3)',
             display: 'grid',
@@ -272,7 +272,7 @@ export function TimeExpensePanel({
         <div
           style={{
             border: '1px solid var(--border)',
-            borderRadius: 8,
+            borderRadius: 'var(--radius-sm)',
             padding: 'var(--space-3)',
             marginBottom: 'var(--space-3)',
             display: 'grid',
@@ -332,11 +332,15 @@ export function TimeExpensePanel({
           ) : time.entries.length === 0 ? (
             <p className="text-muted text-sm">No time logged yet.</p>
           ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: '0.5rem 0 0' }}>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 'var(--space-2) 0 0' }}>
               {time.entries.map((t) => (
                 <li
                   key={t.eventId}
-                  style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    padding: 'var(--space-1) 0',
+                  }}
                 >
                   <span>
                     <strong>{formatDuration(t.durationMinutes)}</strong> — {t.description}
@@ -364,11 +368,15 @@ export function TimeExpensePanel({
           ) : expenses.entries.length === 0 ? (
             <p className="text-muted text-sm">No expenses yet.</p>
           ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: '0.5rem 0 0' }}>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 'var(--space-2) 0 0' }}>
               {expenses.entries.map((x) => (
                 <li
                   key={x.eventId}
-                  style={{ display: 'flex', justifyContent: 'space-between', padding: '0.25rem 0' }}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    padding: 'var(--space-1) 0',
+                  }}
                 >
                   <span>
                     <strong>${x.amount}</strong> — {x.description}
@@ -383,7 +391,7 @@ export function TimeExpensePanel({
                             background: 'none',
                             border: 'none',
                             padding: 0,
-                            color: 'var(--link, #2563eb)',
+                            color: 'var(--accent)',
                             textDecoration: 'underline',
                             cursor: 'pointer',
                           }}

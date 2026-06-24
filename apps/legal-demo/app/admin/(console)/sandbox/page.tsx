@@ -24,9 +24,9 @@ interface TemplateDiff {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  new: '#16a34a',
-  changed: '#d97706',
-  identical: '#6b7280',
+  new: 'var(--ok)',
+  changed: 'var(--warn)',
+  identical: 'var(--muted)',
 }
 
 export default function AdminSandboxPage() {
@@ -136,7 +136,7 @@ export default function AdminSandboxPage() {
 
   return (
     <main style={{ maxWidth: 900 }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>Sandbox</h1>
+      <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Sandbox</h1>
       <p style={{ color: 'var(--muted)', marginTop: 0 }}>
         Build and test anything in the sandbox workspace, then promote services to production
         tenants.
@@ -144,15 +144,8 @@ export default function AdminSandboxPage() {
       {error && <div className="alert alert-error">{error}</div>}
       {msg && <div className="alert alert-success">{msg}</div>}
 
-      <section
-        style={{
-          border: '1px solid var(--border, #e5e7eb)',
-          borderRadius: 8,
-          padding: '1rem',
-          marginBottom: '1.5rem',
-        }}
-      >
-        <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Build</h2>
+      <section style={{ marginBottom: 'var(--space-5)' }}>
+        <h2 style={{ fontSize: '1.1rem' }}>Build</h2>
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           Enter the sandbox workspace (the full firm app, all modules enabled) to build and test.
         </p>
@@ -163,16 +156,14 @@ export default function AdminSandboxPage() {
         </form>
       </section>
 
-      <section
-        style={{ border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, padding: '1rem' }}
-      >
-        <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Promote services</h2>
-        <label style={{ display: 'block', marginBottom: '1rem' }}>
+      <section>
+        <h2 style={{ fontSize: '1.1rem' }}>Promote services</h2>
+        <label style={{ display: 'block', marginBottom: 'var(--space-4)' }}>
           Target tenant
           <select
             value={targetId}
             onChange={(e) => setTargetId(e.target.value)}
-            style={{ display: 'block', minWidth: 320, marginTop: 4 }}
+            style={{ display: 'block', minWidth: 320, marginTop: 'var(--space-1)' }}
           >
             <option value="">Select a production firm…</option>
             {tenants
@@ -190,43 +181,43 @@ export default function AdminSandboxPage() {
         )}
         {diff && diff.length > 0 && (
           <>
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border, #e5e7eb)' }}>
-                  <th style={{ padding: '0.5rem' }}>Promote</th>
-                  <th style={{ padding: '0.5rem' }}>Service</th>
-                  <th style={{ padding: '0.5rem' }}>Change</th>
-                  <th style={{ padding: '0.5rem' }}>Versions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {diff.map((d) => (
-                  <tr key={d.kindName} style={{ borderBottom: '1px solid var(--border, #eee)' }}>
-                    <td style={{ padding: '0.5rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(d.kindName)}
-                        disabled={d.status === 'identical'}
-                        onChange={() => toggle(d.kindName)}
-                      />
-                    </td>
-                    <td style={{ padding: '0.5rem' }}>
-                      <strong>{d.displayName}</strong>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>{d.kindName}</div>
-                    </td>
-                    <td
-                      style={{ padding: '0.5rem', fontWeight: 600, color: STATUS_COLOR[d.status] }}
-                    >
-                      {d.status}
-                    </td>
-                    <td style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
-                      sandbox v{d.sourceVersion} → target{' '}
-                      {d.targetVersion === null ? '—' : `v${d.targetVersion}`}
-                    </td>
+            <div className="table-wrap" style={{ marginBottom: 'var(--space-4)' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Promote</th>
+                    <th>Service</th>
+                    <th>Change</th>
+                    <th>Versions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {diff.map((d) => (
+                    <tr key={d.kindName}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(d.kindName)}
+                          disabled={d.status === 'identical'}
+                          onChange={() => toggle(d.kindName)}
+                        />
+                      </td>
+                      <td>
+                        <strong>{d.displayName}</strong>
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>
+                          {d.kindName}
+                        </div>
+                      </td>
+                      <td style={{ fontWeight: 600, color: STATUS_COLOR[d.status] }}>{d.status}</td>
+                      <td style={{ fontSize: 'var(--text-sm)' }}>
+                        sandbox v{d.sourceVersion} → target{' '}
+                        {d.targetVersion === null ? '—' : `v${d.targetVersion}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <button className="primary" disabled={busy || selected.size === 0} onClick={promote}>
               {busy ? 'Promoting…' : `Promote ${selected.size} selected →`}
             </button>
@@ -234,15 +225,8 @@ export default function AdminSandboxPage() {
         )}
       </section>
 
-      <section
-        style={{
-          border: '1px solid var(--border, #e5e7eb)',
-          borderRadius: 8,
-          padding: '1rem',
-          marginTop: '1.5rem',
-        }}
-      >
-        <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Promote document &amp; email templates</h2>
+      <section style={{ marginTop: 'var(--space-5)' }}>
+        <h2 style={{ fontSize: '1.1rem' }}>Promote document &amp; email templates</h2>
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           The firm&apos;s reusable template library (select a target firm above).
         </p>
@@ -254,39 +238,37 @@ export default function AdminSandboxPage() {
         )}
         {tplDiff && tplDiff.length > 0 && (
           <>
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border, #e5e7eb)' }}>
-                  <th style={{ padding: '0.5rem' }}>Promote</th>
-                  <th style={{ padding: '0.5rem' }}>Template</th>
-                  <th style={{ padding: '0.5rem' }}>Category</th>
-                  <th style={{ padding: '0.5rem' }}>Change</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tplDiff.map((d) => (
-                  <tr key={d.key} style={{ borderBottom: '1px solid var(--border, #eee)' }}>
-                    <td style={{ padding: '0.5rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={tplSelected.has(d.key)}
-                        disabled={d.status === 'identical'}
-                        onChange={() => toggleTpl(d.key)}
-                      />
-                    </td>
-                    <td style={{ padding: '0.5rem' }}>
-                      <strong>{d.name}</strong>
-                    </td>
-                    <td style={{ padding: '0.5rem', fontSize: '0.85rem' }}>{d.category}</td>
-                    <td
-                      style={{ padding: '0.5rem', fontWeight: 600, color: STATUS_COLOR[d.status] }}
-                    >
-                      {d.status}
-                    </td>
+            <div className="table-wrap" style={{ marginBottom: 'var(--space-4)' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Promote</th>
+                    <th>Template</th>
+                    <th>Category</th>
+                    <th>Change</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {tplDiff.map((d) => (
+                    <tr key={d.key}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={tplSelected.has(d.key)}
+                          disabled={d.status === 'identical'}
+                          onChange={() => toggleTpl(d.key)}
+                        />
+                      </td>
+                      <td>
+                        <strong>{d.name}</strong>
+                      </td>
+                      <td style={{ fontSize: 'var(--text-sm)' }}>{d.category}</td>
+                      <td style={{ fontWeight: 600, color: STATUS_COLOR[d.status] }}>{d.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <button
               className="primary"
               disabled={busy || tplSelected.size === 0}
