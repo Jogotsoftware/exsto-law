@@ -376,7 +376,9 @@ function StreamingMarkdown({ text }: { text: string }) {
   return (
     <div
       className="assistant-md"
-      dangerouslySetInnerHTML={{ __html: renderMarkdown(shown) + '<span class="uac-caret"></span>' }}
+      dangerouslySetInnerHTML={{
+        __html: renderMarkdown(shown) + '<span class="uac-caret"></span>',
+      }}
     />
   )
 }
