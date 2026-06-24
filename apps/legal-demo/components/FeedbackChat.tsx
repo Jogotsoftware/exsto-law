@@ -43,6 +43,10 @@ export function FeedbackChat() {
   // Snapshot the scope when the panel opens, so an in-progress chat doesn't reset
   // mid-conversation if the attorney navigates while it's open.
   const [scope, setScope] = useState<{ matterEntityId?: string; contactEntityId?: string }>({})
+  // A prompt another surface primed the chat with (via the exsto:assistant:prime
+  // window event) + a nonce so re-priming the same text re-seeds the composer. The
+  // attorney still presses Send — priming never auto-submits.
+  const [primed, setPrimed] = useState<{ text: string; nonce: number } | null>(null)
   const inputFocusRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   // Custom panel size (px). null ⇒ use the CSS default. Stays null on the server
@@ -53,6 +57,22 @@ export function FeedbackChat() {
   useEffect(() => {
     if (open) inputFocusRef.current?.querySelector('textarea')?.focus()
   }, [open])
+
+  // Open the assistant with a primed prompt when another surface dispatches
+  // exsto:assistant:prime (e.g. the service Workflow tab's "Build with AI" button).
+  // The chat opens grounded in the CURRENT page, with the composer pre-written; the
+  // attorney reviews and presses Send. A nonce makes re-priming re-seed the composer.
+  useEffect(() => {
+    function onPrime(e: Event) {
+      const detail = (e as CustomEvent<{ prompt?: string }>).detail
+      const text = typeof detail?.prompt === 'string' ? detail.prompt : ''
+      setScope(scopeForPath(pathname))
+      setPrimed({ text, nonce: Date.now() })
+      setOpen(true)
+    }
+    window.addEventListener('exsto:assistant:prime', onPrime as EventListener)
+    return () => window.removeEventListener('exsto:assistant:prime', onPrime as EventListener)
+  }, [pathname])
 
   // Restore the remembered size once, client-side.
   useEffect(() => {
@@ -68,6 +88,9 @@ export function FeedbackChat() {
 
   function openChat() {
     setScope(scopeForPath(pathname))
+    // A manual open is a fresh chat — drop any stale primed prompt so it doesn't
+    // re-seed the composer.
+    setPrimed(null)
     setOpen(true)
   }
 
@@ -158,12 +181,15 @@ export function FeedbackChat() {
         {/* Keyed by scope so opening on a different page starts a fresh, correctly
             grounded chat (and loads that matter/contact's thread). */}
         <UnifiedAssistantChat
-          key={scope.matterEntityId ?? scope.contactEntityId ?? 'global'}
+          key={`${scope.matterEntityId ?? scope.contactEntityId ?? 'global'}${
+            primed ? `:primed:${primed.nonce}` : ''
+          }`}
           matterEntityId={scope.matterEntityId}
           contactEntityId={scope.contactEntityId}
           loadThread={scoped}
           intro={intro}
           placeholder="Ask a question or share feedback…"
+          initialInput={primed?.text}
         />
       </div>
     </div>

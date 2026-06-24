@@ -120,6 +120,10 @@ export interface UnifiedAssistantChatProps {
   // Shown above the first message.
   intro?: string
   placeholder?: string
+  // Prime the composer with this text on mount (e.g. a "Build with AI" launcher
+  // that pre-writes the request). The attorney still presses Send — we never
+  // auto-submit. Seeded once; later edits/sends clear it normally.
+  initialInput?: string
 }
 
 const WORK_RATES: Array<{ value: WorkRate; label: string; hint: string }> = [
@@ -392,11 +396,14 @@ export function UnifiedAssistantChat({
   loadThread = false,
   intro,
   placeholder = 'Ask a question, request a draft, or share feedback…',
+  initialInput,
 }: UnifiedAssistantChatProps) {
   const [models, setModels] = useState<AssistantModel[] | null>(null)
   const [modelId, setModelId] = useState<string>('')
   const [turns, setTurns] = useState<DisplayTurn[]>([])
-  const [input, setInput] = useState('')
+  // Seed the composer from initialInput on first render (a primed launcher). The
+  // attorney still presses Send; we never auto-submit a primed prompt.
+  const [input, setInput] = useState(initialInput ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // The in-flight assistant reply, streamed token-by-token. `skills` holds any

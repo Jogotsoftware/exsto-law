@@ -89,7 +89,9 @@ export function validateLifecycle(lc: Lifecycle): LifecycleValidation {
 
   for (const s of lc) {
     if (!s.key) errors.push('every stage needs a key')
-    if (!s.label) errors.push(`stage "${s.key}" needs a label`)
+    // A label is required AND must be non-blank (a whitespace-only label reads as
+    // empty in the builder/portal). trim() so "  " is rejected the same as "".
+    if (!s.label || !s.label.trim()) errors.push(`stage "${s.key}" needs a label`)
     // action is OPTIONAL (legacy/seeded graphs and existing fixtures may omit it),
     // so only validate the kind WHEN action is present. A made-up action.kind (e.g.
     // free-form AI output) is rejected against the closed catalog before any write.
@@ -97,10 +99,30 @@ export function validateLifecycle(lc: Lifecycle): LifecycleValidation {
       errors.push(`stage "${s.key}" has an unknown action kind "${s.action.kind}"`)
     if (s.terminal && s.advances_to.length > 0)
       errors.push(`terminal stage "${s.key}" must have no outgoing edges`)
+    // A non-terminal stage with NO outgoing edge strands any matter that reaches it
+    // (it can never advance and is not an exit) — reject it. Terminals are the only
+    // legal dead end.
+    if (!s.terminal && s.advances_to.length === 0)
+      errors.push(
+        `non-terminal stage "${s.key}" must have at least one outgoing edge (or be terminal)`,
+      )
     for (const e of s.advances_to) {
       if (!keySet.has(e.to)) errors.push(`stage "${s.key}" has an edge to unknown stage "${e.to}"`)
       if (!GATE_KINDS.includes(e.gate))
         errors.push(`stage "${s.key}" → "${e.to}" has invalid gate "${e.gate}"`)
+      // Gate coherence: a system/automatic edge fires on an EVENT, so it MUST name
+      // one (`on`) — an automatic edge with no trigger could never fire. An
+      // attorney/client edge is fired by an ACTION, so it SHOULD name one (`via`);
+      // we only warn-as-error on the hard case (system/automatic missing `on`) and
+      // require `via` on human gates so the engine knows which action advances them.
+      if ((e.gate === 'automatic' || e.gate === 'system') && !e.on)
+        errors.push(
+          `stage "${s.key}" → "${e.to}" is a ${e.gate} edge but names no 'on' event to fire on`,
+        )
+      if ((e.gate === 'attorney' || e.gate === 'client') && !e.via)
+        errors.push(
+          `stage "${s.key}" → "${e.to}" is a ${e.gate} edge but names no 'via' action to advance it`,
+        )
     }
   }
 

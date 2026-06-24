@@ -167,3 +167,84 @@ WHERE NOT EXISTS (
   SELECT 1 FROM action_kind_definition a
    WHERE a.tenant_id = '00000000-0000-0000-0000-000000000001'::uuid AND a.kind_name = v.kind_name
 );
+
+-- =============================================================================
+-- ADR 0045 workflow ENGINE kinds — fresh-DB resilience.
+--
+-- These are the kinds the configurable workflow engine's write path needs. They
+-- normally arrive via the legal VERTICAL migrations (migrations_vertical/), but a
+-- fresh substrate that replays only the CORE migrations + this seed would lack
+-- them, so the engine's handlers (legal.matter.advance, legal.service.set_lifecycle,
+-- legal.matter.set_workflow, the workflow_step_template lifecycle) would fail to
+-- dispatch. Copied VERBATIM (same ids) from the vertical migrations so a re-apply of
+-- those migrations is a perfect no-op (ON CONFLICT (id) DO NOTHING):
+--   migrations_vertical/0093_workflow_engine.sql       (legal.matter.advance, workflow.advanced)
+--   migrations_vertical/0094_service_set_lifecycle.sql (legal.service.set_lifecycle)
+--   migrations_vertical/0107_workflow_step_library.sql (workflow_step_template entity + attrs + create/update)
+--   migrations_vertical/0108_matter_set_workflow.sql   (legal.matter.set_workflow, workflow.customized)
+-- Idempotent; configuration-as-data; flag-gated at runtime (LEGAL_WORKFLOW_ENGINE).
+-- =============================================================================
+
+-- ── Action kinds (0093 / 0094 / 0107 / 0108) ─────────────────────────────────
+INSERT INTO action_kind_definition
+  (id, tenant_id, kind_name, display_name, description, default_autonomy_tier, reversibility, reverse_action_kind_name, requires_reasoning_trace) VALUES
+  ('00000000-0000-0000-1013-000000000a01', '00000000-0000-0000-0000-000000000001',
+   'legal.matter.advance', 'Advance matter through workflow',
+   'Advance one matter one step through its bound lifecycle (ADR 0045). Manual gate path (attorney/client continue/approve) and the wrapper a system callback uses. Mirrors matter_status and emits workflow.advanced. Guarded against the bound graph: an illegal transition is rejected.',
+   'notify', 'reversible_with_state_decay', NULL, false),
+  ('00000000-0000-0000-1013-000000000a02', '00000000-0000-0000-0000-000000000001',
+   'legal.service.set_lifecycle', 'Author service workflow lifecycle',
+   'Author the lifecycle stage graph onto a service''s workflow_definition.states (ADR 0045). Versioned: seals the prior active service version and inserts version+1, replacing states with the validated graph while carrying display_name/description/transitions/participating_entity_kinds forward unchanged. The matter Workflow builder save path (and the SMLLC author script) use this.',
+   'notify', 'fully_reversible', NULL, false),
+  ('00000000-0000-0000-1013-000000000a03', '00000000-0000-0000-0000-000000000001',
+   'legal.workflow_step_template.create', 'Create workflow step template',
+   'Create a standalone, reusable workflow step (a LifecycleStage without edges) in the firm library.',
+   'notify', 'fully_reversible', 'entity.archive', false),
+  ('00000000-0000-0000-1013-000000000a04', '00000000-0000-0000-0000-000000000001',
+   'legal.workflow_step_template.update', 'Update workflow step template',
+   'Update a standalone workflow step template (append-only attribute supersession).',
+   'notify', 'fully_reversible', NULL, false),
+  ('00000000-0000-0000-1013-000000000a05', '00000000-0000-0000-0000-000000000001',
+   'legal.matter.set_workflow', 'Customize this matter''s workflow',
+   'Replace ONE matter''s lifecycle graph (add/reorder/remove a step) by writing workflow_instance.states_override, WITHOUT altering the service default (workflow_definition.states). The new graph is validated (closed step-action vocabulary + linear) and rejected if it would orphan the matter''s current step. Fully reversible: set another override or clear it back to the bound graph.',
+   'notify', 'fully_reversible', NULL, false)
+ON CONFLICT (id) DO NOTHING;
+
+-- ── Event kinds (0093 / 0108) ────────────────────────────────────────────────
+INSERT INTO event_kind_definition
+  (id, tenant_id, kind_name, display_name, description, is_state_change) VALUES
+  ('00000000-0000-0000-1014-000000000a01', '00000000-0000-0000-0000-000000000001',
+   'workflow.advanced', 'Workflow advanced',
+   'A matter advanced from one lifecycle stage to another (ADR 0045). payload holds {from, to, gate, trigger}. Primary=matter.',
+   true),
+  ('00000000-0000-0000-1014-000000000a02', '00000000-0000-0000-0000-000000000001',
+   'workflow.customized', 'Workflow customized',
+   'A matter''s workflow GRAPH was customized for that matter only (ADR 0045). This changes the instance''s graph, not its current_state, so is_state_change=false (unlike workflow.advanced). payload holds {stage_count}. Primary=matter.',
+   false)
+ON CONFLICT (id) DO NOTHING;
+
+-- ── workflow_step_template entity kind (0107) ────────────────────────────────
+INSERT INTO entity_kind_definition
+  (id, tenant_id, kind_name, display_name, description, parent_kind_id,
+   supports_temporal_state, supports_judgment, supports_outcomes, requires_period) VALUES
+  ('00000000-0000-0000-1010-000000000a01', '00000000-0000-0000-0000-000000000001',
+   'workflow_step_template', 'Workflow step template',
+   'A reusable workflow STEP (a LifecycleStage without edges) saved from the Workflow builder and droppable into any service.',
+   NULL, true, false, false, false)
+ON CONFLICT (id) DO NOTHING;
+
+-- ── workflow_step_template attribute kinds (0107) ────────────────────────────
+INSERT INTO attribute_kind_definition
+  (id, tenant_id, kind_name, display_name, description, on_entity_kind_id, value_type, is_pii) VALUES
+  ('00000000-0000-0000-1011-000000000a01', '00000000-0000-0000-0000-000000000001',
+   'workflow_step_template_name', 'Step name', 'Human name of the saved step.',
+   '00000000-0000-0000-1010-000000000a01', 'text', false),
+  ('00000000-0000-0000-1011-000000000a02', '00000000-0000-0000-0000-000000000001',
+   'workflow_step_template_description', 'Step description',
+   'Optional short description of what this saved step is for.',
+   '00000000-0000-0000-1010-000000000a01', 'text', false),
+  ('00000000-0000-0000-1011-000000000a03', '00000000-0000-0000-0000-000000000001',
+   'workflow_step_template_stage', 'Step stage',
+   'The reusable LifecycleStage (label, action {kind,config?}, gate, documents?, blocking?) — WITHOUT advances_to. The builder assigns edges at insertion time.',
+   '00000000-0000-0000-1010-000000000a01', 'json', false)
+ON CONFLICT (id) DO NOTHING;

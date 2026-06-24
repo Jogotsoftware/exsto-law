@@ -25,6 +25,9 @@ import { completenessFromTransitions } from '../api/services.js'
 // Pure lifecycle validator + the graph type (ADR 0045). The lifecycle module is
 // substrate-free (no DB, no handlers), so importing it here introduces no cycle.
 import { validateLifecycle, validateLinearLifecycle, type Lifecycle } from '../lifecycle/index.js'
+// The pure id-collector the AI proposal validator uses — shared so the manual save
+// path rejects dangling template refs the SAME way the AI path does (no drift).
+import { collectReferencedTemplateIds } from '../api/workflowAuthoring.js'
 
 interface ServiceTransitions {
   route?: string
@@ -332,6 +335,34 @@ registerActionHandler('legal.service.retire', async (ctx, client, payload, actio
   return { serviceKey: p.service_key, retired: true }
 })
 
+// Reject any stage.documents[].templateEntityId that is not a real DOCUMENT template
+// entity in the firm library. The AI authoring path already enforces this
+// (workflowAuthoring.validateProposedLifecycle); a graph saved via the MCP tool /
+// visual builder must not be able to carry a dangling id either. Runs on the
+// action's own transaction client (one read, ids that exist removed from the set).
+async function assertTemplateRefsExist(
+  client: DbClient,
+  tenantId: string,
+  graph: Lifecycle,
+): Promise<void> {
+  const ids = collectReferencedTemplateIds(graph)
+  if (ids.length === 0) return
+  const res = await client.query<{ id: string }>(
+    `SELECT e.id
+       FROM entity e
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'template'
+      WHERE e.tenant_id = $1 AND e.status = 'active' AND e.id = ANY($2::uuid[])`,
+    [tenantId, ids],
+  )
+  const known = new Set(res.rows.map((r) => r.id))
+  const missing = ids.filter((id) => !known.has(id))
+  if (missing.length > 0) {
+    throw new Error(
+      `Invalid workflow lifecycle: referenced document template(s) not in the firm library: ${missing.join(', ')}`,
+    )
+  }
+}
+
 interface ServiceSetLifecyclePayload {
   service_key: string
   graph: Lifecycle
@@ -365,6 +396,9 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
   if (!linear.ok) {
     throw new Error(`Invalid workflow lifecycle: ${linear.errors.join('; ')}`)
   }
+  // Document refs must resolve to real library templates (same rule the AI path
+  // enforces) — a dangling templateEntityId must never reach workflow_definition.states.
+  await assertTemplateRefsExist(client, ctx.tenantId, p.graph)
 
   const prior = await currentActive(client, ctx.tenantId, p.service_key)
   if (!prior) throw new Error(`Service not found: ${p.service_key}`)

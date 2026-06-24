@@ -11,6 +11,10 @@ import {
   insertRelationship,
   lookupKindId,
 } from './common.js'
+import { workflowEngineEnabled } from '../lifecycle/flags.js'
+import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
+import { advanceWorkflowInstance } from '../lifecycle/instance.js'
+import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // draft.generate / draft.merge — persist a first-draft document (REQ-DRAFT-01..04,
@@ -321,6 +325,68 @@ async function reviewDecision(
   return { documentEntityId, matterEntityId: matterRes.rows[0]?.matter_id ?? null }
 }
 
+// ADR 0045 — keep the workflow_instance in lock-step with the matter_status mirror
+// on the attorney-gated 'draft.approve' edge. draft.approve writes matter_status
+// directly (above); without this the instance's current_state would diverge from the
+// status. signalEvent is for system/automatic gates ONLY, so it must NOT be used
+// here — instead we advance the instance the SAME way handlers/workflow.ts does for a
+// gated edge, but we do NOT re-mirror matter_status (the caller already wrote it) and
+// we emit workflow.advanced exactly once. Flag-guarded no-op; a no-op too when the
+// matter has no instance, is already in the target state, or has no draft.approve
+// edge from its current stage (e.g. a service whose lifecycle approves differently).
+async function advanceInstanceOnApprove(
+  client: DbClient,
+  ctx: { tenantId: string; actorId: string },
+  matterEntityId: string,
+  actionId: string,
+): Promise<void> {
+  if (!workflowEngineEnabled()) return
+  const instance = await getWorkflowInstanceForMatter(client, ctx.tenantId, matterEntityId)
+  if (!instance) return
+
+  const from = instance.currentState
+  // Resolve the bound graph (a per-instance override supersedes the version).
+  let graph =
+    instance.statesOverride && instance.statesOverride.length > 0 ? instance.statesOverride : []
+  if (graph.length === 0) {
+    const bound = await resolveBoundWorkflowById(
+      client,
+      ctx.tenantId,
+      instance.workflowDefinitionId,
+    )
+    graph = bound?.graph ?? []
+  }
+  if (graph.length === 0) return
+
+  // Only the attorney 'draft.approve' edge out of the current stage. If the instance
+  // is already past it (idempotent re-approve) there is no such edge → no-op.
+  const edge = allowedTransitions(graph, from, ['attorney']).find((e) => e.via === 'draft.approve')
+  if (!edge) return
+
+  const toStage = stageByKey(graph, edge.to)
+  await advanceWorkflowInstance(client, ctx, {
+    instanceId: instance.id,
+    fromState: from,
+    toState: edge.to,
+    gate: 'attorney',
+    via: 'draft.approve',
+    status: toStage?.terminal ? 'completed' : undefined,
+    actionId,
+  })
+
+  // The audit event for the advance (matter_status was already mirrored by the
+  // caller, so we do NOT write the attribute again — only the instance + event).
+  await insertEvent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    eventKindName: 'workflow.advanced',
+    primaryEntityId: matterEntityId,
+    data: { from, to: edge.to, gate: 'attorney', trigger: 'draft.approve' },
+    sourceType: 'human',
+    sourceRef: ctx.actorId,
+  })
+}
+
 registerActionHandler('draft.approve', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as DraftReviewPayload
   const { documentEntityId, matterEntityId } = await reviewDecision(client, {
@@ -350,6 +416,8 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
       sourceType: 'human',
       sourceRef: ctx.actorId,
     })
+    // Advance the running workflow instance in lock-step (flag-guarded no-op).
+    await advanceInstanceOnApprove(client, ctx, matterEntityId, actionId)
     await accrueDocumentFeeOnApproval(client, {
       tenantId: ctx.tenantId,
       actionId,

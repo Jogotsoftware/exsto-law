@@ -270,6 +270,9 @@ export default function ServiceWorkflowPage() {
   const [library, setLibrary] = useState<WorkflowStepTemplate[]>([])
   const [steps, setSteps] = useState<BuilderStep[] | null>(null)
   const [version, setVersion] = useState<number | null>(null)
+  // Service display name (for the "Build with AI" primed prompt). Falls back to the
+  // serviceKey if the read fails.
+  const [displayName, setDisplayName] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [savingToLib, setSavingToLib] = useState<string | null>(null) // step uid
@@ -294,7 +297,7 @@ export default function ServiceWorkflowPage() {
 
   const load = useCallback(async () => {
     try {
-      const [lc, cat, lib] = await Promise.all([
+      const [lc, cat, lib, svc] = await Promise.all([
         callAttorneyMcp<{ lifecycle: { graph: WfLifecycle; version: number } | null }>({
           toolName: 'legal.service.lifecycle.get',
           input: { serviceKey },
@@ -303,16 +306,32 @@ export default function ServiceWorkflowPage() {
         callAttorneyMcp<{ steps: WorkflowStepTemplate[] }>({
           toolName: 'legal.workflow_step_template.list',
         }).catch(() => ({ steps: [] as WorkflowStepTemplate[] })),
+        callAttorneyMcp<{ service: { displayName: string } | null }>({
+          toolName: 'legal.service.get',
+          input: { serviceKey },
+        }).catch(() => ({ service: null })),
       ])
       setCatalog(cat)
       setLibrary(lib.steps ?? [])
       setVersion(lc.lifecycle?.version ?? null)
       setSteps(lc.lifecycle ? graphToSteps(lc.lifecycle.graph) : [])
+      setDisplayName(svc.service?.displayName ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setSteps([])
     }
   }, [serviceKey])
+
+  // "Build with AI": open the assistant with a primed prompt so the attorney can
+  // author this service's workflow conversationally (the chatbot proposes a graph;
+  // the attorney approves it on the existing AI authoring path). We dispatch a
+  // window event the global assistant dock (FeedbackChat) listens for — it opens
+  // grounded in this page with the composer pre-written; the attorney presses Send.
+  const buildWithAi = useCallback(() => {
+    const name = displayName ?? serviceKey
+    const prompt = `Build the workflow for ${name}.`
+    window.dispatchEvent(new CustomEvent('exsto:assistant:prime', { detail: { prompt } }))
+  }, [displayName, serviceKey])
 
   useEffect(() => {
     load()
@@ -479,6 +498,26 @@ export default function ServiceWorkflowPage() {
         in order. Saving creates a new immutable workflow version
         {version != null ? ` (currently v${version})` : ''}; matters already in flight keep theirs.
       </p>
+
+      {/* Discoverable AI entry point: open the assistant primed to author this
+          service's workflow. The chatbot proposes a graph; the attorney approves it
+          on the existing AI authoring path. Available whether the workflow is empty
+          or already has steps (the AI can build from scratch or refine). */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.6rem',
+          margin: '0.2rem 0 0.8rem',
+        }}
+      >
+        <button type="button" className="outline" onClick={buildWithAi}>
+          ✨ Build with AI
+        </button>
+        <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+          Describe the workflow to the assistant and it&apos;ll draft the steps for you to review.
+        </span>
+      </div>
 
       {error && <div className="alert alert-error">{error}</div>}
       {saveErrors.length > 0 && (

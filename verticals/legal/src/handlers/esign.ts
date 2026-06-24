@@ -29,6 +29,7 @@ import {
   lookupKindId,
 } from './common.js'
 import { renderTypedSignature, resolveExecutedMarkdown, type EsignField } from '../esign/fields.js'
+import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
 
 interface SendSigner {
   email: string
@@ -325,6 +326,17 @@ registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
     sourceType: 'system',
     sourceRef,
   })
+
+  // ADR 0045 — drive any matter whose lifecycle waits ON esign.completed. The matter
+  // is resolved via the signed document's draft_of link. Flag-guarded no-op when the
+  // engine is off (and a no-op for a document with no matter / no waiting edge). The
+  // advance commits in this same transaction under this action's id.
+  if (documentEntityId) {
+    const matterEntityId = await resolveDocumentMatter(client, tenantId, documentEntityId)
+    if (matterEntityId) {
+      await dispatchLifecycleEvent(client, ctx, matterEntityId, 'esign.completed', actionId)
+    }
+  }
   return {
     envelopeId: p.envelope_entity_id,
     status: 'completed' as const,
@@ -561,6 +573,27 @@ async function resolveEnvelopeDocument(
     [tenantId, envelopeId],
   )
   return res.rows[0]?.document_id ?? null
+}
+
+// The matter a signed document belongs to, via the draft_of relationship
+// (document → matter; written by the drafting flow). Returns null for a document
+// not tied to a matter (e.g. a standalone signature). ADR 0045: used to dispatch
+// the esign.completed lifecycle signal to the right matter.
+async function resolveDocumentMatter(
+  client: DbClient,
+  tenantId: string,
+  documentEntityId: string,
+): Promise<string | null> {
+  const res = await client.query<{ matter_id: string }>(
+    `SELECT r.target_entity_id AS matter_id
+       FROM relationship r
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+      WHERE r.tenant_id = $1 AND r.source_entity_id = $2 AND rkd.kind_name = 'draft_of'
+        AND (r.valid_to IS NULL OR r.valid_to > now())
+      LIMIT 1`,
+    [tenantId, documentEntityId],
+  )
+  return res.rows[0]?.matter_id ?? null
 }
 
 async function findSignerRequest(
