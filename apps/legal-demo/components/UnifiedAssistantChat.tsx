@@ -329,6 +329,58 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+// Smooth a bursty token stream into a steady, word-by-word reveal. The network
+// delivers the reply in uneven chunks — often a whole phrase in one flush through
+// the serverless proxy — so painting each chunk as it lands looks jerky/choppy
+// (beta: "streaming feels jerky, prefer the words come in a little slower and
+// smoother"). Instead we hold the full received text as a target and reveal it a
+// little each animation frame, easing out as we catch up, snapped to word
+// boundaries so words appear whole rather than mid-token. Cadence is decoupled
+// from the network; once caught up it idles until more text arrives.
+function revealedSlice(target: string, shown: number): string {
+  if (shown >= target.length) return target
+  // Don't reveal a partial word — back up to the last whitespace we've reached.
+  const boundary = Math.max(target.lastIndexOf(' ', shown), target.lastIndexOf('\n', shown))
+  return boundary > 0 ? target.slice(0, boundary) : ''
+}
+
+function useSmoothReveal(target: string): string {
+  const [shown, setShown] = useState(0)
+  useEffect(() => {
+    let raf = 0
+    let active = true
+    const tick = () => {
+      if (!active) return
+      setShown((cur) => {
+        if (cur >= target.length) return cur
+        const backlog = target.length - cur
+        // Ease-out: faster when far behind, gentle near the end; never crawls.
+        return cur + Math.min(backlog, Math.max(3, Math.ceil(backlog / 6)))
+      })
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      active = false
+      cancelAnimationFrame(raf)
+    }
+  }, [target])
+  return revealedSlice(target, Math.min(shown, target.length))
+}
+
+// The in-flight assistant reply, revealed smoothly. Lives only while streaming
+// (its parent unmounts it at onDone, which then renders the full committed turn),
+// so the rAF loop is bounded to the stream's lifetime.
+function StreamingMarkdown({ text }: { text: string }) {
+  const shown = useSmoothReveal(text)
+  return (
+    <div
+      className="assistant-md"
+      dangerouslySetInnerHTML={{ __html: renderMarkdown(shown) + '<span class="uac-caret"></span>' }}
+    />
+  )
+}
+
 // A document the assistant produced this turn — rendered as a distinct card (so
 // it reads as a deliverable, not a chat bubble) with the document preview and the
 // download/save actions. This is where downloads live now: on a real produced
@@ -1788,14 +1840,7 @@ export function UnifiedAssistantChat({
             {streaming.buildQuestions.map((q) => (
               <QuestionCard key={q.key} question={q} onAnswer={handleQuestionAnswer} />
             ))}
-            {streaming.text && (
-              <div
-                className="assistant-md"
-                dangerouslySetInnerHTML={{
-                  __html: renderMarkdown(streaming.text) + '<span class="uac-caret"></span>',
-                }}
-              />
-            )}
+            {streaming.text && <StreamingMarkdown text={streaming.text} />}
           </div>
         )}
 
