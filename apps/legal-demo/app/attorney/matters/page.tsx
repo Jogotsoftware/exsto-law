@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
-import { ClockIcon } from '@/components/icons'
+import { Modal } from '@/components/Modal'
+import { ClockIcon, PlusIcon } from '@/components/icons'
 
 interface MatterSummary {
   matterEntityId: string
@@ -63,12 +65,17 @@ export default function MattersPage() {
   const [clientFilter, setClientFilter] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('createdAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [showNew, setShowNew] = useState(false)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     callAttorneyMcp<{ matters: MatterSummary[] }>({ toolName: 'legal.matter.list' })
       .then((r) => setMatters(r.matters))
       .catch((e) => setError(e.message))
   }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   // Distinct filter options, derived from the loaded matters.
   const statusOptions = useMemo(
@@ -139,7 +146,19 @@ export default function MattersPage() {
 
   return (
     <main>
-      <PageHead title="Matters" description="All legal matters — open, in progress, and closed." />
+      <PageHead
+        title="Matters"
+        description="All legal matters — open, in progress, and closed."
+        actions={
+          <button type="button" className="primary" onClick={() => setShowNew(true)}>
+            <span className="icon-inline">
+              <PlusIcon size={16} /> New matter
+            </span>
+          </button>
+        }
+      />
+
+      {showNew && <NewMatterModal onClose={() => setShowNew(false)} />}
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -256,5 +275,135 @@ export default function MattersPage() {
         )}
       </section>
     </main>
+  )
+}
+
+interface ServiceOpt {
+  serviceKey: string
+  displayName: string
+}
+
+// Open a matter by hand (legal.matter.open → intake.submit + matter.open). Most
+// matters come from the booking/intake flow; this is the manual path for walk-ins
+// and matters started outside the portal. Pick the service, enter the client, and
+// the matter + client_contact are created; then we jump into the new matter.
+function NewMatterModal({ onClose }: { onClose: () => void }) {
+  const router = useRouter()
+  const [services, setServices] = useState<ServiceOpt[] | null>(null)
+  const [serviceKey, setServiceKey] = useState('')
+  const [clientFullName, setClientFullName] = useState('')
+  const [clientEmail, setClientEmail] = useState('')
+  const [clientCompanyName, setClientCompanyName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    callAttorneyMcp<{ services: ServiceOpt[] }>({ toolName: 'legal.service.list' })
+      .then((r) => {
+        if (cancelled) return
+        setServices(r.services)
+        setServiceKey((cur) => cur || r.services[0]?.serviceKey || '')
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const canSubmit = serviceKey !== '' && clientFullName.trim() !== '' && clientEmail.trim() !== ''
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!canSubmit || busy) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await callAttorneyMcp<{ matterEntityId: string }>({
+        toolName: 'legal.matter.open',
+        input: {
+          serviceKey,
+          clientFullName: clientFullName.trim(),
+          clientEmail: clientEmail.trim(),
+          clientCompanyName: clientCompanyName.trim() || undefined,
+        },
+      })
+      router.push(`/attorney/matters/${r.matterEntityId}`)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal
+      title="New matter"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="new-matter-form"
+            className="primary"
+            disabled={!canSubmit || busy}
+          >
+            {busy ? 'Creating…' : 'Create matter'}
+          </button>
+        </>
+      }
+    >
+      <form
+        id="new-matter-form"
+        onSubmit={submit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}
+      >
+        <label>
+          <span>Service</span>
+          <select
+            value={serviceKey}
+            onChange={(e) => setServiceKey(e.target.value)}
+            disabled={!services}
+          >
+            {!services && <option value="">Loading…</option>}
+            {services && services.length === 0 && <option value="">No active services</option>}
+            {services?.map((s) => (
+              <option key={s.serviceKey} value={s.serviceKey}>
+                {s.displayName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Client name</span>
+          <input
+            value={clientFullName}
+            onChange={(e) => setClientFullName(e.target.value)}
+            placeholder="Jane Doe"
+            autoFocus
+          />
+        </label>
+        <label>
+          <span>Client email</span>
+          <input
+            type="email"
+            value={clientEmail}
+            onChange={(e) => setClientEmail(e.target.value)}
+            placeholder="jane@example.com"
+          />
+        </label>
+        <label>
+          <span>Company (optional)</span>
+          <input
+            value={clientCompanyName}
+            onChange={(e) => setClientCompanyName(e.target.value)}
+            placeholder="Acme LLC"
+          />
+        </label>
+        {err && <div className="alert alert-error">{err}</div>}
+      </form>
+    </Modal>
   )
 }
