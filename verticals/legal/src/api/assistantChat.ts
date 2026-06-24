@@ -60,6 +60,20 @@ import {
 } from './intakeTemplateTools.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 
+// When the build-wizard is on AND the attorney's message reads like a request to
+// build/create a service (or one of its parts), FORCE-load the orchestrator playbook
+// (firm-admin.build-service) so the guided build always runs by the rules rather than
+// relying on the model to remember to load_skill it. Off-wizard or off-topic turns
+// are untouched (no forced playbook, no prompt bloat) — the dormancy contract holds.
+const BUILD_REQUEST_RE =
+  /\b(build|create|set\s*up|make|add|design)\b[\s\S]{0,40}\b(service|offering|workflow|practice\s*area|intake|questionnaire|template)\b/i
+function wizardForcedSkillSlugs(message: string, selected?: string[]): string[] {
+  const sel = selected ?? []
+  if (!buildWizardEnabled() || !BUILD_REQUEST_RE.test(message)) return sel
+  const slug = 'firm-admin.build-service'
+  return sel.includes(slug) ? sel : [slug, ...sel]
+}
+
 export type AssistantTurnKind = 'question' | 'research' | 'feedback'
 export type AssistantScope = 'matter' | 'contact' | 'global'
 // Beta-feedback category (Obj 11): the attorney tags feedback so the team can
@@ -500,8 +514,13 @@ export function buildClaudeSystem(
   // absent and the propose_service/get_service_context tools aren't registered, so
   // the model has no way to (and is never told to) create services.
   if (buildWizardEnabled()) {
+    // REUSE-FIRST DISCIPLINE (Phase 5) — the load-bearing rule for the whole wizard:
+    // search what already exists before authoring anything, so the firm's library
+    // never bloats with duplicates. Stated up front so it governs every propose_*.
     system +=
-      '\n\nCREATING A NEW SERVICE — when the attorney asks you to create, set up, or add a new SERVICE offering (e.g. "create an NC SMLLC formation service", "add a trademark filing service"), you propose an empty service SHELL for them to approve. ALWAYS call get_service_context FIRST to load the existing service keys (so your proposed key is unique) and the closed route + generation_mode vocabularies. Pick a route and generation_mode ONLY from those — never invent one. When you have a name and a valid choice, deliver it by CALLING the propose_service tool — this does NOT save anything; it shows the attorney an approval card, and the service is created (as a disabled draft) only when THEY approve it. Put the proposal ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to it to review.'
+      '\n\nREUSE BEFORE YOU CREATE (this rule governs the whole build) — the firm already has services, questionnaires, document templates, and saved workflow steps. BEFORE you propose ANY new artifact you MUST call the matching get_*_context tool and SEARCH what already exists. If a matching SERVICE exists (check get_service_context\'s existingServices), propose EDITING that service — point the attorney to its key — and do NOT create a duplicate. If a matching QUESTIONNAIRE, document TEMPLATE, or workflow STEP exists, REUSE or ADAPT it — start from its content (its fields / its body / its action+gate) rather than authoring from scratch. Create a BRAND-NEW artifact ONLY when nothing close exists, and when you do, say WHY in the proposal\'s summary (e.g. "no existing template covered an NC operating agreement, so this is new"). Duplicating what the firm already has is a mistake; reusing or adapting it is the default.'
+    system +=
+      '\n\nCREATING A NEW SERVICE — when the attorney asks you to create, set up, or add a new SERVICE offering (e.g. "create an NC SMLLC formation service", "add a trademark filing service"), you propose an empty service SHELL for them to approve. ALWAYS call get_service_context FIRST: SEARCH its `existingServices` for a close match (if one exists, propose editing it instead of a duplicate), and use the existing service keys (so a new key is unique) and the closed route + generation_mode vocabularies. Pick a route and generation_mode ONLY from those — never invent one. When you have a name and a valid choice, deliver it by CALLING the propose_service tool — this does NOT save anything; it shows the attorney an approval card, and the service is created (as a disabled draft) only when THEY approve it. Put the proposal ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to it to review.'
     system +=
       "\n\nBUILDING A SERVICE'S INTAKE QUESTIONNAIRE AND DOCUMENTS — when the attorney asks you to build the intake form (questionnaire) or a document template for an EXISTING service, you propose them for approval, bound by the VARIABLE CONTRACT: every document {{token}} must map to a questionnaire field id, or it renders [[MISSING]]. For a QUESTIONNAIRE: call get_questionnaire_context FIRST (it gives the closed field types, the current form, and the {{tokens}} the service's documents reference) and build a form that collects a field for EACH template token (matching ids), then CALL propose_questionnaire. For a TEMPLATE: call get_template_context FIRST (it gives the questionnaire's field ids) and write a markdown body whose {{tokens}} are flat snake_case and bind to those field ids — never invent a dotted path — then CALL propose_template. Both tools only show an approval card; nothing is saved until the attorney approves. The card surfaces coverage gaps (template tokens with no question, or questions no document uses) so the attorney never approves a broken contract — point those out. Put the proposal ONLY in the tool call; your reply is a SINGLE short sentence pointing them to it (flag any coverage gap)."
     // Build-Wizard Phase 4 — the ORCHESTRATOR. When the attorney wants a WHOLE new
@@ -797,7 +816,7 @@ export async function assistantChat(
     // the model can pull a playbook on demand (load_skill), plus any skills the
     // attorney force-selected from the /skills menu, and pass the current route.
     const catalog = await listSkillCatalog(ctx)
-    const forced = await loadForcedSkills(ctx, input.skillSlugs)
+    const forced = await loadForcedSkills(ctx, wizardForcedSkillSlugs(message, input.skillSlugs))
     const system = buildClaudeSystem(
       scope,
       primaryEntityId,
@@ -928,7 +947,7 @@ export async function* assistantChatStream(
     // the model can pull a playbook on demand (load_skill), plus any skills the
     // attorney force-selected from the /skills menu, and pass the current route.
     const catalog = await listSkillCatalog(ctx)
-    const forced = await loadForcedSkills(ctx, input.skillSlugs)
+    const forced = await loadForcedSkills(ctx, wizardForcedSkillSlugs(message, input.skillSlugs))
     // Surface the picked skills as chips immediately, before the reply streams.
     for (const s of forced) yield { type: 'skill', slug: s.slug, name: s.name }
     const system = buildClaudeSystem(

@@ -33,7 +33,7 @@ export interface WorkflowProposal {
 const WORKFLOW_CONTEXT_TOOL_DEF = {
   name: 'get_workflow_context',
   description:
-    "Get everything needed to PROPOSE or edit a workflow for an existing service: the closed catalog of step actions you may use (kind, label, description, defaultGate, blocking), the closed set of edge gates, the service's CURRENT lifecycle graph (null if none authored yet), and the firm's available document templates you may attach to steps. Compose a workflow ONLY from these — never invent a step kind, a gate, or a document template id. Call this FIRST whenever the attorney asks you to build, add to, or change a service workflow.",
+    "Get everything needed to PROPOSE or edit a workflow for an existing service: the closed catalog of step actions you may use (kind, label, description, defaultGate, blocking), the closed set of edge gates, the service's CURRENT lifecycle graph (null if none authored yet), the firm's available document templates you may attach to steps, and `stepLibrary` — the firm's SAVED, reusable workflow steps (each with a name, description, and a one-line stage summary). SEARCH `stepLibrary` FIRST: if a saved step matches one you need, REUSE it (mirror its action + gate) rather than composing an identical step from scratch. Compose a workflow ONLY from these — never invent a step kind, a gate, or a document template id. Call this FIRST whenever the attorney asks you to build, add to, or change a service workflow.",
   input_schema: {
     type: 'object',
     properties: {

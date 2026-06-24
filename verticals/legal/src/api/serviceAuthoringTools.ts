@@ -30,7 +30,7 @@ import type { GenerationMode } from './generateDraft.js'
 const SERVICE_CONTEXT_TOOL_DEF = {
   name: 'get_service_context',
   description:
-    "Get everything needed to PROPOSE a new SERVICE for this firm: the existing service keys (so your proposed service's key is unique), the closed set of workflow routes you may pick ('manual' or 'auto'), the closed set of document generation modes ('template_merge' or 'ai_draft'), and the firm's bundled document-kind registry (the kinds a later step can attach). Compose a service ONLY from these — never invent a route or a generation mode. Call this FIRST whenever the attorney asks you to create, set up, or add a new service offering.",
+    "Get everything needed to PROPOSE a new SERVICE for this firm — AND to check whether one already exists you should EDIT instead: `existingServices` is the firm's current services, each with its key, display name, description, and whether it already has a workflow / questionnaire / how many document templates (and which kinds). SEARCH `existingServices` FIRST: if a service like the one the attorney is asking for already exists, propose EDITING that one (point them to its key) rather than creating a duplicate — only propose a brand-new service when nothing close exists. Also returns `serviceKeys` (so a new service's key is unique), the closed set of workflow routes ('manual' or 'auto'), the closed set of generation modes ('template_merge' or 'ai_draft'), and the firm's bundled document-kind registry. Compose a service ONLY from these — never invent a route or a generation mode. Call this FIRST whenever the attorney asks you to create, set up, or add a new service offering.",
   input_schema: {
     type: 'object',
     properties: {},

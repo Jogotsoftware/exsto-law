@@ -23,7 +23,12 @@
 // is written by the action layer (legal.service.upsert → version 1, DISABLED).
 import { randomUUID } from 'node:crypto'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
-import type { WorkflowRoute } from './services.js'
+import {
+  listServicesIncludingInactive,
+  listServiceDocumentTemplates,
+  type WorkflowRoute,
+} from './services.js'
+import { getServiceLifecycle } from './serviceLifecycle.js'
 import type { GenerationMode } from './generateDraft.js'
 import { listStandaloneTemplates } from '../queries/templates.js'
 
@@ -55,13 +60,36 @@ export function slugifyServiceKey(s: string): string {
   )
 }
 
+// One existing service summarized for REUSE detection (Phase 5). Enough for the
+// model to recognize "a service like this already exists" and propose EDITING it
+// rather than authoring a duplicate: the key + display name + description, and a
+// shape read-out (does it already have a workflow / questionnaire / how many
+// document templates, and of which kinds). All read-only, composed from the SAME
+// listServicesIncludingInactive the admin Services list uses.
+export interface ExistingServiceSummary {
+  serviceKey: string
+  displayName: string
+  description: string | null
+  // True when the service has an authored lifecycle graph (its workflow is built).
+  hasWorkflow: boolean
+  // True when the service has at least one intake-schema section with a field.
+  hasQuestionnaire: boolean
+  // How many document templates the service has authored (by docKind), and which.
+  templateCount: number
+  docKinds: string[]
+}
+
 // The read-only context the chat tool hands the model: the existing service keys
-// (for uniqueness), the closed route + generation_mode vocabularies, and the firm's
-// bundled docKind registry (the document kinds a later wizard phase can bind).
+// (for uniqueness), the EXISTING-SERVICE SUMMARIES (for reuse detection — Phase 5),
+// the closed route + generation_mode vocabularies, and the firm's bundled docKind
+// registry (the document kinds a later wizard phase can bind).
 export interface ServiceAuthoringContext {
   // Every existing service kind_name (active OR disabled) — the model checks a
   // proposed key against these so it never proposes a duplicate.
   serviceKeys: string[]
+  // Phase 5 — the firm's existing services, summarized enough that the model can
+  // recognize a close match and propose EDITING it rather than creating a duplicate.
+  existingServices: ExistingServiceSummary[]
   routes: readonly WorkflowRoute[]
   generationModes: readonly GenerationMode[]
   // Distinct document kinds present in the firm's document-template library — the
@@ -86,13 +114,51 @@ export async function listAllServiceKinds(ctx: ActionContext): Promise<string[]>
   })
 }
 
+// Summarize the firm's existing services for REUSE detection (Phase 5). Reads the
+// admin Services list (current row of every service, active OR disabled — minus the
+// firm.* internals, which that query already excludes) and, for each, the document
+// templates authored on it. The hasWorkflow / hasQuestionnaire / templateCount /
+// docKinds flags are exactly what the model needs to see "this already exists" and
+// propose editing instead of duplicating. Read-only — composes existing queries.
+export async function summarizeExistingServices(
+  ctx: ActionContext,
+): Promise<ExistingServiceSummary[]> {
+  const services = await listServicesIncludingInactive(ctx)
+  // Each service's authored document templates (by docKind) — one read per service,
+  // resolved in parallel so the context load stays within the per-op budget.
+  const summaries = await Promise.all(
+    services.map(async (s) => {
+      const docs = await listServiceDocumentTemplates(ctx, s.serviceKey)
+      const docKinds = docs.map((d) => d.documentKind).sort()
+      // A built workflow == an authored, valid lifecycle graph (not the derived
+      // fallback). getServiceLifecycle returns null when nothing is authored yet.
+      const lifecycle = await getServiceLifecycle(ctx, s.serviceKey)
+      const hasQuestionnaire = (s.intakeSchema?.sections ?? []).some(
+        (sec) => Array.isArray(sec.fields) && sec.fields.length > 0,
+      )
+      return {
+        serviceKey: s.serviceKey,
+        displayName: s.displayName,
+        description: s.description,
+        hasWorkflow: lifecycle != null,
+        hasQuestionnaire,
+        templateCount: docKinds.length,
+        docKinds,
+      }
+    }),
+  )
+  return summaries
+}
+
 // Load everything the model needs to PROPOSE a new service shell: the existing keys
-// (uniqueness — all versions, matching the handler), the closed route/generation_mode
-// vocabularies, and the docKind registry. Read-only — composes existing queries.
+// (uniqueness — all versions, matching the handler), the existing-service summaries
+// (reuse — Phase 5), the closed route/generation_mode vocabularies, and the docKind
+// registry. Read-only — composes existing queries.
 export async function loadServiceAuthoringContext(
   ctx: ActionContext,
 ): Promise<ServiceAuthoringContext> {
   const serviceKeys = await listAllServiceKinds(ctx)
+  const existingServices = await summarizeExistingServices(ctx)
   // Only DOCUMENT templates carry a bindable docKind (email templates are for
   // notifications). De-dup, drop empties, and sort for a stable registry.
   const templates = await listStandaloneTemplates(ctx)
@@ -105,6 +171,7 @@ export async function loadServiceAuthoringContext(
   ].sort()
   return {
     serviceKeys,
+    existingServices,
     routes: SERVICE_ROUTES,
     generationModes: SERVICE_GENERATION_MODES,
     docKinds,

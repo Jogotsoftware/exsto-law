@@ -28,6 +28,7 @@ import {
 } from '../lifecycle/index.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
 import { listStandaloneTemplates } from '../queries/templates.js'
+import { listWorkflowStepTemplates } from '../queries/workflowStepLibrary.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
 // the SAME id generateDraft.ts sources its writes to.
@@ -42,8 +43,22 @@ export interface AvailableTemplate {
   docKind: string | null
 }
 
+// A reusable saved STEP (workflow_step_template) the firm has in its library
+// (Phase 5 — reuse), summarized so the model can drop a saved task/step in instead
+// of authoring one from scratch. The stored stage carries the label/action/gate/
+// documents (no edges — the builder wires those at insertion), so a one-line stage
+// summary (the action kind + gate) is enough to recognize a reusable step.
+export interface ReusableStepSummary {
+  workflowStepTemplateId: string
+  name: string
+  description: string | null
+  // A compact read-out of what the saved step does — its action kind + default gate.
+  stageSummary: string
+}
+
 // The read-only context the chat tool hands the model: the closed catalog, the
-// service's current graph (null when unauthored), and the firm's document library.
+// service's current graph (null when unauthored), the firm's document library, and
+// the firm's reusable STEP library (Phase 5).
 export interface WorkflowAuthoringContext {
   serviceKey: string
   actions: StepActionSpec[]
@@ -51,6 +66,9 @@ export interface WorkflowAuthoringContext {
   currentGraph: Lifecycle | null
   currentVersion: number | null
   availableTemplates: AvailableTemplate[]
+  // Phase 5 — the firm's saved, reusable workflow steps, so the model can reuse a
+  // step/task it already has rather than composing an identical one from scratch.
+  stepLibrary: ReusableStepSummary[]
 }
 
 // Load everything the model needs to PROPOSE a workflow for an existing service: the
@@ -67,6 +85,15 @@ export async function loadWorkflowAuthoringContext(
   const availableTemplates: AvailableTemplate[] = templates
     .filter((t) => t.category === 'document')
     .map((t) => ({ templateEntityId: t.templateEntityId, name: t.name, docKind: t.docKind }))
+  // Phase 5 — the firm's reusable STEP library. A one-line stage summary (action
+  // kind + default gate) is enough for the model to recognize a reusable step and
+  // mirror it rather than authoring an identical one from scratch.
+  const stepLibrary: ReusableStepSummary[] = (await listWorkflowStepTemplates(ctx)).map((s) => ({
+    workflowStepTemplateId: s.workflowStepTemplateId,
+    name: s.name,
+    description: s.description,
+    stageSummary: `action=${s.stage.action?.kind ?? 'manual_task'}, gate=${s.stage.gate ?? 'attorney'}`,
+  }))
   return {
     serviceKey,
     actions: STEP_ACTION_CATALOG,
@@ -74,6 +101,7 @@ export async function loadWorkflowAuthoringContext(
     currentGraph: current?.graph ?? null,
     currentVersion: current?.version ?? null,
     availableTemplates,
+    stepLibrary,
   }
 }
 
