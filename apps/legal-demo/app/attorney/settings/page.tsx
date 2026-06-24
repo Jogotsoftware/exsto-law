@@ -5,6 +5,8 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { fetchSession } from '@/lib/auth'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
 import { PageHead } from '@/components/PageHead'
+import { UsersRolesSection } from './UsersRolesSection'
+import { AiUsageSection } from './AiUsageSection'
 
 type Provider = 'google_calendar' | 'anthropic' | 'openai' | 'perplexity' | 'granola' | 'docusign'
 
@@ -751,6 +753,10 @@ export default function SettingsPage() {
       </CollapsibleSection>
 
       <CalendarCategoriesSection />
+
+      <UsersRolesSection />
+
+      <AiUsageSection />
 
       {connectingProvider && (
         <ConnectKeyModal
