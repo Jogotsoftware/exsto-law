@@ -5,6 +5,11 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
 import { WorkflowProposalCard, type WorkflowProposal } from '@/components/WorkflowProposalCard'
 import { ServiceProposalCard, type ServiceProposal } from '@/components/ServiceProposalCard'
+import {
+  QuestionnaireProposalCard,
+  type QuestionnaireProposal,
+} from '@/components/QuestionnaireProposalCard'
+import { TemplateProposalCard, type TemplateProposal } from '@/components/TemplateProposalCard'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import {
@@ -73,6 +78,10 @@ interface DisplayTurn {
   // New-service proposals the assistant captured (Build-Wizard Phase 1) — shown as
   // inline approval cards. The service is created only when the attorney approves.
   serviceProposals?: ServiceProposal[]
+  // Questionnaire proposals captured (Build-Wizard Phase 2) — inline approval cards.
+  questionnaireProposals?: QuestionnaireProposal[]
+  // Document-template proposals captured (Build-Wizard Phase 3) — inline approval cards.
+  templateProposals?: TemplateProposal[]
 }
 
 // One legal skill (playbook) the attorney can pick from the /skills menu.
@@ -94,6 +103,8 @@ interface ThreadTurn {
   documents?: ProducedDoc[]
   workflowProposals?: WorkflowProposal[]
   serviceProposals?: ServiceProposal[]
+  questionnaireProposals?: QuestionnaireProposal[]
+  templateProposals?: TemplateProposal[]
 }
 
 // A document attached to the next message: an uploaded file (parsed to text) or a
@@ -420,6 +431,8 @@ export function UnifiedAssistantChat({
     documents: ProducedDoc[]
     workflowProposals: WorkflowProposal[]
     serviceProposals: ServiceProposal[]
+    questionnaireProposals: QuestionnaireProposal[]
+    templateProposals: TemplateProposal[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -590,6 +603,8 @@ export function UnifiedAssistantChat({
                 documents: t.documents,
                 workflowProposals: t.workflowProposals,
                 serviceProposals: t.serviceProposals,
+                questionnaireProposals: t.questionnaireProposals,
+                templateProposals: t.templateProposals,
               },
         )
         setTurns(display)
@@ -818,6 +833,8 @@ export function UnifiedAssistantChat({
       documents: [] as ProducedDoc[],
       workflowProposals: [] as WorkflowProposal[],
       serviceProposals: [] as ServiceProposal[],
+      questionnaireProposals: [] as QuestionnaireProposal[],
+      templateProposals: [] as TemplateProposal[],
     }
     setStreaming({ ...partial })
     let finished = false
@@ -888,6 +905,23 @@ export function UnifiedAssistantChat({
             if (p.displayName) partial.serviceProposals.push(p as unknown as ServiceProposal)
             setStreaming({ ...partial, serviceProposals: [...partial.serviceProposals] })
           },
+          onQuestionnaireProposal: (p) => {
+            if (!live()) return
+            if (p.serviceKey && p.schema) {
+              partial.questionnaireProposals.push(p as unknown as QuestionnaireProposal)
+            }
+            setStreaming({
+              ...partial,
+              questionnaireProposals: [...partial.questionnaireProposals],
+            })
+          },
+          onTemplateProposal: (p) => {
+            if (!live()) return
+            if (p.serviceKey && p.body && p.docKind) {
+              partial.templateProposals.push(p as unknown as TemplateProposal)
+            }
+            setStreaming({ ...partial, templateProposals: [...partial.templateProposals] })
+          },
           onDone: (d) => {
             if (!live()) return
             finished = true
@@ -904,6 +938,12 @@ export function UnifiedAssistantChat({
                   : undefined,
                 serviceProposals: partial.serviceProposals.length
                   ? partial.serviceProposals
+                  : undefined,
+                questionnaireProposals: partial.questionnaireProposals.length
+                  ? partial.questionnaireProposals
+                  : undefined,
+                templateProposals: partial.templateProposals.length
+                  ? partial.templateProposals
                   : undefined,
               },
             ])
@@ -936,12 +976,16 @@ export function UnifiedAssistantChat({
         partial.thinking ||
         partial.documents.length ||
         partial.workflowProposals.length ||
-        partial.serviceProposals.length)
+        partial.serviceProposals.length ||
+        partial.questionnaireProposals.length ||
+        partial.templateProposals.length)
     ) {
       const hasCards =
         partial.documents.length ||
         partial.workflowProposals.length ||
-        partial.serviceProposals.length
+        partial.serviceProposals.length ||
+        partial.questionnaireProposals.length ||
+        partial.templateProposals.length
       setTurns((prev) => [
         ...prev,
         {
@@ -953,6 +997,12 @@ export function UnifiedAssistantChat({
             ? partial.workflowProposals
             : undefined,
           serviceProposals: partial.serviceProposals.length ? partial.serviceProposals : undefined,
+          questionnaireProposals: partial.questionnaireProposals.length
+            ? partial.questionnaireProposals
+            : undefined,
+          templateProposals: partial.templateProposals.length
+            ? partial.templateProposals
+            : undefined,
         },
       ])
     }
@@ -1347,6 +1397,18 @@ export function UnifiedAssistantChat({
                 {t.serviceProposals?.map((p, pi) => (
                   <ServiceProposalCard key={pi} proposal={p} />
                 ))}
+                {/* Questionnaire proposals (Build-Wizard Phase 2) — inline approval
+                    cards surfacing the variable-contract coverage. Approving writes
+                    the service's intake form; nothing was saved by the proposing turn. */}
+                {t.questionnaireProposals?.map((p, pi) => (
+                  <QuestionnaireProposalCard key={pi} proposal={p} />
+                ))}
+                {/* Template proposals (Build-Wizard Phase 3) — inline approval cards
+                    flagging orphan tokens. Approving writes the service's document
+                    template; nothing was saved by the proposing turn. */}
+                {t.templateProposals?.map((p, pi) => (
+                  <TemplateProposalCard key={pi} proposal={p} />
+                ))}
                 {t.content.trim() && (
                   <div className="uac-reply-actions">
                     <CopyButton text={t.content} />
@@ -1422,6 +1484,14 @@ export function UnifiedAssistantChat({
             {/* A service proposed mid-stream appears as an approval card right away. */}
             {streaming.serviceProposals.map((p, pi) => (
               <ServiceProposalCard key={pi} proposal={p} />
+            ))}
+            {/* A questionnaire proposed mid-stream appears as an approval card. */}
+            {streaming.questionnaireProposals.map((p, pi) => (
+              <QuestionnaireProposalCard key={pi} proposal={p} />
+            ))}
+            {/* A template proposed mid-stream appears as an approval card. */}
+            {streaming.templateProposals.map((p, pi) => (
+              <TemplateProposalCard key={pi} proposal={p} />
             ))}
             {streaming.text && (
               <div

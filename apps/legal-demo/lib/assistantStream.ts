@@ -60,6 +60,32 @@ export interface ServiceProposalEvent {
   confidence: number
 }
 
+// An intake QUESTIONNAIRE the assistant proposed this turn (Build-Wizard Phase 2) —
+// surfaced as an inline approval card with the variable-contract coverage; the write
+// happens only on approve.
+export interface QuestionnaireProposalEvent {
+  serviceKey: string
+  schema: unknown
+  summary: string
+  confidence: number
+  missingForTokens: string[]
+  unusedFields: string[]
+}
+
+// A document TEMPLATE the assistant proposed this turn (Build-Wizard Phase 3) —
+// surfaced as an inline approval card with the orphan tokens; the write happens only
+// on approve.
+export interface TemplateProposalEvent {
+  serviceKey: string
+  name: string
+  body: string
+  docKind: string
+  summary: string
+  confidence: number
+  tokens: string[]
+  orphanTokens: string[]
+}
+
 export interface AssistantStreamHandlers {
   onMeta?: (meta: StreamMeta) => void
   onThinking?: (text: string) => void
@@ -72,6 +98,10 @@ export interface AssistantStreamHandlers {
   onWorkflowProposal?: (proposal: WorkflowProposalEvent) => void
   // The assistant proposed a NEW service (Build-Wizard Phase 1) — render a card.
   onServiceProposal?: (proposal: ServiceProposalEvent) => void
+  // The assistant proposed an intake questionnaire (Build-Wizard Phase 2).
+  onQuestionnaireProposal?: (proposal: QuestionnaireProposalEvent) => void
+  // The assistant proposed a document template (Build-Wizard Phase 3).
+  onTemplateProposal?: (proposal: TemplateProposalEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -169,6 +199,30 @@ export async function streamAssistant(
           generationMode: evt.generationMode === 'ai_draft' ? 'ai_draft' : 'template_merge',
           summary: String(evt.summary ?? ''),
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
+        })
+        break
+      case 'questionnaire_proposal':
+        handlers.onQuestionnaireProposal?.({
+          serviceKey: String(evt.serviceKey ?? ''),
+          schema: evt.schema ?? null,
+          summary: String(evt.summary ?? ''),
+          confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
+          missingForTokens: Array.isArray(evt.missingForTokens)
+            ? (evt.missingForTokens as string[])
+            : [],
+          unusedFields: Array.isArray(evt.unusedFields) ? (evt.unusedFields as string[]) : [],
+        })
+        break
+      case 'template_proposal':
+        handlers.onTemplateProposal?.({
+          serviceKey: String(evt.serviceKey ?? ''),
+          name: String(evt.name ?? ''),
+          body: String(evt.body ?? ''),
+          docKind: String(evt.docKind ?? ''),
+          summary: String(evt.summary ?? ''),
+          confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
+          tokens: Array.isArray(evt.tokens) ? (evt.tokens as string[]) : [],
+          orphanTokens: Array.isArray(evt.orphanTokens) ? (evt.orphanTokens as string[]) : [],
         })
         break
       case 'done':

@@ -56,6 +56,27 @@ export function extractInputTokens(body: string): string[] {
   return out
 }
 
+// Every token the MERGE RENDERER (templateMerge.ts) would try to fill — the same
+// `{{ token }}` shape but also matching DOTTED paths like `{{member.0.name}}`.
+// extractInputTokens above is the flat-only set; this is the renderer-complete set.
+// The build-wizard's variable-contract check uses THIS so a dotted token — which the
+// flat answer map can never fill, so it renders [[MISSING]] at merge time — is SEEN
+// and flagged as an orphan instead of slipping silently past the flat extractor.
+// (Excludes {{>includes}}; first-seen order; lower-cased like the renderer matches.)
+export function extractRenderedTokens(body: string): string[] {
+  const withoutIncludes = body.replace(INCLUDE_RE, '')
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const m of withoutIncludes.matchAll(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g)) {
+    const tok = m[1]?.toLowerCase()
+    if (tok && !seen.has(tok)) {
+      seen.add(tok)
+      out.push(tok)
+    }
+  }
+  return out
+}
+
 // The {{>include}} template keys referenced by a body (first-seen order).
 export function extractIncludeKeys(body: string): string[] {
   const seen = new Set<string>()
