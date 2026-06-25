@@ -38,6 +38,17 @@ export type { ResearchRequest, ResearchResult } from './adapters/perplexity.js'
 export { redactSecret } from './adapters/redact.js'
 export { sanitizeEmailHtml } from './adapters/sanitizeEmailHtml.js'
 export { signOAuthState, verifyOAuthState } from './adapters/oauthState.js'
+// Stripe adapter — payments config flags + webhook signature verify/interpret.
+// The API surface (api/payments.ts) is exported via api/index; these helpers are
+// exported for tests and the webhook plumbing.
+export {
+  isStripeConfigured,
+  stripePublishableKey,
+  constructWebhookEvent,
+  interpretWebhookEvent,
+  StripeNotConfiguredError,
+  type NormalizedStripeEvent,
+} from './adapters/stripe.js'
 // Server-side credential store (Vault-backed) — exported for tests and ops
 // tooling; never reachable from client bundles.
 export {

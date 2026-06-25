@@ -1,15 +1,30 @@
 'use client'
 
 // Invoice detail + pay landing (the link in the invoice email points here:
-// /portal/pay/<invoiceNumber>). It now fetches REAL invoice data behind the signed
+// /portal/pay/<invoiceNumber>). It fetches REAL invoice data behind the signed
 // client session — the authed portal tool authorizes the invoice against the
-// client's own matters, so a number in the URL is no longer a public oracle. Online
-// payment is a seam (lib/payments/provider.ts); until a provider is wired, the page
-// shows the amount due and how to pay offline.
-import { use, useEffect, useMemo, useState } from 'react'
+// client's own matters, so a number in the URL is no longer a public oracle.
+// Online payment is SERVER-authoritative: for a due invoice we offer "Pay online",
+// and legal.client.invoice_payment_intent decides ready (embedded Stripe Element)
+// vs unavailable (firm not connected / keys absent → shows how to pay offline). We
+// deliberately do NOT gate on a build-time NEXT_PUBLIC key, so Vault-provisioned
+// platform keys are honored.
+import { use, useCallback, useEffect, useState } from 'react'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
-import { getPaymentProvider } from '@/lib/payments/provider'
 import { BackButton } from '@/components/BackButton'
+import { PayForm } from './PayForm'
+
+// The payment-intent shape returned by legal.client.invoice_payment_intent.
+type IntentReady = {
+  status: 'ready'
+  clientSecret: string
+  publishableKey: string
+  connectedAccountId: string
+  amountCents: number
+  currency: string
+  invoiceNumber: string
+}
+type IntentResult = IntentReady | { status: 'unavailable'; reason: string }
 
 interface ClientInvoiceLine {
   description: string
@@ -60,7 +75,11 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
   const [pdf, setPdf] = useState<{ url: string; filename: string } | null>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [pdfError, setPdfError] = useState<string | null>(null)
-  const provider = useMemo(() => getPaymentProvider(), [])
+  // Online-payment flow: idle → loading (creating a PaymentIntent) → ready (the
+  // embedded Element is shown) | unavailable (firm not connected / already paid).
+  const [payState, setPayState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
+  const [intent, setIntent] = useState<IntentReady | null>(null)
+  const [payReason, setPayReason] = useState<string | null>(null)
 
   // Revoke the blob URL when it changes or the page unmounts (no leaked object URLs).
   useEffect(() => {
@@ -92,7 +111,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
     }
   }
 
-  useEffect(() => {
+  const loadInvoice = useCallback(() => {
     callClientPortalMcp<{ invoice: ClientInvoiceDetail | null }>({
       toolName: 'legal.client.invoice_get',
       input: { invoiceNumber },
@@ -111,6 +130,34 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
         setState('error')
       })
   }, [invoiceNumber])
+
+  useEffect(() => {
+    loadInvoice()
+  }, [loadInvoice])
+
+  // Create a PaymentIntent for this invoice and reveal the embedded Element. The
+  // firm-not-connected / already-paid cases come back as a clean 'unavailable'.
+  async function startPayment(): Promise<void> {
+    setPayState('loading')
+    setPayReason(null)
+    try {
+      const r = await callClientPortalMcp<IntentResult>({
+        toolName: 'legal.client.invoice_payment_intent',
+        input: { invoiceNumber },
+      })
+      if (r.status === 'ready') {
+        setIntent(r)
+        setPayState('ready')
+      } else {
+        setPayReason(r.reason)
+        setPayState('unavailable')
+      }
+    } catch (e) {
+      if (e instanceof PortalSessionExpiredError) return
+      setPayReason(e instanceof Error ? e.message : String(e))
+      setPayState('unavailable')
+    }
+  }
 
   return (
     <main className="public-draft">
@@ -216,26 +263,35 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
               <p className="text-muted" style={{ marginTop: 'var(--space-4)' }}>
                 This invoice has been paid. Thank you!
               </p>
-            ) : provider.enabled && provider.startCheckout ? (
-              <button
-                type="button"
-                className="pdash-btn"
-                style={{ marginTop: 'var(--space-4)' }}
-                onClick={async () => {
-                  const { url } = await provider.startCheckout!({
-                    invoiceNumber: data.invoiceNumber,
-                    amount: data.total,
-                    currency: data.currency,
-                  })
-                  window.location.href = url
-                }}
-              >
-                Pay {money(data.total, data.currency)}
-              </button>
             ) : (
-              <div className="alert" style={{ marginTop: 'var(--space-4)' }}>
-                <strong>To pay this invoice,</strong> reply to the invoice email or contact the firm
-                for check or bank-transfer details. Online card payment is coming soon.
+              <div style={{ marginTop: 'var(--space-4)' }}>
+                {payState === 'idle' && (
+                  <button type="button" className="pdash-btn" onClick={startPayment}>
+                    Pay {money(data.total, data.currency)} online
+                  </button>
+                )}
+                {payState === 'loading' && (
+                  <div className="loading-block" role="status">
+                    <span className="spinner" /> Preparing secure payment…
+                  </div>
+                )}
+                {payState === 'ready' && intent && (
+                  <PayForm
+                    clientSecret={intent.clientSecret}
+                    publishableKey={intent.publishableKey}
+                    connectedAccountId={intent.connectedAccountId}
+                    amountLabel={money(data.total, data.currency)}
+                    returnUrl={typeof window !== 'undefined' ? window.location.href : ''}
+                    onPaid={loadInvoice}
+                  />
+                )}
+                {payState === 'unavailable' && (
+                  <div className="alert">
+                    {payReason ?? 'Online payment isn’t available for this invoice right now.'} To
+                    pay, reply to the invoice email or contact the firm for check or bank-transfer
+                    details.
+                  </div>
+                )}
               </div>
             )}
           </>
