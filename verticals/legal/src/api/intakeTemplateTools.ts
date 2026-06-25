@@ -37,7 +37,11 @@ import {
   loadFirmFieldLibrary,
   validateProposedTemplate,
 } from './templateAuthoring.js'
-import { collectQuestionnaireFieldIds, getQuestionnaire } from './services.js'
+import {
+  collectQuestionnaireFieldIds,
+  getQuestionnaire,
+  isPromptArtifactDocKind,
+} from './services.js'
 
 // A questionnaire proposal captured this turn — the proposed schema plus the model's
 // reasoning and the token-symmetry coverage. The chat surfaces it as an inline card;
@@ -313,6 +317,18 @@ export function buildProposeTemplateTool(
       if (!serviceKey)
         return 'A service_key is required to propose a template; nothing was captured.'
       if (!docKind) return 'A doc_kind is required to propose a template; nothing was captured.'
+      // A doc_kind must be a real deliverable, never a prompt artifact. Authoring a
+      // "<kind>_drafting_prompt" document pollutes the service (it would then demand
+      // its own drafting prompt and block enablement). The AI drafting prompt is set
+      // up automatically from the body, so reject these outright.
+      if (isPromptArtifactDocKind(docKind)) {
+        return (
+          `"${docKind}" is not a real document — a doc_kind must be the actual deliverable ` +
+          `the client receives (e.g. mutual_nda), never a "<kind>_drafting_prompt". The AI ` +
+          `drafting prompt is set up automatically when you author the document body, so ` +
+          `re-call propose_template with the real doc_kind and the document itself.`
+        )
+      }
       // The questionnaire field ids are the contract target — one read, shared with
       // the validation (and used to flag orphan tokens on the card). Whether this
       // service has a questionnaire YET (flow-aware framing) + the firm-wide field
