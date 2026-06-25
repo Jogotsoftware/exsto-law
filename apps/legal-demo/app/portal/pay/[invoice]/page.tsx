@@ -1,14 +1,16 @@
 'use client'
 
 // Invoice detail + pay landing (the link in the invoice email points here:
-// /portal/pay/<invoiceNumber>). It now fetches REAL invoice data behind the signed
+// /portal/pay/<invoiceNumber>). It fetches REAL invoice data behind the signed
 // client session — the authed portal tool authorizes the invoice against the
-// client's own matters, so a number in the URL is no longer a public oracle. Online
-// payment is a seam (lib/payments/provider.ts); until a provider is wired, the page
-// shows the amount due and how to pay offline.
-import { use, useCallback, useEffect, useMemo, useState } from 'react'
+// client's own matters, so a number in the URL is no longer a public oracle.
+// Online payment is SERVER-authoritative: for a due invoice we offer "Pay online",
+// and legal.client.invoice_payment_intent decides ready (embedded Stripe Element)
+// vs unavailable (firm not connected / keys absent → shows how to pay offline). We
+// deliberately do NOT gate on a build-time NEXT_PUBLIC key, so Vault-provisioned
+// platform keys are honored.
+import { use, useCallback, useEffect, useState } from 'react'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
-import { getPaymentProvider } from '@/lib/payments/provider'
 import { BackButton } from '@/components/BackButton'
 import { PayForm } from './PayForm'
 
@@ -73,7 +75,6 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
   const [pdf, setPdf] = useState<{ url: string; filename: string } | null>(null)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [pdfError, setPdfError] = useState<string | null>(null)
-  const provider = useMemo(() => getPaymentProvider(), [])
   // Online-payment flow: idle → loading (creating a PaymentIntent) → ready (the
   // embedded Element is shown) | unavailable (firm not connected / already paid).
   const [payState, setPayState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
@@ -262,7 +263,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
               <p className="text-muted" style={{ marginTop: 'var(--space-4)' }}>
                 This invoice has been paid. Thank you!
               </p>
-            ) : provider.enabled ? (
+            ) : (
               <div style={{ marginTop: 'var(--space-4)' }}>
                 {payState === 'idle' && (
                   <button type="button" className="pdash-btn" onClick={startPayment}>
@@ -291,11 +292,6 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                     details.
                   </div>
                 )}
-              </div>
-            ) : (
-              <div className="alert" style={{ marginTop: 'var(--space-4)' }}>
-                <strong>To pay this invoice,</strong> reply to the invoice email or contact the firm
-                for check or bank-transfer details. Online card payment is coming soon.
               </div>
             )}
           </>

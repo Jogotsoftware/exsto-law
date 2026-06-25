@@ -13,12 +13,13 @@ export async function GET(request: Request): Promise<NextResponse> {
   if ('error' in ctx) {
     return NextResponse.json({ error: ctx.error }, { status: ctx.status })
   }
+  const origin = new URL(request.url).origin
   try {
-    const origin = new URL(request.url).origin
     const { url } = await startFirmOnboarding(ctx, origin)
     return NextResponse.redirect(url)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+  } catch {
+    // Don't leak internals (or strand the attorney on a raw 500) — bounce back to
+    // Settings, which shows a clean "couldn't start setup" banner on ?payments=error.
+    return NextResponse.redirect(`${origin}/attorney/settings?payments=error`)
   }
 }

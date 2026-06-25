@@ -72,3 +72,57 @@ INSERT INTO action_kind_definition
    'Clear the firm''s Stripe connection so it stops accepting online payments. The connected account persists at Stripe and can be reconnected; this only supersedes the local flags.',
    'notify', 'reversible_with_state_decay', NULL, false)
 ON CONFLICT (id) DO NOTHING;
+
+-- ── Same kinds for EVERY OTHER existing tenant ───────────────────────────────
+-- Kinds are strictly per-tenant: a kind defined for tenant zero "does not exist"
+-- for another firm, so without this a second firm (e.g. Liberty Legal …002, the
+-- sandbox …00FE…0001, or any firm bootstrapped before this migration) could not
+-- connect — and worse, startFirmOnboarding would create a real Stripe Express
+-- account before the local write failed, orphaning it. Mirrors migration 0075's
+-- "seed for every firm" discipline. Cloned tenants get FRESH, remapped entity-kind
+-- ids (cp_remap_entity_kind_refs), so resolve each tenant's OWN firm_settings kind
+-- by name rather than the hard-coded …501. Fresh random kind ids; idempotent via
+-- NOT EXISTS. Tenants created AFTER this migration inherit the kinds from the
+-- tenant-zero registry clone at bootstrap.
+INSERT INTO attribute_kind_definition
+  (id, tenant_id, kind_name, display_name, description, on_entity_kind_id, value_type, is_pii)
+SELECT gen_random_uuid(), fs.tenant_id, k.kind_name, k.display_name, k.description, fs.id, k.value_type, false
+FROM entity_kind_definition fs
+CROSS JOIN (VALUES
+  ('stripe_connected_account_id', 'Stripe connected account id',
+   'The firm''s Stripe Connect Express connected-account id (acct_…). A public identifier, not a secret.', 'text'),
+  ('stripe_charges_enabled', 'Stripe charges enabled',
+   'Whether Stripe reports the firm''s connected account can accept charges (charges_enabled).', 'boolean'),
+  ('stripe_details_submitted', 'Stripe details submitted',
+   'Whether the firm has fully submitted its Express onboarding details (details_submitted).', 'boolean')
+) AS k(kind_name, display_name, description, value_type)
+WHERE fs.kind_name = 'firm_settings'
+  AND fs.status = 'active'
+  AND fs.tenant_id <> '00000000-0000-0000-0000-000000000001'
+  AND NOT EXISTS (
+    SELECT 1 FROM attribute_kind_definition a
+    WHERE a.tenant_id = fs.tenant_id AND a.kind_name = k.kind_name
+  );
+
+INSERT INTO action_kind_definition
+  (id, tenant_id, kind_name, display_name, description, default_autonomy_tier, reversibility, reverse_action_kind_name, requires_reasoning_trace)
+SELECT gen_random_uuid(), t.tenant_id, k.kind_name, k.display_name, k.description,
+       'notify', 'reversible_with_state_decay', k.reverse, false
+FROM (
+  SELECT DISTINCT tenant_id
+  FROM entity_kind_definition
+  WHERE kind_name = 'firm_settings' AND status = 'active'
+    AND tenant_id <> '00000000-0000-0000-0000-000000000001'
+) t
+CROSS JOIN (VALUES
+  ('legal.firm.connect_stripe', 'Connect Stripe payments',
+   'Record/update the firm''s Stripe connected-account id and capability flags on the firm_settings singleton.',
+   'legal.firm.disconnect_stripe'),
+  ('legal.firm.disconnect_stripe', 'Disconnect Stripe payments',
+   'Clear the firm''s Stripe connection so it stops accepting online payments.',
+   NULL::text)
+) AS k(kind_name, display_name, description, reverse)
+WHERE NOT EXISTS (
+  SELECT 1 FROM action_kind_definition a
+  WHERE a.tenant_id = t.tenant_id AND a.kind_name = k.kind_name
+);

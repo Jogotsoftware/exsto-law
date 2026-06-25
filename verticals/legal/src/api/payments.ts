@@ -22,6 +22,7 @@ import {
   createAccountLink,
   retrieveAccount,
   createConnectedPaymentIntent,
+  hasInFlightPaymentIntent,
   interpretWebhookEvent,
   StripeNotConfiguredError,
 } from '../adapters/stripe.js'
@@ -88,6 +89,23 @@ export async function getFirmPaymentStatus(ctx: ActionContext): Promise<FirmPaym
   })
 }
 
+// Whether this tenant's registry actually carries the Stripe action kind. Kinds
+// are per-tenant; a firm whose registry predates the kinds (or never got them)
+// would fail the connect_stripe write. We check this BEFORE creating a Stripe
+// account so a missing kind can never orphan a real Express account at Stripe.
+async function stripeConnectKindAvailable(ctx: ActionContext): Promise<boolean> {
+  return withActionContext(ctx, async (client) => {
+    const r = await client.query<{ ok: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM action_kind_definition
+          WHERE tenant_id = $1 AND kind_name = 'legal.firm.connect_stripe' AND status = 'active'
+       ) AS ok`,
+      [ctx.tenantId],
+    )
+    return r.rows[0]?.ok === true
+  })
+}
+
 // Begin (or resume) Express onboarding. Reuses the firm's existing connected
 // account if it has one, else creates one and records its id. Returns the
 // Stripe-hosted onboarding URL to redirect the attorney to.
@@ -96,6 +114,11 @@ export async function startFirmOnboarding(
   baseUrl: string,
 ): Promise<{ url: string }> {
   if (!(await isStripeConfigured())) throw new StripeNotConfiguredError()
+  // Pre-flight: never create a Stripe account we can't record locally (would
+  // orphan a live Express account at Stripe on every attempt).
+  if (!(await stripeConnectKindAvailable(ctx))) {
+    throw new StripeNotConfiguredError('Online payments aren’t enabled for this firm yet.')
+  }
   const status = await getFirmPaymentStatus(ctx)
   let accountId = status.accountId
   if (!accountId) {
@@ -196,6 +219,16 @@ export async function createInvoicePaymentIntent(
   if (amountCents == null) {
     return { status: 'unavailable', reason: 'This invoice has no amount due.' }
   }
+  // Don't open a second charge while a bank/ACH payment is still clearing — the
+  // invoice reads 'due' for days during settlement, so without this a revisit
+  // could double-charge. (Cards settle instantly → the paid-guard covers them.)
+  if (await hasInFlightPaymentIntent(firm.accountId, invoice.invoiceEntityId)) {
+    return {
+      status: 'unavailable',
+      reason:
+        'A bank payment for this invoice is already processing — it can take a few business days to clear.',
+    }
+  }
   const currency = (invoice.currency || 'USD').toUpperCase()
   const pi = await createConnectedPaymentIntent({
     accountId: firm.accountId,
@@ -245,6 +278,23 @@ export async function recordStripePayment(
     actorId: process.env.LEGAL_PAYMENTS_ACTOR_ID ?? SYSTEM_ACTOR,
   }
   const amount = (args.amountCents / 100).toFixed(2)
+  // Structural idempotency: if the invoice is already paid, this is a duplicate
+  // delivery (Stripe is at-least-once) — ack WITHOUT depending on the handler's
+  // error wording. The string check below stays as a backstop for the concurrent
+  // race (two deliveries serialized by invoice.pay's advisory lock).
+  const currentStatus = await withActionContext(ctx, async (client) => {
+    const r = await client.query<{ v: string | null }>(
+      `SELECT a.value #>> '{}' AS v
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+        WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'invoice_status'
+          AND (a.valid_to IS NULL OR a.valid_to > now())
+        ORDER BY a.valid_from DESC LIMIT 1`,
+      [ctx.tenantId, args.invoiceEntityId],
+    )
+    return r.rows[0]?.v ?? null
+  })
+  if (currentStatus === 'paid') return { ok: true, alreadyPaid: true }
   try {
     const res = await submitAction(ctx, {
       actionKindName: 'invoice.pay',

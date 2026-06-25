@@ -167,6 +167,32 @@ export interface CreatedPaymentIntent {
   clientSecret: string
 }
 
+// Is there already a PaymentIntent for this invoice that is mid-flight on the
+// firm's account? Used to stop a second charge while an ACH/bank debit is still
+// 'processing' (it settles over days, during which the invoice still reads 'due',
+// so the paid-guard can't catch a re-entry). Searches the connected account by the
+// invoice id we stamp in metadata. Fails OPEN (returns false) if Search is
+// unavailable — the post-settlement paid-guard remains the backstop.
+export async function hasInFlightPaymentIntent(
+  accountId: string,
+  invoiceEntityId: string,
+): Promise<boolean> {
+  try {
+    const res = await (
+      await getStripeClient()
+    ).paymentIntents.search(
+      {
+        query: `status:'processing' AND metadata['invoice_entity_id']:'${invoiceEntityId}'`,
+        limit: 1,
+      },
+      { stripeAccount: accountId },
+    )
+    return res.data.length > 0
+  } catch {
+    return false
+  }
+}
+
 // Create a DIRECT-charge PaymentIntent on the firm's connected account. The
 // `{ stripeAccount }` option is what makes it a direct charge (firm = merchant of
 // record). automatic_payment_methods lets the Payment Element offer card + ACH.
