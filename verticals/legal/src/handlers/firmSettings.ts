@@ -106,6 +106,94 @@ registerActionHandler('legal.firm.set_default_rate', async (ctx, client, payload
   return { firm_settings_id: firmSettingsId, rate }
 })
 
+// ───────────────────────────────────────────────────────────────────────────
+// Online payments — Stripe Connect (migration 0113).
+//
+// The firm onboards as a Stripe Express CONNECTED ACCOUNT; what we remember on
+// firm_settings is its public acct_… id plus two capability flags Stripe reports
+// (charges_enabled, details_submitted). None of these are secrets — the platform
+// keys are env vars. connect records/refreshes them; disconnect clears them so
+// the firm stops accepting online payments (the account persists at Stripe).
+// ───────────────────────────────────────────────────────────────────────────
+
+// Append one attribute on the firm_settings singleton. knowabilityState lets a
+// disconnect record a real "no value" (observed_null) rather than delete history.
+async function writeFirmAttr(args: {
+  client: DbClient
+  tenantId: string
+  actionId: string
+  actorId: string
+  firmSettingsId: string
+  kind: string
+  value: unknown
+  knowabilityState?: string
+}): Promise<void> {
+  const akId = await lookupKindId(
+    args.client,
+    'attribute_kind_definition',
+    args.tenantId,
+    args.kind,
+  )
+  await insertAttribute(args.client, {
+    tenantId: args.tenantId,
+    actionId: args.actionId,
+    entityId: args.firmSettingsId,
+    attributeKindId: akId,
+    value: args.value,
+    confidence: 1.0,
+    knowabilityState: args.knowabilityState ?? 'observed',
+    sourceType: 'human',
+    sourceRef: args.actorId,
+  })
+}
+
+interface ConnectStripePayload {
+  account_id?: string | null
+  charges_enabled?: boolean | null
+  details_submitted?: boolean | null
+}
+
+registerActionHandler('legal.firm.connect_stripe', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as ConnectStripePayload
+  const firmSettingsId = await ensureFirmSettings(client, ctx.tenantId, actionId)
+  const base = { client, tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, firmSettingsId }
+
+  // account_id is set at onboarding start; the capability flags arrive on each
+  // refresh (return route + account.updated webhook). Only write what's provided.
+  if (p.account_id !== undefined) {
+    const acct = (p.account_id ?? '').toString().trim()
+    await writeFirmAttr({
+      ...base,
+      kind: 'stripe_connected_account_id',
+      value: acct || null,
+      knowabilityState: acct ? 'observed' : 'observed_null',
+    })
+  }
+  if (p.charges_enabled !== undefined && p.charges_enabled !== null) {
+    await writeFirmAttr({ ...base, kind: 'stripe_charges_enabled', value: !!p.charges_enabled })
+  }
+  if (p.details_submitted !== undefined && p.details_submitted !== null) {
+    await writeFirmAttr({ ...base, kind: 'stripe_details_submitted', value: !!p.details_submitted })
+  }
+  return { firm_settings_id: firmSettingsId }
+})
+
+registerActionHandler('legal.firm.disconnect_stripe', async (ctx, client, payload, actionId) => {
+  void payload
+  const firmSettingsId = await ensureFirmSettings(client, ctx.tenantId, actionId)
+  const base = { client, tenantId: ctx.tenantId, actionId, actorId: ctx.actorId, firmSettingsId }
+  // Clear the connection: account id → observed_null, capabilities → false.
+  await writeFirmAttr({
+    ...base,
+    kind: 'stripe_connected_account_id',
+    value: null,
+    knowabilityState: 'observed_null',
+  })
+  await writeFirmAttr({ ...base, kind: 'stripe_charges_enabled', value: false })
+  await writeFirmAttr({ ...base, kind: 'stripe_details_submitted', value: false })
+  return { firm_settings_id: firmSettingsId }
+})
+
 // The firm's invoice template branding/content config (Phase 3). Stored as one
 // JSON attribute on the firm_settings singleton; a new write supersedes the prior
 // (append-only, effective-dated). The shape is validated/resolved on the read side

@@ -79,6 +79,10 @@ import './tools/esignPortalTools.js'
 // Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
 // invoices, list/inspect them, and send (activation-gated). Session 4.
 import './tools/billingTools.js'
+// Online invoice payments (Stripe Connect): firm payment-connection status /
+// refresh / disconnect. The client-portal checkout tool lives in
+// clientPortalTools.js; connect itself is the /api/billing/connect/init redirect.
+import './tools/paymentsTools.js'
 // Trust (IOLTA) accounting: deposit/disburse/refund, apply-to-invoice (earned
 // transfer), per-client balance + ledger, and three-way reconciliation.
 import './tools/trustTools.js'
@@ -90,6 +94,8 @@ import './tools/skillTools.js'
 // Platform control plane (ADR 0046): tenants / modules / access / promotion.
 // Reachable ONLY from /admin/api/mcp (default-deny via adminPolicy.ts).
 import './tools/adminTools.js'
+// Platform Stripe credentials (owner setup) — admin-only, Vault-backed.
+import './tools/adminPaymentsTools.js'
 // Firm-facing module read (legal.module.enabled) — attorney nav gating. NOT an
 // admin tool; reads only the caller's own tenant.
 import './tools/moduleTools.js'

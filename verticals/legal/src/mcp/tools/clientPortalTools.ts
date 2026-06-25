@@ -6,6 +6,8 @@ import {
   postClientMessage,
   listClientInvoices,
   getClientInvoiceByNumber,
+  createInvoicePaymentIntent,
+  type InvoicePaymentIntentResult,
   quoteClientRequest,
   createClientRequest,
   listClientRequests,
@@ -202,6 +204,26 @@ const requestCreateTool: Tool<RequestCreateInput, { requestId: string; quote: Re
   },
 }
 
+// Begin an online payment for ONE of the signed-in client's own invoices. Reads
+// nothing the client can't already see (it authorises through the same client-safe
+// invoice read) and writes nothing to the substrate — it opens a Stripe
+// PaymentIntent on the firm's connected account and returns the client secret the
+// embedded Payment Element needs. The settled payment is recorded later by the
+// Stripe webhook (invoice.pay), not here. clientContactId is stamped by the route.
+interface InvoicePaymentIntentInput {
+  invoiceNumber: string
+  clientContactId: string
+}
+
+const invoicePaymentIntentTool: Tool<InvoicePaymentIntentInput, InvoicePaymentIntentResult> = {
+  name: 'legal.client.invoice_payment_intent',
+  description:
+    "Begin an online card/bank payment for one of the signed-in client's own invoices; returns the Stripe client secret for the embedded payment form (or an unavailable reason).",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) =>
+    createInvoicePaymentIntent(ctx, input.clientContactId, input.invoiceNumber),
+}
+
 interface RequestListInput {
   clientContactId: string
 }
@@ -269,6 +291,7 @@ registerTool(messagePostTool)
 registerTool(invoicesTool)
 registerTool(invoiceGetTool)
 registerTool(invoicePdfTool)
+registerTool(invoicePaymentIntentTool)
 registerTool(requestQuoteTool)
 registerTool(requestCreateTool)
 registerTool(requestListTool)

@@ -10,6 +10,7 @@ const LINKS: Array<{ href: string; label: string }> = [
   { href: '/admin/modules', label: 'Modules' },
   { href: '/admin/sandbox', label: 'Sandbox' },
   { href: '/admin/access', label: 'Access' },
+  { href: '/admin/payments', label: 'Payments' },
   { href: '/admin/audit', label: 'Audit' },
 ]
 

@@ -42,6 +42,10 @@ const nextConfig = {
     'pdfjs-dist',
     'mammoth',
     '@react-pdf/renderer',
+    // The Stripe server SDK (used by the payments adapter / API routes) is a
+    // Node-native library; require() it at runtime rather than webpack-bundling
+    // it into the serverless function (same rationale as pg / the Anthropic SDK).
+    'stripe',
   ],
   eslint: { ignoreDuringBuilds: true },
 }
