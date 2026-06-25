@@ -253,6 +253,22 @@ function normalizeBooking(b: ServiceBooking | null | undefined): ServiceBooking 
   }
 }
 
+// A doc kind named like a drafting-prompt artifact (e.g. "mutual_nda_drafting_prompt")
+// is never a real deliverable. The build wizard is told never to author a separate
+// "<kind>_drafting_prompt" document, but when a model slips and does, it pollutes the
+// service's document list: the completeness check then demands a drafting prompt for
+// the phantom kind too, so "needs a drafting prompt" shows twice and the service can't
+// enable. Filter these everywhere `documents` is derived; propose_template rejects them
+// at the source so they can't be created again.
+export function isPromptArtifactDocKind(kind: string): boolean {
+  return /drafting_prompt/i.test(kind)
+}
+export function realDocumentKinds(documents: unknown): string[] {
+  return (Array.isArray(documents) ? documents : []).filter(
+    (k): k is string => typeof k === 'string' && !isPromptArtifactDocKind(k),
+  )
+}
+
 function mapRow(r: WorkflowRow): ServiceDefinition {
   const intakeFormId = r.transitions.intake_form_id ?? ''
   // Resolution order (PR2): in-app config (transitions.intake_schema) wins, so an
@@ -268,7 +284,7 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     route: r.transitions.route === 'auto' ? 'auto' : 'manual',
     intakeFormId,
     intakeSchema,
-    documents: Array.isArray(r.transitions.documents) ? r.transitions.documents : [],
+    documents: realDocumentKinds(r.transitions.documents),
     cost: parseServiceCost(r.transitions.cost),
     documentFees: parseDocumentFees(r.transitions.document_fees),
     generationMode: parseGenerationMode(r.transitions.generation_mode),
@@ -695,7 +711,9 @@ export function completenessFromTransitions(
   },
 ): ServiceCompleteness {
   const route: WorkflowRoute = transitions.route === 'auto' ? 'auto' : 'manual'
-  const documents = Array.isArray(transitions.documents) ? transitions.documents : []
+  // Drop phantom "<kind>_drafting_prompt" doc kinds so they can't demand their own
+  // drafting prompt (the "needs a drafting prompt" twice bug) or block enablement.
+  const documents = realDocumentKinds(transitions.documents)
 
   const promptByKind: Record<string, string | null> = {}
   const templateByKind: Record<string, 'config' | 'repo' | 'none'> = {}
