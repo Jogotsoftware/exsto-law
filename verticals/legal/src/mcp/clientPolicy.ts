@@ -47,6 +47,7 @@ export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.client.invoices', // list the signed-in client's own invoices (client-safe fields)
   'legal.client.invoice_get', // one of the client's own invoices by number, with line items
   'legal.client.invoice_pdf', // branded PDF of the client's own invoice (no rates/notes/source events)
+  'legal.client.invoice_payment_intent', // begin an online payment for the client's own invoice (Stripe client secret; no substrate write)
   'legal.client.request_quote', // price a request type before submitting (no write)
   'legal.client.request_create', // submit a cost-accepted request on one of the client's matters
   'legal.client.request_list', // list the signed-in client's own requests + status
