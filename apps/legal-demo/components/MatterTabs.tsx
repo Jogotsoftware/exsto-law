@@ -1,8 +1,8 @@
 'use client'
 
-// Shared tab bar for the matter editor: Overview · Activity · Documents · Billing.
-// Rendered by the /attorney/matters/[id] layout so the matter's panels feel like
-// one workspace instead of one long scroll.
+// Shared tab bar for the matter editor: Overview · Activity · Documents · Tasks ·
+// Billing. Rendered by the /attorney/matters/[id] layout so the matter's panels
+// feel like one workspace instead of one long scroll.
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -13,6 +13,7 @@ export function MatterTabs({ matterEntityId }: { matterEntityId: string }) {
     { href: base, label: 'Overview' },
     { href: `${base}/activity`, label: 'Activity' },
     { href: `${base}/documents`, label: 'Documents' },
+    { href: `${base}/tasks`, label: 'Tasks' },
     { href: `${base}/billing`, label: 'Billing' },
   ]
   // Longest-prefix match so Overview (base) doesn't also light up on sub-tabs.
