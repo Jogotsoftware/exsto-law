@@ -7,6 +7,7 @@ import { CollapsibleSection } from '@/components/CollapsibleSection'
 import { PageHead } from '@/components/PageHead'
 import { UsersRolesSection } from './UsersRolesSection'
 import { AiUsageSection } from './AiUsageSection'
+import { PaymentsSection } from './PaymentsSection'
 
 type Provider = 'google_calendar' | 'anthropic' | 'openai' | 'perplexity' | 'granola' | 'docusign'
 
@@ -755,6 +756,8 @@ export default function SettingsPage() {
       <CalendarCategoriesSection />
 
       <UsersRolesSection />
+
+      <PaymentsSection />
 
       <AiUsageSection />
 

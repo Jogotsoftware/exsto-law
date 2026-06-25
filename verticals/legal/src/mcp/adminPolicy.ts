@@ -39,6 +39,11 @@ export const ADMIN_CONSOLE_TOOLS: ReadonlySet<string> = new Set([
   'admin.access.deactivate',
   // Audit
   'admin.audit.control_plane',
+  // Payments — platform Stripe credentials (Vault-backed owner setup)
+  'admin.payments.status',
+  'admin.payments.set_keys',
+  'admin.payments.test',
+  'admin.payments.clear',
 ])
 
 export function isAdminConsoleTool(toolName: string): boolean {
