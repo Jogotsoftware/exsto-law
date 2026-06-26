@@ -85,6 +85,8 @@ export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> 
        WHERE e.tenant_id = $1
          AND ekd.kind_name = 'matter'
          AND e.status = 'active'
+         -- Exclude matters flagged as hidden test/demo data (metadata.demo_hidden).
+         AND COALESCE(e.metadata->>'demo_hidden', '') <> 'true'
        ORDER BY e.created_at DESC`,
       [ctx.tenantId],
     )

@@ -274,6 +274,8 @@ export async function listRecentBookings(ctx: ActionContext, limit = 10): Promis
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1 AND ekd.kind_name = 'matter'
+         -- Exclude matters flagged as hidden test/demo data (metadata.demo_hidden).
+         AND COALESCE(e.metadata->>'demo_hidden', '') <> 'true'
        ORDER BY e.created_at DESC
        LIMIT $2`,
       [ctx.tenantId, limit],
