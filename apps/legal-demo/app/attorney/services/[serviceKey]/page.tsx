@@ -5,10 +5,10 @@
 // (which also decides whether the Prompt tab appears), and per-service booking —
 // including the live public booking link. Pricing lives on the Billing tab and the
 // document list on the Templates tab; both carry forward untouched on save here
-// (legal.service.update merges, so omitted config is preserved). Also hosts the
-// enable/disable control (gated on the server completeness check). The page chrome
-// (title, status, Back, tabs) is provided by the [serviceKey] layout, so this
-// renders panel content only.
+// (legal.service.update merges, so omitted config is preserved). The page chrome
+// (title, status, Back, tabs) and the Enable/Disable control (top-right, gated on
+// the server completeness check, with a modal listing what's left) live in the
+// [serviceKey] layout, so this renders panel content only.
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -42,12 +42,6 @@ interface ServiceDefinition {
   sortOrder: number
   updatedAt: string
 }
-interface Completeness {
-  serviceKey: string
-  ready: boolean
-  missing: string[]
-}
-
 interface FormState {
   displayName: string
   description: string
@@ -78,10 +72,8 @@ export default function ServiceSettingsPage() {
   // The loaded service, kept so saves preserve config this tab doesn't edit
   // (documents, sort order — carried forward explicitly; cost — carried via merge).
   const [meta, setMeta] = useState<ServiceDefinition | null>(null)
-  const [completeness, setCompleteness] = useState<Completeness | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [enabling, setEnabling] = useState(false)
   const [saved, setSaved] = useState(false)
   const [origin, setOrigin] = useState('')
 
@@ -108,11 +100,6 @@ export default function ServiceSettingsPage() {
         bookingSendInvite: r.service.booking?.send_calendar_invite ?? true,
         bookingDuration: r.service.booking?.duration_minutes ?? 30,
       })
-      const c = await callAttorneyMcp<Completeness>({
-        toolName: 'legal.service.completeness',
-        input: { serviceKey },
-      })
-      setCompleteness(c)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -121,19 +108,6 @@ export default function ServiceSettingsPage() {
   useEffect(() => {
     load()
   }, [load])
-
-  async function setActive(active: boolean) {
-    setEnabling(true)
-    setError(null)
-    try {
-      await callAttorneyMcp({ toolName: 'legal.service.set_active', input: { serviceKey, active } })
-      await load()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setEnabling(false)
-    }
-  }
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => (f ? { ...f, [key]: value } : f))
@@ -214,16 +188,6 @@ export default function ServiceSettingsPage() {
 
   return (
     <>
-      {!isNew && meta && (
-        <EnableGate
-          isActive={meta.isActive}
-          completeness={completeness}
-          enabling={enabling}
-          onEnable={() => setActive(true)}
-          onDisable={() => setActive(false)}
-        />
-      )}
-
       {!isNew && (
         <p style={{ color: 'var(--muted)', marginTop: 'calc(var(--space-2) * -1)' }}>
           Saving creates a new immutable version. Pricing (Billing tab), documents and questionnaire
@@ -413,77 +377,5 @@ function BookingLink({
             : 'Turn on “Offer this service for online booking” and save to make this link live.'}
       </p>
     </div>
-  )
-}
-
-// Enable gate. When the service is already enabled it collapses to a single status
-// line + Disable; when disabled it shows the Enable button, gated on the server
-// completeness check so the UI and the set_active handler never disagree, plus the
-// remaining requirements so the attorney knows why it isn't bookable yet.
-function EnableGate({
-  isActive,
-  completeness,
-  enabling,
-  onEnable,
-  onDisable,
-}: {
-  isActive: boolean
-  completeness: { ready: boolean; missing: string[] } | null
-  enabling: boolean
-  onEnable: () => void
-  onDisable: () => void
-}) {
-  if (isActive) {
-    return (
-      <section
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-2)',
-        }}
-      >
-        <span style={{ color: 'var(--ok)' }}>✓ Enabled and bookable.</span>
-        <button className="danger outline" onClick={onDisable} disabled={enabling}>
-          {enabling ? '…' : 'Disable service'}
-        </button>
-      </section>
-    )
-  }
-
-  const missing = completeness?.missing ?? []
-  const ready = completeness?.ready ?? false
-
-  return (
-    <section>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-        <button
-          className="primary"
-          onClick={onEnable}
-          disabled={enabling || !ready || completeness === null}
-          title={ready ? 'Make this service bookable' : `Finish setup first: ${missing.join('; ')}`}
-        >
-          {enabling ? 'Enabling…' : 'Enable service'}
-        </button>
-        {!ready && completeness && (
-          <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
-            Not bookable yet — complete the requirements below.
-          </span>
-        )}
-      </div>
-      {missing.length > 0 && (
-        <ul
-          style={{
-            margin: 'var(--space-2) 0 0',
-            paddingLeft: 'var(--space-4)',
-            color: 'var(--danger)',
-            fontSize: 'var(--text-sm)',
-          }}
-        >
-          {missing.map((m) => (
-            <li key={m}>{m}</li>
-          ))}
-        </ul>
-      )}
-    </section>
   )
 }

@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import {
+  OPERATING_AGREEMENT_SINGLE_MEMBER_BODY,
+  OPERATING_AGREEMENT_MULTI_MEMBER_BODY,
+  ENGAGEMENT_LETTER_BODY,
+} from './bundledBodies.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // here points at dist/templates at runtime and src/templates during dev; both
@@ -10,9 +15,6 @@ const templatesDir = resolve(here, '..', '..', 'templates')
 
 let cached: {
   intakeQuestionnaireOa?: IntakeQuestionnaire
-  operatingAgreementTemplate?: string
-  operatingAgreementTemplateMultiMember?: string
-  engagementLetterTemplate?: string
   draftingPrompt?: string
 } = {}
 
@@ -73,14 +75,11 @@ export function loadIntakeForm(intakeFormId: string): IntakeQuestionnaire {
   return form
 }
 
+// Bundled (inlined) so the body resolves in the deployed standalone serverless
+// bundle, where a runtime readFileSync of the .md asset throws ENOENT. See
+// bundledBodies.ts for the why. The .md file remains the canonical source to edit.
 export function loadOperatingAgreementTemplate(): string {
-  if (!cached.operatingAgreementTemplate) {
-    cached.operatingAgreementTemplate = readFileSync(
-      resolve(templatesDir, 'nc-llc-operating-agreement.md'),
-      'utf8',
-    )
-  }
-  return cached.operatingAgreementTemplate
+  return OPERATING_AGREEMENT_SINGLE_MEMBER_BODY
 }
 
 // Multi-member NC LLC operating-agreement body. Same mustache-slot contract the
@@ -91,13 +90,7 @@ export function loadOperatingAgreementTemplate(): string {
 // dissociation. This is a TEMPLATE the attorney reviews in the existing review
 // surface — a first draft, never final legal advice.
 export function loadMultiMemberOperatingAgreementTemplate(): string {
-  if (!cached.operatingAgreementTemplateMultiMember) {
-    cached.operatingAgreementTemplateMultiMember = readFileSync(
-      resolve(templatesDir, 'nc-llc-operating-agreement-multi-member.md'),
-      'utf8',
-    )
-  }
-  return cached.operatingAgreementTemplateMultiMember
+  return OPERATING_AGREEMENT_MULTI_MEMBER_BODY
 }
 
 // Service keys that draft the MULTI-MEMBER operating-agreement body. The drafting
@@ -121,13 +114,7 @@ export function resolveOperatingAgreementTemplate(serviceKey: string | null | un
 }
 
 export function loadEngagementLetterTemplate(): string {
-  if (!cached.engagementLetterTemplate) {
-    cached.engagementLetterTemplate = readFileSync(
-      resolve(templatesDir, 'engagement-letter-oa.md'),
-      'utf8',
-    )
-  }
-  return cached.engagementLetterTemplate
+  return ENGAGEMENT_LETTER_BODY
 }
 
 // Document kinds that ship a bundled repo BODY template (the Phase-0 fallback).
