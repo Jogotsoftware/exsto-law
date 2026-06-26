@@ -24,10 +24,6 @@ interface ServiceDefinition {
   documentFees: Record<string, string>
 }
 
-function humanizeDocKind(kind: string): string {
-  return kind.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
 export default function ServiceBillingPage() {
   const params = useParams<{ serviceKey: string }>()
   const serviceKey = params.serviceKey
@@ -36,7 +32,6 @@ export default function ServiceBillingPage() {
   const [costType, setCostType] = useState<CostType>('')
   const [amount, setAmount] = useState('')
   const [hours, setHours] = useState('')
-  const [docFees, setDocFees] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -55,7 +50,6 @@ export default function ServiceBillingPage() {
       setCostType(r.service.cost?.type ?? '')
       setAmount(r.service.cost?.amount ?? '')
       setHours(r.service.cost?.hours != null ? String(r.service.cost.hours) : '')
-      setDocFees(r.service.documentFees ?? {})
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -77,13 +71,6 @@ export default function ServiceBillingPage() {
     if (costType !== '' && !MONEY_RE.test(amount.trim())) {
       setError('Enter the amount like 350 or 350.00.')
       return
-    }
-    for (const [kind, raw] of Object.entries(docFees)) {
-      const v = (raw ?? '').trim()
-      if (v !== '' && !MONEY_RE.test(v)) {
-        setError(`Document fee for "${humanizeDocKind(kind)}" must look like 250 or 250.00.`)
-        return
-      }
     }
     setBusy(true)
     setError(null)
@@ -109,7 +96,6 @@ export default function ServiceBillingPage() {
           documents: meta.documents,
           sortOrder: meta.sortOrder,
           cost,
-          documentFees: docFees,
         },
       })
       setSaved(true)
@@ -179,37 +165,6 @@ export default function ServiceBillingPage() {
             </label>
           )}
         </div>
-      </fieldset>
-
-      <fieldset className="svc-fieldset" style={{ marginTop: 'var(--space-4)' }}>
-        <legend>Document fees</legend>
-        <p className="text-muted text-sm" style={{ marginTop: '-0.2rem' }}>
-          A flat fee per document this service produces — billed automatically when that document is
-          approved. Leave blank for documents that aren’t separately billed.
-        </p>
-        {meta.documents.length === 0 ? (
-          <p className="text-muted text-sm">
-            This service doesn’t produce any documents yet (set them on the Documents tab).
-          </p>
-        ) : (
-          <div className="form-grid">
-            {meta.documents.map((kind) => (
-              <label key={kind}>
-                <span>{humanizeDocKind(kind)} fee (USD)</span>
-                <input
-                  inputMode="decimal"
-                  value={docFees[kind] ?? ''}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setDocFees((s) => ({ ...s, [kind]: v }))
-                    setSaved(false)
-                  }}
-                  placeholder="e.g. 250.00"
-                />
-              </label>
-            ))}
-          </div>
-        )}
       </fieldset>
       <div style={{ marginTop: 'var(--space-4)' }}>
         <button className="primary" onClick={save} disabled={busy}>
