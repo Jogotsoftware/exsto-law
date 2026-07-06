@@ -11,6 +11,7 @@ import Link from 'next/link'
 import { Tabs } from '@/components/Tabs'
 import { PageHead } from '@/components/PageHead'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { formatDate } from '@/lib/datetime'
 
 // A select-all checkbox for a table/group header: checked when every row is
 // selected, indeterminate when only some are. The attorney asked for one plain
@@ -85,9 +86,7 @@ function money(amount: string | null, currency = 'USD'): string {
   return `${currency === 'USD' ? '$' : currency + ' '}${amount}`
 }
 function fmtDate(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso)
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString()
+  return formatDate(iso)
 }
 // Plain-language label for a billable kind — the screen shows this, not the code.
 function kindLabel(kind: string): string {

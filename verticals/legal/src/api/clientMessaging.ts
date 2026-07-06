@@ -168,7 +168,7 @@ export async function getMatterThread(
       `SELECT
          m.payload->>'author' AS author,
          b.body AS body,
-         to_char(m.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS sent_at
+         to_char(m.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS sent_at
        FROM communication_thread t
        JOIN communication_message m ON m.tenant_id = t.tenant_id AND m.thread_id = t.id
        LEFT JOIN content_blob b ON b.id = m.body_blob_id

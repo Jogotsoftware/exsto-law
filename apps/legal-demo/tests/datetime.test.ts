@@ -30,6 +30,15 @@ describe('parseTimestamp', () => {
     expect(d!.toISOString()).toBe('2026-06-23T00:13:00.000Z')
   })
 
+  it('parses a date-only value as LOCAL midnight (a due date means that calendar day)', () => {
+    const d = parseTimestamp('2026-07-06')
+    expect(d).not.toBeNull()
+    expect(d!.getFullYear()).toBe(2026)
+    expect(d!.getMonth()).toBe(6)
+    expect(d!.getDate()).toBe(6) // local — never shifts to the previous day
+    expect(d!.getHours()).toBe(0)
+  })
+
   it('returns null for empty / nullish / unparseable input', () => {
     expect(parseTimestamp(null)).toBeNull()
     expect(parseTimestamp(undefined)).toBeNull()

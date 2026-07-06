@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { formatDateTime } from '@/lib/datetime'
 import { callAdminMcp } from '@/lib/mcpAdmin'
 
 interface AuditEntry {
@@ -53,9 +54,7 @@ export default function AdminAuditPage() {
             <tbody>
               {entries.map((e) => (
                 <tr key={e.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {new Date(e.recordedAt).toLocaleString()}
-                  </td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(e.recordedAt)}</td>
                   <td style={{ fontWeight: 600 }}>{e.operation}</td>
                   <td style={{ fontSize: 'var(--text-xs)' }}>{e.targetTenantId ?? '—'}</td>
                   <td style={{ fontFamily: 'monospace', fontSize: 'var(--text-xs)' }}>

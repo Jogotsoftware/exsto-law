@@ -53,7 +53,7 @@ export async function listApprovedClientDocuments(
          coalesce(e_doc.metadata->>'document_kind', 'document') AS document_kind,
          e_matter.name AS matter_number,
          dv.version_number,
-         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS approved_at
+         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS approved_at
        FROM document_version dv
        JOIN entity e_doc ON e_doc.id = dv.document_entity_id
        JOIN relationship r ON r.source_entity_id = dv.document_entity_id
@@ -110,7 +110,7 @@ export async function listClientUploadedDocuments(
               dv.metadata->>'content_type'      AS content_type,
               dv.metadata->>'size_bytes'        AS size_bytes,
               e_matter.name AS matter_number,
-              to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS uploaded_at
+              to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS uploaded_at
          FROM document_version dv
          JOIN entity e_doc ON e_doc.id = dv.document_entity_id
          JOIN relationship r ON r.source_entity_id = dv.document_entity_id

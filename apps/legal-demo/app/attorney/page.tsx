@@ -11,6 +11,7 @@ import {
   type CalendarCategory,
 } from '@/components/WeeklyCalendar'
 import { ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
+import { parseTimestamp } from '@/lib/datetime'
 
 // Copies the public booking-page link to the clipboard. Replaces the old
 // "/attorney/share" link, which 404'd (no such route) — the link prospects use
@@ -98,7 +99,7 @@ function humanizeService(key: string): string {
 }
 
 function timeAgo(iso: string): string {
-  const t = new Date(iso).getTime()
+  const t = parseTimestamp(iso)?.getTime() ?? NaN
   if (!Number.isFinite(t)) return '—'
   const ms = Date.now() - t
   const m = Math.round(ms / 60000)

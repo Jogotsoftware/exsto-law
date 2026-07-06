@@ -40,7 +40,7 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
          coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
          dv.version_number,
          dv.status,
-         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at
+         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at
        FROM document_version dv
        JOIN entity e_doc ON e_doc.id = dv.document_entity_id
        JOIN relationship r ON r.source_entity_id = dv.document_entity_id
@@ -93,7 +93,7 @@ export async function listMatterDraftVersions(
          coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
          dv.version_number,
          dv.status,
-         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at
+         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at
        FROM document_version dv
        JOIN entity e_doc ON e_doc.id = dv.document_entity_id
        JOIN relationship r ON r.source_entity_id = dv.document_entity_id
@@ -154,7 +154,7 @@ export async function listDocumentVersions(
        SELECT dv.id AS version_id,
               dv.version_number,
               dv.status,
-              to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at,
+              to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
               (dv.reasoning_trace_id IS NOT NULL) AS ai_generated,
               dv.metadata->>'edited_from_version_id' AS edited_from,
               dv.metadata->>'note' AS note
@@ -209,7 +209,7 @@ export async function getSharedDraftVersion(
          coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
          dv.version_number,
          dv.status,
-         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at,
+         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
          cb.body
        FROM document_version dv
        JOIN content_blob cb ON cb.id = dv.content_blob_id
@@ -266,7 +266,7 @@ export async function getDraftVersion(
          coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
          dv.version_number,
          dv.status,
-         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at,
+         to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
          cb.body,
          dv.reasoning_trace_id,
          dv.metadata->>'model_identity' AS model_identity
