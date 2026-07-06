@@ -166,7 +166,9 @@ export default function ClientsPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : clients.length === 0 ? (
-        <p className="text-muted">No clients yet. Create one to start a CRM record.</p>
+        <section>
+          <p className="text-muted">No clients yet. Create one to start a CRM record.</p>
+        </section>
       ) : (
         <div className="matter-list">
           {clients.map((c) => (

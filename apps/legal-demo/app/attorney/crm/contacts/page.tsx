@@ -124,9 +124,11 @@ export default function ContactsPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : visible.length === 0 ? (
-        <p className="text-muted">
-          No contacts{q ? ' match your search' : tab === 'all' ? ' yet' : ` in ${tab}`}.
-        </p>
+        <section>
+          <p className="text-muted">
+            No contacts{q ? ' match your search' : tab === 'all' ? ' yet' : ` in ${tab}`}.
+          </p>
+        </section>
       ) : (
         <div className="matter-list">
           {visible.map((c) => (

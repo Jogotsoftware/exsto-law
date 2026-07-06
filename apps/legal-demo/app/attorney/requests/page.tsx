@@ -98,7 +98,9 @@ export default function ClientRequestsPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : requests.length === 0 ? (
-        <p className="text-muted">No open client requests.</p>
+        <section>
+          <p className="text-muted">No open client requests.</p>
+        </section>
       ) : (
         <div className="matter-list">
           {requests.map((r) => {
