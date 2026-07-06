@@ -216,12 +216,23 @@ export default function TemplatesPage() {
   // Classify a {{variable}} for the editor: a variable backed by a question
   // (library question OR a defined template variable) is "matched" (blue); a
   // recognized variable with no question (e.g. an auto-fill token) is "orphaned"
-  // (yellow); anything unrecognized is "unknown" (red).
+  // (yellow); anything unrecognized is "unknown" (red). Matching is
+  // case-INSENSITIVE, mirroring renderTemplate (a hand-typed {{COMPANY_NAME}}
+  // fills a company_name field at merge time) — never flag red what would merge.
   const validateVariable = useMemo(() => {
-    const hasQuestion = new Set<string>([...libraryTokens, ...Object.keys(draft?.variables ?? {})])
-    const known = new Set<string>([...hasQuestion, ...STANDARD_TOKENS.map((t) => t.id)])
+    const hasQuestion = new Set<string>(
+      [...libraryTokens, ...Object.keys(draft?.variables ?? {})].map((t) => t.toLowerCase()),
+    )
+    const known = new Set<string>([
+      ...hasQuestion,
+      ...STANDARD_TOKENS.map((t) => t.id.toLowerCase()),
+    ])
     return (name: string): VariableStatus =>
-      hasQuestion.has(name) ? 'matched' : known.has(name) ? 'orphaned' : 'unknown'
+      hasQuestion.has(name.toLowerCase())
+        ? 'matched'
+        : known.has(name.toLowerCase())
+          ? 'orphaned'
+          : 'unknown'
   }, [libraryTokens, draft?.variables])
 
   // Candidate names for the editor's `{{` autocomplete: the question library, the
@@ -500,10 +511,12 @@ export default function TemplatesPage() {
     }
     // Persist only field metadata for tokens still in the body, and drop trivial
     // specs (plain text, nothing configured) so the stored map stays lean.
-    const bodyTokens = new Set(extractTokens(draft.body))
+    // Case-insensitive: a spec keyed company_name survives a body typed
+    // {{COMPANY_NAME}} (the merge treats them as the same field).
+    const bodyTokens = new Set(extractTokens(draft.body).map((t) => t.toLowerCase()))
     const variables: TemplateVariables = {}
     for (const [tok, spec] of Object.entries(draft.variables)) {
-      if (!bodyTokens.has(tok)) continue
+      if (!bodyTokens.has(tok.toLowerCase())) continue
       const trivial =
         spec.type === 'text' && !spec.required && !spec.default && !spec.options?.length
       if (!trivial) variables[tok] = spec
@@ -574,7 +587,9 @@ export default function TemplatesPage() {
   }
 
   const bodyTokens = draft
-    ? extractTokens(draft.body).filter((t) => !STANDARD_TOKENS.some((s) => s.id === t))
+    ? extractTokens(draft.body).filter(
+        (t) => !STANDARD_TOKENS.some((s) => s.id === t.toLowerCase()),
+      )
     : []
 
   // HTML the editor mounts with. Recomputed only on a deliberate re-seed
