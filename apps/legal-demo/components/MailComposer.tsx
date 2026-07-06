@@ -9,7 +9,7 @@
 //
 // Anything below the editor (the signature block) is passed in via `footer` — the
 // composer itself stays presentational and never talks to the substrate.
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export interface ComposerValue {
   html: string
@@ -41,35 +41,83 @@ const SIZES: Array<{ label: string; value: string }> = [
   { label: 'Huge', value: '6' },
 ]
 
+// Photos are inserted as data URLs and converted to proper inline MIME parts at
+// send time (Gmail refuses data: images in received mail). Cap the file so the
+// signature/body stays a sane size — matches the invoice-logo limit.
+const MAX_IMAGE_BYTES = 500 * 1024
+
 export function MailComposer({
   placeholder,
   onChange,
   footer,
   minHeight = 150,
+  initialHtml,
+  disabled = false,
 }: {
   placeholder?: string
   onChange: (v: ComposerValue) => void
   footer?: React.ReactNode
   minHeight?: number
+  // Seed content for edit surfaces (e.g. the saved signature). Applied once on
+  // mount — the editor is uncontrolled; remount (key) to reseed.
+  initialHtml?: string
+  disabled?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   // The editor's selection at the moment a toolbar control that steals focus
   // (a <select>, the colour picker, the link field) was activated — restored
   // before the command runs so it lands on the text you had highlighted.
   const savedRange = useRef<Range | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const [empty, setEmpty] = useState(true)
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
+  const [imgError, setImgError] = useState<string | null>(null)
 
   function emit() {
     const el = ref.current
     if (!el) return
     const text = htmlToPlain(el.innerHTML)
-    const isEmpty = text.trim().length === 0
+    // An image-only body (e.g. a photo signature) has no text but is not empty.
+    const isEmpty = text.trim().length === 0 && !el.querySelector('img')
     setEmpty(isEmpty)
     // Send no HTML when the body is effectively empty (avoids shipping stray
     // <br>/<div> markup as a "non-empty" body).
     onChange({ html: isEmpty ? '' : el.innerHTML, text })
+  }
+
+  useEffect(() => {
+    if (initialHtml && ref.current) {
+      ref.current.innerHTML = initialHtml
+      emit()
+    }
+    // Seed once on mount only — the editor is uncontrolled after that.
+  }, [])
+
+  function insertImage(file: File) {
+    setImgError(null)
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) {
+      setImgError('Use a PNG, JPG, GIF or WebP image.')
+      return
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImgError('Image is too large — keep it under 500 KB.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      ref.current?.focus()
+      restoreSelection()
+      document.execCommand(
+        'insertHTML',
+        false,
+        `<img src="${dataUrl}" alt="" style="max-width:240px;height:auto">`,
+      )
+      saveSelection()
+      emit()
+    }
+    reader.readAsDataURL(file)
   }
 
   function saveSelection() {
@@ -132,8 +180,13 @@ export function MailComposer({
   }
 
   return (
-    <div className="composer">
-      <div className="composer-toolbar" role="toolbar" aria-label="Text formatting">
+    <div className="composer" style={disabled ? { opacity: 0.55 } : undefined}>
+      <div
+        className="composer-toolbar"
+        role="toolbar"
+        aria-label="Text formatting"
+        style={disabled ? { pointerEvents: 'none' } : undefined}
+      >
         <button
           type="button"
           className="composer-btn"
@@ -254,6 +307,30 @@ export function MailComposer({
         >
           🔗 Link
         </button>
+        <button
+          type="button"
+          className="composer-btn"
+          title="Insert photo (PNG/JPG, under 500 KB)"
+          aria-label="Insert photo"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            saveSelection()
+            fileRef.current?.click()
+          }}
+        >
+          🖼️ Photo
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) insertImage(f)
+            e.target.value = ''
+          }}
+        />
 
         <span className="composer-sep" aria-hidden="true" />
 
@@ -309,10 +386,12 @@ export function MailComposer({
         </div>
       )}
 
+      {imgError && <div className="composer-link-row">{imgError}</div>}
+
       <div
         ref={ref}
         className={`composer-area ${empty ? 'is-empty' : ''}`}
-        contentEditable
+        contentEditable={!disabled}
         role="textbox"
         aria-multiline="true"
         aria-label="Message body"

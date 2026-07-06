@@ -61,6 +61,8 @@ async function setProfileAttr(
 interface SignatureSetPayload {
   // The signature text. Empty string clears it; undefined leaves it unchanged.
   signature?: string | null
+  // Rich-HTML signature paired with `signature`; null/'' means plain-text only.
+  signatureHtml?: string | null
   // Toggle whether the signature is appended. undefined leaves it unchanged.
   enabled?: boolean
 }
@@ -75,13 +77,17 @@ registerActionHandler('legal.firm.signature_set', async (ctx, client, payload, a
 
   const updated: string[] = []
   if (p.signature !== undefined) {
+    // Stored as { text, html } in the one jsonb attribute (no new kind needed);
+    // readers also accept the legacy bare-string shape from pre-rich saves.
+    const html =
+      typeof p.signatureHtml === 'string' && p.signatureHtml.trim() ? p.signatureHtml : null
     await setProfileAttr(client, {
       tenantId: ctx.tenantId,
       actionId,
       actorId: ctx.actorId,
       entityId: firmProfileId,
       kind: 'email_signature',
-      value: p.signature ?? '',
+      value: { text: p.signature ?? '', html },
     })
     updated.push('email_signature')
   }

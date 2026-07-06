@@ -5,6 +5,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
 import { fetchSession } from '@/lib/auth'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { MailComposer } from '@/components/MailComposer'
 import { PageHead } from '@/components/PageHead'
 import { UsersRolesSection } from './UsersRolesSection'
 import { AiUsageSection } from './AiUsageSection'
@@ -52,9 +53,21 @@ interface TenantSettings {
 
 interface FirmSignature {
   signature: string | null
+  signatureHtml: string | null
   enabled: boolean
   isDefault: boolean
   resolved: string
+  resolvedHtml: string | null
+}
+
+// Seed HTML for the rich editor from a plain-text signature (legacy saves and
+// the firm-derived default are plain text).
+function signatureTextToHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>')
 }
 
 interface SignatureSettings {
@@ -148,6 +161,9 @@ export default function SettingsPage() {
   const [connectingProvider, setConnectingProvider] = useState<ApiKeyProvider | null>(null)
   const [sig, setSig] = useState<SignatureSettings | null>(null)
   const [sigDraft, setSigDraft] = useState<string>('')
+  const [sigDraftHtml, setSigDraftHtml] = useState<string>('')
+  // Seed for the rich editor + a key so it remounts (reseeds) after each load/save.
+  const [sigSeed, setSigSeed] = useState<{ html: string; nonce: number }>({ html: '', nonce: 0 })
   const [sigEnabled, setSigEnabled] = useState<boolean>(true)
   const [savedSig, setSavedSig] = useState(false)
   const [bookingRules, setBookingRules] = useState<BookingRules | null>(null)
@@ -199,9 +215,14 @@ export default function SettingsPage() {
         toolName: 'legal.settings.signature.get',
       })
       setSig(r)
-      // Seed the editable draft with the stored text, or the firm-derived default
-      // so the attorney edits from a sensible starting point rather than blank.
-      setSigDraft(r.signature.signature ?? r.signature.resolved ?? '')
+      // Seed the editable draft with the stored signature (rich HTML when there
+      // is one), or the firm-derived default so the attorney edits from a
+      // sensible starting point rather than blank.
+      const text = r.signature.signature ?? r.signature.resolved ?? ''
+      const html = r.signature.signatureHtml ?? signatureTextToHtml(text)
+      setSigDraft(text)
+      setSigDraftHtml(r.signature.signatureHtml ?? '')
+      setSigSeed((s) => ({ html, nonce: s.nonce + 1 }))
       setSigEnabled(r.signature.enabled)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -302,10 +323,12 @@ export default function SettingsPage() {
     try {
       const r = await callAttorneyMcp<SignatureSettings>({
         toolName: 'legal.settings.signature.set',
-        input: { signature: sigDraft, enabled: sigEnabled },
+        input: { signature: sigDraft, signatureHtml: sigDraftHtml || null, enabled: sigEnabled },
       })
       setSig(r)
-      setSigDraft(r.signature.signature ?? r.signature.resolved ?? '')
+      const text = r.signature.signature ?? r.signature.resolved ?? ''
+      setSigDraft(text)
+      setSigDraftHtml(r.signature.signatureHtml ?? '')
       setSigEnabled(r.signature.enabled)
       setSavedSig(true)
       setTimeout(() => setSavedSig(false), 2000)
@@ -586,17 +609,19 @@ export default function SettingsPage() {
             </label>
             <label>
               <span>Signature</span>
-              <textarea
-                value={sigDraft}
-                onChange={(e) => {
-                  setSigDraft(e.target.value)
-                  setSavedSig(false)
-                }}
-                rows={5}
-                disabled={!sigEnabled}
-                placeholder={'Best regards,\nJuan Carlos Pacheco\nPacheco Law Firm'}
-              />
             </label>
+            <MailComposer
+              key={sigSeed.nonce}
+              initialHtml={sigSeed.html}
+              disabled={!sigEnabled}
+              minHeight={120}
+              placeholder={'Best regards,\nJuan Carlos Pacheco\nPacheco Law Firm'}
+              onChange={(v) => {
+                setSigDraft(v.text)
+                setSigDraftHtml(v.html)
+                setSavedSig(false)
+              }}
+            />
             {sigEnabled && sig.signature.isDefault && (
               <p
                 style={{ color: 'var(--muted)', fontSize: '0.85rem', margin: 'var(--space-2) 0 0' }}
