@@ -28,13 +28,16 @@ const nextConfig = {
   // and the same approach used for pg / the Anthropic SDK. Powers the document
   // upload in the Templates importer and the assistant chat's attach-a-file.
   //
-  // @react-pdf/renderer ships the standard-14 font metrics (Helvetica AFM) and
-  // fontkit's binary data as data files. Webpack-bundling it into the function
-  // strips those files, so at runtime the font lookup returns undefined and the
-  // render dies with "Cannot read properties of undefined (reading 'S')" — the
-  // invoice-template preview 500 on Settings, and every server-rendered invoice
-  // PDF. Externalize it so it (and its @react-pdf/* + fontkit subtree) is required
-  // natively at runtime with its data files intact.
+  // @react-pdf/renderer must NOT be webpack-bundled: bundled, its react-reconciler
+  // binds to Next's vendored server React, whose shared internals lack the field
+  // the reconciler reads — every server-side invoice render (Settings preview,
+  // View/Download, email attachment) dies with "Cannot read properties of
+  // undefined (reading 'S')" (diegomura/react-pdf#2966, #3285). Listing it here
+  // is necessary but NOT sufficient: the externals check resolves the package
+  // FROM THIS APP, and with pnpm's strict node_modules a dependency of
+  // @exsto/legal alone isn't resolvable here, so Next silently fell back to
+  // bundling. That's why @react-pdf/renderer is also a direct dependency in this
+  // app's package.json — remove it there and this entry stops working again.
   serverExternalPackages: [
     'pg',
     '@anthropic-ai/sdk',
