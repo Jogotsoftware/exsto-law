@@ -1002,6 +1002,19 @@ export function UnifiedAssistantChat({
     // setModelId() won't have flushed by the time enterBuildMode fires its priming send.
     const turnModelId = opts?.model ?? modelId
     if (!message || busy || !turnModelId) return
+    // If the attorney answered SOME cards of a batch then typed a message instead of
+    // finishing it, fold the buffered answers into this send — silently dropping them
+    // would lose clicks the cards already show as locked answer chips. The bubble
+    // shows only what they typed; historyContent carries what the model saw.
+    let outgoing = message
+    const pendingBatch = batchRef.current
+    if (!isContinuation && pendingBatch.answers.size > 0) {
+      const partialAnswers = [...pendingBatch.answers.entries()]
+        .map(([k, a]) => `"${k}": ${a}`)
+        .join('; ')
+      outgoing = `My answers so far — ${partialAnswers}.\n\n${message}`
+      batchRef.current = { keys: [], answers: new Map() }
+    }
     const gen = ++genRef.current // this exchange's generation; stale callbacks no-op
     const live = () => genRef.current === gen
     setError(null)
@@ -1027,6 +1040,9 @@ export function UnifiedAssistantChat({
       {
         role: 'user',
         content: message,
+        // When buffered batch answers were folded in, the model saw more than the
+        // typed bubble — record it so future history matches what was sent.
+        historyContent: outgoing !== message ? outgoing : undefined,
         hiddenFromUi: hidden || undefined,
         attachments: sentAttachments.length ? sentAttachments.map((a) => a.name) : undefined,
       },
@@ -1060,7 +1076,7 @@ export function UnifiedAssistantChat({
     try {
       await streamAssistant(
         {
-          message,
+          message: outgoing,
           modelId: turnModelId,
           history,
           ...scope,
@@ -1165,6 +1181,12 @@ export function UnifiedAssistantChat({
           onDone: (d) => {
             if (!live()) return
             finished = true
+            // This turn's cards define the CURRENT answer batch (answers to a
+            // multi-card turn buffer and return together; see handleQuestionAnswer).
+            batchRef.current = {
+              keys: partial.buildQuestions.map((q) => q.key),
+              answers: new Map(),
+            }
             setTurns((prev) => [
               ...prev,
               {
@@ -1238,6 +1260,8 @@ export function UnifiedAssistantChat({
         partial.costProposals.length ||
         partial.enableProposals.length ||
         partial.buildQuestions.length
+      // A dropped stream still commits its cards — keep the batch in sync with them.
+      batchRef.current = { keys: partial.buildQuestions.map((q) => q.key), answers: new Map() }
       setTurns((prev) => [
         ...prev,
         {
@@ -1270,6 +1294,17 @@ export function UnifiedAssistantChat({
   // card never fires the continuation twice (the card also disables its own button on
   // success — this is belt-and-suspenders). Keyed by serviceKey+artifact.
   const continuedRef = useRef<Set<string>>(new Set())
+
+  // The CURRENT question batch (beta feedback: one question per API round-trip made
+  // the build crawl). When an assistant turn asks SEVERAL ask_build_question cards,
+  // their keys land here; answers buffer locally (each card locks with its chip) and
+  // ONE hidden continuation carries them all once the last card is answered. A
+  // single-question turn keeps the old immediate-send path. Reset on every assistant
+  // commit, so stale cards from older turns fall back to immediate send.
+  const batchRef = useRef<{ keys: string[]; answers: Map<string, string> }>({
+    keys: [],
+    answers: new Map(),
+  })
 
   // The CONTINUOUS-FLOW driver (Build-Wizard Phase 6): a proposal card calls this on a
   // SUCCESSFUL approve. We auto-send a short continuation turn on the attorney's behalf
@@ -1325,6 +1360,20 @@ export function UnifiedAssistantChat({
   const handleQuestionAnswer = useCallback(
     (info: { key: string; answer: string; display: string }): boolean => {
       if (busy) return false // a turn is mid-stream; card stays interactive
+      // Batched turn (several cards at once): buffer this answer — the card locks
+      // with its chip — and send ONE combined continuation when the last card of
+      // the batch is answered, so a 3-question batch costs one round-trip, not 3.
+      const batch = batchRef.current
+      if (batch.keys.length > 1 && batch.keys.includes(info.key) && !batch.answers.has(info.key)) {
+        batch.answers.set(info.key, info.answer)
+        if (batch.answers.size < batch.keys.length) return true // buffered; wait for the rest
+        const combined = batch.keys
+          .map((k) => `"${k}": ${batch.answers.get(k) ?? '(not answered)'}`)
+          .join('; ')
+        batchRef.current = { keys: [], answers: new Map() }
+        void send(`My answers — ${combined}. Continue the guided build.`, { hidden: true })
+        return true
+      }
       void send(`My answer to "${info.key}": ${info.answer}. Continue the guided build.`, {
         hidden: true,
       })

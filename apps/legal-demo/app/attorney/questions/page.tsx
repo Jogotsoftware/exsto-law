@@ -1,12 +1,14 @@
 'use client'
 
-// Question library (migration 0077) — the firm's reusable, single intake
-// questions. Each carries a stable {{answer}} token reused across questionnaires,
-// so a document template's {{insert}} binds once and fills everywhere. Managed
-// here (rename / retype / re-option / archive) via the through-core
-// legal.question_template.* tools. Authoring also happens inline from the service
+// Question library (migration 0077) — EVERY intake question the firm has: the
+// reusable saved questions (each with a stable {{answer}} token, managed here via
+// the through-core legal.question_template.* tools) PLUS the questions defined
+// inside each service's intake form (read-only here; edited in the service
+// builder). Beta feedback: showing only the saved bank hid the questions a live
+// service was already asking. Authoring also happens inline from the service
 // questionnaire editor's "Save to library"; this page is the bank's home.
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
@@ -80,8 +82,21 @@ function toDraft(q: LibQuestion): Draft {
   }
 }
 
+// A question living inside a service's intake form — surfaced here so the library
+// is the full inventory, but edited in the service builder (it is service config,
+// not a question_template entity).
+interface ServiceQuestion {
+  serviceKey: string
+  serviceName: string
+  label: string
+  type: string
+  token: string
+  options: string[] | null
+}
+
 export default function QuestionLibraryPage() {
   const [items, setItems] = useState<LibQuestion[]>([])
+  const [svcQuestions, setSvcQuestions] = useState<ServiceQuestion[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -100,6 +115,40 @@ export default function QuestionLibraryPage() {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
+    }
+    // Questions defined inside each service's intake form, best-effort: a failure
+    // here must not blank the saved bank.
+    try {
+      const { services } = await callAttorneyMcp<{
+        services: Array<{ serviceKey: string; displayName: string }>
+      }>({ toolName: 'legal.service.list_all' })
+      const perService = await Promise.all(
+        services.map((s) =>
+          callAttorneyMcp<{
+            questionnaire: {
+              sections?: Array<{
+                fields?: Array<{ id?: string; label?: string; type?: string; options?: string[] }>
+              }>
+            } | null
+          }>({ toolName: 'legal.service.questionnaire.get', input: { serviceKey: s.serviceKey } })
+            .then((r) =>
+              (r.questionnaire?.sections ?? []).flatMap((sec) =>
+                (sec.fields ?? []).map((f) => ({
+                  serviceKey: s.serviceKey,
+                  serviceName: s.displayName,
+                  label: f.label?.trim() || f.id || '(unlabelled)',
+                  type: f.type ?? 'text',
+                  token: f.id ?? '',
+                  options: f.options?.length ? f.options : null,
+                })),
+              ),
+            )
+            .catch(() => [] as ServiceQuestion[]),
+        ),
+      )
+      setSvcQuestions(perService.flat())
+    } catch {
+      setSvcQuestions([])
     }
   }
   useEffect(() => {
@@ -196,6 +245,19 @@ export default function QuestionLibraryPage() {
       )
     : items
 
+  // Service-intake questions not already in the saved bank (dedupe by token: a
+  // library question attached to a service is already listed above).
+  const bankTokens = new Set(items.map((i) => i.token.toLowerCase()))
+  const svcOnly = svcQuestions.filter((s) => !bankTokens.has(s.token.toLowerCase()))
+  const svcFiltered = needle
+    ? svcOnly.filter(
+        (i) =>
+          i.label.toLowerCase().includes(needle) ||
+          i.token.toLowerCase().includes(needle) ||
+          i.serviceName.toLowerCase().includes(needle),
+      )
+    : svcOnly
+
   return (
     <main>
       <PageHead
@@ -233,9 +295,9 @@ export default function QuestionLibraryPage() {
         <div className="loading-block">
           <span className="spinner" /> Loading…
         </div>
-      ) : filtered.length === 0 && !edit.new ? (
+      ) : filtered.length === 0 && svcFiltered.length === 0 && !edit.new ? (
         <p style={{ color: 'var(--muted)' }}>
-          {items.length === 0
+          {items.length === 0 && svcOnly.length === 0
             ? 'No saved questions yet. Add one here, or use “Save to library” from a service questionnaire.'
             : 'No matches.'}
         </p>
@@ -282,6 +344,37 @@ export default function QuestionLibraryPage() {
             </div>
           ),
         )
+      )}
+
+      {/* Questions living inside a service's intake form (not in the saved bank) —
+          part of the firm's full question inventory, edited in the service builder. */}
+      {!loading && svcFiltered.length > 0 && (
+        <>
+          <h3 style={{ margin: 'var(--space-4) 0 var(--space-2)' }}>In service intake forms</h3>
+          {svcFiltered.map((it, i) => (
+            <div
+              key={`${it.serviceKey}-${it.token}-${i}`}
+              className="qb-card"
+              style={{ marginBottom: 'var(--space-2)' }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{it.label}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+                    {TYPE_LABEL(it.type)} · <code>{`{{${it.token}}}`}</code> · from{' '}
+                    <strong>{it.serviceName}</strong>
+                    {it.options && it.options.length > 0 ? ` · ${it.options.join(', ')}` : ''}
+                  </div>
+                </div>
+                <Link
+                  href={`/attorney/services/${encodeURIComponent(it.serviceKey)}/questionnaire`}
+                >
+                  <button>Edit in service</button>
+                </Link>
+              </div>
+            </div>
+          ))}
+        </>
       )}
     </main>
   )

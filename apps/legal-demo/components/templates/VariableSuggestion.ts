@@ -2,22 +2,26 @@ import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 
-// Variable autocomplete: typing `{{` opens a dropdown of the known variables
-// (library questions, the template's own fields, and the standard merge tokens);
-// arrow keys move, Enter/Tab inserts the chosen variable as a {{name}} chip.
+// Variable autocomplete: typing `{{` or `#` opens a dropdown of the known
+// variables (library questions, the template's own fields, and the standard merge
+// tokens); arrow keys move, Enter/Tab inserts the chosen variable as a {{name}}
+// chip. A ghost "+" button also follows the caret in the document body — clicking
+// it opens the same dropdown, so inserting a field never requires remembering a
+// trigger (beta feedback: an inline insert affordance IN the body, not only the
+// palette above it).
 //
 // Self-contained ProseMirror plugin — no @tiptap/suggestion / tippy dependency.
-// It manages a single floating <div> (appended to <body> so the editor's
-// fit-to-width transform never clips it) and drives it imperatively. The chip it
-// inserts is the existing `templateVariable` node, so coloring + the markdown
-// round-trip are unchanged. The node input rule (`{{name}}` → chip) still handles
-// the case where an author types a full token by hand.
+// It manages a single floating <div> + ghost <button> (appended to <body> so the
+// editor's fit-to-width transform never clips them) and drives them imperatively.
+// The chip it inserts is the existing `templateVariable` node, so coloring + the
+// markdown round-trip are unchanged. The node input rule (`{{name}}` → chip)
+// still handles the case where an author types a full token by hand.
 
 const KEY = new PluginKey('variableSuggestion')
-// The open trigger: `{{` followed by an in-progress token, with NO closing `}}`
-// yet (that case is the input rule's). Matches at the end of the text before the
-// caret only.
-const TRIGGER = /\{\{([a-zA-Z0-9_]*)$/
+// The open triggers: `{{` (the original) or `#` (the lighter one-keystroke path),
+// each followed by an in-progress token, with NO closing `}}` yet (that case is
+// the input rule's). Matches at the end of the text before the caret only.
+const TRIGGER = /(\{\{|#)([a-zA-Z0-9_]*)$/
 const MAX_ITEMS = 8
 
 export interface VariableSuggestionOptions {
@@ -49,8 +53,9 @@ export const VariableSuggestion = Extension.create<VariableSuggestionOptions>({
 function variablePlugin(getItems: () => string[]): Plugin {
   let state: ActiveState = { active: false, from: 0, to: 0, items: [], index: 0 }
   let dropdown: HTMLDivElement | null = null
+  let ghost: HTMLButtonElement | null = null
 
-  // The `{{query` immediately before an empty selection, or null.
+  // The `{{query` / `#query` immediately before an empty selection, or null.
   function detect(view: EditorView): { query: string; from: number; to: number } | null {
     const { selection } = view.state
     if (!selection.empty) return null
@@ -59,12 +64,43 @@ function variablePlugin(getItems: () => string[]): Plugin {
     const m = TRIGGER.exec(textBefore)
     if (!m) return null
     const to = $from.pos
-    return { query: m[1], from: to - m[0].length, to }
+    return { query: m[2], from: to - m[0].length, to }
   }
 
   function hide() {
     if (state.active) state = { ...state, active: false }
     if (dropdown) dropdown.style.display = 'none'
+  }
+
+  function hideGhost() {
+    if (ghost) ghost.style.display = 'none'
+  }
+
+  // Park the ghost "+" just after the caret. Hidden while the dropdown is open
+  // (the two would overlap) and whenever the editor loses focus or has a range
+  // selection (inserting mid-selection would clobber it).
+  function placeGhost(view: EditorView) {
+    if (!ghost) return
+    const { selection } = view.state
+    if (!view.hasFocus() || !selection.empty || state.active) return hideGhost()
+    const coords = view.coordsAtPos(selection.from)
+    ghost.style.display = 'flex'
+    ghost.style.left = `${coords.right + 6}px`
+    ghost.style.top = `${coords.top + (coords.bottom - coords.top) / 2}px`
+  }
+
+  // Open the full variable list at the caret — the ghost button's click path.
+  // No trigger text exists, so from = to = caret: committing inserts the chip
+  // in place. Any subsequent doc/selection change re-runs update(), which sees
+  // no trigger and closes the dropdown again.
+  function openAtCaret(view: EditorView) {
+    const { selection } = view.state
+    if (!selection.empty) return
+    const items = getItems().slice(0, MAX_ITEMS)
+    if (items.length === 0) return
+    state = { active: true, from: selection.from, to: selection.from, items, index: 0 }
+    hideGhost()
+    paint(view)
   }
 
   function commit(view: EditorView, name: string) {
@@ -100,30 +136,54 @@ function variablePlugin(getItems: () => string[]): Plugin {
 
   return new Plugin({
     key: KEY,
-    view() {
+    view(view) {
       dropdown = document.createElement('div')
       dropdown.className = 'tpl-var-suggest'
       dropdown.setAttribute('role', 'listbox')
       dropdown.style.display = 'none'
       document.body.appendChild(dropdown)
+      ghost = document.createElement('button')
+      ghost.type = 'button'
+      ghost.className = 'tpl-var-ghost'
+      ghost.textContent = '+'
+      ghost.title = 'Insert a field here'
+      ghost.setAttribute('aria-label', 'Insert a field here')
+      ghost.style.display = 'none'
+      // mousedown (not click) + preventDefault so the editor never blurs first.
+      ghost.addEventListener('mousedown', (e) => {
+        e.preventDefault()
+        openAtCaret(view)
+      })
+      document.body.appendChild(ghost)
       return {
         update(view) {
           const hit = detect(view)
-          if (!hit) return hide()
+          if (!hit) {
+            hide()
+            placeGhost(view)
+            return
+          }
           const q = hit.query.toLowerCase()
           const all = getItems()
           const items = (q ? all.filter((n) => n.toLowerCase().includes(q)) : all).slice(
             0,
             MAX_ITEMS,
           )
-          if (items.length === 0) return hide()
+          if (items.length === 0) {
+            hide()
+            placeGhost(view)
+            return
+          }
           const index = state.active && state.index < items.length ? state.index : 0
           state = { active: true, from: hit.from, to: hit.to, items, index }
+          hideGhost()
           paint(view)
         },
         destroy() {
           dropdown?.remove()
           dropdown = null
+          ghost?.remove()
+          ghost = null
         },
       }
     },
@@ -154,6 +214,11 @@ function variablePlugin(getItems: () => string[]): Plugin {
       handleDOMEvents: {
         blur() {
           hide()
+          hideGhost()
+          return false
+        },
+        focus(view) {
+          placeGhost(view)
           return false
         },
       },
