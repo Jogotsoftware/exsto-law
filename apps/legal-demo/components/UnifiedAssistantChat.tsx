@@ -75,6 +75,16 @@ interface ProducedDoc {
 interface DisplayTurn {
   role: 'user' | 'assistant'
   content: string
+  // Model-facing record of this turn, used when building the next request's history.
+  // Differs from `content` when the turn spoke through cards (ask_build_question /
+  // proposal tool calls produce no prose): `content` is what the UI shows (possibly
+  // nothing), `historyContent` is what the model must remember having said. Without
+  // it a card-only turn serializes into history as '', the model loses its place in
+  // the guided build and re-asks earlier questions ("goes back a step").
+  historyContent?: string
+  // Hidden continuation (build primer / question answers / approval nudges): kept in
+  // `turns` so the model re-sees it in history, but never rendered as a bubble.
+  hiddenFromUi?: boolean
   citations?: string[]
   model?: string
   // Names of documents attached to a user turn (shown as chips on the bubble).
@@ -722,7 +732,6 @@ export function UnifiedAssistantChat({
     setActiveScope(target)
     setTurns([])
     continuedRef.current.clear() // fresh thread ⇒ forget which approvals already auto-continued
-    answeredRef.current.clear() // …and which build questions were already answered
     setBuildMode(false) // a different thread is not the in-progress build
     setStreaming(null)
     setError(null)
@@ -768,7 +777,6 @@ export function UnifiedAssistantChat({
     genRef.current++ // abandon any in-flight stream
     setTurns([])
     continuedRef.current.clear() // new conversation ⇒ forget which approvals already auto-continued
-    answeredRef.current.clear() // …and which build questions were already answered
     setBuildMode(false) // a fresh chat is not in build mode until the attorney re-enters it
     setStreaming(null)
     setError(null)
@@ -951,6 +959,40 @@ export function UnifiedAssistantChat({
   // continuations no longer show a fake "✓ created — continue…" user message (founder
   // flagged that as bad UX). The thinking indicator still shows because streaming state
   // is set immediately below, so a hidden continuation isn't a silent gap (fix #5).
+  // The model-facing record of an assistant turn that spoke through cards. Tool-call
+  // turns (ask_build_question, proposals) often carry no prose, so their committed
+  // `content` is '' — and a turn absent from history means the model forgets it ever
+  // asked. Encode the cards compactly so the next request replays them.
+  function assistantHistoryContent(
+    reply: string,
+    cards: {
+      buildQuestions: BuildQuestionEvent[]
+      workflowProposals: WorkflowProposal[]
+      serviceProposals: ServiceProposal[]
+      questionnaireProposals: QuestionnaireProposal[]
+      templateProposals: TemplateProposal[]
+      costProposals: CostProposal[]
+      enableProposals: EnableProposal[]
+    },
+  ): string | undefined {
+    const notes: string[] = []
+    for (const q of cards.buildQuestions)
+      notes.push(`[You asked via ask_build_question (key "${q.key}"): ${q.question}]`)
+    const proposals =
+      cards.workflowProposals.length +
+      cards.serviceProposals.length +
+      cards.questionnaireProposals.length +
+      cards.templateProposals.length +
+      cards.costProposals.length +
+      cards.enableProposals.length
+    if (proposals)
+      notes.push(
+        `[You presented ${proposals} proposal card(s); the attorney approves in the UI and a confirmation message follows on approval.]`,
+      )
+    if (!notes.length) return undefined
+    return [reply, ...notes].filter(Boolean).join('\n')
+  }
+
   async function send(overrideMessage?: string, opts?: { hidden?: boolean; model?: string }) {
     const isContinuation = typeof overrideMessage === 'string'
     const hidden = isContinuation && opts?.hidden === true
@@ -965,25 +1007,30 @@ export function UnifiedAssistantChat({
     setError(null)
     setBusy(true)
     setSettingsOpen(false)
-    // The model history the server expects: prior user/assistant turns as text. A
-    // hidden continuation appends its nudge here (so the model sees it as the latest
-    // user message) WITHOUT rendering a bubble for it.
-    const history = turns.map((t) => ({ role: t.role, content: t.content }))
+    // The model history the server expects: prior user/assistant turns as text.
+    // historyContent wins over content (card-only turns have no prose but must not
+    // vanish from the model's memory); empty turns are dropped as a backstop — an
+    // empty message is invalid at the API and carries no signal.
+    const history = turns
+      .map((t) => ({ role: t.role, content: (t.historyContent ?? t.content).trim() }))
+      .filter((m) => m.content)
     // Attachments are per-message and Claude-only; snapshot then clear them. A
     // continuation carries no attachments (it's a system nudge, not a user upload).
     const sentAttachments = isContinuation ? [] : canAttach ? attachments : []
-    // A hidden continuation renders NO user bubble; an ordinary send (and a legacy
-    // visible continuation) appends the user turn as before.
-    if (!hidden) {
-      setTurns((t) => [
-        ...t,
-        {
-          role: 'user',
-          content: message,
-          attachments: sentAttachments.length ? sentAttachments.map((a) => a.name) : undefined,
-        },
-      ])
-    }
+    // A hidden continuation renders NO user bubble, but it MUST still land in
+    // `turns`: history is built from `turns`, and a nudge the model never re-sees
+    // breaks the guided build — after the next answer the model has no record of
+    // the primer or any prior card answer, loses its place, and re-asks earlier
+    // questions (the "wizard goes back a step" bug). Persist it flagged hidden.
+    setTurns((t) => [
+      ...t,
+      {
+        role: 'user',
+        content: message,
+        hiddenFromUi: hidden || undefined,
+        attachments: sentAttachments.length ? sentAttachments.map((a) => a.name) : undefined,
+      },
+    ])
     // Only an ordinary send clears the input box / attachments; a continuation must
     // leave whatever the attorney is mid-typing untouched.
     if (!isContinuation) {
@@ -1123,6 +1170,7 @@ export function UnifiedAssistantChat({
               {
                 role: 'assistant',
                 content: d.reply,
+                historyContent: assistantHistoryContent(d.reply, partial),
                 citations: d.citations,
                 model: d.model,
                 documents: partial.documents.length ? partial.documents : undefined,
@@ -1195,6 +1243,7 @@ export function UnifiedAssistantChat({
         {
           role: 'assistant',
           content: partial.text || (hasCards ? '' : '(no response)'),
+          historyContent: assistantHistoryContent(partial.text, partial),
           model: modelId,
           documents: partial.documents.length ? partial.documents : undefined,
           workflowProposals: partial.workflowProposals.length
@@ -1266,17 +1315,16 @@ export function UnifiedAssistantChat({
   // Phase 7 fix #2: a QuestionCard calls this when the attorney answers a structured
   // interview question. The answer rides back as a HIDDEN continuation — the model gets
   // it as its latest user message, the build advances, but the transcript shows NO raw
-  // user bubble (the card itself shows the choice as a tidy answer chip). De-duped per
-  // question key so a re-render can't fire twice. Returns whether the answer was
-  // ACCEPTED: false when a turn is mid-stream (busy) so the card stays interactive for a
-  // retry — and crucially we do NOT poison answeredRef in that case, or the retry would
-  // be silently swallowed and the build would dead-end on an answered-looking card.
-  const answeredRef = useRef<Set<string>>(new Set())
+  // user bubble (the card itself shows the choice as a tidy answer chip). Returns
+  // whether the answer was ACCEPTED: false when a turn is mid-stream (busy) so the card
+  // stays interactive for a retry. Double-fire safety lives in the card itself (it
+  // locks once an answer is accepted); there is deliberately NO cross-card dedupe by
+  // question key — when the model legitimately re-asks a key (e.g. after an invalid
+  // answer), a global key-set made the new card permanently unclickable, which was the
+  // "would not let me click the next step" half of the wizard bug.
   const handleQuestionAnswer = useCallback(
     (info: { key: string; answer: string; display: string }): boolean => {
-      if (answeredRef.current.has(info.key)) return false
-      if (busy) return false // a turn is mid-stream; card stays interactive, ref untouched
-      answeredRef.current.add(info.key)
+      if (busy) return false // a turn is mid-stream; card stays interactive
       void send(`My answer to "${info.key}": ${info.answer}. Continue the guided build.`, {
         hidden: true,
       })
@@ -1661,101 +1709,111 @@ export function UnifiedAssistantChat({
             <div className="assistant-md">{intro}</div>
           </div>
         )}
-        {turns.map((t, i) => (
-          <div key={i} className={`feedback-bubble feedback-bubble-${t.role}`}>
-            {/* Assistant replies are markdown — render so **bold**, lists and
+        {/* Hidden continuations stay in `turns` (the model must re-see them in the
+            next request's history) but render no bubble — the cards already show
+            their outcome. Filtering is key-stable: turns only append, and
+            hiddenFromUi never changes after commit. */}
+        {turns
+          .filter((t) => !t.hiddenFromUi)
+          .map((t, i) => (
+            <div key={i} className={`feedback-bubble feedback-bubble-${t.role}`}>
+              {/* Assistant replies are markdown — render so **bold**, lists and
                 headings display formatted (not as raw syntax). renderMarkdown
                 escapes HTML before formatting, so model output can't inject
                 markup. User turns stay verbatim. */}
-            {t.role === 'assistant' ? (
-              <>
-                {t.content.trim() && (
-                  <div
-                    className="assistant-md"
-                    dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
-                  />
-                )}
-                {/* Documents the assistant produced — downloadable deliverables
+              {t.role === 'assistant' ? (
+                <>
+                  {t.content.trim() && (
+                    <div
+                      className="assistant-md"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
+                    />
+                  )}
+                  {/* Documents the assistant produced — downloadable deliverables
                     (PDF/Word + save to matter), not the prose. Downloads attach
                     here, never to an ordinary reply. */}
-                {t.documents?.map((doc, di) => (
-                  <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
-                ))}
-                {/* Workflow proposals (PR5) — inline approval cards. Approving is the
+                  {t.documents?.map((doc, di) => (
+                    <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
+                  ))}
+                  {/* Workflow proposals (PR5) — inline approval cards. Approving is the
                     live write; nothing was saved by the turn that proposed them. */}
-                {t.workflowProposals?.map((p, pi) => (
-                  <WorkflowProposalCard key={pi} proposal={p} onApproved={handleApproved} />
-                ))}
-                {/* New-service proposals (Build-Wizard Phase 1) — inline approval
+                  {t.workflowProposals?.map((p, pi) => (
+                    <WorkflowProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                  ))}
+                  {/* New-service proposals (Build-Wizard Phase 1) — inline approval
                     cards. Approving creates the (disabled) service; nothing was saved
                     by the turn that proposed it. */}
-                {t.serviceProposals?.map((p, pi) => (
-                  <ServiceProposalCard key={pi} proposal={p} onApproved={handleApproved} />
-                ))}
-                {/* Questionnaire proposals (Build-Wizard Phase 2) — inline approval
+                  {t.serviceProposals?.map((p, pi) => (
+                    <ServiceProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                  ))}
+                  {/* Questionnaire proposals (Build-Wizard Phase 2) — inline approval
                     cards surfacing the variable-contract coverage. Approving writes
                     the service's intake form; nothing was saved by the proposing turn. */}
-                {t.questionnaireProposals?.map((p, pi) => (
-                  <QuestionnaireProposalCard key={pi} proposal={p} onApproved={handleApproved} />
-                ))}
-                {/* Template proposals (Build-Wizard Phase 3) — inline approval cards
+                  {t.questionnaireProposals?.map((p, pi) => (
+                    <QuestionnaireProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                  ))}
+                  {/* Template proposals (Build-Wizard Phase 3) — inline approval cards
                     flagging orphan tokens. Approving writes the service's document
                     template; nothing was saved by the proposing turn. */}
-                {t.templateProposals?.map((p, pi) => (
-                  <TemplateProposalCard key={pi} proposal={p} onApproved={handleApproved} />
-                ))}
-                {/* Billing proposals (Build-Wizard Phase 6) — inline approval cards.
+                  {t.templateProposals?.map((p, pi) => (
+                    <TemplateProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                  ))}
+                  {/* Billing proposals (Build-Wizard Phase 6) — inline approval cards.
                     Approving writes the service's fee model; nothing was saved by the
                     proposing turn. */}
-                {t.costProposals?.map((p, pi) => (
-                  <CostProposalCard key={pi} proposal={p} onApproved={handleApproved} />
-                ))}
-                {/* Enable proposals (Build-Wizard Phase 6, terminal) — the final card.
+                  {t.costProposals?.map((p, pi) => (
+                    <CostProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                  ))}
+                  {/* Enable proposals (Build-Wizard Phase 6, terminal) — the final card.
                     Approving flips the service to active/bookable; this ends the build. */}
-                {t.enableProposals?.map((p, pi) => (
-                  <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
-                ))}
-                {/* Structured interview questions (Phase 7) — click-to-answer cards.
+                  {t.enableProposals?.map((p, pi) => (
+                    <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                  ))}
+                  {/* Structured interview questions (Phase 7) — click-to-answer cards.
                     Answering sends a HIDDEN continuation (no fake user bubble). */}
-                {t.buildQuestions?.map((q) => (
-                  <QuestionCard key={q.key} question={q} onAnswer={handleQuestionAnswer} />
-                ))}
-                {t.content.trim() && (
-                  <div className="uac-reply-actions">
-                    <CopyButton text={t.content} />
-                  </div>
-                )}
-              </>
-            ) : (
-              <div style={{ whiteSpace: 'pre-wrap' }}>{t.content}</div>
-            )}
-            {t.citations && t.citations.length > 0 && (
-              <ol className="uac-citations">
-                {t.citations.map((c, j) => (
-                  <li key={j}>
-                    {isHttpUrl(c) ? (
-                      <a href={c} target="_blank" rel="noopener noreferrer">
-                        {c}
-                      </a>
-                    ) : (
-                      <span className="text-muted">{c}</span>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            )}
-            {t.role === 'user' && t.attachments && t.attachments.length > 0 && (
-              <div className="uac-bubble-attachments">
-                {t.attachments.map((name, k) => (
-                  <span key={k} className="uac-attach-chip uac-attach-chip-static" title={name}>
-                    <FileTextIcon size={11} />
-                    <span className="uac-attach-chip-name">{name}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+                  {t.buildQuestions?.map((q, qi) => (
+                    <QuestionCard
+                      key={`${q.key}-${qi}`}
+                      question={q}
+                      onAnswer={handleQuestionAnswer}
+                    />
+                  ))}
+                  {t.content.trim() && (
+                    <div className="uac-reply-actions">
+                      <CopyButton text={t.content} />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ whiteSpace: 'pre-wrap' }}>{t.content}</div>
+              )}
+              {t.citations && t.citations.length > 0 && (
+                <ol className="uac-citations">
+                  {t.citations.map((c, j) => (
+                    <li key={j}>
+                      {isHttpUrl(c) ? (
+                        <a href={c} target="_blank" rel="noopener noreferrer">
+                          {c}
+                        </a>
+                      ) : (
+                        <span className="text-muted">{c}</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {t.role === 'user' && t.attachments && t.attachments.length > 0 && (
+                <div className="uac-bubble-attachments">
+                  {t.attachments.map((name, k) => (
+                    <span key={k} className="uac-attach-chip uac-attach-chip-static" title={name}>
+                      <FileTextIcon size={11} />
+                      <span className="uac-attach-chip-name">{name}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
 
         {/* The in-flight reply: thinking animation → streamed markdown w/ caret. */}
         {streaming && (
@@ -1839,8 +1897,8 @@ export function UnifiedAssistantChat({
               <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
             ))}
             {/* A structured interview question mid-stream (Phase 7) — a QuestionCard. */}
-            {streaming.buildQuestions.map((q) => (
-              <QuestionCard key={q.key} question={q} onAnswer={handleQuestionAnswer} />
+            {streaming.buildQuestions.map((q, qi) => (
+              <QuestionCard key={`${q.key}-${qi}`} question={q} onAnswer={handleQuestionAnswer} />
             ))}
             {streaming.text && <StreamingMarkdown text={streaming.text} />}
           </div>
