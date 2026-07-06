@@ -32,6 +32,12 @@ export interface TemplateProposal {
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
+// Display form of a kind slug ("operating_agreement" → "Operating Agreement"),
+// matching the templates pages — attorneys never see snake_case.
+function humanKind(k: string): string {
+  return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 // A short body preview — the first few lines, so the attorney sees the shape without
 // the card swallowing the chat. The full body is sent on approve.
 const PREVIEW_CHARS = 600
@@ -131,7 +137,7 @@ export function TemplateProposalCard({
           <LayersIcon size={14} /> Proposed template — {proposal.name}
         </span>
         <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-          {proposal.serviceKey} · {proposal.docKind}
+          {proposal.serviceKey} · {humanKind(proposal.docKind)}
         </span>
       </div>
 
