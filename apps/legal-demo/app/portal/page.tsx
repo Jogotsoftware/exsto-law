@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ScaleIcon } from '@/components/icons'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
-import { formatDate, formatDateTime } from '@/lib/datetime'
-import { formatDate, parseTimestamp } from '@/lib/datetime'
+import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
 
 interface MeResponse {
   email: string
