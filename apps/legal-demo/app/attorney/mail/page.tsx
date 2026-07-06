@@ -382,7 +382,7 @@ export default function MailPage() {
           >
             <input
               type="search"
-              placeholder="Search client mail — words, subject:…, from:…, after:2026/01/01"
+              placeholder="Search client mail"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
