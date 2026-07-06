@@ -1,9 +1,11 @@
 'use client'
 
-// Questionnaire library (#4b) — the firm's reusable, NOT-service-bound intake
-// forms. Build a questionnaire once (sections + fields) and attach it to any
-// service from the service builder. CRUD via the through-core
-// legal.questionnaire_template.* tools (backed by migration 0067).
+// Questionnaire library (#4b) — every intake form the firm has: the reusable,
+// NOT-service-bound library forms (CRUD here via the through-core
+// legal.questionnaire_template.* tools, migration 0067) PLUS each service's
+// bound intake form (read via legal.service.questionnaire.get; edited in the
+// service builder). Beta feedback: listing only the standalone forms made the
+// page claim "no questionnaires exist" while a live service had one.
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
@@ -218,8 +220,20 @@ function AddFromLibrary({ onPick }: { onPick: (q: LibQuestion) => void }) {
   )
 }
 
+// A service's bound intake form, shown alongside the library so this page lists
+// EVERY questionnaire the firm has. Edited in the service builder, not here.
+interface ServiceIntakeForm {
+  serviceKey: string
+  serviceName: string
+  isActive: boolean
+  title: string
+  fieldCount: number
+  updatedAt: string
+}
+
 export default function QuestionnaireLibraryPage() {
   const [items, setItems] = useState<QuestionnaireTemplate[] | null>(null)
+  const [svcForms, setSvcForms] = useState<ServiceIntakeForm[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
@@ -233,6 +247,43 @@ export default function QuestionnaireLibraryPage() {
     })
       .then((r) => setItems(r.questionnaires))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+    // Service-bound intake forms, best-effort: a failure here must not blank the
+    // library (the services surface has its own error handling).
+    callAttorneyMcp<{
+      services: Array<{
+        serviceKey: string
+        displayName: string
+        isActive: boolean
+        updatedAt: string
+      }>
+    }>({ toolName: 'legal.service.list_all' })
+      .then((r) =>
+        Promise.all(
+          r.services.map((s) =>
+            callAttorneyMcp<{
+              questionnaire: { title?: string; sections?: SchemaSection[] } | null
+            }>({ toolName: 'legal.service.questionnaire.get', input: { serviceKey: s.serviceKey } })
+              .then((q) =>
+                q.questionnaire
+                  ? {
+                      serviceKey: s.serviceKey,
+                      serviceName: s.displayName,
+                      isActive: s.isActive,
+                      title: q.questionnaire.title?.trim() || `${s.displayName} intake`,
+                      fieldCount: (q.questionnaire.sections ?? []).reduce(
+                        (n, sec) => n + (sec.fields ?? []).length,
+                        0,
+                      ),
+                      updatedAt: s.updatedAt,
+                    }
+                  : null,
+              )
+              .catch(() => null),
+          ),
+        ),
+      )
+      .then((forms) => setSvcForms(forms.filter((f): f is ServiceIntakeForm => f !== null)))
+      .catch(() => setSvcForms([]))
   }
   useEffect(load, [])
 
@@ -385,7 +436,7 @@ export default function QuestionnaireLibraryPage() {
     <main>
       <PageHead
         title="Questionnaires"
-        description="Reusable intake forms for the whole firm. Build one here, then attach it to any service from the service builder."
+        description="Every intake form the firm has — reusable library forms you build here, plus each service's bound intake form."
         actions={
           !draft ? (
             <button className="primary" onClick={() => setDraft(EMPTY_DRAFT())}>
@@ -637,12 +688,12 @@ export default function QuestionnaireLibraryPage() {
           <span className="spinner" /> Loading…
         </div>
       )}
-      {items && items.length === 0 && !draft && (
+      {items && items.length === 0 && (svcForms?.length ?? 0) === 0 && !draft && (
         <section>
           <p>No questionnaires yet. Build your first reusable intake form.</p>
         </section>
       )}
-      {items && items.length > 0 && (
+      {items && (items.length > 0 || (svcForms?.length ?? 0) > 0) && (
         <section>
           <div className="table-wrap">
             <table className="data-table">
@@ -673,6 +724,29 @@ export default function QuestionnaireLibraryPage() {
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button onClick={() => editFrom(t)}>Edit</button>{' '}
                       <button onClick={() => archive(t)}>Archive</button>
+                    </td>
+                  </tr>
+                ))}
+                {/* Service-bound intake forms — every service's questionnaire, so
+                    this page is the full inventory. Edited in the service builder. */}
+                {(svcForms ?? []).map((f) => (
+                  <tr key={`svc-${f.serviceKey}`}>
+                    <td>
+                      <strong>{f.title}</strong>{' '}
+                      <span className={`badge ${f.isActive ? 'ok' : ''}`}>
+                        {f.isActive ? 'Live service' : 'Service (disabled)'}
+                      </span>
+                    </td>
+                    <td className="text-muted">Intake form for the {f.serviceName} service</td>
+                    <td style={{ textAlign: 'right' }}>{f.fieldCount}</td>
+                    <td className="text-muted">{f.serviceName}</td>
+                    <td>{formatDate(f.updatedAt)}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <Link
+                        href={`/attorney/services/${encodeURIComponent(f.serviceKey)}/questionnaire`}
+                      >
+                        <button>Edit in service</button>
+                      </Link>
                     </td>
                   </tr>
                 ))}

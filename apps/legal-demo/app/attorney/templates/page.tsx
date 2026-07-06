@@ -117,6 +117,83 @@ function humanize(token: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : token
 }
 
+// Normalize a typed document kind to the snake_case tag style the library uses
+// ("Operating Agreement" → operating_agreement) so promotion-time matching stays
+// exact-string. Keeps a trailing "_" so "operating_" types cleanly mid-word.
+function normKind(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .slice(0, 60)
+}
+
+// Searchable document-kind combobox: the kinds already in the library as click
+// options, filtered as you type, plus "use as new kind" for anything novel (beta
+// feedback: the raw text input read as a schema field, not a control).
+function DocKindCombobox({
+  value,
+  kinds,
+  onChange,
+}: {
+  value: string
+  kinds: string[]
+  onChange: (v: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const needle = value.trim().toLowerCase()
+  const matches = needle ? kinds.filter((k) => k.includes(needle)) : kinds
+  const isNew = needle.length > 0 && !kinds.includes(needle)
+  return (
+    <span className="tpl-kind-combo">
+      <input
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        aria-label="Document kind"
+        value={value}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onChange={(e) => {
+          onChange(normKind(e.target.value))
+          setOpen(true)
+        }}
+        placeholder="Search or add a kind…"
+      />
+      {open && (matches.length > 0 || isNew) && (
+        <div className="tpl-kind-pop" role="listbox">
+          {matches.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={`tpl-var-suggest-item${k === needle ? ' active' : ''}`}
+              // mousedown (not click) so the input's blur doesn't close the list first.
+              onMouseDown={(e) => {
+                e.preventDefault()
+                onChange(k)
+                setOpen(false)
+              }}
+            >
+              {k}
+            </button>
+          ))}
+          {isNew && (
+            <button
+              type="button"
+              className="tpl-var-suggest-item tpl-kind-new"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                setOpen(false)
+              }}
+            >
+              + Use new kind “{needle}”
+            </button>
+          )}
+        </div>
+      )}
+    </span>
+  )
+}
+
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -140,6 +217,10 @@ export default function TemplatesPage() {
   const [importing, setImporting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [showFields, setShowFields] = useState(false)
+  // The "Insert a field" palette — collapsed by default (beta feedback: it listed
+  // every merge variable expanded and crowded the editor). The ghost "+" in the
+  // body and typing `{{` / `#` are the primary insert paths.
+  const [showInsert, setShowInsert] = useState(false)
   // "New template" start-options chooser: scratch / clone existing / from a
   // questionnaire. Questionnaires load lazily the first time the chooser opens.
   const [showNew, setShowNew] = useState(false)
@@ -773,10 +854,14 @@ export default function TemplatesPage() {
                 type="button"
                 className={showPreview ? 'primary' : undefined}
                 onClick={() => setShowPreview((v) => !v)}
-                title="Preview the finished document with sample data, side by side"
+                title={
+                  showPreview
+                    ? 'Back to editing'
+                    : 'Preview the finished document with sample data (replaces the editor until toggled back)'
+                }
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
               >
-                <EyeIcon size={15} /> Preview
+                <EyeIcon size={15} /> {showPreview ? 'Edit' : 'Preview'}
               </button>
               <button className="primary" onClick={save} disabled={saving}>
                 {saving ? 'Saving…' : draft.templateEntityId ? 'Save changes' : 'Create template'}
@@ -818,11 +903,16 @@ export default function TemplatesPage() {
             {draft.category === 'document' && (
               <label>
                 <span className="field-label">Document kind (optional)</span>
-                <input
-                  type="text"
+                <DocKindCombobox
                   value={draft.docKind}
-                  onChange={(e) => setDraft({ ...draft, docKind: e.target.value })}
-                  placeholder="e.g. nda"
+                  kinds={[
+                    ...new Set(
+                      (templates ?? [])
+                        .map((t) => (t.docKind ?? '').trim().toLowerCase())
+                        .filter(Boolean),
+                    ),
+                  ].sort()}
+                  onChange={(v) => setDraft((d) => (d ? { ...d, docKind: v } : d))}
                 />
               </label>
             )}
@@ -851,30 +941,49 @@ export default function TemplatesPage() {
             )}
           </div>
 
-          {/* Click-to-insert token palette. */}
-          <div className="tpl-insert">
-            <span className="tpl-insert-label">Insert a field:</span>
-            {STANDARD_TOKENS.map((t) => (
-              <button
-                key={t.id}
-                className="qb-pill"
-                type="button"
-                onClick={() => insertToken(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-            {bodyTokens.map((t) => (
-              <button
-                key={t}
-                className="qb-pill"
-                type="button"
-                onClick={() => insertToken(t)}
-                title="A custom token already used in this template"
-              >
-                {humanize(t)}
-              </button>
-            ))}
+          {/* Click-to-insert token palette — collapsed by default; the ghost "+"
+              in the body and typing `{{` / `#` are the primary insert paths. */}
+          <div className="tpl-insert tpl-insert-collapsible">
+            <button
+              type="button"
+              className="tpl-insert-toggle"
+              aria-expanded={showInsert}
+              onClick={() => setShowInsert((s) => !s)}
+            >
+              <span className={`tpl-insert-caret${showInsert ? ' open' : ''}`} aria-hidden="true">
+                ▸
+              </span>
+              Insert a field
+              <span className="tpl-insert-count">{STANDARD_TOKENS.length + bodyTokens.length}</span>
+              <span className="tpl-insert-hint">
+                or type {'{{'} or # in the document, or click the + at your cursor
+              </span>
+            </button>
+            {showInsert && (
+              <div className="tpl-insert-body">
+                {STANDARD_TOKENS.map((t) => (
+                  <button
+                    key={t.id}
+                    className="qb-pill"
+                    type="button"
+                    onClick={() => insertToken(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+                {bodyTokens.map((t) => (
+                  <button
+                    key={t}
+                    className="qb-pill"
+                    type="button"
+                    onClick={() => insertToken(t)}
+                    title="A custom token already used in this template"
+                  >
+                    {humanize(t)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Fields panel — typed metadata per {{token}}, toggled from the header. */}
@@ -889,10 +998,11 @@ export default function TemplatesPage() {
             </section>
           )}
 
-          {/* WYSIWYG canvas + optional live preview. The editor stays in the same
-              DOM slot whether or not the preview column is shown, so toggling
-              preview never re-mounts it. The body is stored as markdown with
-              {{tokens}}, round-tripped via the shared bridge on change. */}
+          {/* WYSIWYG canvas OR full-width live preview — an Edit/Preview switch,
+              not a split (beta feedback: side-by-side muddied the view). The
+              editor stays MOUNTED (display:none) while previewing so toggling
+              never re-mounts it or loses cursor/undo state. The body is stored as
+              markdown with {{tokens}}, round-tripped via the shared bridge. */}
           <div
             className="tpl-split"
             // Page setup only applies to documents; emails fall back to the CSS
@@ -907,13 +1017,13 @@ export default function TemplatesPage() {
                 : undefined
             }
           >
-            <div className="tpl-split-col">
+            <div className="tpl-split-col" style={showPreview ? { display: 'none' } : undefined}>
               <TemplateEditor
                 initialHtml={initialHtml}
                 placeholder={
                   draft.category === 'email'
-                    ? 'Write the email… use “Insert a field” to drop a {{token}}.'
-                    : 'Dear {{client_name}}, …  — use “Insert a field” to drop a {{token}}.'
+                    ? 'Write the email… type {{ or # (or click the + at your cursor) to drop a {{token}}.'
+                    : 'Dear {{client_name}}, …  — type {{ or # (or click the + at your cursor) to drop a {{token}}.'
                 }
                 onChange={onEditorChange}
                 editorRef={editorRef}

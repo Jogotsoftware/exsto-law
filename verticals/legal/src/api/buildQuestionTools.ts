@@ -48,7 +48,7 @@ export interface BuildQuestion {
 const ASK_BUILD_QUESTION_TOOL_DEF = {
   name: 'ask_build_question',
   description:
-    "Ask the attorney ONE structured interview question during a guided service build, rendered as a click-to-answer card (choice buttons and/or a text box) — NOT as free chat. Use this for EVERY interview question in the build: what the service is called, the route (auto vs manual), the generation mode, the documents the client gets, the price, and — for the workflow — who performs EACH step (automatic / attorney / client / system). Provide `choices` whenever the answer is one of a known set (so the attorney clicks instead of typing), set `multiSelect: true` when several may apply, and set `allowFreeText: true` when a typed answer should also be allowed. After you call this, STOP and wait — the attorney's answer comes back as the next message; do not also ask the question in prose. Your chat reply alongside this tool call should be a SINGLE short sentence framing the question (or empty).",
+    "Ask the attorney a structured interview question during a guided service build, rendered as a click-to-answer card (choice buttons and/or a text box) — NOT as free chat. One call = one question, but BATCH a related group by calling this several times in the SAME turn (e.g. route + generation mode together, or name + deliverables + jurisdiction together; keep a batch to ~4) — each call renders its own card and the attorney's answers come back TOGETHER, keyed by question, in the next message. Use this for EVERY interview question in the build: what the service is called, the route (auto vs manual), the generation mode, the documents the client gets, the price, and — for the workflow — who performs EACH step (automatic / attorney / client / system). Provide `choices` whenever the answer is one of a known set (so the attorney clicks instead of typing), set `multiSelect: true` when several may apply, and set `allowFreeText: true` when a typed answer should also be allowed. After the batch, STOP and wait — the answers come back as the next message; do not also ask the questions in prose. Your chat reply alongside the batch should be a SINGLE short sentence framing it (or empty).",
   input_schema: {
     type: 'object',
     properties: {
@@ -133,7 +133,7 @@ export function buildAskQuestionTool(ctx: ActionContext, captured: BuildQuestion
       const allowFreeText = choices.length === 0 ? true : args.allow_free_text === true
       const multiSelect = args.multi_select === true && choices.length > 0
       captured.push({ key, question, choices, allowFreeText, multiSelect })
-      return `The question "${question}" is shown to the attorney as a click-to-answer card. STOP here and WAIT for their answer — it will arrive as the next message. Do NOT repeat the question or the choices in your prose reply; reply with at most ONE short framing sentence (or nothing).`
+      return `The question "${question}" is shown to the attorney as a click-to-answer card. If more questions belong in this same batch (related, ~4 max), call ask_build_question again NOW in this turn; otherwise STOP and WAIT — the answer(s) to every card in the batch arrive together as the next message. Do NOT repeat the questions or choices in your prose reply; reply with at most ONE short framing sentence (or nothing).`
     },
   }
 }
