@@ -569,7 +569,7 @@ export async function matterCommunications(
               (SELECT m.body_preview FROM communication_message m
                 WHERE m.tenant_id = t.tenant_id AND m.thread_id = t.id
                 ORDER BY m.occurred_at DESC LIMIT 1) AS last_preview,
-              (SELECT to_char(max(m.occurred_at), 'YYYY-MM-DD"T"HH24:MI:SSOF')
+              (SELECT to_char(max(m.occurred_at), 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM')
                  FROM communication_message m
                 WHERE m.tenant_id = t.tenant_id AND m.thread_id = t.id) AS last_at,
               (SELECT count(*) FROM communication_message m
@@ -631,7 +631,7 @@ export async function matterCommunicationBodies(
               m.payload->>'direction' AS direction,
               m.payload->>'from' AS sender,
               m.payload->>'to' AS recipient,
-              to_char(m.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS occurred_at,
+              to_char(m.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at,
               left(COALESCE(b.body, m.body_preview, ''), $3) AS body,
               (length(COALESCE(b.body, m.body_preview, '')) > $3) AS truncated
          FROM communication_thread t

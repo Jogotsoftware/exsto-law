@@ -12,6 +12,7 @@ import { useSearchParams } from 'next/navigation'
 import { callClientMcp } from '@/lib/mcpClient'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { CheckIcon, ClockIcon, ChevronLeftIcon, ScaleIcon, LockIcon } from '@/components/icons'
+import { parseTimestamp } from '@/lib/datetime'
 
 interface ManageableBooking {
   clientFirstName: string | null
@@ -31,11 +32,10 @@ type View = 'overview' | 'reschedule' | 'cancel'
 type Done = { kind: 'rescheduled'; whenIso: string } | { kind: 'cancelled' }
 
 function formatWhen(iso: string | null): string {
-  if (!iso) return 'your consultation'
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? 'your consultation'
-    : d.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' })
+  const d = parseTimestamp(iso)
+  return d
+    ? d.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' })
+    : 'your consultation'
 }
 
 export default function ManageBookingPage({ params }: { params: Promise<{ token: string }> }) {

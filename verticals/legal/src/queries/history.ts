@@ -44,7 +44,7 @@ export async function getMatterHistory(
       `SELECT a.id AS action_id, akd.kind_name, a.intent_kind, a.autonomy_tier,
               act.display_name AS actor_name, act.actor_type,
               (a.reasoning_trace_id IS NOT NULL) AS has_trace,
-              to_char(a.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at
+              to_char(a.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at
        FROM action a
        JOIN action_kind_definition akd ON akd.id = a.action_kind_id
        JOIN actor act ON act.id = a.actor_id
@@ -76,7 +76,7 @@ export async function getMatterHistory(
       occurred_at: string
     }>(
       `SELECT e.id AS event_id, ekd.kind_name, e.payload,
-              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS occurred_at
+              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
        WHERE e.tenant_id = $1

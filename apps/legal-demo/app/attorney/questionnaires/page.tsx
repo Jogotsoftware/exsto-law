@@ -8,6 +8,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { formatDate } from '@/lib/datetime'
 import { PageHead } from '@/components/PageHead'
 import { LayersIcon, SearchIcon } from '@/components/icons'
 
@@ -668,7 +669,7 @@ export default function QuestionnaireLibraryPage() {
                         ? (t.associatedTemplates ?? []).map((a) => a.name || 'untitled').join(', ')
                         : '—'}
                     </td>
-                    <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
+                    <td>{formatDate(t.updatedAt)}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button onClick={() => editFrom(t)}>Edit</button>{' '}
                       <button onClick={() => archive(t)}>Archive</button>

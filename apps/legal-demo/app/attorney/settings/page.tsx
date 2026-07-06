@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { formatDateTime } from '@/lib/datetime'
 import { fetchSession } from '@/lib/auth'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
 import { PageHead } from '@/components/PageHead'
@@ -1058,7 +1059,7 @@ function IntegrationCard({
             style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: 'var(--space-1)' }}
             title={status.lastProbeAt}
           >
-            Last checked {new Date(status.lastProbeAt).toLocaleString()}
+            Last checked {formatDateTime(status.lastProbeAt)}
           </div>
         )}
       </div>

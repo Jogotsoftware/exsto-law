@@ -98,7 +98,7 @@ export async function buildMatterEmailIndex(ctx: ActionContext): Promise<MatterE
          na.value #>> '{}'        AS full_name,
          e.id                     AS matter_entity_id,
          e.name                   AS matter_number,
-         to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at
+         to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS created_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'matter'
        JOIN relationship r

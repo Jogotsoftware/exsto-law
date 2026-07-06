@@ -13,6 +13,7 @@ import { use, useCallback, useEffect, useState } from 'react'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 import { BackButton } from '@/components/BackButton'
 import { PayForm } from './PayForm'
+import { formatDate } from '@/lib/datetime'
 
 // The payment-intent shape returned by legal.client.invoice_payment_intent.
 type IntentReady = {
@@ -201,10 +202,8 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                 </span>
               </div>
               <div className="text-sm text-muted">
-                {data.issuedDate && <>Issued {new Date(data.issuedDate).toLocaleDateString()} · </>}
-                {data.dueDate && data.status !== 'paid' && (
-                  <>Due {new Date(data.dueDate).toLocaleDateString()}</>
-                )}
+                {data.issuedDate && <>Issued {formatDate(data.issuedDate)} · </>}
+                {data.dueDate && data.status !== 'paid' && <>Due {formatDate(data.dueDate)}</>}
               </div>
 
               {data.lines.length > 0 && (

@@ -113,7 +113,7 @@ export async function getClientMatterTimeline(
       occurred_at: string
     }>(
       `SELECT ekd.kind_name,
-              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS occurred_at
+              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
        WHERE e.tenant_id = $1

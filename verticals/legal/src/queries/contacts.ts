@@ -259,7 +259,7 @@ export async function getContact(
          (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'practice_area') AS service_key,
          (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
          (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'matter_summary') AS summary,
-         to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at
+         to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS created_at
        FROM entity e
        WHERE e.tenant_id = $1
          AND e.id IN (

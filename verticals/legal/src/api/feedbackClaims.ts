@@ -193,7 +193,7 @@ export async function listFeedbackBacklog(
               fb.category,
               fb.link_path,
               left(regexp_replace(fb.message, '\\s+', ' ', 'g'), 140) AS excerpt,
-              to_char(fb.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS submitted_at
+              to_char(fb.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS submitted_at
        FROM fb
        LEFT JOIN resolved r ON r.fid = fb.id::text
        LEFT JOIN latest_claim c ON c.fid = fb.id::text

@@ -114,7 +114,7 @@ export async function listMyNotifications(
               e.payload->>'summary'           AS summary,
               e.payload->>'excerpt'           AS excerpt,
               e.payload->>'category'          AS category,
-              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS resolved_at,
+              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS resolved_at,
               (seen.seen_through IS NULL OR e.occurred_at > seen.seen_through) AS unread
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id

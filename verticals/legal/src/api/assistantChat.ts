@@ -1345,7 +1345,7 @@ export async function listAssistantThread(
       occurred_at: string
     }>(
       `SELECT e.id AS event_id, e.payload,
-              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS occurred_at
+              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
        WHERE e.tenant_id = $1
@@ -1415,7 +1415,7 @@ export async function listAssistantFeedback(ctx: ActionContext): Promise<Assista
       occurred_at: string
     }>(
       `SELECT e.id AS event_id, e.payload,
-              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS occurred_at
+              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
        WHERE e.tenant_id = $1
@@ -1463,7 +1463,7 @@ export async function listAssistantThreads(ctx: ActionContext): Promise<Assistan
       `SELECT e.primary_entity_id AS entity_id,
               ekd2.kind_name      AS entity_kind,
               count(*)::int       AS turn_count,
-              to_char(max(e.occurred_at), 'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_at,
+              to_char(max(e.occurred_at), 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_at,
               (array_agg(e.payload->>'message' ORDER BY e.occurred_at DESC))[1] AS last_message
        FROM event e
        JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id

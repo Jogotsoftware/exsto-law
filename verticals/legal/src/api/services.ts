@@ -301,7 +301,7 @@ function compareServices(a: ServiceDefinition, b: ServiceDefinition): number {
 
 const WORKFLOW_COLS = `
   id, kind_name, display_name, description, transitions, status,
-  to_char(recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS recorded_at
+  to_char(recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at
 `
 
 // Bitemporal read discipline (exsto-query-substrate): current definitions only.
