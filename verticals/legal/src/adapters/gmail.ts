@@ -47,6 +47,29 @@ function wrap76(b64: string): string {
   return b64.replace(/(.{76})/g, '$1\r\n')
 }
 
+interface InlineImage {
+  cid: string
+  contentType: string
+  contentBase64: string
+}
+
+// Rich signatures / composer bodies embed photos as data: URLs. Gmail (and most
+// clients) refuse to display data: images in received mail, so at the MIME
+// boundary they become proper inline parts: each data URL is swapped for a
+// cid: reference and the bytes ride along in a multipart/related wrapper.
+function extractInlineImages(html: string, seed: string): { html: string; images: InlineImage[] } {
+  const images: InlineImage[] = []
+  const out = html.replace(
+    /src="data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)"/gi,
+    (_m, contentType: string, b64: string) => {
+      const cid = `img${images.length + 1}.${seed}@exsto`
+      images.push({ cid, contentType, contentBase64: b64 })
+      return `src="cid:${cid}"`
+    },
+  )
+  return { html: out, images }
+}
+
 // Build the raw RFC 5322 message, base64url-encoded for the Gmail send API.
 // Four shapes, composed from one body section + an optional attachment wrapper:
 //   plain only                  → text/plain
@@ -66,11 +89,45 @@ function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
   const seed = Buffer.from(`${args.to}:${args.subject}`).toString('hex').slice(0, 24)
 
   // The body section: a bare text/plain, or a multipart/alternative (plaintext +
-  // HTML) when an html part is supplied. Returns its own Content-Type header
-  // line(s) so it can sit at the top level OR be nested inside multipart/mixed.
+  // HTML) when an html part is supplied. Embedded data: images in the HTML are
+  // lifted into a multipart/related wrapper around the html part (cid parts), so
+  // photos in signatures/bodies actually display in recipients' clients. Returns
+  // its own Content-Type header line(s) so it can sit at the top level OR be
+  // nested inside multipart/mixed.
   function bodySection(): { typeLines: string[]; lines: string[] } {
     if (args.html) {
+      const { html, images } = extractInlineImages(args.html, seed)
       const altB = `=_exsto_alt_${seed}`
+      const htmlLines = [
+        'Content-Type: text/html; charset="UTF-8"',
+        'Content-Transfer-Encoding: 8bit',
+        '',
+        html,
+      ]
+      const htmlPart: string[] = []
+      if (images.length > 0) {
+        const relB = `=_exsto_rel_${seed}`
+        htmlPart.push(
+          `Content-Type: multipart/related; boundary="${relB}"`,
+          '',
+          `--${relB}`,
+          ...htmlLines,
+        )
+        for (const img of images) {
+          htmlPart.push(
+            `--${relB}`,
+            `Content-Type: ${img.contentType}`,
+            'Content-Transfer-Encoding: base64',
+            `Content-ID: <${img.cid}>`,
+            'Content-Disposition: inline',
+            '',
+            wrap76(img.contentBase64),
+          )
+        }
+        htmlPart.push(`--${relB}--`)
+      } else {
+        htmlPart.push(...htmlLines)
+      }
       return {
         typeLines: [`Content-Type: multipart/alternative; boundary="${altB}"`],
         lines: [
@@ -80,10 +137,7 @@ function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
           '',
           args.body,
           `--${altB}`,
-          'Content-Type: text/html; charset="UTF-8"',
-          'Content-Transfer-Encoding: 8bit',
-          '',
-          args.html,
+          ...htmlPart,
           `--${altB}--`,
         ],
       }

@@ -95,20 +95,28 @@ function escapeHtml(s: string): string {
 
 export function withSignature(
   parts: { body: string; html?: string },
-  signature: string,
+  signature: { text: string; html: string | null },
 ): { body: string; html?: string } {
-  const sig = signature.trim()
-  if (!sig) return parts
+  const sig = signature.text.trim()
+  if (!sig && !signature.html) return parts
   // Standard "-- " delimiter so clients recognise it as a signature block.
-  const body = `${parts.body.replace(/\s+$/, '')}\n\n-- \n${sig}\n`
+  const body = sig ? `${parts.body.replace(/\s+$/, '')}\n\n-- \n${sig}\n` : parts.body
+  // Rich signatures (formatting, links, photos) ship their stored HTML as-is —
+  // same trust as the composer's own bodyHtml, both authored by the attorney.
+  // Inline data-URL photos are converted to cid attachments in the Gmail
+  // adapter, not here.
+  const sigInner = signature.html ?? escapeHtml(sig).replace(/\n/g, '<br>')
+  const sigHtml = `<br><br><div class="firm-signature" style="color:#555">--<br>${sigInner}</div>`
   let html = parts.html
   if (html) {
-    const sigHtml = `<br><br><div class="firm-signature" style="color:#555">--<br>${escapeHtml(
-      sig,
-    ).replace(/\n/g, '<br>')}</div>`
     html = /<\/body\s*>/i.test(html)
       ? html.replace(/<\/body\s*>/i, `${sigHtml}</body>`)
       : html + sigHtml
+  } else if (signature.html) {
+    // Plaintext-only send (e.g. a template-driven notification without a
+    // branded HTML kit) but a rich signature: synthesize the HTML alternative
+    // so the formatting/photo actually reaches the client.
+    html = `<div>${escapeHtml(parts.body).replace(/\n/g, '<br>')}</div>${sigHtml}`
   }
   return { body, html }
 }

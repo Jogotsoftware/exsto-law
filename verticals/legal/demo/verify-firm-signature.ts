@@ -51,7 +51,7 @@ async function main() {
   const resolved1 = await resolveEmailSignature(ctx)
   check(
     'stored signature is what the send path resolves',
-    resolved1 === sigText,
+    resolved1.text === sigText,
     JSON.stringify(resolved1),
   )
 
@@ -66,13 +66,13 @@ async function main() {
   const sigText2 = sigText + '\nNC Bar #12345'
   await setFirmSignature(ctx, { signature: sigText2 })
   const resolved2 = await resolveEmailSignature(ctx)
-  check('editing the signature changes the next send', resolved2 === sigText2)
+  check('editing the signature changes the next send', resolved2.text === sigText2)
 
   // (5) disable → send path appends nothing; getFirmSignature reflects it
   await setFirmSignature(ctx, { enabled: false })
   const resolved3 = await resolveEmailSignature(ctx)
   const cfg3 = await getFirmSignature(ctx)
-  check('disabled ⇒ send path appends nothing', resolved3 === '' && cfg3.enabled === false)
+  check('disabled ⇒ send path appends nothing', resolved3.text === '' && cfg3.enabled === false)
 
   // (6) clear text + re-enable ⇒ firm-derived default kicks in (non-empty)
   await setFirmSignature(ctx, { signature: '', enabled: true })
@@ -80,7 +80,7 @@ async function main() {
   const resolved4 = await resolveEmailSignature(ctx)
   check(
     'empty stored ⇒ firm-derived default used',
-    cfg4.isDefault === true && resolved4.length > 0,
+    cfg4.isDefault === true && resolved4.text.length > 0,
     `default=${JSON.stringify(resolved4)}`,
   )
 

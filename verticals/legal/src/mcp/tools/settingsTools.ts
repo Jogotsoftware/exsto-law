@@ -67,7 +67,7 @@ registerTool({
 registerTool({
   name: 'legal.settings.signature.set',
   description:
-    'Set the firm email signature and/or its enabled flag. Undefined fields are left alone; an empty signature clears it (sends then fall back to the firm-derived default). Applies to every subsequent outbound client email.',
+    'Set the firm email signature (plain text + optional rich signatureHtml with formatting/links/photos) and/or its enabled flag. Undefined fields are left alone; an empty signature clears it (sends then fall back to the firm-derived default). Applies to every subsequent outbound client email.',
   mode: 'write',
   handler: async (ctx: ActionContext, input) => {
     const { signature } = await setFirmSignature(ctx, input)

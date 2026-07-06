@@ -5,15 +5,28 @@
 // SAME firm signature as Settings → Email signature (legal.settings.signature.*),
 // so editing here updates everywhere. The signature is appended to outbound mail
 // server-side by the central send path; this is its preview + a convenient editor,
-// not a per-message body field.
+// not a per-message body field. Rich signatures (formatting, links, photos) are
+// edited with the same MailComposer as the message body and previewed as HTML —
+// the HTML is the attorney's own saved content, the same trust as the body.
 import { useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { MailComposer, type ComposerValue } from '@/components/MailComposer'
 
 export interface FirmSignature {
   signature: string | null
+  signatureHtml: string | null
   enabled: boolean
   isDefault: boolean
   resolved: string
+  resolvedHtml: string | null
+}
+
+function textToHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>')
 }
 
 export function SignatureBlock({
@@ -24,12 +37,16 @@ export function SignatureBlock({
   onChange: (v: FirmSignature) => void
 }) {
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState<ComposerValue>({ html: '', text: '' })
+  const [seedHtml, setSeedHtml] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   function startEdit() {
-    setDraft(value?.signature ?? value?.resolved ?? '')
+    const text = value?.signature ?? value?.resolved ?? ''
+    const html = value?.signatureHtml ?? textToHtml(text)
+    setDraft({ html, text })
+    setSeedHtml(html)
     setErr(null)
     setEditing(true)
   }
@@ -40,7 +57,7 @@ export function SignatureBlock({
     try {
       const r = await callAttorneyMcp<{ signature: FirmSignature }>({
         toolName: 'legal.settings.signature.set',
-        input: { signature: draft, enabled: true },
+        input: { signature: draft.text, signatureHtml: draft.html || null, enabled: true },
       })
       onChange(r.signature)
       setEditing(false)
@@ -55,12 +72,11 @@ export function SignatureBlock({
     return (
       <div className="composer-signature is-editing">
         <span className="composer-signature-label">Signature</span>
-        <textarea
-          className="composer-signature-input"
-          rows={4}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+        <MailComposer
+          initialHtml={seedHtml}
+          minHeight={100}
           placeholder="Your name, firm, phone…"
+          onChange={setDraft}
         />
         {err && <div className="composer-signature-err">{err}</div>}
         <div className="composer-signature-actions">
@@ -77,6 +93,7 @@ export function SignatureBlock({
 
   const enabled = value?.enabled ?? true
   const text = value?.resolved?.trim() ?? ''
+  const html = enabled ? value?.resolvedHtml : null
   return (
     <div className="composer-signature">
       <div className="composer-signature-head">
@@ -85,15 +102,23 @@ export function SignatureBlock({
           Edit
         </button>
       </div>
-      <div
-        className={`composer-signature-text ${enabled && text ? '' : 'composer-signature-muted'}`}
-      >
-        {enabled && text
-          ? text
-          : enabled
-            ? 'No signature yet — click Edit to add one.'
-            : 'Signature is turned off (Settings → Email signature).'}
-      </div>
+      {html ? (
+        <div
+          className="composer-signature-text"
+          // The firm's own saved signature HTML (same trust as the mail body).
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <div
+          className={`composer-signature-text ${enabled && text ? '' : 'composer-signature-muted'}`}
+        >
+          {enabled && text
+            ? text
+            : enabled
+              ? 'No signature yet — click Edit to add one.'
+              : 'Signature is turned off (Settings → Email signature).'}
+        </div>
+      )}
     </div>
   )
 }
