@@ -79,7 +79,7 @@ export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> 
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'workflow_route') AS workflow_route,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
          e.metadata->>'scheduled_at' AS scheduled_at,
-         to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at
+         to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS created_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1

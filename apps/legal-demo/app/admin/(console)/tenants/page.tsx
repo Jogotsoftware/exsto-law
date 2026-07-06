@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { formatDate } from '@/lib/datetime'
 import { callAdminMcp } from '@/lib/mcpAdmin'
 
 interface TenantSummary {
@@ -168,9 +169,7 @@ export default function AdminTenantsPage() {
                   <td>
                     <span className={`badge ${STATUS_BADGE[t.status] ?? 'info'}`}>{t.status}</span>
                   </td>
-                  <td style={{ fontSize: 'var(--text-sm)' }}>
-                    {new Date(t.createdAt).toLocaleDateString()}
-                  </td>
+                  <td style={{ fontSize: 'var(--text-sm)' }}>{formatDate(t.createdAt)}</td>
                   <td>
                     {t.reserved ? (
                       <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>—</span>

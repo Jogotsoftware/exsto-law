@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ScaleIcon } from '@/components/icons'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 import { formatDate, formatDateTime } from '@/lib/datetime'
+import { formatDate, parseTimestamp } from '@/lib/datetime'
 
 interface MeResponse {
   email: string
@@ -281,11 +282,9 @@ export default function ClientPortalPage() {
 // Upcoming consultation with a self-service reschedule/cancel link (the same
 // token-gated /book/manage page the confirmation email uses).
 function UpcomingEventCard({ timeline }: { timeline: Timeline }) {
-  const when = timeline.scheduledAt
-    ? new Date(timeline.scheduledAt).toLocaleString(undefined, {
-        dateStyle: 'full',
-        timeStyle: 'short',
-      })
+  const whenDate = timeline.scheduledAt ? parseTimestamp(timeline.scheduledAt) : null
+  const when = whenDate
+    ? whenDate.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' })
     : null
   return (
     <section className="pdash-card pdash-upcoming">
@@ -569,7 +568,7 @@ function InvoicesPanel() {
                 </span>
                 {inv.dueDate && inv.status !== 'paid' && (
                   <span className="text-sm text-muted" style={{ marginLeft: 'var(--space-2)' }}>
-                    due {new Date(inv.dueDate).toLocaleDateString()}
+                    due {formatDate(inv.dueDate)}
                   </span>
                 )}
               </div>

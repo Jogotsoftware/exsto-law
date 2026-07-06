@@ -82,7 +82,7 @@ export async function listClientTrustLedger(
       payload: Record<string, unknown>
     }>(
       `SELECT e.id, ekd.kind_name, e.payload->>'amount' AS amount,
-              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') AS occurred_at, e.payload
+              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at, e.payload
          FROM event e
          JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
         WHERE e.tenant_id = $1 AND e.primary_entity_id = $2::uuid AND ekd.kind_name = ANY($3)
