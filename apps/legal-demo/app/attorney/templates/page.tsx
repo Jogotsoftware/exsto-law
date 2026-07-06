@@ -25,7 +25,7 @@ import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
 import { PageHead } from '@/components/PageHead'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
-import type { TemplateVariables } from '@exsto/legal'
+import type { TemplateVariables, TemplateVariableSpec } from '@exsto/legal'
 
 type Category = 'document' | 'email'
 
@@ -125,6 +125,18 @@ function normKind(s: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9_]+/g, '_')
     .slice(0, 60)
+}
+
+// Canonical form for ASSOCIATION comparisons (review finding on #284): the
+// docKind combobox keeps trailing underscores while typing (normKind), MCP
+// writers store free-text kinds verbatim, and service documents are slugified —
+// three spellings of the same kind. Slug both sides of the includes() the same
+// way so "Operating Agreement " still associates with operating_agreement.
+function canonKind(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
 }
 
 // Display form of a kind slug ("operating_agreement" → "Operating Agreement").
@@ -350,10 +362,12 @@ export default function TemplatesPage() {
   // list includes the draft's docKind. Their field ids are the only ones that
   // bind blue — a question existing elsewhere isn't a binding, it's a candidate.
   const associatedFields = useMemo(() => {
-    const dk = draft?.category === 'document' ? draft.docKind.trim().toLowerCase() : ''
+    const dk = draft?.category === 'document' ? canonKind(draft.docKind) : ''
     if (!dk) return new Set<string>()
     const producing = new Set(
-      serviceDocuments.filter((sd) => sd.documents.includes(dk)).map((sd) => sd.serviceKey),
+      serviceDocuments
+        .filter((sd) => sd.documents.some((doc) => canonKind(doc) === dk))
+        .map((sd) => sd.serviceKey),
     )
     if (producing.size === 0) return new Set<string>()
     return new Set(
@@ -362,6 +376,12 @@ export default function TemplatesPage() {
         .map((f) => f.fieldId),
     )
   }, [draft?.category, draft?.docKind, firmFieldEntries, serviceDocuments])
+
+  // A spec that carries no configuration. save() drops these to keep the stored
+  // map lean; coloring must agree (a trivial spec is NOT a defined field), or
+  // chips flip blue → yellow across a save with no content change.
+  const isTrivialSpec = (spec: TemplateVariableSpec): boolean =>
+    spec.type === 'text' && !spec.required && !spec.default && !spec.options?.length
 
   // Classify a {{variable}} for the editor (per the 2026-07-06 spec):
   //   matched (blue)   — bound to a question in a questionnaire ASSOCIATED with
@@ -376,7 +396,9 @@ export default function TemplatesPage() {
   const validateVariable = useMemo(() => {
     const bound = new Set<string>([
       ...associatedFields,
-      ...Object.keys(draft?.variables ?? {}).map((t) => t.toLowerCase()),
+      ...Object.entries(draft?.variables ?? {})
+        .filter(([, spec]) => !isTrivialSpec(spec))
+        .map(([t]) => t.toLowerCase()),
     ])
     const exists = new Set<string>([
       ...bound,
@@ -678,9 +700,7 @@ export default function TemplatesPage() {
     const variables: TemplateVariables = {}
     for (const [tok, spec] of Object.entries(draft.variables)) {
       if (!bodyTokens.has(tok.toLowerCase())) continue
-      const trivial =
-        spec.type === 'text' && !spec.required && !spec.default && !spec.options?.length
-      if (!trivial) variables[tok] = spec
+      if (!isTrivialSpec(spec)) variables[tok] = spec
     }
 
     setSaving(true)
