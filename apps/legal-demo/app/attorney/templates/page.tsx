@@ -127,6 +127,12 @@ function normKind(s: string): string {
     .slice(0, 60)
 }
 
+// Display form of a kind slug ("operating_agreement" → "Operating Agreement").
+// Same helper as the per-service templates page — attorneys never see snake_case.
+function humanKind(k: string): string {
+  return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 // Searchable document-kind combobox: the kinds already in the library as click
 // options, filtered as you type, plus "use as new kind" for anything novel (beta
 // feedback: the raw text input read as a schema field, not a control).
@@ -140,6 +146,9 @@ function DocKindCombobox({
   onChange: (v: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // What the attorney typed, shown verbatim while editing; null means "not
+  // editing — display the stored slug in human form". The slug never surfaces.
+  const [text, setText] = useState<string | null>(null)
   const needle = value.trim().toLowerCase()
   const matches = needle ? kinds.filter((k) => k.includes(needle)) : kinds
   const isNew = needle.length > 0 && !kinds.includes(needle)
@@ -150,10 +159,14 @@ function DocKindCombobox({
         role="combobox"
         aria-expanded={open}
         aria-label="Document kind"
-        value={value}
+        value={text ?? (value ? humanKind(value) : '')}
         onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
+        onBlur={() => {
+          setOpen(false)
+          setText(null)
+        }}
         onChange={(e) => {
+          setText(e.target.value)
           onChange(normKind(e.target.value))
           setOpen(true)
         }}
@@ -170,10 +183,11 @@ function DocKindCombobox({
               onMouseDown={(e) => {
                 e.preventDefault()
                 onChange(k)
+                setText(null)
                 setOpen(false)
               }}
             >
-              {k}
+              {humanKind(k)}
             </button>
           ))}
           {isNew && (
@@ -182,10 +196,11 @@ function DocKindCombobox({
               className="tpl-var-suggest-item tpl-kind-new"
               onMouseDown={(e) => {
                 e.preventDefault()
+                setText(null)
                 setOpen(false)
               }}
             >
-              + Use new kind “{needle}”
+              + Use new kind “{humanKind(needle)}”
             </button>
           )}
         </div>
@@ -1262,7 +1277,7 @@ export default function TemplatesPage() {
                         {t.category}
                       </span>
                     </td>
-                    <td>{t.docKind ?? '—'}</td>
+                    <td>{t.docKind ? humanKind(t.docKind) : '—'}</td>
                     <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button onClick={() => edit(t)}>Edit</button>{' '}
