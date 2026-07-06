@@ -2,16 +2,16 @@ import type { ReactNode } from 'react'
 
 interface PageHeadProps {
   title: ReactNode
+  // Accepted but no longer rendered: pages don't show subtitles under the title.
   description?: ReactNode
   actions?: ReactNode
 }
 
-export function PageHead({ title, description, actions }: PageHeadProps) {
+export function PageHead({ title, actions }: PageHeadProps) {
   return (
     <div className="attorney-page-head">
       <div className="page-head-titles">
         <h1>{title}</h1>
-        {description && <p className="page-head-desc">{description}</p>}
       </div>
       {actions && <div className="head-actions">{actions}</div>}
     </div>
