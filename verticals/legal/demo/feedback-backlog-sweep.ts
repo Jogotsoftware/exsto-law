@@ -1,11 +1,12 @@
 // One-shot beta-feedback backlog sweep (manager coordination), THROUGH THE CORE.
 //
-// CLAIMS ONLY — reversible. Marks each open item whose page area is owned by an
-// active branch as in_progress (claimed by that branch), so parallel sessions stop
-// duplicating them. It does NOT resolve anything: resolution is irreversible and
-// belongs to the session that actually shipped the work (the standing rule), so
-// "looks shipped" candidates are reported, not auto-resolved here. Items with no
-// clear active owner are left open and reported.
+// CLAIMS ONLY. Marks each open item whose page area is owned by an active branch
+// as in_progress (claimed by that branch), so parallel sessions stop duplicating
+// them. This script does not resolve — resolution is a per-item, verified call
+// (see the resolve-shipped-feedback-*.ts scripts). Note: any session may resolve
+// an item it verifies is shipped; the old "resolution belongs to the shipping
+// session" rule was removed 2026-07-06 (it left fixed items reading as open).
+// Items with no clear active owner are left open and reported.
 //
 // Attributed to the Claude agent actor (tenant zero) — this is an agent action.
 // Run: tsx --env-file=.env.local verticals/legal/demo/feedback-backlog-sweep.ts
