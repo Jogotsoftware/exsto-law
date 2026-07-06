@@ -3,7 +3,7 @@
 // from data, flags missing fields honestly, and never calls anything external,
 // and that buildMergeData maps matter + questionnaire facts onto template slots.
 import { describe, it, expect } from 'vitest'
-import { renderTemplate, buildMergeData } from '@exsto/legal'
+import { renderTemplate, buildMergeData, MERGE_SLOT_FIELDS } from '@exsto/legal'
 import type { MatterDetail } from '@exsto/legal'
 
 describe('renderTemplate (deterministic, no Anthropic)', () => {
@@ -153,5 +153,77 @@ describe('buildMergeData', () => {
     } satisfies MatterDetail
     const data = buildMergeData(matter, { effectiveDateIso: '2026-06-18T00:00:00Z' })
     expect(data.client_email).toBe('raw@intake.com')
+  })
+})
+
+// Field auto-bind (beta feedback 2026-07-06): the editors recognize tokens off
+// MERGE_SLOT_FIELDS, so the constant and buildMergeData must never drift apart.
+describe('MERGE_SLOT_FIELDS (editor recognition contract)', () => {
+  const baseMatter = {
+    matterEntityId: 'm1',
+    matterNumber: 'PL-2026-0007',
+    clientName: 'Maria Gomez',
+    serviceKey: 'nc_llc_multi_member',
+    workflowRoute: 'auto',
+    status: 'in_review',
+    scheduledAt: null,
+    createdAt: '2026-06-18T00:00:00Z',
+    practiceArea: 'nc_llc_multi_member',
+    summary: '',
+    attributes: {},
+    questionnaireResponses: {},
+    transcriptText: null,
+    latestDraftVersionId: null,
+    latestDraftStatus: null,
+    clientEmail: 'maria@example.com',
+  } satisfies MatterDetail
+
+  it('every curated slot buildMergeData can emit is listed in MERGE_SLOT_FIELDS', () => {
+    // Full inputs so every source resolves; questionnaire supplies the pick()
+    // sources. Any curated key missing from the constant = editor would flag red
+    // a token that merges — the exact bug this contract exists to prevent.
+    const matter = {
+      ...baseMatter,
+      questionnaireResponses: {
+        company_name: 'Sunrise Ventures',
+        business_description: 'Consulting',
+      },
+    } satisfies MatterDetail
+    const data = buildMergeData(matter, {
+      effectiveDateIso: '2026-06-18T00:00:00Z',
+      todayIso: '2026-07-06T00:00:00Z',
+      feeAmountFormatted: '$1,500.00',
+      feeStructureHuman: 'a fixed flat fee',
+      firmName: 'Pacheco Law',
+      attorneyName: 'Juan Carlos Pacheco',
+    })
+    const raw = new Set(['company_name', 'business_description']) // questionnaire ids
+    for (const key of Object.keys(data)) {
+      if (raw.has(key)) continue
+      expect(MERGE_SLOT_FIELDS, `curated slot "${key}" missing from MERGE_SLOT_FIELDS`).toContain(
+        key,
+      )
+    }
+  })
+
+  it('firm_name / attorney_name / today fill from options (they were MISSING before)', () => {
+    const data = buildMergeData(baseMatter, {
+      effectiveDateIso: '2026-06-18T00:00:00Z',
+      todayIso: '2026-07-06T00:00:00Z',
+      firmName: 'Pacheco Law',
+      attorneyName: 'Juan Carlos Pacheco',
+    })
+    expect(data.firm_name).toBe('Pacheco Law')
+    expect(data.attorney_name).toBe('Juan Carlos Pacheco')
+    expect(data.today).toBe('July 6, 2026')
+    // effective_date stays independent of today
+    expect(data.effective_date).toBe('June 18, 2026')
+  })
+
+  it('today defaults to the effective date; unset firm identity renders MISSING honestly', () => {
+    const data = buildMergeData(baseMatter, { effectiveDateIso: '2026-06-18T00:00:00Z' })
+    expect(data.today).toBe('June 18, 2026')
+    const { markdown } = renderTemplate('{{firm_name}} / {{attorney_name}}', data)
+    expect(markdown).toBe('[[MISSING: firm_name]] / [[MISSING: attorney_name]]')
   })
 })

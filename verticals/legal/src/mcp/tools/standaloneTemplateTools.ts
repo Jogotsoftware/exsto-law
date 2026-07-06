@@ -7,10 +7,13 @@ import {
   archiveTemplate,
   aiDraftTemplate,
   aiEnhanceTemplate,
+  loadFirmFieldLibrary,
+  MERGE_SLOT_FIELDS,
   type StandaloneTemplate,
   type CreateTemplateInput,
   type UpdateTemplateInput,
   type AiEnhanceTemplateInput,
+  type FirmQuestionSummary,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -26,6 +29,27 @@ const listTool: Tool<Record<string, never>, { templates: StandaloneTemplate[] }>
   mode: 'read',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => ({ templates: await listStandaloneTemplates(ctx) }),
+}
+
+// The firm-wide field catalog the template editors auto-bind against: every
+// questionnaire field id any service (active or retired) has ever defined, with
+// the services that define it, plus the merge engine's curated slot ids. A
+// {{token}} matching one of these already has a data source — the editors paint
+// it bound instead of unknown/red. Read-only; composes loadFirmFieldLibrary
+// (which recurses repeater memberFields) and MERGE_SLOT_FIELDS.
+const fieldLibraryTool: Tool<
+  Record<string, never>,
+  { firmFields: FirmQuestionSummary[]; mergeFields: string[] }
+> = {
+  name: 'legal.template.field_library',
+  description:
+    'The firm-wide template field catalog: every questionnaire field id defined by any service (with the defining service keys) plus the platform merge slots (matter facts, fee block, firm identity, dates). Editors use it to auto-bind {{tokens}} whose fields already exist.',
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({
+    firmFields: await loadFirmFieldLibrary(ctx, ''),
+    mergeFields: [...MERGE_SLOT_FIELDS],
+  }),
 }
 
 const getTool: Tool<{ templateEntityId: string }, { template: StandaloneTemplate | null }> = {
@@ -193,6 +217,7 @@ const aiEnhanceTool: Tool<AiEnhanceTemplateInput, { body: string }> = {
 }
 
 registerTool(listTool)
+registerTool(fieldLibraryTool)
 registerTool(getTool)
 registerTool(createTool)
 registerTool(updateTool)

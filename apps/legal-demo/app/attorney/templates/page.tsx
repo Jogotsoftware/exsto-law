@@ -166,6 +166,12 @@ export default function TemplatesPage() {
   // intake question. Used to color {{variables}} in the editor (best-effort; the
   // chips just fall back to "no question / yellow" if the library can't load).
   const [libraryTokens, setLibraryTokens] = useState<Set<string>>(() => new Set())
+  // Firm-wide field catalog (legal.template.field_library): every questionnaire
+  // field id any service already defines (firmFields — these AUTO-BIND blue) and
+  // the platform merge slots that fill from matter/firm data (mergeFields —
+  // recognized, yellow when no question backs them). Lower-cased on arrival.
+  const [firmFields, setFirmFields] = useState<Set<string>>(() => new Set())
+  const [mergeFields, setMergeFields] = useState<Set<string>>(() => new Set())
 
   function load() {
     setError(null)
@@ -208,24 +214,39 @@ export default function TemplatesPage() {
         // No library / tool unavailable — coloring still works off STANDARD_TOKENS
         // and the template's own defined variables.
       })
+    callAttorneyMcp<{ firmFields: Array<{ fieldId: string }>; mergeFields: string[] }>({
+      toolName: 'legal.template.field_library',
+    })
+      .then((r) => {
+        if (cancelled) return
+        setFirmFields(new Set((r.firmFields ?? []).map((f) => f.fieldId.toLowerCase())))
+        setMergeFields(new Set((r.mergeFields ?? []).map((t) => t.toLowerCase())))
+      })
+      .catch(() => {
+        // Best-effort like the question library — coloring degrades gracefully.
+      })
     return () => {
       cancelled = true
     }
   }, [])
 
-  // Classify a {{variable}} for the editor: a variable backed by a question
-  // (library question OR a defined template variable) is "matched" (blue); a
-  // recognized variable with no question (e.g. an auto-fill token) is "orphaned"
-  // (yellow); anything unrecognized is "unknown" (red). Matching is
+  // Classify a {{variable}} for the editor: a variable that already has a data
+  // source — a library question, a questionnaire field ANY service defines
+  // (firmFields — the auto-bind the beta feedback asked for), or a defined
+  // template variable — is "matched" (blue); a recognized platform token with no
+  // question behind it (standard/merge slots) is "orphaned" (yellow); anything
+  // else is "unknown" (red — the field exists nowhere yet). Matching is
   // case-INSENSITIVE, mirroring renderTemplate (a hand-typed {{COMPANY_NAME}}
   // fills a company_name field at merge time) — never flag red what would merge.
   const validateVariable = useMemo(() => {
-    const hasQuestion = new Set<string>(
-      [...libraryTokens, ...Object.keys(draft?.variables ?? {})].map((t) => t.toLowerCase()),
-    )
+    const hasQuestion = new Set<string>([
+      ...[...libraryTokens, ...Object.keys(draft?.variables ?? {})].map((t) => t.toLowerCase()),
+      ...firmFields,
+    ])
     const known = new Set<string>([
       ...hasQuestion,
       ...STANDARD_TOKENS.map((t) => t.id.toLowerCase()),
+      ...mergeFields,
     ])
     return (name: string): VariableStatus =>
       hasQuestion.has(name.toLowerCase())
@@ -233,18 +254,21 @@ export default function TemplatesPage() {
         : known.has(name.toLowerCase())
           ? 'orphaned'
           : 'unknown'
-  }, [libraryTokens, draft?.variables])
+  }, [libraryTokens, draft?.variables, firmFields, mergeFields])
 
   // Candidate names for the editor's `{{` autocomplete: the question library, the
-  // standard merge tokens, and the template's own defined variables.
+  // firm-wide field catalog, the standard merge tokens, and the template's own
+  // defined variables.
   const suggestVariables = useMemo(() => {
     const set = new Set<string>([
       ...libraryTokens,
+      ...firmFields,
+      ...mergeFields,
       ...STANDARD_TOKENS.map((t) => t.id),
       ...Object.keys(draft?.variables ?? {}),
     ])
     return [...set].sort()
-  }, [libraryTokens, draft?.variables])
+  }, [libraryTokens, draft?.variables, firmFields, mergeFields])
 
   // Escape closes the "Draft with AI" modal (and restores focus to its trigger).
   useEffect(() => {

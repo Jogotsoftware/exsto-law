@@ -64,6 +64,15 @@ export interface MergeDataOptions {
   // (the worker reads Contract G). Absent → the fee slots render as MISSING.
   feeAmountFormatted?: string
   feeStructureHuman?: string
+  // Firm identity from tenant settings (the worker reads getTenantSettings).
+  // Absent → {{firm_name}}/{{attorney_name}} render as MISSING — these tokens
+  // were offered by the editors long before they merged, so they must fill.
+  firmName?: string
+  attorneyName?: string
+  // ISO date for {{today}} (the generation date). Defaults to effectiveDateIso —
+  // today the caller passes "now" for both, but effective_date is a legal fact
+  // that may diverge from the generation date, so they stay separate slots.
+  todayIso?: string
 }
 
 // Pull the first plausible value for a logical field out of the questionnaire
@@ -155,7 +164,13 @@ export function buildMergeData(
     primary_client_salutation: firstName(clientName) ?? clientName,
     client_email: matter.clientEmail ?? undefined,
     effective_date: longDate(options.effectiveDateIso),
+    today: longDate(options.todayIso ?? options.effectiveDateIso),
     business_description: pick(q, ['business_description', 'business_purpose']),
+
+    // Firm identity (tenant settings) — undefined when the firm hasn't set them,
+    // which renders an honest MISSING rather than a guessed name.
+    firm_name: options.firmName,
+    attorney_name: options.attorneyName,
 
     // Fee block (from service cost config when available)
     fee_amount_formatted: options.feeAmountFormatted,
@@ -178,3 +193,26 @@ export function buildMergeData(
   }
   return merged
 }
+
+// The curated slot ids buildMergeData can fill — the single source of truth the
+// template editors use to recognize platform-provided tokens (yellow tier), so
+// the recognition set and the merge engine can never drift apart again. Kept as
+// an explicit list (not derived at runtime) because buildMergeData only emits a
+// slot when its source resolves; a unit test pins the two together.
+export const MERGE_SLOT_FIELDS: readonly string[] = [
+  'company_name',
+  'matter_number',
+  'primary_client_name',
+  'primary_client_salutation',
+  'client_email',
+  'effective_date',
+  'today',
+  'business_description',
+  'firm_name',
+  'attorney_name',
+  'fee_amount_formatted',
+  'fee_structure_human',
+  'scope_notes_clause',
+  'fee_terms_clause',
+  'ambiguities_section',
+]
