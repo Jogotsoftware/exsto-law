@@ -44,6 +44,24 @@ export async function getTenantSettings(ctx: ActionContext): Promise<TenantSetti
   }
 }
 
+// For DOCUMENT MERGE only: degrade to EMPTY (unknown), never to FIRM_DEFAULTS.
+// The Settings-page fallback above exists so the UI renders in a wedge-era
+// environment; but a generated legal document that fills {{firm_name}} with the
+// demo firm's identity for some OTHER tenant is a forgery the reviewing attorney
+// gets no [[MISSING]] warning about. Unknown must render as MISSING — the
+// substrate distinguishes "we don't know" from "we know a default".
+export async function getTenantSettingsForMerge(ctx: ActionContext): Promise<TenantSettings> {
+  try {
+    return await readTenantSettings(ctx)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('tenant_settings') || msg.includes('does not exist')) {
+      return EMPTY
+    }
+    throw err
+  }
+}
+
 async function readTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{

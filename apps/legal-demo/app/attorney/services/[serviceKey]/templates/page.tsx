@@ -332,6 +332,10 @@ export default function TemplateEditorPage() {
   const [library, setLibrary] = useState<LibraryDoc[]>([])
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  // Firm-wide field catalog (legal.template.field_library): questionnaire field
+  // ids other services define + platform merge slots. A {{token}} matching one is
+  // recognized (yellow, one-click bindable) instead of unknown/red. Lower-cased.
+  const [knownFields, setKnownFields] = useState<Set<string>>(() => new Set())
 
   // The firm document-template library, fetched once: it powers the "add document"
   // picker and the per-document start-from / save-to-library actions.
@@ -404,6 +408,27 @@ export default function TemplateEditorPage() {
     loadLibrary()
   }, [load, loadLibrary])
 
+  // Best-effort, once: recognition degrades to STANDARD_TOKENS if the tool fails.
+  useEffect(() => {
+    let cancelled = false
+    callAttorneyMcp<{ firmFields: Array<{ fieldId: string }>; mergeFields: string[] }>({
+      toolName: 'legal.template.field_library',
+    })
+      .then((r) => {
+        if (cancelled) return
+        setKnownFields(
+          new Set([
+            ...(r.firmFields ?? []).map((f) => f.fieldId.toLowerCase()),
+            ...(r.mergeFields ?? []).map((t) => t.toLowerCase()),
+          ]),
+        )
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Add fields to the bound questionnaire through the core, then refresh. Used by
   // "add orphan as a question", inline new-field creation, and "build from template".
   const addFieldsToQuestionnaire = useCallback(
@@ -461,6 +486,7 @@ export default function TemplateEditorPage() {
                 serviceKey={serviceKey}
                 template={t}
                 fields={fields}
+                knownFields={knownFields}
                 library={library}
                 onAddFields={addFieldsToQuestionnaire}
                 onSavedToLibrary={loadLibrary}
@@ -597,6 +623,7 @@ function KindEditor({
   serviceKey,
   template,
   fields,
+  knownFields,
   library,
   onAddFields,
   onSavedToLibrary,
@@ -604,6 +631,9 @@ function KindEditor({
   serviceKey: string
   template: TemplateDoc
   fields: QField[]
+  // Firm-wide catalog (other services' field ids + merge slots), lower-cased —
+  // widens the "recognized" tier so an existing field is never flagged red.
+  knownFields: Set<string>
   library: LibraryDoc[]
   onAddFields: (f: { id: string; label: string }[]) => Promise<void>
   onSavedToLibrary: () => Promise<void>
@@ -664,14 +694,16 @@ function KindEditor({
   const orphans = tokens.filter((tok) => !fieldIds.has(tok.toLowerCase()))
 
   // Editor `{{` autocomplete + chip coloring: a bound questionnaire field is
-  // "matched", a standard merge token is recognized but unbound ("orphaned"),
-  // anything else is "unknown" (and surfaces in the orphans warning below).
+  // "matched"; a token that exists elsewhere — a standard token, a platform merge
+  // slot, or a field another service's questionnaire already defines (knownFields)
+  // — is recognized but unbound here ("orphaned", one click away via the orphans
+  // banner); anything else is "unknown" (exists nowhere yet).
   const suggestVariables = [...new Set([...fields.map((f) => f.id), ...STANDARD_TOKENS])].sort()
-  const standardLower = new Set(STANDARD_TOKENS.map((t) => t.toLowerCase()))
+  const recognizedLower = new Set([...STANDARD_TOKENS.map((t) => t.toLowerCase()), ...knownFields])
   const validateVariable = (name: string): VariableStatus =>
     fieldIds.has(name.toLowerCase())
       ? 'matched'
-      : standardLower.has(name.toLowerCase())
+      : recognizedLower.has(name.toLowerCase())
         ? 'orphaned'
         : 'unknown'
 

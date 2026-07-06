@@ -11,6 +11,7 @@ import { loadDraftingPrompt } from '../templates/loader.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
 import { renderTemplate, buildMergeData } from './templateMerge.js'
+import { getTenantSettingsForMerge } from './tenantSettings.js'
 import {
   loadForcedSkills,
   buildActiveSkillsText,
@@ -170,12 +171,18 @@ export async function runDraftGeneration(
 
   if (generationMode === 'template_merge') {
     const service = await readServiceGeneration(agentCtx, m.serviceKey)
+    // Firm identity fills {{firm_name}}/{{attorney_name}} — tokens the editors
+    // have always offered. The ForMerge read degrades to unknown (honest
+    // MISSING), never to the demo-firm defaults the Settings page shows.
+    const settings = await getTenantSettingsForMerge(agentCtx)
     const { markdown, missingFields } = renderTemplate(
       template,
       buildMergeData(m, {
         effectiveDateIso: new Date().toISOString(),
         feeAmountFormatted: service.feeAmountFormatted,
         feeStructureHuman: service.feeStructureHuman,
+        firmName: settings.firmName ?? undefined,
+        attorneyName: settings.attorneyName ?? undefined,
       }),
     )
 
