@@ -111,4 +111,6 @@ Then, two required steps whenever a change addresses a feedback item:
 
 2. **Resolve the event the same session you ship it** — through the action layer (hard rule 1; never a raw INSERT into `event`): `legal.assistant.feedback_resolve` (MCP) or `resolveAssistantFeedback(ctx, { feedbackEventId, summary, note? })` from `@exsto/legal`. Resolving is what removes the item from the open backlog; a shipped-but-unresolved item looks open and gets re-worked by another session.
 
-Claim up front, then do both of the above when you ship — they're not interchangeable. The merge manager resolves from your `Beta-Feedback:` trailers at merge time as a backstop, but the source of truth is you marking the item when you ship it. To see what's still open, read the unresolved `assistant.turn` feedback rows (the manager keeps the backlog current as PRs land).
+Claim up front, then do both of the above when you ship — they're not interchangeable. To see what's still open, read the unresolved `assistant.turn` feedback rows.
+
+**Resolve any item you can verify is shipped — you do not have to be the session that shipped it.** There is no "resolution belongs to the shipping session" rule (it was removed 2026-07-06; it left verifiably-fixed items reading as open for weeks). If you confirm an item is addressed on `main` — a `Beta-Feedback:` trailer, a matching commit, or the behavior in the code/live app — resolve it through the action layer with a `summary`/`note` pointing at the PR. The only bar is verification, not authorship. Duplicates of the same fix all get resolved.
