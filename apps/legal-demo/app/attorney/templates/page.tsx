@@ -262,12 +262,17 @@ export default function TemplatesPage() {
   // intake question. Used to color {{variables}} in the editor (best-effort; the
   // chips just fall back to "no question / yellow" if the library can't load).
   const [libraryTokens, setLibraryTokens] = useState<Set<string>>(() => new Set())
-  // Firm-wide field catalog (legal.template.field_library): every questionnaire
-  // field id any service already defines (firmFields — these AUTO-BIND blue) and
-  // the platform merge slots that fill from matter/firm data (mergeFields —
-  // recognized, yellow when no question backs them). Lower-cased on arrival.
-  const [firmFields, setFirmFields] = useState<Set<string>>(() => new Set())
+  // Firm-wide field catalog (legal.template.field_library). Blue is ASSOCIATION,
+  // not mere existence: a token binds blue only when its question lives in a
+  // questionnaire of a service that produces this template's docKind. Fields
+  // that exist elsewhere (other services / merge slots) are yellow. Lower-cased.
+  const [firmFieldEntries, setFirmFieldEntries] = useState<
+    Array<{ fieldId: string; services: string[] }>
+  >([])
   const [mergeFields, setMergeFields] = useState<Set<string>>(() => new Set())
+  const [serviceDocuments, setServiceDocuments] = useState<
+    Array<{ serviceKey: string; documents: string[] }>
+  >([])
 
   function load() {
     setError(null)
@@ -310,13 +315,28 @@ export default function TemplatesPage() {
         // No library / tool unavailable — coloring still works off STANDARD_TOKENS
         // and the template's own defined variables.
       })
-    callAttorneyMcp<{ firmFields: Array<{ fieldId: string }>; mergeFields: string[] }>({
+    callAttorneyMcp<{
+      firmFields: Array<{ fieldId: string; services: string[] }>
+      mergeFields: string[]
+      serviceDocuments: Array<{ serviceKey: string; documents: string[] }>
+    }>({
       toolName: 'legal.template.field_library',
     })
       .then((r) => {
         if (cancelled) return
-        setFirmFields(new Set((r.firmFields ?? []).map((f) => f.fieldId.toLowerCase())))
+        setFirmFieldEntries(
+          (r.firmFields ?? []).map((f) => ({
+            fieldId: f.fieldId.toLowerCase(),
+            services: f.services ?? [],
+          })),
+        )
         setMergeFields(new Set((r.mergeFields ?? []).map((t) => t.toLowerCase())))
+        setServiceDocuments(
+          (r.serviceDocuments ?? []).map((sd) => ({
+            serviceKey: sd.serviceKey,
+            documents: (sd.documents ?? []).map((d) => d.toLowerCase()),
+          })),
+        )
       })
       .catch(() => {
         // Best-effort like the question library — coloring degrades gracefully.
@@ -326,31 +346,52 @@ export default function TemplatesPage() {
     }
   }, [])
 
-  // Classify a {{variable}} for the editor: a variable that already has a data
-  // source — a library question, a questionnaire field ANY service defines
-  // (firmFields — the auto-bind the beta feedback asked for), or a defined
-  // template variable — is "matched" (blue); a recognized platform token with no
-  // question behind it (standard/merge slots) is "orphaned" (yellow); anything
-  // else is "unknown" (red — the field exists nowhere yet). Matching is
-  // case-INSENSITIVE, mirroring renderTemplate (a hand-typed {{COMPANY_NAME}}
-  // fills a company_name field at merge time) — never flag red what would merge.
+  // The questionnaires ASSOCIATED with this document: services whose document
+  // list includes the draft's docKind. Their field ids are the only ones that
+  // bind blue — a question existing elsewhere isn't a binding, it's a candidate.
+  const associatedFields = useMemo(() => {
+    const dk = draft?.category === 'document' ? draft.docKind.trim().toLowerCase() : ''
+    if (!dk) return new Set<string>()
+    const producing = new Set(
+      serviceDocuments.filter((sd) => sd.documents.includes(dk)).map((sd) => sd.serviceKey),
+    )
+    if (producing.size === 0) return new Set<string>()
+    return new Set(
+      firmFieldEntries
+        .filter((f) => f.services.some((sk) => producing.has(sk)))
+        .map((f) => f.fieldId),
+    )
+  }, [draft?.category, draft?.docKind, firmFieldEntries, serviceDocuments])
+
+  // Classify a {{variable}} for the editor (per the 2026-07-06 spec):
+  //   matched (blue)   — bound to a question in a questionnaire ASSOCIATED with
+  //                      this document (a service producing this docKind), or a
+  //                      field defined on the template itself.
+  //   orphaned (yellow) — the field/question EXISTS (question library, another
+  //                      service's questionnaire, standard/merge slots) but no
+  //                      associated questionnaire asks it.
+  //   unknown (red)    — exists nowhere yet.
+  // Matching is case-INSENSITIVE, mirroring renderTemplate (a hand-typed
+  // {{COMPANY_NAME}} fills a company_name field) — never flag red what exists.
   const validateVariable = useMemo(() => {
-    const hasQuestion = new Set<string>([
-      ...[...libraryTokens, ...Object.keys(draft?.variables ?? {})].map((t) => t.toLowerCase()),
-      ...firmFields,
+    const bound = new Set<string>([
+      ...associatedFields,
+      ...Object.keys(draft?.variables ?? {}).map((t) => t.toLowerCase()),
     ])
-    const known = new Set<string>([
-      ...hasQuestion,
+    const exists = new Set<string>([
+      ...bound,
+      ...[...libraryTokens].map((t) => t.toLowerCase()),
+      ...firmFieldEntries.map((f) => f.fieldId),
       ...STANDARD_TOKENS.map((t) => t.id.toLowerCase()),
       ...mergeFields,
     ])
     return (name: string): VariableStatus =>
-      hasQuestion.has(name.toLowerCase())
+      bound.has(name.toLowerCase())
         ? 'matched'
-        : known.has(name.toLowerCase())
+        : exists.has(name.toLowerCase())
           ? 'orphaned'
           : 'unknown'
-  }, [libraryTokens, draft?.variables, firmFields, mergeFields])
+  }, [libraryTokens, draft?.variables, associatedFields, firmFieldEntries, mergeFields])
 
   // Candidate names for the editor's `{{` autocomplete: the question library, the
   // firm-wide field catalog, the standard merge tokens, and the template's own
@@ -358,13 +399,13 @@ export default function TemplatesPage() {
   const suggestVariables = useMemo(() => {
     const set = new Set<string>([
       ...libraryTokens,
-      ...firmFields,
+      ...firmFieldEntries.map((f) => f.fieldId),
       ...mergeFields,
       ...STANDARD_TOKENS.map((t) => t.id),
       ...Object.keys(draft?.variables ?? {}),
     ])
     return [...set].sort()
-  }, [libraryTokens, draft?.variables, firmFields, mergeFields])
+  }, [libraryTokens, draft?.variables, firmFieldEntries, mergeFields])
 
   // Escape closes the "Draft with AI" modal (and restores focus to its trigger).
   useEffect(() => {

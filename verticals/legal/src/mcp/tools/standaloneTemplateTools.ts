@@ -8,6 +8,7 @@ import {
   aiDraftTemplate,
   aiEnhanceTemplate,
   loadFirmFieldLibrary,
+  listServicesIncludingInactive,
   MERGE_SLOT_FIELDS,
   type StandaloneTemplate,
   type CreateTemplateInput,
@@ -31,25 +32,38 @@ const listTool: Tool<Record<string, never>, { templates: StandaloneTemplate[] }>
   handler: async (ctx: ActionContext) => ({ templates: await listStandaloneTemplates(ctx) }),
 }
 
-// The firm-wide field catalog the template editors auto-bind against: every
-// questionnaire field id any service (active or retired) has ever defined, with
-// the services that define it, plus the merge engine's curated slot ids. A
-// {{token}} matching one of these already has a data source — the editors paint
-// it bound instead of unknown/red. Read-only; composes loadFirmFieldLibrary
-// (which recurses repeater memberFields) and MERGE_SLOT_FIELDS.
+// The firm-wide field catalog the template editors bind against: every
+// questionnaire field id any current service defines (with the services that
+// define it), the merge engine's curated slot ids, and each service's document
+// kinds. The docKind map is what lets the library editor decide ASSOCIATION —
+// blue only when the field's question lives in a questionnaire of a service
+// that produces this template's document kind; merely-existing fields are
+// yellow. Read-only; composes loadFirmFieldLibrary (which recurses repeater
+// memberFields), MERGE_SLOT_FIELDS, and listServicesIncludingInactive.
 const fieldLibraryTool: Tool<
   Record<string, never>,
-  { firmFields: FirmQuestionSummary[]; mergeFields: string[] }
+  {
+    firmFields: FirmQuestionSummary[]
+    mergeFields: string[]
+    serviceDocuments: Array<{ serviceKey: string; documents: string[] }>
+  }
 > = {
   name: 'legal.template.field_library',
   description:
-    'The firm-wide template field catalog: every questionnaire field id defined by any service (with the defining service keys) plus the platform merge slots (matter facts, fee block, firm identity, dates). Editors use it to auto-bind {{tokens}} whose fields already exist.',
+    "The firm-wide template field catalog: every questionnaire field id defined by any service (with the defining service keys), the platform merge slots (matter facts, fee block, firm identity, dates), and each service's document kinds. Editors bind {{tokens}} blue when the field's questionnaire is associated with the document, yellow when the field merely exists.",
   mode: 'read',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-  handler: async (ctx: ActionContext) => ({
-    firmFields: await loadFirmFieldLibrary(ctx, ''),
-    mergeFields: [...MERGE_SLOT_FIELDS],
-  }),
+  handler: async (ctx: ActionContext) => {
+    const services = await listServicesIncludingInactive(ctx)
+    return {
+      firmFields: await loadFirmFieldLibrary(ctx, ''),
+      mergeFields: [...MERGE_SLOT_FIELDS],
+      serviceDocuments: services.map((s) => ({
+        serviceKey: s.serviceKey,
+        documents: s.documents ?? [],
+      })),
+    }
+  },
 }
 
 const getTool: Tool<{ templateEntityId: string }, { template: StandaloneTemplate | null }> = {
