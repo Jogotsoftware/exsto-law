@@ -223,7 +223,10 @@ export default function TemplatesPage() {
     const hasQuestion = new Set<string>(
       [...libraryTokens, ...Object.keys(draft?.variables ?? {})].map((t) => t.toLowerCase()),
     )
-    const known = new Set<string>([...hasQuestion, ...STANDARD_TOKENS.map((t) => t.id.toLowerCase())])
+    const known = new Set<string>([
+      ...hasQuestion,
+      ...STANDARD_TOKENS.map((t) => t.id.toLowerCase()),
+    ])
     return (name: string): VariableStatus =>
       hasQuestion.has(name.toLowerCase())
         ? 'matched'

@@ -112,7 +112,7 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
     provider: 'openai',
     providerLabel: 'OpenAI',
     model: 'gpt-4o',
-    label: 'OpenAI GPT-4o (connect to enable)',
+    label: 'OpenAI GPT-4o (coming soon)',
     available: false,
     supportsCitations: false,
     isDefault: true,

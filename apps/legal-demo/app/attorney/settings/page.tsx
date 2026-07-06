@@ -20,6 +20,8 @@ interface IntegrationStatus {
   authKind: 'api_key' | 'oauth' | 'coming_soon'
   connected: boolean
   comingSoon?: boolean
+  // Honest-capability note (e.g. key stored but no feature consumes it yet).
+  note?: string
   lastFour: string | null
   connectedAt: string | null
   lastVerifiedAt: string | null
@@ -1044,6 +1046,15 @@ function IntegrationCard({
         {isGoogle && status.connected && google?.connected && missingGoogleScopes.length > 0 && (
           <div className="integration-card-warn">
             {missingGoogleScopes.join(', ')} not granted — reconnect to enable.
+          </div>
+        )}
+
+        {/* Honest-capability note: e.g. an OpenAI key that validates and is
+            stored while no chat adapter consumes it yet — "Connected" alone
+            read as "selectable in the assistant", which it isn't. */}
+        {status.note && (
+          <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: 'var(--space-1)' }}>
+            {status.note}
           </div>
         )}
 

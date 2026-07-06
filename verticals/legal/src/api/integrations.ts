@@ -18,6 +18,9 @@ export interface IntegrationStatus {
   authKind: 'api_key' | 'oauth' | 'coming_soon'
   connected: boolean
   comingSoon?: boolean
+  // Honest-capability note rendered under the card (e.g. a key that validates
+  // and is stored but that no feature consumes yet).
+  note?: string
   // 'error' state surfaces prominently in Settings (broken sync ≠ disconnected).
   health: 'connected' | 'error' | 'disconnected'
   lastFour: string | null
@@ -35,11 +38,18 @@ const STATIC_INTEGRATIONS: Array<{
   provider: IntegrationStatus['provider']
   authKind: IntegrationStatus['authKind']
   comingSoon?: boolean
+  note?: string
 }> = [
   { provider: 'google_calendar', authKind: 'oauth' },
   { provider: 'granola', authKind: 'oauth' },
   { provider: 'anthropic', authKind: 'api_key' },
-  { provider: 'openai', authKind: 'api_key' },
+  {
+    provider: 'openai',
+    authKind: 'api_key',
+    // Beta feedback: a connected OpenAI key read as usable, but no chat
+    // adapter consumes it yet — say so instead of implying otherwise.
+    note: 'Key is validated and stored, but the chat assistant cannot use OpenAI models yet — coming soon.',
+  },
   { provider: 'perplexity', authKind: 'api_key' },
   { provider: 'docusign', authKind: 'coming_soon', comingSoon: true },
 ]
@@ -52,11 +62,12 @@ export async function listIntegrationStatuses(ctx: ActionContext): Promise<Integ
   const conns = await listConnections(ctx.tenantId, ctx.actorId)
   const byProvider = new Map(conns.map((c) => [c.provider, c]))
 
-  return STATIC_INTEGRATIONS.map(({ provider, authKind, comingSoon }) => {
+  return STATIC_INTEGRATIONS.map(({ provider, authKind, comingSoon, note }) => {
     if (comingSoon) {
       return {
         provider,
         authKind,
+        note,
         comingSoon: true,
         connected: false,
         health: 'disconnected' as const,
@@ -72,6 +83,7 @@ export async function listIntegrationStatuses(ctx: ActionContext): Promise<Integ
     return {
       provider,
       authKind,
+      note,
       comingSoon: false,
       connected: health === 'connected',
       health,
