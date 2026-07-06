@@ -657,15 +657,23 @@ function KindEditor({
   }
 
   const tokens = extractTokens(text)
-  const fieldIds = new Set(fields.map((f) => f.id))
-  const orphans = tokens.filter((tok) => !fieldIds.has(tok))
+  // Token/field matching is case-INSENSITIVE, mirroring renderTemplate (a
+  // hand-typed {{COMPANY_NAME}} fills a company_name field at merge time), so
+  // the editor never flags red something the merge would fill.
+  const fieldIds = new Set(fields.map((f) => f.id.toLowerCase()))
+  const orphans = tokens.filter((tok) => !fieldIds.has(tok.toLowerCase()))
 
   // Editor `{{` autocomplete + chip coloring: a bound questionnaire field is
   // "matched", a standard merge token is recognized but unbound ("orphaned"),
   // anything else is "unknown" (and surfaces in the orphans warning below).
   const suggestVariables = [...new Set([...fields.map((f) => f.id), ...STANDARD_TOKENS])].sort()
+  const standardLower = new Set(STANDARD_TOKENS.map((t) => t.toLowerCase()))
   const validateVariable = (name: string): VariableStatus =>
-    fieldIds.has(name) ? 'matched' : STANDARD_TOKENS.includes(name) ? 'orphaned' : 'unknown'
+    fieldIds.has(name.toLowerCase())
+      ? 'matched'
+      : standardLower.has(name.toLowerCase())
+        ? 'orphaned'
+        : 'unknown'
 
   // Insert a bound field as an atomic {{marker}} chip at the cursor. The editor's
   // onChange then refreshes `text` (the markdown source of truth).
