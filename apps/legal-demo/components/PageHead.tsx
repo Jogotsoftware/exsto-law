@@ -2,8 +2,6 @@ import type { ReactNode } from 'react'
 
 interface PageHeadProps {
   title: ReactNode
-  // Accepted but no longer rendered: pages don't show subtitles under the title.
-  description?: ReactNode
   actions?: ReactNode
 }
 

@@ -482,9 +482,11 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
 
       <PageHead
         title={humanizeKind(draft.documentKind)}
-        description={`Generated ${formatDateTime(draft.recordedAt)}`}
         actions={
           <>
+            <span className="text-muted review-generated">
+              Generated {formatDateTime(draft.recordedAt)}
+            </span>
             <span className="review-version">v{draft.versionNumber}</span>
             <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
           </>

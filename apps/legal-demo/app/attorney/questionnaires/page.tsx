@@ -436,7 +436,6 @@ export default function QuestionnaireLibraryPage() {
     <main>
       <PageHead
         title="Questionnaires"
-        description="Every intake form the firm has — reusable library forms you build here, plus each service's bound intake form."
         actions={
           !draft ? (
             <button className="primary" onClick={() => setDraft(EMPTY_DRAFT())}>

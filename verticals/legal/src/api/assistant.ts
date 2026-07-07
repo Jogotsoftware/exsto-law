@@ -1,4 +1,4 @@
-import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
+import { submitAction, type ActionContext } from '@exsto/substrate'
 import { chatWithAssistant, type ChatMessage } from '../adapters/claude.js'
 
 // The page the attorney was on when they opened the assistant, plus an optional
@@ -20,15 +20,6 @@ export interface AskAssistantInput {
 
 export interface AssistantReply {
   reply: string
-}
-
-export interface FeedbackEntry {
-  eventId: string
-  message: string
-  reply: string
-  pageContext: AssistantPageContext
-  kind: 'feedback' | 'question'
-  recordedAt: string
 }
 
 // Concise system prompt for the Pacheco Law beta assistant. It helps the
@@ -122,38 +113,4 @@ export async function askAssistant(
   await recordFeedback(ctx, { message, reply, pageContext: input.pageContext, kind })
 
   return { reply }
-}
-
-// All feedback exchanges, newest-first — for a future admin/review surface.
-// Mirrors listMatterResearch: a tenant-scoped read of feedback.recorded events.
-export async function listFeedback(ctx: ActionContext): Promise<FeedbackEntry[]> {
-  return withActionContext(ctx, async (client) => {
-    const res = await client.query<{
-      event_id: string
-      payload: {
-        message?: string
-        reply?: string
-        page_context?: AssistantPageContext
-        kind?: 'feedback' | 'question'
-      }
-      occurred_at: string
-    }>(
-      `SELECT e.id AS event_id, e.payload,
-              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
-       FROM event e
-       JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
-       WHERE e.tenant_id = $1
-         AND ekd.kind_name = 'feedback.recorded'
-       ORDER BY e.occurred_at DESC`,
-      [ctx.tenantId],
-    )
-    return res.rows.map((r) => ({
-      eventId: r.event_id,
-      message: r.payload.message ?? '',
-      reply: r.payload.reply ?? '',
-      pageContext: r.payload.page_context ?? {},
-      kind: r.payload.kind ?? 'question',
-      recordedAt: r.occurred_at,
-    }))
-  })
 }

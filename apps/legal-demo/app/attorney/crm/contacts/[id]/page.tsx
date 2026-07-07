@@ -123,7 +123,6 @@ export default function ContactDetailPage() {
             )}
           </span>
         }
-        description="Contact details, portal access, and matters for this CRM record."
       />
 
       {error && <div className="alert alert-error">{error}</div>}

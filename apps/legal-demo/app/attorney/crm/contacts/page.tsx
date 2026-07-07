@@ -89,7 +89,6 @@ export default function ContactsPage() {
     <main>
       <PageHead
         title="Contacts"
-        description="Everyone who’s reached the firm, by standing (derived from their matters)."
         actions={contacts ? <span style={{ color: 'var(--muted)' }}>{contacts.length}</span> : null}
       />
 
