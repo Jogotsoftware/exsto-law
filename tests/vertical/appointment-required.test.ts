@@ -8,6 +8,7 @@ import {
   parseAppointmentRequired,
   deriveLifecycleFromService,
   renderNotificationTemplate,
+  updateServiceMetadata,
 } from '@exsto/legal'
 
 describe('parseAppointmentRequired — only explicit false turns the appointment off', () => {
@@ -24,6 +25,25 @@ describe('parseAppointmentRequired — only explicit false turns the appointment
   })
   it('honors explicit false', () => {
     expect(parseAppointmentRequired(false)).toBe(false)
+  })
+})
+
+describe('updateServiceMetadata — write side accepts ONLY booleans', () => {
+  // The untyped MCP tool passes input verbatim; garbage ("true", 1, null) must
+  // throw BEFORE any substrate write, never coerce into a stored false that
+  // silently flips a live service to intake-only. The throw happens ahead of
+  // the DB call, so this runs without a database.
+  it.each([['true'], [1], [null]])('rejects non-boolean %j', async (bad) => {
+    await expect(
+      updateServiceMetadata(
+        { tenantId: 't', actorId: 'a' },
+        {
+          serviceKey: 'svc',
+          displayName: 'Svc',
+          appointmentRequired: bad as never,
+        },
+      ),
+    ).rejects.toThrow(/boolean/)
   })
 })
 

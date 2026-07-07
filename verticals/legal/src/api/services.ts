@@ -484,8 +484,15 @@ export async function updateServiceMetadata(
   if (input.cost !== undefined) transitionsPatch.cost = normalizeCost(input.cost)
   if (input.documentFees !== undefined)
     transitionsPatch.document_fees = normalizeDocumentFees(input.documentFees)
-  if (input.appointmentRequired !== undefined)
-    transitionsPatch.appointment_required = input.appointmentRequired === true
+  if (input.appointmentRequired !== undefined) {
+    // Strict boolean only. The read side treats garbage as true (safe default),
+    // so the write side must never coerce garbage ("true", 1, null) into a
+    // stored false — that would silently flip a live service to intake-only.
+    if (typeof input.appointmentRequired !== 'boolean') {
+      throw new Error('appointmentRequired must be a boolean.')
+    }
+    transitionsPatch.appointment_required = input.appointmentRequired
+  }
 
   await submitAction(ctx, {
     actionKindName: 'legal.service.upsert',
@@ -1495,10 +1502,16 @@ export async function submitBooking(
   // consultation slot — never the payload shape, so the public client can't
   // force (or skip) a booking.create by shape-shifting its input. A stale
   // client that disagrees with a mid-wizard config flip gets a clear error
-  // and re-enters. Unknown service keeps legacy appointment behavior; the
-  // intake.submit below rejects it the same way it always has.
+  // and re-enters. An unknown service key is REJECTED outright: nothing
+  // downstream validates it (intake.submit/matter.open take any string), and
+  // the legitimate /book client only ever submits keys from legal.service.list
+  // — so a mangled key must not consume a slot, fire calendar invites, or open
+  // a matter for a service that doesn't exist.
   const service = await getService(ctx, input.serviceKey)
-  const appointmentRequired = service ? service.appointmentRequired : true
+  if (!service) {
+    throw new Error(`Unknown service: ${input.serviceKey}`)
+  }
+  const appointmentRequired = service.appointmentRequired
   if (appointmentRequired && !input.scheduledAtIso) {
     throw new Error('This service requires choosing a consultation time.')
   }

@@ -164,6 +164,14 @@ export default function BookPage() {
   // only requires/sends a token in that case.
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const resetCaptchaRef = useRef<(() => void) | null>(null)
+  // A token belongs to the widget instance on the step that hosts it. Any step
+  // change unmounts that widget (its expired-callback dies with it), so a
+  // retained token would enable submit against a visibly-unsolved widget —
+  // drop it and require a fresh solve on the hosting step.
+  useEffect(() => {
+    setCaptchaToken(null)
+    resetCaptchaRef.current = null
+  }, [step])
   const [confirmation, setConfirmation] = useState<{
     matterNumber: string
     // Null for intake-only services — the confirmation renders "request
@@ -690,7 +698,14 @@ export default function BookPage() {
                   </div>
                 )}
                 <div className="bk-actions">
-                  <button className="bk-btn bk-btn-ghost" onClick={() => setStep('contact')}>
+                  {/* Back stays disabled during an in-flight intake-only submit —
+                      navigating away mid-write lets the user edit fields the
+                      submit already captured. */}
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    disabled={busy === 'submit'}
+                    onClick={() => setStep('contact')}
+                  >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
                   </button>
@@ -787,7 +802,11 @@ export default function BookPage() {
                   </div>
                 )}
                 <div className="bk-actions">
-                  <button className="bk-btn bk-btn-ghost" onClick={() => setStep('intake')}>
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    disabled={busy === 'submit'}
+                    onClick={() => setStep('intake')}
+                  >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
                   </button>
