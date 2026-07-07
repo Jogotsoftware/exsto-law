@@ -3,6 +3,7 @@
 import { use, useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 import { formatDateTime } from '@/lib/datetime'
@@ -467,7 +468,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   if (!draft && !error) {
     return (
       <main>
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading draft…
         </div>
       </main>
@@ -881,7 +882,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
                 onClick={() => setCompareOpen(false)}
                 aria-label="Close"
               >
-                ×
+                <X size={18} aria-hidden />
               </button>
             </div>
 

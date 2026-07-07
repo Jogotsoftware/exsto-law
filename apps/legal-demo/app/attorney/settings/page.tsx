@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
 import { fetchSession } from '@/lib/auth'
@@ -433,7 +434,7 @@ export default function SettingsPage() {
 
       <CollapsibleSection title="Integrations">
         {integrations === null ? (
-          <div className="loading-block">
+          <div className="loading-block" role="status">
             <span className="spinner" /> Loading…
           </div>
         ) : (
@@ -466,7 +467,7 @@ export default function SettingsPage() {
 
       <CollapsibleSection title="Firm details">
         {!settings ? (
-          <div className="loading-block">
+          <div className="loading-block" role="status">
             <span className="spinner" /> Loading…
           </div>
         ) : (
@@ -575,7 +576,7 @@ export default function SettingsPage() {
           <div className="alert alert-success">Saved. New emails will use this signature.</div>
         )}
         {!sig ? (
-          <div className="loading-block">
+          <div className="loading-block" role="status">
             <span className="spinner" /> Loading…
           </div>
         ) : (
@@ -650,7 +651,7 @@ export default function SettingsPage() {
         </p>
         {savedRules && <div className="alert alert-success">Saved.</div>}
         {!bookingRules ? (
-          <div className="loading-block">
+          <div className="loading-block" role="status">
             <span className="spinner" /> Loading…
           </div>
         ) : (
@@ -890,7 +891,7 @@ function InvoiceTemplateSection() {
 
   if (!cfg)
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )
@@ -1006,7 +1007,7 @@ function InvoiceTemplateSection() {
               style={{ width: '100%', height: 520, border: '1px solid var(--border)' }}
             />
           ) : (
-            <div className="loading-block">
+            <div className="loading-block" role="status">
               <span className="spinner" /> Rendering preview…
             </div>
           )}
@@ -1219,7 +1220,7 @@ function ConnectKeyModal({
         <div className="modal-head">
           <h2>Connect {meta.name}</h2>
           <button onClick={onClose} aria-label="Close" className="modal-close">
-            ×
+            <X size={18} aria-hidden />
           </button>
         </div>
         <div className="modal-body">
@@ -1344,7 +1345,7 @@ function CalendarCategoriesSection() {
       {saved && <div className="alert alert-success">Saved.</div>}
       {error && <div className="alert alert-error">{error}</div>}
       {!cats ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : (

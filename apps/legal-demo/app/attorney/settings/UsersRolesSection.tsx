@@ -5,6 +5,7 @@
 // operation core via the legal.user.* MCP tools; the admin gate is enforced
 // server-side (requireAdmin) — this page only shows/hides for convenience.
 import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
 
@@ -94,9 +95,7 @@ export function UsersRolesSection() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {me && !me.isAdmin && (
-        <div className="loading-block text-muted">
-          Only the firm owner (admin) can manage users.
-        </div>
+        <div className="empty-block">Only the firm owner (admin) can manage users.</div>
       )}
 
       {me?.isAdmin && (
@@ -114,7 +113,7 @@ export function UsersRolesSection() {
           </div>
 
           {users === null && (
-            <div className="loading-block">
+            <div className="loading-block" role="status">
               <span className="spinner" /> Loading…
             </div>
           )}
@@ -250,7 +249,7 @@ function InviteModal({
         <div className="modal-head">
           <h2>Invite user</h2>
           <button onClick={onClose} aria-label="Close" className="modal-close">
-            ×
+            <X size={18} aria-hidden />
           </button>
         </div>
         <div className="modal-body">

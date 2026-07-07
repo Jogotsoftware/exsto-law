@@ -127,7 +127,7 @@ export default function TaskWindowPage({
     )
   if (!task)
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )
@@ -215,7 +215,7 @@ export default function TaskWindowPage({
                   dangerouslySetInnerHTML={{ __html: renderDocumentHtml(executedMarkdown) }}
                 />
               ) : (
-                <div className="loading-block">
+                <div className="loading-block" role="status">
                   <span className="spinner" /> Loading executed copy…
                 </div>
               )}

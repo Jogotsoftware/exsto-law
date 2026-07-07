@@ -91,7 +91,7 @@ export default function ClientRequestsPage() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {requests === null ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : requests.length === 0 ? (

@@ -125,7 +125,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {notFound ? (
         <p className="text-muted">Client not found.</p>
       ) : !client ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : (

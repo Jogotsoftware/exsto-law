@@ -267,7 +267,7 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
   if (error && clients === null) return <div className="alert alert-error">{error}</div>
   if (clients === null)
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )
@@ -280,9 +280,7 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
       {error && <div className="alert alert-error">{error}</div>}
       {notice && <div className="alert">{notice}</div>}
       {clients.length === 0 && (
-        <div className="loading-block">
-          Nothing unbilled — every time/expense entry is invoiced.
-        </div>
+        <div className="empty-block">Nothing unbilled — every time/expense entry is invoiced.</div>
       )}
 
       {billable.map((c) => (
@@ -666,7 +664,7 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
   if (error && invoices === null) return <div className="alert alert-error">{error}</div>
   if (invoices === null)
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )
@@ -845,7 +843,7 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                         style={{ background: 'var(--surface-2)', padding: 'var(--space-3)' }}
                       >
                         {pdf === null ? (
-                          <div className="loading-block">
+                          <div className="loading-block" role="status">
                             <span className="spinner" /> Rendering invoice…
                           </div>
                         ) : (
@@ -947,7 +945,7 @@ function RatesTab() {
   if (error && view === null) return <div className="alert alert-error">{error}</div>
   if (view === null)
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )

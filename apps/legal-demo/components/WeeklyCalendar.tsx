@@ -70,8 +70,8 @@ const CATEGORY_ORDER: BookingCategory[] = ['new_consultation', 'new_matter', 'ex
 // Muted styling for external (non-app) Google events — inline so it doesn't
 // depend on a new global CSS class.
 const EXTERNAL_STYLE: React.CSSProperties = {
-  background: '#f1f5f9',
-  color: '#475569',
+  background: 'var(--surface-2)',
+  color: 'var(--muted)',
   borderLeft: '3px solid #94a3b8',
 }
 
@@ -724,7 +724,7 @@ function MonthGrid({
               onClick={() => onPickDay(day)}
               style={{
                 minHeight: '5.5rem',
-                background: '#fff',
+                background: 'var(--surface)',
                 opacity: inMonth ? 1 : 0.45,
                 border: 'none',
                 borderTop: isToday ? '2px solid var(--accent, #2563eb)' : '2px solid transparent',
@@ -752,7 +752,7 @@ function MonthGrid({
                     textOverflow: 'ellipsis',
                     ...(it.kind === 'external'
                       ? EXTERNAL_STYLE
-                      : { background: '#dbeafe', color: '#1e3a8a' }),
+                      : { background: '#dbeafe', color: 'var(--navy)' }),
                   }}
                   title={it.title}
                 >

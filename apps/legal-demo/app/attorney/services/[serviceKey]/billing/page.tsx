@@ -111,7 +111,7 @@ export default function ServiceBillingPage() {
   if (error && !meta) return <div className="alert alert-error">{error}</div>
   if (!meta)
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )

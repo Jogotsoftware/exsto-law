@@ -291,7 +291,7 @@ export default function QuestionLibraryPage() {
       )}
 
       {loading ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : filtered.length === 0 && svcFiltered.length === 0 && !edit.new ? (

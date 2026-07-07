@@ -177,7 +177,7 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
 
   if (loading) {
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )

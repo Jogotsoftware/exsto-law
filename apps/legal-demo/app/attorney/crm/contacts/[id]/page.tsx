@@ -128,7 +128,7 @@ export default function ContactDetailPage() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {!contact && !error ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : contact ? (

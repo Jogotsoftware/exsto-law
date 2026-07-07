@@ -48,7 +48,7 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
   if (!draft) {
     return (
       <div className="public-draft">
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       </div>

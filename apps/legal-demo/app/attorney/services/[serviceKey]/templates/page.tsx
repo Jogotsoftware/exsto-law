@@ -464,7 +464,7 @@ export default function TemplateEditorPage() {
       {note && <div className="alert alert-success">{note}</div>}
 
       {!service ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : (

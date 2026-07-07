@@ -139,7 +139,7 @@ export default function AdminTenantsPage() {
 
       <h2 style={{ fontSize: '1.1rem' }}>Registry</h2>
       {!tenants && (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       )}

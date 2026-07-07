@@ -7,6 +7,7 @@
 // onboarding), mirroring the Google connect flow; this card shows status and the
 // connect / finish-setup / refresh / disconnect actions.
 import { useCallback, useEffect, useState } from 'react'
+import { Check } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
 
@@ -139,7 +140,7 @@ export function PaymentsSection(): React.ReactElement {
       {error && <div className="alert alert-error">{error}</div>}
 
       {loading && !status ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : status ? (
@@ -230,7 +231,7 @@ function ManualMethodsEditor(): React.ReactElement {
   if (error && !methods) return <div className="alert alert-error">{error}</div>
   if (!methods) {
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )
@@ -390,7 +391,14 @@ function ManualMethodsEditor(): React.ReactElement {
           <button type="button" className="primary" disabled={saving} onClick={() => void save()}>
             {saving ? 'Saving…' : 'Save payment methods'}
           </button>
-          {saved && <span className="text-sm text-muted">Saved ✓</span>}
+          {saved && (
+            <span
+              className="text-sm text-muted"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              <Check size={14} aria-hidden /> Saved
+            </span>
+          )}
         </div>
       </div>
     </div>

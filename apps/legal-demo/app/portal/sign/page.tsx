@@ -32,7 +32,7 @@ export default function PortalSignList() {
   if (!sigs)
     return (
       <div className="cp-main">
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       </div>

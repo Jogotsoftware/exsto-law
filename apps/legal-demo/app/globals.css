@@ -1221,7 +1221,10 @@ a.att-notif-link:hover {
   letter-spacing: 0.04em;
 }
 
-.loading-block {
+/* .empty-block shares the treatment: same centered/muted box, but for static
+   "nothing here" / info notes — no spinner, no role="status". */
+.loading-block,
+.empty-block {
   padding: 1.5rem;
   text-align: center;
   color: var(--muted);
@@ -10134,4 +10137,14 @@ input[type='number'] {
 }
 .link-button.danger {
   color: var(--danger);
+}
+
+/* lucide-react icons. Inline SVGs sit on the text baseline and carry a few px of
+   descender gap, which nudges them low inside buttons and out of line with
+   adjacent text. inline-block + middle removes that gap so icons center in
+   icon-only buttons and align with labels in icon+text controls. */
+svg.lucide {
+  display: inline-block;
+  vertical-align: middle;
+  flex: 0 0 auto;
 }
