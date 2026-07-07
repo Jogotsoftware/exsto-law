@@ -139,7 +139,7 @@ export default function MatterTasksPage({ params }: { params: Promise<{ id: stri
 
   if (loading)
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )

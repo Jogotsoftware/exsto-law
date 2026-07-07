@@ -246,7 +246,7 @@ export default function ReviewQueue() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {drafts === null && !error && (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       )}

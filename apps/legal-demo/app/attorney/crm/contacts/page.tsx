@@ -119,7 +119,7 @@ export default function ContactsPage() {
       />
 
       {contacts === null ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : visible.length === 0 ? (

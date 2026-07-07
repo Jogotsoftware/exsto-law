@@ -683,7 +683,7 @@ export default function QuestionnaireLibraryPage() {
       )}
 
       {items === null && !error && (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       )}

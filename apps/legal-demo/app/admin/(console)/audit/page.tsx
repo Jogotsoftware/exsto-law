@@ -35,7 +35,7 @@ export default function AdminAuditPage() {
       </p>
       {error && <div className="alert alert-error">{error}</div>}
       {!entries && !error && (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       )}

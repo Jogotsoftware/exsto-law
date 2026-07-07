@@ -94,9 +94,7 @@ export function UsersRolesSection() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {me && !me.isAdmin && (
-        <div className="loading-block text-muted">
-          Only the firm owner (admin) can manage users.
-        </div>
+        <div className="empty-block">Only the firm owner (admin) can manage users.</div>
       )}
 
       {me?.isAdmin && (
@@ -114,7 +112,7 @@ export function UsersRolesSection() {
           </div>
 
           {users === null && (
-            <div className="loading-block">
+            <div className="loading-block" role="status">
               <span className="spinner" /> Loading…
             </div>
           )}

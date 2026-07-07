@@ -139,7 +139,7 @@ export function PaymentsSection(): React.ReactElement {
       {error && <div className="alert alert-error">{error}</div>}
 
       {loading && !status ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : status ? (
@@ -230,7 +230,7 @@ function ManualMethodsEditor(): React.ReactElement {
   if (error && !methods) return <div className="alert alert-error">{error}</div>
   if (!methods) {
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )

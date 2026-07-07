@@ -441,7 +441,7 @@ export default function QuestionnaireEditorPage() {
       {notice && <div className="alert alert-success">{notice}</div>}
 
       {!doc ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : (

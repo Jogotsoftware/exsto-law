@@ -696,7 +696,7 @@ export default function CalendarPage() {
     const borderLeft = color
       ? `3px solid ${color}`
       : e.managedByApp
-        ? '3px solid var(--primary, #1e3a5f)'
+        ? '3px solid var(--navy)'
         : '3px solid var(--border)'
     return (
       <div
@@ -1410,8 +1410,7 @@ export default function CalendarPage() {
                           textAlign: 'left',
                           border: 'none',
                           borderLeft: `3px solid ${
-                            eventColor(e) ??
-                            (e.managedByApp ? 'var(--primary, #1e3a5f)' : 'var(--border)')
+                            eventColor(e) ?? (e.managedByApp ? 'var(--navy)' : 'var(--border)')
                           }`,
                           borderRadius: 3,
                           background: 'var(--surface, #f6f6f6)',
@@ -1461,7 +1460,7 @@ export default function CalendarPage() {
                   gap: 'var(--space-3)',
                   border: '1px solid var(--border)',
                   borderLeft: `3px solid ${
-                    eventColor(e) ?? (e.managedByApp ? 'var(--primary, #1e3a5f)' : 'var(--border)')
+                    eventColor(e) ?? (e.managedByApp ? 'var(--navy)' : 'var(--border)')
                   }`,
                   borderRadius: 6,
                   padding: 'var(--space-2) var(--space-3)',

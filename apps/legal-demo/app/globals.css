@@ -1221,7 +1221,10 @@ a.att-notif-link:hover {
   letter-spacing: 0.04em;
 }
 
-.loading-block {
+/* .empty-block shares the treatment: same centered/muted box, but for static
+   "nothing here" / info notes — no spinner, no role="status". */
+.loading-block,
+.empty-block {
   padding: 1.5rem;
   text-align: center;
   color: var(--muted);

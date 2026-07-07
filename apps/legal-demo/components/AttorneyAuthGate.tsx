@@ -37,7 +37,7 @@ export function AttorneyAuthGate({ children }: { children: ReactNode }) {
   if (checking || !ok) {
     return (
       <main>
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Checking session…
         </div>
       </main>

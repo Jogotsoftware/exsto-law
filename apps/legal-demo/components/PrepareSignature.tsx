@@ -162,7 +162,7 @@ export function PrepareSignature({ documentVersionId, onSent, cancelHref }: Prep
   if (error && !draft) return <div className="alert alert-error">{error}</div>
   if (!draft)
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading…
       </div>
     )
