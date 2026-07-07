@@ -134,6 +134,14 @@ async function persistDraftDocument(
     properties: { document_kind: p.documentKind },
   })
 
+  // An AI review MEMO is an internal attorney artifact, NOT a client
+  // deliverable. It must not touch the client-visible matter workflow: no
+  // 'in_review' status flip (the matter keeps its real status) and no
+  // 'draft.completed' milestone (which the client portal renders as the
+  // misleading "A document is ready" with nothing released). Its audit trail is
+  // the separate document.review.completed event runDocumentReview records.
+  const isReviewMemo = p.generationMode === 'ai_review'
+
   // Matter moves to in_review once a draft lands (unless already terminal).
   const currentStatus = await getLatestAttributeValue<string>(
     client,
@@ -141,7 +149,7 @@ async function persistDraftDocument(
     p.matterEntityId,
     'matter_status',
   )
-  if (currentStatus !== 'approved' && currentStatus !== 'closed') {
+  if (!isReviewMemo && currentStatus !== 'approved' && currentStatus !== 'closed') {
     const statusKindId = await lookupKindId(
       client,
       'attribute_kind_definition',
@@ -160,21 +168,23 @@ async function persistDraftDocument(
     })
   }
 
-  await insertEvent(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    eventKindName: 'draft.completed',
-    primaryEntityId: p.matterEntityId,
-    secondaryEntityIds: [draftEntityId],
-    data: {
-      document_kind: p.documentKind,
-      document_version_id: versionId,
-      generation_mode: p.generationMode,
-      model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
-    },
-    sourceType: p.sourceType,
-    sourceRef: p.sourceRef,
-  })
+  if (!isReviewMemo) {
+    await insertEvent(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      eventKindName: 'draft.completed',
+      primaryEntityId: p.matterEntityId,
+      secondaryEntityIds: [draftEntityId],
+      data: {
+        document_kind: p.documentKind,
+        document_version_id: versionId,
+        generation_mode: p.generationMode,
+        model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
+      },
+      sourceType: p.sourceType,
+      sourceRef: p.sourceRef,
+    })
+  }
 
   return { draftEntityId, contentBlobId, documentVersionId: versionId, versionNumber: 1 }
 }

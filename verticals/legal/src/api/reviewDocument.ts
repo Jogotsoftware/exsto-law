@@ -114,8 +114,15 @@ export function validateReviewPrompt(promptText: unknown): string {
 
 export interface UpdateReviewConfigInput {
   serviceKey: string
-  enabled: boolean
-  // null/'' → clear the custom prompt and fall back to the bundled default.
+  // Every field is a MERGE, not a replace: an OMITTED (undefined) field leaves
+  // the current value untouched. This matters because the MCP tool
+  // (legal.service.review.update) can be driven by the assistant with a partial
+  // payload — "turn on the redline for contract-review" must NOT wipe the
+  // attorney's carefully authored custom prompt. The config-editor UI always
+  // sends the full set, so it is unaffected.
+  enabled?: boolean
+  // undefined → leave the prompt unchanged; null/'' → explicitly clear the
+  // custom prompt and fall back to the bundled default; non-empty → set custom.
   prompt?: string | null
   redline?: boolean
   skillSlugs?: string[]
@@ -140,16 +147,21 @@ export async function updateReviewConfig(
   if (!row) throw new Error(`Service not found: ${input.serviceKey}`)
   const existing = parseReviewConfig(row.review)
 
-  const wantsCustomPrompt = typeof input.prompt === 'string' && input.prompt.trim().length > 0
-  const prompt = wantsCustomPrompt ? validateReviewPrompt(input.prompt) : null
-  const promptChanged = prompt !== existing.prompt
-  const nextVersion = promptChanged ? (existing.promptVersion ?? 0) + 1 : existing.promptVersion
+  // Prompt: only touched when the caller actually sent the field.
+  let prompt = existing.prompt
+  let nextVersion = existing.promptVersion
+  if (input.prompt !== undefined) {
+    const wantsCustomPrompt = typeof input.prompt === 'string' && input.prompt.trim().length > 0
+    prompt = wantsCustomPrompt ? validateReviewPrompt(input.prompt) : null
+    const promptChanged = prompt !== existing.prompt
+    nextVersion = promptChanged ? (existing.promptVersion ?? 0) + 1 : existing.promptVersion
+  }
 
   const review = {
-    enabled: input.enabled === true,
+    enabled: input.enabled !== undefined ? input.enabled === true : existing.enabled,
     prompt,
     prompt_version: nextVersion,
-    redline: input.redline === true,
+    redline: input.redline !== undefined ? input.redline === true : existing.redline,
     skill_slugs: (input.skillSlugs ?? existing.skillSlugs).filter(
       (s) => typeof s === 'string' && !!s.trim(),
     ),
@@ -230,14 +242,35 @@ export class UnreviewableDocumentError extends Error {}
 export async function extractDocumentText(buf: Buffer, contentType: string): Promise<string> {
   let text: string
   if (contentType === 'application/pdf') {
-    text = (await extractPdfText(buf)).text
+    // A parse throw here (encrypted, corrupt, or truncated PDF) is DETERMINISTIC
+    // — it fails identically on every retry. Convert it to the non-retryable
+    // typed error so the job records document.review.failed and stops instead of
+    // burning 5 full-cost model-less retries and dead-lettering silently.
+    try {
+      text = (await extractPdfText(buf)).text
+    } catch (err) {
+      throw new UnreviewableDocumentError(
+        `Could not read this PDF (it may be password-protected or corrupt): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
   } else if (
     contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
   ) {
     // mammoth is docx-only by design; legacy .doc falls to the unsupported arm.
-    const mammoth = await import('mammoth')
-    const result = await mammoth.extractRawText({ buffer: buf })
-    text = (result.value ?? '').trim()
+    // A parse throw is likewise deterministic → non-retryable.
+    try {
+      const mammoth = await import('mammoth')
+      const result = await mammoth.extractRawText({ buffer: buf })
+      text = (result.value ?? '').trim()
+    } catch (err) {
+      throw new UnreviewableDocumentError(
+        `Could not read this Word document (it may be corrupt): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
   } else if (contentType === 'text/plain' || contentType === 'text/markdown') {
     text = buf.toString('utf8').trim()
   } else {

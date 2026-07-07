@@ -11,6 +11,8 @@ import {
   extractDocumentText,
   UnreviewableDocumentError,
   REVIEW_MEMO_DOCUMENT_KIND,
+  loadRedlinePrompt,
+  loadReviewPrompt,
 } from '@exsto/legal'
 
 describe('parseReviewConfig — review is opt-in, garbage means disabled', () => {
@@ -140,5 +142,22 @@ describe('extractDocumentText — dispatch on the sniffed content type', () => {
 describe('memo document kind', () => {
   it('is the stable label the queue humanizes', () => {
     expect(REVIEW_MEMO_DOCUMENT_KIND).toBe('document_review_memo')
+  })
+})
+
+describe('bundled prompts satisfy the callClaudeDrafter trace contract', () => {
+  // callClaudeDrafter parses BOTH the review and redline responses with
+  // splitDocumentAndTrace, which throws unless the model emits a fenced ```json
+  // reasoning-trace block. If the redline prompt forgets to ask for one, the
+  // redline pass throws on every run and the feature is silently dead — so both
+  // bundled prompts must instruct the model to end with a ```json block.
+  it('review prompt asks for a fenced ```json trace block', () => {
+    expect(loadReviewPrompt()).toMatch(/```json/)
+  })
+  it('redline prompt asks for a fenced ```json trace block and keeps both slots', () => {
+    const p = loadRedlinePrompt()
+    expect(p).toMatch(/```json/)
+    expect(p).toContain('{{review_memo}}')
+    expect(p).toContain('{{document_text}}')
   })
 })

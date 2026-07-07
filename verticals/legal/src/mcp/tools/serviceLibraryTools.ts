@@ -232,7 +232,7 @@ const reviewGetTool: Tool<{ serviceKey: string }, { review: ReviewConfig }> = {
 const reviewUpdateTool: Tool<UpdateReviewConfigInput, { review: ReviewConfig }> = {
   name: 'legal.service.review.update',
   description:
-    "Save a service offering's AI document-review config as a new immutable service version. A custom prompt must contain {{document_text}}; pass prompt null/empty to fall back to the bundled default. Newly enqueued reviews use the new config immediately.",
+    "Save a service offering's AI document-review config as a new immutable service version. Every field is a MERGE: OMIT a field to leave it unchanged (e.g. send only { serviceKey, redline: true } to toggle the redline without touching the prompt). A custom prompt must contain {{document_text}}; pass prompt null/empty to explicitly clear it and fall back to the bundled default. Newly enqueued reviews use the new config immediately.",
   mode: 'write',
   handler: async (ctx: ActionContext, input) => ({
     review: await updateReviewConfig(ctx, input),

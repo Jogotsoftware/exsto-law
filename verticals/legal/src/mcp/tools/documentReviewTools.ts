@@ -1,6 +1,11 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import { withActionContext, type ActionContext } from '@exsto/substrate'
-import { requestDocumentReview, getUploadedDocumentObject, getMatter } from '../../index.js'
+import {
+  requestDocumentReview,
+  resolveReviewConfig,
+  getUploadedDocumentObject,
+  getMatter,
+} from '../../index.js'
 
 // Manual (re)run of the AI document review for one uploaded matter document —
 // the attorney's recovery story for a dead-lettered job and the "tweak the
@@ -27,6 +32,16 @@ const reviewRunTool: Tool<
     }
     const matter = await getMatter(ctx, input.matterEntityId)
     if (!matter) throw new Error('Matter not found.')
+    // Reject SYNCHRONOUSLY when review is off for this service. Otherwise the
+    // job enqueues, the attorney sees a "queued — email on completion" toast,
+    // and the worker silently fail()s the job (runDocumentReview re-checks the
+    // config) — a promised memo that never arrives. Surface it here instead.
+    const review = await resolveReviewConfig(ctx, matter.serviceKey)
+    if (!review.enabled) {
+      throw new Error(
+        `AI review is not enabled for this service (${matter.serviceKey}). Enable it under the service's “AI review” tab first.`,
+      )
+    }
     const documentEntityId = await withActionContext(ctx, async (client) => {
       const res = await client.query<{ document_entity_id: string }>(
         `SELECT document_entity_id FROM document_version WHERE tenant_id = $1 AND id = $2`,

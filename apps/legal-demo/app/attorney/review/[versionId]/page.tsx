@@ -364,6 +364,26 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     setError(null)
     setNotice(null)
     try {
+      if (draft.aiReview?.reviewedDocumentVersionId) {
+        // This is an AI review MEMO, not a drafted document. Re-running it means
+        // re-reviewing the SAME client-uploaded document with the attorney's
+        // focus notes — NOT running the operating-agreement drafting flow (which
+        // would drop an irrelevant OA into the queue). Routes through the same
+        // legal.document.review.run tool as the Documents-tab "AI review" button.
+        await callAttorneyMcp({
+          toolName: 'legal.document.review.run',
+          input: {
+            matterEntityId: draft.matterEntityId,
+            documentVersionId: draft.aiReview.reviewedDocumentVersionId,
+            guidance: regenGuidance.trim() || undefined,
+          },
+        })
+        setRegenOpen(false)
+        setNotice(
+          'Re-running the AI review with your instructions — the new memo will appear in the review queue shortly.',
+        )
+        return
+      }
       await callAttorneyMcp({
         toolName: 'legal.draft.generate',
         input: {
