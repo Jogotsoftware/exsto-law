@@ -46,7 +46,11 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
     bodyText: [
       `Hi ${s(v.client_first_name, s(v.client_full_name, 'there'))},`,
       ``,
-      `Thanks for telling us about your matter. Juan Carlos will review your answers before your consultation.`,
+      // Intake-only services (no consultation) get honest next-steps copy —
+      // never a reference to an appointment that doesn't exist.
+      v.scheduled_at
+        ? `Thanks for telling us about your matter. Juan Carlos will review your answers before your consultation.`
+        : `Thanks for telling us about your matter. Juan Carlos will review your answers and follow up with next steps by email.`,
     ].join('\n'),
   }),
   'client-portal-magic-link': (v) => ({
