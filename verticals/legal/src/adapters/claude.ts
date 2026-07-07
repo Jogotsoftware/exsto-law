@@ -195,6 +195,11 @@ export interface AssistantChatOptions {
   webSearch?: boolean
   // Tools the model may call, executed locally via a tool_use → tool_result loop.
   clientTools?: ClientTool[]
+  // Per-turn system text (live screen capture, current route, force-loaded
+  // skills) appended as a SECOND system block AFTER the prompt-cache breakpoint,
+  // so its churn never invalidates the cached stable prefix (the leading system
+  // message). See buildVolatileClaudeSystem in assistantChat.ts.
+  volatileSystem?: string
 }
 
 // Token usage for an assistant turn, summed across every API call the turn made
@@ -299,7 +304,21 @@ export function buildChatRequest(
   // Lift a leading system turn into the top-level `system` param; everything
   // else is a user/assistant turn. Anthropic requires the first messages[] entry
   // to be 'user', which the post-system turns satisfy.
-  const system = messages[0]?.role === 'system' ? messages[0].content : undefined
+  //
+  // PROMPT CACHING: the system prompt here is large (base prompt + matter
+  // context + wizard blocks + skill catalog) and stable across a conversation's
+  // turns AND across the several tool rounds within one turn, so it carries a
+  // cache_control breakpoint — every request after the first reads it at ~10% of
+  // the input price instead of re-paying full freight. Volatile per-turn text
+  // (opts.volatileSystem) goes in a second block AFTER the breakpoint so its
+  // churn never invalidates the cached prefix.
+  const systemText = messages[0]?.role === 'system' ? messages[0].content : undefined
+  const system = systemText
+    ? [
+        { type: 'text', text: systemText, cache_control: { type: 'ephemeral' } },
+        ...(opts.volatileSystem ? [{ type: 'text', text: opts.volatileSystem }] : []),
+      ]
+    : undefined
   const turns = messages.filter((m) => m.role !== 'system')
   const { extra, maxTokens } = workRateParams(
     opts.workRate ?? 'balanced',
@@ -326,10 +345,40 @@ export function buildChatRequest(
     // final answer; give them headroom on top of the work-rate budget.
     max_tokens: tools.length ? maxTokens + 1024 : maxTokens,
     system,
-    messages: [...turns, ...carryTurns],
+    messages: withCacheBreakpoint([...turns, ...carryTurns]),
     ...(tools.length ? { tools } : {}),
     ...effectiveExtra,
   }
+}
+
+// Block types Anthropic accepts cache_control on. A carry turn can end in other
+// block types (e.g. server_tool_use mid web-search pause) — marking those 400s,
+// so we skip the breakpoint rather than risk the request.
+const CACHEABLE_BLOCK_TYPES = new Set(['text', 'tool_use', 'tool_result', 'image', 'document'])
+
+// Moving prompt-cache breakpoint on the LAST message: within a turn's tool loop
+// each round re-sends the identical, growing message list, so marking the tail
+// lets round N+1 read everything through round N from cache — that loop is where
+// a guided build burns most of its input tokens. Copies rather than mutates, so
+// a carried turn never accumulates stale markers across rounds (max 4 markers
+// per request; this keeps us at exactly two: stable system + this one).
+function withCacheBreakpoint(
+  msgs: Array<{ role: string; content: unknown }>,
+): Array<{ role: string; content: unknown }> {
+  const last = msgs[msgs.length - 1]
+  if (!last) return msgs
+  let content: unknown
+  if (typeof last.content === 'string' && last.content) {
+    content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }]
+  } else if (Array.isArray(last.content) && last.content.length) {
+    const blocks = last.content as Array<Record<string, unknown>>
+    const tail = blocks[blocks.length - 1]!
+    if (!CACHEABLE_BLOCK_TYPES.has(String(tail.type))) return msgs
+    content = [...blocks.slice(0, -1), { ...tail, cache_control: { type: 'ephemeral' } }]
+  } else {
+    return msgs
+  }
+  return [...msgs.slice(0, -1), { role: last.role, content }]
 }
 
 // Drop the `thinking` request param (used on continuation turns — see above).
