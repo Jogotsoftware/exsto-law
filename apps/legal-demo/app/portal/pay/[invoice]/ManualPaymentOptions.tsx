@@ -9,6 +9,7 @@
 // report form says so explicitly, so nobody thinks reporting = paid.
 import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
+import { Check } from 'lucide-react'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 
 interface CryptoWallet {
@@ -90,7 +91,13 @@ function CopyButton({ text, what }: { text: string; what: string }) {
         })
       }}
     >
-      {copied ? 'Copied ✓' : `Copy ${what}`}
+      {copied ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Check size={14} aria-hidden /> Copied
+        </span>
+      ) : (
+        `Copy ${what}`
+      )}
     </button>
   )
 }

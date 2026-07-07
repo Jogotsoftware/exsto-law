@@ -5,6 +5,7 @@
 // operation core via the legal.user.* MCP tools; the admin gate is enforced
 // server-side (requireAdmin) — this page only shows/hides for convenience.
 import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
 
@@ -248,7 +249,7 @@ function InviteModal({
         <div className="modal-head">
           <h2>Invite user</h2>
           <button onClick={onClose} aria-label="Close" className="modal-close">
-            ×
+            <X size={18} aria-hidden />
           </button>
         </div>
         <div className="modal-body">

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
 import { fetchSession } from '@/lib/auth'
@@ -1219,7 +1220,7 @@ function ConnectKeyModal({
         <div className="modal-head">
           <h2>Connect {meta.name}</h2>
           <button onClick={onClose} aria-label="Close" className="modal-close">
-            ×
+            <X size={18} aria-hidden />
           </button>
         </div>
         <div className="modal-body">

@@ -9,6 +9,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDate } from '@/lib/datetime'
 import { PageHead } from '@/components/PageHead'
@@ -631,11 +632,12 @@ export default function QuestionnaireLibraryPage() {
                     type="button"
                     className="qb-remove"
                     title="Remove field"
+                    aria-label="Remove field"
                     onClick={() =>
                       patchSection(si, { fields: section.fields.filter((_, j) => j !== fi) })
                     }
                   >
-                    ×
+                    <X size={14} aria-hidden />
                   </button>
                   {OPTION_TYPES.has(field.type) && (
                     <textarea
