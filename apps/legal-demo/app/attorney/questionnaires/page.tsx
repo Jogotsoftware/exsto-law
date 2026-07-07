@@ -690,7 +690,9 @@ export default function QuestionnaireLibraryPage() {
       )}
       {items && items.length === 0 && (svcForms?.length ?? 0) === 0 && !draft && (
         <section>
-          <p>No questionnaires yet. Build your first reusable intake form.</p>
+          <p className="text-muted">
+            No questionnaires yet. Build your first reusable intake form.
+          </p>
         </section>
       )}
       {items && (items.length > 0 || (svcForms?.length ?? 0) > 0) && (
