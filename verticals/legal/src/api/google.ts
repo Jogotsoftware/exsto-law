@@ -3,14 +3,12 @@ import {
   GOOGLE_OAUTH_SCOPES_CONNECT,
   GOOGLE_OAUTH_SCOPES_SIGNIN,
   buildOAuthClient,
-  cancelEvent,
   createBookingEvent,
   deleteCredentials,
   getAvailability,
   getOAuthClientConfig,
   loadCredentials,
   probeGoogleCapabilities,
-  rescheduleEvent,
   saveCredentials,
   REQUIRED_CONNECT_SCOPES,
   type AvailabilitySlot,
@@ -360,21 +358,4 @@ ${args.intakeSummary ? `<b>Intake summary:</b><br>${args.intakeSummary}<br><br>`
     console.error('[google-calendar] createBookingEvent failed:', error)
     return null
   }
-}
-
-export async function rescheduleBookingEvent(
-  ctx: ActionContext,
-  eventId: string,
-  newStartIso: string,
-  newEndIso: string,
-): Promise<void> {
-  // Client-initiated reschedule from the public booking link: the event lives on
-  // the firm's primary attorney's calendar (per-matter assignment is track C).
-  const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
-  return rescheduleEvent(ctx.tenantId, eventId, newStartIso, newEndIso, firmActor)
-}
-
-export async function cancelBookingEvent(ctx: ActionContext, eventId: string): Promise<void> {
-  const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
-  return cancelEvent(ctx.tenantId, eventId, firmActor)
 }

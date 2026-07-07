@@ -132,7 +132,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         <>
           <PageHead
             title={client.name || 'Client'}
-            description="Client record with its contacts and matters."
             actions={
               <>
                 {!editing && <button onClick={beginEdit}>Edit</button>}

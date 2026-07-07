@@ -135,7 +135,6 @@ export default function ServicesPage() {
     <main>
       <PageHead
         title="Services"
-        description="The offerings clients can book. Toggle a service off to hide it from the booking page without losing its setup; the gear menu edits, clones, or deletes it."
         actions={
           <button className="primary" onClick={() => router.push('/attorney/services/new')}>
             + New service

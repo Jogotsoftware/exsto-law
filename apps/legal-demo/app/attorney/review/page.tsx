@@ -241,10 +241,7 @@ export default function ReviewQueue() {
 
   return (
     <main>
-      <PageHead
-        title="Review queue"
-        description="Approve, request revisions on, or reject drafts pending attorney review."
-      />
+      <PageHead title="Review queue" />
 
       {error && <div className="alert alert-error">{error}</div>}
 

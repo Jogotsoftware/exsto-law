@@ -1165,10 +1165,7 @@ export default function BillingPage() {
 
   return (
     <main>
-      <PageHead
-        title="Billing"
-        description="Roll unbilled time and expenses into invoices, then send them to clients."
-      />
+      <PageHead title="Billing" />
       <Tabs
         tabs={[
           {

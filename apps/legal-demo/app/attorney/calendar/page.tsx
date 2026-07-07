@@ -1052,10 +1052,7 @@ export default function CalendarPage() {
 
   return (
     <main>
-      <PageHead
-        title="Calendar"
-        description="Your real calendar — changes here sync to Google and are recorded as actions."
-      />
+      <PageHead title="Calendar" />
       {source === 'disconnected' && (
         <div className="alert alert-error">
           <strong>Google Calendar is not connected.</strong> The calendar cannot load.{' '}

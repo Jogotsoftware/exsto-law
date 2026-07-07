@@ -349,10 +349,7 @@ export default function MailPage() {
 
   return (
     <main>
-      <PageHead
-        title="Mail"
-        description="Client-related email only — replies go out through your real Gmail and land on the matter."
-      />
+      <PageHead title="Mail" />
       {needsMailScope && (
         <div className="alert">
           <strong>Reconnect Google.</strong> This Google connection was made before email reading

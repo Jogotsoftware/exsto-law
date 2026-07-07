@@ -785,7 +785,6 @@ export default function TemplatesPage() {
     <main>
       <PageHead
         title="Templates"
-        description="Your firm's reusable document and email templates with merge fields."
         actions={
           !draft ? (
             <>

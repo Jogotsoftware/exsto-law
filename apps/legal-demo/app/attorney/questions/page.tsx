@@ -262,7 +262,6 @@ export default function QuestionLibraryPage() {
     <main>
       <PageHead
         title="Question library"
-        description="Reusable intake questions — each carries a stable {{token}} that document templates bind to."
         actions={
           <button className="primary" onClick={startNew} disabled={busy || !!edit.new}>
             <PlusIcon size={16} /> New question

@@ -48,10 +48,7 @@ export default function MatterLayout({
     <main>
       <BackButton fallback="/attorney/matters" />
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-        <PageHead
-          title={matter?.matterNumber ?? 'Matter'}
-          description={matter?.summary || undefined}
-        />
+        <PageHead title={matter?.matterNumber ?? 'Matter'} />
         {matter && (
           <span className={statusBadgeClass(matter.status)} style={{ marginBottom: '0.4rem' }}>
             {humanizeStatus(matter.status)}

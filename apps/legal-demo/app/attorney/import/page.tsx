@@ -176,10 +176,7 @@ export default function ImportPage() {
 
   return (
     <main>
-      <PageHead
-        title="Import from Granola"
-        description="Pick a Granola folder, auto-match its meeting notes to matters by attendee email, then import the transcripts."
-      />
+      <PageHead title="Import from Granola" />
 
       {error && <div className="alert alert-error">{error}</div>}
 

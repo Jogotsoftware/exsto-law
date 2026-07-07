@@ -86,10 +86,7 @@ export default function ClientRequestsPage() {
 
   return (
     <main>
-      <PageHead
-        title="Client requests"
-        description="Requests clients submitted from the portal — each already cost-accepted. Fulfilling one records its amount as a matter fee."
-      />
+      <PageHead title="Client requests" />
 
       {error && <div className="alert alert-error">{error}</div>}
 
