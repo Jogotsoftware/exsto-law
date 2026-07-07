@@ -760,7 +760,9 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
       )}
 
       {invoices.length === 0 ? (
-        <div className="loading-block">No invoices yet. Generate one from the Unbilled tab.</div>
+        <section>
+          <p className="text-muted">No invoices yet. Generate one from the Unbilled tab.</p>
+        </section>
       ) : (
         <div className="table-wrap">
           <table className="data-table">
