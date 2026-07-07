@@ -21,6 +21,7 @@ const FIELD_TYPES = [
   'number',
   'address_autocomplete',
   'members_repeater',
+  'file_upload',
 ] as const
 type FieldType = (typeof FIELD_TYPES)[number]
 
@@ -35,6 +36,7 @@ const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   number: 'Number',
   address_autocomplete: 'Address',
   members_repeater: 'Members (repeating)',
+  file_upload: 'File upload (client attaches documents)',
 }
 
 // Answer types that carry a choice list edited via OptionPills.
@@ -908,14 +910,18 @@ function FieldEditor({
           />
           <span>Required</span>
         </label>
-        <label className="qb-switch">
-          <input
-            type="checkbox"
-            checked={field.allow_unknown}
-            onChange={(e) => onChange((f) => ({ ...f, allow_unknown: e.target.checked }))}
-          />
-          <span>Allow “I don’t know”</span>
-        </label>
+        {/* "I don't know" has no sensible rendering for an attachment control —
+            the /book renderer ignores it there, so don't author dead config. */}
+        {field.type !== 'file_upload' && (
+          <label className="qb-switch">
+            <input
+              type="checkbox"
+              checked={field.allow_unknown}
+              onChange={(e) => onChange((f) => ({ ...f, allow_unknown: e.target.checked }))}
+            />
+            <span>Allow “I don’t know”</span>
+          </label>
+        )}
         <label className="qb-switch">
           <input
             type="checkbox"

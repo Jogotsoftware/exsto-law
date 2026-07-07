@@ -7196,6 +7196,66 @@ button.danger.outline:hover:not(:disabled) {
   align-self: flex-start;
 }
 
+/* ---- Intake file uploads (file_upload fields) ---- */
+.bk-upload-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.bk-upload-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1.5px solid var(--bk-line);
+  border-radius: var(--bk-r-lg);
+  padding: 0.5rem 0.7rem;
+  background: rgba(248, 250, 252, 0.6);
+  font-size: 0.88rem;
+}
+.bk-upload-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.bk-upload-size {
+  margin-left: auto;
+  font-size: 0.78rem;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+.bk-upload-remove {
+  background: transparent;
+  border: 0;
+  color: var(--bk-danger);
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+}
+.bk-upload-add {
+  margin-top: 0.6rem;
+  align-self: flex-start;
+  cursor: pointer;
+}
+.bk-upload-busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.bk-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  opacity: 0.65;
+}
+.bk-upload-error {
+  margin: 0.45rem 0 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--bk-danger);
+}
+
 /* ---- Buttons ---- */
 .bk-btn {
   display: inline-flex;

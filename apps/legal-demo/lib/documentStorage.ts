@@ -92,6 +92,28 @@ export async function removeObject(objectKey: string): Promise<void> {
   }
 }
 
+// Oldest-first listing of a tenant's intake-staging objects, for the
+// reference-aware orphan sweep in the intake uploads route. List-only —
+// deletion composes from removeObject, and the ROUTE (not this module) decides
+// what is deletable by checking substrate references, so the service-role
+// client here still never touches a DB table.
+export async function listIntakeStagingObjects(
+  tenantId: string,
+  limit = 200,
+): Promise<Array<{ objectKey: string; createdAt: string | null }>> {
+  const prefix = `${tenantId}/intake-staging`
+  const { data, error } = await storageClient()
+    .storage.from(DOCUMENTS_BUCKET)
+    .list(prefix, { limit, sortBy: { column: 'created_at', order: 'asc' } })
+  if (error || !data) return []
+  return data
+    .filter((o) => !!o.name)
+    .map((o) => ({
+      objectKey: `${prefix}/${o.name}`,
+      createdAt: (o as { created_at?: string | null }).created_at ?? null,
+    }))
+}
+
 // Server-side fetch of the bytes for the proxy-stream download. No signed URL is
 // ever issued to the browser.
 export async function downloadObject(objectKey: string): Promise<Buffer> {

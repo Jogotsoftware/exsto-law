@@ -15,6 +15,8 @@ import {
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
 import { signBookingManageToken } from './bookingManageToken.js'
+import { verifyStagedUploadToken, type StagedUploadTokenPayload } from './intakeUploads.js'
+import { recordUploadedDocument } from './documentUpload.js'
 import type { GenerationMode } from './generateDraft.js'
 import {
   deriveLifecycleFromService,
@@ -768,6 +770,12 @@ export const KNOWN_FIELD_TYPES = [
   'number',
   'address_autocomplete',
   'members_repeater',
+  // Client attaches document(s) mid-wizard (document-review intake). The bytes
+  // upload immediately to a tenant-prefixed STAGING key via the public upload
+  // route; the stored answer is the filename(s), and the signed staging tokens
+  // ride SubmitBookingInput.stagedUploads so submitBooking can bind the objects
+  // to the matter via document.upload.
+  'file_upload',
 ] as const
 
 export type KnownFieldType = (typeof KNOWN_FIELD_TYPES)[number]
@@ -1352,7 +1360,16 @@ export interface SubmitBookingInput {
   scheduledAtIso: string
   scheduledEndIso?: string
   notionEventId?: string | null
+  // Signed staging tokens from the public intake-upload route (file_upload
+  // fields). Verified up front, before any side effects; each becomes a
+  // document.upload on the new matter after the booking lands.
+  stagedUploads?: string[]
 }
+
+// Hard cap on files bound per booking. The upload route already rate-limits
+// and size-caps each file; this bounds the submit itself so a scripted caller
+// can't turn one booking into an unbounded document fan-out.
+const MAX_STAGED_UPLOADS = 10
 
 // Returns true when the requested time window overlaps with an existing
 // active matter's scheduled window. This is the substrate-level guard
@@ -1456,6 +1473,28 @@ export async function submitBooking(
     throw new Error(SLOT_TAKEN_MESSAGE)
   }
 
+  // Staged intake uploads: verify every token NOW, before any side effects, so
+  // a tampered/expired/foreign-tenant token fails the whole submit cleanly
+  // instead of leaving a half-built matter. Binding happens after the booking
+  // lands (below) — a SLOT_TAKEN retry re-sends the same tokens and the files
+  // attach to the retry's matter, not the failed attempt's.
+  const rawTokens = input.stagedUploads ?? []
+  if (rawTokens.length > MAX_STAGED_UPLOADS) {
+    throw new Error(`Too many uploaded files (max ${MAX_STAGED_UPLOADS} per submission).`)
+  }
+  // Dedupe by object key: the token is a stateless bearer, so the same file
+  // re-sent twice (double-added client-side, or replayed on a SLOT_TAKEN retry)
+  // must become ONE document on the matter, not N rows pointing at one object.
+  const stagedFiles: StagedUploadTokenPayload[] = []
+  const seenObjectKeys = new Set<string>()
+  for (const tok of rawTokens) {
+    const f = verifyStagedUploadToken(tok, ctx.tenantId)
+    if (!seenObjectKeys.has(f.objectKey)) {
+      seenObjectKeys.add(f.objectKey)
+      stagedFiles.push(f)
+    }
+  }
+
   // Pre-generate the matter id so the Google Calendar event description can
   // include a reschedule link that points back at this matter.
   const matterEntityId = randomUUID()
@@ -1541,6 +1580,30 @@ export async function submitBooking(
     throw err
   }
 
+  // Bind the staged uploads to the matter (verified above). Provenance is the
+  // client_contact intake just created — same ADR 0035 posture as the portal
+  // upload. Best-effort per file: a Storage/record hiccup must not fail the
+  // booking; the attorney email's document count reflects what actually bound.
+  let boundUploads = 0
+  for (const f of stagedFiles) {
+    try {
+      await recordUploadedDocument(ctx, {
+        matterEntityId,
+        objectKey: f.objectKey,
+        originalFilename: f.originalFilename,
+        contentType: f.contentType,
+        sizeBytes: f.sizeBytes,
+        sha256Hex: f.sha256Hex,
+        documentSource: 'client_uploaded',
+        clientContactId: intakeEffects.clientEntityId ?? null,
+        documentKind: 'intake_upload',
+      })
+      boundUploads++
+    } catch (err) {
+      console.error('[submitBooking] intake upload bind failed (booking still saved):', err)
+    }
+  }
+
   // Notifications (WP6, REQ-NOTIFY-01..03) — queued so the booking response
   // never waits on the Gmail API; failures retry in the worker.
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
@@ -1588,6 +1651,10 @@ export async function submitBooking(
     // reschedule; ?intent=cancel jumps straight to the cancel panel.
     reschedule_url: manageToken ? `${baseUrl}/book/manage/${manageToken}` : null,
     cancel_url: manageToken ? `${baseUrl}/book/manage/${manageToken}?intent=cancel` : null,
+    // Documents the client attached at intake (file_upload fields) — the
+    // attorney email surfaces the count so a document-review matter is opened
+    // knowing there is something to read.
+    document_count: boundUploads > 0 ? boundUploads : null,
   }
   await queueNotification(ctx, {
     routeKindName: 'prospect_intake_confirmation',
