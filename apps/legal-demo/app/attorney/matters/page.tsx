@@ -220,12 +220,12 @@ export default function MattersPage() {
           )}
         </div>
         {view === null && !error && (
-          <div className="loading-block">
+          <div className="loading-block" role="status">
             <span className="spinner" /> Loading…
           </div>
         )}
         {view && view.length === 0 && (
-          <div className="loading-block text-muted">
+          <div className="empty-block">
             {matters && matters.length === 0 ? 'No matters yet.' : 'No matches.'}
           </div>
         )}

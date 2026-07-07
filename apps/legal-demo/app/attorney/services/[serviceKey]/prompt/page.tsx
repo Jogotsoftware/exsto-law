@@ -147,11 +147,11 @@ export default function PromptEditorPage() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {!service ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : kinds.length === 0 ? (
-        <div className="loading-block">
+        <div className="empty-block">
           This service has no documents configured. Add document kinds (e.g.{' '}
           <code>operating_agreement</code>) on the service editor first.
         </div>

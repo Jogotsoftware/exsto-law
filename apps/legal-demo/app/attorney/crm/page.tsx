@@ -161,7 +161,7 @@ export default function ClientsPage() {
       )}
 
       {clients === null ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : clients.length === 0 ? (

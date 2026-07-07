@@ -133,7 +133,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
 
   if (!matter && !error) {
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading matter…
       </div>
     )

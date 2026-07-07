@@ -133,7 +133,7 @@ export function AiUsageSection() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {loading && !summary ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : summary ? (

@@ -235,7 +235,7 @@ export default function AttorneyHome() {
           </div>
         )}
         {upcoming === null && !error ? (
-          <div className="loading-block">
+          <div className="loading-block" role="status">
             <span className="spinner" /> Loading…
           </div>
         ) : (
@@ -253,7 +253,7 @@ export default function AttorneyHome() {
         <section>
           <h2>Matters</h2>
           {matters === null && !error && (
-            <div className="loading-block">
+            <div className="loading-block" role="status">
               <span className="spinner" /> Loading…
             </div>
           )}
@@ -263,7 +263,7 @@ export default function AttorneyHome() {
         <section>
           <h2>Recently booked</h2>
           {recent === null && !error && (
-            <div className="loading-block">
+            <div className="loading-block" role="status">
               <span className="spinner" /> Loading…
             </div>
           )}

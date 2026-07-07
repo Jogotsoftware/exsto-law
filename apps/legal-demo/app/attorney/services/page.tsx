@@ -145,7 +145,7 @@ export default function ServicesPage() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {services === null ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : services.length === 0 ? (

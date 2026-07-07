@@ -210,14 +210,14 @@ export default function ImportPage() {
       </section>
 
       {busy === 'scan' && (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Scanning notes and matching to matters…
         </div>
       )}
 
       {notes && notes.length === 0 && !results && (
         <section>
-          <div className="loading-block text-muted">No notes in this folder.</div>
+          <div className="empty-block">No notes in this folder.</div>
         </section>
       )}
 

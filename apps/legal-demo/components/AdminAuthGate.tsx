@@ -38,7 +38,7 @@ export function AdminAuthGate({ children }: { children: ReactNode }) {
   if (checking || !ok) {
     return (
       <main>
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Checking admin session…
         </div>
       </main>

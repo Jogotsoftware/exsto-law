@@ -427,7 +427,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   if (!draft && !error) {
     return (
       <main>
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading draft…
         </div>
       </main>

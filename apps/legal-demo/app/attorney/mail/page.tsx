@@ -465,7 +465,7 @@ export default function MailPage() {
         )}
 
         {threads === null ? (
-          <div className="loading-block">
+          <div className="loading-block" role="status">
             <span className="spinner" /> Loading client mail…
           </div>
         ) : threads.length === 0 && !needsMailScope ? (

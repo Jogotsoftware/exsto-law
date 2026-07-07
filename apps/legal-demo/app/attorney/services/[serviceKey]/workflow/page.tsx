@@ -485,7 +485,7 @@ export default function ServiceWorkflowPage() {
 
   if (steps === null) {
     return (
-      <div className="loading-block">
+      <div className="loading-block" role="status">
         <span className="spinner" /> Loading workflow…
       </div>
     )

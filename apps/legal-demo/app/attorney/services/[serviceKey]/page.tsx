@@ -199,7 +199,7 @@ export default function ServiceSettingsPage() {
       {saved && <div className="alert alert-success">Saved a new version.</div>}
 
       {!form ? (
-        <div className="loading-block">
+        <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       ) : (
