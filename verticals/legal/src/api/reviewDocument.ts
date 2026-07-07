@@ -10,7 +10,7 @@ import { callClaudeDrafter } from '../adapters/claude.js'
 import { loadReviewPrompt, loadRedlinePrompt } from '../templates/loader.js'
 import { getMatter } from '../queries/matters.js'
 import { getUploadedDocumentObject } from './documentUpload.js'
-import { extractPdfText } from './importPdf.js'
+import { extractPdfText } from './pdfText.js'
 import {
   loadForcedSkills,
   buildActiveSkillsText,

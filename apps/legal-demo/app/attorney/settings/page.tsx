@@ -427,10 +427,7 @@ export default function SettingsPage() {
 
   return (
     <main>
-      <PageHead
-        title="Settings"
-        description="Integrations, firm details, invoice template, email signature, and booking rules."
-      />
+      <PageHead title="Settings" />
 
       {error && <div className="alert alert-error">{error}</div>}
 

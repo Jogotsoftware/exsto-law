@@ -81,6 +81,36 @@ interface InvoiceSummary {
   lineCount: number
   createdAt: string
 }
+// A client-reported Zelle/crypto payment (legal.billing.payment_reports).
+interface PaymentReport {
+  eventId: string
+  invoiceEntityId: string
+  invoiceNumber: string
+  invoiceStatus: string
+  method: 'zelle' | 'crypto'
+  reference: string
+  payerName: string | null
+  note: string | null
+  wallet: { label: string; currency: string } | null
+  screenshotKey: string | null
+  reportedAt: string
+  status: 'open' | 'resolved' | 'dismissed'
+  dismissedReason: string | null
+}
+
+// Block-explorer link for a crypto report, so verification is one click. Only
+// offered when the reference actually looks like a transaction hash.
+function explorerUrl(report: PaymentReport): string | null {
+  if (report.method !== 'crypto') return null
+  const ref = report.reference.trim()
+  const cur = (report.wallet?.currency ?? '').toUpperCase()
+  if (/^[0-9a-f]{64}$/i.test(ref) && cur === 'BTC') return `https://mempool.space/tx/${ref}`
+  if (/^(0x)?[0-9a-f]{64}$/i.test(ref) && ['ETH', 'USDC', 'USDT'].includes(cur)) {
+    return `https://etherscan.io/tx/${ref.startsWith('0x') ? ref : `0x${ref}`}`
+  }
+  return null
+}
+
 function money(amount: string | null, currency = 'USD'): string {
   if (amount === null) return '—'
   return `${currency === 'USD' ? '$' : currency + ' '}${amount}`
@@ -475,6 +505,8 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
   const [pdf, setPdf] = useState<{ url: string; filename: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [paying, setPaying] = useState<string | null>(null)
+  // Client-reported Zelle/crypto payments (migration 0115) awaiting verification.
+  const [reports, setReports] = useState<PaymentReport[]>([])
   const linkStyle: React.CSSProperties = {
     background: 'none',
     border: 'none',
@@ -491,6 +523,16 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
         toolName: 'legal.invoice.list',
       })
       setInvoices(r.invoices)
+      // Client-reported Zelle/crypto payments ride along; a failure here must not
+      // take down the invoices table (reports are additive verification work).
+      try {
+        const rep = await callAttorneyMcp<{ reports: PaymentReport[] }>({
+          toolName: 'legal.billing.payment_reports',
+        })
+        setReports(rep.reports)
+      } catch {
+        setReports([])
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -558,6 +600,49 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
     }
   }
 
+  // Confirm a client-reported Zelle/crypto payment: the SAME invoice.pay action as
+  // "Mark paid", but carrying the report's method + verification reference so the
+  // payment record says exactly how it was verified.
+  async function confirmReport(report: PaymentReport) {
+    setPaying(report.invoiceEntityId)
+    setError(null)
+    setNotice(null)
+    try {
+      await callAttorneyMcp<{ paid: boolean }>({
+        toolName: 'legal.invoice.pay',
+        input: {
+          invoiceEntityId: report.invoiceEntityId,
+          method: report.method,
+          reference: report.reference,
+        },
+      })
+      setNotice(`${report.invoiceNumber} marked paid (${report.method}).`)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPaying(null)
+    }
+  }
+
+  async function dismissReport(report: PaymentReport) {
+    const reason = prompt('Dismiss this payment report? Optional reason for the record:')
+    if (reason === null) return
+    setBusy(report.eventId)
+    setError(null)
+    try {
+      await callAttorneyMcp<{ eventId: string }>({
+        toolName: 'legal.billing.dismiss_payment_report',
+        input: { reportEventId: report.eventId, reason: reason || undefined },
+      })
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   // Manual "Mark paid" — records a payment through the same core action a payment
   // processor will call later. v1 has no amount prompt: it records the full total.
   async function markPaid(inv: InvoiceSummary) {
@@ -590,8 +675,94 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
     <div>
       {error && <div className="alert alert-error">{error}</div>}
       {notice && <div className="alert">{notice}</div>}
+
+      {/* Client-reported Zelle/crypto payments awaiting verification. Confirm =
+          the same invoice.pay action as Mark paid, carrying the report's method +
+          reference; Dismiss records an append-only correction. */}
+      {reports.some((r) => r.status === 'open') && (
+        <section style={{ marginBottom: 'var(--space-4)' }}>
+          <h3 style={{ margin: '0 0 var(--space-2)' }}>Payments reported by clients</h3>
+          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            {reports
+              .filter((r) => r.status === 'open')
+              .map((r) => {
+                const explorer = explorerUrl(r)
+                return (
+                  <div
+                    key={r.eventId}
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      padding: 'var(--space-3)',
+                      display: 'grid',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                      <strong>{r.invoiceNumber}</strong>
+                      <span className="badge info">
+                        {r.method === 'crypto'
+                          ? `crypto${r.wallet?.currency ? ` · ${r.wallet.currency}` : ''}`
+                          : 'Zelle'}
+                      </span>
+                      <span className="text-sm" style={{ color: 'var(--muted)' }}>
+                        {fmtDate(r.reportedAt)}
+                        {r.payerName ? ` · from ${r.payerName}` : ''}
+                      </span>
+                    </div>
+                    <div className="text-sm" style={{ wordBreak: 'break-all' }}>
+                      {r.method === 'crypto' ? 'Transaction ID: ' : 'Confirmation #: '}
+                      <code>{r.reference}</code>
+                      {explorer && (
+                        <>
+                          {' · '}
+                          <a href={explorer} target="_blank" rel="noreferrer noopener">
+                            View on block explorer ↗
+                          </a>
+                        </>
+                      )}
+                      {r.screenshotKey && (
+                        <>
+                          {' · '}
+                          <a
+                            href={`/api/attorney/payments/report-screenshot?key=${encodeURIComponent(r.screenshotKey)}`}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            View screenshot ↗
+                          </a>
+                        </>
+                      )}
+                    </div>
+                    {r.note && <div className="text-sm text-muted">“{r.note}”</div>}
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: '0.2rem' }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={paying === r.invoiceEntityId}
+                        onClick={() => confirmReport(r)}
+                      >
+                        {paying === r.invoiceEntityId ? '…' : 'Verified — mark paid'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy === r.eventId}
+                        onClick={() => dismissReport(r)}
+                      >
+                        {busy === r.eventId ? '…' : 'Dismiss'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+          </div>
+        </section>
+      )}
+
       {invoices.length === 0 ? (
-        <div className="loading-block">No invoices yet. Generate one from the Unbilled tab.</div>
+        <section>
+          <p className="text-muted">No invoices yet. Generate one from the Unbilled tab.</p>
+        </section>
       ) : (
         <div className="table-wrap">
           <table className="data-table">
@@ -625,6 +796,13 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                       >
                         {inv.status === 'paid' ? '✓ paid' : inv.status}
                       </span>
+                      {reports.some(
+                        (r) => r.status === 'open' && r.invoiceEntityId === inv.invoiceEntityId,
+                      ) && (
+                        <span className="badge info" style={{ marginLeft: 6 }}>
+                          payment reported
+                        </span>
+                      )}
                     </td>
                     <td>{fmtDate(inv.issuedDate)}</td>
                     <td style={{ textAlign: 'right' }}>{inv.lineCount}</td>
@@ -989,10 +1167,7 @@ export default function BillingPage() {
 
   return (
     <main>
-      <PageHead
-        title="Billing"
-        description="Roll unbilled time and expenses into invoices, then send them to clients."
-      />
+      <PageHead title="Billing" />
       <Tabs
         tabs={[
           {

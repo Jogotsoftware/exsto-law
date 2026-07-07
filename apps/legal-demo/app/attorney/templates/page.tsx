@@ -785,7 +785,6 @@ export default function TemplatesPage() {
     <main>
       <PageHead
         title="Templates"
-        description="Your firm's reusable document and email templates with merge fields."
         actions={
           !draft ? (
             <>
@@ -1337,7 +1336,9 @@ export default function TemplatesPage() {
       )}
       {templates && templates.length === 0 && !draft && (
         <section>
-          <p>No templates yet. Create your first reusable document or email template.</p>
+          <p className="text-muted">
+            No templates yet. Create your first reusable document or email template.
+          </p>
         </section>
       )}
       {templates && templates.length > 0 && (

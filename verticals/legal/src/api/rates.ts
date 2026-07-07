@@ -59,14 +59,6 @@ export async function getClientRate(
   })
 }
 
-/** A service's fixed fee (its workflow_definition fixed_fee), or null if unpriced. */
-export async function getServiceRate(
-  ctx: ActionContext,
-  serviceKey: string,
-): Promise<string | null> {
-  return withActionContext(ctx, async (client) => readServiceFee(client, ctx.tenantId, serviceKey))
-}
-
 // ── Writes (through the core) ─────────────────────────────────────────────────
 
 export async function setFirmDefaultRate(
@@ -265,19 +257,4 @@ async function readClientOwnRate(
     [tenantId, clientEntityId],
   )
   return res.rows[0]?.rate ?? null
-}
-
-async function readServiceFee(
-  client: import('@exsto/shared').DbClient,
-  tenantId: string,
-  serviceKey: string,
-): Promise<string | null> {
-  const res = await client.query<{ fixed_fee: string | null }>(
-    `SELECT transitions ->> 'fixed_fee' AS fixed_fee
-       FROM workflow_definition
-      WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
-      ORDER BY version DESC LIMIT 1`,
-    [tenantId, serviceKey],
-  )
-  return res.rows[0]?.fixed_fee ?? null
 }

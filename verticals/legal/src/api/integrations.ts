@@ -2,7 +2,6 @@ import { submitAction, type ActionContext } from '@exsto/substrate'
 import {
   listConnections,
   saveConnection,
-  loadConnection,
   disconnect as disconnectProvider,
 } from '../adapters/connectionStore.js'
 import { verifyAnthropicKey } from '../adapters/claude.js'
@@ -99,16 +98,6 @@ export async function listIntegrationStatuses(ctx: ActionContext): Promise<Integ
           : undefined,
     }
   })
-}
-
-// Read a stored API key for server-side use (drafting, ingestion). Env var
-// takes precedence so local dev works without a connected integration.
-export async function loadApiKey(
-  tenantId: string,
-  provider: IntegrationProvider,
-): Promise<string | null> {
-  const conn = await loadConnection<{ api_key: string }>(tenantId, provider)
-  return conn?.secret.api_key ?? null
 }
 
 // Ping the provider with the supplied key. Returns null on success or an

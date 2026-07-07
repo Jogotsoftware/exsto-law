@@ -146,3 +146,43 @@ export async function ensureMeetingReconcileScheduled(tenantId: string): Promise
   if (pending > 0) return
   await enqueueJob({ tenantId, jobKind: 'legal.meeting.reconcile', runAt: new Date() })
 }
+
+// One-shot recovery sweep for drafting jobs orphaned by a worker crash or a deploy
+// mid-run (WP3.4): a job left CLAIMED ('running') with a stale lock never reached a
+// terminal state, leaving its matter stuck "generating" with no draft and no
+// failure. resolveStaleDraftJobs surfaces each as a retryable draft.failed so it
+// stops hanging silently. Errors are swallowed — a recovery sweep must never crash
+// the worker boot.
+registerWorkerHandler('legal.draft.reconcile', async (ctx) => {
+  try {
+    const { resolveStaleDraftJobs } = await import('../api/generateDraft.js')
+    const resolved = await resolveStaleDraftJobs(ctx)
+    if (resolved.length > 0) {
+      console.log(
+        `[draft.reconcile] surfaced ${resolved.length} stalled drafting job(s): ` +
+          resolved.map((r) => r.jobId).join(', '),
+      )
+    }
+  } catch (err) {
+    console.error('[draft.reconcile] sweep failed (non-fatal):', err)
+  }
+})
+
+// Seed ONE recovery sweep at worker startup — idempotent (no-ops if one is already
+// pending/running) so a restart never piles them up. Deliberately one-shot per
+// boot, NOT a self-perpetuating chain like meeting-reconcile: resolveStaleDraftJobs
+// emits draft.failed without transitioning the stuck job, so a recurring pass would
+// re-emit the same failure every interval. A boot sweep is the right cadence — each
+// merge auto-deploys, restarting the worker often enough to catch orphaned jobs.
+export async function ensureStaleDraftReconcileScheduled(tenantId: string): Promise<void> {
+  const pending = await withTenant(tenantId, async (client) => {
+    const r = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM worker_job
+       WHERE tenant_id = $1 AND job_kind = 'legal.draft.reconcile' AND status IN ('pending','running')`,
+      [tenantId],
+    )
+    return Number(r.rows[0]?.n ?? '0')
+  })
+  if (pending > 0) return
+  await enqueueJob({ tenantId, jobKind: 'legal.draft.reconcile', runAt: new Date() })
+}

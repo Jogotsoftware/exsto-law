@@ -148,7 +148,6 @@ export default function MattersPage() {
     <main>
       <PageHead
         title="Matters"
-        description="All legal matters — open, in progress, and closed."
         actions={
           <button type="button" className="primary" onClick={() => setShowNew(true)}>
             <span className="icon-inline">

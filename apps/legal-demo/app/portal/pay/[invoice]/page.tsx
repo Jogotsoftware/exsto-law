@@ -13,6 +13,7 @@ import { use, useCallback, useEffect, useState } from 'react'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 import { BackButton } from '@/components/BackButton'
 import { PayForm } from './PayForm'
+import { ManualPaymentOptions } from './ManualPaymentOptions'
 import { formatDate } from '@/lib/datetime'
 
 // The payment-intent shape returned by legal.client.invoice_payment_intent.
@@ -291,6 +292,13 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                     details.
                   </div>
                 )}
+                {/* Instruct-then-verify rails (Zelle / crypto) — shown alongside the
+                    online option whenever the firm has configured them. Renders
+                    nothing when no methods are set. */}
+                <ManualPaymentOptions
+                  invoiceNumber={data.invoiceNumber}
+                  amountLabel={money(data.total, data.currency)}
+                />
               </div>
             )}
           </>

@@ -436,7 +436,6 @@ export default function QuestionnaireLibraryPage() {
     <main>
       <PageHead
         title="Questionnaires"
-        description="Every intake form the firm has — reusable library forms you build here, plus each service's bound intake form."
         actions={
           !draft ? (
             <button className="primary" onClick={() => setDraft(EMPTY_DRAFT())}>
@@ -690,7 +689,9 @@ export default function QuestionnaireLibraryPage() {
       )}
       {items && items.length === 0 && (svcForms?.length ?? 0) === 0 && !draft && (
         <section>
-          <p>No questionnaires yet. Build your first reusable intake form.</p>
+          <p className="text-muted">
+            No questionnaires yet. Build your first reusable intake form.
+          </p>
         </section>
       )}
       {items && (items.length > 0 || (svcForms?.length ?? 0) > 0) && (

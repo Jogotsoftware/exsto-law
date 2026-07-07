@@ -135,7 +135,6 @@ export default function ServicesPage() {
     <main>
       <PageHead
         title="Services"
-        description="The offerings clients can book. Toggle a service off to hide it from the booking page without losing its setup; the gear menu edits, clones, or deletes it."
         actions={
           <button className="primary" onClick={() => router.push('/attorney/services/new')}>
             + New service
@@ -150,7 +149,9 @@ export default function ServicesPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : services.length === 0 ? (
-        <div className="loading-block">No services yet. Create your first offering.</div>
+        <section>
+          <p className="text-muted">No services yet. Create your first offering.</p>
+        </section>
       ) : (
         <section style={{ padding: 0, overflow: 'visible' }}>
           <table className="data-table">

@@ -152,13 +152,3 @@ export function resolveAssistantModel(id: string): AssistantModel | null {
   if (!entry) return null
   return { ...entry, id: modelId(entry.provider, entry.model), connected: false }
 }
-
-// The default model id to preselect when the UI has no prior choice: the first
-// connected+available model, else the catalog default for the first available
-// provider. Pure given the model list, so the UI can call it on the client.
-export function defaultModelId(models: AssistantModel[]): string | null {
-  const usable = models.find((m) => m.available && m.connected)
-  if (usable) return usable.id
-  const fallback = models.find((m) => m.available && m.isDefault) ?? models.find((m) => m.available)
-  return fallback?.id ?? null
-}

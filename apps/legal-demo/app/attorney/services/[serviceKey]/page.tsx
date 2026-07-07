@@ -38,6 +38,7 @@ interface ServiceDefinition {
   cost: ServiceCost | null
   generationMode: GenerationMode
   booking: ServiceBooking | null
+  appointmentRequired: boolean
   isActive: boolean
   sortOrder: number
   updatedAt: string
@@ -50,6 +51,7 @@ interface FormState {
   bookingEnabled: boolean
   bookingSendInvite: boolean
   bookingDuration: BookingDuration
+  appointmentRequired: boolean
 }
 
 const EMPTY: FormState = {
@@ -60,6 +62,7 @@ const EMPTY: FormState = {
   bookingEnabled: false,
   bookingSendInvite: true,
   bookingDuration: 30,
+  appointmentRequired: true,
 }
 
 export default function ServiceSettingsPage() {
@@ -99,6 +102,9 @@ export default function ServiceSettingsPage() {
         bookingEnabled: r.service.booking?.enabled ?? false,
         bookingSendInvite: r.service.booking?.send_calendar_invite ?? true,
         bookingDuration: r.service.booking?.duration_minutes ?? 30,
+        // Defensive ?? true: a stale server bundle without the field must not
+        // silently flip existing services to intake-only.
+        appointmentRequired: r.service.appointmentRequired ?? true,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -142,7 +148,11 @@ export default function ServiceSettingsPage() {
           },
         })
         const newKey = r.service.serviceKey
-        if (form.bookingEnabled || form.generationMode !== 'template_merge') {
+        if (
+          form.bookingEnabled ||
+          form.generationMode !== 'template_merge' ||
+          !form.appointmentRequired
+        ) {
           await callAttorneyMcp({
             toolName: 'legal.service.update',
             input: {
@@ -152,6 +162,7 @@ export default function ServiceSettingsPage() {
               route: form.route,
               generationMode: form.generationMode,
               booking,
+              appointmentRequired: form.appointmentRequired,
             },
           })
         }
@@ -172,6 +183,7 @@ export default function ServiceSettingsPage() {
           sortOrder: meta?.sortOrder,
           generationMode: form.generationMode,
           booking,
+          appointmentRequired: form.appointmentRequired,
         },
       })
       setSaved(true)
@@ -266,6 +278,26 @@ export default function ServiceSettingsPage() {
             <label className="svc-check">
               <input
                 type="checkbox"
+                checked={form.appointmentRequired}
+                onChange={(e) => update('appointmentRequired', e.target.checked)}
+              />
+              <span>Clients schedule a consultation when they book this service</span>
+            </label>
+            {!form.appointmentRequired && (
+              <p
+                style={{
+                  color: 'var(--muted)',
+                  fontSize: 'var(--text-sm)',
+                  margin: '0 0 var(--space-2)',
+                }}
+              >
+                Intake only — clients submit the questionnaire and the matter opens without an
+                appointment. Great for document-review services.
+              </p>
+            )}
+            <label className="svc-check">
+              <input
+                type="checkbox"
                 checked={form.bookingEnabled}
                 onChange={(e) => update('bookingEnabled', e.target.checked)}
               />
@@ -275,14 +307,16 @@ export default function ServiceSettingsPage() {
               <input
                 type="checkbox"
                 checked={form.bookingSendInvite}
+                disabled={!form.appointmentRequired}
                 onChange={(e) => update('bookingSendInvite', e.target.checked)}
               />
               <span>Send a calendar invite when a consultation is booked</span>
             </label>
-            <label style={{ maxWidth: 240 }}>
+            <label style={{ maxWidth: 240, opacity: form.appointmentRequired ? 1 : 0.5 }}>
               <span>Consultation length</span>
               <select
                 value={form.bookingDuration}
+                disabled={!form.appointmentRequired}
                 onChange={(e) =>
                   update('bookingDuration', Number(e.target.value) as BookingDuration)
                 }

@@ -96,7 +96,6 @@ export default function ClientsPage() {
             {clients && <span style={{ color: 'var(--muted)' }}>{clients.length}</span>}
           </span>
         }
-        description="The billing parent that groups a client’s contacts and matters."
         actions={
           !creating && (
             <button className="primary" onClick={() => setCreating(true)}>
