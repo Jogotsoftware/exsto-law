@@ -21,6 +21,7 @@ const FIELD_TYPES = [
   'number',
   'address_autocomplete',
   'members_repeater',
+  'file_upload',
 ] as const
 type FieldType = (typeof FIELD_TYPES)[number]
 
@@ -35,6 +36,7 @@ const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   number: 'Number',
   address_autocomplete: 'Address',
   members_repeater: 'Members (repeating)',
+  file_upload: 'File upload (client attaches documents)',
 }
 
 // Answer types that carry a choice list edited via OptionPills.

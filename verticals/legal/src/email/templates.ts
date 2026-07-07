@@ -342,6 +342,9 @@ const BUILDERS: Record<string, (v: Vars) => BuiltEmail> = {
             label: 'Consultation',
             value: v.scheduled_at ? esc(val(v.scheduled_at)) : 'Not booked yet',
           },
+          ...(v.document_count
+            ? [{ label: 'Documents', value: `${esc(val(v.document_count))} uploaded at intake` }]
+            : []),
         ]) +
         button('Open the matter', val(v.matter_url, '#')),
     }),

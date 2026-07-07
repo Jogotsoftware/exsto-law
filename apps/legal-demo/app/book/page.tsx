@@ -70,6 +70,16 @@ interface MemberRow {
   is_manager: boolean
 }
 
+// A file staged through /api/client/intake/uploads for a file_upload field.
+// The token is the ONLY handle on the stored object (opaque, HMAC-signed);
+// filename/size are echoed back purely for display. Keyed by field id in the
+// wizard's stagedUploads state; the tokens ride the submit as stagedUploads[].
+interface StagedFile {
+  token: string
+  filename: string
+  sizeBytes: number
+}
+
 const INITIAL_HORIZON_DAYS = 60
 const HORIZON_INCREMENT_DAYS = 28
 const REFRESH_MS = 60_000
@@ -98,6 +108,13 @@ function newMemberId(): string {
   return `m_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`
 }
 
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function emptyMember(): MemberRow {
   return {
     id: newMemberId(),
@@ -124,6 +141,8 @@ export default function BookPage() {
   const [selectedServiceKey, setSelectedServiceKey] = useState<string | null>(null)
   const [intakeResponses, setIntakeResponses] = useState<Record<string, unknown>>({})
   const [members, setMembers] = useState<MemberRow[]>([emptyMember()])
+  // file_upload answers: files upload immediately (staging), tokens submit later.
+  const [stagedUploads, setStagedUploads] = useState<Record<string, StagedFile[]>>({})
 
   const [slots, setSlots] = useState<CalendarSlot[] | null>(null)
   const [slotsSource, setSlotsSource] = useState<'google' | 'stub' | null>(null)
@@ -273,6 +292,13 @@ export default function BookPage() {
           continue
         }
         const label = t(`field.${field.id}.label`, undefined, field.label)
+        if (field.type === 'file_upload') {
+          // The answer is the staged files themselves, not intakeResponses text.
+          if ((stagedUploads[field.id] ?? []).length === 0) {
+            return t('error.fill_field', { field: label })
+          }
+          continue
+        }
         if (field.type === 'address_autocomplete') {
           const val = intakeResponses[field.id] as StructuredAddress | undefined
           if (!val?.formatted_address?.trim()) return t('error.fill_field', { field: label })
@@ -321,6 +347,12 @@ export default function BookPage() {
         ? { ...intakeResponses, members: members.map(({ id: _id, ...rest }) => rest) }
         : intakeResponses
 
+      // Staged file tokens across all file_upload fields; the server verifies
+      // each and binds the objects to the new matter.
+      const stagedTokens = Object.values(stagedUploads).flatMap((files) =>
+        files.map((f) => f.token),
+      )
+
       const result = await callClientMcp<{
         actionId: string
         effects: Array<{ matterEntityId: string; matterNumber: string; scheduledAt: string }>
@@ -336,6 +368,7 @@ export default function BookPage() {
           intakeResponses: responsesToSubmit,
           scheduledAtIso: selectedSlot.startIso,
           scheduledEndIso: selectedSlot.endIso,
+          stagedUploads: stagedTokens.length > 0 ? stagedTokens : undefined,
         },
         // undefined when CAPTCHA is disabled → callClientMcp omits the field.
         captchaToken: captchaToken ?? undefined,
@@ -589,6 +622,10 @@ export default function BookPage() {
                             setResponses={setIntakeResponses}
                             members={members}
                             setMembers={setMembers}
+                            staged={stagedUploads[field.id] ?? []}
+                            setStaged={(files) =>
+                              setStagedUploads((prev) => ({ ...prev, [field.id]: files }))
+                            }
                           />
                         ))}
                       </div>
@@ -821,15 +858,23 @@ function FieldRenderer({
   setResponses,
   members,
   setMembers,
+  staged,
+  setStaged,
 }: {
   field: ServiceField
   responses: Record<string, unknown>
   setResponses: React.Dispatch<React.SetStateAction<Record<string, unknown>>>
   members: MemberRow[]
   setMembers: React.Dispatch<React.SetStateAction<MemberRow[]>>
+  staged: StagedFile[]
+  setStaged: (files: StagedFile[]) => void
 }) {
   const { t } = useI18n()
   const fieldId = useId()
+  // file_upload transient UI state — declared unconditionally (hooks rule);
+  // unused by every other field type.
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const value = responses[field.id]
   const set = (v: unknown) => setResponses((prev) => ({ ...prev, [field.id]: v }))
   const fieldLabel = t(`field.${field.id}.label`, undefined, field.label)
@@ -940,6 +985,101 @@ function FieldRenderer({
         >
           {t('member.add')}
         </button>
+      </div>
+    )
+  }
+
+  if (field.type === 'file_upload') {
+    // Uploads go to staging IMMEDIATELY (so submit is instant and validation
+    // can require a completed upload, not a pending one). The response token is
+    // the only handle the browser holds; the filename list mirrors into the
+    // questionnaire answers so the attorney sees what was attached.
+    const applyStaged = (files: StagedFile[]) => {
+      setStaged(files)
+      set(files.map((f) => f.filename))
+    }
+    const uploadFile = async (file: File) => {
+      setUploadError(null)
+      setUploading(true)
+      try {
+        const fd = new FormData()
+        fd.append('file', file)
+        const res = await fetch('/api/client/intake/uploads', { method: 'POST', body: fd })
+        const data = (await res.json().catch(() => null)) as {
+          token?: string
+          filename?: string
+          sizeBytes?: number
+          error?: string
+        } | null
+        if (!res.ok || !data?.token) {
+          throw new Error(data?.error ?? t('upload.failed', undefined, 'Upload failed.'))
+        }
+        applyStaged([
+          ...staged,
+          {
+            token: data.token,
+            filename: data.filename ?? file.name,
+            sizeBytes: data.sizeBytes ?? file.size,
+          },
+        ])
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setUploading(false)
+      }
+    }
+    return (
+      <div className="bk-field bk-field-wide">
+        <span className="bk-label">
+          <FileTextIcon size={15} />
+          {fieldLabel}
+          {field.required ? <em className="bk-req">*</em> : ''}
+        </span>
+        {staged.length > 0 && (
+          <ul className="bk-upload-list">
+            {staged.map((f, idx) => (
+              <li key={f.token} className="bk-upload-item">
+                <FileTextIcon size={14} />
+                <span className="bk-upload-name">{f.filename}</span>
+                <span className="bk-upload-size">{formatFileSize(f.sizeBytes)}</span>
+                <button
+                  type="button"
+                  className="bk-upload-remove"
+                  aria-label={t('upload.remove', undefined, 'Remove')}
+                  onClick={() => applyStaged(staged.filter((_, i) => i !== idx))}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {staged.length < 10 && (
+          <label
+            className={`bk-btn bk-btn-soft bk-upload-add${uploading ? ' bk-upload-busy' : ''}`}
+          >
+            <input
+              type="file"
+              accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.tif,.tiff,.txt"
+              style={{ display: 'none' }}
+              disabled={uploading}
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (file) void uploadFile(file)
+              }}
+            />
+            {uploading
+              ? t('upload.uploading', undefined, 'Uploading…')
+              : staged.length > 0
+                ? t('upload.add_another', undefined, 'Attach another document')
+                : t('upload.attach', undefined, 'Attach a document')}
+          </label>
+        )}
+        <p className="bk-hint">
+          {t('upload.hint', undefined, 'PDF, Word, images, or text — up to 25 MB each.')}
+        </p>
+        {uploadError && <p className="bk-upload-error">{uploadError}</p>}
       </div>
     )
   }

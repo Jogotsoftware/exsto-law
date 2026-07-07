@@ -21,6 +21,9 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `Phone: ${s(v.client_phone, '—')}`,
       `Service: ${s(v.service_label, s(v.service_key, '—'))}`,
       v.scheduled_at ? `Consultation: ${s(v.scheduled_at)}` : `No consultation booked yet.`,
+      ...(v.document_count
+        ? [`Documents uploaded at intake: ${s(v.document_count)} (see the matter's Documents tab)`]
+        : []),
       ``,
       `This matter routes to your manual workflow — no documents will be auto-generated.`,
       `Open the matter: ${s(v.matter_url, '(set NEXT_PUBLIC_BASE_URL)')}`,
