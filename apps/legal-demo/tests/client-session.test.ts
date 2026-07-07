@@ -1,12 +1,12 @@
 // Client-portal session crypto + cookie + domain separation (feat/client-portal-pr1).
 //
 // Three layers under test here:
-//   1. lib/clientSession — HMAC sign/verify for the long-lived session cookie AND
-//      the short-lived magic token (round-trip, tamper, expiry, wrong-secret,
-//      missing-secret fail-closed). Pure crypto, no DB.
-//   2. DOMAIN SEPARATION — the client session, the client magic token, the
-//      attorney session, and OAuth state are mutually unverifiable even though
-//      they share OAUTH_STATE_SECRET, because each MACs over a distinct prefix.
+//   1. lib/clientSession — HMAC sign/verify for the long-lived session cookie
+//      (round-trip, tamper, expiry, wrong-secret, missing-secret fail-closed).
+//      Pure crypto, no DB.
+//   2. DOMAIN SEPARATION — the client session, the attorney session, and OAuth
+//      state are mutually unverifiable even though they share OAUTH_STATE_SECRET,
+//      because each MACs over a distinct prefix.
 //   3. /api/client/auth/me — valid cookie → 200 display fields; none → 401.
 //
 // Lives under apps/legal-demo/tests so `next/server` resolves. OAUTH_STATE_SECRET
@@ -15,8 +15,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
   signClientSession,
   verifyClientSession,
-  signClientMagicToken,
-  verifyClientMagicToken,
   buildClientSessionCookie,
   buildClearedClientSessionCookie,
   readClientSessionFromCookieHeader,
@@ -131,49 +129,6 @@ describe('lib/clientSession — session HMAC sign/verify (no DB)', () => {
   })
 })
 
-describe('lib/clientSession — magic token HMAC sign/verify (no DB)', () => {
-  let restore: () => void
-  beforeAll(() => {
-    restore = withSecret()
-  })
-  afterAll(() => restore())
-
-  it('round-trips a magic token with a nonce and ~30-min expiry', () => {
-    const before = Math.floor(Date.now() / 1000)
-    const token = signClientMagicToken({ clientContactId: CLIENT_CONTACT, tenantId: TENANT })
-    const payload = verifyClientMagicToken(token)
-    expect(payload).not.toBeNull()
-    expect(payload!.clientContactId).toBe(CLIENT_CONTACT)
-    expect(payload!.tenantId).toBe(TENANT)
-    expect(typeof payload!.nonce).toBe('string')
-    expect(payload!.nonce.length).toBeGreaterThan(0)
-    // TTL is 1800s; allow a little slack for execution time.
-    expect(payload!.exp - before).toBeGreaterThan(1700)
-    expect(payload!.exp - before).toBeLessThanOrEqual(1810)
-  })
-
-  it('mints a distinct nonce each time (links are not guessable from id+exp)', () => {
-    const a = verifyClientMagicToken(
-      signClientMagicToken({ clientContactId: CLIENT_CONTACT, tenantId: TENANT }),
-    )
-    const b = verifyClientMagicToken(
-      signClientMagicToken({ clientContactId: CLIENT_CONTACT, tenantId: TENANT }),
-    )
-    expect(a!.nonce).not.toBe(b!.nonce)
-  })
-
-  it('rejects an expired magic token', () => {
-    const token = signClientMagicToken({ clientContactId: CLIENT_CONTACT, tenantId: TENANT }, -10)
-    expect(verifyClientMagicToken(token)).toBeNull()
-  })
-
-  it('rejects a tampered magic token', () => {
-    const token = signClientMagicToken({ clientContactId: CLIENT_CONTACT, tenantId: TENANT })
-    const tampered = token.slice(0, token.indexOf('.')) + '.deadbeef'
-    expect(verifyClientMagicToken(tampered)).toBeNull()
-  })
-})
-
 describe('DOMAIN SEPARATION — tokens are mutually unverifiable', () => {
   let restore: () => void
   beforeAll(() => {
@@ -196,20 +151,6 @@ describe('DOMAIN SEPARATION — tokens are mutually unverifiable', () => {
       displayName: 'Attorney',
     })
     expect(verifyClientSession(attorneyToken)).toBeNull()
-  })
-
-  it('a magic token is neither a client session nor an attorney session', async () => {
-    const { verifySession } = await import('../lib/session')
-    const magic = signClientMagicToken({ clientContactId: CLIENT_CONTACT, tenantId: TENANT })
-    expect(verifyClientSession(magic)).toBeNull()
-    expect(verifySession(magic)).toBeNull()
-  })
-
-  it('a client session token is not a valid magic token (and vice-versa)', () => {
-    const session = signClientSession(IDENTITY)
-    const magic = signClientMagicToken({ clientContactId: CLIENT_CONTACT, tenantId: TENANT })
-    expect(verifyClientMagicToken(session)).toBeNull()
-    expect(verifyClientSession(magic)).toBeNull()
   })
 
   it('a client session token is not a valid OAuth-state token', async () => {
