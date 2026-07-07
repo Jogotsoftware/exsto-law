@@ -194,6 +194,74 @@ registerActionHandler('legal.firm.disconnect_stripe', async (ctx, client, payloa
   return { firm_settings_id: firmSettingsId }
 })
 
+// Manual payment methods — Zelle + crypto wallets (migration 0115). One JSON
+// config attribute on the firm_settings singleton, same discipline as
+// invoice_template_config below, except the shape is validated at the WRITE
+// boundary too: these strings render on the client payment page, so nothing
+// unbounded may be stored.
+registerActionHandler(
+  'legal.firm.set_manual_payment_methods',
+  async (ctx, client, payload, actionId) => {
+    const p = payload as unknown as { config?: Record<string, unknown> }
+    const config = validateManualPaymentConfig(p.config)
+
+    const firmSettingsId = await ensureFirmSettings(client, ctx.tenantId, actionId)
+    const akId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'manual_payment_methods_config',
+    )
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: firmSettingsId,
+      attributeKindId: akId,
+      value: config,
+      confidence: 1.0,
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+    return { firm_settings_id: firmSettingsId }
+  },
+)
+
+// Bound + normalize the config at the write boundary. Length caps keep the
+// client payment page honest; the wallet cap stops it becoming a wall of
+// addresses. Wallets missing an address or currency are dropped, not stored.
+function validateManualPaymentConfig(raw: unknown): Record<string, unknown> {
+  const cfg = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const str = (v: unknown, label: string, max: number): string => {
+    const s = typeof v === 'string' ? v.trim() : ''
+    if (s.length > max) throw new Error(`${label} is too long (max ${max} characters).`)
+    return s
+  }
+
+  let zelle: { recipient: string; recipientName: string } | null = null
+  if (cfg.zelle && typeof cfg.zelle === 'object') {
+    const z = cfg.zelle as Record<string, unknown>
+    const recipient = str(z.recipient, 'Zelle recipient', 120)
+    const recipientName = str(z.recipientName, 'Zelle recipient name', 80)
+    if (recipient) zelle = { recipient, recipientName }
+  }
+
+  const walletsRaw = Array.isArray(cfg.wallets) ? cfg.wallets : []
+  if (walletsRaw.length > 10) throw new Error('At most 10 crypto wallets can be configured.')
+  const wallets = walletsRaw
+    .map((w) => {
+      const o = w && typeof w === 'object' ? (w as Record<string, unknown>) : {}
+      return {
+        label: str(o.label, 'Wallet label', 40),
+        currency: str(o.currency, 'Wallet currency', 12).toUpperCase(),
+        network: str(o.network, 'Wallet network', 60),
+        address: str(o.address, 'Wallet address', 200),
+      }
+    })
+    .filter((w) => w.address && w.currency)
+
+  return { zelle, wallets }
+}
+
 // The firm's invoice template branding/content config (Phase 3). Stored as one
 // JSON attribute on the firm_settings singleton; a new write supersedes the prior
 // (append-only, effective-dated). The shape is validated/resolved on the read side

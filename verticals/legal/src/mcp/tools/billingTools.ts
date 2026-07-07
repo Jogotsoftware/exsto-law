@@ -32,6 +32,12 @@ import {
   type InvoiceDetail,
   type MatterInvoicedItem,
   type RatesView,
+  getManualPaymentMethods,
+  setManualPaymentMethods,
+  listPaymentReports,
+  dismissPaymentReport,
+  type ManualPaymentMethods,
+  type PaymentReport,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -348,3 +354,88 @@ registerTool({
   handler: async (ctx: ActionContext, input) =>
     await setServiceRate(ctx, input.serviceKey, input.fixedFee),
 } satisfies Tool<{ serviceKey: string; fixedFee: string }, { fixedFee: string }>)
+
+// ── Manual payment methods — Zelle + crypto (migration 0115) ──────────────────
+// The firm's instruct-then-verify rails: config lives on firm_settings; client
+// payment claims arrive as invoice.payment_reported events. Confirming a report
+// is the EXISTING legal.invoice.pay tool (method 'zelle'/'crypto' + reference) —
+// these tools only configure, list, and dismiss.
+
+registerTool({
+  name: 'legal.firm.get_payment_methods',
+  description:
+    "The firm's manual payment methods (Zelle recipient + crypto wallet addresses) shown to clients on the invoice payment page.",
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ methods: await getManualPaymentMethods(ctx) }),
+} satisfies Tool<Record<string, never>, { methods: ManualPaymentMethods }>)
+
+registerTool({
+  name: 'legal.firm.set_payment_methods',
+  description:
+    "Save the firm's manual payment methods: Zelle recipient (enrolled email/phone + display name) and up to 10 crypto wallets (label, currency, network, address). Shown to clients as pay-by-instruction options on the invoice payment page.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      config: {
+        type: 'object',
+        properties: {
+          // No `type` on purpose: null (don't offer Zelle) or the object below —
+          // the schema type here only takes a single string, and the handler
+          // validates the shape anyway.
+          zelle: {
+            description:
+              "The firm's Zelle recipient ({recipient, recipientName}) or null to not offer Zelle.",
+          },
+          wallets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string' },
+                currency: { type: 'string', description: 'e.g. BTC, ETH, USDC.' },
+                network: { type: 'string', description: 'e.g. Bitcoin, Ethereum mainnet, Solana.' },
+                address: { type: 'string' },
+              },
+              required: ['currency', 'address'],
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    required: ['config'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    methods: await setManualPaymentMethods(ctx, input.config as ManualPaymentMethods),
+  }),
+} satisfies Tool<{ config: ManualPaymentMethods }, { methods: ManualPaymentMethods }>)
+
+registerTool({
+  name: 'legal.billing.payment_reports',
+  description:
+    'Client-reported Zelle/crypto payments awaiting verification (plus recently resolved/dismissed ones). Verify against your bank app / a block explorer / the screenshot, then confirm with legal.invoice.pay or dismiss with legal.billing.dismiss_payment_report.',
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ reports: await listPaymentReports(ctx) }),
+} satisfies Tool<Record<string, never>, { reports: PaymentReport[] }>)
+
+registerTool({
+  name: 'legal.billing.dismiss_payment_report',
+  description:
+    'Dismiss a client payment report you could not verify (or that is duplicate/mistaken). Append-only: records a correction event; the report stays in history.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      reportEventId: { type: 'string' },
+      reason: { type: 'string', description: 'Why it was dismissed (shown alongside the report).' },
+    },
+    required: ['reportEventId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await dismissPaymentReport(ctx, input),
+} satisfies Tool<{ reportEventId: string; reason?: string | null }, { eventId: string }>)

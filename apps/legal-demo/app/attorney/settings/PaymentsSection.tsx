@@ -18,6 +18,17 @@ interface FirmPaymentStatus {
   accountId: string | null
 }
 
+interface CryptoWallet {
+  label: string
+  currency: string
+  network: string
+  address: string
+}
+interface ManualPaymentMethods {
+  zelle: { recipient: string; recipientName: string } | null
+  wallets: CryptoWallet[]
+}
+
 // The ?payments= flag the connect return/refresh routes set on the way back.
 function returnBanner(flag: string | null): { tone: 'ok' | 'warn' | 'error'; text: string } | null {
   switch (flag) {
@@ -193,6 +204,195 @@ export function PaymentsSection(): React.ReactElement {
           )}
         </>
       ) : null}
+
+      <ManualMethodsEditor />
     </CollapsibleSection>
+  )
+}
+
+// Zelle + crypto (migration 0115): instruct-then-verify rails shown to clients on
+// the invoice payment page. Clients report their payment with a confirmation
+// number / tx hash; those reports land on Billing for the attorney to verify.
+function ManualMethodsEditor(): React.ReactElement {
+  const [methods, setMethods] = useState<ManualPaymentMethods | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    callAttorneyMcp<{ methods: ManualPaymentMethods }>({
+      toolName: 'legal.firm.get_payment_methods',
+    })
+      .then((r) => setMethods(r.methods))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [])
+
+  if (error && !methods) return <div className="alert alert-error">{error}</div>
+  if (!methods) {
+    return (
+      <div className="loading-block">
+        <span className="spinner" /> Loading…
+      </div>
+    )
+  }
+
+  const zelle = methods.zelle ?? { recipient: '', recipientName: '' }
+  const setZelle = (patch: Partial<{ recipient: string; recipientName: string }>) =>
+    setMethods({ ...methods, zelle: { ...zelle, ...patch } })
+  const setWallet = (i: number, patch: Partial<CryptoWallet>) =>
+    setMethods({
+      ...methods,
+      wallets: methods.wallets.map((w, wi) => (wi === i ? { ...w, ...patch } : w)),
+    })
+
+  async function save(): Promise<void> {
+    if (!methods || saving) return
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      const config: ManualPaymentMethods = {
+        zelle: zelle.recipient.trim()
+          ? { recipient: zelle.recipient.trim(), recipientName: zelle.recipientName.trim() }
+          : null,
+        wallets: methods.wallets
+          .map((w) => ({
+            label: w.label.trim(),
+            currency: w.currency.trim().toUpperCase(),
+            network: w.network.trim(),
+            address: w.address.trim(),
+          }))
+          .filter((w) => w.address && w.currency),
+      }
+      const r = await callAttorneyMcp<{ methods: ManualPaymentMethods }>({
+        toolName: 'legal.firm.set_payment_methods',
+        input: { config },
+      })
+      setMethods(r.methods)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const field: React.CSSProperties = { display: 'block', width: '100%', marginTop: 4 }
+
+  return (
+    <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+      <h3 style={{ margin: '0 0 0.25rem' }}>Zelle &amp; crypto</h3>
+      <p className="text-muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
+        Shown to clients on the invoice payment page as “Other ways to pay”, with step-by-step
+        instructions and QR codes. Clients report their payment with a Zelle confirmation number or
+        crypto transaction ID (plus an optional screenshot); you verify and confirm it on the
+        Billing page — invoices are never marked paid automatically.
+      </p>
+      {error && <div className="alert alert-error">{error}</div>}
+
+      <div style={{ display: 'grid', gap: '0.5rem', maxWidth: 560 }}>
+        <label className="text-sm">
+          Zelle email or U.S. phone <span className="text-muted">(blank = don’t offer Zelle)</span>
+          <input
+            type="text"
+            value={zelle.recipient}
+            onChange={(e) => setZelle({ recipient: e.target.value })}
+            placeholder="payments@yourfirm.com"
+            style={field}
+          />
+        </label>
+        <label className="text-sm">
+          Zelle recipient name <span className="text-muted">(what the payer’s bank shows)</span>
+          <input
+            type="text"
+            value={zelle.recipientName}
+            onChange={(e) => setZelle({ recipientName: e.target.value })}
+            placeholder="Pacheco Law PLLC"
+            style={field}
+          />
+        </label>
+
+        <div className="text-sm" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+          Crypto wallets
+        </div>
+        {methods.wallets.map((w, i) => (
+          <div
+            key={i}
+            style={{
+              display: 'grid',
+              gap: '0.4rem',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              padding: '0.6rem',
+            }}
+          >
+            <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <input
+                type="text"
+                value={w.currency}
+                onChange={(e) => setWallet(i, { currency: e.target.value })}
+                placeholder="Currency (BTC, ETH, USDC…)"
+                style={{ flex: 1 }}
+              />
+              <input
+                type="text"
+                value={w.network}
+                onChange={(e) => setWallet(i, { network: e.target.value })}
+                placeholder="Network (e.g. Ethereum mainnet)"
+                style={{ flex: 2 }}
+              />
+            </div>
+            <input
+              type="text"
+              value={w.address}
+              onChange={(e) => setWallet(i, { address: e.target.value })}
+              placeholder="Wallet address"
+            />
+            <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <input
+                type="text"
+                value={w.label}
+                onChange={(e) => setWallet(i, { label: e.target.value })}
+                placeholder="Label (optional, e.g. Firm treasury)"
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setMethods({ ...methods, wallets: methods.wallets.filter((_, wi) => wi !== i) })
+                }
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
+        <div>
+          <button
+            type="button"
+            disabled={methods.wallets.length >= 10}
+            onClick={() =>
+              setMethods({
+                ...methods,
+                wallets: [
+                  ...methods.wallets,
+                  { label: '', currency: '', network: '', address: '' },
+                ],
+              })
+            }
+          >
+            Add wallet
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: '0.4rem' }}>
+          <button type="button" className="primary" disabled={saving} onClick={() => void save()}>
+            {saving ? 'Saving…' : 'Save payment methods'}
+          </button>
+          {saved && <span className="text-sm text-muted">Saved ✓</span>}
+        </div>
+      </div>
+    </div>
   )
 }

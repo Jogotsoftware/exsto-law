@@ -27,6 +27,9 @@ import {
   type RequestQuote,
   type RequestType,
   type ClientRequestSummary,
+  getClientPaymentMethods,
+  reportInvoicePayment,
+  type ManualPaymentMethods,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -284,6 +287,48 @@ const feedbackSubmitTool: Tool<FeedbackInput, { eventId: string }> = {
     }),
 }
 
+// ── Manual payment methods (Zelle + crypto, migration 0115) ─────────────────
+// The instruct-then-verify rails: the pay page shows the firm's Zelle recipient
+// and wallet addresses, the client pays in their own app, then REPORTS it here
+// with a verification reference. The invoice stays due until the attorney
+// verifies and marks it paid — the report is a claim, never a state change.
+const paymentMethodsTool: Tool<Record<string, never>, { methods: ManualPaymentMethods }> = {
+  name: 'legal.client.payment_methods',
+  description:
+    "The firm's manual payment options (Zelle recipient, crypto wallet addresses) to display on the invoice payment page.",
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ methods: await getClientPaymentMethods(ctx) }),
+}
+
+interface ReportPaymentInput {
+  invoiceNumber: string
+  method: 'zelle' | 'crypto'
+  reference: string
+  payerName?: string | null
+  note?: string | null
+  wallet?: { label?: string | null; currency?: string | null } | null
+  screenshotKey?: string | null
+  clientContactId: string
+}
+
+const reportPaymentTool: Tool<ReportPaymentInput, { eventId: string }> = {
+  name: 'legal.client.report_payment',
+  description:
+    'Report a Zelle/crypto payment the signed-in client made on one of their OWN invoices (confirmation number / transaction hash + optional proof screenshot). The firm verifies before the invoice is marked paid. clientContactId is stamped by the route.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    reportInvoicePayment(ctx, {
+      clientContactId: input.clientContactId,
+      invoiceNumber: input.invoiceNumber,
+      method: input.method,
+      reference: input.reference,
+      payerName: input.payerName ?? null,
+      note: input.note ?? null,
+      wallet: input.wallet ?? null,
+      screenshotKey: input.screenshotKey ?? null,
+    }),
+}
+
 registerTool(matterTimelineTool)
 registerTool(mattersTool)
 registerTool(threadGetTool)
@@ -298,3 +343,5 @@ registerTool(requestListTool)
 registerTool(documentsTool)
 registerTool(uploadsTool)
 registerTool(feedbackSubmitTool)
+registerTool(paymentMethodsTool)
+registerTool(reportPaymentTool)
