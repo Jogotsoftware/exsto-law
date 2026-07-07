@@ -5,13 +5,11 @@
 //     cookie → 401; a valid cookie for a seeded client → resolves + dispatches.
 //   • PER-MATTER AUTHORIZATION (critical): a cookie bound to matter A returns the
 //     same 404 as an unknown tool for matter B's timeline — no oracle.
-//   • ANTI-ENUMERATION: /api/client/auth/request returns 200 for an unknown
-//     email and queues nothing.
 //   • AUTHED ALLOWLIST: attorney/write tools are not client-portal-authed tools.
 //
 // DB-gated like tests/invariants: the success + authorization cases create real
 // matters/contacts, so they skip (not fail) when no DB URL is wired. The pure
-// cases (no-cookie 401, allowlist, anti-enumeration with an unmatchable email)
+// cases (no-cookie 401, allowlist)
 // run without a DB.
 //
 // Requires a prior build: the route handlers + lib are aliased to apps/legal-demo
@@ -161,33 +159,6 @@ describe('/api/client/portal/mcp resolveClientCtx — cookie gating (no DB)', ()
 })
 
 // ───────────────────────────────────────────────────────────────────────────
-// Pure (no DB): anti-enumeration on the request route for an unmatchable email.
-// An email with no '@' can never match a contact and never hits the DB, so this
-// runs without a DB and proves the neutral 200 + no-queue path.
-// ───────────────────────────────────────────────────────────────────────────
-describe('/api/client/auth/request — anti-enumeration (no DB)', () => {
-  let restore: () => void
-  beforeAll(() => {
-    restore = withSecret()
-  })
-  afterAll(() => restore())
-
-  it('returns a neutral 200 for an obviously-unknown (malformed) email', async () => {
-    const { POST } = await import('@/app/api/client/auth/request/route')
-    const res = await POST(
-      new Request('https://app.test/api/client/auth/request', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: 'not-an-email' }),
-      }),
-    )
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { message?: string }
-    expect(body.message).toMatch(/if that email is on file/i)
-  })
-})
-
-// ───────────────────────────────────────────────────────────────────────────
 // DB-gated: resolve a real client, prove the success path + per-matter authz +
 // anti-enumeration (unknown but well-formed email queues nothing).
 // ───────────────────────────────────────────────────────────────────────────
@@ -312,34 +283,5 @@ dbRun('client portal auth + authorization (live DB)', { timeout: 90_000 }, () =>
     const ids = (body.result?.matters ?? []).map((m) => m.matterEntityId)
     expect(ids).toContain(matterAId)
     expect(ids).not.toContain(matterBId)
-  })
-
-  it('ANTI-ENUMERATION: request for an unknown (well-formed) email returns 200 and queues nothing', async () => {
-    const { POST } = await import('@/app/api/client/auth/request/route')
-    const unknownEmail = `definitely-not-a-client-${randomUUID().slice(0, 8)}@nope.test`
-    const res = await POST(
-      new Request('https://app.test/api/client/auth/request', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: unknownEmail }),
-      }),
-    )
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { message?: string }
-    expect(body.message).toMatch(/if that email is on file/i)
-
-    // Nothing was queued: no worker_job rows reference this address.
-    const pg = (await import('pg')).default
-    const db = new pg.Pool({ connectionString: url })
-    try {
-      const jobs = await db.query(
-        `SELECT count(*)::int AS n FROM worker_job
-         WHERE tenant_id = $1 AND payload::text LIKE '%' || $2 || '%'`,
-        [TENANT, unknownEmail],
-      )
-      expect(jobs.rows[0].n).toBe(0)
-    } finally {
-      await db.end()
-    }
   })
 })

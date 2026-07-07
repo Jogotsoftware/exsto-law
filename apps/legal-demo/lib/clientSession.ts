@@ -4,7 +4,7 @@
 // where that guard throws; instead, the node:crypto dependency makes any
 // accidental client import fail loudly at build time, and no client module
 // imports this file (the client talks to /api/client/auth/me instead).
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
 // Server-verified CLIENT-PORTAL session. This is the client-facing twin of
 // lib/session.ts (the attorney session): a signed payload in an httpOnly cookie
@@ -14,28 +14,23 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 // can never be confused for each other even though both reuse the same secret.
 //
 // Domain separation (security-critical): every MAC here is computed over a
-// 'client-session.v1:' (or 'client-magic.v1:') prefix. The attorney session
-// uses 'session.v1:' and OAuth-state uses no prefix. Because the prefix is part
-// of the signed bytes, an attorney session token, an OAuth-state token, and a
-// client-magic token are all REJECTED by verifyClientSession (and vice-versa)
-// even though the underlying HMAC key is identical. See ADR 0035.
+// 'client-session.v1:' prefix. The attorney session uses 'session.v1:' and
+// OAuth-state uses no prefix. Because the prefix is part of the signed bytes, an
+// attorney session token and an OAuth-state token are both REJECTED by
+// verifyClientSession (and vice-versa) even though the underlying HMAC key is
+// identical. See ADR 0035.
 //
 // Fail-closed: OAUTH_STATE_SECRET is REQUIRED (mirrors lib/session.ts and
 // adapters/oauthState.ts). No secret ⇒ signing and verification throw rather
 // than degrading to an unsigned/forgeable token.
 
 const SESSION_DOMAIN_PREFIX = 'client-session.v1:'
-const MAGIC_DOMAIN_PREFIX = 'client-magic.v1:'
 
 export const CLIENT_SESSION_COOKIE_NAME = 'exsto_client_session'
 
 // 8 hours, in seconds. Used for both the `exp` claim and the cookie Max-Age so
 // they expire together.
 export const CLIENT_SESSION_TTL_SECONDS = 8 * 60 * 60
-
-// Magic-link tokens are short-lived: ~30 minutes. Long enough for a client to
-// open the email and click; short enough that a leaked link is low-value.
-export const MAGIC_TOKEN_TTL_SECONDS = 30 * 60
 
 export interface ClientSessionPayload {
   clientContactId: string
@@ -50,15 +45,6 @@ export interface ClientSessionPayload {
   exp: number // expiry, unix seconds
 }
 
-export interface ClientMagicPayload {
-  clientContactId: string
-  tenantId: string
-  exp: number // expiry, unix seconds (iat + MAGIC_TOKEN_TTL_SECONDS)
-  // A random nonce so two links minted in the same second for the same client
-  // differ, and so the token can't be guessed from its (clientContactId,exp).
-  nonce: string
-}
-
 function secret(): string {
   const s = process.env.OAUTH_STATE_SECRET
   if (!s || s.length < 16) {
@@ -71,8 +57,8 @@ function secret(): string {
 }
 
 // Domain-separated MAC. The prefix is the only thing that distinguishes a
-// client-session MAC from a client-magic MAC, an attorney-session MAC, or an
-// OAuth-state MAC over the same bytes — so none can be replayed as another.
+// client-session MAC from an attorney-session MAC or an OAuth-state MAC over the
+// same bytes — so none can be replayed as another.
 function mac(domainPrefix: string, payloadB64: string): string {
   return createHmac('sha256', secret()).update(domainPrefix).update(payloadB64).digest('base64url')
 }
@@ -139,7 +125,7 @@ export function signClientSession(
 
 // Verify the MAC + `exp` and validate the payload shape. Returns the payload or
 // null (never throws except on missing secret — fail-closed). An attorney
-// session token or a client-magic token fails here: wrong domain prefix.
+// session token fails here: wrong domain prefix.
 export function verifyClientSession(token: string | null | undefined): ClientSessionPayload | null {
   const payload = verifyToken(SESSION_DOMAIN_PREFIX, token)
   if (!payload) return null
@@ -191,45 +177,4 @@ export function buildClientSessionCookie(token: string): string {
 export function buildClearedClientSessionCookie(): string {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
   return `${CLIENT_SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-// Magic-link TOKEN (the short-lived bearer that lands in the email URL).
-// ───────────────────────────────────────────────────────────────────────────
-
-// Mint a signed magic token for a resolved client_contact. ~30-min TTL. The
-// token carries ONLY the contact id + tenant + a nonce; the authorized matter
-// set is RE-RESOLVED from the DB at consume time, never trusted from the token.
-export function signClientMagicToken(
-  identity: Pick<ClientMagicPayload, 'clientContactId' | 'tenantId'>,
-  ttlSeconds: number = MAGIC_TOKEN_TTL_SECONDS,
-): string {
-  const iat = Math.floor(Date.now() / 1000)
-  const payload: ClientMagicPayload = {
-    clientContactId: identity.clientContactId,
-    tenantId: identity.tenantId,
-    exp: iat + ttlSeconds,
-    nonce: randomBytes(16).toString('base64url'),
-  }
-  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  return `${payloadB64}.${mac(MAGIC_DOMAIN_PREFIX, payloadB64)}`
-}
-
-// Verify a magic token's MAC + expiry and validate its shape. Returns the
-// payload or null. A client-session token or attorney-session token fails here
-// (wrong domain prefix) — domain separation in both directions.
-export function verifyClientMagicToken(
-  token: string | null | undefined,
-): ClientMagicPayload | null {
-  const payload = verifyToken(MAGIC_DOMAIN_PREFIX, token)
-  if (!payload) return null
-  if (
-    typeof payload.clientContactId !== 'string' ||
-    typeof payload.tenantId !== 'string' ||
-    typeof payload.exp !== 'number' ||
-    typeof payload.nonce !== 'string'
-  ) {
-    return null
-  }
-  return payload as unknown as ClientMagicPayload
 }
