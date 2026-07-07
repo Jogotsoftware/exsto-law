@@ -16,6 +16,8 @@ const templatesDir = resolve(here, '..', '..', 'templates')
 let cached: {
   intakeQuestionnaireOa?: IntakeQuestionnaire
   draftingPrompt?: string
+  reviewPrompt?: string
+  redlinePrompt?: string
 } = {}
 
 export interface QuestionnaireField {
@@ -149,4 +151,23 @@ export function loadDraftingPrompt(): string {
     cached.draftingPrompt = readFileSync(resolve(templatesDir, 'drafting-prompt.md'), 'utf8')
   }
   return cached.draftingPrompt
+}
+
+// Default AI document-review prompt (per-service config overrides it, same
+// config-first pattern as the drafting prompt).
+export function loadReviewPrompt(): string {
+  if (!cached.reviewPrompt) {
+    cached.reviewPrompt = readFileSync(resolve(templatesDir, 'document-review-prompt.md'), 'utf8')
+  }
+  return cached.reviewPrompt
+}
+
+// The redline pass's prompt is REPO-CONTROLLED (not attorney-editable): its
+// output contract (verbatim reproduction + memo-driven edits only) is what the
+// diff view depends on, so it stays content the firm can't accidentally break.
+export function loadRedlinePrompt(): string {
+  if (!cached.redlinePrompt) {
+    cached.redlinePrompt = readFileSync(resolve(templatesDir, 'document-redline-prompt.md'), 'utf8')
+  }
+  return cached.redlinePrompt
 }

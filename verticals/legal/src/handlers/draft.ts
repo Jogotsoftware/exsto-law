@@ -28,7 +28,11 @@ import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
 // draft.completed, and record generation_mode so the audit trail names the METHOD.
 // ───────────────────────────────────────────────────────────────────────────
 
-type GenerationMode = 'ai_draft' | 'template_merge'
+// VERSION-metadata vocabulary (what method produced this document). 'ai_review'
+// exists ONLY here — the SERVICE-level generation-mode config stays binary
+// (ai_draft | template_merge); its parsers coerce unknown values, so the review
+// marker must never travel through that channel.
+type GenerationMode = 'ai_draft' | 'template_merge' | 'ai_review'
 
 interface PersistDraftArgs {
   matterEntityId: string
@@ -130,6 +134,14 @@ async function persistDraftDocument(
     properties: { document_kind: p.documentKind },
   })
 
+  // An AI review MEMO is an internal attorney artifact, NOT a client
+  // deliverable. It must not touch the client-visible matter workflow: no
+  // 'in_review' status flip (the matter keeps its real status) and no
+  // 'draft.completed' milestone (which the client portal renders as the
+  // misleading "A document is ready" with nothing released). Its audit trail is
+  // the separate document.review.completed event runDocumentReview records.
+  const isReviewMemo = p.generationMode === 'ai_review'
+
   // Matter moves to in_review once a draft lands (unless already terminal).
   const currentStatus = await getLatestAttributeValue<string>(
     client,
@@ -137,7 +149,7 @@ async function persistDraftDocument(
     p.matterEntityId,
     'matter_status',
   )
-  if (currentStatus !== 'approved' && currentStatus !== 'closed') {
+  if (!isReviewMemo && currentStatus !== 'approved' && currentStatus !== 'closed') {
     const statusKindId = await lookupKindId(
       client,
       'attribute_kind_definition',
@@ -156,21 +168,23 @@ async function persistDraftDocument(
     })
   }
 
-  await insertEvent(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    eventKindName: 'draft.completed',
-    primaryEntityId: p.matterEntityId,
-    secondaryEntityIds: [draftEntityId],
-    data: {
-      document_kind: p.documentKind,
-      document_version_id: versionId,
-      generation_mode: p.generationMode,
-      model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
-    },
-    sourceType: p.sourceType,
-    sourceRef: p.sourceRef,
-  })
+  if (!isReviewMemo) {
+    await insertEvent(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      eventKindName: 'draft.completed',
+      primaryEntityId: p.matterEntityId,
+      secondaryEntityIds: [draftEntityId],
+      data: {
+        document_kind: p.documentKind,
+        document_version_id: versionId,
+        generation_mode: p.generationMode,
+        model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
+      },
+      sourceType: p.sourceType,
+      sourceRef: p.sourceRef,
+    })
+  }
 
   return { draftEntityId, contentBlobId, documentVersionId: versionId, versionNumber: 1 }
 }
@@ -183,20 +197,64 @@ interface DraftGeneratePayload {
   reasoning_trace_id: string
   jurisdiction: string
   confidence?: number
+  // AI document review (reviewDocument.ts): the memo is persisted through this
+  // same action so it lands in the review queue unchanged. 'ai_review' is the
+  // only accepted override — anything else stays 'ai_draft'.
+  generation_mode?: string
+  review_of_document_version_id?: string
+  review_of_document_entity_id?: string
+  review_original_filename?: string
+  // Extracted source text + optional redline ride the memo VERSION as extra
+  // content blobs (linked by id in versionMetadata) — deliberately NOT a second
+  // draft entity, which would double the queue rows per reviewed document.
+  review_source_text?: string | null
+  review_redline_text?: string | null
+  redline_reasoning_trace_id?: string | null
 }
 
 registerActionHandler('draft.generate', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as DraftGeneratePayload
+  const isReview = p.generation_mode === 'ai_review'
+
+  let versionMetadata: Record<string, unknown> | undefined
+  if (isReview) {
+    const sourceBlobId = p.review_source_text
+      ? await insertContentBlob(client, {
+          tenantId: ctx.tenantId,
+          actionId,
+          contentType: 'text/plain',
+          body: p.review_source_text,
+        })
+      : null
+    const redlineBlobId = p.review_redline_text
+      ? await insertContentBlob(client, {
+          tenantId: ctx.tenantId,
+          actionId,
+          contentType: 'text/markdown',
+          body: p.review_redline_text,
+        })
+      : null
+    versionMetadata = {
+      review_of_document_version_id: p.review_of_document_version_id ?? null,
+      review_of_document_entity_id: p.review_of_document_entity_id ?? null,
+      review_original_filename: p.review_original_filename ?? null,
+      review_source_blob_id: sourceBlobId,
+      review_redline_blob_id: redlineBlobId,
+      redline_reasoning_trace_id: p.redline_reasoning_trace_id ?? null,
+    }
+  }
+
   return persistDraftDocument(ctx, client, actionId, {
     matterEntityId: p.matter_entity_id,
     documentKind: p.document_kind,
     documentMarkdown: p.document_markdown,
     jurisdiction: p.jurisdiction,
-    generationMode: 'ai_draft',
+    generationMode: isReview ? 'ai_review' : 'ai_draft',
     reasoningTraceId: p.reasoning_trace_id,
     sourceType: 'agent',
     sourceRef: p.model_identity,
     confidence: p.confidence,
+    versionMetadata,
   })
 })
 

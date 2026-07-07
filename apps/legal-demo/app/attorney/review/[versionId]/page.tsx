@@ -33,6 +33,14 @@ interface DraftDetail {
   conclusion: string | null
   confidence: number | null
   reviewNotes: string | null
+  // Present only for AI document-review memos (generation_mode 'ai_review').
+  aiReview: {
+    reviewedDocumentVersionId: string | null
+    reviewedDocumentEntityId: string | null
+    reviewedOriginalFilename: string | null
+    sourceText: string | null
+    redlineText: string | null
+  } | null
 }
 
 interface ReasoningTrace {
@@ -149,6 +157,8 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   // Compare-versions drawer: the document's version history + a line diff of a
   // chosen earlier version against this one.
   const [compareOpen, setCompareOpen] = useState(false)
+  // AI-review redline panel (diff of the client's document vs the suggestion).
+  const [redlineOpen, setRedlineOpen] = useState(false)
   const [versions, setVersions] = useState<VersionSummary[] | null>(null)
   const [baseVersionId, setBaseVersionId] = useState<string | null>(null)
   const [baseMarkdown, setBaseMarkdown] = useState<string | null>(null)
@@ -355,6 +365,26 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     setError(null)
     setNotice(null)
     try {
+      if (draft.aiReview?.reviewedDocumentVersionId) {
+        // This is an AI review MEMO, not a drafted document. Re-running it means
+        // re-reviewing the SAME client-uploaded document with the attorney's
+        // focus notes — NOT running the operating-agreement drafting flow (which
+        // would drop an irrelevant OA into the queue). Routes through the same
+        // legal.document.review.run tool as the Documents-tab "AI review" button.
+        await callAttorneyMcp({
+          toolName: 'legal.document.review.run',
+          input: {
+            matterEntityId: draft.matterEntityId,
+            documentVersionId: draft.aiReview.reviewedDocumentVersionId,
+            guidance: regenGuidance.trim() || undefined,
+          },
+        })
+        setRegenOpen(false)
+        setNotice(
+          'Re-running the AI review with your instructions — the new memo will appear in the review queue shortly.',
+        )
+        return
+      }
       await callAttorneyMcp({
         toolName: 'legal.draft.generate',
         input: {
@@ -424,6 +454,16 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   const evidence = useMemo(() => draft?.reasoningTrace?.evidence ?? [], [draft])
   const alternatives = useMemo(() => draft?.reasoningTrace?.alternatives_considered ?? [], [draft])
   const ambiguities = useMemo(() => draft?.reasoningTrace?.ambiguities ?? [], [draft])
+  // AI review memos: diff of the client's document against the model's
+  // suggested redline (both ride the memo version's metadata blobs).
+  const redlineOps = useMemo(
+    () =>
+      draft?.aiReview?.sourceText && draft.aiReview.redlineText
+        ? lineDiff(draft.aiReview.sourceText, draft.aiReview.redlineText)
+        : [],
+    [draft],
+  )
+  const redlineSummary = useMemo(() => diffStats(redlineOps), [redlineOps])
 
   if (!draft && !error) {
     return (
@@ -490,6 +530,14 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             </span>
             <span className="review-version">v{draft.versionNumber}</span>
             <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
+            {draft.aiReview && (
+              <span
+                className="badge info"
+                title={`AI review of ${draft.aiReview.reviewedOriginalFilename ?? 'a client-uploaded document'}`}
+              >
+                AI review
+              </span>
+            )}
           </>
         }
       />
@@ -538,6 +586,32 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             <SparklesIcon size={14} /> Reasoning trace
           </button>
         )}
+        {draft.aiReview?.reviewedDocumentVersionId && (
+          <a
+            href={`/api/attorney/matters/${draft.matterEntityId}/documents/${draft.aiReview.reviewedDocumentVersionId}/download`}
+          >
+            <button
+              type="button"
+              title="Download the client's original document this memo reviews."
+            >
+              Reviewed file
+              {draft.aiReview.reviewedOriginalFilename
+                ? `: ${draft.aiReview.reviewedOriginalFilename}`
+                : ''}{' '}
+              ↓
+            </button>
+          </a>
+        )}
+        {redlineOps.length > 0 && (
+          <button
+            type="button"
+            className="review-trace-btn"
+            onClick={() => setRedlineOpen((v) => !v)}
+            title="The AI's suggested revision of the client's document, as a line-by-line comparison."
+          >
+            ⇄ Suggested redline ({redlineSummary.added} added, {redlineSummary.removed} removed)
+          </button>
+        )}
         <a
           href={shareUrlFor(draft.documentVersionId)}
           target="_blank"
@@ -547,6 +621,42 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           <button>Open client view ↗</button>
         </a>
       </div>
+
+      {/* AI-review redline: the client's document vs the model's suggested
+          revision, line by line. Rendered above the memo so the attorney can
+          eyeball both without leaving the page. */}
+      {redlineOpen && redlineOps.length > 0 && draft.aiReview && (
+        <section className="review-canvas" aria-label="Suggested redline">
+          <div className="doc-paper" style={{ overflowX: 'auto' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 'var(--space-2)',
+                marginBottom: 'var(--space-2)',
+              }}
+            >
+              <strong>
+                Suggested redline
+                {draft.aiReview.reviewedOriginalFilename
+                  ? ` — ${draft.aiReview.reviewedOriginalFilename}`
+                  : ''}
+              </strong>
+              <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+                AI-suggested changes; nothing is applied until you act on them.
+              </span>
+              <button
+                type="button"
+                style={{ marginLeft: 'auto' }}
+                onClick={() => setRedlineOpen(false)}
+              >
+                Hide
+              </button>
+            </div>
+            <VersionDiff ops={redlineOps} showUnchanged={false} />
+          </div>
+        </section>
+      )}
 
       {/* The document, as a page — or the inline editor when editing. */}
       <div className="review-canvas">

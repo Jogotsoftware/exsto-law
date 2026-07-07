@@ -16,11 +16,15 @@ import {
   serviceCompleteness,
   setServiceActive,
   setServiceCost,
+  resolveReviewConfig,
   updateDocumentTemplate,
   updateDraftingPrompt,
   updateQuestionnaire,
+  updateReviewConfig,
   updateServiceMetadata,
   type CreateServiceInput,
+  type ReviewConfig,
+  type UpdateReviewConfigInput,
   type SetServiceCostInput,
   type DocumentTemplateDoc,
   type DraftingPromptDoc,
@@ -211,6 +215,30 @@ const promptUpdateTool: Tool<
   }),
 }
 
+// AI document-review config (transitions.review). The attorney preconfigures the
+// review prompt (config-first, bundled default fallback — resolved inside the
+// review worker), toggles the redline pass, and force-applies skills. NEITHER is
+// client-portal-callable (clientPolicy.ts is default-deny).
+const reviewGetTool: Tool<{ serviceKey: string }, { review: ReviewConfig }> = {
+  name: 'legal.service.review.get',
+  description:
+    "Get a service offering's AI document-review config: enabled flag, custom review prompt (null = bundled default), redline toggle, forced skill slugs.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    review: await resolveReviewConfig(ctx, input.serviceKey),
+  }),
+}
+
+const reviewUpdateTool: Tool<UpdateReviewConfigInput, { review: ReviewConfig }> = {
+  name: 'legal.service.review.update',
+  description:
+    "Save a service offering's AI document-review config as a new immutable service version. Every field is a MERGE: OMIT a field to leave it unchanged (e.g. send only { serviceKey, redline: true } to toggle the redline without touching the prompt). A custom prompt must contain {{document_text}}; pass prompt null/empty to explicitly clear it and fall back to the bundled default. Newly enqueued reviews use the new config immediately.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    review: await updateReviewConfig(ctx, input),
+  }),
+}
+
 // Document-template editor (Doc-Types PR1). Per-document-kind BODY template. Read
 // resolves the in-app config template first, else the bundled repo body, else null
 // (source 'none') for a novel kind not yet authored. Write validates non-empty and
@@ -261,5 +289,7 @@ registerTool(questionnaireGetTool)
 registerTool(questionnaireUpdateTool)
 registerTool(promptGetTool)
 registerTool(promptUpdateTool)
+registerTool(reviewGetTool)
+registerTool(reviewUpdateTool)
 registerTool(templateGetTool)
 registerTool(templateUpdateTool)

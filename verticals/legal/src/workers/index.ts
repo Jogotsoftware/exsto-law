@@ -47,6 +47,35 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
   })
 })
 
+// Runs one AI document-review job (one per uploaded document). Storage access
+// is the vertical's read-only adapter, injected HERE so the pipeline stays
+// testable with fakes. Transient model/Storage errors throw → runtime backoff;
+// unreviewable documents fail non-retryably inside the runner.
+registerWorkerHandler('legal.document.review', async (ctx, payload) => {
+  const { runDocumentReview } = await import('../api/reviewDocument.js')
+  const { downloadMatterDocument } = await import('../adapters/storage.js')
+  const p = payload as {
+    matter_entity_id: string
+    document_entity_id: string
+    document_version_id: string
+    service_key: string
+    original_filename?: string | null
+    guidance?: string
+  }
+  await runDocumentReview(
+    ctx,
+    {
+      matterEntityId: p.matter_entity_id,
+      documentEntityId: p.document_entity_id,
+      documentVersionId: p.document_version_id,
+      serviceKey: p.service_key,
+      originalFilename: p.original_filename,
+      guidance: p.guidance,
+    },
+    { downloadObject: downloadMatterDocument },
+  )
+})
+
 // Delivers one queued notification through its route's channel driver
 // (REQ-NOTIFY-01..03); failures retry with backoff, then dead-letter.
 registerWorkerHandler('legal.notify', async (ctx, payload) => {
