@@ -75,6 +75,21 @@ describe('assembleReviewPrompt — slot fill + precedence', () => {
     expect(out).not.toMatch(/\{\{\w+\}\}/)
   })
 
+  it('inserts document text literally — $ special replacement patterns are not interpreted', () => {
+    // Raw-string replaceAll would treat these as $&/$`/$'/$$ replacement
+    // patterns and splice the prompt into itself; the function replacer must not.
+    const hostile = "clause A $$ $& $` $' clause B"
+    const out = assembleReviewPrompt({
+      basePrompt: 'Doc:\n{{document_text}}',
+      documentText: hostile,
+      intakeResponses: null,
+      originalFilename: 'f.pdf',
+      serviceLabel: 's',
+    })
+    expect(out).toBe(`Doc:\n${hostile}`)
+    expect(out).toContain(hostile)
+  })
+
   it('appends skills before guidance (guidance carries the most weight, LAST)', () => {
     const out = assembleReviewPrompt({
       basePrompt: '{{document_text}}',

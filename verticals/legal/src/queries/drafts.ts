@@ -232,6 +232,10 @@ export async function getSharedDraftVersion(
          AND dv.id = $2
          AND rkd.kind_name = 'draft_of'
          AND dv.status NOT IN ('rejected', 'revision_requested')
+         -- Defense in depth: AI review memos are internal attorney work product
+         -- and must never resolve through the client-safe shared-draft surface,
+         -- even by direct version id. (They're also excluded from the list.)
+         AND coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') <> 'document_review_memo'
        LIMIT 1`,
       [ctx.tenantId, documentVersionId],
     )

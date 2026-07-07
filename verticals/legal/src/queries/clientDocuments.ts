@@ -63,6 +63,11 @@ export async function listApprovedClientDocuments(
          AND rkd.kind_name = 'draft_of'
          AND r.target_entity_id = ANY($2::uuid[])
          AND dv.status = 'approved'
+         -- AI document-review memos are INTERNAL attorney work product. They ride
+         -- the ordinary draft.generate → pending_review queue (so the attorney can
+         -- edit/approve them), which means "approve" would otherwise publish them
+         -- to this client list. Never expose the memo kind to the client.
+         AND coalesce(e_doc.metadata->>'document_kind', 'document') <> 'document_review_memo'
          -- Exclude docs routed for e-signature (they show in the e-sign list instead).
          AND NOT EXISTS (
            SELECT 1 FROM relationship er

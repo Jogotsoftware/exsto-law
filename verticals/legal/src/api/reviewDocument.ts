@@ -271,11 +271,18 @@ export interface AssembleReviewArgs {
 }
 
 export function assembleReviewPrompt(args: AssembleReviewArgs): string {
+  // Function replacers, NOT raw strings: every value here is untrusted content
+  // (client-uploaded document text, client intake answers, a client-supplied
+  // filename). A raw-string second arg to replaceAll honors `$&`/`` $` ``/`$'`/`$$`
+  // special replacement patterns, so a document containing e.g. `$'` would
+  // splice the rest of the prompt into itself. `() => value` is inserted verbatim.
   let prompt = args.basePrompt
-    .replaceAll('{{document_text}}', args.documentText)
-    .replaceAll('{{intake_responses_json}}', JSON.stringify(args.intakeResponses ?? {}, null, 2))
-    .replaceAll('{{original_filename}}', args.originalFilename)
-    .replaceAll('{{service_label}}', args.serviceLabel)
+    .replaceAll('{{document_text}}', () => args.documentText)
+    .replaceAll('{{intake_responses_json}}', () =>
+      JSON.stringify(args.intakeResponses ?? {}, null, 2),
+    )
+    .replaceAll('{{original_filename}}', () => args.originalFilename)
+    .replaceAll('{{service_label}}', () => args.serviceLabel)
 
   // Selected legal playbooks first, the attorney's own focus LAST — same
   // precedence contract as drafting.
@@ -410,9 +417,11 @@ export async function runDocumentReview(
   let redlineError: string | null = null
   if (config.redline) {
     try {
+      // Function replacers (see assembleReviewPrompt): the memo is model output
+      // and documentText is client-uploaded — both can contain `$&`/`$'`/`$$`.
       const redlinePrompt = loadRedlinePrompt()
-        .replaceAll('{{review_memo}}', result.documentMarkdown)
-        .replaceAll('{{document_text}}', documentText)
+        .replaceAll('{{review_memo}}', () => result.documentMarkdown)
+        .replaceAll('{{document_text}}', () => documentText)
       const redline = await callClaudeDrafter(agentCtx.tenantId, {
         prompt: redlinePrompt,
         maxTokens: 16000,
@@ -464,41 +473,55 @@ export async function runDocumentReview(
 
   const genEffects = (generated.effects[0] ?? {}) as { documentVersionId?: string }
 
-  await submitAction(agentCtx, {
-    actionKindName: 'event.record',
-    intentKind: 'automatic_sync',
-    payload: {
-      event_kind_name: 'document.review.completed',
-      primary_entity_id: input.matterEntityId,
-      secondary_entity_ids: [input.documentEntityId],
-      data: {
-        reviewed_document_version_id: input.documentVersionId,
-        memo_document_version_id: genEffects.documentVersionId ?? null,
-        redline: redlineText != null,
-        redline_error: redlineError,
-        model_identity: result.modelIdentity,
+  // The memo is now durable. The audit event and the "ready for review" email
+  // are best-effort AFTER the commit: if either threw, the job would retry and
+  // re-run draft.generate from the top, producing a SECOND pending_review memo
+  // in the attorney's queue (and re-spending memo+redline tokens). A missing
+  // audit event or unsent email is strictly less bad than a duplicate memo, and
+  // the attorney still sees the memo in their review queue regardless. Mirrors
+  // the redline pass's "never let a secondary step burn the memo" posture.
+  try {
+    await submitAction(agentCtx, {
+      actionKindName: 'event.record',
+      intentKind: 'automatic_sync',
+      payload: {
+        event_kind_name: 'document.review.completed',
+        primary_entity_id: input.matterEntityId,
+        secondary_entity_ids: [input.documentEntityId],
+        data: {
+          reviewed_document_version_id: input.documentVersionId,
+          memo_document_version_id: genEffects.documentVersionId ?? null,
+          redline: redlineText != null,
+          redline_error: redlineError,
+          model_identity: result.modelIdentity,
+        },
+        source_type: 'system',
       },
-      source_type: 'system',
-    },
-  })
+    })
 
-  // Same attorney "ready for review" email as drafting (reuses the route row).
-  const { queueNotification } = await import('./notifications.js')
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
-  await queueNotification(agentCtx, {
-    routeKindName: 'attorney_draft_completed',
-    variables: {
-      matter_entity_id: input.matterEntityId,
-      matter_number: matter.matterNumber,
-      document_kind: REVIEW_MEMO_DOCUMENT_KIND,
-      document_kind_label: `AI document review — ${filename}`,
-      confidence: clampConfidence(result.reasoningTrace.confidence),
-      review_url:
-        baseUrl && genEffects.documentVersionId
-          ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
-          : null,
-    },
-  })
+    // Same attorney "ready for review" email as drafting (reuses the route row).
+    const { queueNotification } = await import('./notifications.js')
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? ''
+    await queueNotification(agentCtx, {
+      routeKindName: 'attorney_draft_completed',
+      variables: {
+        matter_entity_id: input.matterEntityId,
+        matter_number: matter.matterNumber,
+        document_kind: REVIEW_MEMO_DOCUMENT_KIND,
+        document_kind_label: `AI document review — ${filename}`,
+        confidence: clampConfidence(result.reasoningTrace.confidence),
+        review_url:
+          baseUrl && genEffects.documentVersionId
+            ? `${baseUrl}/attorney/review/${genEffects.documentVersionId}`
+            : null,
+      },
+    })
+  } catch (err) {
+    console.error(
+      '[runDocumentReview] memo persisted; post-commit audit/notification failed (not retried to avoid a duplicate memo):',
+      err,
+    )
+  }
 
   return generated
 }
