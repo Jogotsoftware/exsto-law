@@ -910,14 +910,18 @@ function FieldEditor({
           />
           <span>Required</span>
         </label>
-        <label className="qb-switch">
-          <input
-            type="checkbox"
-            checked={field.allow_unknown}
-            onChange={(e) => onChange((f) => ({ ...f, allow_unknown: e.target.checked }))}
-          />
-          <span>Allow “I don’t know”</span>
-        </label>
+        {/* "I don't know" has no sensible rendering for an attachment control —
+            the /book renderer ignores it there, so don't author dead config. */}
+        {field.type !== 'file_upload' && (
+          <label className="qb-switch">
+            <input
+              type="checkbox"
+              checked={field.allow_unknown}
+              onChange={(e) => onChange((f) => ({ ...f, allow_unknown: e.target.checked }))}
+            />
+            <span>Allow “I don’t know”</span>
+          </label>
+        )}
         <label className="qb-switch">
           <input
             type="checkbox"

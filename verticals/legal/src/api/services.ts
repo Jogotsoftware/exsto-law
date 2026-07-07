@@ -1482,9 +1482,18 @@ export async function submitBooking(
   if (rawTokens.length > MAX_STAGED_UPLOADS) {
     throw new Error(`Too many uploaded files (max ${MAX_STAGED_UPLOADS} per submission).`)
   }
-  const stagedFiles: StagedUploadTokenPayload[] = rawTokens.map((tok) =>
-    verifyStagedUploadToken(tok, ctx.tenantId),
-  )
+  // Dedupe by object key: the token is a stateless bearer, so the same file
+  // re-sent twice (double-added client-side, or replayed on a SLOT_TAKEN retry)
+  // must become ONE document on the matter, not N rows pointing at one object.
+  const stagedFiles: StagedUploadTokenPayload[] = []
+  const seenObjectKeys = new Set<string>()
+  for (const tok of rawTokens) {
+    const f = verifyStagedUploadToken(tok, ctx.tenantId)
+    if (!seenObjectKeys.has(f.objectKey)) {
+      seenObjectKeys.add(f.objectKey)
+      stagedFiles.push(f)
+    }
+  }
 
   // Pre-generate the matter id so the Google Calendar event description can
   // include a reschedule link that points back at this matter.

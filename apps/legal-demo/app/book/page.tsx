@@ -347,11 +347,18 @@ export default function BookPage() {
         ? { ...intakeResponses, members: members.map(({ id: _id, ...rest }) => rest) }
         : intakeResponses
 
-      // Staged file tokens across all file_upload fields; the server verifies
-      // each and binds the objects to the new matter.
-      const stagedTokens = Object.values(stagedUploads).flatMap((files) =>
-        files.map((f) => f.token),
+      // Staged file tokens for the SELECTED service's file_upload fields only —
+      // a file attached while browsing a different service (then abandoned via
+      // Back) must never bind to this booking's matter. The server verifies
+      // each token and binds the objects to the new matter.
+      const fileFieldIds = new Set(
+        selectedService.intakeSchema.sections.flatMap((s) =>
+          s.fields.filter((f) => f.type === 'file_upload').map((f) => f.id),
+        ),
       )
+      const stagedTokens = Object.entries(stagedUploads)
+        .filter(([fieldId]) => fileFieldIds.has(fieldId))
+        .flatMap(([, files]) => files.map((f) => f.token))
 
       const result = await callClientMcp<{
         actionId: string
@@ -623,9 +630,16 @@ export default function BookPage() {
                             members={members}
                             setMembers={setMembers}
                             staged={stagedUploads[field.id] ?? []}
-                            setStaged={(files) =>
-                              setStagedUploads((prev) => ({ ...prev, [field.id]: files }))
+                            setStaged={(updater) =>
+                              setStagedUploads((prev) => ({
+                                ...prev,
+                                [field.id]: updater(prev[field.id] ?? []),
+                              }))
                             }
+                            totalStaged={Object.values(stagedUploads).reduce(
+                              (n, files) => n + files.length,
+                              0,
+                            )}
                           />
                         ))}
                       </div>
@@ -860,6 +874,7 @@ function FieldRenderer({
   setMembers,
   staged,
   setStaged,
+  totalStaged,
 }: {
   field: ServiceField
   responses: Record<string, unknown>
@@ -867,7 +882,12 @@ function FieldRenderer({
   members: MemberRow[]
   setMembers: React.Dispatch<React.SetStateAction<MemberRow[]>>
   staged: StagedFile[]
-  setStaged: (files: StagedFile[]) => void
+  // Functional updater ONLY: an upload finishing while the user removes another
+  // file must merge into the latest list, never overwrite it from a stale copy.
+  setStaged: (updater: (prev: StagedFile[]) => StagedFile[]) => void
+  // Files staged across ALL fields — the server caps 10 per submission, so the
+  // add button hides on the submission-wide total, not this field's count.
+  totalStaged: number
 }) {
   const { t } = useI18n()
   const fieldId = useId()
@@ -877,6 +897,24 @@ function FieldRenderer({
   const [uploadError, setUploadError] = useState<string | null>(null)
   const value = responses[field.id]
   const set = (v: unknown) => setResponses((prev) => ({ ...prev, [field.id]: v }))
+  // Mirror the staged filenames into the questionnaire answer (what the attorney
+  // sees), derived from the AUTHORITATIVE staged list so no update path can
+  // leave them out of sync. Guarded so non-file fields and the initial empty
+  // state never write an answer.
+  const { id: syncFieldId, type: syncFieldType } = field
+  useEffect(() => {
+    if (syncFieldType !== 'file_upload') return
+    const names = staged.map((f) => f.filename)
+    setResponses((prev) => {
+      const cur = prev[syncFieldId]
+      const curArr = Array.isArray(cur) ? (cur as string[]) : null
+      if (!curArr && names.length === 0) return prev
+      if (curArr && curArr.length === names.length && curArr.every((x, i) => x === names[i])) {
+        return prev
+      }
+      return { ...prev, [syncFieldId]: names }
+    })
+  }, [staged, syncFieldId, syncFieldType, setResponses])
   const fieldLabel = t(`field.${field.id}.label`, undefined, field.label)
   const isUnknown = value === UNKNOWN_ANSWER
   const unknownToggle = field.allow_unknown ? (
@@ -993,11 +1031,9 @@ function FieldRenderer({
     // Uploads go to staging IMMEDIATELY (so submit is instant and validation
     // can require a completed upload, not a pending one). The response token is
     // the only handle the browser holds; the filename list mirrors into the
-    // questionnaire answers so the attorney sees what was attached.
-    const applyStaged = (files: StagedFile[]) => {
-      setStaged(files)
-      set(files.map((f) => f.filename))
-    }
+    // questionnaire answers via the sync effect above. All list changes go
+    // through functional updates — an upload finishing mid-removal must merge
+    // into the latest list, not resurrect a removed file from a stale copy.
     const uploadFile = async (file: File) => {
       setUploadError(null)
       setUploading(true)
@@ -1014,14 +1050,12 @@ function FieldRenderer({
         if (!res.ok || !data?.token) {
           throw new Error(data?.error ?? t('upload.failed', undefined, 'Upload failed.'))
         }
-        applyStaged([
-          ...staged,
-          {
-            token: data.token,
-            filename: data.filename ?? file.name,
-            sizeBytes: data.sizeBytes ?? file.size,
-          },
-        ])
+        const added: StagedFile = {
+          token: data.token,
+          filename: data.filename ?? file.name,
+          sizeBytes: data.sizeBytes ?? file.size,
+        }
+        setStaged((prev) => [...prev, added])
       } catch (err) {
         setUploadError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -1037,7 +1071,7 @@ function FieldRenderer({
         </span>
         {staged.length > 0 && (
           <ul className="bk-upload-list">
-            {staged.map((f, idx) => (
+            {staged.map((f) => (
               <li key={f.token} className="bk-upload-item">
                 <FileTextIcon size={14} />
                 <span className="bk-upload-name">{f.filename}</span>
@@ -1046,7 +1080,7 @@ function FieldRenderer({
                   type="button"
                   className="bk-upload-remove"
                   aria-label={t('upload.remove', undefined, 'Remove')}
-                  onClick={() => applyStaged(staged.filter((_, i) => i !== idx))}
+                  onClick={() => setStaged((prev) => prev.filter((x) => x.token !== f.token))}
                 >
                   ×
                 </button>
@@ -1054,7 +1088,7 @@ function FieldRenderer({
             ))}
           </ul>
         )}
-        {staged.length < 10 && (
+        {totalStaged < 10 && (
           <label
             className={`bk-btn bk-btn-soft bk-upload-add${uploading ? ' bk-upload-busy' : ''}`}
           >

@@ -100,6 +100,29 @@ export async function listMatterDocuments(
   })
 }
 
+// Which of these Storage object keys are referenced by ANY recorded document
+// version (tenant-scoped)? The intake-staging sweep must never delete an object
+// a matter document points at — binding a staged intake upload records the key
+// on the document_version but does NOT move the bytes, so a bound upload keeps
+// its intake-staging key for life. Read-only (RLS-scoped), used by the public
+// uploads route's best-effort orphan sweep.
+export async function filterReferencedObjectKeys(
+  ctx: ActionContext,
+  objectKeys: string[],
+): Promise<Set<string>> {
+  if (objectKeys.length === 0) return new Set()
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ object_key: string }>(
+      `SELECT DISTINCT dv.metadata->>'object_key' AS object_key
+         FROM document_version dv
+        WHERE dv.tenant_id = $1
+          AND dv.metadata->>'object_key' = ANY($2::text[])`,
+      [ctx.tenantId, objectKeys],
+    )
+    return new Set(res.rows.map((r) => r.object_key))
+  })
+}
+
 // Resolve a version's storage object key — but ONLY if that version is an
 // uploaded document of THIS matter (document_of). The matterEntityId equality is
 // the load-bearing IDOR guard: RLS already scopes to ctx.tenant, so this also
