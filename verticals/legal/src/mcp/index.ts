@@ -31,6 +31,9 @@ import './tools/reviewDraft.js'
 import './tools/getIntakeQuestionnaire.js'
 import './tools/bookingTools.js'
 import './tools/serviceLibraryTools.js'
+// AI document review: manual (re)run of the review pipeline for one uploaded
+// matter document. Attorney-only.
+import './tools/documentReviewTools.js'
 // ADR 0045 PR4a: author/read a service's workflow lifecycle graph (states).
 import './tools/serviceLifecycleTools.js'
 // ADR 0045 PR4b: the closed step-action + gate catalog the service-editor Workflow

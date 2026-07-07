@@ -1584,10 +1584,14 @@ export async function submitBooking(
   // client_contact intake just created — same ADR 0035 posture as the portal
   // upload. Best-effort per file: a Storage/record hiccup must not fail the
   // booking; the attorney email's document count reflects what actually bound.
-  let boundUploads = 0
+  const boundDocuments: Array<{
+    documentEntityId: string
+    documentVersionId: string
+    originalFilename: string
+  }> = []
   for (const f of stagedFiles) {
     try {
-      await recordUploadedDocument(ctx, {
+      const rec = await recordUploadedDocument(ctx, {
         matterEntityId,
         objectKey: f.objectKey,
         originalFilename: f.originalFilename,
@@ -1598,9 +1602,38 @@ export async function submitBooking(
         clientContactId: intakeEffects.clientEntityId ?? null,
         documentKind: 'intake_upload',
       })
-      boundUploads++
+      boundDocuments.push({
+        documentEntityId: rec.documentEntityId,
+        documentVersionId: rec.documentVersionId,
+        originalFilename: f.originalFilename,
+      })
     } catch (err) {
       console.error('[submitBooking] intake upload bind failed (booking still saved):', err)
+    }
+  }
+  const boundUploads = boundDocuments.length
+
+  // AI document review (document-review services): when the service's review
+  // config is enabled, enqueue one async review job per bound document (lazy
+  // import, same posture as enqueueAutoDrafts below). Best-effort: a review
+  // hiccup must not fail the booking.
+  if (boundDocuments.length > 0) {
+    try {
+      const { resolveReviewConfig, requestDocumentReview } = await import('./reviewDocument.js')
+      const review = await resolveReviewConfig(ctx, input.serviceKey)
+      if (review.enabled) {
+        for (const doc of boundDocuments) {
+          await requestDocumentReview(ctx, {
+            matterEntityId,
+            documentEntityId: doc.documentEntityId,
+            documentVersionId: doc.documentVersionId,
+            serviceKey: input.serviceKey,
+            originalFilename: doc.originalFilename,
+          })
+        }
+      }
+    } catch (err) {
+      console.error('[submitBooking] ai review enqueue failed (booking still saved):', err)
     }
   }
 

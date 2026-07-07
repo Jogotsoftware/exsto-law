@@ -18,6 +18,17 @@ export interface DraftDetail extends PendingDraftSummary {
   conclusion: string | null
   confidence: number | null
   reviewNotes: string | null
+  // AI document review (generation_mode 'ai_review' versions): the reviewed
+  // upload's linkage plus the extracted source text and optional redline —
+  // both stored as extra content blobs on the memo's action, resolved here by
+  // the metadata ids. Null for ordinary drafts.
+  aiReview: {
+    reviewedDocumentVersionId: string | null
+    reviewedDocumentEntityId: string | null
+    reviewedOriginalFilename: string | null
+    sourceText: string | null
+    redlineText: string | null
+  } | null
 }
 
 export async function listPendingDraftVersions(ctx: ActionContext): Promise<PendingDraftSummary[]> {
@@ -257,6 +268,12 @@ export async function getDraftVersion(
       body: string
       reasoning_trace_id: string | null
       model_identity: string | null
+      generation_mode: string | null
+      review_of_version_id: string | null
+      review_of_entity_id: string | null
+      review_filename: string | null
+      review_source_blob_id: string | null
+      review_redline_blob_id: string | null
     }>(
       `SELECT
          dv.id AS version_id,
@@ -269,7 +286,13 @@ export async function getDraftVersion(
          to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
          cb.body,
          dv.reasoning_trace_id,
-         dv.metadata->>'model_identity' AS model_identity
+         dv.metadata->>'model_identity' AS model_identity,
+         dv.metadata->>'generation_mode' AS generation_mode,
+         dv.metadata->>'review_of_document_version_id' AS review_of_version_id,
+         dv.metadata->>'review_of_document_entity_id' AS review_of_entity_id,
+         dv.metadata->>'review_original_filename' AS review_filename,
+         dv.metadata->>'review_source_blob_id' AS review_source_blob_id,
+         dv.metadata->>'review_redline_blob_id' AS review_redline_blob_id
        FROM document_version dv
        JOIN content_blob cb ON cb.id = dv.content_blob_id
        JOIN entity e_doc ON e_doc.id = dv.document_entity_id
@@ -321,6 +344,34 @@ export async function getDraftVersion(
       [ctx.tenantId, row.document_entity_id],
     )
 
+    // AI-review linkage: resolve the source/redline blobs the memo's action
+    // wrote (tenant-scoped; the metadata ids are the only pointer).
+    let aiReview: DraftDetail['aiReview'] = null
+    if (row.generation_mode === 'ai_review') {
+      const blobIds = [row.review_source_blob_id, row.review_redline_blob_id].filter(
+        (x): x is string => !!x,
+      )
+      const blobs = new Map<string, string>()
+      if (blobIds.length > 0) {
+        const blobRes = await client.query<{ id: string; body: string }>(
+          `SELECT id, body FROM content_blob WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+          [ctx.tenantId, blobIds],
+        )
+        for (const b of blobRes.rows) blobs.set(b.id, b.body)
+      }
+      aiReview = {
+        reviewedDocumentVersionId: row.review_of_version_id,
+        reviewedDocumentEntityId: row.review_of_entity_id,
+        reviewedOriginalFilename: row.review_filename,
+        sourceText: row.review_source_blob_id
+          ? (blobs.get(row.review_source_blob_id) ?? null)
+          : null,
+        redlineText: row.review_redline_blob_id
+          ? (blobs.get(row.review_redline_blob_id) ?? null)
+          : null,
+      }
+    }
+
     return {
       documentVersionId: row.version_id,
       documentEntityId: row.document_entity_id,
@@ -336,6 +387,7 @@ export async function getDraftVersion(
       conclusion,
       confidence,
       reviewNotes: notesRes.rows[0]?.value ?? null,
+      aiReview,
     }
   })
 }

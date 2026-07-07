@@ -53,6 +53,8 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
   const [emailStatus, setEmailStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  // Which upload row has an AI review being enqueued (manual trigger/re-run).
+  const [reviewBusyId, setReviewBusyId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -87,6 +89,27 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
   useEffect(() => {
     load()
   }, [load])
+
+  // Manual AI review of one uploaded document. Async by design: the memo lands
+  // in the review queue and the "draft ready" email fires when it finishes.
+  async function runAiReview(documentVersionId: string) {
+    setReviewBusyId(documentVersionId)
+    setUploadError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.document.review.run',
+        input: { matterEntityId: id, documentVersionId },
+      })
+      setEmailStatus({
+        kind: 'ok',
+        msg: 'AI review queued — the memo will appear in your review queue (you will get an email).',
+      })
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReviewBusyId(null)
+    }
+  }
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -284,11 +307,31 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
                       {new Date(u.uploadedAt).toLocaleDateString()}
                     </td>
                     <td>
-                      <a
-                        href={`/api/attorney/matters/${id}/documents/${u.documentVersionId}/download`}
-                      >
-                        Download
-                      </a>
+                      <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
+                        <a
+                          href={`/api/attorney/matters/${id}/documents/${u.documentVersionId}/download`}
+                        >
+                          Download
+                        </a>
+                        <button
+                          type="button"
+                          className="link-btn"
+                          style={{
+                            background: 'none',
+                            border: 0,
+                            padding: 0,
+                            color: 'var(--accent, inherit)',
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
+                            font: 'inherit',
+                          }}
+                          disabled={reviewBusyId === u.documentVersionId}
+                          title="Run the AI document review on this file — the memo lands in your review queue."
+                          onClick={() => runAiReview(u.documentVersionId)}
+                        >
+                          {reviewBusyId === u.documentVersionId ? 'Queued…' : 'AI review'}
+                        </button>
+                      </span>
                     </td>
                   </tr>
                 ))}
