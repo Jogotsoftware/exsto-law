@@ -7,6 +7,7 @@
 // onboarding), mirroring the Google connect flow; this card shows status and the
 // connect / finish-setup / refresh / disconnect actions.
 import { useCallback, useEffect, useState } from 'react'
+import { Check } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
 
@@ -390,7 +391,14 @@ function ManualMethodsEditor(): React.ReactElement {
           <button type="button" className="primary" disabled={saving} onClick={() => void save()}>
             {saving ? 'Saving…' : 'Save payment methods'}
           </button>
-          {saved && <span className="text-sm text-muted">Saved ✓</span>}
+          {saved && (
+            <span
+              className="text-sm text-muted"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              <Check size={14} aria-hidden /> Saved
+            </span>
+          )}
         </div>
       </div>
     </div>

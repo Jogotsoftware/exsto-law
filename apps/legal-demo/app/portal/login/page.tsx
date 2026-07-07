@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ChevronLeft } from 'lucide-react'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
 
@@ -141,7 +142,9 @@ export default function ClientPortalLoginPage() {
               setIsSignUp(false)
             }}
           >
-            ← Back to sign in
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+              <ChevronLeft size={14} aria-hidden /> Back to sign in
+            </span>
           </button>
         </p>
       </Shell>

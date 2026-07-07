@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { X } from 'lucide-react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
 import { callClientMcp } from '@/lib/mcpClient'
@@ -1167,7 +1168,7 @@ function FieldRenderer({
                   aria-label={t('upload.remove', undefined, 'Remove')}
                   onClick={() => setStaged((prev) => prev.filter((x) => x.token !== f.token))}
                 >
-                  ×
+                  <X size={16} aria-hidden />
                 </button>
               </li>
             ))}

@@ -8,6 +8,7 @@
 // month grid, day pulls a single day, etc.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
+import { Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
 import { Modal } from '@/components/Modal'
@@ -1073,9 +1074,19 @@ export default function CalendarPage() {
           className="row"
           style={{ gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}
         >
-          <button onClick={() => shift(-1)}>← Previous</button>
+          <button
+            onClick={() => shift(-1)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+          >
+            <ChevronLeft size={16} aria-hidden /> Previous
+          </button>
           <button onClick={() => setAnchor(new Date())}>Today</button>
-          <button onClick={() => shift(1)}>Next →</button>
+          <button
+            onClick={() => shift(1)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+          >
+            Next <ChevronRight size={16} aria-hidden />
+          </button>
           <strong style={{ marginLeft: 'var(--space-3)' }}>{period.label}</strong>
           <div className="row" style={{ gap: 0, marginLeft: 'var(--space-3)' }}>
             {(['day', 'week', 'month', 'list'] as const).map((v) => (
@@ -1259,7 +1270,9 @@ export default function CalendarPage() {
                   }}
                 />
                 {c.label}
-                {categorizeFor.categoryKey === c.key ? ' ✓' : ''}
+                {categorizeFor.categoryKey === c.key ? (
+                  <Check size={14} aria-hidden style={{ marginLeft: 4 }} />
+                ) : null}
               </button>
             ))}
             {categorizeFor.categoryKey && (
