@@ -53,6 +53,13 @@ const en: Record<string, string> = {
   'confirm.matter_ref': 'Matter reference:',
   'confirm.back': 'Back to home',
 
+  // Intake-only services (no consultation appointment)
+  'intake.submit': 'Submit request',
+  'intake.submitting': 'Submitting…',
+  'confirm.title_intake': 'Request received',
+  'confirm.intake_received': '{attorney} will review your information and follow up by email.',
+  'confirm.email_intake': 'A confirmation email is on its way to {email}.',
+
   // Errors
   'error.pick_service': 'Please pick a service.',
   'error.name': 'Please enter your full name.',
@@ -221,6 +228,13 @@ const es: Record<string, string> = {
   'confirm.email': 'Una invitación de calendario va en camino a {email}.',
   'confirm.matter_ref': 'Referencia del asunto:',
   'confirm.back': 'Volver al inicio',
+
+  // Intake-only services (no consultation appointment)
+  'intake.submit': 'Enviar solicitud',
+  'intake.submitting': 'Enviando…',
+  'confirm.title_intake': 'Solicitud recibida',
+  'confirm.intake_received': '{attorney} revisará tu información y te contactará por correo.',
+  'confirm.email_intake': 'Un correo de confirmación va en camino a {email}.',
 
   // Errors
   'error.pick_service': 'Por favor selecciona un servicio.',

@@ -55,6 +55,9 @@ interface Service {
   displayName: string
   description: string | null
   intakeSchema: { sections: ServiceSection[] }
+  // False = intake-only (document-review style): no slot step, submit happens
+  // on the intake step, no consultation on the confirmation screen.
+  appointmentRequired: boolean
 }
 
 type Step = 'service' | 'contact' | 'intake' | 'slot' | 'done'
@@ -161,9 +164,19 @@ export default function BookPage() {
   // only requires/sends a token in that case.
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const resetCaptchaRef = useRef<(() => void) | null>(null)
+  // A token belongs to the widget instance on the step that hosts it. Any step
+  // change unmounts that widget (its expired-callback dies with it), so a
+  // retained token would enable submit against a visibly-unsolved widget —
+  // drop it and require a fresh solve on the hosting step.
+  useEffect(() => {
+    setCaptchaToken(null)
+    resetCaptchaRef.current = null
+  }, [step])
   const [confirmation, setConfirmation] = useState<{
     matterNumber: string
-    scheduledAt: string
+    // Null for intake-only services — the confirmation renders "request
+    // received" copy instead of a consultation time.
+    scheduledAt: string | null
   } | null>(null)
 
   // Honor ?service=… (presets pick the service up-front and skip the picker)
@@ -259,6 +272,9 @@ export default function BookPage() {
     () => services?.find((s) => s.serviceKey === selectedServiceKey) ?? null,
     [services, selectedServiceKey],
   )
+  // No service chosen yet ⇒ assume the appointment flow (the 4-node rail before
+  // services load is cosmetic; it settles once the picker resolves).
+  const needsSlot = selectedService ? selectedService.appointmentRequired !== false : true
 
   function advanceFromService() {
     setError(null)
@@ -326,11 +342,18 @@ export default function BookPage() {
       return
     }
     setError(null)
+    // Intake-only services submit straight from this step — there is no slot
+    // to pick (the submit button hosting this handler renders the captcha).
+    if (!needsSlot) {
+      void submitBooking()
+      return
+    }
     setStep('slot')
   }
 
   async function submitBooking() {
-    if (!selectedService || !selectedSlot) return
+    if (!selectedService) return
+    if (needsSlot && !selectedSlot) return
     // When the CAPTCHA is enabled, a verified token is mandatory before we hit
     // the server (which would otherwise 403). When it's disabled the widget
     // never renders, captchaToken stays null, and this guard is skipped.
@@ -362,7 +385,8 @@ export default function BookPage() {
 
       const result = await callClientMcp<{
         actionId: string
-        effects: Array<{ matterEntityId: string; matterNumber: string; scheduledAt: string }>
+        // matter.open's effect (intake-only) has no scheduledAt; booking.create's does.
+        effects: Array<{ matterEntityId: string; matterNumber: string; scheduledAt?: string }>
       }>({
         toolName: 'legal.booking.submit',
         input: {
@@ -373,8 +397,10 @@ export default function BookPage() {
           attributionSource: contact.attributionSource.trim(),
           serviceKey: selectedService.serviceKey,
           intakeResponses: responsesToSubmit,
-          scheduledAtIso: selectedSlot.startIso,
-          scheduledEndIso: selectedSlot.endIso,
+          // The server REJECTS a slot on an intake-only service — omit both.
+          ...(needsSlot && selectedSlot
+            ? { scheduledAtIso: selectedSlot.startIso, scheduledEndIso: selectedSlot.endIso }
+            : {}),
           stagedUploads: stagedTokens.length > 0 ? stagedTokens : undefined,
         },
         // undefined when CAPTCHA is disabled → callClientMcp omits the field.
@@ -383,7 +409,10 @@ export default function BookPage() {
 
       const effect = result.effects[0]
       if (!effect) throw new Error('Booking response missing matter id.')
-      setConfirmation({ matterNumber: effect.matterNumber, scheduledAt: effect.scheduledAt })
+      setConfirmation({
+        matterNumber: effect.matterNumber,
+        scheduledAt: effect.scheduledAt ?? null,
+      })
       setStep('done')
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err)
@@ -411,15 +440,20 @@ export default function BookPage() {
 
   // ---- Confirmation screen ------------------------------------------------
   if (step === 'done' && confirmation) {
-    const whenStr = new Date(confirmation.scheduledAt).toLocaleString(
-      lang === 'es' ? 'es-US' : undefined,
-      { dateStyle: 'full', timeStyle: 'short' },
-    )
-    const scheduledTemplate = t('confirm.scheduled', {
-      attorney: '__ATTORNEY__',
-      when: '__WHEN__',
-    })
-    const emailTemplate = t('confirm.email', { email: '__EMAIL__' })
+    const hasSlot = confirmation.scheduledAt !== null
+    // whenStr only exists on the has-slot branch (a null date renders "Invalid Date").
+    const whenStr = hasSlot
+      ? new Date(confirmation.scheduledAt as string).toLocaleString(
+          lang === 'es' ? 'es-US' : undefined,
+          { dateStyle: 'full', timeStyle: 'short' },
+        )
+      : ''
+    const scheduledTemplate = hasSlot
+      ? t('confirm.scheduled', { attorney: '__ATTORNEY__', when: '__WHEN__' })
+      : t('confirm.intake_received', { attorney: '__ATTORNEY__' })
+    const emailTemplate = hasSlot
+      ? t('confirm.email', { email: '__EMAIL__' })
+      : t('confirm.email_intake', { email: '__EMAIL__' })
     const [scheduledBefore, restAfterAttorney] = scheduledTemplate.split('__ATTORNEY__')
     const [scheduledMiddle, scheduledAfter] = (restAfterAttorney ?? '').split('__WHEN__')
     const [emailBefore, emailAfter] = emailTemplate.split('__EMAIL__')
@@ -435,12 +469,12 @@ export default function BookPage() {
                 <CheckIcon size={40} />
               </span>
             </div>
-            <h1 className="bk-h1">{t('confirm.title')}</h1>
+            <h1 className="bk-h1">{hasSlot ? t('confirm.title') : t('confirm.title_intake')}</h1>
             <p className="bk-confirm-line">
               {scheduledBefore}
               <strong>Juan Carlos Pacheco</strong>
               {scheduledMiddle}
-              <strong>{whenStr}</strong>
+              {hasSlot && <strong>{whenStr}</strong>}
               {scheduledAfter}
             </p>
             <p className="bk-sub">
@@ -482,7 +516,10 @@ export default function BookPage() {
       <div className="bk-aurora" aria-hidden />
       <div className="bk-frame">
         <BookTopbar />
-        <BookProgress step={step} />
+        <BookProgress
+          step={step}
+          steps={needsSlot ? PROGRESS_STEPS : PROGRESS_STEPS.filter((s) => s.key !== 'slot')}
+        />
 
         <section className="bk-card">
           {/* key={step} remounts the stage so each step animates in cleanly */}
@@ -646,15 +683,51 @@ export default function BookPage() {
                     </div>
                   ))}
                 </div>
+                {/* Intake-only services submit HERE — the captcha renders on
+                    whichever step hosts the write (the public route 403s
+                    without a verified token). */}
+                {!needsSlot && TURNSTILE_SITE_KEY && (
+                  <div className="bk-captcha" aria-live="polite">
+                    <Turnstile
+                      siteKey={TURNSTILE_SITE_KEY}
+                      onToken={setCaptchaToken}
+                      onReady={(reset) => {
+                        resetCaptchaRef.current = reset
+                      }}
+                    />
+                  </div>
+                )}
                 <div className="bk-actions">
-                  <button className="bk-btn bk-btn-ghost" onClick={() => setStep('contact')}>
+                  {/* Back stays disabled during an in-flight intake-only submit —
+                      navigating away mid-write lets the user edit fields the
+                      submit already captured. */}
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    disabled={busy === 'submit'}
+                    onClick={() => setStep('contact')}
+                  >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
                   </button>
-                  <button className="bk-btn bk-btn-primary bk-btn-grow" onClick={advanceFromIntake}>
-                    {t('common.continue')}
-                    <ArrowRightIcon size={18} />
-                  </button>
+                  {needsSlot ? (
+                    <button
+                      className="bk-btn bk-btn-primary bk-btn-grow"
+                      onClick={advanceFromIntake}
+                    >
+                      {t('common.continue')}
+                      <ArrowRightIcon size={18} />
+                    </button>
+                  ) : (
+                    <button
+                      className="bk-btn bk-btn-primary bk-btn-grow"
+                      disabled={busy === 'submit' || (Boolean(TURNSTILE_SITE_KEY) && !captchaToken)}
+                      onClick={advanceFromIntake}
+                    >
+                      {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
+                      {busy === 'submit' ? t('intake.submitting') : t('intake.submit')}
+                      {busy !== 'submit' && <CheckIcon size={18} />}
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -729,7 +802,11 @@ export default function BookPage() {
                   </div>
                 )}
                 <div className="bk-actions">
-                  <button className="bk-btn bk-btn-ghost" onClick={() => setStep('intake')}>
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    disabled={busy === 'submit'}
+                    onClick={() => setStep('intake')}
+                  >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
                   </button>
@@ -775,23 +852,31 @@ function BookTopbar() {
   )
 }
 
-function BookProgress({ step }: { step: Step }) {
+function BookProgress({
+  step,
+  steps,
+}: {
+  step: Step
+  // Intake-only services render a 3-node rail (no 'slot'); percentages derive
+  // from the array so no other math changes.
+  steps: ReadonlyArray<{ key: Exclude<Step, 'done'>; labelKey: string }>
+}) {
   const { t } = useI18n()
-  const idx = PROGRESS_STEPS.findIndex((s) => s.key === step)
+  const idx = steps.findIndex((s) => s.key === step)
   const safeIdx = idx < 0 ? 0 : idx
-  const railPct = (safeIdx / (PROGRESS_STEPS.length - 1)) * 100
-  const mobilePct = ((safeIdx + 1) / PROGRESS_STEPS.length) * 100
-  const current = PROGRESS_STEPS[safeIdx]
+  const railPct = (safeIdx / (steps.length - 1)) * 100
+  const mobilePct = ((safeIdx + 1) / steps.length) * 100
+  const current = steps[safeIdx]
 
   return (
     <nav
       className="bk-progress"
-      aria-label={t('progress.step_of', { n: safeIdx + 1, total: PROGRESS_STEPS.length })}
+      aria-label={t('progress.step_of', { n: safeIdx + 1, total: steps.length })}
     >
       <div className="bk-progress-mobile">
         <div className="bk-progress-mobile-row">
           <span className="bk-progress-step">
-            {t('progress.step_of', { n: safeIdx + 1, total: PROGRESS_STEPS.length })}
+            {t('progress.step_of', { n: safeIdx + 1, total: steps.length })}
           </span>
           <span className="bk-progress-current">{current ? t(current.labelKey) : ''}</span>
         </div>
@@ -804,7 +889,7 @@ function BookProgress({ step }: { step: Step }) {
         <div className="bk-progress-rail-track" aria-hidden>
           <div className="bk-progress-rail-fill" style={{ width: `${railPct}%` }} />
         </div>
-        {PROGRESS_STEPS.map((s, i) => {
+        {steps.map((s, i) => {
           const state = i < safeIdx ? 'done' : i === safeIdx ? 'current' : 'upcoming'
           return (
             <li key={s.key} className={`bk-progress-node ${state}`}>

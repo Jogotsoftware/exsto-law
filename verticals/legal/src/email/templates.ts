@@ -140,22 +140,33 @@ const BUILDERS: Record<string, (v: Vars) => BuiltEmail> = {
   },
 
   // CLIENT — intake received.
-  'prospect-intake-confirmation': (v) => ({
-    subject: 'We received your information — Pacheco Law',
-    preheader: `Thanks — ${FIRM.attorney} will review before your consultation.`,
-    html: renderShell({
-      audience: 'client',
-      preheader: `${FIRM.attorney} will review before your consultation.`,
-      heading: 'Thanks — we have your information',
-      body:
-        paragraph(hi(v)) +
-        paragraph(
-          `Thanks for telling us about your matter. <strong>${esc(FIRM.attorney)}</strong> will review your answers before your consultation so your time together is focused and productive.`,
-        ) +
-        signoff(),
-    }),
-    text: `${val(v.client_first_name, 'Hi')},\n\nThanks for telling us about your matter. ${FIRM.attorney} will review your answers before your consultation.${BASE_FALLBACK}`,
-  }),
+  'prospect-intake-confirmation': (v) => {
+    // Intake-only services (no consultation slot) get follow-up copy instead of
+    // consultation copy — scheduled_at presence is the branch, same as the
+    // plaintext renderer.
+    const hasSlot = Boolean(v.scheduled_at)
+    const preheader = hasSlot
+      ? `${FIRM.attorney} will review before your consultation.`
+      : `${FIRM.attorney} will review and follow up by email.`
+    return {
+      subject: 'We received your information — Pacheco Law',
+      preheader: `Thanks — ${preheader}`,
+      html: renderShell({
+        audience: 'client',
+        preheader,
+        heading: 'Thanks — we have your information',
+        body:
+          paragraph(hi(v)) +
+          paragraph(
+            hasSlot
+              ? `Thanks for telling us about your matter. <strong>${esc(FIRM.attorney)}</strong> will review your answers before your consultation so your time together is focused and productive.`
+              : `Thanks for telling us about your matter. <strong>${esc(FIRM.attorney)}</strong> will review your answers and follow up with next steps by email.`,
+          ) +
+          signoff(),
+      }),
+      text: `${val(v.client_first_name, 'Hi')},\n\nThanks for telling us about your matter. ${FIRM.attorney} will review your answers ${hasSlot ? 'before your consultation' : 'and follow up with next steps by email'}.${BASE_FALLBACK}`,
+    }
+  },
 
   // CLIENT — document ready (NEW: "documents being complete"). Branches on
   // whether a signature is needed (e-sign hand-off lives with S5).

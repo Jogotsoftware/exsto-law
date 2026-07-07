@@ -97,6 +97,13 @@ export interface ServiceDefinition {
   documentFees: Record<string, string>
   generationMode: GenerationMode
   booking: ServiceBooking | null
+  // Whether booking this service schedules a consultation slot (default). When
+  // false, /book runs intake-only: no slot step, no booking.create, no calendar
+  // event — the matter opens straight into intake_submitted (document-review
+  // services). NOTE: deliberately NOT derived from booking.enabled — the
+  // Settings editor persists booking.enabled=false on every save, so that flag
+  // cannot mean "no appointment" without breaking existing services.
+  appointmentRequired: boolean
   isActive: boolean
   sortOrder: number
   updatedAt: string
@@ -119,6 +126,7 @@ type WorkflowRow = {
     document_fees?: Record<string, string>
     generation_mode?: string
     booking?: { enabled?: boolean; send_calendar_invite?: boolean; duration_minutes?: number }
+    appointment_required?: boolean
     [k: string]: unknown
   }
   status: string
@@ -271,6 +279,13 @@ export function realDocumentKinds(documents: unknown): string[] {
   )
 }
 
+// Only an explicit stored `false` turns the appointment off. Absent (every
+// pre-existing service) or garbage ⇒ true, so no service changes behavior until
+// an attorney deliberately unchecks the box. Exported for the unit contract.
+export function parseAppointmentRequired(v: unknown): boolean {
+  return v !== false
+}
+
 function mapRow(r: WorkflowRow): ServiceDefinition {
   const intakeFormId = r.transitions.intake_form_id ?? ''
   // Resolution order (PR2): in-app config (transitions.intake_schema) wins, so an
@@ -291,6 +306,7 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     documentFees: parseDocumentFees(r.transitions.document_fees),
     generationMode: parseGenerationMode(r.transitions.generation_mode),
     booking: parseBooking(r.transitions.booking),
+    appointmentRequired: parseAppointmentRequired(r.transitions.appointment_required),
     isActive: r.status === 'active',
     sortOrder: sortOrderOf(r),
     updatedAt: r.recorded_at,
@@ -366,7 +382,9 @@ export async function resolveServiceLifecycle(
   if (!service) return null
   return deriveLifecycleFromService({
     route: service.route,
-    bookingEnabled: service.booking?.enabled === true,
+    // An intake-only service can never reach consultation stages, whatever its
+    // booking block says — drop them from the derived fallback graph.
+    bookingEnabled: service.appointmentRequired && service.booking?.enabled === true,
   })
 }
 
@@ -420,6 +438,9 @@ export interface UpdateServiceMetadataInput {
   // Per-document-kind flat fees, { [document_kind]: decimal-string }. Replaces the
   // stored map; an empty amount clears that kind's fee.
   documentFees?: Record<string, string> | null
+  // Whether booking schedules a consultation slot. Omit to carry forward;
+  // absent-in-storage reads as true (parseAppointmentRequired).
+  appointmentRequired?: boolean
 }
 
 // Create a new service (metadata only — questionnaire/prompt editors are a
@@ -463,6 +484,15 @@ export async function updateServiceMetadata(
   if (input.cost !== undefined) transitionsPatch.cost = normalizeCost(input.cost)
   if (input.documentFees !== undefined)
     transitionsPatch.document_fees = normalizeDocumentFees(input.documentFees)
+  if (input.appointmentRequired !== undefined) {
+    // Strict boolean only. The read side treats garbage as true (safe default),
+    // so the write side must never coerce garbage ("true", 1, null) into a
+    // stored false — that would silently flip a live service to intake-only.
+    if (typeof input.appointmentRequired !== 'boolean') {
+      throw new Error('appointmentRequired must be a boolean.')
+    }
+    transitionsPatch.appointment_required = input.appointmentRequired
+  }
 
   await submitAction(ctx, {
     actionKindName: 'legal.service.upsert',
@@ -1357,7 +1387,10 @@ export interface SubmitBookingInput {
   attributionSource: string
   serviceKey: string
   intakeResponses: Record<string, unknown>
-  scheduledAtIso: string
+  // Required when the service takes an appointment; must be OMITTED for an
+  // intake-only service (appointmentRequired=false). The server validates
+  // presence against the service config — never the payload shape.
+  scheduledAtIso?: string
   scheduledEndIso?: string
   notionEventId?: string | null
   // Signed staging tokens from the public intake-upload route (file_upload
@@ -1465,12 +1498,40 @@ export async function submitBooking(
   ctx: ActionContext,
   input: SubmitBookingInput,
 ): Promise<ActionResult> {
+  // The SERVICE CONFIG is authoritative on whether this submission carries a
+  // consultation slot — never the payload shape, so the public client can't
+  // force (or skip) a booking.create by shape-shifting its input. A stale
+  // client that disagrees with a mid-wizard config flip gets a clear error
+  // and re-enters. An unknown service key is REJECTED outright: nothing
+  // downstream validates it (intake.submit/matter.open take any string), and
+  // the legitimate /book client only ever submits keys from legal.service.list
+  // — so a mangled key must not consume a slot, fire calendar invites, or open
+  // a matter for a service that doesn't exist.
+  const service = await getService(ctx, input.serviceKey)
+  if (!service) {
+    throw new Error(`Unknown service: ${input.serviceKey}`)
+  }
+  const appointmentRequired = service.appointmentRequired
+  if (appointmentRequired && !input.scheduledAtIso) {
+    throw new Error('This service requires choosing a consultation time.')
+  }
+  if (!appointmentRequired && input.scheduledAtIso) {
+    throw new Error('This service does not take an appointment; submit without a time slot.')
+  }
+  // Post-validation invariant: set ⟺ the service takes an appointment. Every
+  // slot-coupled block below gates on this local (which TS narrows), so the
+  // intake-only path skips conflict check, calendar, booking.create and the
+  // reschedule machinery in one shape.
+  const scheduledAtIso = input.scheduledAtIso ?? null
+
   // Conflict check FIRST, before any side effects. Throwing here means no
   // Google event is created, no matter row is written, and the client sees
   // a clear "pick another time" error.
-  const requestedEnd = input.scheduledEndIso ?? input.scheduledAtIso
-  if (await isSlotTaken(ctx, input.scheduledAtIso, requestedEnd)) {
-    throw new Error(SLOT_TAKEN_MESSAGE)
+  if (scheduledAtIso) {
+    const requestedEnd = input.scheduledEndIso ?? scheduledAtIso
+    if (await isSlotTaken(ctx, scheduledAtIso, requestedEnd)) {
+      throw new Error(SLOT_TAKEN_MESSAGE)
+    }
   }
 
   // Staged intake uploads: verify every token NOW, before any side effects, so
@@ -1499,25 +1560,25 @@ export async function submitBooking(
   // include a reschedule link that points back at this matter.
   const matterEntityId = randomUUID()
   const matterNumber = `M-${Date.now().toString(36).toUpperCase()}`
-  const service = await getService(ctx, input.serviceKey)
   const serviceDisplayName = service?.displayName ?? input.serviceKey
 
   // Try to create the Google Calendar event first (sends invite emails via
   // sendUpdates:'all'). If Google isn't connected or fails, we still book the
   // matter — the calendar sync just won't happen.
   const intakeSummary = summarizeIntake(input.intakeResponses)
-  const googleEvent = input.scheduledEndIso
-    ? await tryCreateBookingEvent(ctx, {
-        matterEntityId,
-        matterNumber,
-        clientFullName: input.clientFullName,
-        clientEmail: input.clientEmail,
-        serviceDisplayName,
-        scheduledAtIso: input.scheduledAtIso,
-        scheduledEndIso: input.scheduledEndIso,
-        intakeSummary,
-      })
-    : null
+  const googleEvent =
+    scheduledAtIso && input.scheduledEndIso
+      ? await tryCreateBookingEvent(ctx, {
+          matterEntityId,
+          matterNumber,
+          clientFullName: input.clientFullName,
+          clientEmail: input.clientEmail,
+          serviceDisplayName,
+          scheduledAtIso,
+          scheduledEndIso: input.scheduledEndIso,
+          intakeSummary,
+        })
+      : null
 
   // Booking is recorded through the Phase 0 vocabulary: intake.submit →
   // matter.open → booking.create, each its own audited action (WP1 kinds).
@@ -1559,25 +1620,30 @@ export async function submitBooking(
     },
   })
 
-  let booked: ActionResult
-  try {
-    booked = await submitAction(ctx, {
-      actionKindName: 'booking.create',
-      intentKind: 'enforcement',
-      payload: {
-        matter_entity_id: matterEntityId,
-        matter_number: matterNumber,
-        scheduled_at: input.scheduledAtIso,
-        scheduled_end: input.scheduledEndIso ?? null,
-        google_event_id: googleEvent?.eventId ?? null,
-        google_event_url: googleEvent?.htmlLink ?? null,
-        matter_open_action_id: opened.actionId,
-      },
-    })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes('SLOT_TAKEN')) throw new Error(SLOT_TAKEN_MESSAGE)
-    throw err
+  // Intake-only services stop at matter.open — no booking.create, so no
+  // consultation.booked event, no scheduled_at on the matter (invisible to
+  // availability by construction), and the response effect is matter.open's.
+  let booked: ActionResult | null = null
+  if (scheduledAtIso) {
+    try {
+      booked = await submitAction(ctx, {
+        actionKindName: 'booking.create',
+        intentKind: 'enforcement',
+        payload: {
+          matter_entity_id: matterEntityId,
+          matter_number: matterNumber,
+          scheduled_at: scheduledAtIso,
+          scheduled_end: input.scheduledEndIso ?? null,
+          google_event_id: googleEvent?.eventId ?? null,
+          google_event_url: googleEvent?.htmlLink ?? null,
+          matter_open_action_id: opened.actionId,
+        },
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('SLOT_TAKEN')) throw new Error(SLOT_TAKEN_MESSAGE)
+      throw err
+    }
   }
 
   // Bind the staged uploads to the matter (verified above). Provenance is the
@@ -1611,8 +1677,9 @@ export async function submitBooking(
   // Self-service manage-link token (minted once, reused for reschedule + cancel).
   // Best-effort: if the signing secret is unset, the email simply omits the
   // manage buttons (the booking itself must never fail over a missing link).
+  // Intake-only matters have nothing to reschedule — no token, no manage links.
   let manageToken: string | null = null
-  if (baseUrl) {
+  if (baseUrl && scheduledAtIso) {
     try {
       manageToken = signBookingManageToken({ matterEntityId, tenantId: ctx.tenantId })
     } catch (err) {
@@ -1628,16 +1695,20 @@ export async function submitBooking(
     client_phone: input.clientPhone ?? null,
     service_key: input.serviceKey,
     service_label: serviceDisplayName,
-    scheduled_at: input.scheduledAtIso,
-    scheduled_at_label: new Date(input.scheduledAtIso).toLocaleString('en-US', {
-      timeZone: 'America/New_York',
-      weekday: 'long',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-    }),
+    // Null for intake-only matters — templates branch on presence and drop
+    // every consultation-flavored line.
+    scheduled_at: scheduledAtIso,
+    scheduled_at_label: scheduledAtIso
+      ? new Date(scheduledAtIso).toLocaleString('en-US', {
+          timeZone: 'America/New_York',
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          timeZoneName: 'short',
+        })
+      : null,
     matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
     // Client account access (S10): magic-link portal sign-in. The prospect
     // booking confirmation email links here, pre-filled with the email they just
@@ -1661,11 +1732,13 @@ export async function submitBooking(
     to: input.clientEmail,
     variables: commonVars,
   })
-  await queueNotification(ctx, {
-    routeKindName: 'prospect_booking_confirmation',
-    to: input.clientEmail,
-    variables: commonVars,
-  })
+  if (scheduledAtIso) {
+    await queueNotification(ctx, {
+      routeKindName: 'prospect_booking_confirmation',
+      to: input.clientEmail,
+      variables: commonVars,
+    })
+  }
   if ((service?.route ?? 'manual') === 'manual') {
     // Manual-workflow matters may lack auto-generation visibility — the
     // attorney email is their safety net (REQ-NOTIFY-02).
@@ -1687,7 +1760,10 @@ export async function submitBooking(
     console.error('[submitBooking] auto-draft enqueue failed (booking still saved):', err)
   }
 
-  return booked
+  // Intake-only path returns matter.open's result — its effect carries
+  // { matterEntityId, matterNumber } (no scheduledAt), which is all the
+  // confirmation screen needs.
+  return booked ?? opened
 }
 
 function summarizeIntake(responses: Record<string, unknown>): string {

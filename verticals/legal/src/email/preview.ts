@@ -30,7 +30,15 @@ const SAMPLES: Record<string, Record<string, unknown>> = {
     join_url: 'https://meet.google.com/abc-defg-hij',
     reschedule_url: 'https://app.pacheco.law/book/reschedule/abc123',
   },
-  'prospect-intake-confirmation': { client_first_name: 'Priya' },
+  // The builder branches on scheduled_at: present = the consultation variant
+  // every appointment booking sends; absent = the intake-only variant
+  // (appointment_required=false services). Both belong in the gallery, and the
+  // slot-present sample documents the variable the branch depends on.
+  'prospect-intake-confirmation': {
+    client_first_name: 'Priya',
+    scheduled_at: '2026-06-25T18:00:00Z',
+  },
+  'prospect-intake-confirmation--intake-only': { client_first_name: 'Priya' },
   'client-document-ready': {
     client_first_name: 'Marcus',
     document_label: 'Operating Agreement',
@@ -83,7 +91,9 @@ mkdirSync(outDir, { recursive: true })
 
 const links: string[] = []
 for (const [ref, vars] of Object.entries(SAMPLES)) {
-  const email = buildEmail(ref, vars)
+  // A '--variant' suffix renders the SAME builder with different sample data
+  // (e.g. the intake-only branch of a template) as its own gallery entry.
+  const email = buildEmail(ref.split('--')[0] ?? ref, vars)
   if (!email) {
     console.warn(`No builder for ${ref}`)
     continue
