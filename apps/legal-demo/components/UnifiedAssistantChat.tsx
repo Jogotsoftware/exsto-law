@@ -85,6 +85,12 @@ interface DisplayTurn {
   // Hidden continuation (build primer / question answers / approval nudges): kept in
   // `turns` so the model re-sees it in history, but never rendered as a bubble.
   hiddenFromUi?: boolean
+  // The send that carried this user turn failed (after the automatic retry). The
+  // bubble stays visible (dimmed) so the attorney sees what didn't go through, but
+  // the turn is EXCLUDED from the history sent to the model — otherwise the next
+  // send would show the model the same unanswered question twice. Cleared when the
+  // attorney clicks "Try again" (the same turn is re-sent, context intact).
+  failed?: boolean
   citations?: string[]
   model?: string
   // Names of documents attached to a user turn (shown as chips on the bubble).
@@ -255,6 +261,17 @@ function slugifyTitle(title: string): string {
 // so the conversation itself is never fed back in. Whitespace is collapsed and the
 // text is bounded (the server bounds it again). Claude-only; the caller skips this
 // for the external research model so page content never leaves the firm.
+// Errors worth ONE silent automatic retry: infrastructure hiccups (model
+// overloaded, rate limited, gateway/network blips) where an immediate re-send
+// usually succeeds — the attorney just sees the thinking indicator continue.
+// Anything else (bad request, auth, validation) surfaces immediately with the
+// manual "Try again" instead; retrying those wouldn't change the outcome.
+function isTransientAssistantError(message: string): boolean {
+  return /overloaded|rate.?limit|too many requests|timed?.?out|timeout|network|failed to fetch|load failed|connection|temporarily unavailable|service unavailable|internal server error|request failed \(5\d\d\)|\b(429|500|502|503|504|529)\b/i.test(
+    message,
+  )
+}
+
 const MAX_PAGE_CONTENT_CHARS = 14000
 function capturePageContent(): string | undefined {
   if (typeof document === 'undefined') return undefined
@@ -537,6 +554,17 @@ export function UnifiedAssistantChat({
   // prior thread). In-flight stream/load callbacks compare against it and no-op
   // when stale, so an old reply can never land in a newly-opened thread.
   const genRef = useRef(0)
+  // Everything needed to re-fire the last FAILED send verbatim ("Try again"):
+  // the exact outgoing text (batch answers already folded in), whether it was a
+  // hidden continuation, the forced model, and the attachments (which were
+  // cleared from the composer when the original send left). Set only on final
+  // failure; cleared on success and on thread switch / new chat.
+  const retryRef = useRef<{
+    message: string
+    hidden: boolean
+    model?: string
+    attachments: { name: string; text: string }[]
+  } | null>(null)
 
   // /skills picker — the firm's legal playbooks the attorney can force-load.
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[] | null>(null)
@@ -735,6 +763,7 @@ export function UnifiedAssistantChat({
     setBuildMode(false) // a different thread is not the in-progress build
     setStreaming(null)
     setError(null)
+    retryRef.current = null // a superseded exchange can't be retried into the new one
     setInput('')
     setBusy(false)
     setUseContext(true)
@@ -780,6 +809,7 @@ export function UnifiedAssistantChat({
     setBuildMode(false) // a fresh chat is not in build mode until the attorney re-enters it
     setStreaming(null)
     setError(null)
+    retryRef.current = null // a superseded exchange can't be retried into the new one
     setInput('')
     setBusy(false)
     setHistoryOpen(false)
@@ -993,8 +1023,20 @@ export function UnifiedAssistantChat({
     return [reply, ...notes].filter(Boolean).join('\n')
   }
 
-  async function send(overrideMessage?: string, opts?: { hidden?: boolean; model?: string }) {
+  async function send(
+    overrideMessage?: string,
+    opts?: {
+      hidden?: boolean
+      model?: string
+      // Re-fire of a failed send: don't append a new user bubble — the failed one
+      // is already in `turns`; clear its failed flag and re-send with the same
+      // attachments (passed here, since the composer's were cleared long ago).
+      retry?: boolean
+      attachments?: { name: string; text: string }[]
+    },
+  ) {
     const isContinuation = typeof overrideMessage === 'string'
+    const isRetry = opts?.retry === true
     const hidden = isContinuation && opts?.hidden === true
     const message = isContinuation ? overrideMessage.trim() : input.trim()
     // A caller may force the model for this turn (build mode upgrades Haiku → the
@@ -1023,30 +1065,57 @@ export function UnifiedAssistantChat({
     // The model history the server expects: prior user/assistant turns as text.
     // historyContent wins over content (card-only turns have no prose but must not
     // vanish from the model's memory); empty turns are dropped as a backstop — an
-    // empty message is invalid at the API and carries no signal.
-    const history = turns
+    // empty message is invalid at the API and carries no signal. Failed turns are
+    // excluded — they were never answered, and re-showing them would present the
+    // model the same question twice.
+    const fullHistory = turns
+      .filter((t) => !t.failed)
       .map((t) => ({ role: t.role, content: (t.historyContent ?? t.content).trim() }))
       .filter((m) => m.content)
+    // Cap what we resend: a long conversation otherwise grows the request without
+    // bound (every turn re-bills the whole transcript). Trim oldest-first once the
+    // transcript passes the budget, but always keep the most recent turns so the
+    // model never loses the working context of the current exchange.
+    const MAX_HISTORY_CHARS = 100_000
+    const MIN_HISTORY_TURNS = 12
+    let start = fullHistory.length
+    let budget = MAX_HISTORY_CHARS
+    for (let i = fullHistory.length - 1; i >= 0; i--) {
+      budget -= fullHistory[i]!.content.length
+      if (budget < 0 && fullHistory.length - i > MIN_HISTORY_TURNS) break
+      start = i
+    }
+    const history = fullHistory.slice(start)
     // Attachments are per-message and Claude-only; snapshot then clear them. A
-    // continuation carries no attachments (it's a system nudge, not a user upload).
-    const sentAttachments = isContinuation ? [] : canAttach ? attachments : []
-    // A hidden continuation renders NO user bubble, but it MUST still land in
-    // `turns`: history is built from `turns`, and a nudge the model never re-sees
-    // breaks the guided build — after the next answer the model has no record of
-    // the primer or any prior card answer, loses its place, and re-asks earlier
-    // questions (the "wizard goes back a step" bug). Persist it flagged hidden.
-    setTurns((t) => [
-      ...t,
-      {
-        role: 'user',
-        content: message,
-        // When buffered batch answers were folded in, the model saw more than the
-        // typed bubble — record it so future history matches what was sent.
-        historyContent: outgoing !== message ? outgoing : undefined,
-        hiddenFromUi: hidden || undefined,
-        attachments: sentAttachments.length ? sentAttachments.map((a) => a.name) : undefined,
-      },
-    ])
+    // continuation carries no attachments (it's a system nudge, not a user upload) —
+    // except a retry, which re-sends the original turn's attachments verbatim.
+    const sentAttachments =
+      opts?.attachments ?? (isContinuation ? [] : canAttach ? attachments : [])
+    if (isRetry) {
+      // The bubble already exists (dimmed as failed) — revive it instead of
+      // appending a duplicate. History above was built from the closure value,
+      // which still has the flag, so the turn was correctly excluded there and
+      // rides again as THIS send's message.
+      setTurns((t) => t.map((x) => (x.failed ? { ...x, failed: undefined } : x)))
+    } else {
+      // A hidden continuation renders NO user bubble, but it MUST still land in
+      // `turns`: history is built from `turns`, and a nudge the model never re-sees
+      // breaks the guided build — after the next answer the model has no record of
+      // the primer or any prior card answer, loses its place, and re-asks earlier
+      // questions (the "wizard goes back a step" bug). Persist it flagged hidden.
+      setTurns((t) => [
+        ...t,
+        {
+          role: 'user',
+          content: message,
+          // When buffered batch answers were folded in, the model saw more than the
+          // typed bubble — record it so future history matches what was sent.
+          historyContent: outgoing !== message ? outgoing : undefined,
+          hiddenFromUi: hidden || undefined,
+          attachments: sentAttachments.length ? sentAttachments.map((a) => a.name) : undefined,
+        },
+      ])
+    }
     // Only an ordinary send clears the input box / attachments; a continuation must
     // leave whatever the attorney is mid-typing untouched.
     if (!isContinuation) {
@@ -1072,169 +1141,230 @@ export function UnifiedAssistantChat({
     }
     setStreaming({ ...partial })
     let finished = false
+    // The failure (if any) of the CURRENT attempt. Transient failures get one
+    // silent automatic retry — full conversation context intact, no user action —
+    // before surfacing the error with a manual "Try again".
+    let errMsg: string | null = null
+    const MAX_ATTEMPTS = 2
 
-    try {
-      await streamAssistant(
-        {
-          message: outgoing,
-          modelId: turnModelId,
-          history,
-          ...scope,
-          workRate,
-          // Secure mode hard-forces web search off so sensitive context can't be
-          // routed into an outbound search, regardless of the web-search setting.
-          webSearch: secureMode ? false : webSearch,
-          // Only meaningful when scoped; the toggle is hidden otherwise.
-          useContext: scoped ? useContext : undefined,
-          // Depth only matters when grounded in a matter/client.
-          contextDepth: scoped && useContext ? contextDepth : undefined,
-          // Attorney-picked skills (Claude only) — force-loaded this turn.
-          skillSlugs:
-            isClaude && selectedSkills.length ? selectedSkills.map((s) => s.slug) : undefined,
-          attachments: sentAttachments.length
-            ? sentAttachments.map((a) => ({ name: a.name, text: a.text }))
-            : undefined,
-          // Path + a live snapshot of what's on screen, so the assistant can
-          // answer about the page/matter the attorney is looking at — not just know
-          // its route. Page content is Claude-only (the firm's own model); never
-          // captured for the external research model.
-          pageContext:
-            typeof window !== 'undefined'
-              ? {
-                  path: window.location.pathname,
-                  content: isClaude ? capturePageContent() : undefined,
-                }
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      errMsg = null
+      finished = false
+      if (attempt > 1) {
+        // Discard whatever partially streamed on the failed attempt — the retry
+        // regenerates the whole reply, so keeping fragments would duplicate text.
+        partial.thinking = ''
+        partial.text = ''
+        partial.drafting = false
+        partial.skills = []
+        partial.documents = []
+        partial.workflowProposals = []
+        partial.serviceProposals = []
+        partial.questionnaireProposals = []
+        partial.templateProposals = []
+        partial.costProposals = []
+        partial.enableProposals = []
+        partial.buildQuestions = []
+        setStreaming({ ...partial })
+        // Brief pause so a momentary blip (overload spike, dropped socket) has a
+        // chance to clear before the re-send.
+        await new Promise((r) => setTimeout(r, 750))
+        if (!live()) return
+      }
+      try {
+        await streamAssistant(
+          {
+            message: outgoing,
+            modelId: turnModelId,
+            history,
+            ...scope,
+            workRate,
+            // Secure mode hard-forces web search off so sensitive context can't be
+            // routed into an outbound search, regardless of the web-search setting.
+            webSearch: secureMode ? false : webSearch,
+            // Only meaningful when scoped; the toggle is hidden otherwise.
+            useContext: scoped ? useContext : undefined,
+            // Depth only matters when grounded in a matter/client.
+            contextDepth: scoped && useContext ? contextDepth : undefined,
+            // Attorney-picked skills (Claude only) — force-loaded this turn.
+            skillSlugs:
+              isClaude && selectedSkills.length ? selectedSkills.map((s) => s.slug) : undefined,
+            attachments: sentAttachments.length
+              ? sentAttachments.map((a) => ({ name: a.name, text: a.text }))
               : undefined,
-        },
-        {
-          onThinking: (t) => {
-            if (!live()) return
-            partial.thinking += t
-            setStreaming({ ...partial })
+            // Path + a live snapshot of what's on screen, so the assistant can
+            // answer about the page/matter the attorney is looking at — not just know
+            // its route. Page content is Claude-only (the firm's own model); never
+            // captured for the external research model.
+            pageContext:
+              typeof window !== 'undefined'
+                ? {
+                    path: window.location.pathname,
+                    content: isClaude ? capturePageContent() : undefined,
+                  }
+                : undefined,
           },
-          onDrafting: () => {
-            if (!live()) return
-            partial.drafting = true
-            setStreaming({ ...partial })
+          {
+            onThinking: (t) => {
+              if (!live()) return
+              partial.thinking += t
+              setStreaming({ ...partial })
+            },
+            onDrafting: () => {
+              if (!live()) return
+              partial.drafting = true
+              setStreaming({ ...partial })
+            },
+            onText: (t) => {
+              if (!live()) return
+              // Real reply text means the silent drafting phase is over.
+              partial.drafting = false
+              partial.text += t
+              setStreaming({ ...partial })
+            },
+            onSkill: (s) => {
+              if (!live()) return
+              if (s.slug && !partial.skills.some((x) => x.slug === s.slug)) partial.skills.push(s)
+              setStreaming({ ...partial, skills: [...partial.skills] })
+            },
+            onDocument: (doc) => {
+              if (!live()) return
+              if (doc.markdown.trim()) partial.documents.push(doc)
+              setStreaming({ ...partial, documents: [...partial.documents] })
+            },
+            onWorkflowProposal: (p) => {
+              if (!live()) return
+              if (p.serviceKey && Array.isArray(p.graph) && p.graph.length) {
+                partial.workflowProposals.push(p as unknown as WorkflowProposal)
+              }
+              setStreaming({ ...partial, workflowProposals: [...partial.workflowProposals] })
+            },
+            onServiceProposal: (p) => {
+              if (!live()) return
+              if (p.displayName) partial.serviceProposals.push(p as unknown as ServiceProposal)
+              setStreaming({ ...partial, serviceProposals: [...partial.serviceProposals] })
+            },
+            onQuestionnaireProposal: (p) => {
+              if (!live()) return
+              if (p.serviceKey && p.schema) {
+                partial.questionnaireProposals.push(p as unknown as QuestionnaireProposal)
+              }
+              setStreaming({
+                ...partial,
+                questionnaireProposals: [...partial.questionnaireProposals],
+              })
+            },
+            onTemplateProposal: (p) => {
+              if (!live()) return
+              if (p.serviceKey && p.body && p.docKind) {
+                partial.templateProposals.push(p as unknown as TemplateProposal)
+              }
+              setStreaming({ ...partial, templateProposals: [...partial.templateProposals] })
+            },
+            onCostProposal: (p) => {
+              if (!live()) return
+              if (p.serviceKey && p.amount) partial.costProposals.push(p as unknown as CostProposal)
+              setStreaming({ ...partial, costProposals: [...partial.costProposals] })
+            },
+            onEnableProposal: (p) => {
+              if (!live()) return
+              if (p.serviceKey) partial.enableProposals.push(p as unknown as EnableProposal)
+              setStreaming({ ...partial, enableProposals: [...partial.enableProposals] })
+            },
+            onBuildQuestion: (q) => {
+              if (!live()) return
+              if (q.question) partial.buildQuestions.push(q)
+              setStreaming({ ...partial, buildQuestions: [...partial.buildQuestions] })
+            },
+            onDone: (d) => {
+              if (!live()) return
+              finished = true
+              // This turn's cards define the CURRENT answer batch (answers to a
+              // multi-card turn buffer and return together; see handleQuestionAnswer).
+              batchRef.current = {
+                keys: partial.buildQuestions.map((q) => q.key),
+                answers: new Map(),
+              }
+              setTurns((prev) => [
+                ...prev,
+                {
+                  role: 'assistant',
+                  content: d.reply,
+                  historyContent: assistantHistoryContent(d.reply, partial),
+                  citations: d.citations,
+                  model: d.model,
+                  documents: partial.documents.length ? partial.documents : undefined,
+                  workflowProposals: partial.workflowProposals.length
+                    ? partial.workflowProposals
+                    : undefined,
+                  serviceProposals: partial.serviceProposals.length
+                    ? partial.serviceProposals
+                    : undefined,
+                  questionnaireProposals: partial.questionnaireProposals.length
+                    ? partial.questionnaireProposals
+                    : undefined,
+                  templateProposals: partial.templateProposals.length
+                    ? partial.templateProposals
+                    : undefined,
+                  costProposals: partial.costProposals.length ? partial.costProposals : undefined,
+                  enableProposals: partial.enableProposals.length
+                    ? partial.enableProposals
+                    : undefined,
+                  buildQuestions: partial.buildQuestions.length
+                    ? partial.buildQuestions
+                    : undefined,
+                },
+              ])
+              setStreaming(null)
+            },
+            onError: (m) => {
+              if (!live()) return
+              finished = true
+              errMsg = m
+            },
           },
-          onText: (t) => {
-            if (!live()) return
-            // Real reply text means the silent drafting phase is over.
-            partial.drafting = false
-            partial.text += t
-            setStreaming({ ...partial })
-          },
-          onSkill: (s) => {
-            if (!live()) return
-            if (s.slug && !partial.skills.some((x) => x.slug === s.slug)) partial.skills.push(s)
-            setStreaming({ ...partial, skills: [...partial.skills] })
-          },
-          onDocument: (doc) => {
-            if (!live()) return
-            if (doc.markdown.trim()) partial.documents.push(doc)
-            setStreaming({ ...partial, documents: [...partial.documents] })
-          },
-          onWorkflowProposal: (p) => {
-            if (!live()) return
-            if (p.serviceKey && Array.isArray(p.graph) && p.graph.length) {
-              partial.workflowProposals.push(p as unknown as WorkflowProposal)
-            }
-            setStreaming({ ...partial, workflowProposals: [...partial.workflowProposals] })
-          },
-          onServiceProposal: (p) => {
-            if (!live()) return
-            if (p.displayName) partial.serviceProposals.push(p as unknown as ServiceProposal)
-            setStreaming({ ...partial, serviceProposals: [...partial.serviceProposals] })
-          },
-          onQuestionnaireProposal: (p) => {
-            if (!live()) return
-            if (p.serviceKey && p.schema) {
-              partial.questionnaireProposals.push(p as unknown as QuestionnaireProposal)
-            }
-            setStreaming({
-              ...partial,
-              questionnaireProposals: [...partial.questionnaireProposals],
-            })
-          },
-          onTemplateProposal: (p) => {
-            if (!live()) return
-            if (p.serviceKey && p.body && p.docKind) {
-              partial.templateProposals.push(p as unknown as TemplateProposal)
-            }
-            setStreaming({ ...partial, templateProposals: [...partial.templateProposals] })
-          },
-          onCostProposal: (p) => {
-            if (!live()) return
-            if (p.serviceKey && p.amount) partial.costProposals.push(p as unknown as CostProposal)
-            setStreaming({ ...partial, costProposals: [...partial.costProposals] })
-          },
-          onEnableProposal: (p) => {
-            if (!live()) return
-            if (p.serviceKey) partial.enableProposals.push(p as unknown as EnableProposal)
-            setStreaming({ ...partial, enableProposals: [...partial.enableProposals] })
-          },
-          onBuildQuestion: (q) => {
-            if (!live()) return
-            if (q.question) partial.buildQuestions.push(q)
-            setStreaming({ ...partial, buildQuestions: [...partial.buildQuestions] })
-          },
-          onDone: (d) => {
-            if (!live()) return
-            finished = true
-            // This turn's cards define the CURRENT answer batch (answers to a
-            // multi-card turn buffer and return together; see handleQuestionAnswer).
-            batchRef.current = {
-              keys: partial.buildQuestions.map((q) => q.key),
-              answers: new Map(),
-            }
-            setTurns((prev) => [
-              ...prev,
-              {
-                role: 'assistant',
-                content: d.reply,
-                historyContent: assistantHistoryContent(d.reply, partial),
-                citations: d.citations,
-                model: d.model,
-                documents: partial.documents.length ? partial.documents : undefined,
-                workflowProposals: partial.workflowProposals.length
-                  ? partial.workflowProposals
-                  : undefined,
-                serviceProposals: partial.serviceProposals.length
-                  ? partial.serviceProposals
-                  : undefined,
-                questionnaireProposals: partial.questionnaireProposals.length
-                  ? partial.questionnaireProposals
-                  : undefined,
-                templateProposals: partial.templateProposals.length
-                  ? partial.templateProposals
-                  : undefined,
-                costProposals: partial.costProposals.length ? partial.costProposals : undefined,
-                enableProposals: partial.enableProposals.length
-                  ? partial.enableProposals
-                  : undefined,
-                buildQuestions: partial.buildQuestions.length ? partial.buildQuestions : undefined,
-              },
-            ])
-            setStreaming(null)
-          },
-          onError: (m) => {
-            if (!live()) return
-            finished = true
-            setError(m)
-            setStreaming(null)
-          },
-        },
-      )
-    } catch (e) {
+        )
+      } catch (e) {
+        if (!live()) return
+        finished = true
+        errMsg = e instanceof Error ? e.message : String(e)
+      }
       if (!live()) return
-      finished = true
-      setError(e instanceof Error ? e.message : String(e))
-      setStreaming(null)
+      // Snapshot: errMsg is assigned inside stream callbacks, so TS can't narrow
+      // the captured `let` across the calls above — read it once here.
+      const attemptError: string | null = errMsg
+      if (!attemptError) break
+      if (attempt < MAX_ATTEMPTS && isTransientAssistantError(attemptError)) continue
+      break
     }
 
     // A newer send or a thread switch superseded this exchange — leave the
     // reopened conversation's state untouched (its reply must not land here).
     if (!live()) return
+
+    // Final failure (auto-retry exhausted or non-transient): keep the attorney's
+    // bubble (dimmed), stash everything needed to re-fire it verbatim, and show
+    // the error with a one-click "Try again". Nothing about the conversation is
+    // lost — the retry re-sends with the full history up to this point.
+    const finalError: string | null = errMsg
+    if (finalError) {
+      retryRef.current = {
+        message: outgoing,
+        hidden,
+        model: turnModelId,
+        attachments: sentAttachments.map((a) => ({ name: a.name, text: a.text })),
+      }
+      setTurns((prev) =>
+        prev.map((t, i) =>
+          i === prev.length - 1 && t.role === 'user' ? { ...t, failed: true } : t,
+        ),
+      )
+      setError(finalError)
+      setStreaming(null)
+      setBusy(false)
+      return
+    }
+    retryRef.current = null
 
     // Reconcile a stream that ended without a terminal event (e.g. a drop):
     // keep whatever streamed rather than losing it.
@@ -1288,6 +1418,22 @@ export function UnifiedAssistantChat({
     }
     setStreaming(null)
     setBusy(false)
+  }
+
+  // Re-fire the last failed send exactly as it went out — same text (batch
+  // answers folded), same attachments, same model, same hidden-continuation
+  // status — with the conversation history rebuilt up to that point. The failed
+  // bubble is revived (not duplicated) inside send()'s retry path.
+  function retryLastSend() {
+    const r = retryRef.current
+    if (!r || busy) return
+    setError(null)
+    void send(r.message, {
+      retry: true,
+      hidden: r.hidden,
+      model: r.model,
+      attachments: r.attachments,
+    })
   }
 
   // Tracks approvals we've already auto-continued from, so a re-render of an approved
@@ -1765,7 +1911,14 @@ export function UnifiedAssistantChat({
         {turns
           .filter((t) => !t.hiddenFromUi)
           .map((t, i) => (
-            <div key={i} className={`feedback-bubble feedback-bubble-${t.role}`}>
+            <div
+              key={i}
+              className={`feedback-bubble feedback-bubble-${t.role}`}
+              // A failed send stays visible but dimmed: the attorney sees what
+              // didn't go through, and "Try again" (in the error alert) revives it.
+              style={t.failed ? { opacity: 0.55 } : undefined}
+              title={t.failed ? 'This message didn’t send — use Try again below.' : undefined}
+            >
               {/* Assistant replies are markdown — render so **bold**, lists and
                 headings display formatted (not as raw syntax). renderMarkdown
                 escapes HTML before formatting, so model output can't inject
@@ -1955,7 +2108,31 @@ export function UnifiedAssistantChat({
 
         {error && (
           <div role="alert" className="alert alert-error">
-            {error}
+            <span>{error}</span>
+            {/* One-click retry of the failed send — full conversation context is
+                rebuilt up to that point, so the exchange picks up where it left
+                off (the failed bubble is revived, not duplicated). */}
+            {retryRef.current && !busy && (
+              <button
+                type="button"
+                className="uac-retry-btn"
+                onClick={retryLastSend}
+                style={{
+                  marginLeft: 8,
+                  padding: '2px 10px',
+                  borderRadius: 6,
+                  border: '1px solid currentColor',
+                  background: 'transparent',
+                  color: 'inherit',
+                  font: 'inherit',
+                  fontSize: '0.85em',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Try again
+              </button>
+            )}
           </div>
         )}
       </div>
