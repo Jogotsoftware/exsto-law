@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 
 interface Slot {
   startIso: string
@@ -20,7 +21,13 @@ interface Availability {
   timezone: string
   meetingLengthsMinutes: number[]
   durationMinutes: number
+  // Clickable open times only (the true intersection). Drives the list view + the
+  // confirm no-double-book re-check.
   slots: Slot[]
+  // The FULL candidate grid with an `available` flag per cell — open (clickable) vs
+  // unavailable (anonymous blocked). Feeds the calendar view. Carries NO event detail
+  // (only times + busy/free), so the public calendar exposes busy/free and nothing else.
+  gridSlots: CalendarSlot[]
   configured: boolean
 }
 
@@ -46,6 +53,7 @@ export default function PublicBookingPage(): React.JSX.Element {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
+  const [view, setView] = useState<'calendar' | 'list'>('calendar') // calendar is default
   const [selected, setSelected] = useState<Slot | null>(null)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -216,40 +224,93 @@ export default function PublicBookingPage(): React.JSX.Element {
             </div>
           )}
 
-          {!selected && days.length === 0 && (
-            <p style={{ color: '#6b7280' }}>No open times in the next few weeks.</p>
-          )}
-
-          {!selected &&
-            days.map(({ day, slots }) => (
-              <div key={day} style={{ marginTop: 20 }}>
-                <h3 style={{ fontSize: 15, color: '#374151', margin: '0 0 8px' }}>{day}</h3>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {slots.map((s) => (
+          {!selected && (
+            <>
+              {/* Calendar | List toggle — calendar is the default. */}
+              <div style={{ margin: '18px 0 6px' }}>
+                <div
+                  role="tablist"
+                  aria-label="View"
+                  style={{
+                    display: 'inline-flex',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {(['calendar', 'list'] as const).map((v) => (
                     <button
-                      key={s.startIso}
-                      onClick={() => {
-                        setSelected(s)
-                        setError(null)
-                      }}
+                      key={v}
+                      role="tab"
+                      aria-selected={view === v}
+                      onClick={() => setView(v)}
                       style={{
-                        padding: '8px 14px',
-                        borderRadius: 8,
-                        border: '1px solid #d1d5db',
-                        background: '#fff',
+                        padding: '6px 16px',
+                        border: 'none',
+                        background: view === v ? '#1a1a2e' : '#fff',
+                        color: view === v ? '#fff' : '#1a1a2e',
                         cursor: 'pointer',
                         fontSize: 14,
+                        textTransform: 'capitalize',
                       }}
                     >
-                      {new Date(s.startIso).toLocaleTimeString(undefined, {
-                        hour: 'numeric',
-                        minute: '2-digit',
-                      })}
+                      {v}
                     </button>
                   ))}
                 </div>
               </div>
-            ))}
+
+              {avail.slots.length === 0 && (
+                <p style={{ color: '#6b7280' }}>No open times in the next few weeks.</p>
+              )}
+
+              {/* Calendar view — reuses the public AvailabilityCalendar (weekly grid +
+                  mobile accordion). It renders ONLY open (clickable) vs unavailable
+                  (anonymous greyed "taken") cells; it never receives event detail, so
+                  the public calendar exposes busy/free and nothing about "what". */}
+              {view === 'calendar' ? (
+                <AvailabilityCalendar
+                  slots={avail.gridSlots}
+                  selectedStartIso={selected ? (selected as Slot).startIso : null}
+                  onSelect={(s) => {
+                    setSelected({ startIso: s.startIso, endIso: s.endIso, label: s.label })
+                    setError(null)
+                  }}
+                  live
+                />
+              ) : (
+                days.map(({ day, slots }) => (
+                  <div key={day} style={{ marginTop: 20 }}>
+                    <h3 style={{ fontSize: 15, color: '#374151', margin: '0 0 8px' }}>{day}</h3>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {slots.map((s) => (
+                        <button
+                          key={s.startIso}
+                          onClick={() => {
+                            setSelected(s)
+                            setError(null)
+                          }}
+                          style={{
+                            padding: '8px 14px',
+                            borderRadius: 8,
+                            border: '1px solid #d1d5db',
+                            background: '#fff',
+                            cursor: 'pointer',
+                            fontSize: 14,
+                          }}
+                        >
+                          {new Date(s.startIso).toLocaleTimeString(undefined, {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </>
+          )}
 
           {selected && (
             <div style={{ marginTop: 24 }}>

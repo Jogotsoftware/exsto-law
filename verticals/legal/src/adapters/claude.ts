@@ -17,7 +17,157 @@ const DEFAULT_MODEL = process.env.LEGAL_DRAFTING_MODEL ?? 'claude-sonnet-4-6'
 const ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
 
 function makeAnthropic(apiKey: string): Anthropic {
-  return new Anthropic({ apiKey, baseURL: ANTHROPIC_BASE_URL })
+  // maxRetries: 0 — we own retry ourselves (see withTransientRetry / retryDelayMs)
+  // so the policy is deterministic, logged, and SIDE-EFFECT-SAFE: retry is scoped
+  // to a single messages.create/stream round inside the tool loop, never an outer
+  // turn that has already executed a client tool. The SDK's silent built-in retry
+  // (default 2) is disabled so the two don't compound into confusing latency.
+  return new Anthropic({ apiKey, baseURL: ANTHROPIC_BASE_URL, maxRetries: 0 })
+}
+
+// ── Transient-error handling (OVERLOAD-HANDLING-1) ──────────────────────────
+// Anthropic API overload (529 overloaded_error), rate limits (429), upstream
+// 5xx, and connection blips are TRANSIENT and RETRYABLE — momentary saturation,
+// not a caller error. We auto-retry them with backoff before surfacing anything,
+// and when retries exhaust we show a plain human sentence — never the raw
+// API-error JSON or a request_id.
+
+// Short backoff schedule (ms) applied BEFORE each retry. Most 529s clear by the
+// second attempt; the schedule is bounded so a synchronous request doesn't blow
+// its route budget (see maxDuration on the stream route). Length = max retries.
+const RETRY_BACKOFF_MS = [1000, 2000, 4000]
+// Cap on a server-suggested Retry-After so a large value can't hang the request.
+const MAX_RETRY_DELAY_MS = 8000
+
+const TRANSIENT_OVERLOAD_MESSAGE =
+  'The assistant is briefly overloaded — please try again in a moment.'
+const TEMPORARILY_UNAVAILABLE_MESSAGE =
+  'The assistant is temporarily unavailable — please try again in a moment.'
+const GENERIC_ASSISTANT_ERROR = "The assistant couldn't complete that request. Please try again."
+
+// True when an error is transient and safe to auto-retry. A 4xx that isn't 429
+// (400 bad request, 401/403 auth, 404, 422 content policy) is the caller's
+// problem — retrying can't fix it, so those surface immediately.
+export function isRetryableAnthropicError(err: unknown): boolean {
+  // No HTTP response arrived at all (network drop / DNS / timeout). The SDK
+  // raises APIConnectionError (incl. its timeout subclass) — transient. A user
+  // abort (APIUserAbortError) is a sibling with no `status`; it is NOT caught
+  // here and falls through to non-retryable, which is correct.
+  if (err instanceof Anthropic.APIConnectionError) return true
+  if (err instanceof Anthropic.APIError) {
+    const status = err.status
+    if (status === 429) return true // rate limited
+    if (typeof status === 'number' && status >= 500 && status < 600) return true // incl. 529
+    return false
+  }
+  return false
+}
+
+// Pull a Retry-After header (HTTP spec: delay in seconds) off an SDK error,
+// converted to ms and capped. Returns null when absent/unparseable.
+function retryAfterMs(err: unknown): number | null {
+  if (!(err instanceof Anthropic.APIError)) return null
+  const headers = (err as { headers?: unknown }).headers
+  const raw = readHeader(headers, 'retry-after')
+  if (raw == null) return null
+  const secs = Number(raw)
+  if (!Number.isFinite(secs) || secs < 0) return null
+  return Math.min(secs * 1000, MAX_RETRY_DELAY_MS)
+}
+
+// err.headers can be a fetch Headers instance or a plain record across SDK
+// versions; read both shapes defensively.
+function readHeader(headers: unknown, name: string): string | null {
+  if (!headers || typeof headers !== 'object') return null
+  const getter = (headers as { get?: unknown }).get
+  if (typeof getter === 'function') {
+    const v = (getter as (n: string) => string | null).call(headers, name)
+    return typeof v === 'string' ? v : null
+  }
+  const rec = headers as Record<string, unknown>
+  const v = rec[name] ?? rec[name.toLowerCase()]
+  return typeof v === 'string' ? v : null
+}
+
+// The delay (ms) to wait before retrying `attempt` (0-based), or null when the
+// error is non-retryable OR the retry budget is spent. Single source of truth
+// for both the non-streaming wrapper and the streaming loop.
+export function retryDelayMs(attempt: number, err: unknown): number | null {
+  if (!isRetryableAnthropicError(err) || attempt >= RETRY_BACKOFF_MS.length) return null
+  return retryAfterMs(err) ?? RETRY_BACKOFF_MS[attempt]!
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Run ONE Anthropic round-trip with automatic retry on transient errors.
+// SIDE-EFFECT SAFETY: `call` MUST be a single messages.create/stream call with
+// no side effect of its own — never wrap an outer turn that already ran a tool,
+// or a retry could re-fire it. A failed call never executed a tool (tools run
+// only after a call succeeds with stop_reason 'tool_use'), so this is safe.
+// `sleepFn` is injectable so unit tests don't actually wait out the backoff.
+export async function withTransientRetry<T>(
+  call: () => Promise<T>,
+  opts: { label?: string; sleepFn?: (ms: number) => Promise<void> } = {},
+): Promise<T> {
+  const sleep = opts.sleepFn ?? defaultSleep
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call()
+    } catch (err) {
+      const delay = retryDelayMs(attempt, err)
+      if (delay == null) throw err
+      if (opts.label) {
+        console.warn(
+          `[claude] transient error on ${opts.label}; retry ${attempt + 1}/${RETRY_BACKOFF_MS.length} in ${delay}ms`,
+        )
+      }
+      await sleep(delay)
+    }
+  }
+}
+
+function looksLikeJson(s: string): boolean {
+  const t = s.trim()
+  return t.startsWith('{') || t.startsWith('[') || /"type"\s*:\s*"error"/.test(t)
+}
+
+// Extract the human `message` from an Anthropic error body (shape:
+// { type:'error', error:{ type, message } }) — never the JSON envelope, never a
+// request_id. Returns null when nothing clean is available.
+export function extractApiErrorMessage(err: unknown): string | null {
+  if (!(err instanceof Anthropic.APIError)) return null
+  const body = (err as { error?: unknown }).error
+  if (!body || typeof body !== 'object') return null
+  const inner = (body as { error?: unknown; message?: unknown }).error
+  const candidates: unknown[] = [
+    inner && typeof inner === 'object' ? (inner as { message?: unknown }).message : undefined,
+    (body as { message?: unknown }).message,
+  ]
+  for (const m of candidates) {
+    if (typeof m === 'string' && m.trim() && !looksLikeJson(m)) return m.trim()
+  }
+  return null
+}
+
+// Turn any Anthropic call error into a plain, user-safe sentence. Transient
+// errors reach here only after retries are exhausted. NEVER returns raw
+// API-error JSON or a request_id — the transcript shows only human text.
+export function humanizeAnthropicError(err: unknown): string {
+  if (err instanceof Anthropic.APIConnectionError) return TEMPORARILY_UNAVAILABLE_MESSAGE
+  if (err instanceof Anthropic.APIError) {
+    if (isRetryableAnthropicError(err)) return TRANSIENT_OVERLOAD_MESSAGE
+    if (err.status === 401 || err.status === 403) {
+      return 'Anthropic rejected the API key. Check the connected key in Settings → Integrations.'
+    }
+    const detail = extractApiErrorMessage(err)
+    return detail
+      ? `The assistant couldn't complete that request: ${detail}`
+      : GENERIC_ASSISTANT_ERROR
+  }
+  if (err instanceof Error && err.message && !looksLikeJson(err.message)) return err.message
+  return GENERIC_ASSISTANT_ERROR
 }
 
 type AnthropicSecret = { api_key: string }
@@ -75,11 +225,15 @@ export async function verifyAnthropicKey(apiKey: string): Promise<string | null>
   if (!key) return 'No API key was provided to verify.'
   try {
     const anthropic = makeAnthropic(key)
-    await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8,
-      messages: [{ role: 'user', content: 'ping' }],
-    })
+    await withTransientRetry(
+      () =>
+        anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 8,
+          messages: [{ role: 'user', content: 'ping' }],
+        }),
+      { label: 'verifyKey' },
+    )
     return null
   } catch (err) {
     if (err instanceof Anthropic.APIError) {
@@ -118,23 +272,17 @@ export async function callClaudeDrafter(
   const anthropic = makeAnthropic(apiKey)
   let response: Anthropic.Message
   try {
-    response = await anthropic.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: request.maxTokens ?? 8000,
-      messages: [{ role: 'user', content: request.prompt }],
-    })
+    response = await withTransientRetry(
+      () =>
+        anthropic.messages.create({
+          model: DEFAULT_MODEL,
+          max_tokens: request.maxTokens ?? 8000,
+          messages: [{ role: 'user', content: request.prompt }],
+        }),
+      { label: 'draft' },
+    )
   } catch (err) {
-    // A rejected Settings-managed key flips the connection to 'error' so the
-    // integration card surfaces the broken sync instead of failing silently
-    // in the worker log.
-    if (source === 'connection' && tenantId && isAuthError(err)) {
-      const msg = redactSecret(err instanceof Error ? err.message : String(err), apiKey)
-      await markConnectionError(tenantId, 'anthropic', `Drafting failed: ${msg}`)
-      throw new Error(
-        'Anthropic rejected the connected API key. Replace it in Settings → Integrations.',
-      )
-    }
-    throw err
+    throw await toUserFacingError(err, { source, tenantId, apiKey, context: 'Drafting failed' })
   }
 
   const textBlock = response.content.find((block) => block.type === 'text')
@@ -496,23 +644,35 @@ function mergeCitations(into: string[], more: string[]): void {
   for (const c of more) if (!into.includes(c)) into.push(c)
 }
 
-// Translate an SDK error into the error to throw: a rejected Settings-managed
-// key flips the connection to 'error' (so the integration card surfaces it)
-// and reports a clear, actionable message; anything else is rethrown as-is.
-async function assistantAuthError(
+// Translate an SDK error into the error to throw. Two jobs: (1) a rejected
+// Settings-managed key flips the connection to 'error' (so the integration card
+// surfaces it) with a clear, actionable message; (2) EVERY other error is
+// humanized — the raw SDK message can be raw API-error JSON (e.g.
+// `529 {"type":"error",...}`), which must never reach the UI. Transient errors
+// reach here only after retries are exhausted. The raw detail is logged
+// (redacted) for diagnosis.
+async function toUserFacingError(
   err: unknown,
-  source: 'connection' | 'env',
-  tenantId: string | null,
-  apiKey: string,
+  opts: {
+    source: 'connection' | 'env'
+    tenantId: string | null
+    apiKey: string
+    context: string
+  },
 ): Promise<Error> {
+  const { source, tenantId, apiKey, context } = opts
   if (source === 'connection' && tenantId && isAuthError(err)) {
     const msg = redactSecret(err instanceof Error ? err.message : String(err), apiKey)
-    await markConnectionError(tenantId, 'anthropic', `Assistant chat failed: ${msg}`)
+    await markConnectionError(tenantId, 'anthropic', `${context}: ${msg}`)
     return new Error(
       'Anthropic rejected the connected API key. Replace it in Settings → Integrations.',
     )
   }
-  return err instanceof Error ? err : new Error(String(err))
+  console.error(
+    `[claude] ${context}:`,
+    redactSecret(err instanceof Error ? err.message : String(err), apiKey),
+  )
+  return new Error(humanizeAnthropicError(err))
 }
 
 // Non-streaming assistant turn returning the reply plus any web-search citations.
@@ -537,11 +697,18 @@ export async function chatWithAssistantDetailed(
     const body = buildChatRequest(messages, opts, carryTurns)
     let response: Anthropic.Message
     try {
-      response = await anthropic.messages.create(
-        body as unknown as Anthropic.MessageCreateParamsNonStreaming,
+      response = await withTransientRetry(
+        () =>
+          anthropic.messages.create(body as unknown as Anthropic.MessageCreateParamsNonStreaming),
+        { label: 'assistant.chat' },
       )
     } catch (err) {
-      throw await assistantAuthError(err, source, tenantId, apiKey)
+      throw await toUserFacingError(err, {
+        source,
+        tenantId,
+        apiKey,
+        context: 'Assistant chat failed',
+      })
     }
     reply += extractText(response.content)
     addUsage(usage, response.usage)
@@ -609,44 +776,72 @@ export async function* streamChatWithAssistant(
 
   for (let i = 0; ; i++) {
     const body = buildChatRequest(messages, opts, carryTurns)
-    const stream = anthropic.messages.stream(
-      body as unknown as Anthropic.MessageCreateParamsStreaming,
-    )
     let final: Anthropic.Message
+    // Retry THIS round's stream on transient errors — but only while nothing has
+    // yet streamed to the consumer (roundEmitted). Once a delta is out, re-
+    // streaming would duplicate it, so a mid-stream failure surfaces instead.
+    // In practice a 529/overload happens at connection setup, before any delta,
+    // so the exact bug this fixes is retried invisibly. State is preserved: each
+    // attempt re-sends the identical `body`; a failed stream ran no client tool
+    // (tools run only after finalMessage() succeeds), so retry can't double-fire.
+    let roundEmitted = false
     // Throttle the `drafting` pulse: input_json deltas arrive rapidly, so emit one
     // every Nth (≈ one pulse per second of active generation) — enough to keep the
     // connection warm and drive the animation, without flooding the stream.
-    let draftDeltas = 0
     const DRAFT_PULSE_EVERY = 6
-    try {
-      for await (const event of stream) {
-        if (event.type !== 'content_block_delta') continue
-        // SDK 0.32 doesn't type thinking_delta / input_json_delta; read defensively.
-        const delta = event.delta as {
-          type?: string
-          text?: string
-          thinking?: string
-          partial_json?: string
-        }
-        if (delta.type === 'text_delta' && delta.text) {
-          if (needsBreak) {
-            needsBreak = false
-            yield { type: 'text', text: '\n\n' }
+    for (let attempt = 0; ; attempt++) {
+      const stream = anthropic.messages.stream(
+        body as unknown as Anthropic.MessageCreateParamsStreaming,
+      )
+      let draftDeltas = 0
+      try {
+        for await (const event of stream) {
+          if (event.type !== 'content_block_delta') continue
+          // SDK 0.32 doesn't type thinking_delta / input_json_delta; read defensively.
+          const delta = event.delta as {
+            type?: string
+            text?: string
+            thinking?: string
+            partial_json?: string
           }
-          textEmitted = true
-          yield { type: 'text', text: delta.text }
-        } else if (delta.type === 'thinking_delta' && delta.thinking) {
-          yield { type: 'thinking', text: delta.thinking }
-        } else if (delta.type === 'input_json_delta') {
-          // The model is building a tool call's input (e.g. a document body). Pulse so
-          // the stream isn't silent during a long generation.
-          if (draftDeltas % DRAFT_PULSE_EVERY === 0) yield { type: 'drafting' }
-          draftDeltas++
+          if (delta.type === 'text_delta' && delta.text) {
+            if (needsBreak) {
+              needsBreak = false
+              yield { type: 'text', text: '\n\n' }
+            }
+            textEmitted = true
+            roundEmitted = true
+            yield { type: 'text', text: delta.text }
+          } else if (delta.type === 'thinking_delta' && delta.thinking) {
+            roundEmitted = true
+            yield { type: 'thinking', text: delta.thinking }
+          } else if (delta.type === 'input_json_delta') {
+            // The model is building a tool call's input (e.g. a document body). Pulse so
+            // the stream isn't silent during a long generation.
+            if (draftDeltas % DRAFT_PULSE_EVERY === 0) {
+              roundEmitted = true
+              yield { type: 'drafting' }
+            }
+            draftDeltas++
+          }
         }
+        final = await stream.finalMessage()
+        break
+      } catch (err) {
+        const delay = roundEmitted ? null : retryDelayMs(attempt, err)
+        if (delay == null) {
+          throw await toUserFacingError(err, {
+            source,
+            tenantId,
+            apiKey,
+            context: 'Assistant chat failed',
+          })
+        }
+        console.warn(
+          `[claude] transient error on assistant.stream; retry ${attempt + 1}/${RETRY_BACKOFF_MS.length} in ${delay}ms`,
+        )
+        await defaultSleep(delay)
       }
-      final = await stream.finalMessage()
-    } catch (err) {
-      throw await assistantAuthError(err, source, tenantId, apiKey)
     }
     addUsage(usage, final.usage)
     mergeCitations(citations, collectCitations(final.content))
