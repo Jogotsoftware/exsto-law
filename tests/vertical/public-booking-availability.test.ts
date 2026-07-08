@@ -33,33 +33,38 @@ describe('public booking availability — rules ∩ busy (acceptance C/F)', () =
     expect(slots.every((s) => s.available)).toBe(true)
   })
 
-  it('a busy interval EXCLUDES its own slot (a booked time is removed)', () => {
+  // Robust across day boundaries: offsets are relative to ONE picked slot's own
+  // wall-clock time (never an assumption about which two candidates are adjacent).
+  it('a busy interval EXCLUDES its own slot AND slots within the buffer', () => {
     const free = computeAvailabilityFromBusy(3, RULES, 30, [])
-    const target = free[4]! // some mid-list candidate
-    const busy = [{ start: ms(target.startIso), end: ms(target.endIso) }]
-    const withBusy = computeAvailabilityFromBusy(3, RULES, 30, busy)
-    const after = withBusy.find((s) => s.startIso === target.startIso)!
-    expect(after.available).toBe(false)
+    const s = free[4]!
+    const sStart = ms(s.startIso)
+
+    // (a) busy exactly over the slot → the slot is removed (a booked time).
+    const withOwn = computeAvailabilityFromBusy(3, RULES, 30, [
+      { start: sStart, end: ms(s.endIso) },
+    ])
+    expect(withOwn.find((x) => x.startIso === s.startIso)!.available).toBe(false)
+
+    // (b) a 1-minute busy ending 9 minutes before the slot starts is WITHIN the
+    //     15-min buffer → the slot is still removed (the required gap between calls).
+    const withBuffer = computeAvailabilityFromBusy(3, RULES, 30, [
+      { start: sStart - 10 * 60_000, end: sStart - 9 * 60_000 },
+    ])
+    expect(withBuffer.find((x) => x.startIso === s.startIso)!.available).toBe(false)
   })
 
-  it('a free slot well before the busy block stays available', () => {
+  it('a slot far from any busy block stays available (busy over ONE slot leaves the rest open)', () => {
     const free = computeAvailabilityFromBusy(3, RULES, 30, [])
     const target = free[4]!
-    const busy = [{ start: ms(target.startIso), end: ms(target.endIso) }]
-    const withBusy = computeAvailabilityFromBusy(3, RULES, 30, busy)
-    // free[0] is > 4 slots (>2h) earlier — outside the 15-min buffer — so still open.
-    const early = withBusy.find((s) => s.startIso === free[0]!.startIso)!
+    const withBusy = computeAvailabilityFromBusy(3, RULES, 30, [
+      { start: ms(target.startIso), end: ms(target.endIso) },
+    ])
+    // The earliest slot is many slots / a day away from free[4] — well outside the
+    // buffer — so it stays open. (Only free[4] and its buffer neighbours drop.)
+    const early = withBusy.find((x) => x.startIso === free[0]!.startIso)!
     expect(early.available).toBe(true)
-  })
-
-  it('the 15-min buffer also removes the slot immediately adjacent to the busy block', () => {
-    // The brief scenario: a 14:00–14:30 busy with a 15-min buffer removes 14:00 AND
-    // the abutting slots within the buffer (stricter than the busy block alone).
-    const free = computeAvailabilityFromBusy(3, RULES, 30, [])
-    const target = free[4]!
-    const prev = free[3]! // ends exactly at target.start → inside the buffer
-    const busy = [{ start: ms(target.startIso), end: ms(target.endIso) }]
-    const withBusy = computeAvailabilityFromBusy(3, RULES, 30, busy)
-    expect(withBusy.find((s) => s.startIso === prev.startIso)!.available).toBe(false)
+    // And the vast majority of slots remain available (a single busy block).
+    expect(withBusy.filter((x) => x.available).length).toBeGreaterThan(free.length - 5)
   })
 })
