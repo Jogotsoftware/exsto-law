@@ -22,6 +22,12 @@ export interface AssistantStreamInput {
   // Documents attached to this message (Claude only): each { name, text }.
   attachments?: Array<{ name: string; text: string }>
   pageContext?: { path?: string; [k: string]: unknown }
+  // Explicit build session (the Build button) — forces the build-service playbook
+  // server-side regardless of phrasing (WP5.3).
+  buildMode?: boolean
+  // The service under construction in the active build — the server injects the
+  // live BUILD BRIEF for it into the model's context (WP4.2).
+  buildServiceKey?: string
 }
 
 export interface StreamMeta {
@@ -150,6 +156,9 @@ export interface AssistantStreamHandlers {
   onDrafting?: () => void
   // The assistant loaded a specialized skill (playbook) for this turn.
   onSkill?: (skill: { slug: string; name: string }) => void
+  // A non-fatal warning worth showing (e.g. the tool-round cap cut a step off).
+  // Distinct from onError: the streamed reply is good and must not be retried.
+  onNotice?: (message: string) => void
   // The assistant produced a downloadable document (a deliverable, not the prose).
   onDocument?: (doc: { title: string; markdown: string }) => void
   // The assistant proposed a service workflow (PR5) — render an approval card.
@@ -243,6 +252,9 @@ export async function streamAssistant(
         break
       case 'skill':
         handlers.onSkill?.({ slug: String(evt.slug ?? ''), name: String(evt.name ?? '') })
+        break
+      case 'notice':
+        handlers.onNotice?.(String(evt.message ?? ''))
         break
       case 'document':
         handlers.onDocument?.({

@@ -251,6 +251,10 @@ export type AssistantStreamChunk =
   | { type: 'tool'; name: string; input: unknown }
   // Terminal chunk carrying the turn's summed token usage (for the AI usage view).
   | { type: 'usage'; usage: AssistantUsage }
+  // The tool loop hit MAX_PAUSE_CONTINUATIONS with a client tool_use still pending —
+  // the model wanted to keep working but the round cap cut it off. Surfaced (never
+  // silent) so the caller can tell the attorney and record an observation.
+  | { type: 'tool_cap'; pendingTools: string[] }
 
 // Anthropic's web search server tool. When enabled the model searches the web
 // itself and annotates its answer with source URLs (the citation blocks we
@@ -473,8 +477,10 @@ function collectCitations(content: unknown): string[] {
 // partial answer. We resume by re-sending the assistant's content verbatim —
 // NO extra "continue" user turn, since the trailing server_tool_use block is
 // what tells the API to pick up where it left off. Capped so a pathological
-// case can't loop forever.
-const MAX_PAUSE_CONTINUATIONS = 4
+// case can't loop forever. 10 (was 4): a guided-build turn legitimately chains
+// context reads + a question batch + a propose + a validation retry, which
+// overran 4 rounds and silently truncated the step (BUILDER-HARDENING-1 WP5).
+const MAX_PAUSE_CONTINUATIONS = 10
 
 // Concatenate the text blocks of a message's content (ignores thinking /
 // server-tool blocks). Used to assemble the reply across resumed segments.
@@ -517,7 +523,7 @@ export async function chatWithAssistantDetailed(
   tenantId: string | null,
   messages: ChatMessage[],
   opts: AssistantChatOptions = {},
-): Promise<{ reply: string; citations: string[]; usage: AssistantUsage }> {
+): Promise<{ reply: string; citations: string[]; usage: AssistantUsage; toolCapHit: boolean }> {
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
   const anthropic = makeAnthropic(apiKey)
 
@@ -525,6 +531,7 @@ export async function chatWithAssistantDetailed(
   const citations: string[] = []
   const usage = emptyUsage()
   let reply = ''
+  let toolCapHit = false
 
   for (let i = 0; ; i++) {
     const body = buildChatRequest(messages, opts, carryTurns)
@@ -548,19 +555,22 @@ export async function chatWithAssistantDetailed(
     }
     // The model called a client tool (e.g. log_feedback): run it, feed the
     // result back, and let the model finish its turn.
-    if (stop === 'tool_use' && i < MAX_PAUSE_CONTINUATIONS && (opts.clientTools?.length ?? 0) > 0) {
+    if (stop === 'tool_use' && (opts.clientTools?.length ?? 0) > 0) {
       const uses = clientToolUses(response.content)
-      if (uses.length) {
+      if (uses.length && i < MAX_PAUSE_CONTINUATIONS) {
         carryTurns.push({ role: 'assistant', content: stripThinkingBlocks(response.content) })
         carryTurns.push(await runClientTools(uses, opts.clientTools!))
         continue
       }
+      // Round cap with a tool call still pending: the step the model wanted to run
+      // never happens. Flag it so the caller can surface it — never a silent break.
+      if (uses.length) toolCapHit = true
     }
     break
   }
 
   if (!reply) throw new Error('Claude response contained no text block.')
-  return { reply, citations, usage }
+  return { reply, citations, usage, toolCapHit }
 }
 
 // Back-compat thin wrapper: prose reply only. Kept for the legacy assistant and
@@ -653,9 +663,9 @@ export async function* streamChatWithAssistant(
     // The model called a client tool (e.g. log_feedback): run it, feed the result
     // back, and continue — the next stream is the model's post-tool reply, whose
     // text deltas keep flowing to the UI seamlessly.
-    if (stop === 'tool_use' && i < MAX_PAUSE_CONTINUATIONS && (opts.clientTools?.length ?? 0) > 0) {
+    if (stop === 'tool_use' && (opts.clientTools?.length ?? 0) > 0) {
       const uses = clientToolUses(final.content)
-      if (uses.length) {
+      if (uses.length && i < MAX_PAUSE_CONTINUATIONS) {
         // Surface each tool call so the UI can show what the assistant is doing
         // (e.g. "using NDA review") before the tool runs and the answer resumes.
         for (const u of uses) yield { type: 'tool', name: u.name, input: u.input }
@@ -666,6 +676,9 @@ export async function* streamChatWithAssistant(
         if (textEmitted) needsBreak = true
         continue
       }
+      // Round cap with a tool call still pending — surface it (never a silent
+      // break) so the caller can tell the attorney and record an observation.
+      if (uses.length) yield { type: 'tool_cap', pendingTools: uses.map((u) => u.name) }
     }
     break
   }
