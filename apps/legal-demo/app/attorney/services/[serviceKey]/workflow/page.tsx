@@ -15,44 +15,23 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+// The pure builder data-model (wire shapes + graph round-trip). Kept in a sibling,
+// React-free module so the lossless round-trip is unit-testable — see
+// workflowBuilderModel.ts.
+import {
+  type WfGate,
+  type WfActionKind,
+  type WfDocumentRef,
+  type WfLifecycle,
+  type BuilderStep,
+  triggerField,
+  defaultTrigger,
+  nextUid,
+  graphToSteps,
+  stepsToGraph,
+} from './workflowBuilderModel'
 
 // ── Wire shapes (structural mirror; not imported from the server) ──────────────
-type WfGate = 'automatic' | 'attorney' | 'client' | 'system'
-type WfActionKind =
-  | 'view_intake'
-  | 'view_consultation'
-  | 'generate_document'
-  | 'review_send_document'
-  | 'approve_send_invoice'
-  | 'await_payment'
-  | 'manual_task'
-  | 'complete_matter'
-
-interface WfEdge {
-  to: string
-  gate: WfGate
-  via?: string
-  on?: string
-  when?: string
-}
-interface WfDocumentRef {
-  templateEntityId?: string
-  docKind?: string
-  label?: string
-}
-interface WfStage {
-  key: string
-  label: string
-  client_label?: string
-  entry?: boolean
-  terminal?: boolean
-  blocking?: boolean
-  action?: { kind: WfActionKind; config?: Record<string, unknown> }
-  documents?: WfDocumentRef[]
-  advances_to: WfEdge[]
-}
-type WfLifecycle = WfStage[]
-
 interface CatalogAction {
   kind: WfActionKind
   label: string
@@ -86,146 +65,11 @@ interface WorkflowStepTemplate {
   stage: WfStepStage
 }
 
-// ── The builder's working model. One Step per stage, in display = run order. The
-// outgoing edge to the NEXT step is implicit (rebuilt on save); we only keep the
-// per-step gate + trigger so editing is local and reordering is trivial. The last
-// step is terminal (no outgoing edge); every earlier step → the next. ──────────
-interface BuilderStep {
-  // Stable id for React keys + reordering; distinct from the saved stage `key`,
-  // which is slugged from the label on save so the running matter_status reads well.
-  uid: string
-  // The persisted stage key. Preserved across edits where possible so a saved-then-
-  // edited graph keeps stable keys; regenerated from the label only when blank.
-  key: string
-  label: string
-  clientLabel: string
-  actionKind: WfActionKind
-  gate: WfGate // gate on THIS step's outgoing edge (ignored on the terminal step)
-  trigger: string // via/on text for the outgoing edge (optional; defaulted per gate)
-  blocking: boolean
-  documents: WfDocumentRef[]
-}
-
 const GATE_LABELS: Record<WfGate, string> = {
   automatic: 'Automatic — the system advances it',
   attorney: 'Attorney — an attorney action advances it',
   client: 'Client — a client action advances it',
   system: 'System — an external event advances it',
-}
-
-// `via` names the action that fires attorney/client edges; `on` names the event a
-// automatic/system edge waits for. We store one free-text "trigger" per step and
-// place it on the right field at save time based on the gate.
-function triggerField(gate: WfGate): 'via' | 'on' {
-  return gate === 'attorney' || gate === 'client' ? 'via' : 'on'
-}
-// A sensible default trigger so a saved edge is never empty-but-meaningful. The
-// attorney can override it in the step panel.
-function defaultTrigger(gate: WfGate, actionKind: WfActionKind): string {
-  if (gate === 'attorney') return 'legal.matter.advance'
-  if (gate === 'client') return 'booking.create'
-  if (gate === 'system') return actionKind === 'approve_send_invoice' ? 'invoice.paid' : 'event'
-  return 'condition' // automatic
-}
-
-let uidSeq = 0
-function nextUid(): string {
-  uidSeq += 1
-  return `s${uidSeq}_${Math.random().toString(36).slice(2, 7)}`
-}
-
-// label → a stable, unique stage key (== the matter_status value the engine writes).
-function slugKey(label: string, taken: Set<string>): string {
-  const base =
-    label
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .slice(0, 48) || 'step'
-  let key = base
-  let n = 2
-  while (taken.has(key)) {
-    key = `${base}_${n}`
-    n += 1
-  }
-  taken.add(key)
-  return key
-}
-
-// Map a loaded lifecycle graph (run order by edges) into the linear builder model.
-// The graph is already linear in practice; we walk it from the entry stage by
-// following the single outgoing edge so display order == run order even if the
-// stored array order drifted.
-function graphToSteps(graph: WfLifecycle): BuilderStep[] {
-  if (!graph.length) return []
-  const byKey = new Map<string, WfStage>(graph.map((s) => [s.key, s]))
-  const entry = graph.find((s) => s.entry) ?? graph[0]
-  const ordered: WfStage[] = []
-  const seen = new Set<string>()
-  let cursorKey: string | undefined = entry?.key
-  while (cursorKey && !seen.has(cursorKey)) {
-    const stage: WfStage | undefined = byKey.get(cursorKey)
-    if (!stage) break
-    seen.add(cursorKey)
-    ordered.push(stage)
-    const nextEdge: WfEdge | undefined = stage.advances_to[0]
-    cursorKey = nextEdge?.to
-  }
-  // Include any stages the walk didn't reach (defensive — shouldn't happen for a
-  // valid linear graph) so nothing silently disappears on load.
-  for (const s of graph) if (!seen.has(s.key)) ordered.push(s)
-
-  return ordered.map((s) => {
-    const edge = s.advances_to[0]
-    return {
-      uid: nextUid(),
-      key: s.key,
-      label: s.label,
-      clientLabel: s.client_label ?? '',
-      actionKind: s.action?.kind ?? 'manual_task',
-      gate: (edge?.gate ?? 'attorney') as WfGate,
-      trigger: edge?.via ?? edge?.on ?? '',
-      blocking: s.blocking !== false,
-      documents: s.documents ?? [],
-    }
-  })
-}
-
-// Assemble the linear Lifecycle to save: first step is the entry, last is terminal
-// (no outgoing edge), every other step → the next via one edge carrying the step's
-// gate + trigger. Keys are stabilized/uniquified from labels.
-function stepsToGraph(steps: BuilderStep[]): WfLifecycle {
-  const taken = new Set<string>()
-  // Resolve a unique key for each step first (so edges can reference the next key).
-  const keys = steps.map((s) => {
-    const existing = s.key && !taken.has(s.key) ? s.key : ''
-    if (existing) {
-      taken.add(existing)
-      return existing
-    }
-    return slugKey(s.label, taken)
-  })
-  return steps.map((s, i) => {
-    const isLast = i === steps.length - 1
-    const stage: WfStage = {
-      key: keys[i],
-      label: s.label.trim() || `Step ${i + 1}`,
-      entry: i === 0 || undefined,
-      terminal: isLast || undefined,
-      action: { kind: s.actionKind },
-      advances_to: [],
-    }
-    if (s.clientLabel.trim()) stage.client_label = s.clientLabel.trim()
-    if (!s.blocking) stage.blocking = false
-    if (s.documents.length) stage.documents = s.documents
-    if (!isLast) {
-      const edge: WfEdge = { to: keys[i + 1], gate: s.gate }
-      const trig = s.trigger.trim() || defaultTrigger(s.gate, s.actionKind)
-      edge[triggerField(s.gate)] = trig
-      stage.advances_to = [edge]
-    }
-    return stage
-  })
 }
 
 // One builder step → a saved-step STAGE (no edges/key/entry/terminal). The step's
@@ -592,6 +436,7 @@ export default function ServiceWorkflowPage() {
                 index={i}
                 total={steps.length}
                 catalog={catalog}
+                serviceKey={serviceKey}
                 open={editing === s.uid}
                 onToggle={() => setEditing(editing === s.uid ? null : s.uid)}
                 onChange={(patch) => updateStep(s.uid, patch)}
@@ -797,6 +642,7 @@ function StepCard({
   index,
   total,
   catalog,
+  serviceKey,
   open,
   onToggle,
   onChange,
@@ -812,6 +658,7 @@ function StepCard({
   index: number
   total: number
   catalog: WorkflowCatalog | null
+  serviceKey: string
   open: boolean
   onToggle: () => void
   onChange: (patch: Partial<BuilderStep>) => void
@@ -924,7 +771,15 @@ function StepCard({
         />
       )}
 
-      {open && <StepEditor step={step} isLast={isLast} catalog={catalog} onChange={onChange} />}
+      {open && (
+        <StepEditor
+          step={step}
+          isLast={isLast}
+          catalog={catalog}
+          serviceKey={serviceKey}
+          onChange={onChange}
+        />
+      )}
     </div>
   )
 }
@@ -986,11 +841,13 @@ function StepEditor({
   step,
   isLast,
   catalog,
+  serviceKey,
   onChange,
 }: {
   step: BuilderStep
   isLast: boolean
   catalog: WorkflowCatalog | null
+  serviceKey: string
   onChange: (patch: Partial<BuilderStep>) => void
 }) {
   const gates = catalog?.gates ?? (['automatic', 'attorney', 'client', 'system'] as WfGate[])
@@ -1076,6 +933,17 @@ function StepEditor({
       )}
 
       <DocumentRows documents={step.documents} onChange={(documents) => onChange({ documents })} />
+
+      {/* NEW-G: config lives WITH the step it drives. A capability step carries the
+          attorney's standing instructions (rubric / materials message) in
+          action.config.capability_config; a generate step's drafting instructions are
+          the service-level prompt keyed by document kind, surfaced here on the step. */}
+      {step.actionKind === 'invoke_capability' && (
+        <CapabilityConfigEditor config={step.config} onChange={(config) => onChange({ config })} />
+      )}
+      {step.actionKind === 'generate_document' && (
+        <DraftingInstructionsEditor serviceKey={serviceKey} documents={step.documents} />
+      )}
     </div>
   )
 }
@@ -1135,6 +1003,205 @@ function DocumentRows({
       >
         + Add document
       </button>
+    </fieldset>
+  )
+}
+
+function humanizeDocKind(k: string): string {
+  return k.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// NEW-G: the attorney's standing instructions for an invoke_capability step (the AI
+// review rubric, the "request materials" message, …). These live in
+// action.config.capability_config; we edit the STRING values in place and hand the
+// whole config object back so it round-trips (stepsToGraph writes action.config
+// verbatim). Non-string values are shown read-only so a structured config is never
+// silently flattened.
+function CapabilityConfigEditor({
+  config,
+  onChange,
+}: {
+  config?: Record<string, unknown>
+  onChange: (config: Record<string, unknown>) => void
+}) {
+  const cfg = config ?? {}
+  const slug = typeof cfg.capability_slug === 'string' ? cfg.capability_slug : ''
+  const capConfig = (cfg.capability_config ?? {}) as Record<string, unknown>
+  const keys = Object.keys(capConfig)
+
+  function setKey(key: string, value: string) {
+    onChange({ ...cfg, capability_config: { ...capConfig, [key]: value } })
+  }
+
+  return (
+    <fieldset className="svc-fieldset">
+      <legend>Capability configuration{slug ? ` · ${slug}` : ''}</legend>
+      {keys.length === 0 && (
+        <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: 0 }}>
+          This capability has no editable instructions.
+        </p>
+      )}
+      <div style={{ display: 'grid', gap: '0.5rem' }}>
+        {keys.map((key) => {
+          const value = capConfig[key]
+          if (typeof value !== 'string') {
+            return (
+              <label key={key}>
+                <span>{humanizeDocKind(key)}</span>
+                <pre
+                  style={{
+                    color: 'var(--muted)',
+                    fontSize: '0.8rem',
+                    whiteSpace: 'pre-wrap',
+                    margin: '0.2rem 0 0',
+                  }}
+                >
+                  {JSON.stringify(value)}
+                </pre>
+              </label>
+            )
+          }
+          return (
+            <label key={key}>
+              <span>{humanizeDocKind(key)}</span>
+              <textarea value={value} rows={3} onChange={(e) => setKey(key, e.target.value)} />
+            </label>
+          )
+        })}
+      </div>
+    </fieldset>
+  )
+}
+
+// NEW-G: a generate step's drafting instructions are the service-level prompt keyed by
+// document kind (same store the Prompt tab edits). Surfaced ON the step here so config
+// lives with the step that consumes it. Authoritative — it reads/writes the same
+// legal.service.prompt.get/update store; the separate Prompt tab is untouched.
+function DraftingInstructionsEditor({
+  serviceKey,
+  documents,
+}: {
+  serviceKey: string
+  documents: WfDocumentRef[]
+}) {
+  const docKinds = documents
+    .map((d) => d.docKind?.trim())
+    .filter((k): k is string => !!k && k.length > 0)
+  if (docKinds.length === 0) {
+    return (
+      <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: 0 }}>
+        Add a document kind above to edit its drafting instructions.
+      </p>
+    )
+  }
+  return (
+    <>
+      {docKinds.map((dk) => (
+        <DraftingInstructionsForKind key={dk} serviceKey={serviceKey} docKind={dk} />
+      ))}
+    </>
+  )
+}
+
+function DraftingInstructionsForKind({
+  serviceKey,
+  docKind,
+}: {
+  serviceKey: string
+  docKind: string
+}) {
+  const [text, setText] = useState<string | null>(null) // null while loading
+  const [source, setSource] = useState<'config' | 'repo' | 'none'>('none')
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{
+        prompt: { promptText: string | null; source: 'config' | 'repo' | 'none' } | null
+      }>({ toolName: 'legal.service.prompt.get', input: { serviceKey, documentKind: docKind } })
+      setText(r.prompt?.promptText ?? '')
+      setSource(r.prompt?.source ?? 'none')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setText('')
+    }
+  }, [serviceKey, docKind])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function save() {
+    if (text == null) return
+    setBusy(true)
+    setError(null)
+    setSaved(false)
+    try {
+      // The server validates the required {{slots}} and throws with guidance if any
+      // are missing — surface that rather than re-implementing the slot list here.
+      await callAttorneyMcp({
+        toolName: 'legal.service.prompt.update',
+        input: { serviceKey, documentKind: docKind, promptText: text },
+      })
+      setSource('config')
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <fieldset className="svc-fieldset">
+      <legend>Drafting instructions · {humanizeDocKind(docKind)}</legend>
+      {text == null ? (
+        <div className="loading-block" role="status">
+          <span className="spinner" /> Loading…
+        </div>
+      ) : (
+        <>
+          <textarea
+            value={text}
+            rows={10}
+            spellCheck={false}
+            onChange={(e) => {
+              setText(e.target.value)
+              setSaved(false)
+              setError(null)
+            }}
+            style={{ fontFamily: 'var(--mono, monospace)', fontSize: '0.82rem', width: '100%' }}
+            placeholder="Drafting instructions, including the required {{slots}}…"
+          />
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginTop: '0.4rem' }}
+          >
+            <button type="button" className="primary" onClick={save} disabled={busy}>
+              {busy ? 'Saving…' : 'Save instructions'}
+            </button>
+            <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+              {source === 'config'
+                ? 'Custom instructions'
+                : source === 'repo'
+                  ? 'Using the built-in default'
+                  : 'No instructions yet'}
+            </span>
+          </div>
+          {error && (
+            <div className="alert alert-error" style={{ marginTop: '0.4rem' }}>
+              {error}
+            </div>
+          )}
+          {saved && (
+            <div className="alert alert-success" style={{ marginTop: '0.4rem' }}>
+              Saved a new version.
+            </div>
+          )}
+        </>
+      )}
     </fieldset>
   )
 }
