@@ -518,6 +518,11 @@ export function buildAttorneyClientTools(
     catalog: { slug: string; name: string }[]
     producedDocuments: ProducedDocument[]
     workflowProposals: WorkflowProposal[]
+    // WORKFLOW-AUTHORING-1 — one entry per failed propose_workflow call this turn
+    // (validation error text). Read back after the model loop: a non-empty list
+    // with nothing captured means the builder tried and never landed a valid
+    // workflow, which must surface as an honest failure, never silently.
+    failedWorkflowAttempts: string[]
     serviceProposals: ServiceProposal[]
     questionnaireProposals: QuestionnaireProposal[]
     templateProposals: TemplateProposal[]
@@ -535,7 +540,9 @@ export function buildAttorneyClientTools(
   // (Phase 4) COMPOSES this same pair as its workflow step, so the orchestrator
   // gets propose_workflow for free without a second registration.
   tools.push(buildWorkflowContextTool(ctx))
-  tools.push(buildProposeWorkflowTool(ctx, capture.workflowProposals))
+  tools.push(
+    buildProposeWorkflowTool(ctx, capture.workflowProposals, capture.failedWorkflowAttempts),
+  )
   // Build-Wizard (Phases 1–4): the authoring tools are dormant unless the
   // LEGAL_BUILD_WIZARD flag is on. With the flag off they're never registered (and
   // the orchestrator system-prompt block below is absent), so the chatbot is
@@ -968,6 +975,34 @@ async function recordToolCapObservation(ctx: ActionContext, pendingTools: string
   }
 }
 
+// WORKFLOW-AUTHORING-1 WP3 — queryable signal when a turn tried propose_workflow
+// and never landed a valid graph (honest-failure telemetry, mirrors
+// recordToolCapObservation). Never fails the turn.
+async function recordWorkflowProposalFailedObservation(
+  ctx: ActionContext,
+  failedAttempts: string[],
+): Promise<void> {
+  try {
+    await submitAction(ctx, {
+      actionKindName: 'event.record',
+      intentKind: 'reflection',
+      payload: {
+        event_kind_name: 'observation',
+        primary_entity_id: null,
+        source_type: 'system',
+        source_ref: 'system:workflow_proposal_failed',
+        data: {
+          tag: 'workflow_proposal_failed',
+          attempt_count: failedAttempts.length,
+          failedAttempts,
+        },
+      },
+    })
+  } catch (err) {
+    console.error('assistantChat: failed to record workflow_proposal_failed observation', err)
+  }
+}
+
 // The machinery a model reply must NEVER contain (1.1 WP9). If any of these reach
 // the reply text, the model parroted an internal marker instead of speaking its own
 // words / calling the tool — the exact card-leak the render sanitizer then hides.
@@ -1036,6 +1071,10 @@ export async function assistantChat(
   // Workflow proposals captured this turn (Claude only, via propose_workflow). Not
   // persisted here — surfaced as approval cards; the live write is the approve route.
   const workflowProposals: WorkflowProposal[] = []
+  // WORKFLOW-AUTHORING-1 — validation-error text from each FAILED propose_workflow
+  // call this turn. If the turn ends with failures and no captured proposal, that
+  // is an honest failure to surface, never a silent non-render (WP3).
+  const failedWorkflowAttempts: string[] = []
   // New-service proposals captured this turn (Claude only, via propose_service, and
   // only when the build-wizard flag is on). Surfaced as approval cards; the live
   // version-1 write is the create-from-ai approve route.
@@ -1103,6 +1142,7 @@ export async function assistantChat(
         catalog,
         producedDocuments,
         workflowProposals,
+        failedWorkflowAttempts,
         serviceProposals,
         questionnaireProposals,
         templateProposals,
@@ -1120,6 +1160,12 @@ export async function assistantChat(
       // attorney in the reply and leave a queryable observation on the substrate.
       reply += `\n\n⚠️ I hit my per-turn tool limit before finishing that step — say "continue" and I'll pick up where I left off.`
       await recordToolCapObservation(ctx, [])
+    }
+    // WORKFLOW-AUTHORING-1 WP3 — a workflow that never landed a valid proposal must
+    // say so, never render as silent success or a bare apology (honest failure).
+    if (!workflowProposals.length && failedWorkflowAttempts.length) {
+      reply += `\n\n⚠️ I couldn't compose a valid workflow — here's what's blocking it:\n${failedWorkflowAttempts[failedWorkflowAttempts.length - 1]}`
+      await recordWorkflowProposalFailedObservation(ctx, failedWorkflowAttempts)
     }
     // WP9: if the reply parroted internal machinery, record it (measurable card-leak).
     await recordQuestionWithoutCardObservation(ctx, reply)
@@ -1201,6 +1247,9 @@ export async function* assistantChatStream(
   const producedDocuments: ProducedDocument[] = []
   // Workflow proposals captured this turn (Claude only, via propose_workflow).
   const workflowProposals: WorkflowProposal[] = []
+  // WORKFLOW-AUTHORING-1 — validation-error text from each FAILED propose_workflow
+  // call this turn (honest-failure surfacing, WP3).
+  const failedWorkflowAttempts: string[] = []
   // New-service proposals captured this turn (Claude only, via propose_service,
   // flag-gated). Surfaced as approval cards after the model loop.
   const serviceProposals: ServiceProposal[] = []
@@ -1271,6 +1320,7 @@ export async function* assistantChatStream(
         catalog,
         producedDocuments,
         workflowProposals,
+        failedWorkflowAttempts,
         serviceProposals,
         questionnaireProposals,
         templateProposals,
@@ -1328,6 +1378,15 @@ export async function* assistantChatStream(
         summary: p.summary,
         confidence: p.confidence,
       }
+    }
+    // WORKFLOW-AUTHORING-1 WP3 — tried and never landed a valid workflow: an honest
+    // failure notice, never silent (mirrors the tool_cap notice above).
+    if (!workflowProposals.length && failedWorkflowAttempts.length) {
+      yield {
+        type: 'notice',
+        message: `I couldn't compose a valid workflow — here's what's blocking it: ${failedWorkflowAttempts[failedWorkflowAttempts.length - 1]}`,
+      }
+      await recordWorkflowProposalFailedObservation(ctx, failedWorkflowAttempts)
     }
     // Surface validated new-service proposals captured this turn (Build-Wizard
     // Phase 1). Like propose_workflow these are validated by the tool's run() before

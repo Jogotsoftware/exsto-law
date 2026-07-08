@@ -23,6 +23,8 @@ function emptyCapture() {
     catalog: [{ slug: 's', name: 'Skill' }],
     producedDocuments: [],
     workflowProposals: [],
+    // WORKFLOW-AUTHORING-1 — empty bucket, like the rest.
+    failedWorkflowAttempts: [],
     serviceProposals: [],
     questionnaireProposals: [],
     templateProposals: [],
@@ -31,6 +33,7 @@ function emptyCapture() {
     enableProposals: [],
     // Phase 7 (the structured interview) — empty bucket, like the rest.
     buildQuestions: [],
+    kindProposals: [],
   }
 }
 

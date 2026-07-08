@@ -292,3 +292,57 @@ Auto-run runs the capability inside the request that triggered the advance (per 
 
 ## Files
 `packages/substrate/src/{context,action}.ts` · `verticals/legal/src/lifecycle/{autoRun(new),index,executor}.ts` · `verticals/legal/src/handlers/{workflow,draft,clientDelivery,intake}.ts` · `verticals/legal/src/api/capabilityRuntime.ts` · `tests/vertical/capability-runtime.test.ts`. (Acceptance harness `caprt1-autorun.ts` lives in the scratchpad, not the repo — see the storage-guard note above.)
+
+---
+
+# WORKFLOW-AUTHORING-1 (2026-07-08) — the builder AUTHORS invoke_capability by conversation
+
+Branch `workflow-authoring-1` (off `main` @ `fda1d8f`, post-#305). The runtime (CAPABILITY-RUNTIME-1/AUTORUN-1) executes hand-authored invoke_capability workflows end to end; the AUTHORING path was broken — the builder couldn't compose a valid `invoke_capability` step by conversation because it was never GIVEN the step shape, so it reverse-engineered the validator by rejection and never converged. Fix = make each capability SELF-DESCRIBE its authoring contract as data, and GENERATE the build-context the AI reads from that one contract (the same one the validator + runtime read). No migration, no runtime-path change.
+
+## DIAGNOSTIC (the divergence, pasted)
+1. **Canonical step shape** (the ONE definition the validator enforces — `api/workflowAuthoring.ts:validateProposedLifecycle` + `lifecycle/types.ts:CapabilityStepConfig`):
+   ```json
+   { "action": { "kind": "invoke_capability",
+       "config": { "capability_slug": "ai_document_review",
+                   "capability_config": { "rubric": "…" } } } }
+   ```
+   `capability_slug` is a DIRECT child of `action.config`; the schema's fields nest under `capability_config`.
+2. **Real contract jsonb path:** NOT `entity.metadata.spec.*` (null). It is `attribute` rows on `platform_capability` entities: `capability_slug` / `capability_status` / `capability_spec` (the jsonb) — read by `queries/capabilities.ts:listCapabilities`. `capability_spec` already carried the full ADR-0046 contract (`step_invocable`, `handler_key`, `inputs[]`, `outputs[]`, `default_gate`, `config_schema`) for the real capabilities — **no stored-data gap**; the fix builds on it as-is.
+3. **What `get_workflow_context` gave the builder (before):** `InvocableCapabilitySummary` = `{slug, name, purpose, defaultGate, inputsByProvidedBy, configSchema}` — names/purposes + the raw schema, but NEVER the wrapper shape. The tool's `action.config` JSON-schema was `{type:'object', additionalProperties:true}` — unconstrained.
+4. **The divergence:** the summary's own field is named `slug`, so the model echoed `slug` (not `capability_slug`); `configSchema` was handed over unwrapped, so the model put `rubric` flat on `action.config` or copied the key `configSchema` itself. Errors were one-per-round and didn't name the expected path, so each fix broke another guess. **Root cause: the knowledge wasn't given → guessing-by-rejection.**
+
+## THE FIX (self-describing contract; ONE source, three readers)
+- **WP1/WP2 — generated step template.** New PURE module `lifecycle/capabilityAuthoring.ts`: `buildInvokeCapabilityStepTemplate(cap)` emits the literal `stage.action` for a capability from its `config_schema`, typed through `CapabilityStepConfig` so a field rename fails the TS build (no drift). `get_workflow_context` now returns, per invocable capability, a `stepTemplate` — the exact step to COPY (placeholders `<…>` for the values). Same module backs the validator's diagnostics, so the example shown and the error on a miss read the same schema.
+- **WP3 — machine-readable errors + honest failure.** `diagnoseCapabilityStepConfig` / `diagnoseMissingCapabilitySlug` name the offending key AND the expected path (e.g. *"Found 'rubric' directly on action.config — it must be nested INSIDE action.config.capability_config"*), so ONE correction lands it. `propose_workflow` records each failed attempt; after **2** it hard-refuses to re-validate and tells the model to STOP and report the failure. A turn that tried and never landed a valid workflow appends a visible **"I couldn't compose a valid workflow — here's what's blocking it"** notice (streaming) / reply line (non-streaming) + a `workflow_proposal_failed` observation — never silent success, never an apologize-retry loop.
+- **WP4 — playbook pointer only.** `build-service.md` gained ONE sentence ("each capability carries its own `stepTemplate` — copy it verbatim"); the authoritative schema comes from context (WP2), not prose. Playbook is a DB row → reseed required post-merge (`demo/seed-firm-admin-skills.ts`).
+
+## The SECOND axis (surfaced by acceptance B): gate-transition vocabulary
+Acceptance B (drive the builder-authored workflow) first FAILED: the matter stuck at the entry stage. Same disease, different field — an edge's `via` (attorney/client) / `on` (system) must be an EXACT action/event token the runtime dispatches on (`clientDelivery.ts:59` matches `e.via === actionKind`), but the builder was never told the tokens, so it wrote prose (`via: "Client submits intake…"`) and even wrong punctuation (`invoice_paid` vs `invoice.paid`) — a workflow that renders + approves but never advances. Fix = the identical pattern: new PURE `lifecycle/gateTransitions.ts` (the single catalog: client via ∈ {booking.create, document.upload, client.message.post}, system on ∈ {invoice.paid, esign.completed, transcript.received}, attorney via ∈ {legal.matter.advance, draft.approve}, automatic = free-form), surfaced in `get_workflow_context.gateTransitions` and enforced in `validateProposedLifecycle` with a machine-readable error naming the token + allowed set. **Pinned to the real dispatch call sites by a unit test** (`gate-transition vocabulary` describe) rather than refactoring the 6 handlers — respects "do not touch the runtime execution path"; the test fails if a dispatcher's token diverges from the catalog. Enforcement is authoring-only (`validateProposedLifecycle`, not `validateLifecycle`) so legacy/manual graphs with other tokens are never rejected.
+
+## Decisions (non-obvious rationale)
+1. **Generate the example through a `CapabilityStepConfig`-typed literal, not a raw object** — the wrapper keys (`capability_slug`/`capability_config`) live in ONE type; a future rename breaks this build, so the shown example can't drift from what the validator/runtime read.
+2. **Two-strike cap, not N.** With errors that name the exact path, a valid emission should land in ≤1 correction; a 2nd failure means the model is guessing, so refuse rather than loop. The cap is the *honest-failure* mechanism, not a retry budget.
+3. **Gate vocabulary pinned-by-test, not by refactor.** True single-source would import the catalog constants into the 6 dispatch handlers, but that touches the runtime path the brief froze. A pinning test gives the same anti-drift guarantee (CI fails on divergence) with zero runtime-file churn. Tradeoff logged: a NEW dispatch kind added without updating the catalog degrades safely (the builder just won't offer it), it doesn't break execution.
+4. **No migration.** The contract is free jsonb already populated by CAPABILITY-RUNTIME-1's seed; nothing new is stored. (Frontier note: 0119 is taken-but-unstamped by booking #305; this session claimed no migration.)
+
+## ACCEPTANCE — receipts (sandbox `00000000-0000-0000-00fe-000000000001`, real Opus model; harness `demo/workflow-authoring-1-sandbox-run.ts`)
+Every substrate row `tenant_id = …00fe…0001`. The harness inlines assistantChat's own Claude-branch orchestration (the REAL `buildAttorneyClientTools` / `get_workflow_context` / `propose_workflow` / `validateProposedLifecycle`) only to read back `failedWorkflowAttempts` — the signal that proves "first correct emission," which the `assistantChat()` wrapper return can't distinguish from a fail-then-self-correct.
+
+**A — THE PROOF.** "NC Contractor Contract Drafting & Review" built BY CONVERSATION to a LANDED workflow (`workflowDefinitionId 48621e13…`, v3), `A_failedWorkflowAttempts = []` (**first correct emission, no trial-and-error**), `A_proposalCount = 1`, `revalidation.ok = true`. 7 stages, **3 `invoke_capability`** = `[ai_document_review, request_client_materials, ai_document_review]`, every config correctly nested (`capability_slug` + `capability_config.{rubric|message}`), every edge a REAL token (`document.upload` / `draft.approve` / `legal.matter.advance` / `invoice.paid`).
+
+**B — RUN IT.** Matter `0536d39f…` driven through the BUILDER-AUTHORED graph: `intake → first_ai_review → request_materials → second_ai_review → send_invoice → await_payment → complete` (**7-turn money shot to terminal**). `memoCount = 2`, both `reasoning_trace_id` NOT NULL (`3b3faedb…`, `bbf23e04…`), client-gated advances via `document.upload`, `invoice INV-2026-0004`, final state `complete`. (Autorun fires ai_document_review on entry but can't read Storage in-sandbox → parks re-invocable; the manual invoke with injected bytes stands in for the window/route trigger, exactly as `caprt1-sandbox-run.ts`. request_client_materials autorun needs no Storage and runs clean.)
+
+**C — NEGATIVE (one-round correction).** Asked to name the key `slug` not `capability_slug`, the model REFUSED and explained the key is exact per the stepTemplate (renaming breaks execution), then proposed correctly: `C_failedWorkflowAttempts = []`, `C_proposalCount = 1`, `correctedInOneRound = true`. The strong context prevented the divergence outright — better than a one-round recovery.
+
+**D — HONEST FAILURE.** Forced-invalid graph called 3×: `failedAttemptCount = 2`, `capturedCount = 0`, 2nd call warned "last allowed attempt", 3rd was REFUSED without re-validating. No silent success, no loop.
+
+**E — GENERALIZATION.** Seeded a trivial 2nd invocable capability `demo_echo_note_*` (complete authoring contract, **zero playbook prose** — the fixture is never named in build-service.md) and asked for a workflow using it: the builder composed a VALID `invoke_capability` step referencing it (`usesFixtureCapability = true`, `capabilitySlugUsed == fixtureSlugSeededThisRun`, `revalidation.ok = true`, zero failed attempts) — proving the self-describing mechanism generalizes to any new capability, not an invoke_capability special-case.
+
+**Local gate:** `typecheck` ✓ · `lint` ✓ · `format:check` ✓ · `build` ✓ · `test:unit` (adds `capability-authoring` — 22 cases incl. the gate-transition pinning + diagnostics).
+
+## Post-merge / remaining
+- **Reseed the playbook** (`demo/seed-firm-admin-skills.ts`) so prod runs the new `build-service.md` sentence (a DB row until reseeded) — the schema itself rides context, so this is a pointer refresh, not the fix.
+- The `send_invoice → await_payment` attorney "Continue" edge the model chose (`via: legal.matter.advance`) is valid but means an attorney must click Continue after approving the invoice; a firm that wants auto-progress can revise. Not a defect — an authoring choice the vocabulary now makes explicit.
+
+## Files
+`verticals/legal/src/lifecycle/{capabilityAuthoring(new),gateTransitions(new),index}.ts` · `verticals/legal/src/api/{workflowAuthoring,workflowAuthoringTools,assistantChat}.ts` · `verticals/legal/skills/firm-admin/build-service.md` · `tests/vertical/{capability-authoring(new),build-wizard-dormancy}.test.ts` · `package.json` · `verticals/legal/demo/workflow-authoring-1-sandbox-run.ts (new, committed — no Storage/service-role ref, storage-guard-safe like caprt1-sandbox-run.ts)`.

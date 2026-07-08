@@ -22,9 +22,16 @@ import {
   GATE_KINDS,
   validateLifecycle,
   validateLinearLifecycle,
+  buildInvokeCapabilityStepTemplate,
+  diagnoseCapabilityStepConfig,
+  diagnoseMissingCapabilitySlug,
+  diagnoseEdgeTransition,
+  GATE_TRANSITION_VOCABULARY,
+  type GateTransitionOption,
   type StepActionSpec,
   type GateKind,
   type Lifecycle,
+  type StepAction,
 } from '../lifecycle/index.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
 import { listStandaloneTemplates } from '../queries/templates.js'
@@ -61,7 +68,12 @@ export interface ReusableStepSummary {
 // A capability the builder may wire into a stage as an `invoke_capability` step
 // (ADR 0046) — the runnable half of the registry, summarized so the model knows what
 // it does, what it needs, who provides each input, and the standing config to
-// capture. The model references it by `slug` in the stage's action.config.
+// capture. `stepTemplate` (WORKFLOW-AUTHORING-1) is the literal `stage.action`
+// shape to emit for THIS capability, GENERATED from the same config_schema the
+// validator checks — copy it verbatim, replacing the <…> placeholder values with
+// the real ones. Never invent the wrapper keys; they are always exactly
+// `capability_slug` (a direct child of action.config) and `capability_config` (a
+// nested object holding the schema's fields) — see `stepTemplate` for the proof.
 export interface InvocableCapabilitySummary {
   slug: string
   name: string
@@ -69,6 +81,7 @@ export interface InvocableCapabilitySummary {
   defaultGate: GateKind
   inputsByProvidedBy: Record<string, string[]>
   configSchema: Record<string, unknown> | null
+  stepTemplate: { action: StepAction }
 }
 
 // The read-only context the chat tool hands the model: the closed catalog, the
@@ -88,6 +101,11 @@ export interface WorkflowAuthoringContext {
   // step actions. Express a mid-service client ask or an AI task as an
   // invoke_capability stage that references one of these by slug.
   invocableCapabilities: InvocableCapabilitySummary[]
+  // WORKFLOW-AUTHORING-1 — the EXACT advance tokens per gate. An attorney/client edge
+  // MUST set `via` to one of gateTransitions[gate].options[].token; a system edge MUST
+  // set `on` to one; automatic edges are free-form. Pick the token whose label matches
+  // what advances the step — never write prose or invent a token, or the edge can't fire.
+  gateTransitions: Record<GateKind, { field: 'via' | 'on' | null; options: GateTransitionOption[] }>
 }
 
 // Load everything the model needs to PROPOSE a workflow for an existing service: the
@@ -131,6 +149,7 @@ export async function loadWorkflowAuthoringContext(
         defaultGate: (c.spec.default_gate ?? 'attorney') as GateKind,
         inputsByProvidedBy,
         configSchema: c.spec.config_schema ?? null,
+        stepTemplate: buildInvokeCapabilityStepTemplate({ slug: c.slug, spec: c.spec }),
       }
     })
   return {
@@ -142,6 +161,7 @@ export async function loadWorkflowAuthoringContext(
     availableTemplates,
     stepLibrary,
     invocableCapabilities,
+    gateTransitions: GATE_TRANSITION_VOCABULARY,
   }
 }
 
@@ -159,33 +179,6 @@ export function collectReferencedTemplateIds(graph: Lifecycle): string[] {
   return [...ids]
 }
 
-// Light config check against a capability's config_schema (ADR 0046). config_schema
-// is a permissive JSON-Schema-ish map { key: { type?, required?, description? } };
-// we enforce the one thing that matters at authoring time — every REQUIRED key has a
-// non-empty value in the stage's capability_config — rather than a full validator.
-function validateCapabilityConfig(
-  stageKey: string,
-  slug: string,
-  schema: Record<string, unknown> | undefined,
-  config: Record<string, unknown>,
-): string[] {
-  if (!schema || typeof schema !== 'object') return []
-  const errors: string[] = []
-  const props = (schema.properties as Record<string, unknown> | undefined) ?? schema
-  for (const [key, raw] of Object.entries(props)) {
-    const field = (raw && typeof raw === 'object' ? raw : {}) as { required?: boolean }
-    if (field.required) {
-      const v = config[key]
-      const empty = v == null || (typeof v === 'string' && !v.trim())
-      if (empty)
-        errors.push(
-          `stage "${stageKey}" runs capability "${slug}" but its required config "${key}" is missing`,
-        )
-    }
-  }
-  return errors
-}
-
 // Validate a PROPOSED graph the way the authoring path will write it: structural
 // validity (incl. the closed action-kind vocabulary), linear-only, every referenced
 // templateEntityId real, and — ADR 0046 — every invoke_capability stage names a
@@ -199,6 +192,16 @@ export async function validateProposedLifecycle(
   const errors: string[] = []
   errors.push(...validateLifecycle(graph).errors)
   errors.push(...validateLinearLifecycle(graph).errors)
+
+  // WORKFLOW-AUTHORING-1 — every attorney/client/system edge must name a REAL advance
+  // token (the runtime matches on it verbatim), not prose. Authoring-only (not in
+  // validateLifecycle) so legacy/manual graphs with other tokens are never rejected.
+  for (const s of graph) {
+    for (const e of s.advances_to) {
+      const err = diagnoseEdgeTransition(s.key, e.to, e.gate, e.via, e.on)
+      if (err) errors.push(err)
+    }
+  }
 
   // Referenced template ids must exist in the firm's document library. Collect the
   // ids the graph references, then check them against the real library in one read.
@@ -221,10 +224,11 @@ export async function validateProposedLifecycle(
     const registry = await listCapabilities(ctx)
     const bySlug = new Map<string, Capability>(registry.map((c) => [c.slug, c]))
     for (const s of capabilityStages) {
-      const cfg = (s.action?.config ?? {}) as unknown as CapabilityStepConfig
+      const rawConfig = (s.action?.config ?? {}) as Record<string, unknown>
+      const cfg = rawConfig as unknown as CapabilityStepConfig
       const slug = (cfg.capability_slug ?? '').trim()
       if (!slug) {
-        errors.push(`stage "${s.key}" is an invoke_capability step but names no capability_slug`)
+        errors.push(diagnoseMissingCapabilitySlug(s.key, rawConfig))
         continue
       }
       const cap = bySlug.get(slug)
@@ -242,14 +246,7 @@ export async function validateProposedLifecycle(
           `stage "${s.key}" references capability "${slug}" which is not step-invocable (it cannot run as a workflow step)`,
         )
       }
-      errors.push(
-        ...validateCapabilityConfig(
-          s.key,
-          slug,
-          cap.spec.config_schema,
-          (cfg.capability_config ?? {}) as Record<string, unknown>,
-        ),
-      )
+      errors.push(...diagnoseCapabilityStepConfig(s.key, slug, rawConfig, cap.spec.config_schema))
     }
   }
 

@@ -14,3 +14,9 @@ export * from './instance.js'
 export * from './executor.js'
 // ADR 0046 — auto-run an invoke_capability stage on entry (post-commit).
 export * from './autoRun.js'
+// WORKFLOW-AUTHORING-1 — the self-describing invoke_capability authoring contract
+// (pure: worked-example step shape + precise config-mismatch diagnostics).
+export * from './capabilityAuthoring.js'
+// WORKFLOW-AUTHORING-1 — the gate-transition vocabulary (the exact via/on advance
+// tokens per gate) so the builder never writes prose in an edge that can't fire.
+export * from './gateTransitions.js'
