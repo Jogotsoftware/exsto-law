@@ -32,6 +32,11 @@ export {
   runClientTools,
   buildChatRequest,
   stripThinkingBlocks,
+  isRetryableAnthropicError,
+  retryDelayMs,
+  withTransientRetry,
+  humanizeAnthropicError,
+  extractApiErrorMessage,
 } from './adapters/claude.js'
 export { resolvePerplexityApiKey } from './adapters/perplexity.js'
 export type { ResearchRequest, ResearchResult } from './adapters/perplexity.js'
