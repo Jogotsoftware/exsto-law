@@ -343,6 +343,10 @@ export interface AssistantThreadEntry {
   kind: AssistantTurnKind
   citations: string[]
   recordedAt: string
+  // The model's own reasoning/process for this turn (assistant side), relocated out of
+  // the reply and shown behind an expandable "thinking" disclosure (BUILDER-REASONING-
+  // CHANNEL-1). Empty/absent for quick turns (no thinking) or pre-1 turns.
+  reasoning?: string
   // Names of documents attached to this turn (on the user side), so a reopened
   // thread still shows what was attached.
   attachmentNames?: string[]
@@ -401,6 +405,13 @@ const SYSTEM_PROMPT = [
   // — continuation/stage-direction instructions (hidden user turns) and state notes,
   // all wrapped in ⟦ ⟧. These are for YOU to act on, never for the attorney to read.
   'INTERNAL MACHINERY — some messages contain instructions or notes wrapped in ⟦ ⟧ (guillemet brackets). These are internal directions for you to ACT ON. NEVER write the ⟦ or ⟧ characters, never repeat or paraphrase the text inside them, and never narrate a tool call or a system instruction. Speak to the attorney only in your own words. Also never type a bracketed status line like "[You asked …]" or "[You proposed …]" — those are internal records, not things to say.',
+  // REPLY CHANNEL (BUILDER-REASONING-CHANNEL-1, source-side channel separation): the
+  // visible reply is a product surface, not a debug console. All working-out — which
+  // tool/skill/router you used, how you're deciding, the shape of the data you loaded —
+  // goes in your PRIVATE REASONING, which the attorney can expand separately; it must
+  // never bleed into the reply text. This is enforced at generation, not stripped after,
+  // so the identifiers below structurally never enter the reply.
+  'REPLY vs REASONING — your visible reply contains ONLY the attorney-facing answer in plain English, plus the cards/proposals/documents your tools surface. It must NEVER contain: (1) process narration — no "Using <skill>", "Let me call…", "I\'ll now run…", "Routing to…", or naming a tool, skill, router, or phase; (2) internal identifiers or data-structure vocabulary that appears in tool inputs/results — field/entity ids, service or capability slugs (e.g. capability_slug), config keys (e.g. availableTemplates, config_schema, gateTransitions, stepTemplate), advance tokens, snake_case keys, or raw JSON. Refer to things by their plain human names (say "the engagement-letter template", never a slug or key). Your step-by-step reasoning and any reference to that internal structure belong in your thinking, where they are shown to the attorney behind an expandable disclosure — keep them out of the reply entirely.',
   'Keep replies focused and concise.',
 ].join(' ')
 
@@ -836,6 +847,10 @@ export async function recordAssistantTurn(
     model: string
     kind: AssistantTurnKind
     citations: string[]
+    // The model's summarized reasoning for this turn, relocated from the reply into an
+    // expandable disclosure (BUILDER-REASONING-CHANNEL-1). Additive payload field; null
+    // when the turn produced no thinking (e.g. the 'quick' work rate).
+    reasoning?: string | null
     scope: AssistantScope
     primaryEntityId: string | null
     // Feedback turns (Obj 11): the tagged category + the page the attorney was on.
@@ -886,6 +901,10 @@ export async function recordAssistantTurn(
       data: {
         message: input.message,
         reply: input.reply,
+        // The model's reasoning for this turn, relocated out of the reply. Null when the
+        // turn produced none, so a reopened thread's disclosure only shows when there's
+        // something to show. Additive — never affects the reply text itself.
+        reasoning: input.reasoning?.trim() ? input.reasoning : null,
         provider: input.provider,
         model: input.model,
         kind: input.kind,
@@ -1241,6 +1260,9 @@ export async function* assistantChatStream(
   yield { type: 'meta', provider: model.provider, model: model.model, kind, scope, webSearch }
 
   let reply = ''
+  // The model's summarized reasoning for this turn, accumulated from the thinking
+  // deltas and persisted with the turn so it re-shows behind the expandable disclosure.
+  let reasoning = ''
   let citations: string[] = []
   // Documents the model produces this turn (Claude only, via produce_document);
   // captured by the tool's run() so they can be recorded on the turn.
@@ -1336,6 +1358,10 @@ export async function* assistantChatStream(
         reply += chunk.text
         yield { type: 'text', text: chunk.text }
       } else if (chunk.type === 'thinking') {
+        // Relocated, not destroyed: the same summarized reasoning the client shows live
+        // is accumulated here so it persists with the turn and re-shows in the thinking
+        // disclosure on reopen (BUILDER-REASONING-CHANNEL-1).
+        reasoning += chunk.text
         yield { type: 'thinking', text: chunk.text }
       } else if (chunk.type === 'citations') {
         citations = chunk.citations
@@ -1500,6 +1526,7 @@ export async function* assistantChatStream(
     const recorded = await recordAssistantTurn(ctx, {
       message,
       reply,
+      reasoning,
       provider: model.provider,
       model: model.model,
       kind,
@@ -1592,6 +1619,7 @@ export async function listAssistantThread(
       payload: {
         message?: string
         reply?: string
+        reasoning?: string | null
         provider?: string
         model?: string
         kind?: AssistantTurnKind
@@ -1643,6 +1671,7 @@ export async function listAssistantThread(
           role: 'assistant' as const,
           message: '',
           reply: r.payload.reply ?? '',
+          reasoning: r.payload.reasoning ?? undefined,
           documents: r.payload.produced_documents ?? undefined,
           workflowProposals: r.payload.workflow_proposals ?? undefined,
           serviceProposals: r.payload.service_proposals ?? undefined,

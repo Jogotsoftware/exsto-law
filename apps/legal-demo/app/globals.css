@@ -5912,6 +5912,38 @@ button.danger.outline:hover:not(:disabled) {
   max-height: 7.5em;
   overflow: hidden;
 }
+/* Reasoning disclosure (BUILDER-REASONING-CHANNEL-1) — a collapsed "Thinking" toggle on
+   a committed assistant turn. Reasoning/process lives here, out of the reply, revealed
+   only on demand. Collapsed by default; muted so it never competes with the answer. */
+.uac-reasoning {
+  margin: 0.15rem 0 0.35rem;
+}
+.uac-reasoning-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.35rem 0.1rem 0.1rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.uac-reasoning-toggle:hover {
+  color: var(--fg, var(--accent));
+}
+.uac-reasoning-body {
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin-top: 0.25rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+  max-height: 22em;
+  overflow-y: auto;
+}
 /* "Using <skill>" chips — shown while the assistant works a loaded playbook. */
 .uac-skill-chips {
   display: flex;
