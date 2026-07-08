@@ -58,13 +58,25 @@ export interface PublicSlot {
   label: string
 }
 
+// A candidate cell for the calendar grid: a time + whether it is OPEN (available) or
+// blocked. Carries NO event detail — only the time and busy/free — so the public
+// calendar exposes busy/free and nothing about what the attorney is doing.
+export interface PublicGridSlot extends PublicSlot {
+  available: boolean
+}
+
 export interface PublicAvailability {
   firmName: string
   timezone: string
   meetingLengthsMinutes: number[]
   durationMinutes: number
   // Only TRUE-available slots (rules ∩ live Google free/busy). Never fabricated.
+  // Drives the list view + the confirm no-double-book re-check.
   slots: PublicSlot[]
+  // The FULL candidate grid (open + blocked) for the calendar view — same computed
+  // set as `slots`, unfiltered, each cell tagged available/blocked. Anonymous
+  // (times only, no event detail). Empty when not configured.
+  gridSlots: PublicGridSlot[]
   // false when the firm has not connected a calendar — the page shows an honest
   // "not yet configured", NEVER stub slots (NO-SIMULATE).
   configured: boolean
@@ -106,7 +118,7 @@ export async function getPublicAvailability(
   const firmActor = await resolveFirmPrimaryActor(firm.tenantId, 'google')
   const status = await getGoogleStatus(ctx, firmActor)
   if (!firmActor || !status.connected) {
-    return { ...base, slots: [], configured: false }
+    return { ...base, slots: [], gridSlots: [], configured: false }
   }
 
   try {
@@ -125,11 +137,20 @@ export async function getPublicAvailability(
       slots: slots
         .filter((s) => s.available)
         .map(({ startIso, endIso, label }) => ({ startIso, endIso, label })),
+      // The full computed grid (open + blocked), anonymous — each cell only carries a
+      // time + busy/free flag. The calendar renders open as clickable, blocked as an
+      // anonymous greyed cell; no event detail exists here to leak.
+      gridSlots: slots.map(({ startIso, endIso, label, available }) => ({
+        startIso,
+        endIso,
+        label,
+        available,
+      })),
     }
   } catch (err) {
     console.error(`[publicBooking] availability read failed for ${firm.tenantId}:`, err)
     // A connected-but-erroring calendar shows honestly-empty, never fabricated.
-    return { ...base, slots: [], configured: false }
+    return { ...base, slots: [], gridSlots: [], configured: false }
   }
 }
 
