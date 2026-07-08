@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { insertAttribute, insertEvent, lookupKindId } from './common.js'
+import { dispatchClientDelivery } from './clientDelivery.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // booking.create / booking.update / booking.cancel — consultation scheduling
@@ -144,6 +145,10 @@ registerActionHandler('booking.create', async (ctx, client, payload, actionId) =
     },
     sourceRef: ctx.actorId,
   })
+
+  // ADR 0046 — the client's OWN booking advances a matter parked at a client gate
+  // whose edge is `via: 'booking.create'` (flag-guarded no-op otherwise).
+  await dispatchClientDelivery(client, ctx, p.matter_entity_id, 'booking.create', actionId)
 
   return {
     matterEntityId: p.matter_entity_id,

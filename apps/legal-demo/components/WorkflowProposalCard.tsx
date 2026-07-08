@@ -71,6 +71,15 @@ function actionLabel(kind: string | undefined): string {
   if (!kind) return ''
   return ACTION_LABELS[kind] ?? humanize(kind)
 }
+// ADR 0046 — an invoke_capability step shows the CAPABILITY's name (de-slugged from
+// its config), never the raw "invoke_capability" kind or the slug.
+function stageActionLabel(stage: WfStage): string {
+  if (stage.action?.kind === 'invoke_capability') {
+    const slug = (stage.action.config?.capability_slug as string | undefined) ?? ''
+    return slug ? humanize(slug) : 'Run a platform capability'
+  }
+  return actionLabel(stage.action?.kind)
+}
 function gateLabel(gate: WfGate | undefined): string {
   if (!gate) return ''
   return GATE_LABELS[gate] ?? humanize(gate)
@@ -254,8 +263,8 @@ export function WorkflowProposalCard({
           <li key={s.key} style={{ marginBottom: 6 }}>
             <span>
               <strong>{s.label}</strong>
-              {s.action && actionLabel(s.action.kind) !== s.label ? (
-                <span className="text-muted"> · {actionLabel(s.action.kind)}</span>
+              {s.action && stageActionLabel(s) !== s.label ? (
+                <span className="text-muted"> · {stageActionLabel(s)}</span>
               ) : null}
               {!s.terminal && s.advances_to[0] ? (
                 <span className="text-muted"> · {gateLabel(s.advances_to[0].gate)}</span>

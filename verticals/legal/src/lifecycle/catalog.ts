@@ -77,6 +77,20 @@ export const STEP_ACTION_CATALOG: StepActionSpec[] = [
     defaultGate: 'system',
     blocking: false,
   },
+  {
+    // ADR 0046 — the one OPEN-ENDED step kind: it runs a registered platform
+    // capability resolved from the capability registry at run time (which capability
+    // + its config live on the stage's StepAction.config as a CapabilityStepConfig).
+    // The DEFAULT gate here is a placeholder; the real gate is the invoked
+    // capability's own `default_gate` (attorney for a review, client for a
+    // materials request), which the builder writes onto the stage's edge.
+    kind: 'invoke_capability',
+    label: 'Run a platform capability',
+    description:
+      "Run one of the platform's registered, step-invocable capabilities (e.g. AI document review, request client materials) as a workflow step — the capability produces its outputs and the matter waits at the capability's gate.",
+    defaultGate: 'attorney',
+    blocking: true,
+  },
 ]
 
 export const STEP_ACTION_KINDS: StepActionKind[] = STEP_ACTION_CATALOG.map((s) => s.kind)

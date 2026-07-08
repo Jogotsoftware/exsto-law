@@ -44,6 +44,20 @@ export type StepActionKind =
   | 'await_payment' // system: hold until the invoice is paid
   | 'manual_task' // attorney: a free-form to-do with a done check
   | 'complete_matter' // terminal: close the matter
+  | 'invoke_capability' // run a registered, step-invocable platform capability (ADR 0046)
+
+// The config an `invoke_capability` step carries: WHICH registered capability to run
+// (by its stable registry slug) and the attorney's standing instructions for it, set
+// once at build time and validated against the capability's `config_schema`. This is
+// the ONLY step kind whose behavior is resolved from the capability registry at run
+// time rather than a hardcoded executor branch — new runnable abilities are registry
+// entries (a `step_invocable` capability + a handler), never new step kinds.
+export interface CapabilityStepConfig {
+  capability_slug: string
+  // Attorney standing instructions (e.g. the review rubric, the materials to request).
+  // Shape is capability-specific; validated against the capability's config_schema.
+  capability_config?: Record<string, unknown>
+}
 
 export interface StepAction {
   kind: StepActionKind

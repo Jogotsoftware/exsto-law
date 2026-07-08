@@ -29,6 +29,8 @@ import {
 import { getServiceLifecycle } from './serviceLifecycle.js'
 import { listStandaloneTemplates } from '../queries/templates.js'
 import { listWorkflowStepTemplates } from '../queries/workflowStepLibrary.js'
+import { listCapabilities, type Capability } from '../queries/capabilities.js'
+import type { CapabilityStepConfig } from '../lifecycle/types.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
 // the SAME id generateDraft.ts sources its writes to.
@@ -56,9 +58,22 @@ export interface ReusableStepSummary {
   stageSummary: string
 }
 
+// A capability the builder may wire into a stage as an `invoke_capability` step
+// (ADR 0046) — the runnable half of the registry, summarized so the model knows what
+// it does, what it needs, who provides each input, and the standing config to
+// capture. The model references it by `slug` in the stage's action.config.
+export interface InvocableCapabilitySummary {
+  slug: string
+  name: string
+  purpose: string
+  defaultGate: GateKind
+  inputsByProvidedBy: Record<string, string[]>
+  configSchema: Record<string, unknown> | null
+}
+
 // The read-only context the chat tool hands the model: the closed catalog, the
-// service's current graph (null when unauthored), the firm's document library, and
-// the firm's reusable STEP library (Phase 5).
+// service's current graph (null when unauthored), the firm's document library, the
+// firm's reusable STEP library (Phase 5), and the runnable capabilities (ADR 0046).
 export interface WorkflowAuthoringContext {
   serviceKey: string
   actions: StepActionSpec[]
@@ -69,6 +84,10 @@ export interface WorkflowAuthoringContext {
   // Phase 5 — the firm's saved, reusable workflow steps, so the model can reuse a
   // step/task it already has rather than composing an identical one from scratch.
   stepLibrary: ReusableStepSummary[]
+  // ADR 0046 — the platform's step-invocable capabilities, alongside the 8 built-in
+  // step actions. Express a mid-service client ask or an AI task as an
+  // invoke_capability stage that references one of these by slug.
+  invocableCapabilities: InvocableCapabilitySummary[]
 }
 
 // Load everything the model needs to PROPOSE a workflow for an existing service: the
@@ -94,6 +113,26 @@ export async function loadWorkflowAuthoringContext(
     description: s.description,
     stageSummary: `action=${s.stage.action?.kind ?? 'manual_task'}, gate=${s.stage.gate ?? 'attorney'}`,
   }))
+  // ADR 0046 — the runnable capabilities (available + step_invocable), summarized for
+  // the builder: what each does, who provides each input, and the config to capture.
+  const invocableCapabilities: InvocableCapabilitySummary[] = (await listCapabilities(ctx))
+    .filter((c) => c.status === 'available' && c.spec.step_invocable === true)
+    .map((c) => {
+      const inputsByProvidedBy: Record<string, string[]> = {}
+      for (const inp of c.spec.inputs ?? []) {
+        ;(inputsByProvidedBy[inp.provided_by] ??= []).push(
+          `${inp.key}${inp.required ? '' : ' (optional)'}${inp.description ? ` — ${inp.description}` : ''}`,
+        )
+      }
+      return {
+        slug: c.slug,
+        name: c.spec.name,
+        purpose: c.spec.purpose ?? '',
+        defaultGate: (c.spec.default_gate ?? 'attorney') as GateKind,
+        inputsByProvidedBy,
+        configSchema: c.spec.config_schema ?? null,
+      }
+    })
   return {
     serviceKey,
     actions: STEP_ACTION_CATALOG,
@@ -102,6 +141,7 @@ export async function loadWorkflowAuthoringContext(
     currentVersion: current?.version ?? null,
     availableTemplates,
     stepLibrary,
+    invocableCapabilities,
   }
 }
 
@@ -119,11 +159,39 @@ export function collectReferencedTemplateIds(graph: Lifecycle): string[] {
   return [...ids]
 }
 
+// Light config check against a capability's config_schema (ADR 0046). config_schema
+// is a permissive JSON-Schema-ish map { key: { type?, required?, description? } };
+// we enforce the one thing that matters at authoring time — every REQUIRED key has a
+// non-empty value in the stage's capability_config — rather than a full validator.
+function validateCapabilityConfig(
+  stageKey: string,
+  slug: string,
+  schema: Record<string, unknown> | undefined,
+  config: Record<string, unknown>,
+): string[] {
+  if (!schema || typeof schema !== 'object') return []
+  const errors: string[] = []
+  const props = (schema.properties as Record<string, unknown> | undefined) ?? schema
+  for (const [key, raw] of Object.entries(props)) {
+    const field = (raw && typeof raw === 'object' ? raw : {}) as { required?: boolean }
+    if (field.required) {
+      const v = config[key]
+      const empty = v == null || (typeof v === 'string' && !v.trim())
+      if (empty)
+        errors.push(
+          `stage "${stageKey}" runs capability "${slug}" but its required config "${key}" is missing`,
+        )
+    }
+  }
+  return errors
+}
+
 // Validate a PROPOSED graph the way the authoring path will write it: structural
-// validity (incl. the closed action-kind vocabulary), linear-only, and — because
-// documents must come from the EXISTING library (decision 2) — every referenced
-// templateEntityId must be a real document template. Returns the same shape as
-// validateLifecycle so the propose tool can surface the combined errors verbatim.
+// validity (incl. the closed action-kind vocabulary), linear-only, every referenced
+// templateEntityId real, and — ADR 0046 — every invoke_capability stage names a
+// capability that is LIVE and step-invocable, with a config that satisfies its
+// config_schema. Returns the same shape as validateLifecycle so the propose tool can
+// surface the combined errors verbatim.
 export async function validateProposedLifecycle(
   ctx: ActionContext,
   graph: Lifecycle,
@@ -145,6 +213,46 @@ export async function validateProposedLifecycle(
         errors.push(`referenced document template "${id}" is not in the firm library`)
     }
   }
+
+  // ADR 0046 — invoke_capability stages. Load the registry once only if the graph
+  // actually uses one (keeps the common case a single template read).
+  const capabilityStages = graph.filter((s) => s.action?.kind === 'invoke_capability')
+  if (capabilityStages.length > 0) {
+    const registry = await listCapabilities(ctx)
+    const bySlug = new Map<string, Capability>(registry.map((c) => [c.slug, c]))
+    for (const s of capabilityStages) {
+      const cfg = (s.action?.config ?? {}) as unknown as CapabilityStepConfig
+      const slug = (cfg.capability_slug ?? '').trim()
+      if (!slug) {
+        errors.push(`stage "${s.key}" is an invoke_capability step but names no capability_slug`)
+        continue
+      }
+      const cap = bySlug.get(slug)
+      if (!cap) {
+        errors.push(`stage "${s.key}" references unknown capability "${slug}"`)
+        continue
+      }
+      if (cap.status !== 'available') {
+        errors.push(
+          `stage "${s.key}" references capability "${slug}" which is not available (status=${cap.status})`,
+        )
+      }
+      if (cap.spec.step_invocable !== true) {
+        errors.push(
+          `stage "${s.key}" references capability "${slug}" which is not step-invocable (it cannot run as a workflow step)`,
+        )
+      }
+      errors.push(
+        ...validateCapabilityConfig(
+          s.key,
+          slug,
+          cap.spec.config_schema,
+          (cfg.capability_config ?? {}) as Record<string, unknown>,
+        ),
+      )
+    }
+  }
+
   return { ok: errors.length === 0, errors }
 }
 

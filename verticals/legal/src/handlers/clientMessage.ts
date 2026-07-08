@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { insertContentBlob, insertEvent } from './common.js'
+import { dispatchClientDelivery } from './clientDelivery.js'
 import { randomUUID } from 'node:crypto'
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -153,6 +154,18 @@ registerActionHandler('client.message.post', async (ctx, client, payload, action
     sourceType: 'human',
     sourceRef: `client_contact:${p.client_contact_id}`,
   })
+
+  // ADR 0046 — a client portal reply is a delivery (a client_response): it advances a
+  // matter parked at a client gate whose edge is `via: 'client.message.post'`
+  // (flag-guarded no-op otherwise).
+  await dispatchClientDelivery(
+    client,
+    ctx,
+    p.matter_entity_id,
+    'client.message.post',
+    actionId,
+    `client_contact:${p.client_contact_id}`,
+  )
 
   return { threadId, messageId, author: 'client' as const }
 })
