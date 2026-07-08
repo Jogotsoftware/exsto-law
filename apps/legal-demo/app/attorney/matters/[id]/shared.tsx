@@ -23,6 +23,7 @@ export type WfStepActionKind =
   | 'await_payment'
   | 'manual_task'
   | 'complete_matter'
+  | 'invoke_capability'
 
 export interface WfEdge {
   to: string

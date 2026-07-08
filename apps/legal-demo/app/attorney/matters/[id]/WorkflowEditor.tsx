@@ -20,6 +20,7 @@ import { Modal } from '@/components/Modal'
 import { XIcon, PlusIcon } from '@/components/icons'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import type { MatterWorkflow, WfStage, WfGate, WfStepActionKind } from './shared'
+import { buildMatterGraph } from './workflowGraph'
 
 // The closed step-action catalog (the builder palette), loaded from the server-side
 // guardrail (legal.workflow.catalog) so the UI never re-declares the closed set.
@@ -98,6 +99,14 @@ export function WorkflowEditor({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
+  // localId of the row whose step config panel is open (NEW-G: edit config in place).
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  // Replace one row's stage (used by the in-place step-config editor). Keeps the row's
+  // stable localId so an open panel and drag/remove stay aligned.
+  function updateStage(localId: string, next: WfStage) {
+    setRows((prev) => prev.map((r) => (r.localId === localId ? { ...r, stage: next } : r)))
+  }
 
   // Load the palette (catalog) + the reusable step library once.
   useEffect(() => {
@@ -181,40 +190,28 @@ export function WorkflowEditor({
     [rows, currentState],
   )
 
-  // Rebuild the linear graph on save: array order is workflow order; each
-  // non-terminal stage gets exactly one outgoing edge (its catalog default gate) to
-  // the next stage; the LAST stage is terminal with no edges. `complete_matter`
-  // stays terminal wherever it lands.
-  function buildGraph(): WfStage[] {
-    const gateFor = (kind: WfStepActionKind | undefined): WfGate =>
-      catalog.find((c) => c.kind === kind)?.defaultGate ?? 'attorney'
-    return rows.map((r, i) => {
-      const isLast = i === rows.length - 1
-      const next = rows[i + 1]
-      // Preserve an explicit entry on the first stage; drop stale terminal flags so
-      // only the genuine last stage is terminal.
-      const base: WfStage = { ...r.stage, advances_to: [], terminal: false }
-      if (i === 0) base.entry = true
-      else delete base.entry
-      if (isLast) {
-        base.terminal = true
-      } else {
-        base.advances_to = [
-          { to: next.stage.key, gate: gateFor(r.stage.action?.kind), via: 'legal.matter.advance' },
-        ]
-      }
-      return base
-    })
-  }
+  // Rebuild the linear graph on save via the pure, LOSSLESS builder: array order is
+  // workflow order; each non-terminal stage keeps its OWN outgoing edge (on/via/gate
+  // preserved, only re-pointed at the next stage); the last stage is terminal. A
+  // freshly-added step (no saved edge) gets a valid default from the catalog gate.
+  // Round-tripping an unchanged graph is the identity — see workflowGraph.ts.
+  const catalogGates = useMemo(
+    () => catalog.map((c) => ({ kind: c.kind, defaultGate: c.defaultGate })),
+    [catalog],
+  )
 
   async function save() {
     setSaving(true)
     setError(null)
     try {
+      const graph = buildMatterGraph(
+        rows.map((r) => r.stage),
+        catalogGates,
+      )
       const res = await fetch(`/api/attorney/matters/${matterEntityId}/workflow`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ states: buildGraph() }),
+        body: JSON.stringify({ states: graph }),
       })
       const data = (await res.json().catch(() => ({}))) as { error?: string }
       if (!res.ok) throw new Error(data.error ?? 'Failed to save the workflow.')
@@ -259,43 +256,62 @@ export function WorkflowEditor({
       <div className="step-list">
         {rows.map((r) => {
           const isCurrent = r.stage.key === currentState
+          const configurable = stepHasConfig(r.stage)
+          const isEditing = editingId === r.localId
           return (
-            <div
-              key={r.localId}
-              className="step-row"
-              draggable
-              onDragStart={() => setDragId(r.localId)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => onDrop(r.localId)}
-              style={{
-                cursor: 'grab',
-                opacity: dragId === r.localId ? 0.5 : 1,
-                alignItems: 'center',
-              }}
-            >
-              <span className="step-ico" aria-hidden>
-                ⠿
-              </span>
-              <span className="step-titles">
-                <span className="step-title">
-                  {r.stage.label}
-                  {isCurrent && (
-                    <span className="step-state-pill" style={{ marginLeft: 'var(--space-2)' }}>
-                      current
-                    </span>
-                  )}
+            <div key={r.localId}>
+              <div
+                className="step-row"
+                draggable
+                onDragStart={() => setDragId(r.localId)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => onDrop(r.localId)}
+                style={{
+                  cursor: 'grab',
+                  opacity: dragId === r.localId ? 0.5 : 1,
+                  alignItems: 'center',
+                }}
+              >
+                <span className="step-ico" aria-hidden>
+                  ⠿
                 </span>
-                <span className="step-subtitle">{r.stage.action?.kind ?? 'step'}</span>
-              </span>
-              {!isCurrent && (
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label={`Remove ${r.stage.label}`}
-                  onClick={() => removeRow(r.localId)}
-                >
-                  <XIcon size={16} />
-                </button>
+                <span className="step-titles">
+                  <span className="step-title">
+                    {r.stage.label}
+                    {isCurrent && (
+                      <span className="step-state-pill" style={{ marginLeft: 'var(--space-2)' }}>
+                        current
+                      </span>
+                    )}
+                  </span>
+                  <span className="step-subtitle">{r.stage.action?.kind ?? 'step'}</span>
+                </span>
+                {configurable && (
+                  <button
+                    type="button"
+                    className="button"
+                    style={{ padding: '0.25rem 0.6rem' }}
+                    onClick={() => setEditingId(isEditing ? null : r.localId)}
+                  >
+                    {isEditing ? 'Done' : 'Edit'}
+                  </button>
+                )}
+                {!isCurrent && (
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Remove ${r.stage.label}`}
+                    onClick={() => removeRow(r.localId)}
+                  >
+                    <XIcon size={16} />
+                  </button>
+                )}
+              </div>
+              {isEditing && configurable && (
+                <StepConfigEditor
+                  stage={r.stage}
+                  onChange={(next) => updateStage(r.localId, next)}
+                />
               )}
             </div>
           )
@@ -366,4 +382,157 @@ export function WorkflowEditor({
       )}
     </Modal>
   )
+}
+
+// Which step kinds carry config editable in place (NEW-G). A capability step carries
+// its standing instructions (rubric / materials message) under
+// action.config.capability_config; a generate step carries its document kind(s).
+function stepHasConfig(stage: WfStage): boolean {
+  const kind = stage.action?.kind
+  return kind === 'invoke_capability' || kind === 'generate_document'
+}
+
+// ── In-place step config editor (NEW-G) ──────────────────────────────────────
+// Edits config ON the step and merges it back into the stage, so Save round-trips it
+// (the pure builder preserves action.config + documents verbatim).
+function StepConfigEditor({
+  stage,
+  onChange,
+}: {
+  stage: WfStage
+  onChange: (next: WfStage) => void
+}) {
+  const kind = stage.action?.kind
+  return (
+    <div className="card" style={{ padding: 'var(--space-4)', margin: 'var(--space-2) 0' }}>
+      {kind === 'invoke_capability' ? (
+        <CapabilityConfigFields stage={stage} onChange={onChange} />
+      ) : kind === 'generate_document' ? (
+        <DocumentFields stage={stage} onChange={onChange} />
+      ) : null}
+    </div>
+  )
+}
+
+// The attorney's standing instructions for a capability step (e.g. the AI-review
+// rubric, or the message a "request materials" step sends). We edit the STRING values
+// under capability_config in place; non-string values are shown read-only so a
+// structured config is never silently flattened.
+function CapabilityConfigFields({
+  stage,
+  onChange,
+}: {
+  stage: WfStage
+  onChange: (next: WfStage) => void
+}) {
+  const action = stage.action ?? { kind: 'invoke_capability' as WfStepActionKind }
+  const config = (action.config ?? {}) as Record<string, unknown>
+  const slug = typeof config.capability_slug === 'string' ? config.capability_slug : ''
+  const capConfig = (config.capability_config ?? {}) as Record<string, unknown>
+  const keys = Object.keys(capConfig)
+
+  function setKey(key: string, value: string) {
+    onChange({
+      ...stage,
+      action: {
+        ...action,
+        config: { ...config, capability_config: { ...capConfig, [key]: value } },
+      },
+    })
+  }
+
+  return (
+    <>
+      <h3 className="text-sm" style={{ marginTop: 0 }}>
+        Capability configuration
+        {slug && (
+          <span className="step-subtitle" style={{ marginLeft: 'var(--space-2)' }}>
+            {slug}
+          </span>
+        )}
+      </h3>
+      {keys.length === 0 && (
+        <p className="text-muted text-sm">This capability has no editable instructions.</p>
+      )}
+      {keys.map((key) => {
+        const value = capConfig[key]
+        if (typeof value !== 'string') {
+          return (
+            <label key={key} style={{ display: 'block', marginBottom: 'var(--space-2)' }}>
+              <span className="text-sm">{humanizeKey(key)}</span>
+              <pre className="text-sm text-muted" style={{ whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(value)}
+              </pre>
+            </label>
+          )
+        }
+        return (
+          <label key={key} style={{ display: 'block', marginBottom: 'var(--space-2)' }}>
+            <span className="text-sm">{humanizeKey(key)}</span>
+            <textarea
+              value={value}
+              rows={3}
+              onChange={(e) => setKey(key, e.target.value)}
+              style={{ width: '100%' }}
+            />
+          </label>
+        )
+      })}
+    </>
+  )
+}
+
+// A generate step's document kind(s) — the on-stage config that links the step to its
+// drafting prompt. The prompt TEXT (drafting instructions) is service-level, keyed by
+// document kind, and edited on the service's Workflow/Prompt editor — not per-matter.
+function DocumentFields({
+  stage,
+  onChange,
+}: {
+  stage: WfStage
+  onChange: (next: WfStage) => void
+}) {
+  const documents = stage.documents ?? []
+  function set(i: number, patch: Partial<(typeof documents)[number]>) {
+    onChange({
+      ...stage,
+      documents: documents.map((d, idx) => (idx === i ? { ...d, ...patch } : d)),
+    })
+  }
+  return (
+    <>
+      <h3 className="text-sm" style={{ marginTop: 0 }}>
+        Documents this step drafts
+      </h3>
+      {documents.length === 0 && (
+        <p className="text-muted text-sm">No documents configured on this step.</p>
+      )}
+      {documents.map((d, i) => (
+        <div
+          key={i}
+          style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}
+        >
+          <input
+            value={d.docKind ?? ''}
+            onChange={(e) => set(i, { docKind: e.target.value })}
+            placeholder="Document kind (e.g. last_will_and_testament)"
+            style={{ flex: 1 }}
+          />
+          <input
+            value={d.label ?? ''}
+            onChange={(e) => set(i, { label: e.target.value })}
+            placeholder="Label"
+            style={{ flex: 1 }}
+          />
+        </div>
+      ))}
+      <p className="text-muted text-sm">
+        Drafting instructions for each document are set on the service’s workflow editor.
+      </p>
+    </>
+  )
+}
+
+function humanizeKey(key: string): string {
+  return key.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
