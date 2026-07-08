@@ -146,6 +146,34 @@ export async function invokeCapabilityForMatter(
     )
   }
 
+  // WP2 IDEMPOTENCY (both the auto-run and the manual route funnel through here, so
+  // ONE guard covers both): a (matter, stage) invokes at most once. `capability.invoked`
+  // is recorded ONLY on success (step 4 below), so a prior SUCCESS blocks a re-run —
+  // an advance + a stray manual call, or two advances, can't double-fire (no double
+  // memos). A prior FAILURE leaves only an observation (no capability.invoked), so the
+  // stage stays re-invocable via this same path (the manual route is the retry).
+  const alreadyInvoked = await withActionContext(ctx, async (client) => {
+    const r = await client.query<{ n: string }>(
+      `SELECT count(*) AS n FROM event e
+         JOIN event_kind_definition k ON k.id = e.event_kind_id
+        WHERE e.tenant_id = $1 AND k.kind_name = 'capability.invoked'
+          AND e.primary_entity_id = $2 AND e.payload ->> 'stage' = $3`,
+      [ctx.tenantId, matterEntityId, stage.key],
+    )
+    return Number(r.rows[0]?.n ?? '0') > 0
+  })
+  if (alreadyInvoked) {
+    return {
+      ran: false,
+      capabilitySlug: slug,
+      handlerKey: '',
+      gate: '',
+      advanced: false,
+      outputs: [],
+      summary: `Capability for stage "${stage.key}" already ran on this matter — skipped (idempotent).`,
+    }
+  }
+
   // 2. Resolve the capability from the live registry (must be available + invocable).
   const registry = await listCapabilities(ctx)
   const capability = registry.find((c) => c.slug === slug) ?? null
