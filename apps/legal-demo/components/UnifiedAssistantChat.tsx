@@ -39,6 +39,8 @@ import {
   LayersIcon,
   ShieldCheckIcon,
   WandIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -120,6 +122,10 @@ interface DisplayTurn {
   buildQuestions?: BuildQuestionEvent[]
   // New data-kind proposals captured (Tier 1 data-as-schema) — inline approval cards.
   kindProposals?: KindProposal[]
+  // The model's own reasoning/process for this turn, relocated OUT of the reply and
+  // shown behind a collapsed, expandable "thinking" disclosure (BUILDER-REASONING-
+  // CHANNEL-1). Absent when the turn produced no thinking (e.g. the 'quick' work rate).
+  reasoning?: string
   // Non-fatal warnings surfaced on this turn (e.g. the tool-round cap cut a pending
   // step off) — rendered as a visible notice line, never as a turn failure (WP5.1).
   notices?: string[]
@@ -138,6 +144,7 @@ interface ThreadTurn {
   role: 'user' | 'assistant'
   message: string
   reply: string
+  reasoning?: string
   model: string
   citations: string[]
   attachmentNames?: string[]
@@ -339,6 +346,30 @@ function storeModelId(id: string): void {
   } catch {
     // ignore — a remembered model is a nicety, not load-bearing
   }
+}
+
+// The model's reasoning/process for a turn, behind a collapsed disclosure (BUILDER-
+// REASONING-CHANNEL-1). The reply channel stays clean — process narration and internal
+// vocab live here, revealed only when the attorney chooses to expand (the Claude
+// pattern: clean by default, transparent on demand). Reasoning is plain summarized text
+// (not markdown/machinery), so it's rendered verbatim, not through renderMarkdown.
+function ReasoningDisclosure({ reasoning }: { reasoning: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="uac-reasoning">
+      <button
+        type="button"
+        className="uac-reasoning-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        <SparklesIcon size={12} />
+        <span>Thinking</span>
+      </button>
+      {open && <div className="uac-reasoning-body">{reasoning}</div>}
+    </div>
+  )
 }
 
 // Hover affordance on an assistant reply: copy its text to the clipboard. Copies
@@ -759,6 +790,7 @@ export function UnifiedAssistantChat({
             : {
                 role: 'assistant',
                 content: t.reply,
+                reasoning: t.reasoning,
                 citations: t.citations,
                 model: t.model,
                 documents: t.documents,
@@ -1326,6 +1358,9 @@ export function UnifiedAssistantChat({
                 {
                   role: 'assistant',
                   content: d.reply,
+                  // Relocate the reasoning the "Thinking…" indicator streamed live into
+                  // the committed turn's expandable disclosure — not destroyed, moved.
+                  reasoning: partial.thinking.trim() || undefined,
                   historyContent: assistantHistoryContent(d.reply, partial),
                   citations: d.citations,
                   model: d.model,
@@ -2013,6 +2048,9 @@ export function UnifiedAssistantChat({
                       }}
                     />
                   )}
+                  {/* The model's reasoning/process — relocated out of the reply into a
+                    collapsed disclosure the attorney can expand on demand. */}
+                  {t.reasoning?.trim() && <ReasoningDisclosure reasoning={t.reasoning} />}
                   {/* Documents the assistant produced — downloadable deliverables
                     (PDF/Word + save to matter), not the prose. Downloads attach
                     here, never to an ordinary reply. */}
@@ -2123,7 +2161,10 @@ export function UnifiedAssistantChat({
         {/* The in-flight reply: thinking animation → streamed markdown w/ caret. */}
         {streaming && (
           <div className="feedback-bubble feedback-bubble-assistant">
-            {streaming.skills.length > 0 && (
+            {/* "Using <skill>" chips are process signals, not the reply — a live
+                progress affordance only. They clear the moment answer text arrives so
+                the reply channel reads clean (BUILDER-REASONING-CHANNEL-1). */}
+            {!streaming.text && streaming.skills.length > 0 && (
               <div className="uac-skill-chips">
                 {streaming.skills.map((s) => (
                   <span key={s.slug} className="uac-skill-chip">
