@@ -33,7 +33,7 @@ export interface WorkflowProposal {
 const WORKFLOW_CONTEXT_TOOL_DEF = {
   name: 'get_workflow_context',
   description:
-    "Get everything needed to PROPOSE or edit a workflow for an existing service: the closed catalog of step actions you may use (kind, label, description, defaultGate, blocking), the closed set of edge gates, the service's CURRENT lifecycle graph (null if none authored yet), the firm's available document templates you may attach to steps, and `stepLibrary` — the firm's SAVED, reusable workflow steps (each with a name, description, and a one-line stage summary). SEARCH `stepLibrary` FIRST: if a saved step matches one you need, REUSE it (mirror its action + gate) rather than composing an identical step from scratch. Compose a workflow ONLY from these — never invent a step kind, a gate, or a document template id. Call this FIRST whenever the attorney asks you to build, add to, or change a service workflow.",
+    "Get everything needed to PROPOSE or edit a workflow for an existing service: the closed catalog of step actions you may use (kind, label, description, defaultGate, blocking), the closed set of edge gates, the service's CURRENT lifecycle graph (null if none authored yet), the firm's available document templates you may attach to steps, `stepLibrary` — the firm's SAVED, reusable workflow steps (each with a name, description, and a one-line stage summary) — and `invocableCapabilities` — real platform abilities a step can RUN (e.g. AI document review). SEARCH `stepLibrary` FIRST: if a saved step matches one you need, REUSE it (mirror its action + gate) rather than composing an identical step from scratch. For a step that should run one of `invocableCapabilities`, COPY that capability's `stepTemplate` VERBATIM as the stage's `action` (same two keys, same nesting) and only replace the `<…>` placeholder values inside `capability_config` with the real content — never rename `capability_slug`, never move a config value out of `capability_config`, never invent different keys. Compose a workflow ONLY from these — never invent a step kind, a gate, or a document template id. Call this FIRST whenever the attorney asks you to build, add to, or change a service workflow.",
   input_schema: {
     type: 'object',
     properties: {
@@ -89,7 +89,12 @@ const STAGE_SCHEMA = {
       description: 'What this step does — its kind MUST be from the closed catalog.',
       properties: {
         kind: { type: 'string' as const, enum: STEP_ACTION_KINDS },
-        config: { type: 'object' as const, additionalProperties: true },
+        config: {
+          type: 'object' as const,
+          description:
+            'For kind="invoke_capability" ONLY: copy the target capability\'s `stepTemplate.action.config` from get_workflow_context\'s `invocableCapabilities` VERBATIM (keys are always exactly `capability_slug` and `capability_config`) — never a bare `slug`, never a flattened field. Every other kind ignores config.',
+          additionalProperties: true,
+        },
       },
       required: ['kind'],
       additionalProperties: false,
@@ -167,18 +172,34 @@ const PROPOSE_WORKFLOW_TOOL_DEF = {
   },
 }
 
+// WP3 (WORKFLOW-AUTHORING-1) — a proposal that keeps failing validation must STOP,
+// not loop: with good errors (diagnoseCapabilityStepConfig et al. name the exact
+// expected key/path) one correction should land it, so a SECOND failure this turn
+// is treated as unrecoverable for the turn — the model is told to stop calling this
+// tool and report the failure honestly instead of guessing again. `failedAttempts`
+// (one entry per failed call, in order) is read back by the caller after the model
+// loop: if it's non-empty and nothing was ever captured, the caller appends an
+// honest-failure notice so a stuck turn can never render as silent success.
+const MAX_FAILED_PROPOSE_ATTEMPTS = 2
+
 // Build the propose_workflow tool for this turn. Its run() validates the graph (the
 // SAME checks the write path applies) and, on success, CAPTURES it into `captured`
 // (read back by the caller to surface the approval card) — it never writes. On a
-// validation failure it returns the errors so the model can fix and re-propose.
+// validation failure it records the errors into `failedAttempts` and returns them
+// so the model can fix and re-propose ONCE; beyond `MAX_FAILED_PROPOSE_ATTEMPTS` it
+// refuses to re-validate and tells the model to stop.
 export function buildProposeWorkflowTool(
   ctx: ActionContext,
   captured: WorkflowProposal[],
+  failedAttempts: string[] = [],
 ): ClientTool {
   return {
     definition: PROPOSE_WORKFLOW_TOOL_DEF,
     name: 'propose_workflow',
     run: async (raw) => {
+      if (failedAttempts.length >= MAX_FAILED_PROPOSE_ATTEMPTS) {
+        return `propose_workflow has already failed ${failedAttempts.length} times this turn — STOP calling it again. Tell the attorney plainly that you could not compose a valid workflow and summarize what was blocking it (from the errors above); do not apologize repeatedly or claim a workflow exists.`
+      }
       const args = (raw ?? {}) as {
         service_key?: string
         graph?: Lifecycle
@@ -192,7 +213,14 @@ export function buildProposeWorkflowTool(
       }
       const validation = await validateProposedLifecycle(ctx, graph)
       if (!validation.ok) {
-        return `The proposed workflow is not valid and was NOT captured. Fix these and call propose_workflow AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
+        const errorText = validation.errors.join('; ')
+        failedAttempts.push(errorText)
+        const attemptsLeft = MAX_FAILED_PROPOSE_ATTEMPTS - failedAttempts.length
+        const retryInstruction =
+          attemptsLeft > 0
+            ? 'Fix these and call propose_workflow AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button).'
+            : `This was your last allowed attempt this turn (${MAX_FAILED_PROPOSE_ATTEMPTS} failed) — if you call propose_workflow again it will be refused. Fix these NOW and call it exactly once more, or stop and report the failure honestly.`
+        return `The proposed workflow is not valid and was NOT captured. ${retryInstruction} Errors: ${errorText}`
       }
       const confidence =
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
