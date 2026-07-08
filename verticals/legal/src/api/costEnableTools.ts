@@ -89,7 +89,7 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
       const hours = costType === 'hourly' && typeof args.hours === 'number' ? args.hours : null
       const validation = validateProposedCost({ costType, amount, hours })
       if (!validation.ok) {
-        return `The proposed billing is not valid and was NOT captured. Fix these and call propose_cost again: ${validation.errors.join('; ')}`
+        return `The proposed billing is not valid and was NOT captured. Fix these and call propose_cost AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
       const confidence =
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
@@ -105,7 +105,7 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
           `Proposed ${costType} billing of ${amount} for ${serviceKey}.`,
         confidence,
       })
-      return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve. Reply with ONE short sentence pointing them to it; do NOT repeat the price in prose.`
+      return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve. The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the price in prose.`
     },
   }
 }

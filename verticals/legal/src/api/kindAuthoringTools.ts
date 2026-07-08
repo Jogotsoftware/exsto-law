@@ -113,7 +113,7 @@ export function buildProposeKindTool(ctx: ActionContext, captured: KindProposal[
         context,
       )
       if (!validation.ok) {
-        return `The proposed kind is not valid and was NOT captured. Fix these and call propose_kind again: ${validation.errors.join('; ')}`
+        return `The proposed kind is not valid and was NOT captured. Fix these and call propose_kind AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
       const confidence =
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)

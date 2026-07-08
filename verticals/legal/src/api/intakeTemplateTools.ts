@@ -180,7 +180,7 @@ export function buildProposeQuestionnaireTool(
       const { tokens: templateTokens } = await loadServiceTemplateTokens(ctx, serviceKey)
       const validation = validateProposedQuestionnaire(args.schema, templateTokens)
       if (!validation.ok) {
-        return `The proposed questionnaire is not valid and was NOT captured. Fix these and call propose_questionnaire again: ${validation.errors.join('; ')}`
+        return `The proposed questionnaire is not valid and was NOT captured. Fix these and call propose_questionnaire AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
       // HARD RULE (the variable contract): the questionnaire MUST collect EVERY value the
       // document templates reference. If a template uses a token, the form has to capture
@@ -209,7 +209,7 @@ export function buildProposeQuestionnaireTool(
           ? `It covers ${templateTokens.length - validation.missingForTokens.length}/${templateTokens.length} template tokens — these are NOT yet collected: ${validation.missingForTokens.join(', ')}.`
           : `It covers all ${templateTokens.length} template tokens.`
         : 'The service has no document templates yet, so there are no tokens to cover.'
-      return `The proposed questionnaire is shown to the attorney as an approval card; it is NOT saved until they approve. ${coverage} Reply with ONE short sentence pointing them to it (mention the coverage if any tokens are uncovered); do NOT repeat the fields in prose.`
+      return `The proposed questionnaire is shown to the attorney as an approval card; it is NOT saved until they approve. ${coverage} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence (mention the coverage if any tokens are uncovered); NEVER repeat the fields in prose.`
     },
   }
 }
@@ -345,7 +345,7 @@ export function buildProposeTemplateTool(
         firmFieldIds,
       })
       if (!validation.ok) {
-        return `The proposed template is not valid and was NOT captured. Fix these and call propose_template again: ${validation.errors.join('; ')}`
+        return `The proposed template is not valid and was NOT captured. Fix these and call propose_template AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
       const confidence =
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
@@ -379,7 +379,7 @@ export function buildProposeTemplateTool(
       } else {
         tokenNote = `WARNING: these tokens have NO matching question and would render [[MISSING]]: ${validation.orphanTokens.join(', ')}. Add those questions to the questionnaire.${reuseNote}`
       }
-      return `The proposed template "${name || docKind}" is shown to the attorney as an approval card; it is NOT saved until they approve. ${tokenNote} Reply with ONE short sentence pointing them to it; do NOT repeat the body in prose.`
+      return `The proposed template "${name || docKind}" is shown to the attorney as an approval card; it is NOT saved until they approve. ${tokenNote} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the body in prose.`
     },
   }
 }

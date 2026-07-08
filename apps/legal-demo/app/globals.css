@@ -6375,21 +6375,8 @@ button.danger.outline:hover:not(:disabled) {
   background: var(--card, #fff);
   color: var(--fg);
 }
-.uac-qcard-textsend {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-}
-.uac-qcard-textsend:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
+/* The text-row submit reuses .uac-send (the chat composer's send) — one send
+   affordance app-wide. The row centers it against the input via align-items. */
 /* The answered state — replaces the buttons/input (no raw user bubble), so the
    answered question reads as a clean record of what was chosen or typed. NOT a pill:
    a free-text answer can be a full paragraph, so this is a left-aligned rounded block
