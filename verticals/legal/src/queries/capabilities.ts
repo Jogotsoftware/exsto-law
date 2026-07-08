@@ -4,6 +4,35 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 // catalog to decide reuse vs. build. Mirrors queries/skills.ts (entity +
 // superseded attributes → one row per capability, latest values).
 
+// Who supplies a capability input, and where it is read from at run time.
+export type CapabilityInputProvidedBy = 'client' | 'attorney' | 'system'
+export type CapabilityInputSource =
+  | 'intake_field'
+  | 'uploaded_document'
+  | 'matter_context'
+  | 'service_config'
+  | 'prior_step_output'
+  | 'client_response'
+
+export interface CapabilityInput {
+  key: string
+  provided_by: CapabilityInputProvidedBy
+  source: CapabilityInputSource
+  required: boolean
+  description?: string
+}
+
+export interface CapabilityOutput {
+  entity_kind: string
+  description?: string
+}
+
+// ADR 0046 — the EXECUTABLE contract a step-invocable capability carries in its
+// spec jsonb (additive; a non-invocable capability simply omits these). It tells the
+// engine HOW to run the capability as a workflow step: the handler to dispatch to,
+// the inputs to assemble and who provides each, the outputs it persists, the default
+// gate the matter waits at afterwards, and the shape of the attorney's per-service
+// standing config (validated when a builder wires the capability into a stage).
 export interface CapabilitySpec {
   name: string
   category?: string
@@ -11,6 +40,14 @@ export interface CapabilitySpec {
   when_to_use?: string
   backed_by?: string[]
   docs_path?: string
+  // ── executable contract (present iff step_invocable) ──────────────────────
+  step_invocable?: boolean
+  handler_key?: string
+  inputs?: CapabilityInput[]
+  outputs?: CapabilityOutput[]
+  default_gate?: 'automatic' | 'attorney' | 'client' | 'system'
+  // JSON-Schema-ish description of the attorney standing config (set once at build).
+  config_schema?: Record<string, unknown>
 }
 
 export interface Capability {

@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { insertAttribute, insertEntity, lookupKindId } from './common.js'
+import type { CapabilitySpec } from '../queries/capabilities.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Platform capability library (schema-as-data). A capability is an ENTITY the
@@ -62,18 +63,13 @@ async function findCapabilityBySlug(
   return res.rows[0]?.entity_id ?? null
 }
 
-interface CapabilitySpec {
-  name: string
-  category?: string
-  purpose?: string
-  when_to_use?: string
-  backed_by?: string[]
-  docs_path?: string
-}
-
 interface CapabilityUpsertPayload {
   slug: string
   status?: string
+  // The executable contract fields (ADR 0046) ride the spec jsonb passthrough
+  // (`{ ...spec, name }`) — no per-field validation here; the builder-side validator
+  // (validateProposedLifecycle) checks a capability is live + invocable before a
+  // stage may reference it.
   spec: CapabilitySpec
 }
 

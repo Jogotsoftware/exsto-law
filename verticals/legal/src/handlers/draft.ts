@@ -432,8 +432,36 @@ async function advanceInstanceOnApprove(
     actionId,
   })
 
-  // The audit event for the advance (matter_status was already mirrored by the
-  // caller, so we do NOT write the attribute again — only the instance + event).
+  // Status coherence (ADR 0046): draft.approve unconditionally mirrored
+  // matter_status = 'approved' for the classic single-document service (whose
+  // approve edge lands on the stage keyed 'approved'). In a MULTI-STAGE flow (e.g.
+  // an invoke_capability(ai_document_review) whose approve advances to a later
+  // stage such as 'materials_requested'), that hardcode would desync the status
+  // from the instance's real state. When the instance advanced somewhere other than
+  // 'approved', re-mirror the status to the true next stage (append-only; last write
+  // wins). NC_SMLLC's edge.to === 'approved' → this is a no-op there.
+  if (edge.to !== 'approved') {
+    const statusKindId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'matter_status',
+    )
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: matterEntityId,
+      attributeKindId: statusKindId,
+      value: edge.to,
+      confidence: 1.0,
+      knowabilityState: 'observed',
+      timePrecision: 'exact_instant',
+      sourceType: 'system',
+      sourceRef: null,
+    })
+  }
+
+  // The audit event for the advance.
   await insertEvent(client, {
     tenantId: ctx.tenantId,
     actionId,

@@ -101,6 +101,65 @@ The interactive build-interview acceptance (Session 1 A/C) remains Joe's run —
 
 ---
 
+# CAPABILITY-RUNTIME-1 (2026-07-08) — executable capability registry + `invoke_capability`
+
+Branch `capability-runtime-1` (off `main` @ `808eafc`, post-#300) · migration **0118** (frontier was 0117) · id block **1019** (event kind). Makes capabilities EXECUTABLE: a workflow can now RUN a client through a service end to end, not just author one.
+
+## What shipped (ADR 0046)
+- **WP1 — capability contract (additive jsonb, no migration).** `CapabilitySpec` gained `step_invocable, handler_key, inputs[] (key/provided_by/source/required), outputs[], default_gate, config_schema`. Upgrades ride the existing `legal.capability.upsert` (append-only supersession) — never a raw UPDATE.
+- **WP2 — the `invoke_capability` step kind** (the 9th, and the ONLY open-ended one). `catalog.ts` + `types.ts` (`CapabilityStepConfig`). `validateLifecycle` already rejects unknown kinds; `validateProposedLifecycle` now also rejects an `invoke_capability` stage that names a non-live / non-invocable capability or an incomplete config. `get_workflow_context` returns `invocableCapabilities` alongside the 8 built-ins; the playbook gained a "Runnable capabilities / mid-service client asks" section (reseeded). `WorkflowProposalCard` shows the capability's human name, never the slug. Route `POST /api/attorney/matters/[id]/workflow/invoke` triggers it.
+- **The runtime** (`api/capabilityRuntime.ts`): resolves the current stage's capability, dispatches its `handler_key`, records a `capability.invoked` audit event, applies the gate. **Execution is TRIGGERED, not auto-run in the advance transaction** — same model as `generate_document` (run by the matter Workflow window / the route / a caller), so no LLM call or job enqueue ever rides a lifecycle-advance transaction.
+- **WP3 — two REAL handlers.** `ai_document_review.run` reuses `runDocumentReview` verbatim (Contract A → review memo via `draft.generate ai_review` → the existing review queue); the interview rubric is layered on as attorney **guidance** (so the bundled prompt keeps its `{{document_text}}` slot + reasoning-trace contract), and the invoke IS the enablement (bypasses the per-service review-enabled gate). `request_client_materials.run` reuses `attorney.message.post` (Contract B) and parks at the client gate. A contracted capability with no registered handler (e.g. `esignature`) raises a clear error + records an `observation` — never a silent no-op or simulated output.
+- **Client-dispatch fix** (`handlers/clientDelivery.ts`, kept out of the pure `executor.ts`): a client's OWN action now advances a matter parked at a client gate — wired into `booking.create`, a CLIENT `document.upload`, and `client.message.post`. Flag-guarded; matches the client edge whose `via` equals the action kind.
+- **Status coherence:** `draft.approve` hard-coded `matter_status='approved'`; for a multi-stage flow whose approve edge lands elsewhere (e.g. a mid-flow review → `materials_requested`), `advanceInstanceOnApprove` now re-mirrors the status to the real next stage (no-op for NC_SMLLC, whose edge.to is `approved`).
+
+## Decisions (non-obvious rationale)
+1. **No migration for the contract** — `capability_spec` is free jsonb, so the 6 contract fields are additive data through the existing upsert. The one migration (0118) seeds ONLY the `capability.invoked` audit event kind (failures reuse the core `observation` kind). Applied to all legal tenants at merge; the sandbox tenant was provisioned with it for the run (ledger left unstamped — the manager/merge applies 0118).
+2. **Rubric as guidance, not base-prompt** — a first attempt passed the rubric as `promptOverride` (replacing the base prompt) and the model output lost the trailing ```json reasoning-trace fence the adapter parses. Fix: the base prompt always comes from the service/bundled default (which carries the slot + trace contract) and the rubric is appended as attorney guidance.
+3. **Triggered execution, not auto-on-entry** — running the AI review synchronously inside a matter-advance transaction would put an LLM call (and a job enqueue) on the substrate write path (50 ms budget, transaction length). The engine already triggers step actions from the Workflow window; `invoke_capability` follows that. Auto-run-on-entry is a future enhancement.
+4. **Completion is `invoice.paid`, not a manual system advance** — the seeded Claude agent actor `…0001-…0004` (audit finding 7.1, hardcoded) has no `actor` row in the sandbox tenant, so `legal.matter.advance` on a SYSTEM gate is (correctly) rejected for it. That is not a bug to route around: the `approved→closed` edge is meant to fire on `invoice.paid`. The run issues + pays a real invoice, which both creates the invoice row AND advances via `signalEvent` (no actor guard). Faithful, not forged.
+5. **Authored via the action layer, run through the real runtime.** WP4's service was authored via the same actions the builder's approve routes call (`legal.service.upsert` + `createQuestionnaireAI` + `setServiceLifecycleAI`) — the builder's write path, deterministic. The interactive builder *conversation* (comprehension, solved in #298/#300) is the one piece still worth a human click-through; the get_workflow_context + playbook wiring makes it capable. This session proves the **runtime**, which was the gap.
+
+## CLEANUP (through core, logged)
+The live builder had filed two near-duplicate matter-close capabilities via `request_capability`. Both soft-retired to `status='deprecated'` via `legal.capability.upsert` (append-only supersession — no raw UPDATE, no delete); `step_close_notification` kept as the one canonical `requested` entry. Receipt: `attorney_notification_on_matter_close` → deprecated, `notify_attorney_when_a_matter_auto_closes` → deprecated, `step_close_notification` → requested.
+
+## 21-capability classification (step_invocable + rationale)
+**Invocable (3):**
+| slug | gate | handler | rationale |
+|---|---|---|---|
+| `ai_document_review` | attorney | `…ai_document_review.run` **[REAL]** | runs an AI review of the client's uploaded doc → review memo in the queue |
+| `request_client_materials` | client | `…request_client_materials.run` **[REAL, NEW]** | posts a portal request and parks until the client delivers |
+| `esignature` | system | `…esignature.run` **[contracted, unbuilt]** | send-for-signature as a step; invoking it raises the not-executable error (the honest gap — the acceptance-F subject) |
+
+**Not invocable (19):** `booking_scheduling` (intake front door + client gate, not a step) · `intake_document_upload` (a questionnaire field type) · `document_generation` (realized by the built-in `generate_document` step) · `attorney_review_queue` (a destination surface) · `workflow_engine` (it RUNS steps, isn't one) · `invoicing` (built-in `approve_send_invoice`/`await_payment`) · `stripe_payments` / `manual_payments` (payment rails/config) · `rates_billing` (build-time pricing config) · `client_portal` (always-on surface) · `client_messaging` (the surface `request_client_materials` is built on) · `mail` (comms surface) · `calendar_sync` (fires on booking) · `granola_import` (import integration) · `trust_accounting` (a ledger surface) · `template_editor` / `questionnaire_editor` / `ai_assistant` (authoring/chat surfaces) · `data_as_schema` (build-time authoring).
+
+## Acceptance — receipts (sandbox `00000000-0000-0000-00fe-000000000001`; registry upgrades also applied to tenant-zero where the 21 live)
+**A — registry.** Tenant-zero: 22 available (21 + `request_client_materials`) all contracted; **3 invocable** (matches the log); the two REQUIRED (`ai_document_review` attorney, `request_client_materials` client) contracted; 2 dupes `deprecated`; all writes via `legal.capability.upsert` (no raw UPDATE).
+
+**B — build.** `employment_contract_review_mrc70en5` workflow_definition v3: **3 `invoke_capability` stages** — `[ai_document_review, request_client_materials, ai_document_review]` (one review w/ non-empty rubric, one client-materials w/ client gate). Questionnaire persists **`internal:true` fields** `review_summary`, `requested_changes` (closes WP5-in-data — first persisted internal fields).
+
+**C — run.** Matter `9dc5244c-…`: two `document_draft` review memos (`550159f8…`, `f74436c2…`), both `generation_mode=ai_review`, `reasoning_trace_id` NOT NULL, `actor_type=agent` "Claude"; parks at attorney gate after each review; `draft.approve` advances; parks at the client gate until a client upload arrives; second review incorporates it; **invoice `INV-2026-0001` exists**; instance `current_state=closed, status=completed`. state_history (6 turns): `intake_submitted → first_review (via legal.matter.advance) → materials_requested (via draft.approve) → second_review (via document.upload, gate client) → approved (via draft.approve) → closed (gate system)`. Three `capability.invoked` events (first_review/attorney, materials_requested/client, second_review/attorney) — outputs persisted through core.
+
+**D — client-dispatch.** state_history turn 4: `materials_requested → second_review`, `gate:"client"`, **`via:"document.upload"`** — advanced by the CLIENT's own upload, with NO `legal.matter.advance` in that turn.
+
+**E — negative.** `validateProposedLifecycle` rejects an `invoke_capability` stage naming `client_portal` ("not step-invocable") and `does_not_exist_cap` ("unknown capability").
+
+**F — negative.** Invoking `esignature` (contracted, unbuilt) on a probe matter threw `Capability "esignature" is contracted but has no executable handler … yet`, recorded an `observation` tagged `capability_not_executable`, produced no output, and the matter stayed on `sign_step` (no advance).
+
+**G — negative.** While parked at the client gate (`materials_requested`, waiting on `document.upload`), an unrelated `client.message.post` did NOT advance — the matter stayed `materials_requested`.
+
+**Local gate:** `build` ✓ · `typecheck` ✓ · `lint` ✓ · `format:check` ✓ · `test:unit` **48/48 ✓** (new `capability-runtime` suite) · invariants **16 pass / 77 DB-skipped** (storage-guard + authoring-vocabulary green).
+
+## Files
+Core: `verticals/legal/src/lifecycle/{types,catalog}.ts` · `verticals/legal/src/queries/capabilities.ts` · `verticals/legal/src/handlers/{capability,clientDelivery(new),booking,documentUpload,clientMessage,draft}.ts` · `verticals/legal/src/api/{capabilityRuntime(new),reviewDocument,workflowAuthoring}.ts` · `verticals/legal/src/api/index.ts` · `apps/legal-demo/components/WorkflowProposalCard.tsx` · `apps/legal-demo/app/api/attorney/matters/[id]/workflow/invoke/route.ts (new)` · `verticals/legal/skills/firm-admin/build-service.md` · `supabase/migrations_vertical/0118_capability_invoked_event.sql (new)` · `verticals/legal/demo/{seed-capabilities,cleanup-capability-dupes(new),caprt1-sandbox-run(new)}.ts` · `tests/vertical/capability-runtime.test.ts (new)` · `package.json`.
+
+## Post-merge / remaining
+- **Reseed the playbook** (`demo/seed-firm-admin-skills.ts`) so prod runs the new build-service.md (the invoke_capability section is a DB row until reseeded).
+- **The matter Workflow window** has no "Run capability" button yet — the runtime + route exist and are proven; the UI affordance is the one production wiring left (an attorney currently can't trigger `invoke_capability` from the app, only via the route/API). Auto-run-on-entry is the follow-on.
+- **Hardcoded Claude agent actor** (`…0001-…0004`) still assumed to exist in every tenant (audit 7.1) — flagged for the tenancy pass; the runtime inherits it.
+
+---
+
 # BUILDER-HARDENING-1.1 — interview polish + render-layer leak fixes (2026-07-08)
 
 Follow-up after Joe ran a full interactive build (Healthcare Employment Contract Review) end-to-end: comprehension is solved; the remaining defects were the render layer leaking internal channels into the transcript, a few functional bugs, and interview pacing. Branch `builder-hardening-1.1`. No workflow-engine / step-catalog / gate / linear-constraint changes.

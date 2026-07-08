@@ -16,6 +16,7 @@ import {
   insertRelationship,
   lookupKindId,
 } from './common.js'
+import { dispatchClientDelivery } from './clientDelivery.js'
 
 interface DocumentUploadPayload {
   matter_entity_id: string
@@ -147,6 +148,21 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
     sourceType: 'human',
     sourceRef: provenanceRef,
   })
+
+  // ADR 0046 — a CLIENT upload is a delivery: it advances a matter parked at a client
+  // gate whose edge is `via: 'document.upload'` (e.g. "client sends the follow-up
+  // materials"). Firm uploads never drive a client gate, so only client uploads
+  // dispatch. Flag-guarded no-op otherwise.
+  if (isClientUpload) {
+    await dispatchClientDelivery(
+      client,
+      ctx,
+      p.matter_entity_id,
+      'document.upload',
+      actionId,
+      provenanceRef,
+    )
+  }
 
   return { documentEntityId: docEntityId, documentVersionId: versionId, objectKey: p.object_key }
 })

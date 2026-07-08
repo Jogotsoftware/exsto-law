@@ -10,7 +10,10 @@
 import { upsertCapability, type UpsertCapabilityInput } from '@exsto/legal'
 import { type ActionContext } from '@exsto/substrate'
 
-const TENANT = '00000000-0000-0000-0000-000000000001'
+// Registry contract upgrades apply wherever the capabilities live. Defaults to
+// tenant zero (Pacheco pilot — where the 21 live); SEED_TENANT overrides it so the
+// same contract can be provisioned into the sandbox tenant for runtime testing.
+const TENANT = process.env.SEED_TENANT ?? '00000000-0000-0000-0000-000000000001'
 const ADMIN = '00000000-0000-0000-0001-000000000004' // seeded Claude agent actor
 
 // The current platform surface. `backed_by` names the workflow step / tool /
@@ -253,7 +256,123 @@ const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
       backed_by: ['kind.define', 'propose_kind', 'get_kind_context'],
     },
   },
+  {
+    // ADR 0046 — the second REQUIRED invocable capability. A mid-service ask: the
+    // firm requests materials from the client and the matter PARKS at the client
+    // gate until the client delivers (an upload or a portal reply).
+    slug: 'request_client_materials',
+    spec: {
+      name: 'Request client materials',
+      category: 'client',
+      purpose:
+        'Ask the client to send something mid-matter (a document, an answer, a signed form). Posts the request to the client portal thread; the matter waits at the client gate until the client delivers, then advances on the client’s own action.',
+      when_to_use:
+        'When a service needs the client to hand something over after intake — e.g. a follow-up document the attorney asked for during review. Express it as its own client-gated stage.',
+      backed_by: ['attorney.message.post', 'client portal', 'client delivery dispatch'],
+    },
+  },
 ]
+
+// ADR 0046 — the EXECUTABLE CONTRACT per capability (WP1). Merged onto each spec at
+// seed time: every capability declares whether it is step_invocable, and each
+// invocable one carries its handler_key, inputs (+ who provides each), outputs, gate,
+// and config_schema. Only the two WP3 handlers are REAL; a contracted capability
+// whose handler is not yet in the runtime registry (e.g. esignature) raises a clear
+// "not yet executable" error when invoked — never a silent no-op or simulated output.
+// The full T/F classification + one-line rationale lives in the decision log.
+const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>> = {
+  ai_document_review: {
+    step_invocable: true,
+    handler_key: 'legal.capability.ai_document_review.run',
+    inputs: [
+      {
+        key: 'uploaded_document',
+        provided_by: 'client',
+        source: 'uploaded_document',
+        required: true,
+        description: 'the document the client uploaded to the matter for review',
+      },
+      {
+        key: 'rubric',
+        provided_by: 'attorney',
+        source: 'service_config',
+        required: true,
+        description: 'what the attorney wants checked (the review rubric)',
+      },
+      {
+        key: 'matter_context',
+        provided_by: 'system',
+        source: 'matter_context',
+        required: false,
+        description: 'intake answers, for context',
+      },
+    ],
+    outputs: [
+      {
+        entity_kind: 'document_draft',
+        description: 'a review memo (pending_review) in the attorney review queue',
+      },
+    ],
+    default_gate: 'attorney',
+    config_schema: {
+      rubric: {
+        type: 'string',
+        required: true,
+        description: 'What to check for in the document — the review rubric.',
+      },
+    },
+  },
+  request_client_materials: {
+    step_invocable: true,
+    handler_key: 'legal.capability.request_client_materials.run',
+    inputs: [
+      {
+        key: 'message',
+        provided_by: 'attorney',
+        source: 'service_config',
+        required: true,
+        description: 'what to ask the client for',
+      },
+    ],
+    outputs: [
+      {
+        entity_kind: 'communication_message',
+        description: 'the request posted to the client portal thread',
+      },
+      {
+        entity_kind: 'document_uploaded',
+        description: 'the client’s delivered materials, when they upload',
+      },
+    ],
+    default_gate: 'client',
+    config_schema: {
+      message: {
+        type: 'string',
+        required: true,
+        description: 'The message asking the client for the materials.',
+      },
+    },
+  },
+  // Contracted but NOT yet wired to a runtime handler — sending a document for
+  // signature as a workflow step. Invoking it raises the "not yet executable" error
+  // (the honest gap, never a fake success).
+  esignature: {
+    step_invocable: true,
+    handler_key: 'legal.capability.esignature.run',
+    inputs: [
+      {
+        key: 'document',
+        provided_by: 'system',
+        source: 'prior_step_output',
+        required: true,
+        description: 'the approved document to send for signature',
+      },
+    ],
+    outputs: [{ entity_kind: 'signature_task', description: 'a sign-by-link e-sign envelope' }],
+    default_gate: 'system',
+    config_schema: {},
+  },
+}
 
 // Capabilities the platform does NOT do yet — filed as `requested` so the builder
 // surfaces them honestly (and does not try to fake them) and the team has a backlog.
@@ -280,9 +399,13 @@ async function main(): Promise<void> {
   const ctx: ActionContext = { tenantId: TENANT, actorId: ADMIN }
   let n = 0
   for (const cap of CAPABILITIES) {
-    await upsertCapability(ctx, { ...cap, status: 'available' })
+    // Merge the executable contract: default step_invocable=false, then overlay the
+    // invocable ones' handler_key/inputs/outputs/gate/config_schema.
+    const spec = { ...cap.spec, step_invocable: false, ...(INVOCABLE_CONTRACTS[cap.slug] ?? {}) }
+    await upsertCapability(ctx, { slug: cap.slug, spec, status: 'available' })
     n++
-    console.log(`capability: upserted ${cap.slug} (available)`)
+    const inv = spec.step_invocable ? ' [invocable]' : ''
+    console.log(`capability: upserted ${cap.slug} (available)${inv}`)
   }
   for (const cap of REQUESTED_CAPABILITIES) {
     await upsertCapability(ctx, { ...cap, status: 'requested' })

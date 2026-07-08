@@ -344,6 +344,12 @@ export interface RunDocumentReviewInput {
   serviceKey: string
   originalFilename?: string | null
   guidance?: string
+  // ADR 0046 capability path: when an invoke_capability(ai_document_review) stage
+  // runs this, the rubric from the stage config IS the base prompt and the invoke
+  // itself is the enablement — so a non-empty override bypasses the service-level
+  // transitions.review enabled gate. Absent → the classic per-service review config
+  // drives it (the worker path is unchanged).
+  promptOverride?: string | null
 }
 
 export interface RunDocumentReviewDeps {
@@ -377,9 +383,14 @@ export async function runDocumentReview(
   }
 
   // Config re-check at RUN time: the attorney may have disabled review (or the
-  // service changed) between enqueue and execution.
+  // service changed) between enqueue and execution. A capability rubric override
+  // (ADR 0046) IS the enablement, so it skips this gate.
+  const rubricOverride =
+    typeof input.promptOverride === 'string' && input.promptOverride.trim()
+      ? input.promptOverride.trim()
+      : null
   const config = await resolveReviewConfig(agentCtx, input.serviceKey)
-  if (!config.enabled) {
+  if (!rubricOverride && !config.enabled) {
     return fail(`AI review is not enabled for service "${input.serviceKey}".`)
   }
 
@@ -408,7 +419,15 @@ export async function runDocumentReview(
   }
 
   const filename = input.originalFilename ?? object.filename
+  // The base prompt ALWAYS comes from the service config or the bundled default —
+  // both carry the {{document_text}} slot AND the trailing reasoning-trace format the
+  // adapter parses. A capability rubric (ADR 0046) is layered on as attorney GUIDANCE
+  // (below), never as the base prompt, so it can't drop the trace contract.
   const basePrompt = config.prompt ?? loadReviewPrompt()
+  const guidance =
+    [input.guidance?.trim(), rubricOverride ? `Focus this review on: ${rubricOverride}` : null]
+      .filter(Boolean)
+      .join('\n\n') || undefined
 
   // Skills: attorney-configured (forced) plus the conservative jurisdiction
   // auto-resolve, keyed on the memo kind. Same NC binding as drafting.
@@ -427,7 +446,7 @@ export async function runDocumentReview(
     originalFilename: filename,
     serviceLabel: matter.serviceKey ?? input.serviceKey,
     activeSkillsText,
-    guidance: input.guidance,
+    guidance,
   })
 
   // Call 1 — the review memo (+ structured trace).
