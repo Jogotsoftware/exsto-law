@@ -346,3 +346,43 @@ Every substrate row `tenant_id = …00fe…0001`. The harness inlines assistantC
 
 ## Files
 `verticals/legal/src/lifecycle/{capabilityAuthoring(new),gateTransitions(new),index}.ts` · `verticals/legal/src/api/{workflowAuthoring,workflowAuthoringTools,assistantChat}.ts` · `verticals/legal/skills/firm-admin/build-service.md` · `tests/vertical/{capability-authoring(new),build-wizard-dormancy}.test.ts` · `package.json` · `verticals/legal/demo/workflow-authoring-1-sandbox-run.ts (new, committed — no Storage/service-role ref, storage-guard-safe like caprt1-sandbox-run.ts)`.
+
+---
+
+# WORKFLOW-AUTHORING-1-MERGE (2026-07-08) — merge #308, refresh the prod playbook pointer
+
+## 1. Merge
+- PR #308 was CONFLICTING when this session opened (main had advanced to `09fc287` via #306 OVERLOAD-HANDLING-1 + #307 BOOKING-CALENDAR-VIEW-1). **The only conflict was one line** — `package.json`'s `test:unit` (main added `overload-handling.test.ts`, #308 added `capability-authoring.test.ts`). Reconciled by keeping BOTH (normal hygiene, not a force/override); re-ran the full local gate on the merged branch (typecheck ✓ · lint ✓ · format:check ✓ · build ✓ · **test:unit 90/90**, 12 files incl. both new suites), pushed, CI re-ran green (verify + invariants), then **squash-merged via `gh pr merge --squash`** (respects branch protection).
+- **Squash SHA `71414bc2d2b7e427940a8e9f5f1680d662d07137`** is the tip of `main`. Feature branch + worktree (`~/dev/exsto-law-workflowauth`) pruned.
+
+## 2. No migration (confirmed)
+#308 added no migration. Repo `supabase/migrations_vertical/` top = **0119**; prod `private.vertical_migration` top row = **`0119` (`0119_tenant_public_slug.sql`, applied 2026-07-08T18:50:37Z)**. No 0120 anywhere. Nothing to apply.
+
+## 3. Seed mechanism (diagnostic-first — reported before running)
+`demo/seed-firm-admin-skills.ts` is **idempotent UPSERT by slug** through the action layer (`upsertSkill` → `getSkillBySlug` → `createSkill` or `legal.skill.update`). `legal.skill.update` writes **append-only new attribute versions** (substrate supersession — DISTINCT ON `valid_from DESC` picks the latest); **no DELETE, no wipe**. Safe. BUT the full seed re-upserts all 5 firm-admin skills, appending an identical new version to the 4 unchanged ones (bumping their `valid_from`). To honor "touch ONLY build-service," this session ran a **surgical single-skill variant** (a one-off harness, not committed) that upserts only `firm-admin.build-service`.
+
+## 4. Scope (tenant vs canonical)
+Skills are **tenant-scoped** — `entity(kind='skill')` + `attribute` rows keyed by `tenant_id` (`queries/skills.ts`, RLS via `withActionContext`). Each tenant has its own row; the builder reads them via `listSkillCatalog(ctx)` (tenant-scoped). `joe@revenueinstruments.com` logs into **Pacheco tenant-zero `00000000-0000-0000-0000-000000000001`**, so the pointer was landed **there** (the LIVE tenant, not sandbox).
+
+## 5. Reseed — live receipt (Pacheco tenant-zero, surgical, append-only)
+Upserted ONLY `firm-admin.build-service` (body 20305 → **20498** chars, +193 = the new pointer sentence). Before/after inventory of ALL 5 firm-admin skills:
+
+| slug | body_len before→after | body valid_from before→after | has `stepTemplate` |
+|---|---|---|---|
+| firm-admin.author-questionnaire | 6065 → 6065 | 15:24:49.485 → **15:24:49.485 (unchanged)** | false |
+| firm-admin.author-template | 6625 → 6625 | 15:24:50.514 → **15:24:50.514 (unchanged)** | false |
+| firm-admin.author-workflow | 7194 → 7194 | 15:24:51.563 → **15:24:51.563 (unchanged)** | false |
+| **firm-admin.build-service** | 20305 → **20498** | 15:24:52.615 → **20:30:25.069 (advanced)** | false → **true** |
+| firm-admin.platform-discipline | 4709 → 4709 | 15:24:53.660 → **15:24:53.660 (unchanged)** | false |
+
+Receipt JSON: `target_has_stepTemplate: true`, `target_changed: true`, `other_skills_all_unchanged: true`, `firm_admin_skill_count 5 → 5`. The new sentence is live in the row the builder reads for Joe's login: *"Each capability carries its own `stepTemplate` — the exact `stage.action` JSON to emit for it. COPY it verbatim, only filling in the `<…>` placeholders; never guess the shape or the key names."*
+
+## Acceptance — met
+A. #308 squash-merged (`71414bc`) by this session; `main` advanced; branch + worktree pruned; frontier still 0119; no new migration (prod ledger pasted §2). ✓
+B. Seed mechanism = idempotent upsert (append-only), NOT destructive; ran the surgical single-skill variant only. ✓
+C. `build-service` pointer present + live (`has_step_template=true`) in the correct scope (Pacheco tenant-zero) — row pasted §5. ✓
+D. All 4 other firm-admin skills intact — identical `valid_from` before/after, count 5→5. ✓
+E. Only tenant-zero written (the intended scope); zero hard deletes (append-only new version). ✓
+
+## Note
+Only `firm-admin.build-service` changed content in #308, so only it needed refreshing; the other 4 firm-admin skills already matched their repo source and were deliberately left at their existing versions. The one-off surgical reseed harness was not committed (a prod one-off, like the CAPRT1 harnesses).
