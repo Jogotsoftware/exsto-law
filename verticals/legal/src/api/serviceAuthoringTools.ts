@@ -71,13 +71,13 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         type: 'string',
         enum: SERVICE_ROUTES as unknown as string[],
         description:
-          "How the matter is worked: 'manual' (the attorney drives it) or 'auto' (documents draft from intake). REQUIRED — ASK the attorney which they want (via ask_build_question) before proposing; NEVER assume 'manual'.",
+          "How the matter is worked: 'manual' (the attorney drives it) or 'auto' (documents draft from intake). REQUIRED and NEVER assumed — DERIVE it from the attorney's process walkthrough, then CONFIRM it in plain attorney language via ask_build_question (e.g. \"Sounds like the documents should draft themselves from the client's answers — right?\"). Never say the word 'route' to the attorney; the translation to this field happens silently here.",
       },
       generation_mode: {
         type: 'string',
         enum: SERVICE_GENERATION_MODES as unknown as string[],
         description:
-          "How documents are produced: 'template_merge' (deterministic merge, no AI) or 'ai_draft' (AI drafting). REQUIRED — ASK the attorney which they want (via ask_build_question) before proposing; NEVER assume 'template_merge'.",
+          "How documents are produced: 'template_merge' (deterministic merge, no AI) or 'ai_draft' (AI drafting). REQUIRED and NEVER assumed — DERIVE it from the walkthrough, then CONFIRM in plain attorney language via ask_build_question (e.g. \"Should the documents fill a fixed template word-for-word, or should AI adapt the wording to each client?\"). Never say 'generation mode' to the attorney; translate silently here.",
       },
       summary: {
         type: 'string',
@@ -130,13 +130,14 @@ export function buildProposeServiceTool(
         return `The description was NOT captured: it is shown to CLIENTS on the booking page, so it must not mention internal mechanics ("${internalLeak[0]}"). Rewrite it in plain client-facing language about WHAT the client gets and its value — never how it is produced — then call propose_service again.`
       }
       // Route + generation mode are REQUIRED — NEVER defaulted. Defaulting to
-      // 'manual'/'template_merge' is the founder-reported bug; the attorney must choose
-      // both in the interview. If the model omits either, refuse to capture and tell it
-      // to ASK, rather than silently birthing a manual, template-merge service.
+      // 'manual'/'template_merge' is the founder-reported bug; both must be settled
+      // with the attorney in the interview. If the model omits either, refuse to
+      // capture and tell it to derive-and-confirm, rather than silently birthing a
+      // manual, template-merge service.
       const route = (args.route ?? '').trim() as WorkflowRoute
       const generationMode = (args.generation_mode ?? '').trim() as GenerationMode
       if (!route || !generationMode) {
-        return 'route and generation_mode are REQUIRED and must NOT be assumed — ask the attorney which they want (via ask_build_question: route = manual or auto; documents = template_merge or ai_draft) before proposing. Nothing was captured.'
+        return 'route and generation_mode are REQUIRED and must NOT be assumed — derive them from the attorney\'s process walkthrough and CONFIRM each in plain language via ask_build_question (no platform vocabulary: describe who drives the matter and how documents are produced, not "route"/"generation_mode") before proposing. Nothing was captured.'
       }
 
       // Uniqueness needs the existing keys — one read, shared with the validation.

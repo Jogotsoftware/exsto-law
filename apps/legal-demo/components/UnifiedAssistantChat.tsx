@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
+import { assistantHistoryContent } from '@/lib/buildHistoryContent'
 import { WorkflowProposalCard, type WorkflowProposal } from '@/components/WorkflowProposalCard'
 import {
   ServiceProposalCard,
@@ -118,6 +119,9 @@ interface DisplayTurn {
   buildQuestions?: BuildQuestionEvent[]
   // New data-kind proposals captured (Tier 1 data-as-schema) — inline approval cards.
   kindProposals?: KindProposal[]
+  // Non-fatal warnings surfaced on this turn (e.g. the tool-round cap cut a pending
+  // step off) — rendered as a visible notice line, never as a turn failure (WP5.1).
+  notices?: string[]
 }
 
 // One legal skill (playbook) the attorney can pick from the /skills menu.
@@ -552,6 +556,7 @@ export function UnifiedAssistantChat({
     enableProposals: EnableProposal[]
     buildQuestions: BuildQuestionEvent[]
     kindProposals: KindProposal[]
+    notices: string[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -812,6 +817,8 @@ export function UnifiedAssistantChat({
     genRef.current++ // abandon any in-flight stream
     setTurns([])
     continuedRef.current.clear() // new conversation ⇒ forget which approvals already auto-continued
+    buildServiceKeyRef.current = null // …and which service was under construction
+    pendingContinuationRef.current = null // a queued continuation dies with its conversation
     setBuildMode(false) // a fresh chat is not in build mode until the attorney re-enters it
     setStreaming(null)
     setError(null)
@@ -863,12 +870,16 @@ export function UnifiedAssistantChat({
       claudeWorkRate(() => true) // any capable Claude model
     const buildModelId = strong?.id ?? modelId
     if (buildModelId !== modelId) setModelId(buildModelId)
-    // The priming message reads like a build request so the server force-loads the
-    // build-service orchestrator (BUILD_REQUEST_RE) and the wizard tools are live. It's
-    // hidden — the attorney sees the AI's first question card, not this nudge. Pass the
-    // (possibly upgraded) model explicitly: setModelId hasn't flushed yet this tick.
+    // A fresh build: forget any prior build's service key and queued continuation.
+    buildServiceKeyRef.current = null
+    pendingContinuationRef.current = null
+    // The priming message starts the guided build. The playbook is force-loaded by
+    // the buildMode flag on every send in this session (WP5.3 — no regex dependency
+    // inside an explicit build). It's hidden — the attorney sees the AI's first
+    // question card, not this nudge. Pass the (possibly upgraded) model explicitly:
+    // setModelId hasn't flushed yet this tick.
     void send(
-      "I want to build a new service. Start the guided build interview now: ask me your first question with ask_build_question (what the service is called and what the client gets), and don't assume any automation choices — ask me the route and generation mode, and per-step who performs each workflow step.",
+      'I want to build a new service. Start the guided build now, following your build-service playbook: open by asking me to describe the service in my own words — who the client is, what they walk away with, and my process from first contact to done (ask_build_question cards; the then-what loop). Derive the setup choices from my answers and confirm them with me in plain language — do not ask me anything in platform vocabulary, and do not re-ask anything I have already told you.',
       { hidden: true, model: buildModelId },
     )
   }
@@ -995,41 +1006,9 @@ export function UnifiedAssistantChat({
   // continuations no longer show a fake "✓ created — continue…" user message (founder
   // flagged that as bad UX). The thinking indicator still shows because streaming state
   // is set immediately below, so a hidden continuation isn't a silent gap (fix #5).
-  // The model-facing record of an assistant turn that spoke through cards. Tool-call
-  // turns (ask_build_question, proposals) often carry no prose, so their committed
-  // `content` is '' — and a turn absent from history means the model forgets it ever
-  // asked. Encode the cards compactly so the next request replays them.
-  function assistantHistoryContent(
-    reply: string,
-    cards: {
-      buildQuestions: BuildQuestionEvent[]
-      workflowProposals: WorkflowProposal[]
-      serviceProposals: ServiceProposal[]
-      questionnaireProposals: QuestionnaireProposal[]
-      templateProposals: TemplateProposal[]
-      costProposals: CostProposal[]
-      enableProposals: EnableProposal[]
-      kindProposals: KindProposal[]
-    },
-  ): string | undefined {
-    const notes: string[] = []
-    for (const q of cards.buildQuestions)
-      notes.push(`[You asked via ask_build_question (key "${q.key}"): ${q.question}]`)
-    const proposals =
-      cards.workflowProposals.length +
-      cards.serviceProposals.length +
-      cards.questionnaireProposals.length +
-      cards.templateProposals.length +
-      cards.costProposals.length +
-      cards.enableProposals.length +
-      cards.kindProposals.length
-    if (proposals)
-      notes.push(
-        `[You presented ${proposals} proposal card(s); the attorney approves in the UI and a confirmation message follows on approval.]`,
-      )
-    if (!notes.length) return undefined
-    return [reply, ...notes].filter(Boolean).join('\n')
-  }
+  // The model-facing record of a card-heavy assistant turn now lives in
+  // lib/buildHistoryContent (WP4.1): each proposal's actual substance is replayed
+  // (keys, tokens, field ids, workflow steps), not a flattened count.
 
   async function send(
     overrideMessage?: string,
@@ -1147,6 +1126,7 @@ export function UnifiedAssistantChat({
       enableProposals: [] as EnableProposal[],
       buildQuestions: [] as BuildQuestionEvent[],
       kindProposals: [] as KindProposal[],
+      notices: [] as string[],
     }
     setStreaming({ ...partial })
     let finished = false
@@ -1175,6 +1155,7 @@ export function UnifiedAssistantChat({
         partial.enableProposals = []
         partial.buildQuestions = []
         partial.kindProposals = []
+        partial.notices = []
         setStreaming({ ...partial })
         // Brief pause so a momentary blip (overload spike, dropped socket) has a
         // chance to clear before the re-send.
@@ -1213,6 +1194,12 @@ export function UnifiedAssistantChat({
                     content: isClaude ? capturePageContent() : undefined,
                   }
                 : undefined,
+            // Explicit build session (WP5.3): force the build-service playbook
+            // server-side regardless of how this message is phrased.
+            buildMode: buildMode || undefined,
+            // The service under construction (WP4.2): the server injects the live
+            // BUILD BRIEF for it. Harmless when no build is active (undefined).
+            buildServiceKey: buildServiceKeyRef.current ?? undefined,
           },
           {
             onThinking: (t) => {
@@ -1236,6 +1223,13 @@ export function UnifiedAssistantChat({
               if (!live()) return
               if (s.slug && !partial.skills.some((x) => x.slug === s.slug)) partial.skills.push(s)
               setStreaming({ ...partial, skills: [...partial.skills] })
+            },
+            onNotice: (m) => {
+              if (!live()) return
+              // A non-fatal warning (e.g. the tool-round cap) — shown on the turn,
+              // never treated as a failure (that would trigger a full regenerate).
+              if (m) partial.notices.push(m)
+              setStreaming({ ...partial, notices: [...partial.notices] })
             },
             onDocument: (doc) => {
               if (!live()) return
@@ -1329,6 +1323,7 @@ export function UnifiedAssistantChat({
                     ? partial.buildQuestions
                     : undefined,
                   kindProposals: partial.kindProposals.length ? partial.kindProposals : undefined,
+                  notices: partial.notices.length ? partial.notices : undefined,
                 },
               ])
               setStreaming(null)
@@ -1432,11 +1427,20 @@ export function UnifiedAssistantChat({
           enableProposals: partial.enableProposals.length ? partial.enableProposals : undefined,
           buildQuestions: partial.buildQuestions.length ? partial.buildQuestions : undefined,
           kindProposals: partial.kindProposals.length ? partial.kindProposals : undefined,
+          notices: partial.notices.length ? partial.notices : undefined,
         },
       ])
     }
     setStreaming(null)
     setBusy(false)
+    // A continuation that arrived while this turn was mid-stream was QUEUED, not
+    // dropped (WP5.2 — the silent busy-skip stalled builds right after an approval).
+    // Fire it now that the turn is committed.
+    const queued = pendingContinuationRef.current
+    if (queued) {
+      pendingContinuationRef.current = null
+      void send(queued, { hidden: true })
+    }
   }
 
   // Re-fire the last failed send exactly as it went out — same text (batch
@@ -1459,6 +1463,18 @@ export function UnifiedAssistantChat({
   // card never fires the continuation twice (the card also disables its own button on
   // success — this is belt-and-suspenders). Keyed by serviceKey+artifact.
   const continuedRef = useRef<Set<string>>(new Set())
+
+  // A continuation that arrived while a turn was mid-stream (WP5.2). The old code
+  // dropped it silently ("if (busy) return"), which stalled the build right after an
+  // approval; now it queues here and fires when the in-flight turn completes. One
+  // slot is enough — approvals are sequential, and the latest continuation wins.
+  const pendingContinuationRef = useRef<string | null>(null)
+
+  // The service under construction in the active build — set by the first approval
+  // that carries a serviceKey. Sent with every message so the server injects the
+  // live BUILD BRIEF (everything already approved + open items) into the model's
+  // context (WP4.2). Cleared when a new chat/build starts.
+  const buildServiceKeyRef = useRef<string | null>(null)
 
   // The CURRENT question batch (beta feedback: one question per API round-trip made
   // the build crawl). When an assistant turn asks SEVERAL ask_build_question cards,
@@ -1486,26 +1502,25 @@ export function UnifiedAssistantChat({
       const key = `${info.serviceKey}:${info.artifact}`
       if (continuedRef.current.has(key)) return // already continued from this approval
       continuedRef.current.add(key)
+      // Remember which service this build is assembling — every subsequent message
+      // carries it so the server injects the live BUILD BRIEF (WP4.2).
+      if (info.serviceKey) buildServiceKeyRef.current = info.serviceKey
       // Enable is the TERMINAL step — approving it makes the service live and ENDS the
       // build. Leave build mode (the banner goes away) and fire ONE final wrap-up so the
       // wizard FINISHES cleanly instead of just stopping: confirm it's live, point to the
       // service, and close warmly — never start another step.
-      if (info.artifact === 'enable') {
-        setBuildMode(false)
-        if (busy) return
-        void send(
-          `✓ The service is now LIVE: ${info.label} (${info.link}). The build is COMPLETE — do NOT start another step or propose anything else. Give the attorney a short, warm wrap-up: confirm the service is built and live, point them to it with that link to review, mention they can share their booking link so clients can book it, and close with "Let me know how else I can help!"`,
-          { hidden: true },
-        )
+      const continuation =
+        info.artifact === 'enable'
+          ? `✓ The service is now LIVE: ${info.label} (${info.link}). The build is COMPLETE — do NOT start another step or propose anything else. Give the attorney a short, warm wrap-up: confirm the service is built and live, point them to it with that link to review, mention they can share their booking link so clients can book it, and close with "Let me know how else I can help!"`
+          : `✓ ${info.label} created — ${info.link}. Continue the guided build: do the next step now (confirm with the attorney via ask_build_question if needed, then propose it and share its link). If the whole service is complete, propose Enable.`
+      if (info.artifact === 'enable') setBuildMode(false)
+      // Never drop a continuation on a mid-stream turn (WP5.2) — queue it; the send
+      // path fires it as soon as the in-flight turn commits.
+      if (busy) {
+        pendingContinuationRef.current = continuation
         return
       }
-      // Don't stack continuations on top of an in-flight turn; if one is mid-stream the
-      // attorney can nudge it manually. (Approvals are inherently sequential here.)
-      if (busy) return
-      void send(
-        `✓ ${info.label} created — ${info.link}. Continue the guided build: do the next step now (interview the attorney with ask_build_question if needed, then propose it and share its link). If the whole service is complete, propose Enable.`,
-        { hidden: true },
-      )
+      void send(continuation, { hidden: true })
     },
     // send/busy are stable enough for this driver; intentionally not re-created per
     // keystroke (send reads the latest input/turns from closure at call time).
@@ -2004,6 +2019,24 @@ export function UnifiedAssistantChat({
                   {t.buildQuestions && t.buildQuestions.length > 0 && (
                     <QuestionBatch questions={t.buildQuestions} onAnswer={handleQuestionAnswer} />
                   )}
+                  {/* Non-fatal warnings (e.g. the tool-round cap cut a step off) —
+                    visible on the turn, never rendered as a failure (WP5.1). */}
+                  {t.notices?.map((n, ni) => (
+                    <div
+                      key={ni}
+                      role="status"
+                      style={{
+                        marginTop: 8,
+                        padding: '6px 10px',
+                        borderRadius: 8,
+                        fontSize: 13,
+                        background: 'rgba(245, 158, 11, 0.12)',
+                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                      }}
+                    >
+                      ⚠️ {n}
+                    </div>
+                  ))}
                   {t.content.trim() && (
                     <div className="uac-reply-actions">
                       <CopyButton text={t.content} />

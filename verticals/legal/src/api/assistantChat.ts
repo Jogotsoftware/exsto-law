@@ -69,17 +69,26 @@ import { buildCapabilityContextTool, buildRequestCapabilityTool } from './capabi
 import { buildKindContextTool, buildProposeKindTool } from './kindAuthoringTools.js'
 import type { KindProposal } from './kindAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
+import { buildBuildBriefText } from './buildBrief.js'
 
 // When the build-wizard is on AND the attorney's message reads like a request to
 // build/create a service (or one of its parts), FORCE-load the orchestrator playbook
 // (firm-admin.build-service) so the guided build always runs by the rules rather than
 // relying on the model to remember to load_skill it. Off-wizard or off-topic turns
 // are untouched (no forced playbook, no prompt bloat) — the dormancy contract holds.
+// An explicit build session (the Build button → input.buildMode) forces the playbook
+// UNCONDITIONALLY — inside a declared build, phrasing must never decide whether the
+// rules apply (WP5.3: the regex is only the fallback for free-typed build requests).
 const BUILD_REQUEST_RE =
   /\b(build|create|set\s*up|make|add|design)\b[\s\S]{0,40}\b(service|offering|workflow|practice\s*area|intake|questionnaire|template)\b/i
-function wizardForcedSkillSlugs(message: string, selected?: string[]): string[] {
+export function wizardForcedSkillSlugs(
+  message: string,
+  selected?: string[],
+  buildMode?: boolean,
+): string[] {
   const sel = selected ?? []
-  if (!buildWizardEnabled() || !BUILD_REQUEST_RE.test(message)) return sel
+  if (!buildWizardEnabled()) return sel
+  if (!buildMode && !BUILD_REQUEST_RE.test(message)) return sel
   const slug = 'firm-admin.build-service'
   return sel.includes(slug) ? sel : [slug, ...sel]
 }
@@ -126,6 +135,13 @@ export interface AssistantChatInput {
   // Beta feedback (Obj 11): the category the attorney tagged + where they were.
   category?: FeedbackCategory
   pageContext?: { path?: string; [k: string]: unknown }
+  // The attorney is in an EXPLICIT build session (the Build button). Forces the
+  // build-service playbook regardless of how this message is phrased (WP5.3).
+  buildMode?: boolean
+  // The service under construction in the active build (known once the shell is
+  // approved). Injects the live BUILD BRIEF — everything already approved for this
+  // service plus its open items — into the volatile system block (WP4.2).
+  buildServiceKey?: string
 }
 
 // A finished document the assistant produced this turn (via the produce_document
@@ -160,6 +176,10 @@ export type AssistantChatStreamEvent =
   // The assistant loaded a specialized skill (playbook) for this turn — the UI
   // shows a "using <skill>" chip while it works.
   | { type: 'skill'; slug: string; name: string }
+  // A non-fatal warning worth showing the attorney (e.g. the tool-round cap cut a
+  // pending step off). Distinct from 'error' — the reply that streamed is still
+  // good; the client must render the warning WITHOUT failing/retrying the turn.
+  | { type: 'notice'; message: string }
   // The assistant produced a finished document — the UI shows it as a downloadable
   // card (PDF/Word + save to matter), separate from the prose reply.
   | { type: 'document'; title: string; markdown: string }
@@ -621,9 +641,10 @@ export function buildClaudeSystem(
     // non-negotiable behaviors as a safety net; the skill carries the full playbook,
     // the worked example, the build order, and the data-as-schema / capability rules.
     system +=
-      '\n\nBUILDING A WHOLE SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a whole new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service"), the firm-admin.build-service skill is your AUTHORITATIVE PLAYBOOK: load_skill it and FOLLOW IT — the batched interview, the build order (shell → documents → questionnaire → workflow → billing → enable), when you may propose a new data kind vs. request a capability, and how to finish. Do not improvise the flow from memory. Two behaviors hold no matter what: ' +
-      '(1) EVERY interview question goes through the ask_build_question tool (a click-to-answer card), NEVER free-text prose — and BATCH a related group into ONE turn (several ask_build_question calls in the same response: the ESSENTIALS — name + deliverables + route + generation mode + pricing — as one batch, then propose). Never drip one question per turn; never silently default the route or generation mode or a workflow gate — ASK. ' +
-      '(2) DO NOT NARRATE your process — run reads/lookups silently, and keep your OWN prose to at most ONE short sentence per turn (the questions and proposals live in the cards, never duplicated in text). Before building from scratch, REUSE first: check the capability library (get_capability_context) and existing kinds (get_kind_context) so you wire in what the platform already does rather than reinventing it.'
+      '\n\nBUILDING A WHOLE SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a whole new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service"), the firm-admin.build-service skill is your AUTHORITATIVE PLAYBOOK: load_skill it and FOLLOW IT — the doctrine, the process-first interview, the build order (shell → documents → questionnaire → workflow → billing → enable), when you may propose a new data kind vs. request a capability, and how to finish. Do not improvise the flow from memory. Three behaviors hold no matter what: ' +
+      '(1) EVERY interview question goes through the ask_build_question tool (a click-to-answer card), NEVER free-text prose. Open with the attorney describing their process in their own words; DERIVE the platform choices (how automated the service is, how documents are produced, the gates) from that walkthrough and present them as plain-language CONFIRMATIONS to click, never as open questions. Never silently default a derived choice — confirm it. ' +
+      '(2) NEVER use platform vocabulary with the attorney — no "route", "generation_mode", "kind", "gate", "entity" in any question or confirmation; say it in attorney language ("the draft comes to you before the client sees it — right?") and translate to the schema silently inside the proposal. ' +
+      '(3) DO NOT NARRATE your process — run reads/lookups silently, and keep your OWN prose to at most ONE short sentence per turn (the questions and proposals live in the cards, never duplicated in text). Before building from scratch, REUSE first: check the capability library (get_capability_context) and existing kinds (get_kind_context) so you wire in what the platform already does rather than reinventing it.'
   }
   if (skillCatalogText) system += `\n\n${skillCatalogText}`
   return system
@@ -636,9 +657,14 @@ export function buildClaudeSystem(
 export function buildVolatileClaudeSystem(
   activeSkillsText = '',
   pageContext?: { path?: string; [k: string]: unknown } | null,
+  buildBriefText = '',
 ): string {
   const parts: string[] = []
   if (activeSkillsText) parts.push(activeSkillsText)
+  // The live BUILD BRIEF (WP4.2) — the approved state of the service under
+  // construction, re-derived every turn. Volatile by nature (it changes on every
+  // approval), so it lives after the cache breakpoint.
+  if (buildBriefText) parts.push(buildBriefText)
   const currentPath =
     typeof pageContext?.path === 'string' && pageContext.path ? pageContext.path : null
   if (currentPath) {
@@ -908,6 +934,28 @@ export async function recordAssistantTurn(
   return { eventId }
 }
 
+// Leave a QUERYABLE signal when the tool-round cap cuts a pending tool call off
+// (WP5.1) — an `observation` event (core-seeded, no state change) tagged
+// assistant_tool_cap, through the action layer. Wrapped by callers so this
+// diagnostic can never fail the turn that hit the cap.
+async function recordToolCapObservation(ctx: ActionContext, pendingTools: string[]): Promise<void> {
+  try {
+    await submitAction(ctx, {
+      actionKindName: 'event.record',
+      intentKind: 'reflection',
+      payload: {
+        event_kind_name: 'observation',
+        primary_entity_id: null,
+        source_type: 'system',
+        source_ref: 'system:assistant_tool_cap',
+        data: { tag: 'assistant_tool_cap', pending_tools: pendingTools },
+      },
+    })
+  } catch (err) {
+    console.error('assistantChat: failed to record assistant_tool_cap observation', err)
+  }
+}
+
 // Send a message to the chosen model with the matter/client context injected,
 // then record the exchange. Returns the reply (+ citations for research models).
 export async function assistantChat(
@@ -976,13 +1024,19 @@ export async function assistantChat(
     // the model can pull a playbook on demand (load_skill), plus any skills the
     // attorney force-selected from the /skills menu, and pass the current route.
     const catalog = await listSkillCatalog(ctx)
-    const forced = await loadForcedSkills(ctx, wizardForcedSkillSlugs(message, input.skillSlugs))
+    const forced = await loadForcedSkills(
+      ctx,
+      wizardForcedSkillSlugs(message, input.skillSlugs, input.buildMode),
+    )
     const system = buildClaudeSystem(
       scope,
       primaryEntityId,
       context,
       buildSkillCatalogText(catalog),
     )
+    const buildBrief = buildWizardEnabled()
+      ? await buildBuildBriefText(ctx, input.buildServiceKey)
+      : ''
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
@@ -993,7 +1047,11 @@ export async function assistantChat(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      volatileSystem: buildVolatileClaudeSystem(buildActiveSkillsText(forced), input.pageContext),
+      volatileSystem: buildVolatileClaudeSystem(
+        buildActiveSkillsText(forced),
+        input.pageContext,
+        buildBrief,
+      ),
       clientTools: buildAttorneyClientTools(ctx, input, {
         catalog,
         producedDocuments,
@@ -1010,6 +1068,12 @@ export async function assistantChat(
     reply = result.reply
     citations = result.citations
     usage = result.usage
+    if (result.toolCapHit) {
+      // The tool-round cap cut a pending step off (WP5.1) — never silent: tell the
+      // attorney in the reply and leave a queryable observation on the substrate.
+      reply += `\n\n⚠️ I hit my per-turn tool limit before finishing that step — say "continue" and I'll pick up where I left off.`
+      await recordToolCapObservation(ctx, [])
+    }
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -1127,7 +1191,10 @@ export async function* assistantChatStream(
     // the model can pull a playbook on demand (load_skill), plus any skills the
     // attorney force-selected from the /skills menu, and pass the current route.
     const catalog = await listSkillCatalog(ctx)
-    const forced = await loadForcedSkills(ctx, wizardForcedSkillSlugs(message, input.skillSlugs))
+    const forced = await loadForcedSkills(
+      ctx,
+      wizardForcedSkillSlugs(message, input.skillSlugs, input.buildMode),
+    )
     // Surface the picked skills as chips immediately, before the reply streams.
     for (const s of forced) yield { type: 'skill', slug: s.slug, name: s.name }
     const system = buildClaudeSystem(
@@ -1136,6 +1203,9 @@ export async function* assistantChatStream(
       context,
       buildSkillCatalogText(catalog),
     )
+    const buildBrief = buildWizardEnabled()
+      ? await buildBuildBriefText(ctx, input.buildServiceKey)
+      : ''
     const messages: ChatMessage[] = [
       { role: 'system', content: system },
       ...(input.history ?? []),
@@ -1146,7 +1216,11 @@ export async function* assistantChatStream(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      volatileSystem: buildVolatileClaudeSystem(buildActiveSkillsText(forced), input.pageContext),
+      volatileSystem: buildVolatileClaudeSystem(
+        buildActiveSkillsText(forced),
+        input.pageContext,
+        buildBrief,
+      ),
       clientTools: buildAttorneyClientTools(ctx, input, {
         catalog,
         producedDocuments,
@@ -1171,6 +1245,15 @@ export async function* assistantChatStream(
         citations = chunk.citations
       } else if (chunk.type === 'usage') {
         usage = chunk.usage
+      } else if (chunk.type === 'tool_cap') {
+        // The tool-round cap cut a pending step off (WP5.1) — never silent: a
+        // visible notice for the attorney + a queryable observation. NOT an
+        // 'error': the streamed reply is good and must not be failed/retried.
+        yield {
+          type: 'notice',
+          message: `The assistant hit its per-turn tool limit before finishing (pending: ${chunk.pendingTools.join(', ')}). Say "continue" to let it pick up where it left off.`,
+        }
+        await recordToolCapObservation(ctx, chunk.pendingTools)
       } else if (chunk.type === 'tool' && chunk.name === 'load_skill') {
         // Surface the loaded skill so the UI can show a "using <skill>" chip.
         const slug = ((chunk.input ?? {}) as { slug?: string }).slug ?? ''

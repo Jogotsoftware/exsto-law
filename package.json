@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "test:unit": "vitest run tests/invariants/hlc.test.ts tests/invariants/worker-backoff.test.ts tests/vertical/template-merge.test.ts tests/vertical/service-completeness.test.ts tests/vertical/stripe-payments.test.ts",
+    "test:unit": "vitest run tests/invariants/hlc.test.ts tests/invariants/worker-backoff.test.ts tests/vertical/template-merge.test.ts tests/vertical/service-completeness.test.ts tests/vertical/stripe-payments.test.ts tests/vertical/build-brief.test.ts tests/vertical/build-history-content.test.ts tests/vertical/build-mode-forcing.test.ts",
     "test:invariants": "vitest run tests/invariants",
     "test:watch": "vitest",
     "lint": "eslint .",
