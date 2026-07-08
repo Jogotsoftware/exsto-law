@@ -25,6 +25,9 @@ import {
   buildInvokeCapabilityStepTemplate,
   diagnoseCapabilityStepConfig,
   diagnoseMissingCapabilitySlug,
+  diagnoseEdgeTransition,
+  GATE_TRANSITION_VOCABULARY,
+  type GateTransitionOption,
   type StepActionSpec,
   type GateKind,
   type Lifecycle,
@@ -98,6 +101,11 @@ export interface WorkflowAuthoringContext {
   // step actions. Express a mid-service client ask or an AI task as an
   // invoke_capability stage that references one of these by slug.
   invocableCapabilities: InvocableCapabilitySummary[]
+  // WORKFLOW-AUTHORING-1 — the EXACT advance tokens per gate. An attorney/client edge
+  // MUST set `via` to one of gateTransitions[gate].options[].token; a system edge MUST
+  // set `on` to one; automatic edges are free-form. Pick the token whose label matches
+  // what advances the step — never write prose or invent a token, or the edge can't fire.
+  gateTransitions: Record<GateKind, { field: 'via' | 'on' | null; options: GateTransitionOption[] }>
 }
 
 // Load everything the model needs to PROPOSE a workflow for an existing service: the
@@ -153,6 +161,7 @@ export async function loadWorkflowAuthoringContext(
     availableTemplates,
     stepLibrary,
     invocableCapabilities,
+    gateTransitions: GATE_TRANSITION_VOCABULARY,
   }
 }
 
@@ -183,6 +192,16 @@ export async function validateProposedLifecycle(
   const errors: string[] = []
   errors.push(...validateLifecycle(graph).errors)
   errors.push(...validateLinearLifecycle(graph).errors)
+
+  // WORKFLOW-AUTHORING-1 — every attorney/client/system edge must name a REAL advance
+  // token (the runtime matches on it verbatim), not prose. Authoring-only (not in
+  // validateLifecycle) so legacy/manual graphs with other tokens are never rejected.
+  for (const s of graph) {
+    for (const e of s.advances_to) {
+      const err = diagnoseEdgeTransition(s.key, e.to, e.gate, e.via, e.on)
+      if (err) errors.push(err)
+    }
+  }
 
   // Referenced template ids must exist in the firm's document library. Collect the
   // ids the graph references, then check them against the real library in one read.

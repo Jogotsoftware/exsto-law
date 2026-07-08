@@ -126,10 +126,15 @@ const STAGE_SCHEMA = {
             enum: GATE_KINDS as unknown as string[],
             description: 'Who/what advances this edge.',
           },
-          via: { type: 'string' as const, description: 'Action that fires it (attorney/client).' },
+          via: {
+            type: 'string' as const,
+            description:
+              'For attorney/client gates: the EXACT advance token from get_workflow_context\'s `gateTransitions[gate].options[].token` (e.g. "document.upload", "draft.approve") — NEVER prose. The runtime matches on it verbatim; a made-up token means the step never advances.',
+          },
           on: {
             type: 'string' as const,
-            description: 'Event/condition it waits for (automatic/system).',
+            description:
+              'For system gates: the EXACT event token from `gateTransitions.system.options[].token` (e.g. "invoice.paid"). Automatic gates are free-form. Never invent a token.',
           },
         },
         required: ['to', 'gate'],

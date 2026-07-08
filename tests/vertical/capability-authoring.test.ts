@@ -9,6 +9,8 @@ import {
   buildInvokeCapabilityStepTemplate,
   diagnoseCapabilityStepConfig,
   diagnoseMissingCapabilitySlug,
+  allowedTransitionTokens,
+  diagnoseEdgeTransition,
 } from '@exsto/legal'
 
 const RUBRIC_SCHEMA = {
@@ -139,5 +141,76 @@ describe('diagnoseCapabilityStepConfig — names the exact expected path', () =>
       { message: { type: 'string', required: true }, note: { type: 'string', required: false } },
     )
     expect(errors).toEqual([])
+  })
+})
+
+// WORKFLOW-AUTHORING-1 — the gate-transition vocabulary. These pin the catalog to
+// the EXACT tokens the runtime dispatches on (the "single source" guarantee): if a
+// dispatch call site changes, this test is where it surfaces.
+describe('gate-transition vocabulary — pinned to the runtime dispatch tokens', () => {
+  it('client via = the dispatchClientDelivery action kinds', () => {
+    // handlers/booking.ts, documentUpload.ts, clientMessage.ts.
+    expect(allowedTransitionTokens('client')?.sort()).toEqual(
+      ['booking.create', 'client.message.post', 'document.upload'].sort(),
+    )
+  })
+
+  it('system on = the dispatchLifecycleEvent event kinds', () => {
+    // handlers/invoice.ts, esign.ts, call.ts.
+    expect(allowedTransitionTokens('system')?.sort()).toEqual(
+      ['esign.completed', 'invoice.paid', 'transcript.received'].sort(),
+    )
+  })
+
+  it('attorney via = the two attorney advances', () => {
+    // handlers/matterWorkflow.ts (legal.matter.advance), handlers/draft.ts (draft.approve).
+    expect(allowedTransitionTokens('attorney')?.sort()).toEqual(
+      ['draft.approve', 'legal.matter.advance'].sort(),
+    )
+  })
+
+  it('automatic is free-form (no fixed vocabulary)', () => {
+    expect(allowedTransitionTokens('automatic')).toBeNull()
+  })
+})
+
+describe('diagnoseEdgeTransition — names the offending token + the allowed set', () => {
+  it('flags prose in a client via (the exact observed bug)', () => {
+    const err = diagnoseEdgeTransition(
+      'client_intake',
+      'first_review',
+      'client',
+      'Client submits intake and uploads their draft agreement',
+      undefined,
+    )
+    expect(err).toContain('document.upload')
+    expect(err).toContain('never advance')
+  })
+
+  it('flags a wrong-punctuation system on (invoice_paid vs invoice.paid)', () => {
+    const err = diagnoseEdgeTransition(
+      'await_payment',
+      'closed',
+      'system',
+      undefined,
+      'invoice_paid',
+    )
+    expect(err).toContain('invoice.paid')
+  })
+
+  it('passes a real token', () => {
+    expect(diagnoseEdgeTransition('a', 'b', 'client', 'document.upload', undefined)).toBeNull()
+    expect(diagnoseEdgeTransition('a', 'b', 'attorney', 'draft.approve', undefined)).toBeNull()
+    expect(diagnoseEdgeTransition('a', 'b', 'system', undefined, 'invoice.paid')).toBeNull()
+  })
+
+  it('never constrains an automatic edge (free-form on)', () => {
+    expect(
+      diagnoseEdgeTransition('a', 'b', 'automatic', undefined, 'anything_descriptive'),
+    ).toBeNull()
+  })
+
+  it('leaves an ABSENT token to validateLifecycle (no double error)', () => {
+    expect(diagnoseEdgeTransition('a', 'b', 'client', undefined, undefined)).toBeNull()
   })
 })
