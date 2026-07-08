@@ -113,22 +113,25 @@ export function ServiceProposalCard({
         </span>
       </div>
 
-      {proposal.summary && (
+      {/* The CLIENT-FACING description leads — it's what the attorney is actually
+          approving onto their booking page. The AI's WHY (summary) is a muted
+          footnote, not the headline: reasoning is context, not content. */}
+      {proposal.description && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {proposal.summary}
+          {proposal.description}
         </div>
       )}
 
       <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-        {proposal.description && (
-          <div>
-            <strong>Description:</strong> {proposal.description}
-          </div>
-        )}
         <div>
           <strong>Route:</strong> {proposal.route} · <strong>Documents:</strong>{' '}
           {proposal.generationMode === 'ai_draft' ? 'AI draft' : 'template merge'}
         </div>
+        {proposal.summary && (
+          <div className="text-muted" style={{ marginTop: 4 }}>
+            {proposal.summary}
+          </div>
+        )}
         {/* Set expectations: a created service starts disabled until it's completed. */}
         <div className="text-muted">Created disabled — finish setting it up, then enable it.</div>
       </div>

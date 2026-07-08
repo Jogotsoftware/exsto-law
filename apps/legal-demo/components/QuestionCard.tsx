@@ -141,14 +141,16 @@ export function QuestionCard({
                 }
                 aria-label="Your answer"
               />
+              {/* Same treatment as the chat composer's send (uac-send) — one send
+                  affordance across the app, not a second heavier variant. */}
               <button
                 type="button"
-                className="uac-qcard-textsend"
+                className="uac-send"
                 onClick={submitText}
                 disabled={!text.trim()}
                 aria-label="Submit answer"
               >
-                <SendIcon size={14} />
+                <SendIcon size={16} />
               </button>
             </div>
           )}

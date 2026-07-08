@@ -82,7 +82,7 @@ const PROPOSE_SERVICE_TOOL_DEF = {
       summary: {
         type: 'string',
         description:
-          'A one-paragraph plain-language summary of WHY this service and what it is for. Shown to the attorney and recorded as the reasoning trace on approve.',
+          'ONE crisp sentence of what the service IS and DOES, written for the attorney (e.g. "Reviews a client\'s healthcare employment contract and returns attorney notes plus a ready-to-send employer email."). NEVER process narration — "no existing service covers this, so it is new", "jurisdiction assumed…", or route/mode restatements belong in your private reasoning, never in text the attorney reads. Recorded as the reasoning trace on approve.',
       },
       confidence: {
         type: 'number',
@@ -146,7 +146,7 @@ export function buildProposeServiceTool(
         context.serviceKeys,
       )
       if (!validation.ok) {
-        return `The proposed service is not valid and was NOT captured. Fix these and call propose_service again: ${validation.errors.join('; ')}`
+        return `The proposed service is not valid and was NOT captured. Fix these and call propose_service AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
       const confidence =
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
@@ -162,7 +162,7 @@ export function buildProposeServiceTool(
         summary: (args.summary ?? '').trim() || `Proposed new service "${displayName}".`,
         confidence,
       })
-      return `The proposed service "${displayName}" (key "${derivedKey}") is shown to the attorney as an approval card; it is NOT created until they approve. Reply with ONE short sentence pointing them to it; do NOT repeat the proposal details in prose.`
+      return `The proposed service "${displayName}" (key "${derivedKey}") is shown to the attorney as an approval card; it is NOT created until they approve. The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the proposal details in prose.`
     },
   }
 }

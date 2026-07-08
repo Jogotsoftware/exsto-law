@@ -192,7 +192,7 @@ export function buildProposeWorkflowTool(
       }
       const validation = await validateProposedLifecycle(ctx, graph)
       if (!validation.ok) {
-        return `The proposed workflow is not valid and was NOT captured. Fix these and call propose_workflow again: ${validation.errors.join('; ')}`
+        return `The proposed workflow is not valid and was NOT captured. Fix these and call propose_workflow AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
       const confidence =
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
@@ -204,7 +204,7 @@ export function buildProposeWorkflowTool(
         summary: (args.summary ?? '').trim() || `Proposed workflow for ${serviceKey}.`,
         confidence,
       })
-      return `The proposed workflow for "${serviceKey}" (${graph.length} steps) is shown to the attorney as an approval card; it is NOT saved until they approve. Reply with ONE short sentence pointing them to it; do NOT repeat the workflow steps in prose.`
+      return `The proposed workflow for "${serviceKey}" (${graph.length} steps) is shown to the attorney as an approval card; it is NOT saved until they approve. The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the workflow steps in prose.`
     },
   }
 }
