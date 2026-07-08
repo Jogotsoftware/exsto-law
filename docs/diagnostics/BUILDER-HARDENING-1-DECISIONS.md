@@ -213,3 +213,40 @@ T1 creates the cache (the ~16k-char skill body + base prompt); T2/T3 read it bac
 - The interactive click-through build (a human approving each card in the browser) remains Joe's path; the scripted runs drive the same server generator with the same playbook and prove the transcript/interview/token behavior, but do not click Approve through the browser.
 - The pre-existing hardcoded "Pacheco Law" firm identity in `SYSTEM_PROMPT` is still untouched — flagged (again) for the tenancy pass; no new tenant-specific text was added.
 - Existing built services (e.g. tenant-zero's `healthcare_employment_contract_review`) predate the `internal` flag; their attorney sections gain it only on a re-propose of the questionnaire. New builds set it from the start.
+
+---
+
+# CAPABILITY-RUNTIME-1-MERGE (2026-07-08) — merge, activate, verify live
+
+## Reconciliation (the brief's premise was stale)
+The session brief stated "#301 is merged, CI green." It was **OPEN, MERGEABLE, CLEAN, all checks green** — never actually merged (`origin/main` was still `808eafc`/#300). Per the no-merge-manager operating model, merged it here: squash `ccbc00016fc07f2016b58aa4f89b5fa88ffb98b7` (#301) is the tip of `main`. Applied migration **0118** to prod via the action-independent path (idempotent `event_kind_definition` inserts — `capability.invoked` now exists in tenant-zero + Liberty + sandbox, exactly 1 each) and **stamped the ledger** (`private.vertical_migration` frontier is now **0118**, `applied_at 2026-07-08 15:21:59Z`).
+
+## 1. Deploy confirm
+Netlify production deploy **`6a4e6ae4f29dc10007f8dfa2`**, `commit_ref ccbc00016fc07f2016b58aa4f89b5fa88ffb98b7` (the #301 merge), `state: ready`, `context: production`, `branch: main`, published **2026-07-08T15:23:14Z**, `plugin_state: success`, 1 function (Next.js Server Handler). The **boot line** (`[flags] LEGAL_WORKFLOW_ENGINE=ON`) is NOT retrievable via the Netlify MCP (project/deploy metadata only — same limitation as #298); the env var persists across deploys from when Joe set it for #298, and the engine is functionally proven live by step 4 (a matter would not bind/advance an instance with the flag off).
+
+## 2. Playbook reseed (content-checked)
+Ran `seed-firm-admin-skills.ts` against prod AFTER the deploy went live. Receipt (attribute-row query on the `firm-admin.build-service` `skill_body`, NOT `metadata->>'body'`): `valid_from = 2026-07-08 15:24:52Z` (postdates the 15:23:14Z deploy), body `20,305` chars (was ~16,437 in #300 — grew by the new section). The invoke-capability section is present at char 11,191 — verbatim excerpt: *"Runnable capabilities (beyond the 8 built-in steps).** `get_workflow_context` also returns `invocableCapabilities` — real platform abilities a step can RUN, not just the built-in step actions. When a step the attorney described matches one, PREFER it…"* — plus the `request-client-materials` mid-service-client-ask guidance (`has_materials_language = true`). (The brief's probe phrase "prefer an invocable capability" is not verbatim; the actual wording is "PREFER it over a generic manual step" — same intent, confirmed by the heading + excerpt.)
+
+## 3. THE OPEN QUESTION — is the client money-printer path autonomous today? **NO.**
+**Capabilities do NOT auto-run on stage entry.** Traced from code: the ONLY caller of `invokeCapabilityForMatter` in the entire repo is `apps/legal-demo/app/api/attorney/matters/[id]/workflow/invoke/route.ts`. **No advance path references the capability runtime** — grep of `handlers/intake.ts` (matter.open), `lifecycle/executor.ts` (advanceMatter/signalEvent), `handlers/workflow.ts` (legal.matter.advance), `handlers/draft.ts` (advanceInstanceOnApprove), `handlers/clientDelivery.ts` (dispatchClientDelivery) returns **nothing**. In the verified end-to-end run, each `invoke_capability` stage was triggered by the **test harness calling `invokeCapabilityForMatter` directly** (standing in for the window/route). So when a matter enters an `invoke_capability` stage (e.g. `ai_document_review`), it **PARKS there inert** — the AI review fires only when someone POSTs to the invoke route, and **no UI calls that route** (the route shipped in #301; the "Run capability" button did not).
+
+**Conclusion (which world):** the client self-serve path is **NOT autonomous**. Even if the graph advanced a client into the review stage on their own actions, the review would sit inert until a manual trigger. **The missing "Run capability" trigger (a Workflow-window button OR auto-run-on-entry) is a Phase-1 BLOCKER for the self-serve demo, not polish.** That is the priority-setting answer. (Not built this session, per scope.)
+
+## 4. Money shot re-verified on the merged/deployed build (sandbox)
+Tree parity confirmed: `git diff --stat cb3df1d ccbc000` is empty (the worktree tree == the squash-merged tree). Fresh run, real model, both sides — matter **`c5717ae0-8b57-4735-896d-563f00b7ecce`** (service `employment_contract_review_mrc8cjhs`), every row `tenant_id = …00fe-…0001`:
+- `current_state=closed, status=completed`, **6 turns**: `intake_submitted → first_review (via legal.matter.advance, attorney) → materials_requested (via draft.approve, attorney) → second_review (**via document.upload, gate client**) → approved (via draft.approve, attorney) → closed (gate system)`.
+- Both review memos: `generation_mode=ai_review`, **`reasoning_trace_id` NOT NULL** (all_have_trace=true).
+- 3 `capability.invoked` events; invoice row exists (entity kind `invoice`, `INV-2026-0002`, newest sandbox invoice at 15:28:17Z).
+The **client-gated advance via `document.upload`** (turn 4) is the client-dispatch fix firing on the deployed code.
+
+## 5. Internal-flag confirm (WP5-in-data, live)
+The brief's exact query (`entity` kind `questionnaire_template`, `metadata ILIKE '%"internal":true%'`) returns **0** — because in this codebase a service's questionnaire is stored as **`workflow_definition.transitions.intake_schema`**, not as a `questionnaire_template` entity's metadata. Querying the real location (service `employment_contract_review_mrc70en5`) shows the split:
+- **Client fields** (`internal:false`): `concern` ("What are you worried about?"), `contract_file` ("Upload the contract to review") — section "About you and the contract".
+- **Internal fields** (`internal:true`): `review_summary` ("Review summary"), `requested_changes` ("Requested changes") — section "Attorney review — completed during review".
+The `/book` client view (`filter(f => !f.internal)`) hides the entire attorney section. WP5-in-data is proven live.
+
+## Note — ADR 0046
+There is **no `docs/adr/0046` file**; "ADR 0046" is used as a label in the code comments + this decision log, not a written ADR. Flag for a follow-up: write the ADR (or drop the label). Not blocking.
+
+## Definition of done — met
+#301 merged (`ccbc000`) + deployed (`6a4e6ae4…`, production ready) + confirmed; migration 0118 applied + ledger stamped; playbook reseeded + content-verified (invoke-capability section present, postdates deploy); step-3 answered definitively (**NOT autonomous — button is a Phase-1 blocker**, mechanism cited from code); fresh sandbox end-to-end receipted on the merged build; internal-flag split pasted. No wiring bug found; nothing worked around.
