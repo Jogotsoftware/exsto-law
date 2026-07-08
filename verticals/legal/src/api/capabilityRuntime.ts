@@ -389,11 +389,17 @@ async function recordObservation(
 }
 
 // Advance one automatic edge out of `fromState` via the audited legal.matter.advance
-// path, as the agent (system) actor. Returns whether it advanced.
-async function advanceAutomaticFromStage(
+// path, as the agent (system) actor. Returns whether it advanced. `trigger` names the
+// signal that made the edge fire (defaults to the capability case; the generate_document
+// producing-autorun passes 'draft.completed'); it is recorded on the advance for audit.
+// Exported so the sibling producing-autorun runtimes (generateDocumentRuntime) reuse the
+// SAME audited advance rather than re-implementing it — the invoke_capability path is
+// unchanged (the added param is defaulted).
+export async function advanceAutomaticFromStage(
   agentCtx: ActionContext,
   matterEntityId: string,
   fromState: string,
+  trigger = 'capability.invoked',
 ): Promise<boolean> {
   const edge = await withActionContext(agentCtx, async (client) => {
     const instance = await getWorkflowInstanceForMatter(client, agentCtx.tenantId, matterEntityId)
@@ -410,15 +416,41 @@ async function advanceAutomaticFromStage(
     return allowedTransitions(graph, fromState, ['automatic'])[0] ?? null
   })
   if (!edge) return false
-  await submitAction(agentCtx, {
+  // legal.matter.advance rejects an `automatic` gate fired by a human actor. The module
+  // const above is TENANT-ZERO's agent actor; a different tenant (the sandbox, a second
+  // firm) has its OWN agent/system actor id, so the hardcoded id resolves to no row →
+  // treated as human → the advance is rejected. Resolve THIS tenant's agent/system actor
+  // so automatic advances work in every tenant (no-op in tenant-zero, where it resolves
+  // to the same id). This is why #303's automatic-gate branch — never exercised by an
+  // attorney/client-gated capability — was silently broken outside tenant-zero.
+  const systemActorId = await resolveTenantSystemActorId(agentCtx)
+  const sysCtx: ActionContext = { tenantId: agentCtx.tenantId, actorId: systemActorId }
+  await submitAction(sysCtx, {
     actionKindName: 'legal.matter.advance',
     intentKind: 'automatic_sync',
     payload: {
       matter_entity_id: matterEntityId,
       to_state: edge.to,
       gate: 'automatic',
-      trigger: 'capability.invoked',
+      trigger,
     },
   })
   return true
+}
+
+// The tenant's own system/agent actor id (an `automatic`/`system` advance must come from
+// a non-human actor). Prefers the tenant's `agent` actor (Claude), then any `system`
+// actor; falls back to the tenant-zero agent const if the tenant seeds neither (so
+// tenant-zero behavior is unchanged even if the lookup is ever empty).
+export async function resolveTenantSystemActorId(ctx: ActionContext): Promise<string> {
+  return withActionContext(ctx, async (client) => {
+    const r = await client.query<{ id: string }>(
+      `SELECT id FROM actor
+        WHERE tenant_id = $1 AND actor_type IN ('agent', 'system')
+        ORDER BY CASE actor_type WHEN 'agent' THEN 0 ELSE 1 END, id
+        LIMIT 1`,
+      [ctx.tenantId],
+    )
+    return r.rows[0]?.id ?? CLAUDE_AGENT_ACTOR_ID
+  })
 }

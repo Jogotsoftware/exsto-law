@@ -9,6 +9,10 @@ import type { ActionContext } from '@exsto/substrate'
 import { readClientSessionFromCookieHeader } from '@/lib/clientSession'
 
 export const runtime = 'nodejs'
+// RUNTIME-AUTORUN-2: a client delivery here (an upload/message that advances a gate) may
+// land the matter on a producing stage (generate_document), whose autorun drafts
+// synchronously in this request. Allow the model budget so it does not time out.
+export const maxDuration = 300
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

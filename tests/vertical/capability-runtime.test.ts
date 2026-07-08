@@ -10,7 +10,7 @@ import {
   validateLifecycle,
   validateLinearLifecycle,
   isHandlerImplemented,
-  scheduleCapabilityAutoRun,
+  scheduleProducingAutoRun,
   type Lifecycle,
 } from '@exsto/legal'
 
@@ -91,30 +91,113 @@ describe('invoke_capability step kind (ADR 0046)', () => {
   })
 })
 
-describe('scheduleCapabilityAutoRun — WP1 auto-run scheduling (ADR 0046)', () => {
+describe('scheduleProducingAutoRun — WP1 auto-run scheduling (ADR 0046)', () => {
   const base = { tenantId: 't', actorId: 'a' }
 
   it('enqueues a post-commit callback when the landed stage runs a capability', () => {
     const afterCommit: Array<() => Promise<void>> = []
-    scheduleCapabilityAutoRun({ ...base, afterCommit }, 'matter-1', 'review', REVIEW_GRAPH)
+    scheduleProducingAutoRun({ ...base, afterCommit }, 'matter-1', 'review', REVIEW_GRAPH)
     expect(afterCommit).toHaveLength(1)
   })
 
   it('enqueues NOTHING when the landed stage is a normal (non-capability) step', () => {
     const afterCommit: Array<() => Promise<void>> = []
-    scheduleCapabilityAutoRun(
-      { ...base, afterCommit },
-      'matter-1',
-      'intake_submitted',
-      REVIEW_GRAPH,
-    )
-    scheduleCapabilityAutoRun({ ...base, afterCommit }, 'matter-1', 'done', REVIEW_GRAPH)
+    scheduleProducingAutoRun({ ...base, afterCommit }, 'matter-1', 'intake_submitted', REVIEW_GRAPH)
+    scheduleProducingAutoRun({ ...base, afterCommit }, 'matter-1', 'done', REVIEW_GRAPH)
     expect(afterCommit).toHaveLength(0)
   })
 
   it('is a safe no-op when there is no post-commit queue (never runs inline)', () => {
     // No afterCommit array → cannot schedule safely → does nothing, no throw.
-    expect(() => scheduleCapabilityAutoRun(base, 'matter-1', 'review', REVIEW_GRAPH)).not.toThrow()
+    expect(() => scheduleProducingAutoRun(base, 'matter-1', 'review', REVIEW_GRAPH)).not.toThrow()
+  })
+})
+
+// RUNTIME-AUTORUN-2 — the producing-autorun generalizes past invoke_capability: a
+// generate_document stage auto-runs on entry too, and the dispatch is CLASS-BASED
+// (producing kind + automatic advancing edge), not a hardcoded 'generate_document'.
+const WILL_GRAPH: Lifecycle = [
+  {
+    key: 'client_intake',
+    label: 'Client intake',
+    entry: true,
+    action: { kind: 'view_intake' },
+    advances_to: [{ to: 'generate_will', gate: 'client', via: 'document.upload' }],
+  },
+  {
+    key: 'generate_will',
+    label: 'Generate the will',
+    action: { kind: 'generate_document' },
+    documents: [{ docKind: 'will' }],
+    // Producing + AUTOMATIC → auto-runs on entry.
+    advances_to: [{ to: 'review_send_will', gate: 'automatic', on: 'draft.completed' }],
+  },
+  {
+    key: 'review_send_will',
+    label: 'Review & send the will',
+    action: { kind: 'review_send_document' },
+    // Attorney gate → a human step; must NOT auto-run.
+    advances_to: [{ to: 'complete', gate: 'attorney', via: 'draft.approve' }],
+  },
+  {
+    key: 'complete',
+    label: 'Complete',
+    terminal: true,
+    action: { kind: 'complete_matter' },
+    advances_to: [],
+  },
+]
+
+describe('generate_document producing auto-run — RUNTIME-AUTORUN-2', () => {
+  const base = { tenantId: 't', actorId: 'a' }
+
+  it('enqueues a post-commit run when a matter enters a generate_document + automatic stage', () => {
+    const afterCommit: Array<() => Promise<void>> = []
+    scheduleProducingAutoRun({ ...base, afterCommit }, 'matter-1', 'generate_will', WILL_GRAPH)
+    expect(afterCommit).toHaveLength(1)
+  })
+
+  it('does NOT auto-run the attorney-gated review step (human gates still wait)', () => {
+    const afterCommit: Array<() => Promise<void>> = []
+    scheduleProducingAutoRun({ ...base, afterCommit }, 'matter-1', 'review_send_will', WILL_GRAPH)
+    expect(afterCommit).toHaveLength(0)
+  })
+
+  it('does NOT auto-run a generate_document stage whose advancing edge is NOT automatic', () => {
+    // The "producing + automatic" rule: a producing step an attorney advances by hand
+    // (attorney gate) does not autofire.
+    const manualGen: Lifecycle = [
+      {
+        key: 'gen',
+        label: 'Generate (attorney-triggered)',
+        entry: true,
+        action: { kind: 'generate_document' },
+        documents: [{ docKind: 'will' }],
+        advances_to: [{ to: 'done', gate: 'attorney', via: 'draft.approve' }],
+      },
+      {
+        key: 'done',
+        label: 'Done',
+        terminal: true,
+        action: { kind: 'complete_matter' },
+        advances_to: [],
+      },
+    ]
+    const afterCommit: Array<() => Promise<void>> = []
+    scheduleProducingAutoRun({ ...base, afterCommit }, 'matter-1', 'gen', manualGen)
+    expect(afterCommit).toHaveLength(0)
+  })
+
+  it('dispatch is class-based: both producing kinds route through the same scheduler', () => {
+    // invoke_capability (REVIEW_GRAPH 'review') and generate_document (WILL_GRAPH
+    // 'generate_will') both enqueue through the ONE scheduler — no kind is special-cased
+    // in the caller. A future producing kind slots in by adding a registry entry.
+    const a: Array<() => Promise<void>> = []
+    const b: Array<() => Promise<void>> = []
+    scheduleProducingAutoRun({ ...base, afterCommit: a }, 'm', 'review', REVIEW_GRAPH)
+    scheduleProducingAutoRun({ ...base, afterCommit: b }, 'm', 'generate_will', WILL_GRAPH)
+    expect(a).toHaveLength(1)
+    expect(b).toHaveLength(1)
   })
 })
 

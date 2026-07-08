@@ -21,6 +21,11 @@ import {
 // substrate record is written with CLIENT provenance (ADR 0035), so history shows
 // the client uploaded it, and the attorney sees it badged "Uploaded by client".
 export const runtime = 'nodejs'
+// RUNTIME-AUTORUN-2: a client upload here can advance the matter onto a producing stage
+// (generate_document) whose autorun drafts the document synchronously in this request
+// (post-commit, off the advance txn, but still in-request). Allow the model budget so
+// the will/document draft does not time out.
+export const maxDuration = 300
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 // The firm's public-intake SYSTEM actor — the portal write runs as this actor; the

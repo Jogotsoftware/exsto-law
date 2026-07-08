@@ -18,7 +18,7 @@ import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
 import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
-import { scheduleCapabilityAutoRun } from '../lifecycle/autoRun.js'
+import { scheduleProducingAutoRun } from '../lifecycle/autoRun.js'
 
 interface Ctx {
   tenantId: string
@@ -107,7 +107,7 @@ export async function dispatchClientDelivery(
   // ADR 0046 — the client's OWN delivery may land the matter on an invoke_capability
   // stage (e.g. re-review the newly uploaded doc). Run it AFTER commit so the client
   // self-serve path is autonomous — the AI fires with no attorney/route trigger.
-  scheduleCapabilityAutoRun(ctx, matterEntityId, edge.to, graph)
+  scheduleProducingAutoRun(ctx, matterEntityId, edge.to, graph)
 
   return { from, to: edge.to }
 }
