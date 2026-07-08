@@ -67,4 +67,22 @@ describe('public booking availability — rules ∩ busy (acceptance C/F)', () =
     // And the vast majority of slots remain available (a single busy block).
     expect(withBusy.filter((x) => x.available).length).toBeGreaterThan(free.length - 5)
   })
+
+  // BOOKING-CALENDAR-VIEW-1 acceptance B (privacy, at the data layer): a BLOCKED cell
+  // is anonymous. The busy input is `{start, end}` only — the freebusy read carries no
+  // event titles — so a blocked slot's label is the SAME time-only label it had when
+  // free; the "busy" state adds available:false and nothing else. No event detail can
+  // reach the public calendar because none exists anywhere in this path.
+  it('a blocked slot is anonymous — same time-only label as when free, no event detail', () => {
+    const free = computeAvailabilityFromBusy(3, RULES, 30, [])
+    const s = free[4]!
+    const withBusy = computeAvailabilityFromBusy(3, RULES, 30, [
+      { start: ms(s.startIso), end: ms(s.endIso) },
+    ])
+    const blocked = withBusy.find((x) => x.startIso === s.startIso)!
+    expect(blocked.available).toBe(false)
+    expect(blocked.label).toBe(s.label) // identical to the free label — time only
+    // The label is a date/time string, never an event title / client name.
+    expect(blocked.label).toMatch(/\d/)
+  })
 })
