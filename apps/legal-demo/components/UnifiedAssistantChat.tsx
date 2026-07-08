@@ -281,6 +281,18 @@ function isTransientAssistantError(message: string): boolean {
   )
 }
 
+// Last line of defense so the transcript never shows machinery. The server
+// already humanizes model errors, but if a raw API-error body (e.g.
+// `529 {"type":"error",...}`) ever reaches the UI from any path, replace it
+// with a plain sentence — never render JSON or a request_id to the attorney.
+function humanizeClientError(message: string): string {
+  const looksLikeJson = /[{[]/.test(message) && /"(type|error|request_id)"\s*:/.test(message)
+  if (!looksLikeJson) return message
+  return isTransientAssistantError(message)
+    ? 'The assistant is briefly overloaded — please try again in a moment.'
+    : "The assistant couldn't complete that request. Please try again."
+}
+
 const MAX_PAGE_CONTENT_CHARS = 14000
 function capturePageContent(): string | undefined {
   if (typeof document === 'undefined') return undefined
@@ -2212,7 +2224,7 @@ export function UnifiedAssistantChat({
 
         {error && (
           <div role="alert" className="alert alert-error">
-            <span>{error}</span>
+            <span>{humanizeClientError(error)}</span>
             {/* One-click retry of the failed send — full conversation context is
                 rebuilt up to that point, so the exchange picks up where it left
                 off (the failed bubble is revived, not duplicated). */}
