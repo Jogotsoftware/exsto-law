@@ -87,7 +87,12 @@ interface BookingRules {
   bufferMinutes: number
   minLeadTimeHours: number
   defaultDurationMinutes: number
+  // BOOKING-FRONTDOOR-1 WP2 — meeting lengths the standalone booker offers.
+  meetingLengthsMinutes: number[]
 }
+
+// The meeting-length options an attorney can offer on the standalone booking link.
+const MEETING_LENGTH_OPTIONS = [15, 30, 45, 60, 90]
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -168,6 +173,8 @@ export default function SettingsPage() {
   const [sigEnabled, setSigEnabled] = useState<boolean>(true)
   const [savedSig, setSavedSig] = useState(false)
   const [bookingRules, setBookingRules] = useState<BookingRules | null>(null)
+  const [publicSlug, setPublicSlug] = useState<string | null>(null)
+  const [copiedLink, setCopiedLink] = useState(false)
   const [savedRules, setSavedRules] = useState(false)
   // Firm details edit mode: the section is read-only until the attorney clicks
   // Edit, which swaps the static values for inputs.
@@ -232,10 +239,11 @@ export default function SettingsPage() {
 
   const refreshBookingRules = useCallback(async () => {
     try {
-      const r = await callAttorneyMcp<{ rules: BookingRules }>({
+      const r = await callAttorneyMcp<{ rules: BookingRules; publicSlug: string | null }>({
         toolName: 'legal.booking_rules.get',
       })
       setBookingRules(r.rules)
+      setPublicSlug(r.publicSlug)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -270,6 +278,23 @@ export default function SettingsPage() {
       const has = r.bookableDays.includes(day)
       const next = has ? r.bookableDays.filter((d) => d !== day) : [...r.bookableDays, day]
       return { ...r, bookableDays: next.sort((a, b) => a - b) }
+    })
+    setSavedRules(false)
+  }
+
+  // BOOKING-FRONTDOOR-1 WP2 — the meeting lengths offered on the standalone booker.
+  // Never let the list go empty (the server would fall back to the default anyway).
+  function toggleMeetingLength(minutes: number) {
+    setBookingRules((r) => {
+      if (!r) return r
+      const has = r.meetingLengthsMinutes.includes(minutes)
+      const next = has
+        ? r.meetingLengthsMinutes.filter((m) => m !== minutes)
+        : [...r.meetingLengthsMinutes, minutes]
+      return {
+        ...r,
+        meetingLengthsMinutes: (next.length ? next : [minutes]).sort((a, b) => a - b),
+      }
     })
     setSavedRules(false)
   }
@@ -765,6 +790,58 @@ export default function SettingsPage() {
                   ))}
                 </select>
               </label>
+              <label>
+                <span>Meeting lengths offered (public booking link)</span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                  {MEETING_LENGTH_OPTIONS.map((m) => {
+                    const on = bookingRules.meetingLengthsMinutes.includes(m)
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => toggleMeetingLength(m)}
+                        style={{
+                          padding: '4px 12px',
+                          borderRadius: 999,
+                          border: `1px solid ${on ? '#1a1a2e' : '#d1d5db'}`,
+                          background: on ? '#1a1a2e' : '#fff',
+                          color: on ? '#fff' : 'inherit',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                        }}
+                      >
+                        {m}m
+                      </button>
+                    )
+                  })}
+                </div>
+              </label>
+            </div>
+            <div style={{ marginTop: 'var(--space-4)' }}>
+              <span style={{ display: 'block', fontSize: 13, color: '#6b7280', marginBottom: 6 }}>
+                Your public booking link
+              </span>
+              {publicSlug ? (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <code style={{ fontSize: 13 }}>/book/{publicSlug}</code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = `${window.location.origin}/book/${publicSlug}`
+                      void navigator.clipboard?.writeText(url)
+                      setCopiedLink(true)
+                      setTimeout(() => setCopiedLink(false), 1500)
+                    }}
+                  >
+                    {copiedLink ? 'Copied ✓' : 'Copy link'}
+                  </button>
+                  <a href={`/book/${publicSlug}`} target="_blank" rel="noreferrer">
+                    Open →
+                  </a>
+                </div>
+              ) : (
+                <span style={{ fontSize: 13, color: '#6b7280' }}>Not configured yet.</span>
+              )}
             </div>
             <div className="firm-details-actions" style={{ marginTop: 'var(--space-4)' }}>
               <button

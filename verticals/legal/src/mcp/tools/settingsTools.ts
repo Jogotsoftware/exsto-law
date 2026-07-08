@@ -5,6 +5,7 @@ import {
   disconnectIntegration,
   getFirmSignature,
   getFirmBookingRules,
+  getOwnPublicSlug,
   getFirmDefaultRate,
   setFirmDefaultRate,
   getTenantSettings,
@@ -80,10 +81,13 @@ registerTool({
 registerTool({
   name: 'legal.booking_rules.get',
   description:
-    'Fetch the firm booking rules: bookable days/hours, buffer between calls, minimum lead time, slot granularity, and default consultation duration.',
+    'Fetch the firm booking rules: bookable days/hours, meeting lengths offered, buffer between calls, minimum lead time, slot granularity, and default consultation duration — plus the firm public booking slug (for the standalone /book/{slug} link).',
   mode: 'read',
-  handler: async (ctx: ActionContext) => ({ rules: await getFirmBookingRules(ctx) }),
-} satisfies Tool<Record<string, never>, { rules: FirmBookingRules }>)
+  handler: async (ctx: ActionContext) => ({
+    rules: await getFirmBookingRules(ctx),
+    publicSlug: await getOwnPublicSlug(ctx),
+  }),
+} satisfies Tool<Record<string, never>, { rules: FirmBookingRules; publicSlug: string | null }>)
 
 registerTool({
   name: 'legal.booking_rules.update',

@@ -20,6 +20,10 @@ interface ClientCreatePayload {
   // Existing entities to re-parent under this new client.
   contact_ids?: string[]
   matter_ids?: string[]
+  // Optional entity metadata (additive; existing callers pass none → {}). The
+  // standalone booking front door uses this to stamp a lightweight lead's email /
+  // phone / reason / source on the CRM row it creates (BOOKING-FRONTDOOR-1 WP4).
+  metadata?: Record<string, unknown>
 }
 
 // Write/replace a client attribute (append-only: a new attribute row supersedes).
@@ -84,7 +88,16 @@ registerActionHandler('legal.client.create', async (ctx, client, payload, action
     ctx.tenantId,
     CLIENT_ENTITY_KIND,
   )
-  const clientEntityId = await insertEntity(client, ctx.tenantId, actionId, clientKindId, name, {})
+  const metadata =
+    p.metadata && typeof p.metadata === 'object' && !Array.isArray(p.metadata) ? p.metadata : {}
+  const clientEntityId = await insertEntity(
+    client,
+    ctx.tenantId,
+    actionId,
+    clientKindId,
+    name,
+    metadata,
+  )
 
   await setClientAttr(client, {
     tenantId: ctx.tenantId,

@@ -426,6 +426,27 @@ async function queryBusyBlocks(
     .filter((b) => Number.isFinite(b.start) && Number.isFinite(b.end))
 }
 
+// PURE availability intersection (no I/O — exported for tests): the rules-shaped
+// candidate grid with the busy blocks subtracted. Each busy block is expanded by the
+// firm buffer on both sides, so a candidate within `bufferMinutes` of an existing
+// meeting reads as taken (the buffer is the required gap between calls). This is the
+// "rules ∩ live-busy" computation the public booker proves.
+export function computeAvailabilityFromBusy(
+  daysOut: number,
+  rules: FirmBookingRules,
+  durationMinutes: number,
+  busy: Array<{ start: number; end: number }>,
+): AvailabilitySlot[] {
+  const bufMs = rules.bufferMinutes * 60_000
+  const candidates = generateCandidateSlots(daysOut, rules, durationMinutes)
+  return candidates.map((slot) => {
+    const s = new Date(slot.startIso).getTime()
+    const e = new Date(slot.endIso).getTime()
+    const conflict = busy.some((b) => s < b.end + bufMs && e > b.start - bufMs)
+    return { ...slot, available: !conflict }
+  })
+}
+
 export async function getGoogleAvailability(
   tenantId: string,
   daysOut: number,
@@ -437,18 +458,7 @@ export async function getGoogleAvailability(
   // Pad the horizon by 1 day so freebusy covers the last slot's end time.
   const end = new Date(now.getTime() + (daysOut + 1) * 24 * 3600 * 1000)
   const busy = await queryBusyBlocks(tenantId, now.toISOString(), end.toISOString(), actorId)
-
-  // Expand each busy block by the firm buffer on both sides, so a candidate
-  // adjacent to an existing meeting (within the buffer) reads as taken — the
-  // buffer is the required gap between calls.
-  const bufMs = rules.bufferMinutes * 60_000
-  const candidates = generateCandidateSlots(daysOut, rules, durationMinutes)
-  return candidates.map((slot) => {
-    const s = new Date(slot.startIso).getTime()
-    const e = new Date(slot.endIso).getTime()
-    const conflict = busy.some((b) => s < b.end + bufMs && e > b.start - bufMs)
-    return { ...slot, available: !conflict }
-  })
+  return computeAvailabilityFromBusy(daysOut, rules, durationMinutes, busy)
 }
 
 // Contract M (low-level): merged busy intervals on the synced Google calendar

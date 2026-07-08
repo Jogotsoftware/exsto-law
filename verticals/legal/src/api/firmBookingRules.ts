@@ -37,6 +37,10 @@ export interface FirmBookingRules {
   minLeadTimeHours: number
   // Consultation length used when a service has no explicit duration_minutes.
   defaultDurationMinutes: number
+  // BOOKING-FRONTDOOR-1 WP2: the meeting lengths the standalone booker offers the
+  // prospect to pick from (minutes). Availability is computed per chosen length.
+  // Empty/absent → [defaultDurationMinutes] so the in-service path is unaffected.
+  meetingLengthsMinutes: number[]
 }
 
 // Defaults reproduce the prior hardcoded behavior (Mon–Fri, 9–5 ET, 30-min
@@ -49,6 +53,7 @@ export const DEFAULT_FIRM_BOOKING_RULES: FirmBookingRules = {
   bufferMinutes: 0,
   minLeadTimeHours: 0,
   defaultDurationMinutes: 30,
+  meetingLengthsMinutes: [30],
 }
 
 const FIRM_BOOKING_RULES_KIND = 'firm.booking_rules'
@@ -91,6 +96,28 @@ export function normalizeFirmBookingRules(stored: unknown): FirmBookingRules {
     end = d.bookableHours.end
   }
 
+  const defaultDurationMinutes = clampInt(
+    s.defaultDurationMinutes,
+    5,
+    240,
+    d.defaultDurationMinutes,
+  )
+
+  // Meeting lengths the booker offers: clamp each, drop junk, dedupe, sort. An
+  // empty/all-invalid list falls back to [defaultDurationMinutes] so a firm that
+  // never configured lengths still offers exactly its default (in-service path
+  // reads defaultDurationMinutes directly and is unaffected).
+  const lengths = Array.isArray(s.meetingLengthsMinutes)
+    ? Array.from(
+        new Set(
+          s.meetingLengthsMinutes
+            .map((x) => (typeof x === 'number' ? Math.round(x) : Number(x)))
+            .filter((x) => Number.isInteger(x) && x >= 5 && x <= 240),
+        ),
+      ).sort((a, b) => a - b)
+    : []
+  const meetingLengthsMinutes = lengths.length ? lengths : [defaultDurationMinutes]
+
   return {
     timezone,
     bookableDays,
@@ -98,7 +125,8 @@ export function normalizeFirmBookingRules(stored: unknown): FirmBookingRules {
     slotGranularityMinutes: clampInt(s.slotGranularityMinutes, 5, 240, d.slotGranularityMinutes),
     bufferMinutes: clampInt(s.bufferMinutes, 0, 240, d.bufferMinutes),
     minLeadTimeHours: clampInt(s.minLeadTimeHours, 0, 720, d.minLeadTimeHours),
-    defaultDurationMinutes: clampInt(s.defaultDurationMinutes, 5, 240, d.defaultDurationMinutes),
+    defaultDurationMinutes,
+    meetingLengthsMinutes,
   }
 }
 
