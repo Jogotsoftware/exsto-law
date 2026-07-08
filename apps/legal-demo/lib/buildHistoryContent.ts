@@ -1,14 +1,23 @@
 // Model-facing record of an assistant turn that spoke through cards (WP4.1).
 // Tool-call turns (ask_build_question, propose_*) often carry no prose, so their
 // committed `content` is '' — and a turn absent from history means the model
-// forgets it ever asked or proposed. Worse, the old stub ("[You presented N
-// proposal card(s)]") dropped the CONTENT of every proposal, so mid-build the
-// model could not see the service key, the template tokens, the questionnaire
-// fields, or the workflow it had itself authored. Encode each card's actual
-// substance compactly so the next request replays what was built.
+// forgets it ever asked or proposed.
+//
+// 1.1 REFRAME (the leak fix): these notes used to be BRACKETED PSEUDO-PROSE
+// ("[You asked via ask_build_question (key …): <verbatim question>]") appended to
+// the assistant's OWN reply. The model saw them as its own prior words and imitated
+// them — typing the annotation as visible prose instead of calling the tool (real
+// build transcripts showed exactly this). Two changes break the imitation:
+//   • every note is wrapped in the ⟦…⟧ machinery sentinel (stripMachinery removes it
+//     from any rendered text, and the prompt tells the model never to reproduce it),
+//   • the notes are now TERSE and carry NO verbatim question text and NO field/token
+//     dumps — the live BUILD BRIEF (injected fresh every turn) already carries the
+//     artifact substance, so history only needs to say "a card was shown", not repeat
+//     its contents. Less to imitate, nothing lost.
 //
 // Deliberately structural/defensive over loose shapes (no imports from the card
 // components): history encoding must never crash a send over a missing field.
+import { MACHINERY_OPEN, MACHINERY_CLOSE } from './assistantText'
 
 interface BuildQuestionLike {
   key?: string
@@ -65,88 +74,44 @@ interface CardsLike {
   notices?: string[]
 }
 
-// Each card's note is capped so one huge artifact can't blow the history budget;
-// the full artifact lives on the card/substrate, the note is a reminder.
-const MAX_NOTE_CHARS = 1500
-
-function note(text: string): string {
-  return text.length > MAX_NOTE_CHARS ? `${text.slice(0, MAX_NOTE_CHARS)} …]` : text
-}
-
-function questionnaireFieldIds(
-  schema: CardsLike['questionnaireProposals'][number]['schema'],
-): string[] {
-  const ids: string[] = []
-  for (const s of schema?.sections ?? []) {
-    for (const f of s.fields ?? []) {
-      if (f.id) ids.push(f.id)
-      for (const m of f.memberFields ?? []) if (m.id) ids.push(m.id)
-    }
-  }
-  return ids
+// Wrap a terse state note in the machinery sentinel. stripMachinery removes it from
+// any rendered text; the model is told (prompt rule) never to reproduce these
+// characters or their content. Substance lives in the BUILD BRIEF, so notes stay short.
+function machinery(text: string): string {
+  return `${MACHINERY_OPEN}${text}${MACHINERY_CLOSE}`
 }
 
 export function assistantHistoryContent(reply: string, cards: CardsLike): string | undefined {
-  const notes: string[] = []
-  for (const q of cards.buildQuestions) {
-    notes.push(
-      note(`[You asked via ask_build_question (key "${q.key ?? ''}"): ${q.question ?? ''}]`),
-    )
-  }
+  const parts: string[] = []
+  const n = cards.buildQuestions.length
+  if (n) parts.push(`asked the attorney ${n === 1 ? 'a question' : `${n} questions`} via cards`)
   for (const p of cards.serviceProposals) {
-    notes.push(
-      note(
-        `[You proposed service "${p.displayName ?? ''}" (key ${p.derivedKey ?? '?'}; route=${p.route ?? '?'}, generation_mode=${p.generationMode ?? '?'}) as an approval card.]`,
-      ),
-    )
+    parts.push(`proposed the service shell "${p.derivedKey ?? p.displayName ?? '?'}"`)
   }
   for (const p of cards.templateProposals) {
-    notes.push(
-      note(
-        `[You proposed document template "${p.name ?? ''}" (${p.docKind ?? '?'}) for ${p.serviceKey ?? '?'}; tokens: ${(p.tokens ?? []).join(', ') || '(none)'}${p.orphanTokens?.length ? `; not yet covered by a question: ${p.orphanTokens.join(', ')}` : ''}. Body shown on the card.]`,
-      ),
-    )
+    parts.push(`proposed a document template for "${p.serviceKey ?? '?'}"`)
   }
   for (const p of cards.questionnaireProposals) {
-    const ids = questionnaireFieldIds(p.schema)
-    notes.push(
-      note(
-        `[You proposed a questionnaire for ${p.serviceKey ?? '?'} with fields: ${ids.join(', ') || '(none)'}${p.missingForTokens?.length ? `; still missing for tokens: ${p.missingForTokens.join(', ')}` : ''}${p.unusedFields?.length ? `; unused fields: ${p.unusedFields.join(', ')}` : ''}.]`,
-      ),
-    )
+    parts.push(`proposed the intake questionnaire for "${p.serviceKey ?? '?'}"`)
   }
   for (const p of cards.workflowProposals) {
-    const steps = (p.graph ?? [])
-      .map(
-        (s) =>
-          `${s.key ?? '?'}(${s.action?.kind ?? 'manual_task'}/${s.advances_to?.[0]?.gate ?? 'terminal'})`,
-      )
-      .join(' → ')
-    notes.push(note(`[You proposed a workflow for ${p.serviceKey ?? '?'}: ${steps || '(empty)'}]`))
+    parts.push(`proposed the workflow for "${p.serviceKey ?? '?'}"`)
   }
-  for (const p of cards.costProposals) {
-    notes.push(
-      note(
-        `[You proposed billing for ${p.serviceKey ?? '?'}: ${p.costType ?? '?'} ${p.amount ?? '?'}${p.hours ? ` (${p.hours}h)` : ''}.]`,
-      ),
-    )
-  }
-  for (const p of cards.kindProposals) {
-    notes.push(
-      note(
-        `[You proposed a new ${p.registry ?? '?'} kind "${p.kindName ?? ''}"${p.onEntityKind ? ` on ${p.onEntityKind}` : ''}${p.valueType ? ` (${p.valueType})` : ''}.]`,
-      ),
-    )
-  }
-  for (const p of cards.enableProposals) {
-    notes.push(note(`[You proposed ENABLING ${p.serviceKey ?? '?'} — the terminal card.]`))
-  }
-  if (notes.length || cards.notices?.length) {
-    notes.push(
-      '[The attorney approves cards in the UI; a confirmation message follows each approval.]',
-    )
-  }
-  for (const n of cards.notices ?? []) notes.push(note(`[Notice shown to the attorney: ${n}]`))
-  if (!notes.length) return undefined
-  return [reply, ...notes].filter(Boolean).join('\n')
+  for (const p of cards.costProposals) parts.push(`proposed billing for "${p.serviceKey ?? '?'}"`)
+  for (const p of cards.kindProposals)
+    parts.push(`proposed a new data field "${p.kindName ?? '?'}"`)
+  for (const p of cards.enableProposals) parts.push(`proposed ENABLING "${p.serviceKey ?? '?'}"`)
+  for (const _n of cards.notices ?? []) parts.push('a system notice was shown to the attorney')
+
+  if (!parts.length) return undefined
+  // The current build state (fields/tokens/steps) is in the injected BUILD BRIEF —
+  // this note only records THAT cards were shown so a card-only turn isn't empty.
+  // MUST NOT contain the sentinel characters itself (that would close the wrapper
+  // early); describe them in words instead.
+  const noteBody =
+    `this turn spoke through approval/question cards (the attorney acts on them in the UI): ` +
+    `${parts.join('; ')}. The live state is in the Current-build brief above — re-read it; ` +
+    `never repeat this note or any internal marker to the attorney.`
+  // Keep the model's own framing prose (real words), append the machinery note.
+  return [reply, machinery(noteBody)].filter(Boolean).join('\n')
 }

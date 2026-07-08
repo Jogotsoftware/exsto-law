@@ -98,3 +98,59 @@ There is **no dedicated `%tool_cap%` event kind** — by design, the cap marker 
 
 ## Out of scope, unchanged
 The interactive build-interview acceptance (Session 1 A/C) remains Joe's run — protocol above in "Not verifiable from this session". No registry changes, no new step kinds, no fixes applied beyond this report.
+
+---
+
+# BUILDER-HARDENING-1.1 — interview polish + render-layer leak fixes (2026-07-08)
+
+Follow-up after Joe ran a full interactive build (Healthcare Employment Contract Review) end-to-end: comprehension is solved; the remaining defects were the render layer leaking internal channels into the transcript, a few functional bugs, and interview pacing. Branch `builder-hardening-1.1`. No workflow-engine / step-catalog / gate / linear-constraint changes.
+
+## The one root cause behind WP1–3 (verified on real turns)
+
+The audit-style question in the brief for WP2 ("did the leaked turns call ask_build_question?") — the persisted `assistant.turn` event does NOT record `build_questions` (they're ephemeral), so I verified via the **`reply` text**: on the leaked turns (e.g. `1caf4303`, `ff9e0895`) the literal string `[You asked via ask_build_question (key "then_what_2"): …]` sits **inside the model's `reply` prose**, and every turn shows `bq_count = 0`. So the model did **not** call the tool — it **typed the annotation as prose**, imitating the `[You asked …]` / `[I'll continue …]` stubs it saw in its own history (`buildHistoryContent` appended them to the assistant's own message). WP2 and WP3 are the same disease at the model-INPUT layer. Fixed as a class at three layers:
+1. **Model input** — `apps/legal-demo/lib/buildHistoryContent.ts`: history notes reframed to TERSE, third-person, `⟦…⟧`-sentinel-wrapped records with NO verbatim question text / field dumps (the live BUILD BRIEF already carries the substance). Nothing imitable.
+2. **Render** — new `apps/legal-demo/lib/assistantText.ts` `stripMachinery()` removes `⟦…⟧` spans (incl. a half-streamed trailing open) and legacy bracketed machinery lines from ALL rendered assistant text (committed `t.content`, streaming, copy button). The last-line guarantee.
+3. **Prompt** — one rule in `SYSTEM_PROMPT` (applies to every mode): never write `⟦`/`⟧`, never reproduce their content, never type a `[You asked …]`-style status line.
+
+## Work packages
+- **WP1** thinking → animated indicator only (`uac-thinking-body` prose removed); already excluded from history + persistence.
+- **WP3** priming / approve-continuation / wrap-up strings wrapped by `driver()` in the `⟦…⟧` sentinel — acted on, never echoed; the wrap-up now passes the real booking URL.
+- **WP4** booking link = `/book?service=<key>`: the enable route returns `bookingLink`, the enable card renders real "Open booking page →" + "Copy booking link" buttons, and the wrap-up continuation hands the model that exact URL. No more model-typed href routing to `/`.
+- **WP5** diagnosis: the questionnaire schema had **no client/internal boundary at all** (the built `attorney_review` section's fields were plain `required:false`, nothing marked them). Fix = a new `internal` field flag (both branches): hidden from the `/book` client form + never client-required (view), and the builder marks attorney/system-filled tokens `internal:true` (field-flag). The token stays covered — variable contract intact.
+- **WP6** playbook (`firm-admin.build-service.md`): ONE open opener → derive → ONE batched confirmation turn → propose within ~3 answers; every non-open question offers 2–5 inferred options + free-text Other + multi-select where applicable; then-what loop demoted to a fallback. `ask_build_question` already supported `choices`/`multi_select`/`allow_free_text` — **no schema change needed** (confirmed).
+- **WP7** cards show human labels + plain-language gates ("waits for you" / "waits for the client" / "automatic"), field labels instead of ids, and no `[[MISSING]]` notation in the attorney view.
+- **WP8** forced skill body moved from the uncached volatile block into the CACHED system prefix (`buildClaudeSystem`); per-turn token usage already persisted on `assistant.turn` (confirmed).
+- **WP9** `question_without_card` observation: a server-side detector records when a `reply` parroted internal machinery (measurable WP2 recurrence).
+- **WP10** verified the builder SIMULATED the "notify on close" gap (prose claim, **zero** capability rows). Added a no-simulate playbook rule (a claim to log ⇒ a `request_capability` call) and a `step_close_notification` `requested` capability to the seed backlog.
+
+## Acceptance — receipts (all EXECUTION in sandbox `…00fe…0001`; project `jfcarzprfpoztxuqykoe`)
+
+**Gate:** typecheck ✓ · tsc -b ✓ · next build ✓ · lint ✓ · format ✓ · test:unit **42/42** ✓ (new: `stripMachinery` + reframed `assistantHistoryContent` suites).
+
+**Reseed (content-checked, tenant-zero, the wizard's tenant):** `firm-admin.build-service` `skill_body` `valid_from = 2026-07-08 06:00:51Z`; contains `BATCH, DON'T DRIP` (WP6) ✓, `CLIENT vs INTERNAL fields` (WP5) ✓, `NO-SIMULATE RULE` (WP10) ✓. Capabilities reseeded (22).
+
+**A — scripted build through the REAL model (Opus), sandbox, new playbook seeded there.** Two runs:
+- Healthcare review: T1 = ONE open opener card; T2 = **3 batched confirmation cards, each 2 options + Other**, all plain-language ("The client uploads their contract, and the main thing they get back is your plain-language email …— right?"); T3 = `service_proposal`. Reached the proposal in 3 answers.
+- LLC formation (thin opener): the deliverables question surfaced as `Q(4opt/**MULTI**/other): What does the client walk away with at the end?` — multi-select present.
+- **Machinery leaks in the rendered transcript across all runs: 0.** Zero thinking prose, zero `[You asked via ask_build_question …]`, zero injected-instruction text, zero platform vocabulary ("route"/"generation_mode" never spoken). Every question rendered as a card.
+
+**B — WP4 booking link:** resolves to **`/book?service=<serviceKey>`** (the `?service=` preset the public page honors), returned by the enable route as `bookingLink` and rendered as a real button — not a model-typed link.
+
+**C — WP5 internal boundary (sandbox service `wp5_review_1783490945326`):** stored schema keeps all 5 fields; the 3 attorney fields carry `internal:true` (`overall_summary`, `key_findings`, `attorney_name`). Applying the `/book` filter yields **only** `about_you → [client_name, contract_upload]`; the entire `attorney_review` section is hidden from the client. Variable contract still covered (all tokens present in the schema). Branch: **both** — added the field-flag AND the view respects it.
+
+**D — WP8 token/cache (sandbox `assistant.turn` usage, the 3-turn run):**
+| turn | input | output | cache_create | cache_read |
+|---|---|---|---|---|
+| T1 | 6 | 255 | **43,358** | 21,609 |
+| T2 | 10 | 748 | 1,992 | **109,391** |
+| T3 | 6 | 410 | 1,380 | **64,851** |
+T1 creates the cache (the ~16k-char skill body + base prompt); T2/T3 read it back — cache-read ≫ 0 after the first turn, and tiny `input_tokens` prove the skill body now rides the CACHED prefix (WP8.1).
+
+**E — WP9 telemetry:** `observation` kind queryable = true; `question_without_card` fires = **0** (target — all runs were leak-free). Watch query: `… WHERE k.kind_name='observation' AND e.payload->>'tag'='question_without_card'`.
+
+**F — WP10 capability write:** `step_close_notification` now exists in tenant-zero with status `requested` (was: nothing, despite the builder's prose claim). Plus the no-simulate playbook rule so a future declared gap must call `request_capability`, and the WP9 detector to catch prose-only claims.
+
+## Notes / not done here
+- The interactive click-through build (a human approving each card in the browser) remains Joe's path; the scripted runs drive the same server generator with the same playbook and prove the transcript/interview/token behavior, but do not click Approve through the browser.
+- The pre-existing hardcoded "Pacheco Law" firm identity in `SYSTEM_PROMPT` is still untouched — flagged (again) for the tenancy pass; no new tenant-specific text was added.
+- Existing built services (e.g. tenant-zero's `healthcare_employment_contract_review`) predate the `internal` flag; their attorney sections gain it only on a re-propose of the questionnaire. New builds set it from the start.

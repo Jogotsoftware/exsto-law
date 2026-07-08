@@ -131,7 +131,7 @@ const PROPOSE_QUESTIONNAIRE_TOOL_DEF = {
       schema: {
         type: 'object',
         description:
-          'The intake schema: { title?, sections: [{ id, title, fields: [{ id, label, type, required?, options?, memberFields? }] }] }. Field ids should match the template tokens you want to cover. Use ONLY the field types from get_questionnaire_context.',
+          'The intake schema: { title?, sections: [{ id, title, fields: [{ id, label, type, required?, options?, memberFields?, internal? }] }] }. Field ids should match the template tokens you want to cover. Use ONLY the field types from get_questionnaire_context. VISIBILITY: a document token the CLIENT does not provide — one the ATTORNEY fills during review, or a system/AI-review output (e.g. a review summary, findings, requested changes, the attorney name) — MUST be marked `internal: true` (and required:false). Internal fields still cover their {{token}} (the variable contract is satisfied) but are HIDDEN from the client booking form and never asked of the client. Group internal fields in their own section. Only fields the CLIENT actually fills at intake are left client-facing.',
       },
       summary: {
         type: 'string',

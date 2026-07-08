@@ -43,6 +43,10 @@ export async function POST(
       // The build is done — point the attorney at the live service.
       link: `/attorney/services/${encodeURIComponent(serviceKey)}`,
       label: `Service "${serviceKey}" (live)`,
+      // WP4: the REAL public booking URL for this service — the same link the
+      // attorney shares with clients. The card renders a real button for it, so it
+      // never depends on a model-typed link (which routed to "/").
+      bookingLink: `/book?service=${encodeURIComponent(serviceKey)}`,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

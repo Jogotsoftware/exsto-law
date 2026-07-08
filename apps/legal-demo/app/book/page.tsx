@@ -42,6 +42,10 @@ interface ServiceField {
   required?: boolean
   allow_unknown?: boolean
   options?: string[]
+  // 1.1 WP5 — attorney-filled / system-filled field. Present in the schema so the
+  // document's {{token}} is covered, but NEVER shown to the client on the booking
+  // form and never asked of them. The client view filters these out.
+  internal?: boolean
 }
 
 interface ServiceSection {
@@ -299,6 +303,9 @@ export default function BookPage() {
     if (!selectedService) return t('error.no_service')
     for (const section of selectedService.intakeSchema.sections ?? []) {
       for (const field of section.fields ?? []) {
+        // WP5: internal (attorney/system-filled) fields are never asked of the client,
+        // so they are never client-required — skip them in intake validation.
+        if (field.internal) continue
         if (!field.required) continue
         if (field.type === 'members_repeater') {
           if (members.length === 0) return t('error.member_required')
@@ -653,36 +660,42 @@ export default function BookPage() {
             {step === 'intake' && selectedService && (
               <>
                 <div className="bk-sections">
-                  {selectedService.intakeSchema.sections.map((section) => (
-                    <div key={section.id} className="bk-section">
-                      <h3 className="bk-section-title">
-                        {t(`section.${section.id}.title`, undefined, section.title)}
-                      </h3>
-                      <div className="bk-fields">
-                        {section.fields.map((field) => (
-                          <FieldRenderer
-                            key={field.id}
-                            field={field}
-                            responses={intakeResponses}
-                            setResponses={setIntakeResponses}
-                            members={members}
-                            setMembers={setMembers}
-                            staged={stagedUploads[field.id] ?? []}
-                            setStaged={(updater) =>
-                              setStagedUploads((prev) => ({
-                                ...prev,
-                                [field.id]: updater(prev[field.id] ?? []),
-                              }))
-                            }
-                            totalStaged={Object.values(stagedUploads).reduce(
-                              (n, files) => n + files.length,
-                              0,
-                            )}
-                          />
-                        ))}
+                  {selectedService.intakeSchema.sections
+                    // WP5: a section whose fields are ALL internal (attorney/system-
+                    // filled) never shows on the client booking form.
+                    .filter((section) => section.fields.some((f) => !f.internal))
+                    .map((section) => (
+                      <div key={section.id} className="bk-section">
+                        <h3 className="bk-section-title">
+                          {t(`section.${section.id}.title`, undefined, section.title)}
+                        </h3>
+                        <div className="bk-fields">
+                          {section.fields
+                            .filter((field) => !field.internal)
+                            .map((field) => (
+                              <FieldRenderer
+                                key={field.id}
+                                field={field}
+                                responses={intakeResponses}
+                                setResponses={setIntakeResponses}
+                                members={members}
+                                setMembers={setMembers}
+                                staged={stagedUploads[field.id] ?? []}
+                                setStaged={(updater) =>
+                                  setStagedUploads((prev) => ({
+                                    ...prev,
+                                    [field.id]: updater(prev[field.id] ?? []),
+                                  }))
+                                }
+                                totalStaged={Object.values(stagedUploads).reduce(
+                                  (n, files) => n + files.length,
+                                  0,
+                                )}
+                              />
+                            ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
                 {/* Intake-only services submit HERE — the captcha renders on
                     whichever step hosts the write (the public route 403s

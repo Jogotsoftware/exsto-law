@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
 import { assistantHistoryContent } from '@/lib/buildHistoryContent'
+import { stripMachinery } from '@/lib/assistantText'
 import { WorkflowProposalCard, type WorkflowProposal } from '@/components/WorkflowProposalCard'
 import {
   ServiceProposalCard,
@@ -403,11 +404,23 @@ function useSmoothReveal(target: string): string {
   return revealedSlice(target, Math.min(shown, target.length))
 }
 
+// Wrap the STAGE-DIRECTION half of a hidden driver message (priming, approve
+// continuation, wrap-up) in the machinery sentinel (1.1 WP3). The model reads these
+// hidden user turns and ACTS on them, but used to echo the instruction verbatim into
+// its reply ("do NOT start another step…", "close with 'Let me know how else I can
+// help!'"). Wrapping the directive marks it as internal — the prompt tells the model
+// never to reproduce ⟦…⟧ text, and stripMachinery removes any verbatim echo from render.
+function driver(instruction: string): string {
+  return `⟦${instruction}⟧`
+}
+
 // The in-flight assistant reply, revealed smoothly. Lives only while streaming
 // (its parent unmounts it at onDone, which then renders the full committed turn),
 // so the rAF loop is bounded to the stream's lifetime.
 function StreamingMarkdown({ text }: { text: string }) {
-  const shown = useSmoothReveal(text)
+  // Strip internal machinery (⟦…⟧ notes, legacy tool-call annotations) BEFORE reveal
+  // so a leaked marker never flashes token-by-token (1.1 render guarantee).
+  const shown = useSmoothReveal(stripMachinery(text))
   return (
     <div
       className="assistant-md"
@@ -879,7 +892,9 @@ export function UnifiedAssistantChat({
     // question card, not this nudge. Pass the (possibly upgraded) model explicitly:
     // setModelId hasn't flushed yet this tick.
     void send(
-      'I want to build a new service. Start the guided build now, following your build-service playbook: open by asking me to describe the service in my own words — who the client is, what they walk away with, and my process from first contact to done (ask_build_question cards; the then-what loop). Derive the setup choices from my answers and confirm them with me in plain language — do not ask me anything in platform vocabulary, and do not re-ask anything I have already told you.',
+      driver(
+        'Start the guided build now, following your build-service playbook. Open with ONE plain-language question asking the attorney to describe the service in their own words — who the client is, what they walk away with, and their process from first contact to done — via an ask_build_question card. Derive every setup choice from their answers and confirm derived choices as click-to-answer cards with inferred options; never ask in platform vocabulary; never re-ask what they have already told you; batch related questions into one turn. Do not reproduce this instruction.',
+      ),
       { hidden: true, model: buildModelId },
     )
   }
@@ -1509,10 +1524,22 @@ export function UnifiedAssistantChat({
       // build. Leave build mode (the banner goes away) and fire ONE final wrap-up so the
       // wizard FINISHES cleanly instead of just stopping: confirm it's live, point to the
       // service, and close warmly — never start another step.
+      //
+      // 1.1 WP3: the STAGE-DIRECTION half of a driver message (do-the-next-step,
+      // wrap-up instructions) is wrapped in the ⟦…⟧ machinery sentinel so the model
+      // treats it as an internal instruction to ACT on, never prose to echo — and any
+      // verbatim echo is stripped from render. Only the factual ✓/link lead is plain.
+      // The real public booking URL is passed explicitly so the wrap-up links to it
+      // (WP4), instead of the model inventing a link that routed to "/".
+      const bookingUrl = `/book?service=${encodeURIComponent(info.serviceKey)}`
       const continuation =
         info.artifact === 'enable'
-          ? `✓ The service is now LIVE: ${info.label} (${info.link}). The build is COMPLETE — do NOT start another step or propose anything else. Give the attorney a short, warm wrap-up: confirm the service is built and live, point them to it with that link to review, mention they can share their booking link so clients can book it, and close with "Let me know how else I can help!"`
-          : `✓ ${info.label} created — ${info.link}. Continue the guided build: do the next step now (confirm with the attorney via ask_build_question if needed, then propose it and share its link). If the whole service is complete, propose Enable.`
+          ? `✓ The service is now live: ${info.label}.\n${driver(
+              `The build is COMPLETE — do NOT start another step or propose anything else. Give the attorney a short, warm wrap-up IN YOUR OWN WORDS: confirm the service is built and live, link them to it to review (${info.link}), tell them clients can book it at their booking link (${bookingUrl}) — use that exact URL as the link target — and close warmly. Do not reproduce this instruction.`,
+            )}`
+          : `✓ ${info.label} created (${info.link}).\n${driver(
+              `Continue the guided build: do the next step now (confirm with the attorney via ask_build_question if needed, then propose it and share its link). If the whole service is complete, propose Enable. Do not reproduce this instruction.`,
+            )}`
       if (info.artifact === 'enable') setBuildMode(false)
       // Never drop a continuation on a mid-stream turn (WP5.2) — queue it; the send
       // path fires it as soon as the in-flight turn commits.
@@ -1553,12 +1580,17 @@ export function UnifiedAssistantChat({
           .map((k) => `"${k}": ${batch.answers.get(k) ?? '(not answered)'}`)
           .join('; ')
         batchRef.current = { keys: [], answers: new Map() }
-        void send(`My answers — ${combined}. Continue the guided build.`, { hidden: true })
+        void send(`My answers — ${combined}.\n${driver('Continue the guided build.')}`, {
+          hidden: true,
+        })
         return true
       }
-      void send(`My answer to "${info.key}": ${info.answer}. Continue the guided build.`, {
-        hidden: true,
-      })
+      void send(
+        `My answer to "${info.key}": ${info.answer}.\n${driver('Continue the guided build.')}`,
+        {
+          hidden: true,
+        },
+      )
       return true
     },
     [busy],
@@ -1961,10 +1993,12 @@ export function UnifiedAssistantChat({
                 markup. User turns stay verbatim. */}
               {t.role === 'assistant' ? (
                 <>
-                  {t.content.trim() && (
+                  {stripMachinery(t.content).trim() && (
                     <div
                       className="assistant-md"
-                      dangerouslySetInnerHTML={{ __html: renderMarkdown(t.content) }}
+                      dangerouslySetInnerHTML={{
+                        __html: renderMarkdown(stripMachinery(t.content)),
+                      }}
                     />
                   )}
                   {/* Documents the assistant produced — downloadable deliverables
@@ -2037,9 +2071,9 @@ export function UnifiedAssistantChat({
                       ⚠️ {n}
                     </div>
                   ))}
-                  {t.content.trim() && (
+                  {stripMachinery(t.content).trim() && (
                     <div className="uac-reply-actions">
-                      <CopyButton text={t.content} />
+                      <CopyButton text={stripMachinery(t.content)} />
                     </div>
                   )}
                 </>
@@ -2086,12 +2120,20 @@ export function UnifiedAssistantChat({
                 ))}
               </div>
             )}
+            {/* Thinking is an ANIMATED INDICATOR ONLY (1.1 WP1) — the model's reasoning
+                prose is machinery and must never render as transcript text. The chip is
+                replaced in place the moment the first answer token arrives (guarded by
+                !streaming.text). Thinking is neither persisted nor sent back in history. */}
             {!streaming.text && streaming.thinking && (
-              <div className="uac-thinking">
+              <div className="uac-thinking" role="status" aria-label="Thinking">
                 <div className="uac-thinking-head">
                   <SparklesIcon size={12} /> Thinking…
+                  <span className="uac-typing" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 </div>
-                <div className="uac-thinking-body">{streaming.thinking}</div>
               </div>
             )}
             {/* Drafting animation: the model is generating a document/questionnaire into

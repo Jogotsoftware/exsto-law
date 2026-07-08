@@ -40,6 +40,12 @@ export interface ServiceField {
   options?: string[]
   memberFields?: ServiceField[]
   minItems?: number
+  // 1.1 WP5 — visibility boundary. A field the ATTORNEY fills during review (or a
+  // system/AI-review output token), NOT collected from the client at intake. It stays
+  // in the schema so the variable contract still covers its {{token}}, but the public
+  // booking form hides it and never asks the client for it. Default absent = client-
+  // facing. The build wizard sets this on attorney-review / system-filled fields.
+  internal?: boolean
 }
 
 export interface ServiceSection {
