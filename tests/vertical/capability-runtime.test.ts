@@ -10,6 +10,7 @@ import {
   validateLifecycle,
   validateLinearLifecycle,
   isHandlerImplemented,
+  scheduleCapabilityAutoRun,
   type Lifecycle,
 } from '@exsto/legal'
 
@@ -87,6 +88,33 @@ describe('invoke_capability step kind (ADR 0046)', () => {
     const res = validateLifecycle(bad)
     expect(res.ok).toBe(false)
     expect(res.errors.some((e) => e.includes('unknown action kind'))).toBe(true)
+  })
+})
+
+describe('scheduleCapabilityAutoRun — WP1 auto-run scheduling (ADR 0046)', () => {
+  const base = { tenantId: 't', actorId: 'a' }
+
+  it('enqueues a post-commit callback when the landed stage runs a capability', () => {
+    const afterCommit: Array<() => Promise<void>> = []
+    scheduleCapabilityAutoRun({ ...base, afterCommit }, 'matter-1', 'review', REVIEW_GRAPH)
+    expect(afterCommit).toHaveLength(1)
+  })
+
+  it('enqueues NOTHING when the landed stage is a normal (non-capability) step', () => {
+    const afterCommit: Array<() => Promise<void>> = []
+    scheduleCapabilityAutoRun(
+      { ...base, afterCommit },
+      'matter-1',
+      'intake_submitted',
+      REVIEW_GRAPH,
+    )
+    scheduleCapabilityAutoRun({ ...base, afterCommit }, 'matter-1', 'done', REVIEW_GRAPH)
+    expect(afterCommit).toHaveLength(0)
+  })
+
+  it('is a safe no-op when there is no post-commit queue (never runs inline)', () => {
+    // No afterCommit array → cannot schedule safely → does nothing, no throw.
+    expect(() => scheduleCapabilityAutoRun(base, 'matter-1', 'review', REVIEW_GRAPH)).not.toThrow()
   })
 })
 

@@ -25,6 +25,7 @@ import { insertAttribute, insertEvent, lookupKindId } from './common.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
 import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
+import { scheduleCapabilityAutoRun } from '../lifecycle/autoRun.js'
 import type { GateKind } from '../lifecycle/types.js'
 
 interface MatterAdvancePayload {
@@ -152,6 +153,10 @@ registerActionHandler('legal.matter.advance', async (ctx, client, payload, actio
     sourceType,
     sourceRef,
   })
+
+  // ADR 0046 — if this advance landed the matter on an invoke_capability stage, run
+  // that capability AFTER this transaction commits (never inside it).
+  scheduleCapabilityAutoRun(ctx, p.matter_entity_id, p.to_state, graph)
 
   return {
     workflowInstanceId: instance.id,

@@ -12,3 +12,5 @@ export * from './flags.js'
 export * from './binding.js'
 export * from './instance.js'
 export * from './executor.js'
+// ADR 0046 — auto-run an invoke_capability stage on entry (post-commit).
+export * from './autoRun.js'

@@ -250,3 +250,45 @@ There is **no `docs/adr/0046` file**; "ADR 0046" is used as a label in the code 
 
 ## Definition of done — met
 #301 merged (`ccbc000`) + deployed (`6a4e6ae4…`, production ready) + confirmed; migration 0118 applied + ledger stamped; playbook reseeded + content-verified (invoke-capability section present, postdates deploy); step-3 answered definitively (**NOT autonomous — button is a Phase-1 blocker**, mechanism cited from code); fresh sandbox end-to-end receipted on the merged build; internal-flag split pasted. No wiring bug found; nothing worked around.
+
+---
+
+# CAPABILITY-AUTORUN-1 (2026-07-08) — auto-run invoke_capability stages on entry
+
+Branch `capability-autorun-1` (off `main` @ `cd36dc2`). Closes the CAPABILITY-RUNTIME-1-MERGE step-3 gap: capabilities never fired on their own. Now an `invoke_capability` stage runs automatically when a matter ENTERS it, from any advance path — making the client self-serve path autonomous. No new step kinds, no gate changes, no migration.
+
+## B — the mechanism (and how it preserves "no LLM in an advance transaction")
+The hard invariant from #301: no LLM call ever rides an advance transaction. Preserved via a generic **post-commit queue**:
+- `packages/substrate/src/context.ts` — `ActionContext` gains optional `afterCommit?: Array<() => Promise<void>>`.
+- `packages/substrate/src/action.ts` — `submitAction` creates a fresh queue per call, passes a `handlerCtx` carrying it to the handler, and — **after `withActionContext` (the BEGIN/COMMIT wrapper) resolves, i.e. after the advance transaction has COMMITTED** — drains the queue, each callback in its own `withActionContext`/transaction. Callback errors are caught + logged so a failed side-effect never undoes the committed action.
+- `verticals/legal/src/lifecycle/autoRun.ts` (new) — `scheduleCapabilityAutoRun(ctx, matter, newStageKey, graph)`: if the landed stage's action is `invoke_capability`, it pushes a callback that **dynamic-imports** `invokeCapabilityForMatter` (post-commit — no static lifecycle→api cycle) and runs it in its own context.
+
+So the capability fires synchronously *within the request* but *outside* the advance transaction — exactly the required pattern. A handler never blocks the advance txn on the model; it schedules, the txn commits, then the model runs.
+
+## WP1 — the 5 advance paths hooked
+`scheduleCapabilityAutoRun` is called right after each path lands the matter on a new stage: `handlers/workflow.ts` (legal.matter.advance), `handlers/draft.ts` (`advanceInstanceOnApprove` — the draft.approve edge), `handlers/clientDelivery.ts` (`dispatchClientDelivery` — the client's booking/upload/reply), `handlers/intake.ts` (matter.open entry), `lifecycle/executor.ts` (`signalEvent` system events + each `advanceMatter` automatic hop). The advance-fn ctx (`{tenantId, actorId}`) is assignable to the helper's structural ctx, and at runtime carries the submitAction post-commit queue — so no type churn was needed.
+
+## WP2 — idempotency (one guard, both paths)
+`invokeCapabilityForMatter` now guards up front: if a `capability.invoked` event already exists for `(matter, stage)`, it returns `{ran:false, …skipped (idempotent)}` without re-running. Because `capability.invoked` is recorded ONLY on success, a prior success blocks a re-fire (auto-run + a stray manual call can't double-memo) while a prior FAILURE (observation only) leaves the stage re-invocable via the manual route. No new schema — a guard query on the existing event, no migration.
+
+## WP3 — failure honesty (unchanged from #301)
+The auto-run callback catches the capability's error: `invokeCapabilityForMatter` has already recorded the failure observation and left the matter parked; the caught error just stops a failed auto-run from failing the (committed) advance. No simulated success. The manual `POST …/workflow/invoke` route is untouched — it stays the retry/override path.
+
+## Acceptance — receipts (sandbox `00000000-0000-0000-00fe-000000000001`, ZERO manual invoke in the flow)
+Driver: `verticals/legal/demo/caprt1-autorun.ts` — the autonomy flow submits only advance actions (`legal.matter.advance`, `draft.approve`, client `document.upload`) and **never calls `invokeCapabilityForMatter`**; real contract bytes are uploaded to Storage so the auto-run's REAL `downloadObject` runs (no injected fake).
+
+**A — autonomy.** Matter `2e6a6d28-…`, all rows `tenant_id=…00fe-…0001`, `closed/completed`, **6 turns**: `intake_submitted → first_review (via legal.matter.advance) → materials_requested (via draft.approve) → second_review (**via document.upload, gate client**) → approved (via draft.approve) → closed (gate system)`. Memo count = **1 right after the intake→first_review advance** and **2 right after the client's document.upload advance** — the AI reviews fired automatically on stage entry with no manual trigger between. 3 `capability.invoked` events (`first_review`/ai_document_review, `materials_requested`/request_client_materials, `second_review`/ai_document_review); both memos `reasoning_trace_id` NOT NULL, actor = Claude agent; invoice `INV-2026-0003`. **This is the self-serve autonomy proof.**
+
+**C — idempotency.** Immediately after `second_review` auto-ran, a manual `invokeCapabilityForMatter` returned `ran:false` ("Capability for stage 'second_review' already ran … skipped (idempotent)"); memo count stayed **2** (no double memo).
+
+**D — failure.** Esign-probe matter `225b352b-…`: advancing into the `invoke_capability(esignature)` stage auto-ran esignature, which failed (contracted, unbuilt). Receipt: `esign_state = sign` (NO advance), `capability_not_executable` observations = **2** (the auto-run + a manual re-invoke), `capability.invoked` rows = **0**. The matter is still re-invocable via the manual route (it threw the same clear error rather than being blocked by idempotency).
+
+**E — gate integrity.** The client-gated `request_client_materials` auto-ran (sent the portal ask) then PARKED at the client gate (`parkedAtClientGate = true` — did not auto-advance past it); the attorney-gated reviews parked at the review queue. Gates unchanged.
+
+**Local gate:** `build` ✓ · `typecheck` ✓ · `lint` ✓ · `format:check` ✓ · `test:unit` **51/51 ✓** (3 new `scheduleCapabilityAutoRun` scheduling tests) · invariants 16 pass / 77 DB-skipped.
+
+## Prod note (synchronous-in-request)
+Auto-run runs the capability inside the request that triggered the advance (per the required pattern — not fire-and-forget). The routes that can now trigger a slow AI review — the client `document.upload` route and the attorney `draft.approve` / `legal.matter.advance` routes — should carry `maxDuration ≥ the model budget` (the manual invoke route already has `maxDuration 300`). Small route-config follow-up for the deployed HTTP paths; the sandbox proof drives the action layer directly so it is unaffected. Later option: move `ai_document_review` auto-run onto the existing durable review-job worker (the pattern `requestDocumentReview` already uses) so the client upload request never blocks on the model.
+
+## Files
+`packages/substrate/src/{context,action}.ts` · `verticals/legal/src/lifecycle/{autoRun(new),index,executor}.ts` · `verticals/legal/src/handlers/{workflow,draft,clientDelivery,intake}.ts` · `verticals/legal/src/api/capabilityRuntime.ts` · `verticals/legal/demo/caprt1-autorun.ts (new)` · `tests/vertical/capability-runtime.test.ts`.

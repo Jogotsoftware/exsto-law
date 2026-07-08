@@ -21,6 +21,7 @@ import {
 import { workflowEngineEnabled } from './flags.js'
 import { advanceWorkflowInstance } from './instance.js'
 import { edgesFrom, stageByKey } from './resolve.js'
+import { scheduleCapabilityAutoRun } from './autoRun.js'
 import type { Lifecycle, LifecycleEdge } from './types.js'
 
 interface Ctx {
@@ -114,6 +115,9 @@ export async function advanceMatter(
       actionId,
     })
     chain.push({ from: current, to: edge.to, gate: 'automatic', via: edge.via })
+    // ADR 0046 — an automatic hop may land on an invoke_capability stage; run it
+    // post-commit (scheduleCapabilityAutoRun is a no-op if the stage isn't one).
+    scheduleCapabilityAutoRun(ctx, matterEntityId, edge.to, graph)
     current = edge.to
   }
   return chain
@@ -151,6 +155,9 @@ export async function signalEvent(
     status: toStage?.terminal ? 'completed' : undefined,
     actionId,
   })
+  // ADR 0046 — a system/automatic event (e.g. invoice.paid) may land on an
+  // invoke_capability stage; run it post-commit before chaining automatic edges.
+  scheduleCapabilityAutoRun(ctx, matterEntityId, edge.to, graph)
   await advanceMatter(client, ctx, matterEntityId, actionId)
 }
 

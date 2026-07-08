@@ -13,6 +13,7 @@ import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { resolveActiveServiceVersion } from '../lifecycle/binding.js'
 import { createWorkflowInstance } from '../lifecycle/instance.js'
 import { entryStage } from '../lifecycle/resolve.js'
+import { scheduleCapabilityAutoRun } from '../lifecycle/autoRun.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // intake.submit — steps 1–3 of the intake flow (REQ-INTAKE-01..04, 07).
@@ -329,6 +330,15 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
           currentState: entry?.key ?? 'intake_submitted',
           actionId,
         })
+        // ADR 0046 — if a service's ENTRY stage is itself an invoke_capability, run
+        // it after matter.open commits (scheduling is a synchronous push — safe
+        // inside the savepoint; the run itself fires post-commit).
+        scheduleCapabilityAutoRun(
+          ctx,
+          matterEntityId,
+          entry?.key ?? 'intake_submitted',
+          bound.graph,
+        )
       }
       await client.query('RELEASE SAVEPOINT workflow_engine')
     } catch (err) {

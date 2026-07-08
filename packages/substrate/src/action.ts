@@ -54,7 +54,12 @@ export async function submitAction(ctx: ActionContext, input: ActionInput): Prom
 }
 
 async function submitActionInner(ctx: ActionContext, input: ActionInput): Promise<ActionResult> {
-  return withActionContext(ctx, async (client) => {
+  // ADR 0046 — a fresh post-commit queue per action. Handlers push side effects
+  // that must run AFTER this action's transaction commits (never inside it); the
+  // queue is drained below, each callback in its own transaction/context.
+  const afterCommit: Array<() => Promise<void>> = []
+  const handlerCtx: ActionContext = { ...ctx, afterCommit }
+  const result = await withActionContext(ctx, async (client) => {
     const kindResult = await client.query<{
       id: string
       default_autonomy_tier: AutonomyTier
@@ -133,8 +138,24 @@ async function submitActionInner(ctx: ActionContext, input: ActionInput): Promis
       ],
     )
 
-    const effects = [await handler(ctx, client, input.payload, actionId)]
+    const effects = [await handler(handlerCtx, client, input.payload, actionId)]
 
     return { actionId, effects }
   })
+
+  // The action transaction has COMMITTED. Run any post-commit side effects the
+  // handler scheduled — each in its OWN transaction/context (withActionContext
+  // inside the callback), so slow/fallible work (an LLM call) never rides the
+  // action transaction (ADR 0046). A callback failure must NOT undo the committed
+  // action, so errors are caught + logged; the callback owns its own honest
+  // failure signal (e.g. an observation event).
+  for (const cb of afterCommit) {
+    try {
+      await cb()
+    } catch (err) {
+      console.error('[submitAction] post-commit callback failed (action already committed):', err)
+    }
+  }
+
+  return result
 }
