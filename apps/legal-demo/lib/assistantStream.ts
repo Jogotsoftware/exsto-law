@@ -60,6 +60,21 @@ export interface ServiceProposalEvent {
   confidence: number
 }
 
+// A NEW data kind the assistant proposed this turn (Build-Wizard, Tier 1
+// data-as-schema) — surfaced as an inline approval card; minted only on approve.
+export interface KindProposalEvent {
+  registry: 'entity' | 'attribute' | 'relationship' | 'event'
+  kindName: string
+  displayName: string
+  description: string | null
+  onEntityKind: string | null
+  valueType: string | null
+  sourceEntityKind: string | null
+  targetEntityKind: string | null
+  summary: string
+  confidence: number
+}
+
 // An intake QUESTIONNAIRE the assistant proposed this turn (Build-Wizard Phase 2) —
 // surfaced as an inline approval card with the variable-contract coverage; the write
 // happens only on approve.
@@ -141,6 +156,7 @@ export interface AssistantStreamHandlers {
   onWorkflowProposal?: (proposal: WorkflowProposalEvent) => void
   // The assistant proposed a NEW service (Build-Wizard Phase 1) — render a card.
   onServiceProposal?: (proposal: ServiceProposalEvent) => void
+  onKindProposal?: (proposal: KindProposalEvent) => void
   // The assistant proposed an intake questionnaire (Build-Wizard Phase 2).
   onQuestionnaireProposal?: (proposal: QuestionnaireProposalEvent) => void
   // The assistant proposed a document template (Build-Wizard Phase 3).
@@ -295,6 +311,23 @@ export async function streamAssistant(
         handlers.onEnableProposal?.({
           serviceKey: String(evt.serviceKey ?? ''),
           summary: String(evt.summary ?? ''),
+        })
+        break
+      case 'kind_proposal':
+        handlers.onKindProposal?.({
+          registry:
+            evt.registry === 'entity' || evt.registry === 'relationship' || evt.registry === 'event'
+              ? evt.registry
+              : 'attribute',
+          kindName: String(evt.kindName ?? ''),
+          displayName: String(evt.displayName ?? ''),
+          description: typeof evt.description === 'string' ? evt.description : null,
+          onEntityKind: typeof evt.onEntityKind === 'string' ? evt.onEntityKind : null,
+          valueType: typeof evt.valueType === 'string' ? evt.valueType : null,
+          sourceEntityKind: typeof evt.sourceEntityKind === 'string' ? evt.sourceEntityKind : null,
+          targetEntityKind: typeof evt.targetEntityKind === 'string' ? evt.targetEntityKind : null,
+          summary: String(evt.summary ?? ''),
+          confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
         })
         break
       case 'build_question':

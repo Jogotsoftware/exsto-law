@@ -16,7 +16,8 @@ import {
 import { TemplateProposalCard, type TemplateProposal } from '@/components/TemplateProposalCard'
 import { CostProposalCard, type CostProposal } from '@/components/CostProposalCard'
 import { EnableProposalCard, type EnableProposal } from '@/components/EnableProposalCard'
-import { QuestionCard } from '@/components/QuestionCard'
+import { KindProposalCard, type KindProposal } from '@/components/KindProposalCard'
+import { QuestionBatch } from '@/components/QuestionBatch'
 import type { BuildQuestionEvent } from '@/lib/assistantStream'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
@@ -115,6 +116,8 @@ interface DisplayTurn {
   // as click-to-answer QuestionCards. Ephemeral to the live session (not persisted to
   // the thread): once answered they've already driven the build forward.
   buildQuestions?: BuildQuestionEvent[]
+  // New data-kind proposals captured (Tier 1 data-as-schema) — inline approval cards.
+  kindProposals?: KindProposal[]
 }
 
 // One legal skill (playbook) the attorney can pick from the /skills menu.
@@ -140,6 +143,7 @@ interface ThreadTurn {
   templateProposals?: TemplateProposal[]
   costProposals?: CostProposal[]
   enableProposals?: EnableProposal[]
+  kindProposals?: KindProposal[]
 }
 
 // A document attached to the next message: an uploaded file (parsed to text) or a
@@ -547,6 +551,7 @@ export function UnifiedAssistantChat({
     costProposals: CostProposal[]
     enableProposals: EnableProposal[]
     buildQuestions: BuildQuestionEvent[]
+    kindProposals: KindProposal[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -733,6 +738,7 @@ export function UnifiedAssistantChat({
                 templateProposals: t.templateProposals,
                 costProposals: t.costProposals,
                 enableProposals: t.enableProposals,
+                kindProposals: t.kindProposals,
               },
         )
         setTurns(display)
@@ -1003,6 +1009,7 @@ export function UnifiedAssistantChat({
       templateProposals: TemplateProposal[]
       costProposals: CostProposal[]
       enableProposals: EnableProposal[]
+      kindProposals: KindProposal[]
     },
   ): string | undefined {
     const notes: string[] = []
@@ -1014,7 +1021,8 @@ export function UnifiedAssistantChat({
       cards.questionnaireProposals.length +
       cards.templateProposals.length +
       cards.costProposals.length +
-      cards.enableProposals.length
+      cards.enableProposals.length +
+      cards.kindProposals.length
     if (proposals)
       notes.push(
         `[You presented ${proposals} proposal card(s); the attorney approves in the UI and a confirmation message follows on approval.]`,
@@ -1138,6 +1146,7 @@ export function UnifiedAssistantChat({
       costProposals: [] as CostProposal[],
       enableProposals: [] as EnableProposal[],
       buildQuestions: [] as BuildQuestionEvent[],
+      kindProposals: [] as KindProposal[],
     }
     setStreaming({ ...partial })
     let finished = false
@@ -1165,6 +1174,7 @@ export function UnifiedAssistantChat({
         partial.costProposals = []
         partial.enableProposals = []
         partial.buildQuestions = []
+        partial.kindProposals = []
         setStreaming({ ...partial })
         // Brief pause so a momentary blip (overload spike, dropped socket) has a
         // chance to clear before the re-send.
@@ -1276,6 +1286,11 @@ export function UnifiedAssistantChat({
               if (q.question) partial.buildQuestions.push(q)
               setStreaming({ ...partial, buildQuestions: [...partial.buildQuestions] })
             },
+            onKindProposal: (p) => {
+              if (!live()) return
+              if (p.kindName) partial.kindProposals.push(p as unknown as KindProposal)
+              setStreaming({ ...partial, kindProposals: [...partial.kindProposals] })
+            },
             onDone: (d) => {
               if (!live()) return
               finished = true
@@ -1313,6 +1328,7 @@ export function UnifiedAssistantChat({
                   buildQuestions: partial.buildQuestions.length
                     ? partial.buildQuestions
                     : undefined,
+                  kindProposals: partial.kindProposals.length ? partial.kindProposals : undefined,
                 },
               ])
               setStreaming(null)
@@ -1379,7 +1395,8 @@ export function UnifiedAssistantChat({
         partial.templateProposals.length ||
         partial.costProposals.length ||
         partial.enableProposals.length ||
-        partial.buildQuestions.length)
+        partial.buildQuestions.length ||
+        partial.kindProposals.length)
     ) {
       const hasCards =
         partial.documents.length ||
@@ -1389,7 +1406,8 @@ export function UnifiedAssistantChat({
         partial.templateProposals.length ||
         partial.costProposals.length ||
         partial.enableProposals.length ||
-        partial.buildQuestions.length
+        partial.buildQuestions.length ||
+        partial.kindProposals.length
       // A dropped stream still commits its cards — keep the batch in sync with them.
       batchRef.current = { keys: partial.buildQuestions.map((q) => q.key), answers: new Map() }
       setTurns((prev) => [
@@ -1413,6 +1431,7 @@ export function UnifiedAssistantChat({
           costProposals: partial.costProposals.length ? partial.costProposals : undefined,
           enableProposals: partial.enableProposals.length ? partial.enableProposals : undefined,
           buildQuestions: partial.buildQuestions.length ? partial.buildQuestions : undefined,
+          kindProposals: partial.kindProposals.length ? partial.kindProposals : undefined,
         },
       ])
     }
@@ -1506,13 +1525,15 @@ export function UnifiedAssistantChat({
   const handleQuestionAnswer = useCallback(
     (info: { key: string; answer: string; display: string }): boolean => {
       if (busy) return false // a turn is mid-stream; card stays interactive
-      // Batched turn (several cards at once): buffer this answer — the card locks
-      // with its chip — and send ONE combined continuation when the last card of
-      // the batch is answered, so a 3-question batch costs one round-trip, not 3.
+      // Batched turn (several cards, walked one at a time by QuestionBatch): buffer
+      // this answer and send ONE combined continuation only when EVERY question in
+      // the batch has an answer — so a 4-question batch costs one round-trip, not 4.
+      // Re-answering a key (the attorney stepped Back to revise) UPDATES its buffered
+      // value and does NOT submit early; the batch fires only once all keys are set.
       const batch = batchRef.current
-      if (batch.keys.length > 1 && batch.keys.includes(info.key) && !batch.answers.has(info.key)) {
+      if (batch.keys.length > 1 && batch.keys.includes(info.key)) {
         batch.answers.set(info.key, info.answer)
-        if (batch.answers.size < batch.keys.length) return true // buffered; wait for the rest
+        if (batch.answers.size < batch.keys.length) return true // still gathering the rest
         const combined = batch.keys
           .map((k) => `"${k}": ${batch.answers.get(k) ?? '(not answered)'}`)
           .join('; ')
@@ -1971,15 +1992,18 @@ export function UnifiedAssistantChat({
                   {t.enableProposals?.map((p, pi) => (
                     <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
                   ))}
-                  {/* Structured interview questions (Phase 7) — click-to-answer cards.
-                    Answering sends a HIDDEN continuation (no fake user bubble). */}
-                  {t.buildQuestions?.map((q, qi) => (
-                    <QuestionCard
-                      key={`${q.key}-${qi}`}
-                      question={q}
-                      onAnswer={handleQuestionAnswer}
-                    />
+                  {/* New data-kind proposals (Tier 1 data-as-schema) — approval cards.
+                    Approving mints the kind via kind.define; the proposing turn wrote
+                    nothing. */}
+                  {t.kindProposals?.map((p, pi) => (
+                    <KindProposalCard key={pi} proposal={p} onApproved={handleApproved} />
                   ))}
+                  {/* Structured interview questions (Phase 7) — walked ONE AT A TIME as
+                    a click-through (QuestionBatch), not a stack. Answering sends a
+                    HIDDEN continuation (no fake user bubble). */}
+                  {t.buildQuestions && t.buildQuestions.length > 0 && (
+                    <QuestionBatch questions={t.buildQuestions} onAnswer={handleQuestionAnswer} />
+                  )}
                   {t.content.trim() && (
                     <div className="uac-reply-actions">
                       <CopyButton text={t.content} />
@@ -2049,7 +2073,8 @@ export function UnifiedAssistantChat({
               streaming.templateProposals.length === 0 &&
               streaming.costProposals.length === 0 &&
               streaming.enableProposals.length === 0 &&
-              streaming.buildQuestions.length === 0 && (
+              streaming.buildQuestions.length === 0 &&
+              streaming.kindProposals.length === 0 && (
                 <div className="uac-drafting" aria-label="Drafting" role="status">
                   <SparklesIcon size={12} />
                   <span className="uac-drafting-label">Drafting…</span>
@@ -2098,10 +2123,14 @@ export function UnifiedAssistantChat({
             {streaming.enableProposals.map((p, pi) => (
               <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
             ))}
-            {/* A structured interview question mid-stream (Phase 7) — a QuestionCard. */}
-            {streaming.buildQuestions.map((q, qi) => (
-              <QuestionCard key={`${q.key}-${qi}`} question={q} onAnswer={handleQuestionAnswer} />
+            {/* A new data-kind proposal mid-stream (Tier 1) — an approval card. */}
+            {streaming.kindProposals.map((p, pi) => (
+              <KindProposalCard key={pi} proposal={p} onApproved={handleApproved} />
             ))}
+            {/* Structured interview questions mid-stream (Phase 7) — click-through. */}
+            {streaming.buildQuestions.length > 0 && (
+              <QuestionBatch questions={streaming.buildQuestions} onAnswer={handleQuestionAnswer} />
+            )}
             {streaming.text && <StreamingMarkdown text={streaming.text} />}
           </div>
         )}

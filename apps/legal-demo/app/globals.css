@@ -6263,6 +6263,63 @@ button.danger.outline:hover:not(:disabled) {
   border-radius: 10px;
   background: var(--card, #fff);
 }
+/* Click-through interview stepper (QuestionBatch): one question at a time. */
+.uac-qbatch {
+  margin-top: var(--space-2);
+}
+.uac-qbatch .uac-qcard {
+  margin-top: 6px;
+}
+.uac-qbatch-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.uac-qbatch-back {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: var(--text-xs, 0.78rem);
+  cursor: pointer;
+}
+.uac-qbatch-back:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.uac-qbatch-count {
+  font-size: var(--text-xs, 0.78rem);
+  color: var(--muted);
+  font-weight: 600;
+}
+.uac-qbatch-dots {
+  display: inline-flex;
+  gap: 5px;
+  margin-left: auto;
+  align-items: center;
+}
+.uac-qbatch-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.uac-qbatch-dot.is-done {
+  background: var(--accent, #b8935a);
+}
+.uac-qbatch-dot.is-current {
+  outline: 2px solid var(--accent, #b8935a);
+  outline-offset: 1px;
+}
+.uac-qbatch-done {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: var(--text-xs, 0.78rem);
+  color: var(--muted);
+}
 .uac-qcard-question {
   font-size: var(--text-sm);
   font-weight: 600;

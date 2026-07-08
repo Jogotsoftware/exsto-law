@@ -588,6 +588,14 @@ export async function* streamChatWithAssistant(
   const carryTurns: Array<{ role: 'assistant' | 'user'; content: unknown }> = []
   const citations: string[] = []
   const usage = emptyUsage()
+  // Whether any prose has streamed this turn, and whether the NEXT round's first
+  // text delta needs a paragraph break before it. A client-tool round ends one
+  // prose fragment and the post-tool reply starts another; without a separator
+  // they concatenate mid-sentence ("…services first.No existing…" — founder-
+  // reported formatting bug). pause_turn continuations (web search) deliberately
+  // do NOT set the flag — their text resumes mid-sentence by design.
+  let textEmitted = false
+  let needsBreak = false
 
   for (let i = 0; ; i++) {
     const body = buildChatRequest(messages, opts, carryTurns)
@@ -611,6 +619,11 @@ export async function* streamChatWithAssistant(
           partial_json?: string
         }
         if (delta.type === 'text_delta' && delta.text) {
+          if (needsBreak) {
+            needsBreak = false
+            yield { type: 'text', text: '\n\n' }
+          }
+          textEmitted = true
           yield { type: 'text', text: delta.text }
         } else if (delta.type === 'thinking_delta' && delta.thinking) {
           yield { type: 'thinking', text: delta.thinking }
@@ -648,6 +661,9 @@ export async function* streamChatWithAssistant(
         for (const u of uses) yield { type: 'tool', name: u.name, input: u.input }
         carryTurns.push({ role: 'assistant', content: stripThinkingBlocks(final.content) })
         carryTurns.push(await runClientTools(uses, opts.clientTools!))
+        // The post-tool reply is a NEW prose fragment — separate it from whatever
+        // streamed before the tool call (see needsBreak above).
+        if (textEmitted) needsBreak = true
         continue
       }
     }

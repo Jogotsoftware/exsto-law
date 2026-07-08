@@ -65,6 +65,9 @@ import {
 } from './costEnableTools.js'
 import { buildAskQuestionTool, type BuildQuestion } from './buildQuestionTools.js'
 import type { CostProposal } from './costAuthoring.js'
+import { buildCapabilityContextTool, buildRequestCapabilityTool } from './capabilityTools.js'
+import { buildKindContextTool, buildProposeKindTool } from './kindAuthoringTools.js'
+import type { KindProposal } from './kindAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 
 // When the build-wizard is on AND the attorney's message reads like a request to
@@ -246,6 +249,22 @@ export type AssistantChatStreamEvent =
       allowFreeText: boolean
       multiSelect: boolean
     }
+  // The assistant PROPOSED a NEW data kind (Build-Wizard, Tier 1 data-as-schema).
+  // The UI renders it as an inline approval card; the kind is minted (kind.define)
+  // only on approve. Flag-gated (LEGAL_BUILD_WIZARD).
+  | {
+      type: 'kind_proposal'
+      registry: KindProposal['registry']
+      kindName: string
+      displayName: string
+      description: string | null
+      onEntityKind: string | null
+      valueType: string | null
+      sourceEntityKind: string | null
+      targetEntityKind: string | null
+      summary: string
+      confidence: number
+    }
   | {
       type: 'done'
       eventId: string
@@ -289,6 +308,9 @@ export interface AssistantChatReply {
   // Structured interview questions captured this turn (Build-Wizard Phase 7) — click-
   // to-answer cards. Empty for ordinary answers and whenever the wizard flag is off.
   buildQuestions?: BuildQuestion[]
+  // New data-kind proposals captured this turn (Tier 1 data-as-schema) — approval
+  // cards. Empty for ordinary answers and whenever the wizard flag is off.
+  kindProposals?: KindProposal[]
 }
 
 export interface AssistantThreadEntry {
@@ -325,6 +347,9 @@ export interface AssistantThreadEntry {
   // Enable proposals captured on this turn (assistant side, Build-Wizard Phase 6), so a
   // reopened thread still shows the terminal Enable card.
   enableProposals?: EnableProposal[]
+  // New data-kind proposals captured on this turn (assistant side, Tier 1), so a
+  // reopened thread still shows the approval cards.
+  kindProposals?: KindProposal[]
 }
 
 const SYSTEM_PROMPT = [
@@ -475,6 +500,7 @@ export function buildAttorneyClientTools(
     costProposals: CostProposal[]
     enableProposals: EnableProposal[]
     buildQuestions: BuildQuestion[]
+    kindProposals: KindProposal[]
   },
 ): ClientTool[] {
   const tools: ClientTool[] = [buildFeedbackTool(ctx, input)]
@@ -514,6 +540,15 @@ export function buildAttorneyClientTools(
     // question into a click-to-answer card so the build FEELS like a wizard (the
     // headline UX fix), instead of the AI typing questions as free chat.
     tools.push(buildAskQuestionTool(ctx, capture.buildQuestions))
+    // Capability library: reuse-vs-build over the WHOLE platform surface, plus the
+    // honest gap path (request a capability the platform can't compose yet).
+    tools.push(buildCapabilityContextTool(ctx))
+    tools.push(buildRequestCapabilityTool(ctx))
+    // Data-as-schema: read existing kinds, and propose a NEW data kind (attribute/
+    // event/relationship/entity) when a novel practice area needs to track
+    // something the platform has no kind for — human-approved like every artifact.
+    tools.push(buildKindContextTool(ctx))
+    tools.push(buildProposeKindTool(ctx, capture.kindProposals))
   }
   return tools
 }
@@ -577,48 +612,18 @@ export function buildClaudeSystem(
       "\n\nBUILDING A SERVICE'S INTAKE QUESTIONNAIRE AND DOCUMENTS — when the attorney asks you to build the intake form (questionnaire) or a document template for an EXISTING service, you propose them for approval, bound by the VARIABLE CONTRACT: every document {{token}} must map to a questionnaire field id, or it renders [[MISSING]]. For a QUESTIONNAIRE: call get_questionnaire_context FIRST (it gives the closed field types, the current form, and the {{tokens}} the service's documents reference) and build a form that collects a field for EACH template token (matching ids), then CALL propose_questionnaire. For a TEMPLATE: call get_template_context FIRST (it gives the questionnaire's field ids) and write a markdown body whose {{tokens}} are flat snake_case and bind to those field ids — never invent a dotted path — then CALL propose_template. Both tools only show an approval card; nothing is saved until the attorney approves. Put the proposal ONLY in the tool call; your reply is a SINGLE short sentence pointing them to it. " +
       "DOCUMENTS COME BEFORE THE QUESTIONNAIRE (flow-aware) — when you propose a TEMPLATE for a service that has NO questionnaire yet, the template's tokens are NOT 'missing' or broken: they are exactly the fields the questionnaire will collect in the NEXT step (the questionnaire is reverse-engineered from the templates). Frame them that way to the attorney — forward-looking, not alarming. Only treat a token as a genuine [[MISSING]] gap once a questionnaire already EXISTS and a token has no matching question. " +
       "REUSE EXISTING FIRM QUESTIONS — get_template_context returns `firmFieldLibrary`: the questionnaire field ids OTHER services already define (e.g. company_name, effective_date, principal_office_address). When a token you need already exists there, REUSE that exact field id and that question's definition when you build this service's questionnaire — do NOT re-invent a near-duplicate question, and do NOT call such a token missing. propose_template's result tells you which proposed tokens are reusable from the firm; carry those into propose_questionnaire by id."
-    // Build-Wizard Phase 4 — the ORCHESTRATOR. When the attorney wants a WHOLE new
-    // service (not just one piece), you run the full guided interview that composes
-    // the propose_* tools above into one end-to-end build. This block encodes the
-    // load-bearing FLOW INLINE (so the wizard works even if the playbook skill isn't
-    // loaded); the firm-admin.build-service skill carries the full detail and you
-    // should load_skill it for substance. The order below is NOT optional — each
-    // artifact depends on the one before it.
-    // A — accurate PLATFORM KNOWLEDGE so the wizard reasons from how the system really
-    // works (the founder's "the AI doesn't understand the platform" fix): the booking
-    // link, intake→matter, auto-scheduling, drafting/review, invoicing, close, and the
-    // workflow-gate model. Stated before the flow so every question and proposal is
-    // grounded in real mechanics, not guesses.
+    // Build-Wizard ORCHESTRATOR — SINGLE SOURCE OF TRUTH. When the attorney wants a
+    // WHOLE new service (not just one piece), the authoritative flow lives in ONE
+    // place: the firm-admin.build-service skill (force-loaded when build intent is
+    // detected). We deliberately do NOT restate the whole flow here — an inline copy
+    // that drifts from the skill is exactly what made the wizard contradict itself
+    // (inline "batch" vs skill "one at a time"). This is a short POINTER plus the two
+    // non-negotiable behaviors as a safety net; the skill carries the full playbook,
+    // the worked example, the build order, and the data-as-schema / capability rules.
     system +=
-      '\n\nHOW THIS PLATFORM WORKS (ground every question and proposal in this; do not invent mechanics) — ' +
-      'BOOKING LINK: every service you ENABLE becomes bookable on the firm’s public booking page; that page IS the booking link the attorney shares with clients (it lists the firm’s active services). A client opens it, picks the service, fills the service’s intake questionnaire, and — if the service offers a consultation — picks an available time. There is no separate "send the client a form" step; the booking link is how a client starts. ' +
-      'INTAKE → MATTER: submitting the intake is what CREATES the matter and STARTS the service’s workflow. So the intake questionnaire is the front door, and (when a time is offered) selecting a slot AUTO-SCHEDULES the consultation on the firm’s calendar — the attorney does not schedule it by hand. ' +
-      'ROUTE: "auto" means the system advances the matter on its own where a step’s gate allows (e.g. it generates the document right after intake); "manual" means the attorney drives each step. GENERATION MODE: "template_merge" fills the document deterministically from the intake answers (no AI); "ai_draft" has AI draft it from the answers + the firm’s legal skills. ' +
-      'DOCUMENTS: a drafted document lands in the attorney’s review queue; the attorney reviews/edits/approves it, and only then is it sent to the client — nothing goes to the client unreviewed. INVOICING: invoices are created and sent from the billing area; a workflow step can mark WHEN that happens (e.g. after the document is approved). CLOSE: the attorney closes the matter when the work is done. ' +
-      'WORKFLOW MODEL: a service’s lifecycle is a sequence of stages connected by GATES, and the gate is just WHO advances each step — automatic (the system/worker, on an event), attorney (an attorney action), client (a client action, e.g. completing intake or signing), or system (an external callback). That is exactly what you ask per step. ' +
-      'REUSE WHAT EXISTS: the firm already has services, document templates (a shared library + service-bound bodies), intake questionnaires/questions, tasks, and ~100 legal skills. ALWAYS call the get_*_context read tools first and REUSE an existing template/question/skill before creating a new one; only create when nothing fits.'
-    // Phase 7 — the STRUCTURED INTERVIEW. Every interview question must go through the
-    // ask_build_question tool (rendered as a click-to-answer card), and no automation
-    // choice may be defaulted — the route, the generation mode, and the per-step gate
-    // are ASKED, never assumed. This is the founder's "make it feel like a wizard +
-    // stop silently picking manual" fix; stated up front so it governs the flow below.
-    // Beta feedback (2026-07-06): one question per API round-trip made the build crawl —
-    // RELATED questions are now BATCHED as several ask_build_question calls in one turn
-    // (the UI renders one card each and returns the answers together).
-    system +=
-      "\n\nASK, DON'T ASSUME (the interview is structured) — run the whole build as a GUIDED INTERVIEW where every question goes through the ask_build_question tool, NOT free-text chat and NEVER a wall of prose questions. ask_build_question renders a click-to-answer card (choice buttons and/or a text box), so give `choices` whenever the answer is from a known set. BATCH RELATED QUESTIONS INTO ONE TURN: call ask_build_question once PER question but make ALL the calls for a related group in the SAME response — e.g. the opening basics (name + what the client gets + jurisdiction) as one batch, the automation pair (route + generation mode) as one batch, pricing (fee model + amount) as one batch, or all gates of a short workflow as one batch. Each call renders its own card; the attorney answers them all and the answers come back TOGETHER in one message keyed by question — never re-ask a question that was answered in the batch, and never split a natural pair across two turns (each extra turn is a slow round-trip the attorney feels). Keep a batch to at most ~4 questions and never mix unrelated phases in one batch. EVERY interview question for the ENTIRE build goes through ask_build_question — do NOT start strong and then drift back to typing questions as plain prose partway through; if you are asking the attorney something, it is an ask_build_question card. After the batch, STOP and wait — the answers return as the next message. CRUCIALLY, you must NOT default any automation decision: ASK the ROUTE (auto vs manual) and the GENERATION MODE before you propose the service (offer them as choices with a one-line hint each, batched together), and for the WORKFLOW ask PER STEP who performs it — offer the four gates as the choices (automatic / attorney / client / system), each with a one-line hint; never assume a default gate. propose_service still validates the route/mode, but the values come from the attorney's answer, never from a silent default. Keep your own prose to ONE short sentence per turn — the questions live in the cards, never duplicated in text."
-    system +=
-      '\n\nBUILDING A SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a WHOLE new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service", "set up a trademark filing offering"), you RUN A GUIDED INTERVIEW, not a form. Load the firm-admin.build-service playbook with load_skill for the full detail; the core flow is: ' +
-      '(1) INTERVIEW the attorney about how they actually deliver this work using ask_build_question, BATCHING each related group into one turn (batch 1: what it is called + what the client gets + jurisdiction — default North Carolina + federal but CONFIRM it as a choice; batch 2: the ROUTE auto-vs-manual + the GENERATION MODE as explicit choices; later, pricing as its own batch), reflect the answers back briefly, then ask the next group. Never dump a wall of prose questions, and never silently pick the route/mode — ASK. ' +
-      '(2) Propose the SERVICE SHELL FIRST with propose_service — a service must exist before anything can bind to it (templates attach to it, the questionnaire saves onto it, the workflow is its lifecycle). It is created disabled. Pass the route + generation_mode the attorney CHOSE via ask_build_question — never default to manual/template_merge without asking. The `description` is CLIENT-FACING (it shows on the public booking page): write it for the CLIENT about WHAT they get and its value, in plain language — NEVER mention the workflow, the system, automation, "auto-generated", template merge, or intake mechanics (propose_service will reject a description that leaks internal mechanics). ' +
-      '(3) Then DOCUMENTS → VARIABLES → QUESTIONNAIRE, in that order (a HARD RULE): for each document the client receives, load the relevant firm legal skill with load_skill so the draft is real NC/federal work product, then propose_template; ENUMERATE every {{token}} the approved templates need; then propose_questionnaire to collect EXACTLY those tokens. The questionnaire must cover EVERY template token with no gaps — each field’s id must EXACTLY equal a token, REUSING an existing firm question (same id, from get_questionnaire_context) wherever one matches and only adding a new field when none exists; propose_questionnaire will REFUSE any questionnaire that leaves a token uncovered, so never hand the attorney a form with [[MISSING]] fields to patch by hand. Write every question LABEL in plain, friendly language the CLIENT can answer (e.g. "What’s the full legal name of the other party?"), never legalese or the raw snake_case token. Author ONLY the real documents the client receives — each doc_kind is a DELIVERABLE (e.g. operating_agreement, mutual_nda), NEVER a prompt: do NOT create a separate "<kind>_drafting_prompt" document; the AI drafting prompt is set up automatically when you author the body. Never build the questionnaire first — it is reverse-engineered from what the documents require. ' +
-      "(4) Then the WORKFLOW: interview their real step-by-step process with ask_build_question, and for EACH step ASK who performs it — the gate: automatic / attorney / client / system — offering those four as choices; NEVER assume a default gate. Then propose_workflow composed from get_workflow_context's closed catalog, linear, attaching the templates that now exist, using the gate the attorney chose for each step. " +
-      '(5) Then BILLING: ask how they price the work — a flat fixed fee, or an hourly rate (and roughly how many hours) — then CALL propose_cost with the amount as a decimal string. Billing is a STEP of the build, not something to defer to an editor. ' +
-      '(6) Then check get_service_completeness. It returns { ready, missing }. NEVER tell the attorney the service is ready or live unless ready is true — if it is false, read back the missing reasons in plain language and loop to fix them. ' +
-      '(7) ENABLE LAST — this is how the service actually goes live. Once get_service_completeness returns ready:true, CALL propose_enable: this is the FINAL card; approving it flips the service to active/bookable. Until propose_enable is approved the service is a disabled DRAFT (not on the booking page, its templates/questionnaire pages look empty because those read the ACTIVE version) — so you MUST reach propose_enable; never stop at completeness, and never tell the attorney it is live until Enable is approved. After you propose_enable the build is DONE — do not start another step. ' +
-      'CONTINUOUS, SELF-DRIVING FLOW (this is how the build runs): the build advances ONE piece at a time, and after the attorney approves each card the SYSTEM AUTOMATICALLY CONTINUES the conversation with a short message telling you the artifact was created (with its link) and to do the next step — so when you receive such a continuation, immediately do the NEXT step in the order above (interview if needed, then the next propose_*), share the new artifact, and keep going. Do NOT wait for the attorney to prompt you between steps; do NOT stall after an approval. The ONLY place the build stops is after propose_enable (the terminal step). ' +
-      'FINISH CLEANLY (do not just stop) — once the service is fully built and you reach the end, give a short, clear wrap-up so the attorney knows the build is done and what to do next: (a) confirm the result in one line ("✓ Your NC Mutual NDA service is built"), (b) point them to the service with its link so they can review it, (c) tell them how it goes live + reaches clients — approving the Enable card makes it active and bookable, and they share their booking link for clients to book it (if they have not approved Enable yet, say plainly that it stays a private draft until they approve Enable to activate it), and (d) end warmly, e.g. "Let me know how else I can help." Do NOT start another build step after this. ' +
-      'THROUGHOUT: each artifact is its OWN propose→approve card the attorney owns — never batch-write a finished service, never claim certainty (honest confidence < 1.0), always call the matching get_*_context read tool before each propose so you only use real kinds, ids, and tokens. After each propose tool call, your chat reply is ONE short sentence pointing the attorney at the current card to review; the artifact lives only in the tool call, never repeated in prose.'
+      '\n\nBUILDING A WHOLE SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a whole new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service"), the firm-admin.build-service skill is your AUTHORITATIVE PLAYBOOK: load_skill it and FOLLOW IT — the batched interview, the build order (shell → documents → questionnaire → workflow → billing → enable), when you may propose a new data kind vs. request a capability, and how to finish. Do not improvise the flow from memory. Two behaviors hold no matter what: ' +
+      '(1) EVERY interview question goes through the ask_build_question tool (a click-to-answer card), NEVER free-text prose — and BATCH a related group into ONE turn (several ask_build_question calls in the same response: the ESSENTIALS — name + deliverables + route + generation mode + pricing — as one batch, then propose). Never drip one question per turn; never silently default the route or generation mode or a workflow gate — ASK. ' +
+      '(2) DO NOT NARRATE your process — run reads/lookups silently, and keep your OWN prose to at most ONE short sentence per turn (the questions and proposals live in the cards, never duplicated in text). Before building from scratch, REUSE first: check the capability library (get_capability_context) and existing kinds (get_kind_context) so you wire in what the platform already does rather than reinventing it.'
   }
   if (skillCatalogText) system += `\n\n${skillCatalogText}`
   return system
@@ -815,6 +820,9 @@ export async function recordAssistantTurn(
     // Enable proposals captured this turn (Build-Wizard Phase 6 — the terminal Enable
     // step), recorded so a reopened thread can re-show the approval card. Additive field.
     enableProposals?: EnableProposal[] | null
+    // New data-kind proposals captured this turn (Tier 1 data-as-schema), recorded so
+    // a reopened thread can re-show the approval cards. Additive field.
+    kindProposals?: KindProposal[] | null
     // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
     // Recorded additively in the event payload; powers the AI usage/cost view.
     usage?: AssistantUsage | null
@@ -878,6 +886,10 @@ export async function recordAssistantTurn(
         // thread re-shows them. Null when none were proposed.
         enable_proposals:
           input.enableProposals && input.enableProposals.length ? input.enableProposals : null,
+        // New data-kind proposals captured this turn (Tier 1 approval cards), so a
+        // reopened thread re-shows them. Null when none were proposed.
+        kind_proposals:
+          input.kindProposals && input.kindProposals.length ? input.kindProposals : null,
         // Token usage (snake_case to match the rest of the payload), null when the
         // provider doesn't report it. The actor is captured as source_ref above, so
         // the usage view can attribute cost per attorney.
@@ -942,6 +954,9 @@ export async function assistantChat(
   // Structured interview questions captured this turn (Claude only, build-wizard flag
   // on) — surfaced as click-to-answer cards; they write nothing (Phase 7).
   const buildQuestions: BuildQuestion[] = []
+  // New data-kind proposals captured this turn (Claude only, build-wizard flag on) —
+  // surfaced as approval cards; the live mint (kind.define) is the approve route.
+  const kindProposals: KindProposal[] = []
   // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
   let usage: AssistantUsage | null = null
 
@@ -989,6 +1004,7 @@ export async function assistantChat(
         costProposals,
         enableProposals,
         buildQuestions,
+        kindProposals,
       }),
     })
     reply = result.reply
@@ -1015,6 +1031,7 @@ export async function assistantChat(
     templateProposals,
     costProposals,
     enableProposals,
+    kindProposals,
     usage,
   })
 
@@ -1034,6 +1051,7 @@ export async function assistantChat(
     costProposals: costProposals.length ? costProposals : undefined,
     enableProposals: enableProposals.length ? enableProposals : undefined,
     buildQuestions: buildQuestions.length ? buildQuestions : undefined,
+    kindProposals: kindProposals.length ? kindProposals : undefined,
   }
 }
 
@@ -1084,6 +1102,9 @@ export async function* assistantChatStream(
   // Structured interview questions captured this turn (Phase 7) — surfaced as click-
   // to-answer cards after the loop (like the propose_* proposals).
   const buildQuestions: BuildQuestion[] = []
+  // New data-kind proposals captured this turn (Phase E) — surfaced as approval
+  // cards after the loop; the live mint (kind.define) is the approve route.
+  const kindProposals: KindProposal[] = []
   let usage: AssistantUsage | null = null
 
   if (model.provider === 'perplexity') {
@@ -1136,6 +1157,7 @@ export async function* assistantChatStream(
         costProposals,
         enableProposals,
         buildQuestions,
+        kindProposals,
       }),
     })) {
       if (chunk.type === 'drafting') {
@@ -1258,6 +1280,24 @@ export async function* assistantChatStream(
         multiSelect: q.multiSelect,
       }
     }
+    // Surface validated new data-kind proposals captured this turn (Tier 1). The
+    // tool's run() validated the kind (reuse-check, registry, attachment) before
+    // capture, so emitting after the loop means an invalid one never cards.
+    for (const p of kindProposals) {
+      yield {
+        type: 'kind_proposal',
+        registry: p.registry,
+        kindName: p.kindName,
+        displayName: p.displayName,
+        description: p.description,
+        onEntityKind: p.onEntityKind ?? null,
+        valueType: p.valueType ?? null,
+        sourceEntityKind: p.sourceEntityKind ?? null,
+        targetEntityKind: p.targetEntityKind ?? null,
+        summary: p.summary,
+        confidence: p.confidence,
+      }
+    }
   }
 
   // A persistence failure here must not destroy a reply the attorney has already
@@ -1285,6 +1325,7 @@ export async function* assistantChatStream(
       templateProposals,
       costProposals,
       enableProposals,
+      kindProposals,
       usage,
     })
     eventId = recorded.eventId
@@ -1372,6 +1413,7 @@ export async function listAssistantThread(
         template_proposals?: TemplateProposal[] | null
         cost_proposals?: CostProposal[] | null
         enable_proposals?: EnableProposal[] | null
+        kind_proposals?: KindProposal[] | null
       }
       occurred_at: string
     }>(
@@ -1417,6 +1459,7 @@ export async function listAssistantThread(
           templateProposals: r.payload.template_proposals ?? undefined,
           costProposals: r.payload.cost_proposals ?? undefined,
           enableProposals: r.payload.enable_proposals ?? undefined,
+          kindProposals: r.payload.kind_proposals ?? undefined,
         },
       ]
     })
