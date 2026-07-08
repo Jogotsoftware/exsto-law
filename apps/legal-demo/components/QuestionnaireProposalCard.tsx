@@ -13,11 +13,18 @@ import type { OnApproved } from '@/components/ServiceProposalCard'
 interface ProposalSection {
   id?: string
   title?: string
-  fields?: Array<{ id?: string; label?: string; type?: string }>
+  fields?: Array<{ id?: string; label?: string; type?: string; internal?: boolean }>
 }
 interface ProposalSchema {
   title?: string
   sections?: ProposalSection[]
+}
+
+// WP7 — show human labels, never raw field-id slugs. Prefer the authored label; fall
+// back to a de-slugged id so "client_name" reads as "Client name".
+function fieldLabel(f: { id?: string; label?: string }): string {
+  if (f.label && f.label.trim()) return f.label
+  return (f.id ?? '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 export interface QuestionnaireProposal {
@@ -129,7 +136,12 @@ export function QuestionnaireProposalCard({
             {s.fields && s.fields.length > 0 && (
               <span className="text-muted">
                 {' '}
-                — {s.fields.map((f) => f.id || f.label).join(', ')}
+                —{' '}
+                {s.fields
+                  .map((f) =>
+                    f.internal ? `${fieldLabel(f)} (you fill in review)` : fieldLabel(f),
+                  )
+                  .join(', ')}
               </span>
             )}
           </div>
@@ -140,11 +152,12 @@ export function QuestionnaireProposalCard({
           render [[MISSING]] in the document, so the attorney sees coverage first. */}
       <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {missing.length === 0 ? (
-          <div className="text-muted">Covers every document token — no [[MISSING]] gaps.</div>
+          <div className="text-muted">Collects everything the documents need — no gaps.</div>
         ) : (
           <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
-            Does not yet collect {missing.length} document token{missing.length === 1 ? '' : 's'}:{' '}
-            <strong>{missing.join(', ')}</strong>. These would render [[MISSING]] until added.
+            Doesn&rsquo;t yet collect {missing.length} thing{missing.length === 1 ? '' : 's'} the
+            document needs: <strong>{missing.map((m) => fieldLabel({ id: m })).join(', ')}</strong>.
+            The document would leave {missing.length === 1 ? 'it' : 'them'} blank until added.
           </div>
         )}
       </div>

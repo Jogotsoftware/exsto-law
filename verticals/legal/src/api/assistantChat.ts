@@ -397,6 +397,10 @@ const SYSTEM_PROMPT = [
   // workflow — but only as a PROPOSAL the attorney must approve, composed strictly
   // from the closed catalog, linear, and never written directly by the turn.
   'BUILDING SERVICE WORKFLOWS — when the attorney asks you to build, add a step to, reorder, or change the WORKFLOW for one of their existing SERVICES (e.g. "build the workflow for NC SMLLC", "add a consultation step before review"), you compose a step-by-step workflow for them. ALWAYS call get_workflow_context FIRST to load the closed catalog of step actions you may use, the edge gates, the service\'s current workflow, and the firm\'s available document templates. Compose the workflow ONLY from those step-action kinds and gates — never invent a step kind or a gate. The workflow MUST be LINEAR: each step leads to exactly one next step (one entry step, one final step; no branching). You may attach documents to a step ONLY by referencing an existing firm template\'s templateEntityId from get_workflow_context — never invent a document or a template id. You only ever MODIFY existing services; you do not create new services. When you have a complete, valid workflow, deliver it by CALLING the propose_workflow tool — this does NOT save anything; it shows the attorney an approval card, and the workflow goes live only when THEY approve it. Put the workflow ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to the proposal to review, never the steps themselves.',
+  // Render-integrity (1.1): the app injects INTERNAL machinery into the conversation
+  // — continuation/stage-direction instructions (hidden user turns) and state notes,
+  // all wrapped in ⟦ ⟧. These are for YOU to act on, never for the attorney to read.
+  'INTERNAL MACHINERY — some messages contain instructions or notes wrapped in ⟦ ⟧ (guillemet brackets). These are internal directions for you to ACT ON. NEVER write the ⟦ or ⟧ characters, never repeat or paraphrase the text inside them, and never narrate a tool call or a system instruction. Speak to the attorney only in your own words. Also never type a bracketed status line like "[You asked …]" or "[You proposed …]" — those are internal records, not things to say.',
   'Keep replies focused and concise.',
 ].join(' ')
 
@@ -605,6 +609,13 @@ export function buildClaudeSystem(
   primaryEntityId: string | null,
   context: AssistantContext | null,
   skillCatalogText = '',
+  // Force-loaded skill BODIES (1.1 WP8.1). These used to ride the uncached volatile
+  // block, so the ~16k-char build playbook was re-billed at full price EVERY turn of a
+  // build. They are constant across a build session (the same skill is force-loaded
+  // each turn), so they belong in the CACHED prefix — every turn after the first reads
+  // them at ~10% of the price. On the rare turn the attorney switches skills, the
+  // prefix simply re-caches once. Empty on turns with no forced skill.
+  activeSkillsText = '',
 ): string {
   let system = context ? `${SYSTEM_PROMPT}\n\n--- Context ---\n${context.full}` : SYSTEM_PROMPT
   const entityPath =
@@ -647,20 +658,21 @@ export function buildClaudeSystem(
       '(3) DO NOT NARRATE your process — run reads/lookups silently, and keep your OWN prose to at most ONE short sentence per turn (the questions and proposals live in the cards, never duplicated in text). Before building from scratch, REUSE first: check the capability library (get_capability_context) and existing kinds (get_kind_context) so you wire in what the platform already does rather than reinventing it.'
   }
   if (skillCatalogText) system += `\n\n${skillCatalogText}`
+  // Force-loaded skill bodies live in the cached prefix now (WP8.1), after the catalog.
+  if (activeSkillsText) system += `\n\n${activeSkillsText}`
   return system
 }
 
-// VOLATILE half of the system prompt — the per-turn pieces (force-loaded skills,
-// the route the attorney is on, the live screen capture). Sent as a separate,
-// uncached system block AFTER the cache breakpoint so it never invalidates the
-// stable prefix above. Returns '' when there is nothing volatile this turn.
+// VOLATILE half of the system prompt — the per-turn pieces (the route the attorney is
+// on, the live screen capture, the build brief). Sent as a separate, uncached system
+// block AFTER the cache breakpoint so it never invalidates the stable prefix above.
+// Force-loaded skill bodies moved to the cached prefix (WP8.1). Returns '' when there
+// is nothing volatile this turn.
 export function buildVolatileClaudeSystem(
-  activeSkillsText = '',
   pageContext?: { path?: string; [k: string]: unknown } | null,
   buildBriefText = '',
 ): string {
   const parts: string[] = []
-  if (activeSkillsText) parts.push(activeSkillsText)
   // The live BUILD BRIEF (WP4.2) — the approved state of the service under
   // construction, re-derived every turn. Volatile by nature (it changes on every
   // approval), so it lives after the cache breakpoint.
@@ -956,6 +968,44 @@ async function recordToolCapObservation(ctx: ActionContext, pendingTools: string
   }
 }
 
+// The machinery a model reply must NEVER contain (1.1 WP9). If any of these reach
+// the reply text, the model parroted an internal marker instead of speaking its own
+// words / calling the tool — the exact card-leak the render sanitizer then hides.
+// Detecting it server-side makes the leak MEASURABLE (a `question_without_card`
+// observation), so WP2 recurrence is a query, not a guess. 0 fires is the target.
+const MACHINERY_LEAK_RE =
+  /⟦|⟧|\[You asked via ask_build_question|\[You proposed|\[You presented|\[I'll continue|\[I need your next answer/
+
+// Record a `question_without_card` observation when a reply leaked machinery (WP9).
+// The turn is NOT failed — the sanitizer already hides it from the attorney; this is
+// pure telemetry through the action layer. Wrapped so it can never break the turn.
+async function recordQuestionWithoutCardObservation(
+  ctx: ActionContext,
+  reply: string,
+): Promise<void> {
+  if (!MACHINERY_LEAK_RE.test(reply)) return
+  try {
+    const idx = reply.search(MACHINERY_LEAK_RE)
+    await submitAction(ctx, {
+      actionKindName: 'event.record',
+      intentKind: 'reflection',
+      payload: {
+        event_kind_name: 'observation',
+        primary_entity_id: null,
+        source_type: 'system',
+        source_ref: 'system:question_without_card',
+        data: {
+          tag: 'question_without_card',
+          // A short snippet of the leak (not the whole reply) — enough to triage.
+          leaked_snippet: reply.slice(Math.max(0, idx), idx + 120),
+        },
+      },
+    })
+  } catch (err) {
+    console.error('assistantChat: failed to record question_without_card observation', err)
+  }
+}
+
 // Send a message to the chosen model with the matter/client context injected,
 // then record the exchange. Returns the reply (+ citations for research models).
 export async function assistantChat(
@@ -1033,6 +1083,7 @@ export async function assistantChat(
       primaryEntityId,
       context,
       buildSkillCatalogText(catalog),
+      buildActiveSkillsText(forced),
     )
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey)
@@ -1047,11 +1098,7 @@ export async function assistantChat(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      volatileSystem: buildVolatileClaudeSystem(
-        buildActiveSkillsText(forced),
-        input.pageContext,
-        buildBrief,
-      ),
+      volatileSystem: buildVolatileClaudeSystem(input.pageContext, buildBrief),
       clientTools: buildAttorneyClientTools(ctx, input, {
         catalog,
         producedDocuments,
@@ -1074,6 +1121,8 @@ export async function assistantChat(
       reply += `\n\n⚠️ I hit my per-turn tool limit before finishing that step — say "continue" and I'll pick up where I left off.`
       await recordToolCapObservation(ctx, [])
     }
+    // WP9: if the reply parroted internal machinery, record it (measurable card-leak).
+    await recordQuestionWithoutCardObservation(ctx, reply)
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -1202,6 +1251,7 @@ export async function* assistantChatStream(
       primaryEntityId,
       context,
       buildSkillCatalogText(catalog),
+      buildActiveSkillsText(forced),
     )
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey)
@@ -1216,11 +1266,7 @@ export async function* assistantChatStream(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      volatileSystem: buildVolatileClaudeSystem(
-        buildActiveSkillsText(forced),
-        input.pageContext,
-        buildBrief,
-      ),
+      volatileSystem: buildVolatileClaudeSystem(input.pageContext, buildBrief),
       clientTools: buildAttorneyClientTools(ctx, input, {
         catalog,
         producedDocuments,
@@ -1382,6 +1428,9 @@ export async function* assistantChatStream(
       }
     }
   }
+
+  // WP9: if the streamed reply parroted internal machinery, record it (measurable).
+  await recordQuestionWithoutCardObservation(ctx, reply)
 
   // A persistence failure here must not destroy a reply the attorney has already
   // watched stream in — the client treats a missing `done` as a hard error and

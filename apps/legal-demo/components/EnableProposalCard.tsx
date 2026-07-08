@@ -33,6 +33,10 @@ export function EnableProposalCard({
   )
   const [approveError, setApproveError] = useState<string | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  // WP4: the REAL public booking URL for the service, from the enable route (never a
+  // model-typed link). Rendered as a real button + copy action once the service is live.
+  const [bookingLink, setBookingLink] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
 
   async function approve() {
     setApproveState('approving')
@@ -55,10 +59,14 @@ export function EnableProposalCard({
         serviceKey?: string
         link?: string
         label?: string
+        bookingLink?: string
         error?: string
       } | null
       if (!res.ok) throw new Error(data?.error || `Enable failed (${res.status})`)
       setLink(data?.link ?? null)
+      setBookingLink(
+        data?.bookingLink ?? `/book?service=${encodeURIComponent(proposal.serviceKey)}`,
+      )
       setApproveState('approved')
       // This is the TERMINAL step — onApproved tells the chat the service is live (with
       // its link). The chat does NOT auto-continue after Enable; the build is complete.
@@ -116,6 +124,40 @@ export function EnableProposalCard({
           <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
             View live service →
           </a>
+        )}
+        {/* WP4: the real client booking link — open it, or copy the absolute URL to
+            share. Never a model-generated href, so it can't route to "/". */}
+        {bookingLink && approveState === 'approved' && (
+          <>
+            <a
+              className="uac-reply-btn"
+              href={bookingLink}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open booking page →
+            </a>
+            <button
+              type="button"
+              className={`uac-reply-btn${copied ? ' copied' : ''}`}
+              onClick={() => {
+                const abs =
+                  typeof window !== 'undefined'
+                    ? new URL(bookingLink, window.location.origin).toString()
+                    : bookingLink
+                void navigator.clipboard?.writeText(abs).then(
+                  () => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1500)
+                  },
+                  () => {},
+                )
+              }}
+              title="Copy the client booking link to share"
+            >
+              {copied ? <CheckIcon size={12} /> : null} {copied ? 'Copied' : 'Copy booking link'}
+            </button>
+          </>
         )}
       </div>
       {approveError && (

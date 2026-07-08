@@ -255,6 +255,26 @@ const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
   },
 ]
 
+// Capabilities the platform does NOT do yet — filed as `requested` so the builder
+// surfaces them honestly (and does not try to fake them) and the team has a backlog.
+// 1.1 WP10: a real build declared a "notify me when the matter closes" gap in prose
+// but wrote nothing (a no-simulate violation). It is a genuine Tier-3 gap (a workflow
+// step/notification with no executor), so it belongs here as a tracked build request.
+const REQUESTED_CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
+  {
+    slug: 'step_close_notification',
+    spec: {
+      name: 'Step / matter-close notification',
+      category: 'workflow',
+      purpose:
+        'Notify the attorney (email/in-app) when a matter reaches a chosen workflow step — e.g. when it closes, or when a specific step completes. A per-step "tell me when this happens" hook.',
+      when_to_use:
+        'When an attorney wants to be alerted at a point in a service’s workflow (most commonly on matter close). Not yet buildable — a workflow-step notification hook needs code; file via request_capability until it ships.',
+      backed_by: [],
+    },
+  },
+]
+
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required.')
   const ctx: ActionContext = { tenantId: TENANT, actorId: ADMIN }
@@ -262,7 +282,12 @@ async function main(): Promise<void> {
   for (const cap of CAPABILITIES) {
     await upsertCapability(ctx, { ...cap, status: 'available' })
     n++
-    console.log(`capability: upserted ${cap.slug}`)
+    console.log(`capability: upserted ${cap.slug} (available)`)
+  }
+  for (const cap of REQUESTED_CAPABILITIES) {
+    await upsertCapability(ctx, { ...cap, status: 'requested' })
+    n++
+    console.log(`capability: upserted ${cap.slug} (requested)`)
   }
   console.log(`Done — ${n} capabilities seeded.`)
 }

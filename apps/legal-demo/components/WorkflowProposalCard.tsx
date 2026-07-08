@@ -43,6 +43,39 @@ export interface WorkflowProposal {
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
+// WP7 — attorney-facing labels, not internal slugs. Mirrors the closed step-action
+// catalog (verticals/legal/src/lifecycle/catalog.ts) and gate set; the card is a
+// no-server-import client component, so the human labels live here. An unknown kind
+// falls back to a de-slugged title so nothing ever renders raw snake_case.
+const ACTION_LABELS: Record<string, string> = {
+  view_intake: 'Client intake',
+  view_consultation: 'Client consultation',
+  generate_document: 'Generate document',
+  review_send_document: 'Review & send document',
+  approve_send_invoice: 'Approve & send invoice',
+  await_payment: 'Await payment',
+  manual_task: 'Manual task',
+  complete_matter: 'Complete matter',
+}
+// Plain-language gate: WHO moves the step forward, in the attorney's words.
+const GATE_LABELS: Record<WfGate, string> = {
+  attorney: 'waits for you',
+  client: 'waits for the client',
+  automatic: 'automatic',
+  system: 'automatic (on payment/signature)',
+}
+function humanize(slug: string): string {
+  return slug.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+function actionLabel(kind: string | undefined): string {
+  if (!kind) return ''
+  return ACTION_LABELS[kind] ?? humanize(kind)
+}
+function gateLabel(gate: WfGate | undefined): string {
+  if (!gate) return ''
+  return GATE_LABELS[gate] ?? humanize(gate)
+}
+
 // Walk a linear graph from its entry stage so display order == run order even if the
 // stored array order drifted (same approach as the builder's graphToSteps).
 function orderStages(graph: WfLifecycle): WfStage[] {
@@ -221,9 +254,13 @@ export function WorkflowProposalCard({
           <li key={s.key} style={{ marginBottom: 6 }}>
             <span>
               <strong>{s.label}</strong>
-              {s.action ? ` · ${s.action.kind}` : ''}
-              {!s.terminal && s.advances_to[0] ? ` · ${s.advances_to[0].gate}` : ''}
-              {s.terminal ? ' · terminal' : ''}
+              {s.action && actionLabel(s.action.kind) !== s.label ? (
+                <span className="text-muted"> · {actionLabel(s.action.kind)}</span>
+              ) : null}
+              {!s.terminal && s.advances_to[0] ? (
+                <span className="text-muted"> · {gateLabel(s.advances_to[0].gate)}</span>
+              ) : null}
+              {s.terminal ? <span className="text-muted"> · final step</span> : null}
             </span>
             {s.documents && s.documents.length > 0 && (
               <span className="text-muted">
