@@ -48,10 +48,16 @@ export function QuestionBatch({
     const accepted = onAnswer?.(info)
     if (accepted === false) return false
     setAnswered((prev) => new Map(prev).set(info.key, info.display))
-    setAttempt((a) => a + 1)
     // Auto-advance to the next question (stay put on the last — the parent submits
-    // the whole batch when the final answer lands).
-    if (idx < total - 1) setIdx(idx + 1)
+    // the whole batch when the final answer lands). Only bump `attempt` when we're
+    // actually moving to a new index: bumping it unconditionally used to change the
+    // CURRENT card's key on the final answer too (idx doesn't move), forcing it to
+    // remount and lose the "answered" chip it had just set — right as "All set —
+    // sending your answers…" appeared below it.
+    if (idx < total - 1) {
+      setAttempt((a) => a + 1)
+      setIdx(idx + 1)
+    }
     return true
   }
 

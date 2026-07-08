@@ -6391,8 +6391,8 @@ button.danger.outline:hover:not(:disabled) {
   max-width: 100%;
   padding: 6px 10px;
   border-radius: 8px;
-  background: var(--accent-attorney-soft);
-  color: var(--fg);
+  background: var(--surface-2, #f1f5f9);
+  color: var(--muted);
   font-size: var(--text-sm);
   font-weight: 500;
   line-height: 1.45;
@@ -6400,11 +6400,12 @@ button.danger.outline:hover:not(:disabled) {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* The check stays a small accent tick, aligned to the answer's first line. */
+/* Answered = settled, not a live selection — the chip reads muted/gray rather
+   than accent-colored so a fully answered question looks locked, not editable. */
 .uac-qcard-answerchip svg {
   flex: 0 0 auto;
   margin-top: 3px;
-  color: var(--accent);
+  color: var(--muted);
 }
 /* The toolbar "Context" control popover (lean / balanced / full / secure). */
 .uac-ctxmenu-wrap {
