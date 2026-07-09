@@ -6,9 +6,14 @@
 // stage exactly as it dispatches to invokeCapabilityForMatter for an invoke_capability
 // stage — one post-commit queue, one advance path, two producing kinds.
 //
-// Execution model (identical invariant to #303): NEVER on the advance transaction. The
-// autorun schedules this via ctx.afterCommit, so the (real, model-calling) draft runs
-// in its own transaction AFTER the advance that landed the matter here has committed.
+// Execution model (PROD-DRAFT-OFFLOAD-1): the model-calling draft NEVER runs on the
+// advance transaction — and no longer in the HTTP request at all. The afterCommit
+// autorun calls enqueueDraftAutoRunJob (below), a fast tenant-scoped INSERT of a
+// `legal.draft.run` worker_job — the exact job kind + handler the attorney manual
+// draft uses (generateDraft.requestDraft). The always-on worker claims the job and
+// runs generateDocumentForMatter with no serverless wall-clock; RUNTIME-AUTORUN-2's
+// in-request drain died at that boundary (Netlify killed the function before the
+// document_version committed).
 //
 // What it does:
 //   1. Resolve the matter's current stage; it must be a `generate_document` step.
@@ -28,6 +33,7 @@
 // no questionnaire) records an observation and throws; the autorun catches it, leaves
 // the matter parked + re-invocable, and never fakes a success or a document.
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
+import { enqueueJob } from '@exsto/worker-runtime'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { hasAutomaticTransition, stageByKey } from '../lifecycle/resolve.js'
 import type { Lifecycle, LifecycleStage } from '../lifecycle/types.js'
@@ -136,8 +142,63 @@ async function recordObservation(
   })
 }
 
-// Run the generate_document stage the matter is currently parked on. Called ONLY from
-// the post-commit autorun (never inline on an advance transaction).
+// The ENQUEUE half of the autorun (in-request, post-commit, fast). Resolves the
+// document kind this stage produces, then inserts the `legal.draft.run` job the worker
+// handler routes back to generateDocumentForMatter below. Records draft.requested
+// (manual-path parity, generateDraft.requestDraft) so the job is queryable from the
+// matter timeline; a failed enqueue records an observation instead — the matter stays
+// parked + re-invocable, never a silent log-only death.
+export async function enqueueDraftAutoRunJob(
+  ctx: ActionContext,
+  matterEntityId: string,
+  stage: LifecycleStage,
+): Promise<string | null> {
+  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const documentKind = await resolveStageDocumentKind(ctx, matterEntityId, stage)
+  if (!documentKind) {
+    await recordObservation(agentCtx, matterEntityId, 'generate_document_no_kind', {
+      stage: stage.key,
+    })
+    throw new Error(
+      `generate_document stage "${stage.key}" names no document kind (stage.documents / service documents both empty).`,
+    )
+  }
+  let jobId: string
+  try {
+    jobId = await enqueueJob({
+      tenantId: ctx.tenantId,
+      jobKind: 'legal.draft.run',
+      payload: {
+        matter_entity_id: matterEntityId,
+        document_kind: documentKind,
+        producing_autorun: true,
+      },
+    })
+  } catch (err) {
+    await recordObservation(agentCtx, matterEntityId, 'generate_document_enqueue_failed', {
+      stage: stage.key,
+      document_kind: documentKind,
+      reason: err instanceof Error ? err.message : String(err),
+      retryable: true,
+    })
+    throw err
+  }
+  await submitAction(agentCtx, {
+    actionKindName: 'event.record',
+    intentKind: 'automatic_sync',
+    payload: {
+      event_kind_name: 'draft.requested',
+      primary_entity_id: matterEntityId,
+      data: { document_kind: documentKind, job_id: jobId, producing_autorun: true },
+      source_type: 'system',
+    },
+  })
+  return jobId
+}
+
+// Run the generate_document stage the matter is currently parked on. Called from the
+// legal.draft.run worker handler for producing_autorun jobs (workers/index.ts) — never
+// inline in a request or on an advance transaction.
 export async function generateDocumentForMatter(
   ctx: ActionContext,
   matterEntityId: string,
@@ -189,7 +250,17 @@ export async function generateDocumentForMatter(
   }
 
   // PRODUCE — the proven producer. Emits draft.completed; attributes to the agent actor.
-  await runDraftGeneration(agentCtx, { matterEntityId, documentKind })
+  // A null return is a non-retryable precondition failure (draft.failed already
+  // recorded) — park WITHOUT advancing; never move a matter to review with no document.
+  const produced = await runDraftGeneration(agentCtx, { matterEntityId, documentKind })
+  if (!produced) {
+    return {
+      ran: false,
+      documentKind,
+      advanced: false,
+      summary: `Draft precondition failed for "${documentKind}" (draft.failed recorded) — matter stays parked.`,
+    }
+  }
 
   // ADVANCE the automatic edge via the same audited path the capability runtime uses,
   // recording draft.completed (the real completion event) as the trigger. The matter
