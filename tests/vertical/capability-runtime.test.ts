@@ -4,7 +4,22 @@
 // which capabilities are executable today. The DB-backed paths (the authoring
 // validator against the live registry, the executor, the client-delivery dispatch)
 // are proven by the sandbox end-to-end receipts in the decision log.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+// PROD-DRAFT-OFFLOAD-1: the generate_document autorun now ENQUEUES the manual-path
+// legal.draft.run worker_job instead of drafting inline in the request. Mock the queue
+// (and the action layer the enqueue records its draft.requested receipt through) so the
+// wiring is asserted without a DB — spread the real modules so every other export stays
+// intact.
+vi.mock('@exsto/worker-runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@exsto/worker-runtime')>()
+  return { ...actual, enqueueJob: vi.fn(async () => 'job-1') }
+})
+vi.mock('@exsto/substrate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@exsto/substrate')>()
+  return { ...actual, submitAction: vi.fn(async () => ({ actionId: 'a', effects: [] })) }
+})
+import { enqueueJob } from '@exsto/worker-runtime'
+import { submitAction } from '@exsto/substrate'
 import {
   STEP_ACTION_KINDS,
   validateLifecycle,
@@ -198,6 +213,46 @@ describe('generate_document producing auto-run — RUNTIME-AUTORUN-2', () => {
     scheduleProducingAutoRun({ ...base, afterCommit: b }, 'm', 'generate_will', WILL_GRAPH)
     expect(a).toHaveLength(1)
     expect(b).toHaveLength(1)
+  })
+})
+
+describe('generate_document autorun OFFLOAD — drafting leaves the request (PROD-DRAFT-OFFLOAD-1)', () => {
+  const base = { tenantId: 't1', actorId: 'a1' }
+
+  it('the scheduled callback ENQUEUES the manual-path legal.draft.run job (never drafts inline)', async () => {
+    const afterCommit: Array<() => Promise<void>> = []
+    scheduleProducingAutoRun({ ...base, afterCommit }, 'matter-1', 'generate_will', WILL_GRAPH)
+    expect(afterCommit).toHaveLength(1)
+    vi.mocked(enqueueJob).mockClear()
+    await afterCommit[0]!()
+    expect(enqueueJob).toHaveBeenCalledTimes(1)
+    expect(enqueueJob).toHaveBeenCalledWith({
+      tenantId: 't1',
+      jobKind: 'legal.draft.run',
+      payload: { matter_entity_id: 'matter-1', document_kind: 'will', producing_autorun: true },
+    })
+  })
+
+  it('records draft.requested with the job id (manual-path parity, queryable on the matter)', async () => {
+    const afterCommit: Array<() => Promise<void>> = []
+    scheduleProducingAutoRun({ ...base, afterCommit }, 'matter-1', 'generate_will', WILL_GRAPH)
+    vi.mocked(submitAction).mockClear()
+    await afterCommit[0]!()
+    expect(submitAction).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 't1' }),
+      expect.objectContaining({
+        actionKindName: 'event.record',
+        payload: expect.objectContaining({
+          event_kind_name: 'draft.requested',
+          primary_entity_id: 'matter-1',
+          data: expect.objectContaining({
+            document_kind: 'will',
+            job_id: 'job-1',
+            producing_autorun: true,
+          }),
+        }),
+      }),
+    )
   })
 })
 

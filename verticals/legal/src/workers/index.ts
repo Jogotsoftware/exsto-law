@@ -31,14 +31,26 @@ registerWorkerHandler('legal.granola.project', async (ctx, payload) => {
 
 // Runs one async drafting job (Lesson #2: drafting NEVER blocks the attorney
 // or the request path). Transient model/API errors throw → runtime backoff.
+// PROD-DRAFT-OFFLOAD-1: a producing_autorun job (enqueued on entry to a producing +
+// automatic generate_document stage, lifecycle/autoRun.ts) runs through the producing
+// runtime instead — stage re-check → draft-exists guard → the SAME runDraftGeneration →
+// advance the automatic edge on draft.completed. So a stale or duplicate autorun job
+// no-ops, and a completed draft moves the matter to review. The attorney manual path
+// below is byte-identical to the one that produced June's 97 production drafts.
 registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
-  const { runDraftGeneration } = await import('../api/generateDraft.js')
   const p = payload as {
     matter_entity_id: string
     document_kind: string
     guidance?: string
     skill_slugs?: string[]
+    producing_autorun?: boolean
   }
+  if (p.producing_autorun) {
+    const { generateDocumentForMatter } = await import('../api/generateDocumentRuntime.js')
+    await generateDocumentForMatter(ctx, p.matter_entity_id)
+    return
+  }
+  const { runDraftGeneration } = await import('../api/generateDraft.js')
   await runDraftGeneration(ctx, {
     matterEntityId: p.matter_entity_id,
     documentKind: p.document_kind,
