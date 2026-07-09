@@ -103,8 +103,10 @@ async function resolveStageDocumentKind(
 
 // Has a draft for this document kind already been produced on this matter? (draft_of,
 // matching document_kind). The idempotency guard so an autorun + a manual generate — or
-// two autoruns — never double-draft.
-async function draftAlreadyExists(
+// two autoruns — never double-draft. Exported so the document_generation CAPABILITY
+// handler (capabilityRuntime.ts) reuses the SAME guard rather than a second copy
+// (CAPABILITY-UNIFY-1 WP2: the existing draft-exists idempotency stays).
+export async function draftAlreadyExists(
   ctx: ActionContext,
   matterEntityId: string,
   documentKind: string,

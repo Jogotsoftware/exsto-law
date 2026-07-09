@@ -28,6 +28,9 @@ import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
 import type { CapabilityStepConfig } from '../lifecycle/types.js'
 import { listMatterDocuments } from './documentUpload.js'
 import { runDocumentReview } from './reviewDocument.js'
+// Type-only (no runtime cycle): the document_generation handler dynamic-imports the
+// producer; it only needs the GenerationMode union at compile time.
+import type { GenerationMode } from './generateDraft.js'
 
 // The AI agent actor seeded by the core foundation — the runtime records its audit
 // and any AI writes as this actor (same id every AI write in the vertical uses).
@@ -81,6 +84,7 @@ type CapabilityHandler = (h: CapabilityHandlerContext) => Promise<CapabilityHand
 // A capability's spec.handler_key names its entry here. A step-invocable capability
 // whose handler_key is absent from this map is contracted-but-not-executable.
 const CAPABILITY_HANDLERS: Record<string, CapabilityHandler> = {
+  'legal.capability.document_generation.run': runDocumentGenerationCapability,
   'legal.capability.ai_document_review.run': runAiDocumentReviewCapability,
   'legal.capability.request_client_materials.run': runRequestClientMaterialsCapability,
 }
@@ -97,6 +101,52 @@ export interface InvokeCapabilityResult {
   advanced: boolean
   outputs: CapabilityOutputRef[]
   summary: string
+}
+
+// CAPABILITY-UNIFY-1 (WP3) — the worker-job kind that runs ANY invoke_capability step
+// OFF the request. The job kind is a text value, needs no migration.
+export const CAPABILITY_RUN_JOB_KIND = 'legal.capability.run'
+
+// Enqueue the capability run for a matter parked on an invoke_capability stage (WP3).
+// This is the ONE fast INSERT the producing auto-run's post-commit callback does, and
+// the same job the manual /workflow/invoke route enqueues — a uniform, off-request
+// path (mirrors PROD-DRAFT-OFFLOAD-1's enqueueDraftAutoRunJob for drafting). It runs
+// in-request (post-commit) or in the route, so it NEVER calls the model or a handler;
+// it only writes the job row (+ a queryable observation) and returns. The worker
+// claims the job and runs invokeCapabilityForMatter, whose own idempotency + gate
+// logic are unchanged — they just run on the worker now, past the serverless boundary
+// that killed the deferred in-request execution. `stageKey` is recorded for the
+// timeline; the worker re-resolves the matter's current stage when it runs, so a
+// stale stage key never mis-dispatches.
+export async function enqueueCapabilityRunJob(
+  base: { tenantId: string; actorId: string },
+  matterEntityId: string,
+  stageKey: string,
+): Promise<string | null> {
+  const { enqueueJob } = await import('@exsto/worker-runtime')
+  const agentCtx: ActionContext = { tenantId: base.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  let jobId: string
+  try {
+    jobId = await enqueueJob({
+      tenantId: base.tenantId,
+      jobKind: CAPABILITY_RUN_JOB_KIND,
+      payload: { matter_entity_id: matterEntityId, stage_key: stageKey },
+    })
+  } catch (err) {
+    // A failed enqueue records a queryable observation and rethrows; the matter stays
+    // parked + re-invocable (the manual route is the retry) — never a silent death.
+    await recordObservation(agentCtx, matterEntityId, 'capability_run_enqueue_failed', {
+      stage: stageKey,
+      reason: err instanceof Error ? err.message : String(err),
+      retryable: true,
+    })
+    throw err
+  }
+  await recordObservation(agentCtx, matterEntityId, 'capability_run_enqueued', {
+    stage: stageKey,
+    job_id: jobId,
+  })
+  return jobId
 }
 
 // Run the capability the matter's CURRENT stage points at. The matter must be parked
@@ -262,6 +312,107 @@ export async function invokeCapabilityForMatter(
     outputs: result.outputs,
     summary: result.summary,
   }
+}
+
+// ── Real handler: document generation (CAPABILITY-UNIFY-1 — the first fully-migrated
+// LEGO block) ─────────────────────────────────────────────────────────────────────
+// ONE capability, reused across services, drafting a DIFFERENT document per step. It
+// REUSES the proven producer (generateDraft.runDraftGeneration — the exact path the
+// attorney manual draft and the legal.draft.run worker use); it is NOT a second
+// drafting implementation. The ONLY differences from the bespoke generate_document
+// path: (1) the template is loaded BY template_entity_id from capability_config —
+// never by (serviceKey, docKind) convention, no docKind fallback lookup; (2) the
+// generation mode + drafting instructions come from the step's config, not the
+// service. Persist/trace/attribution/notify are identical. Gate is `automatic` (from
+// the registry): after the draft, invokeCapabilityForMatter advances the automatic
+// edge to the human-gated review stage, which WAITS — same net behavior as today.
+async function runDocumentGenerationCapability(
+  h: CapabilityHandlerContext,
+): Promise<CapabilityHandlerResult> {
+  const templateEntityId = String((h.config.template_entity_id as string | undefined) ?? '').trim()
+  if (!templateEntityId) {
+    // No convention fallback, no silent docKind lookup — a missing id is a hard,
+    // visible failure (the runtime records the failure observation on the rethrow).
+    throw new CapabilityInputMissingError(
+      'document_generation names no template — set action.config.capability_config.template_entity_id ' +
+        'to the exact firm document-template entity id this step drafts.',
+    )
+  }
+  const generationMode: GenerationMode =
+    String(h.config.generation_mode ?? '').trim() === 'template_merge'
+      ? 'template_merge'
+      : 'ai_draft'
+  const instructions =
+    String((h.config.instructions as string | undefined) ?? '').trim() || undefined
+
+  // Load the template BY ENTITY ID. getStandaloneTemplate filters status='active', so
+  // an archived or absent template resolves to null → a clear, recorded failure.
+  const { getStandaloneTemplate } = await import('../queries/templates.js')
+  const tmpl = await getStandaloneTemplate(h.agentCtx, templateEntityId)
+  if (!tmpl || !tmpl.body.trim()) {
+    throw new CapabilityInputMissingError(
+      `document_generation template "${templateEntityId}" is not an active firm template (not found or empty body) — cannot draft.`,
+    )
+  }
+  const documentKind = (tmpl.docKind ?? '').trim() || slugifyDocKind(tmpl.name)
+
+  // Draft-exists idempotency (WP2): the SAME guard the generate_document autorun uses,
+  // so a duplicate run no-ops rather than double-drafting the same document kind.
+  const { draftAlreadyExists } = await import('./generateDocumentRuntime.js')
+  if (await draftAlreadyExists(h.agentCtx, h.matterEntityId, documentKind)) {
+    return {
+      outputs: [
+        {
+          entityKind: 'document_draft',
+          note: `draft for "${documentKind}" already exists on this matter (idempotent)`,
+        },
+      ],
+      summary: `Draft for "${documentKind}" already exists — skipped generation (idempotent).`,
+    }
+  }
+
+  // PRODUCE via the proven producer. The template body + a stable template id come from
+  // the named firm template; the drafting instructions ride as guidance; the mode is the
+  // step's configured mode. A null return is a non-retryable precondition (draft.failed
+  // already recorded) — throw so the matter never advances to review with no document.
+  const { runDraftGeneration } = await import('./generateDraft.js')
+  const produced = await runDraftGeneration(h.agentCtx, {
+    matterEntityId: h.matterEntityId,
+    documentKind,
+    generationMode,
+    guidance: instructions,
+    templateOverride: { templateText: tmpl.body, templateId: `template:${templateEntityId}` },
+  })
+  if (!produced) {
+    throw new CapabilityInputMissingError(
+      `document_generation could not produce "${documentKind}" (draft precondition failed; see draft.failed) — matter stays parked.`,
+    )
+  }
+  const effects = (produced.effects[0] ?? {}) as { documentVersionId?: string }
+  return {
+    outputs: [
+      {
+        entityKind: 'document_draft',
+        entityId: effects.documentVersionId,
+        note: `${documentKind} draft (${generationMode}, pending_review in the attorney review queue)`,
+      },
+    ],
+    summary: `Generated "${documentKind}" (${generationMode}) — pending attorney review.`,
+  }
+}
+
+// A document kind derived from a template name when the template carries no explicit
+// docKind (a firm template SHOULD have one; this keeps the draft-exists guard and the
+// draft's document_kind stable rather than failing on a config gap).
+function slugifyDocKind(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 60) || 'document'
+  )
 }
 
 // ── Real handler: AI document review (Contract A reuse) ──────────────────────────

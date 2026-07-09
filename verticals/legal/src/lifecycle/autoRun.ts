@@ -36,10 +36,11 @@
 // whether entry to such a stage auto-runs (`shouldAutoRun`) and what its post-commit
 // callback does (`run`).
 //   • invoke_capability → always auto-runs on entry; the capability's own gate decides
-//     park-vs-advance inside invokeCapabilityForMatter (unchanged from #303). KNOWN
-//     LIMIT: this runner still executes its handler in-request post-commit — offloading
-//     it needs a capability job kind, a deliberate non-goal here (this change adds no
-//     new job kind; the deployed regression is drafting).
+//     park-vs-advance inside invokeCapabilityForMatter. CAPABILITY-UNIFY-1 (WP3) closed
+//     the old KNOWN LIMIT (in-request post-commit execution that could outrun the
+//     serverless wall-clock): the callback now ENQUEUES a legal.capability.run worker
+//     job (one fast INSERT) and the worker runs invokeCapabilityForMatter off-request —
+//     the same offload shape generate_document uses for legal.draft.run.
 //   • generate_document → auto-runs on entry only when the stage has a gate:automatic
 //     advancing edge (the "producing + automatic" rule) — it ENQUEUES the drafting job;
 //     the worker drafts the real document then advances that edge to the (human-gated)
@@ -80,13 +81,18 @@ interface ProducingRunner {
 // dispatch below never names a kind.
 const PRODUCING_RUNNERS: Partial<Record<StepActionKind, ProducingRunner>> = {
   invoke_capability: {
-    // #303 behavior, unchanged: an invoke_capability stage always runs on entry; the
-    // capability's default_gate (attorney/client → park, automatic/system → advance) is
-    // applied inside invokeCapabilityForMatter.
+    // An invoke_capability stage always runs on entry. CAPABILITY-UNIFY-1 (WP3): the
+    // post-commit callback no longer EXECUTES the capability in-request — deferred
+    // in-request execution could outrun the serverless wall-clock (the same class of
+    // bug PROD-DRAFT-OFFLOAD-1 fixed for drafting). It now ENQUEUES a legal.capability.run
+    // worker job (one fast INSERT); the always-on worker claims it and runs
+    // invokeCapabilityForMatter past the serverless boundary. The capability's own
+    // idempotency + gate logic (attorney/client → park, automatic/system → advance)
+    // are unchanged — they just run on the worker now.
     shouldAutoRun: () => true,
-    run: async (base, matterEntityId) => {
-      const { invokeCapabilityForMatter } = await import('../api/capabilityRuntime.js')
-      await invokeCapabilityForMatter(base, matterEntityId)
+    run: async (base, matterEntityId, stage) => {
+      const { enqueueCapabilityRunJob } = await import('../api/capabilityRuntime.js')
+      await enqueueCapabilityRunJob(base, matterEntityId, stage.key)
     },
   },
   generate_document: {
