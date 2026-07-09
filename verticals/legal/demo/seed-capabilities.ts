@@ -281,6 +281,74 @@ const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
 // "not yet executable" error when invoked — never a silent no-op or simulated output.
 // The full T/F classification + one-line rationale lives in the decision log.
 const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>> = {
+  // CAPABILITY-UNIFY-1 (WP1) — document generation is the first fully-migrated LEGO
+  // block: ONE capability, reused across services, drafting a DIFFERENT document per
+  // step via per-step config. The template is named by EXACT firm-library entity id
+  // (config_schema.template_entity_id) — never resolved by (serviceKey, docKind)
+  // convention — which is what lets the same block draft a will on one service and
+  // an operating agreement on another.
+  document_generation: {
+    step_invocable: true,
+    handler_key: 'legal.capability.document_generation.run',
+    inputs: [
+      {
+        key: 'template',
+        provided_by: 'attorney',
+        source: 'document_template',
+        required: true,
+        description:
+          'the firm-library document template this step drafts, named by exact entity id in capability_config.template_entity_id',
+      },
+      {
+        key: 'intake_answers',
+        provided_by: 'client',
+        source: 'matter_context',
+        required: true,
+        description: 'the client’s intake questionnaire answers on the matter',
+      },
+      {
+        key: 'instructions',
+        provided_by: 'attorney',
+        source: 'service_config',
+        required: false,
+        description: 'the drafting prompt/instructions for ai_draft mode',
+      },
+      {
+        key: 'generation_mode',
+        provided_by: 'attorney',
+        source: 'service_config',
+        required: true,
+        description: 'template_merge (deterministic, no AI) or ai_draft (AI drafting)',
+      },
+    ],
+    outputs: [
+      {
+        entity_kind: 'document_draft',
+        description: 'a document draft (pending_review) in the attorney review queue',
+      },
+    ],
+    // Drafting completes → the stage's automatic edge advances the matter to its
+    // human-gated review stage, which WAITS — same net behavior as the bespoke path.
+    default_gate: 'automatic',
+    config_schema: {
+      template_entity_id: {
+        type: 'string',
+        required: true,
+        description:
+          'The EXACT firm template entity id this step drafts (from the firm document library) — never a name or a docKind.',
+      },
+      generation_mode: {
+        type: 'string',
+        required: true,
+        description: "How to produce the document: 'template_merge' or 'ai_draft'.",
+      },
+      instructions: {
+        type: 'string',
+        required: false,
+        description: 'Optional drafting instructions/prompt for ai_draft mode.',
+      },
+    },
+  },
   ai_document_review: {
     step_invocable: true,
     handler_key: 'legal.capability.ai_document_review.run',

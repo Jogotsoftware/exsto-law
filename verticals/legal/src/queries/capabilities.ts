@@ -13,6 +13,11 @@ export type CapabilityInputSource =
   | 'service_config'
   | 'prior_step_output'
   | 'client_response'
+  // CAPABILITY-UNIFY-1: a firm-library template entity, referenced by EXACT entity
+  // id in the step's capability_config — never resolved by (serviceKey, docKind)
+  // convention. The reuse seam that lets ONE document_generation block draft a
+  // different document per step.
+  | 'document_template'
 
 export interface CapabilityInput {
   key: string
