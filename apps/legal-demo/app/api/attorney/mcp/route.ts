@@ -6,6 +6,11 @@ import '@exsto/legal/mcp'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
 
 export const runtime = 'nodejs'
+// RUNTIME-AUTORUN-2: an attorney advance/approve here may land a matter on a producing
+// stage (generate_document), whose autorun drafts the document synchronously in this
+// request (post-commit, never on the advance txn, but still in-request). Allow the model
+// budget so it does not time out — matches /workflow/invoke and the assistant route.
+export const maxDuration = 300
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)

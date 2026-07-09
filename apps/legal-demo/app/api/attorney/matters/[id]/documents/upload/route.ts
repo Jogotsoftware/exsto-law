@@ -19,6 +19,10 @@ import {
 // (+ allowlist) → upload bytes to Storage → record the substrate document. On a
 // record failure the just-uploaded object is removed (orphan cleanup).
 export const runtime = 'nodejs'
+// RUNTIME-AUTORUN-2: an attorney upload here can advance the matter onto a producing
+// stage (generate_document) whose autorun drafts synchronously in this request. Allow
+// the model budget so the draft does not time out.
+export const maxDuration = 300
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: matterId } = await params

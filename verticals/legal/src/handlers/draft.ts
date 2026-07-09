@@ -15,7 +15,7 @@ import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
 import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
-import { scheduleCapabilityAutoRun } from '../lifecycle/autoRun.js'
+import { scheduleProducingAutoRun } from '../lifecycle/autoRun.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // draft.generate / draft.merge — persist a first-draft document (REQ-DRAFT-01..04,
@@ -475,7 +475,7 @@ async function advanceInstanceOnApprove(
 
   // ADR 0046 — approving a review memo may land the matter on the NEXT
   // invoke_capability stage (e.g. request client materials); run it post-commit.
-  scheduleCapabilityAutoRun(ctx, matterEntityId, edge.to, graph)
+  scheduleProducingAutoRun(ctx, matterEntityId, edge.to, graph)
 }
 
 registerActionHandler('draft.approve', async (ctx, client, payload, actionId) => {

@@ -386,3 +386,45 @@ E. Only tenant-zero written (the intended scope); zero hard deletes (append-only
 
 ## Note
 Only `firm-admin.build-service` changed content in #308, so only it needed refreshing; the other 4 firm-admin skills already matched their repo source and were deliberately left at their existing versions. The one-off surgical reseed harness was not committed (a prod one-off, like the CAPRT1 harnesses).
+
+---
+
+# RUNTIME-AUTORUN-2 — drafting workflows run end-to-end
+
+Session date: 2026-07-08 · Branch `runtime-autorun-2` · Scope: RUNTIME surface (capabilityRuntime / afterCommit autorun / generate_document producer / advance). No migration; frontier stays **0119**.
+
+## The gap
+#303 wired the afterCommit autorun for `invoke_capability` ONLY. A `generate_document` stage never fired on its own — the will/document was drafted only if an attorney clicked "Generate" in the Documents tab. So a builder-authored drafting workflow stranded at `generate_will` (prod matter M-MRCK3A49, Pacheco — READ-ONLY, untouched). The producer had **never run for a will in any tenant** (0 generated docs live), so it was UNPROVEN, not just untriggered.
+
+## A0 — producer proven first (STOP-gate, sandbox `00fe…0001`)
+Invoked the real producer (`generateDraft.runDraftGeneration`) for a will directly. It produced a REAL, complete NC Last Will & Testament from template + intake + drafting prompt:
+- `document_version` **60f6c8c9-2978-449f-a64c-b91b1ef2d062**, `content_blob` `f46ef938…`, docKind `will`, **8554 chars**, status `pending_review`.
+- `reasoning_trace` **3047d10e…**, `agent_actor_id = 00000000-0000-0000-0001-000000000004` (#303's actor). ✓
+The handler is alive. Only then was the trigger wired. Harness: `verticals/legal/demo/runtime-autorun-2-a0.ts` (committed, storage-guard-safe).
+
+## The fix — class-based producing autorun (not a hardcoded kind)
+- `lifecycle/autoRun.ts`: `scheduleCapabilityAutoRun` → **`scheduleProducingAutoRun`**. A `PRODUCING_RUNNERS` registry keyed by `StepActionKind` IS the class; the dispatch never names a kind. Each runner declares `shouldAutoRun(stage, graph)`: `invoke_capability` = always (its runtime self-parks/advances — #303 UNCHANGED); `generate_document` = only when the stage has a `gate:automatic` edge (the "producing + automatic" rule). Non-producing kinds have no runner → never autofire (human gates wait). A future producing kind adds ONE entry.
+- `api/generateDocumentRuntime.ts` (NEW): `generateDocumentForMatter` — the generate_document sibling of `invokeCapabilityForMatter`. Resolve stage → idempotency (skip if a draft for the docKind already exists) → produce via `runDraftGeneration` (emits the canonical **`draft.completed`**) → advance the automatic edge via the shared `advanceAutomaticFromStage`. Post-commit only; never on the advance txn (#303 invariant).
+- **Completion event = `draft.completed`** (already registered; `derive.ts:97` already uses it for exactly this generate→review hop). The brief named `document.generated`, which does **not** exist as an event kind in any migration — so it is NOT created. No migration; the advance is edge-first (mirrors invoke_capability), so the will edge's cosmetic `on:` string is irrelevant.
+- **Cross-tenant actor fix** (surfaced by acceptance): `legal.matter.advance` rejects a `gate:automatic` advance from a non-system actor. The runtime hardcoded tenant-zero's agent actor `…0001…0004`; in any other tenant (sandbox `…00fe…0004`, a 2nd firm) that id resolves to no actor row → treated as human → advance rejected. This branch was never exercised by #303 (all its capabilities were attorney/client-gated). Fix: `advanceAutomaticFromStage` now resolves **the tenant's own** agent/system actor (`resolveTenantSystemActorId`), falling back to the tenant-zero const (so tenant-zero is a no-op). Fixes automatic advances for BOTH producing kinds in every tenant.
+- **maxDuration**: the autorun drafts synchronously in-request, so the trigger routes get `maxDuration = 300` (matches `/workflow/invoke` + assistant): client-portal + attorney document-upload routes and both MCP routes (attorney draft.approve/advance, client delivery).
+
+## Acceptance B–F — green in sandbox `00fe…0001` (harness `runtime-autorun-2-acceptance.ts`, committed)
+Full forward pass driven ONLY by real client/attorney actions + the autorun (zero manual producer calls). Will document `a6d97101…`, agent-attributed. `state_history` / event audit:
+
+| # | advance | gate | trigger | proves |
+|---|---|---|---|---|
+| 1 | client_intake → generate_will | client | document.upload | client action |
+| 2 | **draft.completed** (will `a6d97101`, ai_draft) | — | — | **producer autofired (B)** |
+| 3 | generate_will → review_send_will | **automatic** | **draft.completed** | **producing-autorun advance (B)** |
+| 4 | review_send_will → client_response | attorney | draft.approve | **attorney gate WAITED (E)** |
+| 5 | **capability.invoked** (request_client_materials) | client | — | **invoke_capability autofired (F/D)** |
+| 6 | client_response → complete (terminal) | client | client.message.post | **reached terminal (C)** |
+
+- **B** autofire ✓ · **C** full pass to `complete` ✓ · **D** two producing kinds through ONE class-based scheduler ✓ · **E** attorney gate waits (no autofire past review) ✓ · **F** #303 invoke_capability autorun unregressed, matter completes ✓.
+- Unit: `capability-runtime.test.ts` 13/13 (4 new: generate_document fires with automatic edge; does NOT fire attorney-gated review; does NOT fire a producing step with a non-automatic edge; both kinds route through one scheduler). Full `test:unit` 94/94; typecheck + build green.
+
+## Out of scope / follow-ons
+- **BILLING** is a BUILDER-authoring concern (the will graph has no invoice stage — the builder never authored one). Autorun cannot fire a stage that isn't in the graph. The pass reaching `complete` without billing is EXPECTED and correct.
+- **Existing stranded prod matter M-MRCK3A49** entered `generate_will` BEFORE this fix, so its autorun was never scheduled — it will not retroactively fire. It stays parked + re-invocable (Documents-tab generate, or a manual producer re-trigger) — a prod op, not this PR (READ-ONLY per brief).
+- Durable-worker offload of the in-request draft (beyond `maxDuration`) remains the known scale-up follow-on.
