@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "test:unit": "vitest run tests/invariants/hlc.test.ts tests/invariants/worker-backoff.test.ts tests/vertical/template-merge.test.ts tests/vertical/service-completeness.test.ts tests/vertical/stripe-payments.test.ts tests/vertical/build-brief.test.ts tests/vertical/build-history-content.test.ts tests/vertical/build-mode-forcing.test.ts tests/vertical/capability-runtime.test.ts tests/vertical/capability-authoring.test.ts tests/vertical/public-booking-availability.test.ts tests/vertical/overload-handling.test.ts tests/vertical/step-editor-roundtrip.test.ts",
+    "test:unit": "vitest run tests/invariants/hlc.test.ts tests/invariants/worker-backoff.test.ts tests/vertical/template-merge.test.ts tests/vertical/service-completeness.test.ts tests/vertical/stripe-payments.test.ts tests/vertical/build-brief.test.ts tests/vertical/build-history-content.test.ts tests/vertical/build-mode-forcing.test.ts tests/vertical/capability-runtime.test.ts tests/vertical/capability-authoring.test.ts tests/vertical/public-booking-availability.test.ts tests/vertical/overload-handling.test.ts tests/vertical/step-editor-roundtrip.test.ts tests/vertical/capability-unify.test.ts",
     "test:invariants": "vitest run tests/invariants",
     "test:watch": "vitest",
     "lint": "eslint .",
