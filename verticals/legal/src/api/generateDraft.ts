@@ -40,6 +40,13 @@ export interface GenerateDraftInput {
   // Legal-skill slugs (claude-for-legal playbooks) to force-apply to this draft,
   // selected by the attorney. Their bodies are injected into the drafting prompt.
   skillSlugs?: string[]
+  // CAPABILITY-UNIFY-1: an EXPLICIT template override. The document_generation
+  // capability loads the firm template BY ENTITY ID (config_schema.template_entity_id)
+  // and hands the body + a template id in here, so the producer draws its document
+  // body from the exact template the step names — never resolving by (serviceKey,
+  // docKind) convention. When set, it supersedes the config/repo template lookup for
+  // both generation modes; everything downstream (persist, trace, notify) is identical.
+  templateOverride?: { templateText: string; templateId: string }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -132,9 +139,18 @@ export async function runDraftGeneration(
   // no document to draft — a non-retryable precondition. The completeness gate
   // normally blocks enabling such a service, so this is defense in depth. This
   // fills the {{operating_agreement_template}} slot below.
-  const templateDoc = m.serviceKey
-    ? await getDocumentTemplate(agentCtx, m.serviceKey, input.documentKind)
-    : resolveDocumentTemplateDoc(undefined, '', input.documentKind)
+  // CAPABILITY-UNIFY-1: an explicit template override (the document_generation
+  // capability, loading the template by entity id) wins over the config/repo lookup.
+  // Otherwise resolve config-first with a bundled repo fallback (the bespoke path).
+  const templateDoc = input.templateOverride
+    ? {
+        templateText: input.templateOverride.templateText,
+        source: 'capability',
+        templateVersion: null,
+      }
+    : m.serviceKey
+      ? await getDocumentTemplate(agentCtx, m.serviceKey, input.documentKind)
+      : resolveDocumentTemplateDoc(undefined, '', input.documentKind)
   const template = templateDoc?.templateText ?? null
   if (!template) {
     await submitAction(agentCtx, {
@@ -155,8 +171,9 @@ export async function runDraftGeneration(
   }
   const templateSource = templateDoc?.source ?? 'none'
   const templateVersion = templateDoc?.templateVersion ?? null
-  const templateId =
-    templateSource === 'config' && templateVersion != null
+  const templateId = input.templateOverride
+    ? input.templateOverride.templateId
+    : templateSource === 'config' && templateVersion != null
       ? `${m.serviceKey}/${input.documentKind}@template-v${templateVersion}`
       : `${input.documentKind}@template-repo`
 

@@ -13,11 +13,12 @@ import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import { listCapabilities } from '../queries/capabilities.js'
 import { requestCapability } from './capabilities.js'
+import { isHandlerImplemented } from './capabilityRuntime.js'
 
 const CAPABILITY_CONTEXT_TOOL_DEF = {
   name: 'get_capability_context',
   description:
-    "Get the platform's CAPABILITY LIBRARY — everything the platform can already do (e.g. AI document review, native e-signature, booking, invoicing, Stripe/manual payments, client portal, mail, the template/questionnaire editors, the workflow engine, trust accounting, document generation). Each entry has a name, what it's FOR, when to use it, and what backs it. Call this when building or extending a service to decide REUSE vs. build-from-scratch: if a capability the attorney needs already exists, WIRE IT IN (e.g. add the e-signature step to the workflow) rather than inventing it. Returns `available` capabilities (ready to use now) and any `requested`/`building` ones (asked for but not live yet). Read-only.",
+    "Get the platform's CAPABILITY LIBRARY, split into TWO distinct sections. `executable` = capabilities you can WIRE INTO A WORKFLOW STEP right now as an invoke_capability stage (they are step_invocable) — e.g. document generation, AI document review, request client materials. ONLY `executable` entries may become steps; each carries a `not_yet_executable` flag (true = contracted but no live handler yet, so surface the gap honestly and do NOT wire it in). `features` = platform abilities that back the product but are NOT wired as steps this way (booking, invoicing, Stripe/manual payments, client portal, mail, the template/questionnaire editors, the workflow engine, trust accounting, calendar/Granola sync). Each entry has a name, what it's FOR, when to use it, and what backs it. Call this when building or extending a service to decide REUSE vs. build-from-scratch: if an `executable` capability covers what the attorney needs, wire it into the workflow rather than inventing a step. Also returns any `requested`/`building` capabilities (asked for but not live yet). Read-only.",
   input_schema: { type: 'object', properties: {}, additionalProperties: false },
 }
 
@@ -27,17 +28,37 @@ export function buildCapabilityContextTool(ctx: ActionContext): ClientTool {
     name: 'get_capability_context',
     run: async () => {
       const caps = await listCapabilities(ctx)
-      // Compact projection — the model needs name/purpose/when/backing/status.
-      const projected = caps.map((c) => ({
-        slug: c.slug,
-        status: c.status,
-        name: c.spec.name,
-        category: c.spec.category,
-        purpose: c.spec.purpose,
-        when_to_use: c.spec.when_to_use,
-        backed_by: c.spec.backed_by,
-      }))
-      return JSON.stringify({ capabilities: projected })
+      // CAPABILITY-UNIFY-1 (WP4) — separate the two meanings that used to share one
+      // list. `executable` = step_invocable capabilities the model may wire into a
+      // stage; each names whether it has a live handler (not_yet_executable). `features`
+      // = descriptive/platform-backed capabilities that are NOT wired as steps. A
+      // contracted-but-unimplemented capability (e.g. esignature) appears under
+      // executable WITH not_yet_executable:true — never silently omitted.
+      const executable = caps
+        .filter((c) => c.spec.step_invocable === true)
+        .map((c) => ({
+          slug: c.slug,
+          status: c.status,
+          name: c.spec.name,
+          category: c.spec.category,
+          purpose: c.spec.purpose,
+          when_to_use: c.spec.when_to_use,
+          backed_by: c.spec.backed_by,
+          default_gate: c.spec.default_gate,
+          not_yet_executable: !isHandlerImplemented(c.spec.handler_key),
+        }))
+      const features = caps
+        .filter((c) => c.spec.step_invocable !== true)
+        .map((c) => ({
+          slug: c.slug,
+          status: c.status,
+          name: c.spec.name,
+          category: c.spec.category,
+          purpose: c.spec.purpose,
+          when_to_use: c.spec.when_to_use,
+          backed_by: c.spec.backed_by,
+        }))
+      return JSON.stringify({ executable, features })
     },
   }
 }

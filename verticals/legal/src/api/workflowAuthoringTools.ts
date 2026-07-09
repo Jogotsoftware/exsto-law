@@ -11,12 +11,13 @@
 //     NOTHING — the live version write happens only when the attorney approves
 //     (decision 1). The ack tells the model not to repeat the graph in prose.
 //
-// The input_schema constrains action.kind to the closed catalog (enum =
-// STEP_ACTION_KINDS) and gate to GATE_KINDS, so the guardrail is on the tool surface
+// The input_schema constrains action.kind to the AUTHORABLE catalog (enum =
+// AUTHORABLE_STEP_ACTION_KINDS — the closed catalog minus deprecated kinds like
+// generate_document) and gate to GATE_KINDS, so the guardrail is on the tool surface
 // as well as in the validator.
 import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
-import { STEP_ACTION_KINDS, GATE_KINDS, type Lifecycle } from '../lifecycle/index.js'
+import { AUTHORABLE_STEP_ACTION_KINDS, GATE_KINDS, type Lifecycle } from '../lifecycle/index.js'
 import { loadWorkflowAuthoringContext, validateProposedLifecycle } from './workflowAuthoring.js'
 
 // A workflow proposal captured this turn — the proposed graph plus the model's
@@ -88,7 +89,7 @@ const STAGE_SCHEMA = {
       type: 'object' as const,
       description: 'What this step does — its kind MUST be from the closed catalog.',
       properties: {
-        kind: { type: 'string' as const, enum: STEP_ACTION_KINDS },
+        kind: { type: 'string' as const, enum: AUTHORABLE_STEP_ACTION_KINDS },
         config: {
           type: 'object' as const,
           description:

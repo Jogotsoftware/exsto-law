@@ -59,6 +59,21 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
   })
 })
 
+// CAPABILITY-UNIFY-1 (WP3) — runs one invoke_capability step OFF the request. Enqueued
+// by the producing auto-run's post-commit callback (lifecycle/autoRun.ts) or the manual
+// /workflow/invoke route; the worker claims it here and runs invokeCapabilityForMatter,
+// which re-resolves the matter's current invoke_capability stage, runs the capability's
+// real handler (document_generation, ai_document_review, request_client_materials, …),
+// records capability.invoked (its own idempotency guard), and applies the capability's
+// gate. This is the single off-request path for ALL capabilities — no LLM/handler work
+// ever rides the request or an advance transaction. Transient errors throw → runtime
+// backoff → dead-letter; on failure the matter stays parked + re-invocable.
+registerWorkerHandler('legal.capability.run', async (ctx, payload) => {
+  const { invokeCapabilityForMatter } = await import('../api/capabilityRuntime.js')
+  const p = payload as { matter_entity_id: string; stage_key?: string }
+  await invokeCapabilityForMatter(ctx, p.matter_entity_id)
+})
+
 // Runs one AI document-review job (one per uploaded document). Storage access
 // is the vertical's read-only adapter, injected HERE so the pipeline stays
 // testable with fakes. Transient model/Storage errors throw → runtime backoff;

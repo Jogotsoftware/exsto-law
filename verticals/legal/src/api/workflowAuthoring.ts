@@ -18,11 +18,13 @@
 import { randomUUID } from 'node:crypto'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import {
-  STEP_ACTION_CATALOG,
+  AUTHORABLE_STEP_ACTION_CATALOG,
+  isDeprecatedStepActionKind,
   GATE_KINDS,
   validateLifecycle,
   validateLinearLifecycle,
   buildInvokeCapabilityStepTemplate,
+  capabilityConfigSchemaProps,
   diagnoseCapabilityStepConfig,
   diagnoseMissingCapabilitySlug,
   diagnoseEdgeTransition,
@@ -154,7 +156,9 @@ export async function loadWorkflowAuthoringContext(
     })
   return {
     serviceKey,
-    actions: STEP_ACTION_CATALOG,
+    // WP5 — offer only the AUTHORABLE catalog (deprecated kinds like generate_document
+    // are excluded; new drafting steps are authored as invoke_capability{document_generation}).
+    actions: AUTHORABLE_STEP_ACTION_CATALOG,
     gates: GATE_KINDS,
     currentGraph: current?.graph ?? null,
     currentVersion: current?.version ?? null,
@@ -193,6 +197,17 @@ export async function validateProposedLifecycle(
   errors.push(...validateLifecycle(graph).errors)
   errors.push(...validateLinearLifecycle(graph).errors)
 
+  // CAPABILITY-UNIFY-1 (WP5) — a NEW proposal must not author a deprecated step kind.
+  // Authoring-only (not in validateLifecycle) so EXISTING definitions with the kind
+  // keep validating + running; only fresh proposals are steered to the replacement.
+  for (const s of graph) {
+    if (s.action && isDeprecatedStepActionKind(s.action.kind)) {
+      errors.push(
+        `stage "${s.key}" uses the deprecated step kind "${s.action.kind}". Author a drafting step as an invoke_capability stage running the "document_generation" capability instead (set action.config.capability_config.template_entity_id to the firm template it drafts and generation_mode to "ai_draft" or "template_merge").`,
+      )
+    }
+  }
+
   // WORKFLOW-AUTHORING-1 — every attorney/client/system edge must name a REAL advance
   // token (the runtime matches on it verbatim), not prose. Authoring-only (not in
   // validateLifecycle) so legacy/manual graphs with other tokens are never rejected.
@@ -203,14 +218,24 @@ export async function validateProposedLifecycle(
     }
   }
 
+  // The firm's active document-template ids, loaded at most ONCE and shared by both
+  // the documents[] check and the capability template_entity_id check below (a
+  // document_generation step names its template the same way, by exact entity id).
+  let knownDocTemplateIds: Set<string> | null = null
+  const loadKnownDocTemplateIds = async (): Promise<Set<string>> => {
+    if (knownDocTemplateIds) return knownDocTemplateIds
+    const library = await listStandaloneTemplates(ctx)
+    knownDocTemplateIds = new Set(
+      library.filter((t) => t.category === 'document').map((t) => t.templateEntityId),
+    )
+    return knownDocTemplateIds
+  }
+
   // Referenced template ids must exist in the firm's document library. Collect the
   // ids the graph references, then check them against the real library in one read.
   const referencedIds = new Set<string>(collectReferencedTemplateIds(graph))
   if (referencedIds.size > 0) {
-    const library = await listStandaloneTemplates(ctx)
-    const known = new Set(
-      library.filter((t) => t.category === 'document').map((t) => t.templateEntityId),
-    )
+    const known = await loadKnownDocTemplateIds()
     for (const id of referencedIds) {
       if (!known.has(id))
         errors.push(`referenced document template "${id}" is not in the firm library`)
@@ -247,6 +272,25 @@ export async function validateProposedLifecycle(
         )
       }
       errors.push(...diagnoseCapabilityStepConfig(s.key, slug, rawConfig, cap.spec.config_schema))
+      // CAPABILITY-UNIFY-1 (WP4) — a capability that drafts from a firm template (its
+      // config_schema declares `template_entity_id`, e.g. document_generation) must
+      // name a REAL active firm document template by exact id — the same class of check
+      // as documents[] templateEntityId. Keyed off the schema (not a hardcoded slug) so
+      // any future template-drafting capability inherits it. Only runs when the required
+      // key is present (its absence is diagnoseCapabilityStepConfig's job).
+      const schemaProps = capabilityConfigSchemaProps(cap.spec.config_schema)
+      if ('template_entity_id' in schemaProps) {
+        const capabilityConfig = (cfg.capability_config ?? {}) as Record<string, unknown>
+        const templateId = String((capabilityConfig.template_entity_id as string) ?? '').trim()
+        if (templateId) {
+          const known = await loadKnownDocTemplateIds()
+          if (!known.has(templateId)) {
+            errors.push(
+              `stage "${s.key}" runs capability "${slug}" but its action.config.capability_config.template_entity_id "${templateId}" is not an active firm document template — use an exact templateEntityId from get_workflow_context's availableTemplates.`,
+            )
+          }
+        }
+      }
     }
   }
 
