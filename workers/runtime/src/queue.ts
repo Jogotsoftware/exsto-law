@@ -96,6 +96,14 @@ export function backoffSeconds(attempts: number): number {
   return Math.min(BACKOFF_CAP_SECONDS, BACKOFF_BASE_SECONDS * 2 ** Math.max(0, attempts - 1))
 }
 
+// One place decides retry-vs-dead-letter: a job that has used up its attempts is
+// terminal, otherwise it retries. Shared by failJob (a handler threw) and the
+// lock-timeout sweep (a claim never reached any terminal state) so both age out
+// a poison job the same way instead of reclaiming it forever.
+export function failureDecision(attempts: number, maxAttempts: number): 'retry' | 'dead_letter' {
+  return attempts >= maxAttempts ? 'dead_letter' : 'retry'
+}
+
 // Reschedule with exponential backoff, or move to the dead-letter queue once
 // attempts are exhausted.
 export async function failJob(
@@ -104,7 +112,7 @@ export async function failJob(
   maxAttempts: number,
   error: string,
 ): Promise<'retry' | 'dead_letter'> {
-  const decision: 'retry' | 'dead_letter' = attempts >= maxAttempts ? 'dead_letter' : 'retry'
+  const decision = failureDecision(attempts, maxAttempts)
   await withSuperuser(async (client) => {
     if (decision === 'dead_letter') {
       await client.query(
@@ -123,4 +131,61 @@ export async function failJob(
     }
   })
   return decision
+}
+
+export interface SweepResult {
+  reclaimed: number
+  deadLettered: number
+}
+
+// Lock-timeout (visibility-timeout) sweep. claimNextJob only ever looks at
+// status='pending', so a job whose worker died mid-run stays 'running' forever
+// with a stale lock and never retries — the queue silently loses it. This
+// reclaims any job locked longer than timeoutSeconds and routes it through the
+// SAME failure decision as a thrown handler: retry with backoff, or dead-letter
+// once attempts are spent (attempts was already incremented at claim time, so a
+// job that keeps crashing the worker ages out instead of reclaiming forever).
+//
+// Runs IN the dispatcher/worker (self-heal for the common case: a transient crash
+// where Render restarts the process and the reclaimed job is picked up again).
+// The EXTERNAL liveness detector (src/liveness.ts, run by the Netlify scheduled
+// function) is the backstop for the case this can't cover — a worker that never
+// comes back — because a dead worker can't run its own sweep.
+//
+// One atomic UPDATE across all tenants (owner role, like claimNextJob). The
+// backoff arithmetic mirrors backoffSeconds() computed per-row in SQL.
+export async function sweepStaleRunningJobs(timeoutSeconds: number): Promise<SweepResult> {
+  return withSuperuser(async (client) => {
+    const r = await client.query<{ status: 'pending' | 'dead_letter' }>(
+      `UPDATE worker_job
+          SET status = CASE WHEN attempts >= max_attempts THEN 'dead_letter' ELSE 'pending' END,
+              last_error = $4,
+              run_at = CASE
+                         WHEN attempts >= max_attempts THEN run_at
+                         ELSE now() + make_interval(
+                                secs => LEAST($2::float8, $3::float8 * power(2, GREATEST(0, attempts - 1)))
+                              )
+                       END,
+              locked_at = NULL,
+              locked_by = NULL,
+              updated_at = now()
+        WHERE status = 'running'
+          AND locked_at IS NOT NULL
+          AND locked_at < now() - make_interval(secs => $1::float8)
+        RETURNING status`,
+      [
+        timeoutSeconds,
+        BACKOFF_CAP_SECONDS,
+        BACKOFF_BASE_SECONDS,
+        'lock-timeout sweep: reclaimed a job left running past the lock timeout (worker likely crashed mid-job)',
+      ],
+    )
+    let reclaimed = 0
+    let deadLettered = 0
+    for (const row of r.rows) {
+      if (row.status === 'dead_letter') deadLettered += 1
+      else reclaimed += 1
+    }
+    return { reclaimed, deadLettered }
+  })
 }
