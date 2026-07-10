@@ -11,11 +11,16 @@ export function Modal({
   onClose,
   children,
   footer,
+  // 'default' keeps the 640px confirm-box width. 'wide' sizes the card for real
+  // work — the workflow runner's document steps (review/edit) need a two-pane
+  // feel, not a confirm box (WORKFLOW-RUNNER-1 WP1).
+  size = 'default',
 }: {
   title: React.ReactNode
   onClose: () => void
   children: React.ReactNode
   footer?: React.ReactNode
+  size?: 'default' | 'wide'
 }) {
   const titleId = useId()
   const cardRef = useRef<HTMLDivElement>(null)
@@ -41,7 +46,7 @@ export function Modal({
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
       <div
-        className="modal-card"
+        className={size === 'wide' ? 'modal-card modal-card-wide' : 'modal-card'}
         ref={cardRef}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
