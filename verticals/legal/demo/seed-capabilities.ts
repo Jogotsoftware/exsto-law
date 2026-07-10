@@ -7,6 +7,17 @@
 // DISCIPLINE: whenever a NEW capability ships, add it here (and re-run) — the
 // library is only as useful as it is complete. A capability the builder can't see
 // is one it will wastefully try to build from scratch or wrongly say is missing.
+//
+// PROMOTION DOCTRINE (MACHINE-COMMS-1 WP4): anything that ACTS at runtime inside
+// a matter must be STEP-INVOCABLE — an INVOCABLE_CONTRACTS entry with handler_key,
+// config_schema, and default_gate, composable as an invoke_capability stage (and
+// runnable ad hoc where that makes sense). "Features" are only what cannot be a
+// step by nature: front doors (booking precedes the matter), the chassis (engine,
+// review queue, portal, assistant), authoring editors, and payment rails (the step
+// is await_payment; the rail satisfies its gate). Runtime behavior that is not yet
+// invocable is a PROMOTION GAP — file it via request_capability, don't wire around
+// it. Known-promotable, deliberately not built yet: calendar event creation,
+// client-message post, trust retainer request, portal invite.
 import { pathToFileURL } from 'node:url'
 import { upsertCapability, type UpsertCapabilityInput } from '@exsto/legal'
 import { type ActionContext } from '@exsto/substrate'
@@ -258,6 +269,34 @@ export const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
     },
   },
   {
+    // MACHINE-COMMS-1 (WP2) — the machine's VOICE: email becomes what documents
+    // already are — generated with context, reviewed by the attorney, released on
+    // approval. Composable as a workflow step AND runnable ad hoc from any matter.
+    slug: 'email_generation',
+    spec: {
+      name: 'Email generation',
+      category: 'comms',
+      purpose:
+        'Draft an outbound email for a matter — AI-drafted from the matter facts, the client’s full history (including archived matters), the attorney’s instructions and the firm’s skills, or a deterministic template merge for canned sends. The draft lands in the attorney review queue; APPROVING IT SENDS IT through the firm’s real mail rails. Nothing reaches a client unapproved.',
+      when_to_use:
+        'Compose an email step wherever a service should tell the client something (documents ready, next steps, a request explained). Also available ad hoc from any matter: “draft an email to the client about X”. Gate: attorney, advancing on approval.',
+      backed_by: ['communication_draft + review queue', 'mail.send (Contract B)'],
+    },
+  },
+  {
+    // MACHINE-COMMS-1 (WP3) — memory intake: transcripts stop being stored-but-mute.
+    slug: 'transcript_extraction',
+    spec: {
+      name: 'Transcript extraction',
+      category: 'comms',
+      purpose:
+        'Distill a consultation/meeting transcript into matter memory: a summary note plus extracted facts and action items as notes, attached to the matter and feeding the client’s assembled context. Extracted facts are AI output — they land for attorney review.',
+      when_to_use:
+        'Compose it as a post-consultation step, or run it ad hoc on any transcript (Granola-imported or pasted on the matter page). Gate: attorney.',
+      backed_by: ['note entities + note_about', 'getClientContext'],
+    },
+  },
+  {
     // ADR 0046 — the second REQUIRED invocable capability. A mid-service ask: the
     // firm requests materials from the client and the matter PARKS at the client
     // gate until the client delivers (an upload or a portal reply).
@@ -348,6 +387,12 @@ export const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['
         required: false,
         description: 'Optional drafting instructions/prompt for ai_draft mode.',
       },
+      use_client_context: {
+        type: 'boolean',
+        required: false,
+        description:
+          'ai_draft mode only, default false: inject the client’s assembled history (every matter including archived, notes, transcripts) into the drafting prompt. Opt-in — cross-matter context changes draft provenance, so the attorney chooses it per step. Never applies to template_merge.',
+      },
     },
   },
   ai_document_review: {
@@ -419,6 +464,113 @@ export const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['
         type: 'string',
         required: true,
         description: 'The message asking the client for the materials.',
+      },
+    },
+  },
+  // MACHINE-COMMS-1 (WP2) — email_generation: composes the draft, parks at the
+  // ATTORNEY gate; approving the draft in the review queue IS the send (approve →
+  // mail.send through Contract B) and advances the stage via draft.approve.
+  email_generation: {
+    step_invocable: true,
+    handler_key: 'legal.capability.email_generation.run',
+    inputs: [
+      {
+        key: 'purpose',
+        provided_by: 'attorney',
+        source: 'service_config',
+        required: true,
+        description:
+          'what the email should tell the recipient — the drafting instructions (required in ai_draft mode)',
+      },
+      {
+        key: 'client_history',
+        provided_by: 'system',
+        source: 'matter_context',
+        required: false,
+        description:
+          'the client’s assembled context (every matter including archived, notes, transcripts, released documents) — always injected in ai_draft mode',
+      },
+      {
+        key: 'template',
+        provided_by: 'attorney',
+        source: 'document_template',
+        required: false,
+        description:
+          'template mode only: the firm-library template to merge, named by exact entity id in capability_config.template_entity_id',
+      },
+    ],
+    outputs: [
+      {
+        entity_kind: 'communication_draft',
+        description:
+          'an email draft (pending_review) in the attorney review queue — approving it sends it via the firm’s mail rails',
+      },
+    ],
+    default_gate: 'attorney',
+    config_schema: {
+      purpose: {
+        type: 'string',
+        required: true,
+        description: 'What this email should tell the recipient (the drafting instructions).',
+      },
+      recipient_role: {
+        type: 'string',
+        required: false,
+        description: "Who receives it: 'client' (default) or 'other'.",
+      },
+      mode: {
+        type: 'string',
+        required: false,
+        description:
+          "'ai_draft' (default — drafts from matter facts + client history + instructions) or 'template' (deterministic merge).",
+      },
+      template_entity_id: {
+        type: 'string',
+        required: false,
+        description: 'Template mode: the EXACT firm template entity id to merge — never a name.',
+      },
+    },
+  },
+  // MACHINE-COMMS-1 (WP3) — transcript_extraction: distills the matter's transcript
+  // into notes; parks at the ATTORNEY gate for review (extracted facts are AI output).
+  transcript_extraction: {
+    step_invocable: true,
+    handler_key: 'legal.capability.transcript_extraction.run',
+    inputs: [
+      {
+        key: 'transcript',
+        provided_by: 'system',
+        source: 'matter_context',
+        required: true,
+        description:
+          'the matter’s consultation transcript (Granola-imported or pasted); defaults to the latest',
+      },
+      {
+        key: 'instructions',
+        provided_by: 'attorney',
+        source: 'service_config',
+        required: false,
+        description: 'optional focus for the extraction (what to pull out)',
+      },
+    ],
+    outputs: [
+      {
+        entity_kind: 'note',
+        description:
+          'a summary note plus one note per extracted fact / action item, attached to the matter and feeding the client’s assembled context',
+      },
+    ],
+    default_gate: 'attorney',
+    config_schema: {
+      instructions: {
+        type: 'string',
+        required: false,
+        description: 'Optional attorney focus for the extraction.',
+      },
+      transcript_entity_id: {
+        type: 'string',
+        required: false,
+        description: 'Optional: a specific transcript entity id (defaults to the latest).',
       },
     },
   },

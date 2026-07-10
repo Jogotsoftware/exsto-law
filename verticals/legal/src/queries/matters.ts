@@ -44,6 +44,11 @@ export interface MatterDetail extends MatterSummary {
     currentState: string
     status: string
   } | null
+  // MACHINE-COMMS-1 (WP0) — honesty flag: the matter has NO instance but its
+  // service DOES carry an authored lifecycle (any status). The matter page must
+  // then show the repair control ("start workflow"), NEVER the fabricated legacy
+  // pipeline. False when an instance exists or the service has no lifecycle at all.
+  workflowRepairAvailable: boolean
 }
 
 export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> {
@@ -177,6 +182,23 @@ export async function getMatter(
 
     const workflow = await loadWorkflow(client, ctx.tenantId, matterEntityId)
 
+    // WP0 honesty: with no instance, does the service have an authored lifecycle
+    // the repair control could instantiate? Any-status current row, non-empty graph.
+    let workflowRepairAvailable = false
+    if (!workflow) {
+      const serviceKey = (attributes.service_key as string | undefined) ?? ''
+      if (serviceKey) {
+        const def = await client.query<{ n: number }>(
+          `SELECT jsonb_array_length(states) AS n FROM workflow_definition
+            WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
+              AND jsonb_typeof(states) = 'array'
+            ORDER BY version DESC LIMIT 1`,
+          [ctx.tenantId, serviceKey],
+        )
+        workflowRepairAvailable = (def.rows[0]?.n ?? 0) > 0
+      }
+    }
+
     return {
       matterEntityId,
       matterNumber: base.name,
@@ -196,6 +218,7 @@ export async function getMatter(
       clientEmail: clientEmail ?? null,
       clientEntityId: clientParent.rows[0]?.id ?? null,
       workflow,
+      workflowRepairAvailable,
     }
   })
 }

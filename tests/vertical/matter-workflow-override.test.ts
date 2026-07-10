@@ -104,7 +104,7 @@ async function serviceWithLifecycle(): Promise<{ serviceKey: string; activeDefId
   const activeDefId = await withSuperuser(async (client) => {
     const r = await client.query<{ id: string }>(
       `UPDATE workflow_definition
-          SET states = $3::jsonb
+          SET states = $3::jsonb, status = 'active'
         WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
         RETURNING id`,
       [TENANT, serviceKey, JSON.stringify(BOUND_GRAPH)],

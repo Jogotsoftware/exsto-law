@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { BackButton } from '@/components/BackButton'
 import { PageHead } from '@/components/PageHead'
+import { NotesSection } from '@/components/NotesSection'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
 
 type BillingType = '' | 'hourly' | 'fixed'
@@ -309,6 +310,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
               </div>
             )}
           </section>
+
+          {/* MACHINE-COMMS-1 — client-level notes (attorney + AI-extracted). */}
+          <NotesSection targetEntityId={id} createInput={{ clientEntityId: id }} />
         </>
       )}
     </main>

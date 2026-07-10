@@ -27,6 +27,11 @@ interface DraftDetail {
   versionNumber: number
   status: string
   recordedAt: string
+  // MACHINE-COMMS-1: 'communication' = an email draft. Approving it SENDS it;
+  // document-only affordances (downloads, share link, e-sign) are hidden.
+  channel: 'document' | 'communication'
+  emailSubject: string | null
+  emailToRole: string | null
   bodyMarkdown: string
   reasoningTrace: ReasoningTrace | null
   modelIdentity: string | null
@@ -365,6 +370,25 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     setError(null)
     setNotice(null)
     try {
+      if (draft.channel === 'communication') {
+        // Email draft (MACHINE-COMMS-1): regenerating means re-drafting the SAME
+        // email entity (version n+1) via legal.email.draft, with the attorney's
+        // notes as guidance — NOT the document drafting flow.
+        await callAttorneyMcp({
+          toolName: 'legal.email.draft',
+          input: {
+            matterEntityId: draft.matterEntityId,
+            purpose: 'Regenerate this email',
+            supersedesDocumentEntityId: draft.documentEntityId,
+            guidance: regenGuidance.trim() || undefined,
+          },
+        })
+        setRegenOpen(false)
+        setNotice(
+          'Regenerating this email with your instructions — the new version will appear in the review queue shortly.',
+        )
+        return
+      }
       if (draft.aiReview?.reviewedDocumentVersionId) {
         // This is an AI review MEMO, not a drafted document. Re-running it means
         // re-reviewing the SAME client-uploaded document with the attorney's
@@ -489,6 +513,9 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     )
   }
 
+  // MACHINE-COMMS-1: an email draft — approving sends it; hide the affordances
+  // that only make sense for a document (downloads, share link, e-sign send).
+  const isEmail = draft.channel === 'communication'
   const hasTrace = Boolean(
     draft.reasoningTrace ||
     draft.modelIdentity ||
@@ -522,7 +549,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       </div>
 
       <PageHead
-        title={humanizeKind(draft.documentKind)}
+        title={isEmail ? 'Email draft' : humanizeKind(draft.documentKind)}
         actions={
           <>
             <span className="text-muted review-generated">
@@ -530,6 +557,11 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             </span>
             <span className="review-version">v{draft.versionNumber}</span>
             <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
+            {isEmail && (
+              <span className="badge info" title="Approving this draft sends the email.">
+                Email
+              </span>
+            )}
             {draft.aiReview && (
               <span
                 className="badge info"
@@ -542,6 +574,15 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         }
       />
 
+      {isEmail && (
+        <div style={{ marginBottom: 'var(--space-3)' }}>
+          <div>
+            <strong>Subject:</strong> {draft.emailSubject || humanizeKind(draft.documentKind)}
+          </div>
+          <div className="text-muted text-sm">To: the matter&apos;s client</div>
+        </div>
+      )}
+
       <div className="review-toolbar">
         <button
           onClick={openEdit}
@@ -550,22 +591,30 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         >
           Edit document
         </button>
-        <button onClick={() => downloadAsPdf(draft.bodyMarkdown, docFileBase)}>Download PDF</button>
-        <button onClick={() => downloadAsWord(draft.bodyMarkdown, docFileBase)}>
-          Download Word
-        </button>
-        {/* Contract J: auto-discovered document actions (Send via email; the
-            e-signature session's Send for signature appears here automatically). */}
-        <DocumentActionBar
-          context={{
-            documentVersionId: draft.documentVersionId,
-            documentEntityId: draft.documentEntityId,
-            matterEntityId: draft.matterEntityId,
-            matterNumber: draft.matterNumber,
-            documentKind: draft.documentKind,
-            shareUrl: shareUrlFor(draft.documentVersionId),
-          }}
-        />
+        {/* Document-only affordances (downloads, share-link / e-sign actions) make
+            no sense for an email draft — the email IS the delivery. */}
+        {!isEmail && (
+          <>
+            <button onClick={() => downloadAsPdf(draft.bodyMarkdown, docFileBase)}>
+              Download PDF
+            </button>
+            <button onClick={() => downloadAsWord(draft.bodyMarkdown, docFileBase)}>
+              Download Word
+            </button>
+            {/* Contract J: auto-discovered document actions (Send via email; the
+                e-signature session's Send for signature appears here automatically). */}
+            <DocumentActionBar
+              context={{
+                documentVersionId: draft.documentVersionId,
+                documentEntityId: draft.documentEntityId,
+                matterEntityId: draft.matterEntityId,
+                matterNumber: draft.matterNumber,
+                documentKind: draft.documentKind,
+                shareUrl: shareUrlFor(draft.documentVersionId),
+              }}
+            />
+          </>
+        )}
         {draft.versionNumber > 1 && (
           <button
             type="button"
@@ -612,14 +661,16 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             ⇄ Suggested redline ({redlineSummary.added} added, {redlineSummary.removed} removed)
           </button>
         )}
-        <a
-          href={shareUrlFor(draft.documentVersionId)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="review-toolbar-end"
-        >
-          <button>Open client view ↗</button>
-        </a>
+        {!isEmail && (
+          <a
+            href={shareUrlFor(draft.documentVersionId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="review-toolbar-end"
+          >
+            <button>Open client view ↗</button>
+          </a>
+        )}
       </div>
 
       {/* AI-review redline: the client's document vs the model's suggested
@@ -745,7 +796,13 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             onClick={() => review('legal.draft.approve', 'approve', false)}
           >
             {busy === 'approve' && <span className="spinner" />}
-            {busy === 'approve' ? 'Approving…' : 'Approve'}
+            {busy === 'approve'
+              ? isEmail
+                ? 'Approving & sending…'
+                : 'Approving…'
+              : isEmail
+                ? 'Approve & send email'
+                : 'Approve'}
           </button>
           <button
             className="warn"
@@ -767,9 +824,13 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           <button
             disabled={busy !== null || editing}
             onClick={openRegen}
-            title="Redraft this document with the live model — add instructions and pick legal skills first."
+            title={
+              isEmail
+                ? 'Redraft this email with the live model — add instructions first. The new version appears in the queue.'
+                : 'Redraft this document with the live model — add instructions and pick legal skills first.'
+            }
           >
-            Regenerate draft…
+            {isEmail ? 'Regenerate email…' : 'Regenerate draft…'}
           </button>
         </div>
       </section>
@@ -959,7 +1020,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             aria-label="Regenerate draft"
           >
             <div className="modal-head">
-              <h2>Regenerate draft</h2>
+              <h2>{isEmail ? 'Regenerate email' : 'Regenerate draft'}</h2>
               <button
                 type="button"
                 className="modal-close"
@@ -971,9 +1032,18 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             </div>
             <div className="modal-body">
               <p className="text-muted" style={{ marginTop: 0 }}>
-                Redraft this {humanizeKind(draft.documentKind)} with the live model. Your
-                instructions and any selected legal skills guide the new version; the matter&apos;s
-                questionnaire and transcript are always included.
+                {isEmail ? (
+                  <>
+                    Redraft this email with the live model. Your instructions guide the new version,
+                    which appears in the review queue — approving it sends it.
+                  </>
+                ) : (
+                  <>
+                    Redraft this {humanizeKind(draft.documentKind)} with the live model. Your
+                    instructions and any selected legal skills guide the new version; the
+                    matter&apos;s questionnaire and transcript are always included.
+                  </>
+                )}
               </p>
               <label>
                 <span>Instructions for this draft</span>
@@ -986,59 +1056,62 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
                 />
               </label>
 
-              <div className="regen-skills">
-                <div className="regen-skills-head">
-                  <span>
-                    Legal skills{' '}
-                    {regenSkills.size > 0 && (
-                      <span className="badge info">{regenSkills.size} selected</span>
+              {/* Legal skills steer document drafting only — hidden for emails. */}
+              {!isEmail && (
+                <div className="regen-skills">
+                  <div className="regen-skills-head">
+                    <span>
+                      Legal skills{' '}
+                      {regenSkills.size > 0 && (
+                        <span className="badge info">{regenSkills.size} selected</span>
+                      )}
+                    </span>
+                    {skillCatalog && skillCatalog.length > 6 && (
+                      <input
+                        type="text"
+                        value={skillQuery}
+                        onChange={(e) => setSkillQuery(e.target.value)}
+                        placeholder="Search skills…"
+                        style={{ width: 'auto', flex: '1 1 10rem', minWidth: '9rem' }}
+                      />
                     )}
-                  </span>
-                  {skillCatalog && skillCatalog.length > 6 && (
-                    <input
-                      type="text"
-                      value={skillQuery}
-                      onChange={(e) => setSkillQuery(e.target.value)}
-                      placeholder="Search skills…"
-                      style={{ width: 'auto', flex: '1 1 10rem', minWidth: '9rem' }}
-                    />
+                  </div>
+                  {skillCatalog === null ? (
+                    <p className="text-muted text-sm">
+                      <span className="spinner" /> Loading skills…
+                    </p>
+                  ) : skillCatalog.length === 0 ? (
+                    <p className="text-muted text-sm">No legal skills configured.</p>
+                  ) : (
+                    <div className="regen-skills-list">
+                      {skillCatalog
+                        .filter((s) => {
+                          const q = skillQuery.trim().toLowerCase()
+                          return (
+                            !q ||
+                            s.name.toLowerCase().includes(q) ||
+                            s.slug.toLowerCase().includes(q) ||
+                            s.practiceArea.toLowerCase().includes(q)
+                          )
+                        })
+                        .map((s) => (
+                          <label key={s.slug} className="regen-skill" title={s.whenToUse}>
+                            <input
+                              type="checkbox"
+                              checked={regenSkills.has(s.slug)}
+                              onChange={() => toggleSkill(s.slug)}
+                              style={{ width: 'auto' }}
+                            />
+                            <span>
+                              <strong>{s.name}</strong>
+                              <span className="text-muted text-sm"> · {s.practiceArea}</span>
+                            </span>
+                          </label>
+                        ))}
+                    </div>
                   )}
                 </div>
-                {skillCatalog === null ? (
-                  <p className="text-muted text-sm">
-                    <span className="spinner" /> Loading skills…
-                  </p>
-                ) : skillCatalog.length === 0 ? (
-                  <p className="text-muted text-sm">No legal skills configured.</p>
-                ) : (
-                  <div className="regen-skills-list">
-                    {skillCatalog
-                      .filter((s) => {
-                        const q = skillQuery.trim().toLowerCase()
-                        return (
-                          !q ||
-                          s.name.toLowerCase().includes(q) ||
-                          s.slug.toLowerCase().includes(q) ||
-                          s.practiceArea.toLowerCase().includes(q)
-                        )
-                      })
-                      .map((s) => (
-                        <label key={s.slug} className="regen-skill" title={s.whenToUse}>
-                          <input
-                            type="checkbox"
-                            checked={regenSkills.has(s.slug)}
-                            onChange={() => toggleSkill(s.slug)}
-                            style={{ width: 'auto' }}
-                          />
-                          <span>
-                            <strong>{s.name}</strong>
-                            <span className="text-muted text-sm"> · {s.practiceArea}</span>
-                          </span>
-                        </label>
-                      ))}
-                  </div>
-                )}
-              </div>
+              )}
               {error && <div className="alert alert-error">{error}</div>}
             </div>
             <div className="modal-foot">

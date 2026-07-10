@@ -102,6 +102,10 @@ import './tools/adminPaymentsTools.js'
 // Firm-facing module read (legal.module.enabled) — attorney nav gating. NOT an
 // admin tool; reads only the caller's own tenant.
 import './tools/moduleTools.js'
+// MACHINE-COMMS-1 — memory (notes + assembled client context) and voice (ad-hoc
+// email drafting, transcript extraction into notes).
+import './tools/notesTools.js'
+import './tools/commsTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

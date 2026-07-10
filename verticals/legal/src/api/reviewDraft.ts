@@ -1,6 +1,6 @@
 import { submitAction, type ActionContext, type ActionResult } from '@exsto/substrate'
 import { getDraftVersion } from '../queries/drafts.js'
-import { sendDraftLinkEmail } from './email.js'
+import { sendDraftLinkEmail, sendCommunicationDraft } from './email.js'
 
 export interface DraftReviewInput {
   documentVersionId: string
@@ -19,7 +19,7 @@ export async function approveDraft(
   ctx: ActionContext,
   input: DraftReviewInput,
 ): Promise<ActionResult> {
-  return submitAction(ctx, {
+  const res = await submitAction(ctx, {
     actionKindName: 'draft.approve',
     intentKind: 'enforcement',
     payload: {
@@ -27,6 +27,25 @@ export async function approveDraft(
       review_notes: input.reviewNotes,
     },
   })
+  // MACHINE-COMMS-1 (WP2): for a COMMUNICATION draft, approve = send. EVERY approve
+  // path (queue batch, editor, MCP tool) funnels through here, so the law holds
+  // everywhere. The send runs after the approve committed (same posture as
+  // approveDocument's draft-link send): a send failure does not roll the approval
+  // back — it surfaces loudly, and re-approving retries the send (reviewDecision
+  // re-approves idempotently).
+  const effects = (res.effects[0] ?? {}) as { isCommunication?: boolean }
+  if (effects.isCommunication === true) {
+    try {
+      await sendCommunicationDraft(ctx, input.documentVersionId)
+    } catch (err) {
+      throw new Error(
+        `The email draft is APPROVED, but sending failed: ${
+          err instanceof Error ? err.message : String(err)
+        } Approve it again to retry the send.`,
+      )
+    }
+  }
+  return res
 }
 
 export interface ApproveDocumentResult {
@@ -49,9 +68,12 @@ export async function approveDocument(
     documentVersionId: input.documentVersionId,
     reviewNotes: input.reviewNotes,
   })
+  const draft = await getDraftVersion(ctx, input.documentVersionId)
+  // A communication draft was ALREADY sent by approveDraft (approve = send);
+  // never follow with a /d draft-link email — there is no client-facing document.
+  if (draft?.channel === 'communication') return { approved: true, sent: true }
   if (!input.send) return { approved: true, sent: false }
 
-  const draft = await getDraftVersion(ctx, input.documentVersionId)
   if (!draft)
     throw new Error(`Approved, but draft version not found to send: ${input.documentVersionId}`)
   await sendDraftLinkEmail(ctx, {

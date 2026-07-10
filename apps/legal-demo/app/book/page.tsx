@@ -63,6 +63,9 @@ interface Service {
   // False = intake-only (document-review style): no slot step, submit happens
   // on the intake step, no consultation on the confirmation screen.
   appointmentRequired: boolean
+  // MACHINE-COMMS-1: true only when the service is active AND has an authored
+  // lifecycle. Non-bookable services are never offered on this page.
+  bookable: boolean
 }
 
 type Step = 'service' | 'contact' | 'intake' | 'slot' | 'done'
@@ -198,7 +201,11 @@ export default function BookPage() {
 
   useEffect(() => {
     callClientMcp<{ services: Service[] }>({ toolName: 'legal.service.list' })
-      .then((r) => setServices(r.services))
+      // Only bookable services (active + authored lifecycle) are offered; a
+      // non-bookable one is simply excluded, never rendered disabled. A stale
+      // ?service= preset pointing at one falls back to the picker via the
+      // preset-validation effect below.
+      .then((r) => setServices(r.services.filter((s) => s.bookable === true)))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [])
 

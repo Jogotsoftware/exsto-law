@@ -21,14 +21,27 @@
 // 'human' / ctx.actorId; a system/agent actor writes 'system'. intent_kind
 // ('adjustment') is set by the submission layer (api/matterWorkflow.ts), not here.
 import { registerActionHandler } from '@exsto/substrate'
-import { insertEvent } from './common.js'
-import { getWorkflowInstanceForMatter } from '../lifecycle/binding.js'
-import { validateLifecycle, validateLinearLifecycle, stageByKey } from '../lifecycle/resolve.js'
+import { getLatestAttributeValue, insertEvent } from './common.js'
+import { getWorkflowInstanceForMatter, resolveCurrentServiceVersion } from '../lifecycle/binding.js'
+import { createWorkflowInstance } from '../lifecycle/instance.js'
+import {
+  validateLifecycle,
+  validateLinearLifecycle,
+  stageByKey,
+  entryStage,
+} from '../lifecycle/resolve.js'
 import type { Lifecycle } from '../lifecycle/types.js'
 
 interface MatterSetWorkflowPayload {
   matter_entity_id: string
-  states: Lifecycle
+  states?: Lifecycle
+  // MACHINE-COMMS-1 (WP0) — REPAIR mode: stand up the workflow instance for an
+  // EXISTING matter that has none (the silent-skip class). Instantiates from the
+  // matter's service CURRENT definition — the lifecycle that was approved for the
+  // service, even if the service has since been disabled: the attorney is
+  // explicitly repairing THIS matter, not booking a new one. current_state resumes
+  // at the stage matching matter_status when the graph has one, else the entry.
+  start?: boolean
 }
 
 registerActionHandler('legal.matter.set_workflow', async (ctx, client, payload, actionId) => {
@@ -36,6 +49,71 @@ registerActionHandler('legal.matter.set_workflow', async (ctx, client, payload, 
   const graph = Array.isArray(p.states) ? p.states : []
 
   const instance = await getWorkflowInstanceForMatter(client, ctx.tenantId, p.matter_entity_id)
+
+  if (p.start === true) {
+    if (instance) {
+      throw new Error(
+        `legal.matter.set_workflow: matter ${p.matter_entity_id} already has a workflow instance — nothing to repair.`,
+      )
+    }
+    const serviceKey = await getLatestAttributeValue<string>(
+      client,
+      ctx.tenantId,
+      p.matter_entity_id,
+      'service_key',
+    )
+    if (!serviceKey) {
+      throw new Error(
+        `legal.matter.set_workflow: matter ${p.matter_entity_id} has no service_key — cannot resolve a lifecycle to start.`,
+      )
+    }
+    const bound = await resolveCurrentServiceVersion(client, ctx.tenantId, serviceKey)
+    if (!bound) {
+      throw new Error(
+        `legal.matter.set_workflow: service "${serviceKey}" has no authored lifecycle — nothing to instantiate. Give the service a workflow first.`,
+      )
+    }
+    const matterStatus = await getLatestAttributeValue<string>(
+      client,
+      ctx.tenantId,
+      p.matter_entity_id,
+      'matter_status',
+    )
+    const statusStage = matterStatus ? stageByKey(bound.graph, matterStatus) : null
+    const startState = statusStage?.key ?? entryStage(bound.graph)?.key ?? 'intake_submitted'
+    const instanceId = await createWorkflowInstance(client, ctx, {
+      workflowDefinitionId: bound.workflowDefinitionId,
+      subjectEntityId: p.matter_entity_id,
+      currentState: startState,
+      actionId,
+    })
+    // workflow.started is a runtime-defined event kind (demo/seed-comms-kinds.ts);
+    // the repair control requires the seed — a tenant without it fails loudly here,
+    // which is correct (the receipt IS the point of the event).
+    await insertEvent(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      eventKindName: 'workflow.started',
+      primaryEntityId: p.matter_entity_id,
+      data: {
+        service_key: serviceKey,
+        workflow_definition_id: bound.workflowDefinitionId,
+        version: bound.version,
+        definition_status: bound.status,
+        start_state: startState,
+        repair: true,
+      },
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+    return {
+      workflowInstanceId: instanceId,
+      started: true,
+      startState,
+      stageCount: bound.graph.length,
+    }
+  }
+
   if (!instance) {
     throw new Error(
       `legal.matter.set_workflow: matter ${p.matter_entity_id} has no workflow instance to customize.`,

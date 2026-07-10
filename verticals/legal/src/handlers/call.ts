@@ -175,6 +175,12 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
       relationshipKindId: callOfId,
     })
 
+    // MACHINE-COMMS-1 (WP1): transcripts join the graph DIRECTLY — transcript →
+    // matter and transcript → client — so client memory assembles without hops.
+    await linkTranscriptDirect(client, ctx.tenantId, actionId, transcriptEntityId, [
+      p.matter_entity_id,
+    ])
+
     const statusKindId = await lookupKindId(
       client,
       'attribute_kind_definition',
@@ -257,6 +263,57 @@ async function requireActiveEntity(
   if (!res.rows[0]) throw new Error(`${kindName} not found: ${entityId}`)
 }
 
+// MACHINE-COMMS-1 (WP1) — write the DIRECT transcript links: transcript_of_matter
+// (transcript → each matter) and transcript_of_client (transcript → the matter's
+// parent client via matter_of). The relationship kinds are runtime-defined
+// (demo/seed-comms-kinds.ts, kind.define). A tenant that has not seeded them yet
+// (e.g. the CI migration-only database) skips with a warning — linkage is an
+// additive enrichment and must not fail the ingest that carries the transcript.
+async function linkTranscriptDirect(
+  client: DbClient,
+  tenantId: string,
+  actionId: string,
+  transcriptEntityId: string,
+  matterEntityIds: string[],
+): Promise<void> {
+  const kindId = async (name: string): Promise<string | null> => {
+    const r = await client.query<{ id: string }>(
+      `SELECT id FROM relationship_kind_definition
+        WHERE tenant_id = $1 AND kind_name = $2 AND status = 'active'
+        ORDER BY valid_from DESC LIMIT 1`,
+      [tenantId, name],
+    )
+    return r.rows[0]?.id ?? null
+  }
+  const matterKindId = await kindId('transcript_of_matter')
+  const clientKindId = await kindId('transcript_of_client')
+  if (!matterKindId || !clientKindId) {
+    console.warn(
+      '[call] transcript_of_matter/transcript_of_client kinds not defined in this tenant — direct transcript links skipped (run demo/seed-comms-kinds.ts).',
+    )
+    return
+  }
+  for (const matterId of matterEntityIds) {
+    await insertRelationship(client, {
+      tenantId,
+      actionId,
+      sourceEntityId: transcriptEntityId,
+      targetEntityId: matterId,
+      relationshipKindId: matterKindId,
+    })
+    const clients = await getRelatedEntityIds(client, tenantId, matterId, 'matter_of')
+    if (clients[0]) {
+      await insertRelationship(client, {
+        tenantId,
+        actionId,
+        sourceEntityId: transcriptEntityId,
+        targetEntityId: clients[0],
+        relationshipKindId: clientKindId,
+      })
+    }
+  }
+}
+
 registerActionHandler('legal.call.assign', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as CallAssignPayload
   await requireActiveEntity(client, ctx.tenantId, p.call_entity_id, 'call_session')
@@ -282,6 +339,19 @@ registerActionHandler('legal.call.assign', async (ctx, client, payload, actionId
     targetEntityId: p.matter_entity_id,
     relationshipKindId: callOfId,
   })
+
+  // MACHINE-COMMS-1 (WP1): assigning the call also links its transcripts directly
+  // to the matter/client (same enrichment call.ingest writes for a matched call).
+  const transcripts = await client.query<{ id: string }>(
+    `SELECT r.source_entity_id AS id
+       FROM relationship r
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+      WHERE r.tenant_id = $1 AND r.target_entity_id = $2 AND rkd.kind_name = 'transcript_of'`,
+    [ctx.tenantId, p.call_entity_id],
+  )
+  for (const t of transcripts.rows) {
+    await linkTranscriptDirect(client, ctx.tenantId, actionId, t.id, [p.matter_entity_id])
+  }
 
   return {
     callEntityId: p.call_entity_id,

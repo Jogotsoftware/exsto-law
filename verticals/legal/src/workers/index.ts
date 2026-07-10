@@ -87,6 +87,26 @@ registerWorkerHandler('legal.capability.run', async (ctx, payload) => {
   await invokeCapabilityForMatter(ctx, p.matter_entity_id)
 })
 
+// MACHINE-COMMS-1 (WP2.3/WP3.3) — runs one AD-HOC capability (email_generation,
+// transcript_extraction, …) on a matter with NO workflow stage involved: same
+// registered handlers, no gate/park (for these the review queue is the gate), no
+// (matter, stage) idempotency (repeated ad-hoc runs are legitimate). Enqueued by
+// enqueueAdHocCapabilityJob (matter page / assistant); transient errors throw →
+// runtime backoff → dead-letter.
+registerWorkerHandler('legal.capability.adhoc', async (ctx, payload) => {
+  const { runAdHocCapability } = await import('../api/capabilityRuntime.js')
+  const p = payload as {
+    capability_slug: string
+    matter_entity_id: string
+    config?: Record<string, unknown>
+  }
+  await runAdHocCapability(ctx, {
+    capabilitySlug: p.capability_slug,
+    matterEntityId: p.matter_entity_id,
+    config: p.config ?? {},
+  })
+})
+
 // Runs one AI document-review job (one per uploaded document). Storage access
 // is the vertical's read-only adapter, injected HERE so the pipeline stays
 // testable with fakes. Transient model/Storage errors throw → runtime backoff;

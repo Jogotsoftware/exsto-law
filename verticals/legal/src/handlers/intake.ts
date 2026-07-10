@@ -314,27 +314,37 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
   // so a binding/insert failure never fails matter.open — with the flag OFF this
   // block is a perfect no-op.
   if (workflowEngineEnabled()) {
-    // The whole handler runs in ONE Postgres transaction (withTenant), so a bare
-    // try/catch can't fail-open: a failed INSERT aborts the transaction and the next
-    // query ("current transaction is aborted") would roll back the ENTIRE matter.open.
-    // A SQL SAVEPOINT isolates the engine work — on failure we roll back only this
-    // block and the transaction stays usable, so the matter is opened either way.
+    // MACHINE-COMMS-1 (WP0) — BOOKING HONESTY: a service with no ACTIVE workflow
+    // definition is not openable, and the failure is LOUD. The old behavior bound
+    // regardless of status and, when binding returned null, silently skipped
+    // instantiation — the matter looked open but had no engine, and the matter page
+    // fabricated a legacy pipeline (the 5c5c4ffb class). The throw below fails the
+    // whole matter.open action (no half-open matter), and the public booking page
+    // hides non-bookable services upstream (listServices.bookable) so clients
+    // ~never reach this error.
+    const bound = await resolveActiveServiceVersion(client, ctx.tenantId, p.service_key)
+    if (!bound) {
+      throw new Error(
+        `Service "${p.service_key}" has no ACTIVE workflow definition — it is not bookable. ` +
+          `Enable the service and give it a lifecycle before opening matters on it.`,
+      )
+    }
+    // The instance INSERT still runs under a SAVEPOINT: an infrastructure failure
+    // there (not a config gap — that just failed loudly above) rolls back only the
+    // engine work, records a queryable observation, and the matter still opens.
     await client.query('SAVEPOINT workflow_engine')
     try {
-      const bound = await resolveActiveServiceVersion(client, ctx.tenantId, p.service_key)
-      if (bound) {
-        const entry = entryStage(bound.graph)
-        await createWorkflowInstance(client, ctx, {
-          workflowDefinitionId: bound.workflowDefinitionId,
-          subjectEntityId: matterEntityId,
-          currentState: entry?.key ?? 'intake_submitted',
-          actionId,
-        })
-        // ADR 0046 — if a service's ENTRY stage is itself an invoke_capability, run
-        // it after matter.open commits (scheduling is a synchronous push — safe
-        // inside the savepoint; the run itself fires post-commit).
-        scheduleProducingAutoRun(ctx, matterEntityId, entry?.key ?? 'intake_submitted', bound.graph)
-      }
+      const entry = entryStage(bound.graph)
+      await createWorkflowInstance(client, ctx, {
+        workflowDefinitionId: bound.workflowDefinitionId,
+        subjectEntityId: matterEntityId,
+        currentState: entry?.key ?? 'intake_submitted',
+        actionId,
+      })
+      // ADR 0046 — if a service's ENTRY stage is itself an invoke_capability, run
+      // it after matter.open commits (scheduling is a synchronous push — safe
+      // inside the savepoint; the run itself fires post-commit).
+      scheduleProducingAutoRun(ctx, matterEntityId, entry?.key ?? 'intake_submitted', bound.graph)
       await client.query('RELEASE SAVEPOINT workflow_engine')
     } catch (err) {
       // Roll back ONLY the engine work; the matter is opened either way.
