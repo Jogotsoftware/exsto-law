@@ -199,8 +199,10 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
                     />
                   </label>
                 )}
-                {client.contacts.length > 0 && (
-                  <label className="form-field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <label
+                  className="form-field"
+                  style={{ display: 'flex', gap: 8, alignItems: 'center' }}
+                >
                   <input
                     type="checkbox"
                     checked={form.portalSchedulingBillable}
@@ -212,7 +214,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
                     Portal scheduling is billable (client accepts rate × duration before booking)
                   </span>
                 </label>
-                <label>
+                {client.contacts.length > 0 && (
+                  <label>
                     <span>Main contact</span>
                     <select
                       value={form.mainContactId}

@@ -29,11 +29,7 @@ export async function POST(request: Request) {
   const session = readClientSessionFromCookieHeader(request.headers.get('cookie'))
   if (!session) return Response.json({ error: 'Not signed in.' }, { status: 401 })
   const { clientContactId, tenantId, clientActorId } = session
-  if (
-    !UUID_RE.test(clientContactId) ||
-    !UUID_RE.test(tenantId) ||
-    !UUID_RE.test(clientActorId)
-  ) {
+  if (!UUID_RE.test(clientContactId) || !UUID_RE.test(tenantId) || !UUID_RE.test(clientActorId)) {
     return Response.json({ error: 'Invalid session.' }, { status: 401 })
   }
   if (!(await isClientContactActive(tenantId, clientContactId))) {
@@ -49,10 +45,7 @@ export async function POST(request: Request) {
   }
   const history = Array.isArray(body.history)
     ? (body.history as Array<{ role: 'user' | 'assistant'; content: string }>).filter(
-        (h) =>
-          h &&
-          (h.role === 'user' || h.role === 'assistant') &&
-          typeof h.content === 'string',
+        (h) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string',
       )
     : []
 

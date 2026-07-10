@@ -63,11 +63,13 @@ async function resolveClientStageLabel(
     const instance = await getWorkflowInstanceForMatter(client, tenantId, matterEntityId)
     if (instance) {
       let graph =
-        instance.statesOverride && instance.statesOverride.length > 0
-          ? instance.statesOverride
-          : []
+        instance.statesOverride && instance.statesOverride.length > 0 ? instance.statesOverride : []
       if (graph.length === 0) {
-        const bound = await resolveBoundWorkflowById(client, tenantId, instance.workflowDefinitionId)
+        const bound = await resolveBoundWorkflowById(
+          client,
+          tenantId,
+          instance.workflowDefinitionId,
+        )
         graph = bound?.graph ?? []
       }
       const stage = stageByKey(graph, instance.currentState)
@@ -161,7 +163,12 @@ export async function getClientMatterTimeline(
       [ctx.tenantId, matterEntityId],
     )
     const statusKey = statusRes.rows[0]?.value ?? 'intake_submitted'
-    const stageLabel = await resolveClientStageLabel(client, ctx.tenantId, matterEntityId, statusKey)
+    const stageLabel = await resolveClientStageLabel(
+      client,
+      ctx.tenantId,
+      matterEntityId,
+      statusKey,
+    )
     const serviceKeyRes = await client.query<{ value: string }>(
       `SELECT a.value #>> '{}' AS value
        FROM attribute a

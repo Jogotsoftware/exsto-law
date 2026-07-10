@@ -71,7 +71,9 @@ export function verifyDraftLinkToken(
     throw new Error('This link is invalid.')
   }
   if (payload.exp <= nowMs) {
-    throw new Error('This link has expired — ask the firm to re-send it, or sign in to your portal.')
+    throw new Error(
+      'This link has expired — ask the firm to re-send it, or sign in to your portal.',
+    )
   }
   return payload
 }

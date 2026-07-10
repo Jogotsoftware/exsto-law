@@ -138,7 +138,9 @@ export async function assertFeeConsent(
 ): Promise<FeeConsentRecord> {
   const consent = await findFeeConsent(ctx, q)
   if (!consent) {
-    throw new Error('This has a cost that needs your acceptance first. Please review the fee and accept it to continue.')
+    throw new Error(
+      'This has a cost that needs your acceptance first. Please review the fee and accept it to continue.',
+    )
   }
   return consent
 }

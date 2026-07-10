@@ -53,8 +53,7 @@ export async function POST(request: Request) {
       clientFullName: typeof body.clientFullName === 'string' ? body.clientFullName : '',
       clientEmail: typeof body.clientEmail === 'string' ? body.clientEmail : '',
       clientPhone: typeof body.clientPhone === 'string' ? body.clientPhone : null,
-      clientCompanyName:
-        typeof body.clientCompanyName === 'string' ? body.clientCompanyName : null,
+      clientCompanyName: typeof body.clientCompanyName === 'string' ? body.clientCompanyName : null,
       serviceKey: typeof body.serviceKey === 'string' ? body.serviceKey : '',
       intakeResponses:
         body.intakeResponses && typeof body.intakeResponses === 'object'
@@ -78,7 +77,12 @@ export async function POST(request: Request) {
     } catch {
       quote = null
     }
-    return NextResponse.json({ ok: true, staged: true, leadId: staged.questionnaireEntityId, quote })
+    return NextResponse.json({
+      ok: true,
+      staged: true,
+      leadId: staged.questionnaireEntityId,
+      quote,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json({ error: message }, { status: 400 })

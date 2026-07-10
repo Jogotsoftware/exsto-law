@@ -38,11 +38,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   }
   const { clientContactId, tenantId, matterIds, clientActorId } = session
-  if (
-    !UUID_RE.test(clientContactId) ||
-    !UUID_RE.test(tenantId) ||
-    !UUID_RE.test(clientActorId)
-  ) {
+  if (!UUID_RE.test(clientContactId) || !UUID_RE.test(tenantId) || !UUID_RE.test(clientActorId)) {
     return NextResponse.json({ error: 'Invalid session.' }, { status: 401 })
   }
   // Live re-check: a deactivated contact can't keep uploading on an unexpired cookie.

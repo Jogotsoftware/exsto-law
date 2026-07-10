@@ -613,43 +613,50 @@ function InvoicesPanel() {
         </ul>
       )}
 
-      {billing && (billing.matters.some((m) => m.accrued.length > 0) || Number(billing.totals.running) > 0) && (
-        <>
-          <h3 className="pdash-subhead">Accruing fees (not yet invoiced)</h3>
-          {billing.matters.filter((m) => m.accrued.length > 0).length === 0 ? (
-            <p className="text-muted">No fees accruing right now.</p>
-          ) : (
-            billing.matters
-              .filter((m) => m.accrued.length > 0)
-              .map((m) => (
-                <div key={m.matterEntityId} style={{ marginBottom: 'var(--space-3)' }}>
-                  <div className="pdash-doc-title">Matter {m.matterNumber}</div>
-                  <ul className="pdash-docs">
-                    {m.accrued.map((e, i) => (
-                      <li key={i} className="pdash-doc">
-                        <div>
-                          <div>{e.description}</div>
-                          {e.date && <span className="text-sm text-muted">{formatDate(e.date)}</span>}
-                        </div>
-                        <strong>{formatMoney(e.amount, billing.currency)}</strong>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="text-sm" style={{ textAlign: 'right' }}>
-                    Accrued: <strong>{formatMoney(m.accruedTotal, billing.currency)}</strong>
-                    {' · '}Running total (open + accrued):{' '}
-                    <strong>{formatMoney(m.runningTotal, billing.currency)}</strong>
+      {billing &&
+        (billing.matters.some((m) => m.accrued.length > 0) ||
+          Number(billing.totals.running) > 0) && (
+          <>
+            <h3 className="pdash-subhead">Accruing fees (not yet invoiced)</h3>
+            {billing.matters.filter((m) => m.accrued.length > 0).length === 0 ? (
+              <p className="text-muted">No fees accruing right now.</p>
+            ) : (
+              billing.matters
+                .filter((m) => m.accrued.length > 0)
+                .map((m) => (
+                  <div key={m.matterEntityId} style={{ marginBottom: 'var(--space-3)' }}>
+                    <div className="pdash-doc-title">Matter {m.matterNumber}</div>
+                    <ul className="pdash-docs">
+                      {m.accrued.map((e, i) => (
+                        <li key={i} className="pdash-doc">
+                          <div>
+                            <div>{e.description}</div>
+                            {e.date && (
+                              <span className="text-sm text-muted">{formatDate(e.date)}</span>
+                            )}
+                          </div>
+                          <strong>{formatMoney(e.amount, billing.currency)}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="text-sm" style={{ textAlign: 'right' }}>
+                      Accrued: <strong>{formatMoney(m.accruedTotal, billing.currency)}</strong>
+                      {' · '}Running total (open + accrued):{' '}
+                      <strong>{formatMoney(m.runningTotal, billing.currency)}</strong>
+                    </div>
                   </div>
-                </div>
-              ))
-          )}
-          <div className="pdash-doc-title" style={{ textAlign: 'right', marginTop: 'var(--space-2)' }}>
-            Total open {formatMoney(billing.totals.due, billing.currency)} · accrued{' '}
-            {formatMoney(billing.totals.accrued, billing.currency)} · running{' '}
-            <strong>{formatMoney(billing.totals.running, billing.currency)}</strong>
-          </div>
-        </>
-      )}
+                ))
+            )}
+            <div
+              className="pdash-doc-title"
+              style={{ textAlign: 'right', marginTop: 'var(--space-2)' }}
+            >
+              Total open {formatMoney(billing.totals.due, billing.currency)} · accrued{' '}
+              {formatMoney(billing.totals.accrued, billing.currency)} · running{' '}
+              <strong>{formatMoney(billing.totals.running, billing.currency)}</strong>
+            </div>
+          </>
+        )}
     </section>
   )
 }
@@ -685,7 +692,11 @@ function AssistantPanel() {
     setInput('')
     setCard(null)
     setCardDone(null)
-    setMessages((prev) => [...prev, { role: 'user', content: message }, { role: 'assistant', content: '' }])
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: message },
+      { role: 'assistant', content: '' },
+    ])
     setBusy(true)
     try {
       const res = await fetch('/api/client/portal/assistant/stream', {
@@ -807,7 +818,8 @@ function AssistantPanel() {
               maxWidth: '85%',
               padding: '8px 12px',
               borderRadius: 12,
-              background: m.role === 'user' ? 'var(--color-navy, #16324f)' : 'var(--surface-2, #f1f3f6)',
+              background:
+                m.role === 'user' ? 'var(--color-navy, #16324f)' : 'var(--surface-2, #f1f3f6)',
               color: m.role === 'user' ? '#fff' : 'inherit',
               whiteSpace: 'pre-wrap',
             }}
@@ -822,9 +834,14 @@ function AssistantPanel() {
           <div style={{ margin: '6px 0' }}>
             {card.prefill.description}
             <br />
-            Fee: <strong>${card.quote.amount}</strong> <span className="text-muted">({card.quote.basis})</span>
+            Fee: <strong>${card.quote.amount}</strong>{' '}
+            <span className="text-muted">({card.quote.basis})</span>
           </div>
-          <button className="pdash-btn pdash-btn-primary" disabled={cardBusy} onClick={confirmRequest}>
+          <button
+            className="pdash-btn pdash-btn-primary"
+            disabled={cardBusy}
+            onClick={confirmRequest}
+          >
             {cardBusy ? 'Filing…' : 'Accept fee & file request'}
           </button>
         </div>
@@ -844,7 +861,11 @@ function AssistantPanel() {
             }
           }}
         />
-        <button className="pdash-btn pdash-btn-primary" disabled={busy || !input.trim()} onClick={() => void send()}>
+        <button
+          className="pdash-btn pdash-btn-primary"
+          disabled={busy || !input.trim()}
+          onClick={() => void send()}
+        >
           {busy ? '…' : 'Send'}
         </button>
       </div>
@@ -871,7 +892,9 @@ function SchedulePanel() {
     description: string
   } | null>(null)
   const [feeAccepted, setFeeAccepted] = useState(false)
-  const [selectedSlot, setSelectedSlot] = useState<{ startIso: string; endIso: string } | null>(null)
+  const [selectedSlot, setSelectedSlot] = useState<{ startIso: string; endIso: string } | null>(
+    null,
+  )
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -974,7 +997,10 @@ function SchedulePanel() {
         ) : (
           <>
             {availability.meetingLengthsMinutes.length > 1 && (
-              <label className="text-sm" style={{ display: 'block', marginBottom: 'var(--space-2)' }}>
+              <label
+                className="text-sm"
+                style={{ display: 'block', marginBottom: 'var(--space-2)' }}
+              >
                 Length{' '}
                 <select
                   value={duration ?? availability.durationMinutes}
@@ -991,7 +1017,14 @@ function SchedulePanel() {
             {availability.slots.length === 0 ? (
               <p className="text-muted">No open times in the next few weeks.</p>
             ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 'var(--space-2)' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  marginBottom: 'var(--space-2)',
+                }}
+              >
                 {availability.slots.slice(0, 24).map((slot) => (
                   <button
                     key={slot.startIso}
@@ -1046,9 +1079,9 @@ function TodosStrip({ onOpenTab }: { onOpenTab: (tab: Tab) => void }) {
   }> | null>(null)
 
   useEffect(() => {
-    callClientPortalMcp<{ todos: Array<{ kind: 'sign' | 'pay' | 'materials'; label: string; ref: string }> }>(
-      { toolName: 'legal.client.todos' },
-    )
+    callClientPortalMcp<{
+      todos: Array<{ kind: 'sign' | 'pay' | 'materials'; label: string; ref: string }>
+    }>({ toolName: 'legal.client.todos' })
       .then((r) => setTodos(r.todos))
       .catch(() => setTodos(null))
   }, [])

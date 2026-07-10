@@ -56,10 +56,7 @@ const tool: Tool<Input, { draft: SharedDraftView | null }> = {
       if (!ok) return { draft: null }
     } else if (input.__attorneySession !== true) {
       const tok = verifyDraftLinkToken(input.token)
-      if (
-        tok.documentVersionId !== input.documentVersionId ||
-        tok.tenantId !== ctx.tenantId
-      ) {
+      if (tok.documentVersionId !== input.documentVersionId || tok.tenantId !== ctx.tenantId) {
         throw new Error('This link is invalid.')
       }
     }

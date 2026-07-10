@@ -337,11 +337,10 @@ export async function* clientAssistantChatStream(
         yield { type: 'thinking', text: chunk.text }
       }
     }
-  } catch (err) {
+  } catch {
     yield {
       type: 'error',
-      text:
-        'I hit a problem answering that. Please try again, or message the firm directly from the Messages tab.',
+      text: 'I hit a problem answering that. Please try again, or message the firm directly from the Messages tab.',
     }
     return
   }

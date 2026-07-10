@@ -96,7 +96,10 @@ export async function getClientIntakePrefill(
   serviceKey?: string | null,
 ): Promise<Record<string, unknown> | null> {
   return withActionContext(ctx, async (client) => {
-    const res = await client.query<{ responses: Record<string, unknown> | null; form: string | null }>(
+    const res = await client.query<{
+      responses: Record<string, unknown> | null
+      form: string | null
+    }>(
       `SELECT
          (SELECT a.value FROM attribute a
             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id

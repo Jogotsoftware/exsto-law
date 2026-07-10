@@ -38,101 +38,104 @@ interface ProvisionPayload {
   trigger?: 'intake_gate' | 'invite' | 'login_backfill'
 }
 
-registerActionHandler('legal.client.provision_portal_actor', async (ctx, client, payload, actionId) => {
-  const p = payload as unknown as ProvisionPayload
-  if (!p.client_contact_id) throw new Error('client_contact_id is required.')
+registerActionHandler(
+  'legal.client.provision_portal_actor',
+  async (ctx, client, payload, actionId) => {
+    const p = payload as unknown as ProvisionPayload
+    if (!p.client_contact_id) throw new Error('client_contact_id is required.')
 
-  // The contact must be an active client_contact in this tenant.
-  const contact = await client.query<{ id: string }>(
-    `SELECT e.id FROM entity e
+    // The contact must be an active client_contact in this tenant.
+    const contact = await client.query<{ id: string }>(
+      `SELECT e.id FROM entity e
      JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
      WHERE e.id = $1 AND e.tenant_id = $2
        AND ekd.kind_name = 'client_contact' AND e.status = 'active'`,
-    [p.client_contact_id, ctx.tenantId],
-  )
-  if (contact.rowCount === 0) throw new Error('Unknown client contact.')
-
-  // Idempotency: an existing mapping wins (re-invite, re-login, races).
-  const existing = await getLatestAttributeValue<string>(
-    client,
-    ctx.tenantId,
-    p.client_contact_id,
-    'portal_actor_id',
-  )
-  if (existing) {
-    return { actorId: existing, clientContactId: p.client_contact_id, created: false }
-  }
-
-  const externalId = `client:${p.client_contact_id}`
-  // A prior actor row without the attribute (crash between the two writes on a
-  // previous attempt) is reused, not duplicated.
-  const prior = await client.query<{ id: string }>(
-    `SELECT id FROM actor WHERE tenant_id = $1 AND external_id = $2 AND status = 'active' LIMIT 1`,
-    [ctx.tenantId, externalId],
-  )
-  let actorId = prior.rows[0]?.id
-  if (!actorId) {
-    actorId = randomUUID()
-    const displayName = await contactDisplayName(client, ctx.tenantId, p.client_contact_id)
-    // Direct actor INSERT is deliberate: actor is an identity table, not one of
-    // the hard-rule-1 substrate fact tables, and every other actor row in the
-    // system is created by seed/provisioning SQL. Doing it inside this handler
-    // keeps the write in the action layer's transaction with full audit (the
-    // action row + portal.account_created event below).
-    await client.query(
-      `INSERT INTO actor (id, tenant_id, actor_type, external_id, display_name, status)
-       VALUES ($1, $2, 'human', $3, $4, 'active')`,
-      [actorId, ctx.tenantId, externalId, displayName],
+      [p.client_contact_id, ctx.tenantId],
     )
-  }
+    if (contact.rowCount === 0) throw new Error('Unknown client contact.')
 
-  const attrKindId = await lookupKindId(
-    client,
-    'attribute_kind_definition',
-    ctx.tenantId,
-    'portal_actor_id',
-  )
-  await insertAttribute(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    entityId: p.client_contact_id,
-    attributeKindId: attrKindId,
-    value: actorId,
-    confidence: 1.0,
-    sourceType: 'system',
-    sourceRef: 'system:portal_account_provisioning',
-  })
-
-  await insertEvent(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    eventKindName: 'portal.account_created',
-    primaryEntityId: p.client_contact_id,
-    data: {
-      client_contact_id: p.client_contact_id,
-      actor_id: actorId,
-      trigger: p.trigger ?? 'invite',
-    },
-    sourceType: 'system',
-    sourceRef: `client_contact:${p.client_contact_id}`,
-  })
-
-  // Account creation is a client delivery: advance any of the client's matters
-  // parked on a client gate whose edge is `via: 'legal.client.provision_portal_actor'`
-  // (the send_portal_invite stage). No-op for matters not parked there.
-  for (const matterId of p.matter_entity_ids ?? []) {
-    await dispatchClientDelivery(
+    // Idempotency: an existing mapping wins (re-invite, re-login, races).
+    const existing = await getLatestAttributeValue<string>(
       client,
-      ctx,
-      matterId,
-      'legal.client.provision_portal_actor',
-      actionId,
-      `client_contact:${p.client_contact_id}`,
+      ctx.tenantId,
+      p.client_contact_id,
+      'portal_actor_id',
     )
-  }
+    if (existing) {
+      return { actorId: existing, clientContactId: p.client_contact_id, created: false }
+    }
 
-  return { actorId, clientContactId: p.client_contact_id, created: true }
-})
+    const externalId = `client:${p.client_contact_id}`
+    // A prior actor row without the attribute (crash between the two writes on a
+    // previous attempt) is reused, not duplicated.
+    const prior = await client.query<{ id: string }>(
+      `SELECT id FROM actor WHERE tenant_id = $1 AND external_id = $2 AND status = 'active' LIMIT 1`,
+      [ctx.tenantId, externalId],
+    )
+    let actorId = prior.rows[0]?.id
+    if (!actorId) {
+      actorId = randomUUID()
+      const displayName = await contactDisplayName(client, ctx.tenantId, p.client_contact_id)
+      // Direct actor INSERT is deliberate: actor is an identity table, not one of
+      // the hard-rule-1 substrate fact tables, and every other actor row in the
+      // system is created by seed/provisioning SQL. Doing it inside this handler
+      // keeps the write in the action layer's transaction with full audit (the
+      // action row + portal.account_created event below).
+      await client.query(
+        `INSERT INTO actor (id, tenant_id, actor_type, external_id, display_name, status)
+       VALUES ($1, $2, 'human', $3, $4, 'active')`,
+        [actorId, ctx.tenantId, externalId, displayName],
+      )
+    }
+
+    const attrKindId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'portal_actor_id',
+    )
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: p.client_contact_id,
+      attributeKindId: attrKindId,
+      value: actorId,
+      confidence: 1.0,
+      sourceType: 'system',
+      sourceRef: 'system:portal_account_provisioning',
+    })
+
+    await insertEvent(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      eventKindName: 'portal.account_created',
+      primaryEntityId: p.client_contact_id,
+      data: {
+        client_contact_id: p.client_contact_id,
+        actor_id: actorId,
+        trigger: p.trigger ?? 'invite',
+      },
+      sourceType: 'system',
+      sourceRef: `client_contact:${p.client_contact_id}`,
+    })
+
+    // Account creation is a client delivery: advance any of the client's matters
+    // parked on a client gate whose edge is `via: 'legal.client.provision_portal_actor'`
+    // (the send_portal_invite stage). No-op for matters not parked there.
+    for (const matterId of p.matter_entity_ids ?? []) {
+      await dispatchClientDelivery(
+        client,
+        ctx,
+        matterId,
+        'legal.client.provision_portal_actor',
+        actionId,
+        `client_contact:${p.client_contact_id}`,
+      )
+    }
+
+    return { actorId, clientContactId: p.client_contact_id, created: true }
+  },
+)
 
 // ── Fee consent ───────────────────────────────────────────────────────────────
 

@@ -35,11 +35,7 @@ export async function POST(request: Request) {
   const session = readClientSessionFromCookieHeader(request.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   const { clientContactId, tenantId, clientActorId } = session
-  if (
-    !UUID_RE.test(clientContactId) ||
-    !UUID_RE.test(tenantId) ||
-    !UUID_RE.test(clientActorId)
-  ) {
+  if (!UUID_RE.test(clientContactId) || !UUID_RE.test(tenantId) || !UUID_RE.test(clientActorId)) {
     return NextResponse.json({ error: 'Invalid session.' }, { status: 401 })
   }
   if (!(await isClientContactActive(tenantId, clientContactId))) {

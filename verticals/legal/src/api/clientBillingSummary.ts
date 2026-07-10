@@ -99,7 +99,9 @@ export async function getClientBillingSummary(
   const matters: ClientMatterBilling[] = []
   for (const matterId of matterIdsAll) {
     const accrued = accruedByMatter.get(matterId)
-    const matterInvoices = invoices.filter((inv) => invoiceMatters.get(inv.invoiceEntityId) === matterId)
+    const matterInvoices = invoices.filter(
+      (inv) => invoiceMatters.get(inv.invoiceEntityId) === matterId,
+    )
     const dueCents = matterInvoices
       .filter((i) => i.status === 'due')
       .reduce((n, i) => n + cents(i.total), 0)
@@ -211,20 +213,21 @@ export async function listClientTodos(
   // Matters parked at a CLIENT gate = the firm is waiting on the client
   // (materials, a reply, an acceptance).
   const { withActionContext } = await import('@exsto/substrate')
-  const { getWorkflowInstanceForMatter, resolveBoundWorkflowById } = await import(
-    '../lifecycle/binding.js'
-  )
+  const { getWorkflowInstanceForMatter, resolveBoundWorkflowById } =
+    await import('../lifecycle/binding.js')
   const { stageByKey, allowedTransitions, clientLabel } = await import('../lifecycle/resolve.js')
   await withActionContext(ctx, async (client) => {
     for (const matterId of matterIds) {
       const instance = await getWorkflowInstanceForMatter(client, ctx.tenantId, matterId)
       if (!instance || instance.status === 'completed') continue
       let graph =
-        instance.statesOverride && instance.statesOverride.length > 0
-          ? instance.statesOverride
-          : []
+        instance.statesOverride && instance.statesOverride.length > 0 ? instance.statesOverride : []
       if (graph.length === 0) {
-        const bound = await resolveBoundWorkflowById(client, ctx.tenantId, instance.workflowDefinitionId)
+        const bound = await resolveBoundWorkflowById(
+          client,
+          ctx.tenantId,
+          instance.workflowDefinitionId,
+        )
         graph = bound?.graph ?? []
       }
       if (graph.length === 0) continue

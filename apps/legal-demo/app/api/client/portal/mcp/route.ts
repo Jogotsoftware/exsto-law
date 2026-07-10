@@ -40,11 +40,7 @@ async function resolveClientCtx(
     return { error: 'Not signed in. Request a sign-in link to continue.', status: 401 }
   }
   const { clientContactId, tenantId, matterIds, clientActorId } = session
-  if (
-    !UUID_RE.test(clientContactId) ||
-    !UUID_RE.test(tenantId) ||
-    !UUID_RE.test(clientActorId)
-  ) {
+  if (!UUID_RE.test(clientContactId) || !UUID_RE.test(tenantId) || !UUID_RE.test(clientActorId)) {
     return { error: 'Invalid session.', status: 401 }
   }
   if (!Array.isArray(matterIds) || !matterIds.every((m) => UUID_RE.test(m))) {

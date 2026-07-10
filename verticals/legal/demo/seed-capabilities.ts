@@ -323,7 +323,11 @@ export const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
         'Email the matter’s client a secure link to create their portal account. As a workflow stage the matter parks at the client gate until the account exists, then advances on the client’s own account-creation action.',
       when_to_use:
         'Compose it early in a service when the client should follow the matter, sign, and pay in the portal. Skipped honestly when the client already has an account.',
-      backed_by: ['portal invite token', 'client_portal_invite notification route', 'legal.client.provision_portal_actor'],
+      backed_by: [
+        'portal invite token',
+        'client_portal_invite notification route',
+        'legal.client.provision_portal_actor',
+      ],
     },
   },
 ]

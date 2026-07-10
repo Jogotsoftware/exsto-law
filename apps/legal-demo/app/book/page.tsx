@@ -192,7 +192,11 @@ export default function BookPage() {
     fetch('/api/client/auth/me')
       .then((r) => (r.ok ? r.json() : null))
       .then((me) =>
-        setPortalMe(me && typeof me.email === 'string' ? { email: me.email, displayName: me.displayName ?? me.email } : null),
+        setPortalMe(
+          me && typeof me.email === 'string'
+            ? { email: me.email, displayName: me.displayName ?? me.email }
+            : null,
+        ),
       )
       .catch(() => setPortalMe(null))
   }, [])
@@ -566,7 +570,9 @@ export default function BookPage() {
   async function submitWithAccount() {
     if (!selectedService) return
     if (password.length < 8) {
-      setError(t('account.password_short', undefined, 'Choose a password of at least 8 characters.'))
+      setError(
+        t('account.password_short', undefined, 'Choose a password of at least 8 characters.'),
+      )
       return
     }
     if (password !== password2) {
@@ -574,7 +580,9 @@ export default function BookPage() {
       return
     }
     if (feeQuote && !feeAccepted) {
-      setError(t('account.fee_required', undefined, 'Please review and accept the fee to continue.'))
+      setError(
+        t('account.fee_required', undefined, 'Please review and accept the fee to continue.'),
+      )
       return
     }
     if (TURNSTILE_SITE_KEY && !captchaToken) {
@@ -726,7 +734,11 @@ export default function BookPage() {
         : step === 'intake'
           ? t('intake.subtitle')
           : step === 'account'
-            ? t('account.subtitle', undefined, 'Everything about your matter will live in your secure portal.')
+            ? t(
+                'account.subtitle',
+                undefined,
+                'Everything about your matter will live in your secure portal.',
+              )
             : t('slot.subtitle')
 
   return (
@@ -775,8 +787,8 @@ export default function BookPage() {
                 )}
                 {portalMe && (
                   <div className="bk-notice" role="note">
-                    {t('funnel.signedin', undefined, 'Booking as')} <strong>{portalMe.displayName}</strong>{' '}
-                    ({portalMe.email}) ·{' '}
+                    {t('funnel.signedin', undefined, 'Booking as')}{' '}
+                    <strong>{portalMe.displayName}</strong> ({portalMe.email}) ·{' '}
                     <a href="/portal" style={{ fontWeight: 600 }}>
                       {t('funnel.portal', undefined, 'Go to your portal')}
                     </a>
@@ -938,7 +950,12 @@ export default function BookPage() {
                     captcha — the authed route is session-gated). Anonymous
                     flows continue to the account gate, which hosts the captcha. */}
                 {!needsSlot && signedIn && feeQuote && (
-                  <FeeConsentCard quote={feeQuote} accepted={feeAccepted} onAccept={setFeeAccepted} t={t} />
+                  <FeeConsentCard
+                    quote={feeQuote}
+                    accepted={feeAccepted}
+                    onAccept={setFeeAccepted}
+                    t={t}
+                  />
                 )}
                 <div className="bk-actions">
                   {/* Back stays disabled during an in-flight intake-only submit —
@@ -1038,7 +1055,12 @@ export default function BookPage() {
                 )}
 
                 {signedIn && feeQuote && (
-                  <FeeConsentCard quote={feeQuote} accepted={feeAccepted} onAccept={setFeeAccepted} t={t} />
+                  <FeeConsentCard
+                    quote={feeQuote}
+                    accepted={feeAccepted}
+                    onAccept={setFeeAccepted}
+                    t={t}
+                  />
                 )}
                 <div className="bk-actions">
                   <button
@@ -1289,7 +1311,13 @@ function FeeConsentCard({
   onAccept,
   t,
 }: {
-  quote: { basis: string; amount: string | null; rate: string | null; currency: string; description: string }
+  quote: {
+    basis: string
+    amount: string | null
+    rate: string | null
+    currency: string
+    description: string
+  }
   accepted: boolean
   onAccept: (v: boolean) => void
   t: (key: string, vars?: Record<string, string | number>, fallback?: string) => string
@@ -1318,8 +1346,16 @@ function FeeConsentCard({
         />
         <span>
           {quote.basis === 'fixed'
-            ? t('fee.accept_fixed', undefined, 'I accept this fee. It will be billed on my invoice for this service.')
-            : t('fee.accept_hourly', undefined, 'I accept this hourly rate for work on this service.')}
+            ? t(
+                'fee.accept_fixed',
+                undefined,
+                'I accept this fee. It will be billed on my invoice for this service.',
+              )
+            : t(
+                'fee.accept_hourly',
+                undefined,
+                'I accept this hourly rate for work on this service.',
+              )}
         </span>
       </label>
     </div>

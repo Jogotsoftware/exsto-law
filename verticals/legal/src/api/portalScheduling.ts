@@ -8,11 +8,7 @@ import { getFirmDefaultRate, getClientRate } from './rates.js'
 import { getLatestAttributeValue } from '../handlers/common.js'
 import { loadClientContactEmail } from './clientIdentity.js'
 import { queueNotification } from './notifications.js'
-import {
-  presentFeeQuote,
-  decideFeeQuote,
-  findFeeConsent,
-} from './feeConsent.js'
+import { presentFeeQuote, decideFeeQuote, findFeeConsent } from './feeConsent.js'
 
 // PORTAL-1 (WP4) — schedule time from inside the portal: consultations and
 // appointments on the firm's REAL availability (rules ∩ live Google free/busy —
