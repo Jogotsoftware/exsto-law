@@ -58,6 +58,17 @@ interface PersistDraftArgs {
   // entity at v1. No matter_status flip either: a deliberate regenerate must not
   // yank the matter's stage mirror backwards (the workflow instance is authority).
   supersedesDocumentEntityId?: string | null
+  // MACHINE-COMMS-1 (WP2) — the COMMUNICATION channel: an outbound email draft.
+  // Same persistence shape (entity + versions + review queue), but a distinct
+  // entity kind (communication_draft) and relationship (comm_draft_of), so the
+  // document reads — runner latest-draft, e-sign picker, mail attachments, the
+  // public /d share — never see it. No matter_status flip (an email being drafted
+  // is not the matter's document pipeline), and a comm_draft.completed event
+  // instead of draft.completed (the portal renders draft.completed as "a document
+  // is ready" — wrong for an internal email draft).
+  channel?: 'document' | 'communication'
+  emailSubject?: string | null
+  emailToRole?: string | null
 }
 
 async function persistDraftDocument(
@@ -95,6 +106,17 @@ async function persistDraftDocument(
     }
     draftEntityId = supersedes
     versionNumber = (maxRes.rows[0].max ?? 0) + 1
+    // MACHINE-COMMS-1 (WP2): the email SUBJECT lives on the entity metadata (all
+    // versions share it — it's what approve-and-send uses). A regenerated email
+    // that produced a new subject must supersede it too, or the send would carry
+    // the v1 subject over a v(n+1) body (found live in the acceptance walk).
+    if (p.channel === 'communication' && p.emailSubject?.trim()) {
+      await client.query(
+        `UPDATE entity SET metadata = coalesce(metadata, '{}'::jsonb) || $3::jsonb
+          WHERE tenant_id = $1 AND id = $2`,
+        [ctx.tenantId, draftEntityId, JSON.stringify({ email_subject: p.emailSubject.trim() })],
+      )
+    }
     // The draft goes back to pending_review (append-only supersession) — a
     // regenerated document always re-enters the attorney review queue.
     const statusAkId = await lookupKindId(
@@ -114,11 +136,12 @@ async function persistDraftDocument(
       sourceRef: p.sourceRef,
     })
   } else {
+    const isComm = p.channel === 'communication'
     const docKindId = await lookupKindId(
       client,
       'entity_kind_definition',
       ctx.tenantId,
-      'document_draft',
+      isComm ? 'communication_draft' : 'document_draft',
     )
     draftEntityId = await insertEntity(
       client,
@@ -126,7 +149,17 @@ async function persistDraftDocument(
       actionId,
       docKindId,
       `${p.documentKind} draft`,
-      { document_kind: p.documentKind, jurisdiction: p.jurisdiction },
+      {
+        document_kind: p.documentKind,
+        jurisdiction: p.jurisdiction,
+        ...(isComm
+          ? {
+              channel: 'communication',
+              email_subject: p.emailSubject ?? null,
+              email_to_role: p.emailToRole ?? 'client',
+            }
+          : {}),
+      },
     )
 
     const draftAttrs: Array<{ kind: string; value: unknown; confidence?: number }> = [
@@ -176,7 +209,7 @@ async function persistDraftDocument(
       client,
       'relationship_kind_definition',
       ctx.tenantId,
-      'draft_of',
+      p.channel === 'communication' ? 'comm_draft_of' : 'draft_of',
     )
     await insertRelationship(client, {
       tenantId: ctx.tenantId,
@@ -195,6 +228,9 @@ async function persistDraftDocument(
   // misleading "A document is ready" with nothing released). Its audit trail is
   // the separate document.review.completed event runDocumentReview records.
   const isReviewMemo = p.generationMode === 'ai_review'
+  // A COMMUNICATION draft is likewise internal until approved-and-sent: no
+  // matter_status flip, and its completion event is comm_draft.completed (below).
+  const isComm = p.channel === 'communication'
 
   // Matter moves to in_review once a draft lands (unless already terminal). A
   // REGENERATE (supersede) never flips the status — the workflow instance is the
@@ -206,7 +242,13 @@ async function persistDraftDocument(
     p.matterEntityId,
     'matter_status',
   )
-  if (!isReviewMemo && !supersedes && currentStatus !== 'approved' && currentStatus !== 'closed') {
+  if (
+    !isReviewMemo &&
+    !isComm &&
+    !supersedes &&
+    currentStatus !== 'approved' &&
+    currentStatus !== 'closed'
+  ) {
     const statusKindId = await lookupKindId(
       client,
       'attribute_kind_definition',
@@ -229,7 +271,11 @@ async function persistDraftDocument(
     await insertEvent(client, {
       tenantId: ctx.tenantId,
       actionId,
-      eventKindName: 'draft.completed',
+      // comm_draft.completed is runtime-defined (demo/seed-comms-kinds.ts); a
+      // tenant using the communication channel must have seeded it — a missing
+      // kind fails the persist loudly rather than mislabeling an email as a
+      // client-visible document milestone.
+      eventKindName: isComm ? 'comm_draft.completed' : 'draft.completed',
       primaryEntityId: p.matterEntityId,
       secondaryEntityIds: [draftEntityId],
       data: {
@@ -237,6 +283,7 @@ async function persistDraftDocument(
         document_version_id: versionId,
         generation_mode: p.generationMode,
         model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
+        ...(isComm ? { email_subject: p.emailSubject ?? null } : {}),
         ...(supersedes ? { regenerated: true, version_number: versionNumber } : {}),
       },
       sourceType: p.sourceType,
@@ -270,6 +317,11 @@ interface DraftGeneratePayload {
   redline_reasoning_trace_id?: string | null
   // WP4 regenerate: write this draft as version n+1 on the named existing entity.
   supersedes_document_entity_id?: string | null
+  // MACHINE-COMMS-1 (WP2): 'communication' persists an EMAIL draft (see
+  // PersistDraftArgs.channel). Anything else stays the document channel.
+  channel?: string
+  email_subject?: string | null
+  email_to_role?: string | null
 }
 
 registerActionHandler('draft.generate', async (ctx, client, payload, actionId) => {
@@ -316,6 +368,9 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     confidence: p.confidence,
     versionMetadata,
     supersedesDocumentEntityId: p.supersedes_document_entity_id ?? null,
+    channel: p.channel === 'communication' ? 'communication' : 'document',
+    emailSubject: p.email_subject ?? null,
+    emailToRole: p.email_to_role ?? null,
   })
 })
 
@@ -330,6 +385,10 @@ interface DraftMergePayload {
   missing_fields?: string[]
   // WP4 regenerate: write this draft as version n+1 on the named existing entity.
   supersedes_document_entity_id?: string | null
+  // MACHINE-COMMS-1 (WP2): template-mode email drafts merge deterministically too.
+  channel?: string
+  email_subject?: string | null
+  email_to_role?: string | null
 }
 
 registerActionHandler('draft.merge', async (ctx, client, payload, actionId) => {
@@ -348,6 +407,9 @@ registerActionHandler('draft.merge', async (ctx, client, payload, actionId) => {
       missing_fields: p.missing_fields ?? [],
     },
     supersedesDocumentEntityId: p.supersedes_document_entity_id ?? null,
+    channel: p.channel === 'communication' ? 'communication' : 'document',
+    emailSubject: p.email_subject ?? null,
+    emailToRole: p.email_to_role ?? null,
   })
 })
 
@@ -375,7 +437,7 @@ async function reviewDecision(
     polarity: 'positive' | 'neutral' | 'negative'
     notes?: string
   },
-): Promise<{ documentEntityId: string; matterEntityId: string | null }> {
+): Promise<{ documentEntityId: string; matterEntityId: string | null; isCommunication: boolean }> {
   const versionRes = await client.query<{ document_entity_id: string }>(
     `SELECT document_entity_id FROM document_version WHERE tenant_id = $1 AND id = $2`,
     [args.tenantId, args.versionId],
@@ -436,15 +498,22 @@ async function reviewDecision(
     sourceRef: args.actorId,
   })
 
-  // Find the matter for status propagation (draft_of: draft → matter).
-  const matterRes = await client.query<{ matter_id: string }>(
-    `SELECT r.target_entity_id AS matter_id FROM relationship r
+  // Find the matter for status propagation. Documents link via draft_of;
+  // communication (email) drafts via comm_draft_of (MACHINE-COMMS-1 WP2) — the
+  // review decisions apply identically, the caller branches on the channel.
+  const matterRes = await client.query<{ matter_id: string; rel_kind: string }>(
+    `SELECT r.target_entity_id AS matter_id, rkd.kind_name AS rel_kind FROM relationship r
      JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-     WHERE r.tenant_id = $1 AND r.source_entity_id = $2 AND rkd.kind_name = 'draft_of'
+     WHERE r.tenant_id = $1 AND r.source_entity_id = $2
+       AND rkd.kind_name IN ('draft_of', 'comm_draft_of')
      LIMIT 1`,
     [args.tenantId, documentEntityId],
   )
-  return { documentEntityId, matterEntityId: matterRes.rows[0]?.matter_id ?? null }
+  return {
+    documentEntityId,
+    matterEntityId: matterRes.rows[0]?.matter_id ?? null,
+    isCommunication: matterRes.rows[0]?.rel_kind === 'comm_draft_of',
+  }
 }
 
 // ADR 0045 — keep the workflow_instance in lock-step with the matter_status mirror
@@ -543,7 +612,7 @@ async function advanceInstanceOnApprove(
 
 registerActionHandler('draft.approve', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as DraftReviewPayload
-  const { documentEntityId, matterEntityId } = await reviewDecision(client, {
+  const { documentEntityId, matterEntityId, isCommunication } = await reviewDecision(client, {
     tenantId: ctx.tenantId,
     actionId,
     actorId: ctx.actorId,
@@ -553,7 +622,7 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
     polarity: 'positive',
     notes: p.review_notes,
   })
-  if (matterEntityId) {
+  if (matterEntityId && !isCommunication) {
     const statusKindId = await lookupKindId(
       client,
       'attribute_kind_definition',
@@ -580,10 +649,19 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
       documentEntityId,
     })
   }
+  if (matterEntityId && isCommunication) {
+    // MACHINE-COMMS-1 (WP2): approving an EMAIL draft is not a document milestone —
+    // no matter_status='approved' mirror (the matter's document pipeline did not
+    // move) and no document fee. The workflow DOES advance when the current stage's
+    // attorney edge waits on draft.approve (a composed email_generation stage) —
+    // same advance the document path uses, and a plain no-op ad hoc.
+    await advanceInstanceOnApprove(client, ctx, matterEntityId, actionId)
+  }
   return {
     documentVersionId: p.document_version_id,
     documentEntityId,
     status: 'approved' as const,
+    isCommunication,
   }
 })
 

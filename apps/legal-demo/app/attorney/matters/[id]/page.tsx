@@ -42,6 +42,7 @@ import {
 } from './RunnerReview'
 import { skipStep } from '@/lib/stepRunner'
 import { useConfirm, usePrompt } from '@/components/ConfirmModal'
+import { NotesSection } from '@/components/NotesSection'
 
 const GENERATABLE: Array<{ kind: string; label: string }> = [
   { kind: 'operating_agreement', label: 'operating agreement' },
@@ -190,6 +191,12 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         // straight from matter.workflow.graph. This branch is reached ONLY when a
         // workflow instance exists; the no-workflow path below is untouched.
         <WorkflowWindow matter={matter} workflow={matter.workflow} onChanged={load} />
+      ) : matter.workflowRepairAvailable ? (
+        // ── MACHINE-COMMS-1: honest repair panel ─────────────────────────────
+        // The matter has NO workflow instance but its service HAS an authored
+        // lifecycle — never pretend with the legacy derived steps; say so and
+        // offer to start the real workflow.
+        <WorkflowRepairPanel matterEntityId={id} onStarted={load} />
       ) : (
         // ── Fallback: the existing derived-step window (#197), UNCHANGED ──────
         <section>
@@ -224,6 +231,16 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
           </p>
         </section>
       )}
+
+      {/* MACHINE-COMMS-1 — working notes on the matter (attorney + AI-extracted). */}
+      <NotesSection targetEntityId={id} createInput={{ matterEntityId: id }} />
+
+      {/* MACHINE-COMMS-1 — ad-hoc client email: AI-drafted, lands in the review
+          queue where approving it sends it. */}
+      <section>
+        <h2>Communications</h2>
+        <DraftEmailControl matterEntityId={id} />
+      </section>
 
       {!matter.workflow && openStep === 'intake' && (
         <Modal
@@ -272,7 +289,10 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         <Modal title="Consultation" onClose={closeStep}>
           {error && <div className="alert alert-error">{error}</div>}
           {hasTranscript && matter.transcriptText ? (
-            <TranscriptView text={matter.transcriptText} />
+            <>
+              <TranscriptView text={matter.transcriptText} />
+              <ExtractToNotesButton matterEntityId={id} />
+            </>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
               <p className="text-muted text-sm">
@@ -339,6 +359,199 @@ function StepIcon({ state }: { state: StepState }) {
   if (state === 'done') return <CheckCircleIcon size={18} />
   if (state === 'current') return <ClockIcon size={18} />
   return <FileTextIcon size={18} />
+}
+
+// ── MACHINE-COMMS-1: honest workflow repair panel ───────────────────────────
+// Shown when the matter has NO workflow instance but its service HAS an authored
+// lifecycle (matter.workflowRepairAvailable). Instead of the legacy derived steps
+// (which would pretend a workflow is running), say plainly that the workflow was
+// never started and offer to start it — POST /workflow/start → startMatterWorkflow,
+// then reload the matter so the real workflow window takes over.
+function WorkflowRepairPanel({
+  matterEntityId,
+  onStarted,
+}: {
+  matterEntityId: string
+  onStarted: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function start() {
+    setBusy(true)
+    setErr(null)
+    try {
+      const res = await fetch(`/api/attorney/matters/${matterEntityId}/workflow/start`, {
+        method: 'POST',
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'Failed to start the workflow.')
+      await onStarted()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section>
+      <h2>Workflow</h2>
+      <div style={{ borderLeft: '3px solid var(--border)', paddingLeft: 'var(--space-3)' }}>
+        <p style={{ marginTop: 0 }}>
+          <strong>Workflow not started</strong>
+        </p>
+        <p className="text-muted text-sm">
+          This matter was opened without its service&apos;s workflow instance, so there are no steps
+          running yet. Start the workflow to pick up the service&apos;s authored steps from the
+          beginning.
+        </p>
+        {err && <div className="alert alert-error">{err}</div>}
+        <button
+          className="primary"
+          onClick={() => void start()}
+          disabled={busy}
+          style={{ marginTop: 'var(--space-2)' }}
+        >
+          {busy && <span className="spinner" />}
+          {busy ? 'Starting…' : 'Start workflow'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ── MACHINE-COMMS-1: ad-hoc "Draft email" control ───────────────────────────
+// Opens a small inline form; legal.email.draft only ENQUEUES (the model work runs
+// on the worker), so the success state points at the review queue where approving
+// the draft sends it.
+function DraftEmailControl({ matterEntityId }: { matterEntityId: string }) {
+  const [open, setOpen] = useState(false)
+  const [purpose, setPurpose] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [queued, setQueued] = useState(false)
+
+  async function draft() {
+    if (busy || !purpose.trim()) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.email.draft',
+        input: { matterEntityId, purpose: purpose.trim() },
+      })
+      setQueued(true)
+      setOpen(false)
+      setPurpose('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <p className="text-muted text-sm">
+        Have the AI draft an email to the client from this matter&apos;s facts. Nothing reaches the
+        client unapproved — the draft lands in the Review queue first.
+      </p>
+      {err && <div className="alert alert-error">{err}</div>}
+      {queued && (
+        <div className="alert alert-success">
+          Email draft queued — it will appear in the Review queue; approving it sends it.
+        </div>
+      )}
+      {open ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <textarea
+            value={purpose}
+            onChange={(e) => setPurpose(e.target.value)}
+            rows={3}
+            placeholder="What should this email say?"
+            disabled={busy}
+            autoFocus
+          />
+          <div className="row" style={{ gap: 'var(--space-2)' }}>
+            <button
+              className="primary"
+              onClick={() => void draft()}
+              disabled={busy || !purpose.trim()}
+            >
+              {busy && <span className="spinner" />}
+              {busy ? 'Queuing…' : 'Draft email'}
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false)
+                setErr(null)
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => {
+            setQueued(false)
+            setOpen(true)
+          }}
+        >
+          Draft email
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── MACHINE-COMMS-1: "Extract to notes" (transcript → notes) ────────────────
+// Rendered under the transcript. legal.transcript.extract only ENQUEUES; the
+// distilled summary + facts land as notes on the matter when the worker finishes.
+function ExtractToNotesButton({ matterEntityId }: { matterEntityId: string }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [queued, setQueued] = useState(false)
+
+  async function extract() {
+    if (busy) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.transcript.extract',
+        input: { matterEntityId },
+      })
+      setQueued(true)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (queued) {
+    return (
+      <div className="alert alert-success" style={{ marginTop: 'var(--space-3)' }}>
+        Extraction queued — notes will appear on this matter.
+      </div>
+    )
+  }
+  return (
+    <div style={{ marginTop: 'var(--space-3)' }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      <button
+        onClick={() => void extract()}
+        disabled={busy}
+        title="Distill this transcript into notes on the matter — a summary plus extracted facts, for your review."
+      >
+        {busy && <span className="spinner" />}
+        {busy ? 'Queuing…' : 'Extract to notes'}
+      </button>
+    </div>
+  )
 }
 
 function labelForState(state: StepState): string {
@@ -691,7 +904,10 @@ function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDet
   }
   if (kind === 'view_consultation') {
     return matter.transcriptText ? (
-      <TranscriptView text={matter.transcriptText} />
+      <>
+        <TranscriptView text={matter.transcriptText} />
+        <ExtractToNotesButton matterEntityId={matter.matterEntityId} />
+      </>
     ) : (
       <p className="text-muted text-sm">No consultation transcript on this matter yet.</p>
     )

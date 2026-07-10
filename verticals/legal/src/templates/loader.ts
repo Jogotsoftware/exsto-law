@@ -18,6 +18,8 @@ let cached: {
   draftingPrompt?: string
   reviewPrompt?: string
   redlinePrompt?: string
+  emailDraftingPrompt?: string
+  transcriptExtractionPrompt?: string
 } = {}
 
 export interface QuestionnaireField {
@@ -160,6 +162,32 @@ export function loadReviewPrompt(): string {
     cached.reviewPrompt = readFileSync(resolve(templatesDir, 'document-review-prompt.md'), 'utf8')
   }
   return cached.reviewPrompt
+}
+
+// MACHINE-COMMS-1 (WP2/WP3) — email drafting + transcript extraction prompts.
+// Repo-controlled, worker-only loads (the serverless bundle never reads these:
+// email/extraction always run on the worker via legal.capability.* jobs). Their
+// output contracts (SUBJECT line / [fact]|[action] bullets + trailing trace
+// fence) are parsed in code, so they are deliberately NOT attorney-editable —
+// the attorney's voice rides the per-call instructions and firm skills instead.
+export function loadEmailDraftingPrompt(): string {
+  if (!cached.emailDraftingPrompt) {
+    cached.emailDraftingPrompt = readFileSync(
+      resolve(templatesDir, 'email-drafting-prompt.md'),
+      'utf8',
+    )
+  }
+  return cached.emailDraftingPrompt
+}
+
+export function loadTranscriptExtractionPrompt(): string {
+  if (!cached.transcriptExtractionPrompt) {
+    cached.transcriptExtractionPrompt = readFileSync(
+      resolve(templatesDir, 'transcript-extraction-prompt.md'),
+      'utf8',
+    )
+  }
+  return cached.transcriptExtractionPrompt
 }
 
 // The redline pass's prompt is REPO-CONTROLLED (not attorney-editable): its

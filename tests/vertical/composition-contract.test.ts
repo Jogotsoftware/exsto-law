@@ -77,12 +77,17 @@ describe('composition contract — every step-invocable capability is taught', (
     .filter(([, c]) => c.step_invocable === true)
     .map(([slug]) => slug)
 
-  it('the seed registry has the four invocable capabilities (sanity)', () => {
+  it('the seed registry has the six invocable capabilities (sanity)', () => {
+    // MACHINE-COMMS-1 added email_generation + transcript_extraction. This
+    // enumeration is the ONE line that changes when a new invocable ships — every
+    // teaching assertion below then forces the doctrine to cover the new slug.
     expect(invocableSlugs.sort()).toEqual([
       'ai_document_review',
       'document_generation',
+      'email_generation',
       'esignature',
       'request_client_materials',
+      'transcript_extraction',
     ])
   })
 

@@ -72,6 +72,10 @@ export interface MatterDetail {
   // PR3). Null is the default today; null ⇒ the page renders the existing
   // derived-step window with no behavior change.
   workflow?: MatterWorkflow | null
+  // MACHINE-COMMS-1: true ⇒ this matter has NO workflow instance but its service
+  // HAS an authored lifecycle — the page shows the honest repair panel instead of
+  // the legacy derived-step window.
+  workflowRepairAvailable?: boolean
 }
 
 // Client-side replica of the server resolver's stepStates idea (resolve.ts): a

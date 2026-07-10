@@ -64,3 +64,55 @@ export async function sendDraftLinkEmail(
   })
   return { messageId, from, to }
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// MACHINE-COMMS-1 (WP2) — send an APPROVED communication draft. Approve = send:
+// api/reviewDraft.approveDraft calls this after draft.approve lands on a
+// communication_draft. The attorney-approved BODY is the message (no /d link);
+// delivery is Contract B (enqueueClientEmail) — the client-contact allow-list,
+// send authz, firm signature, and the mail.send audit row all apply unchanged.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface SendCommunicationDraftResult {
+  messageId: string
+  from: string
+  to: string
+  subject: string
+}
+
+export async function sendCommunicationDraft(
+  ctx: ActionContext,
+  documentVersionId: string,
+): Promise<SendCommunicationDraftResult> {
+  const draft = await getDraftVersion(ctx, documentVersionId)
+  if (!draft) throw new Error(`Draft version not found: ${documentVersionId}`)
+  if (draft.channel !== 'communication') {
+    throw new Error(`Version ${documentVersionId} is not a communication draft.`)
+  }
+  if (draft.status !== 'approved') {
+    throw new Error('Only an APPROVED email draft can be sent — approve it in the review queue.')
+  }
+  if ((draft.emailToRole ?? 'client') !== 'client') {
+    // Contract B is client-mail-only by discipline; a non-client recipient has no
+    // authorized rail yet. Honest error, never a silent re-route.
+    throw new Error(
+      'This email draft is addressed to a non-client recipient — no authorized send rail exists for that yet. Copy the approved text and send it manually.',
+    )
+  }
+  const matter = await getMatter(ctx, draft.matterEntityId)
+  if (!matter) throw new Error(`Matter not found: ${draft.matterEntityId}`)
+  const to = (matter.clientEmail ?? '').trim()
+  if (!to) {
+    throw new Error(
+      'No client email on file for this matter — add one to the contact, then approve again to retry the send.',
+    )
+  }
+  const subject = draft.emailSubject?.trim() || `Update on your matter ${matter.matterNumber}`
+  const { messageId, from } = await enqueueClientEmail(ctx, {
+    to,
+    subject,
+    body: draft.bodyMarkdown,
+    matterId: draft.matterEntityId,
+  })
+  return { messageId, from, to, subject }
+}

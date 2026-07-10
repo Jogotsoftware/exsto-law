@@ -22,3 +22,19 @@ export async function setMatterWorkflow(
   })
   return res.effects[0] as { workflowInstanceId: string; stageCount: number }
 }
+
+// MACHINE-COMMS-1 (WP0) — the REPAIR control: stand up the workflow instance for
+// an existing matter that has none (the silent-skip class), instantiating from the
+// matter's service current lifecycle. intent 'correction': the instance should
+// have existed from matter.open; this records that it now does.
+export async function startMatterWorkflow(
+  ctx: ActionContext,
+  matterEntityId: string,
+): Promise<{ workflowInstanceId: string; started: boolean; startState: string }> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.matter.set_workflow',
+    intentKind: 'correction',
+    payload: { matter_entity_id: matterEntityId, start: true },
+  })
+  return res.effects[0] as { workflowInstanceId: string; started: boolean; startState: string }
+}

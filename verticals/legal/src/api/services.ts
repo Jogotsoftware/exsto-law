@@ -111,6 +111,10 @@ export interface ServiceDefinition {
   // cannot mean "no appointment" without breaking existing services.
   appointmentRequired: boolean
   isActive: boolean
+  // MACHINE-COMMS-1 (WP0) — booking honesty: a service is bookable ONLY when it is
+  // active AND carries a non-empty authored lifecycle. matter.open fails loudly on
+  // anything else, so surfaces that offer booking must gate on this, not isActive.
+  bookable: boolean
   sortOrder: number
   updatedAt: string
 }
@@ -137,6 +141,9 @@ type WorkflowRow = {
   }
   status: string
   recorded_at: string
+  // Computed in SQL: does the current row carry a non-empty authored lifecycle?
+  // (MACHINE-COMMS-1 WP0 — feeds `bookable`.)
+  has_lifecycle?: boolean
 }
 
 // Display order for the booking page's service selection (REQ-INTAKE-02) is now
@@ -314,6 +321,7 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     booking: parseBooking(r.transitions.booking),
     appointmentRequired: parseAppointmentRequired(r.transitions.appointment_required),
     isActive: r.status === 'active',
+    bookable: r.status === 'active' && r.has_lifecycle === true,
     sortOrder: sortOrderOf(r),
     updatedAt: r.recorded_at,
   }
@@ -325,6 +333,7 @@ function compareServices(a: ServiceDefinition, b: ServiceDefinition): number {
 
 const WORKFLOW_COLS = `
   id, kind_name, display_name, description, transitions, status,
+  (jsonb_typeof(states) = 'array' AND jsonb_array_length(states) > 0) AS has_lifecycle,
   to_char(recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at
 `
 
@@ -1562,6 +1571,17 @@ export async function submitBooking(
   const service = await getService(ctx, input.serviceKey)
   if (!service) {
     throw new Error(`Unknown service: ${input.serviceKey}`)
+  }
+  // MACHINE-COMMS-1 (WP0) — booking honesty at the FRONT DOOR: a disabled service
+  // or one with no authored lifecycle is not bookable. getService deliberately
+  // resolves any current row (the admin needs that); the public submit gates here,
+  // BEFORE any side effect, so no slot is consumed and no half-open matter exists.
+  // matter.open enforces the same rule as defense in depth.
+  if (!service.bookable) {
+    throw new Error(
+      `Service "${service.displayName}" is not currently accepting bookings` +
+        (service.isActive ? ' (it has no active workflow definition).' : ' (it is disabled).'),
+    )
   }
   const appointmentRequired = service.appointmentRequired
   if (appointmentRequired && !input.scheduledAtIso) {

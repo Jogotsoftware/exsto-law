@@ -374,6 +374,27 @@ export async function buildMatterAssistantContext(
   if (matter.summary) header.push(`Summary: ${safeField(matter.summary)}`)
 
   const sections = await gatherMatterMaterial(ctx, matterEntityId, matter, budget)
+
+  // MACHINE-COMMS-1 (WP1.4) — EXPLICIT client-memory consumption: when the matter
+  // belongs to a client, the assistant sees the client's ASSEMBLED history (every
+  // matter including archived, notes, transcript excerpts, released documents) as
+  // one capped section inside the untrusted-data fence. Best-effort: a context
+  // failure never breaks the assistant.
+  if (matter.clientEntityId) {
+    try {
+      const { getClientContext, formatClientContext } = await import('../queries/clientContext.js')
+      const cap = depth === 'lean' ? 2_000 : depth === 'generous' ? 8_000 : 4_000
+      const clientContext = await getClientContext(ctx, matter.clientEntityId)
+      if (clientContext) {
+        sections.push(
+          `## Client history (all matters, including archived)\n${formatClientContext(clientContext, cap)}`,
+        )
+      }
+    } catch {
+      // Best-effort.
+    }
+  }
+
   const data = wrapData(sections)
   const full = data ? `${header.join('\n')}\n\n${data}` : header.join('\n')
 
