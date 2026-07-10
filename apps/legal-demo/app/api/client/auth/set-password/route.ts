@@ -16,6 +16,9 @@ import {
   verifyPortalInviteToken,
   loadClientContactEmail,
   isClientContactActive,
+  resolvePortalActorId,
+  provisionClientPortalActor,
+  resolveClientMatterIds,
 } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
@@ -32,6 +35,11 @@ const BASE_URL = (
 ).replace(/\/$/, '')
 
 const MIN_PASSWORD_LENGTH = 8
+
+// Submitting actor for the account-provisioning action (the resulting session
+// then acts as the client's own actor).
+const PUBLIC_INTAKE_ACTOR_ID =
+  process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`client-auth-set-password:${clientIpFrom(request)}`)
@@ -105,6 +113,17 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: 'We could not set your password. Please try again or contact the firm.' },
       { status: 502 },
+    )
+  }
+
+  // PORTAL-1: account creation provisions the client's OWN actor (idempotent) and
+  // advances any matter parked on a send_portal_invite client gate. Done here —
+  // not left to the mint's lazy backfill — so the receipt reads trigger:'invite'.
+  if (!(await resolvePortalActorId(invite.tenantId, invite.clientContactId))) {
+    const matterIds = await resolveClientMatterIds(invite.tenantId, invite.clientContactId)
+    await provisionClientPortalActor(
+      { tenantId: invite.tenantId, actorId: PUBLIC_INTAKE_ACTOR_ID },
+      { clientContactId: invite.clientContactId, matterEntityIds: matterIds, trigger: 'invite' },
     )
   }
 

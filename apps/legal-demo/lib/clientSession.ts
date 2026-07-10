@@ -14,7 +14,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 // can never be confused for each other even though both reuse the same secret.
 //
 // Domain separation (security-critical): every MAC here is computed over a
-// 'client-session.v1:' prefix. The attorney session uses 'session.v1:' and
+// 'client-session.v2:' prefix (v2 = PORTAL-1: the payload now carries the
+// client's own actor id; v1 cookies — which lack it — are rejected wholesale so
+// no session can ever write as the shared public-intake actor again). The attorney session uses 'session.v1:' and
 // OAuth-state uses no prefix. Because the prefix is part of the signed bytes, an
 // attorney session token and an OAuth-state token are both REJECTED by
 // verifyClientSession (and vice-versa) even though the underlying HMAC key is
@@ -24,7 +26,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 // adapters/oauthState.ts). No secret ⇒ signing and verification throw rather
 // than degrading to an unsigned/forgeable token.
 
-const SESSION_DOMAIN_PREFIX = 'client-session.v1:'
+const SESSION_DOMAIN_PREFIX = 'client-session.v2:'
 
 export const CLIENT_SESSION_COOKIE_NAME = 'exsto_client_session'
 
@@ -35,6 +37,9 @@ export const CLIENT_SESSION_TTL_SECONDS = 8 * 60 * 60
 export interface ClientSessionPayload {
   clientContactId: string
   tenantId: string
+  // The client's OWN actor id (PORTAL-1). Every authed portal write runs as
+  // this actor — never the shared public-intake system actor.
+  clientActorId: string
   // The set of matter ids this client is client_of, captured at consume time.
   // Authorization in the authed route is checked against THIS list — never
   // against anything in the request body.
@@ -105,7 +110,7 @@ function verifyToken(
 export function signClientSession(
   identity: Pick<
     ClientSessionPayload,
-    'clientContactId' | 'tenantId' | 'matterIds' | 'email' | 'displayName'
+    'clientContactId' | 'tenantId' | 'clientActorId' | 'matterIds' | 'email' | 'displayName'
   >,
   ttlSeconds: number = CLIENT_SESSION_TTL_SECONDS,
 ): string {
@@ -113,6 +118,7 @@ export function signClientSession(
   const payload: ClientSessionPayload = {
     clientContactId: identity.clientContactId,
     tenantId: identity.tenantId,
+    clientActorId: identity.clientActorId,
     matterIds: identity.matterIds,
     email: identity.email,
     displayName: identity.displayName,
@@ -132,6 +138,7 @@ export function verifyClientSession(token: string | null | undefined): ClientSes
   if (
     typeof payload.clientContactId !== 'string' ||
     typeof payload.tenantId !== 'string' ||
+    typeof payload.clientActorId !== 'string' ||
     !Array.isArray(payload.matterIds) ||
     !payload.matterIds.every((m) => typeof m === 'string') ||
     typeof payload.email !== 'string' ||

@@ -28,10 +28,6 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-// The firm's public-intake SYSTEM actor — the portal write runs as this actor; the
-// client's identity rides in the document.upload payload (clientContactId). Same as
-// the authed MCP route.
-const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: matterId } = await params
@@ -41,8 +37,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!session) {
     return NextResponse.json({ error: 'Not signed in.' }, { status: 401 })
   }
-  const { clientContactId, tenantId, matterIds } = session
-  if (!UUID_RE.test(clientContactId) || !UUID_RE.test(tenantId)) {
+  const { clientContactId, tenantId, matterIds, clientActorId } = session
+  if (
+    !UUID_RE.test(clientContactId) ||
+    !UUID_RE.test(tenantId) ||
+    !UUID_RE.test(clientActorId)
+  ) {
     return NextResponse.json({ error: 'Invalid session.' }, { status: 401 })
   }
   // Live re-check: a deactivated contact can't keep uploading on an unexpired cookie.
@@ -54,7 +54,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!UUID_RE.test(matterId) || !matterIds.includes(matterId)) {
     return NextResponse.json({ error: 'Matter not found.' }, { status: 404 })
   }
-  const ctx = { tenantId, actorId: ACTOR_ID }
+  // PORTAL-1: the upload is attributed to the client's OWN actor (from the
+  // signed session), not the shared public-intake system actor.
+  const ctx = { tenantId, actorId: clientActorId }
 
   const form = await request.formData().catch(() => null)
   const file = form?.get('file')

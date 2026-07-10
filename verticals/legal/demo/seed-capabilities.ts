@@ -311,6 +311,21 @@ export const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
       backed_by: ['attorney.message.post', 'client portal', 'client delivery dispatch'],
     },
   },
+  {
+    // PORTAL-1 (WP1) — the first capability promoted under platform-discipline §3b:
+    // one handler backs the composed workflow stage, the attorney's "Invite to
+    // portal" button, and the booking-confirmation account link.
+    slug: 'send_portal_invite',
+    spec: {
+      name: 'Send portal invite',
+      category: 'client',
+      purpose:
+        'Email the matter’s client a secure link to create their portal account. As a workflow stage the matter parks at the client gate until the account exists, then advances on the client’s own account-creation action.',
+      when_to_use:
+        'Compose it early in a service when the client should follow the matter, sign, and pay in the portal. Skipped honestly when the client already has an account.',
+      backed_by: ['portal invite token', 'client_portal_invite notification route', 'legal.client.provision_portal_actor'],
+    },
+  },
 ]
 
 // ADR 0046 — the EXECUTABLE CONTRACT per capability (WP1). Merged onto each spec at
@@ -435,6 +450,24 @@ export const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['
         description: 'What to check for in the document — the review rubric.',
       },
     },
+  },
+  send_portal_invite: {
+    step_invocable: true,
+    handler_key: 'legal.capability.send_portal_invite.run',
+    inputs: [
+      {
+        key: 'client_contact',
+        provided_by: 'system',
+        source: 'matter',
+        required: true,
+        description: 'the matter’s client contact (client_of) — resolved by the runtime',
+      },
+    ],
+    outputs: [],
+    default_gate: 'client',
+    // No standing config. Advance on account-created: the client-gate edge's
+    // `via` is legal.client.provision_portal_actor.
+    config_schema: {},
   },
   request_client_materials: {
     step_invocable: true,

@@ -68,7 +68,7 @@ interface Service {
   bookable: boolean
 }
 
-type Step = 'service' | 'contact' | 'intake' | 'slot' | 'done'
+type Step = 'service' | 'contact' | 'intake' | 'slot' | 'account' | 'done'
 
 interface MemberRow {
   // Client-only stable identity for React keys. Stripped before sending to
@@ -100,7 +100,23 @@ const PROGRESS_STEPS: ReadonlyArray<{ key: Exclude<Step, 'done'>; labelKey: stri
   { key: 'contact', labelKey: 'progress.contact' },
   { key: 'intake', labelKey: 'progress.intake' },
   { key: 'slot', labelKey: 'progress.time' },
+  { key: 'account', labelKey: 'progress.account' },
 ]
+
+// PORTAL-1: the signed-in portal identity, when a client session cookie exists.
+interface PortalMe {
+  email: string
+  displayName: string
+}
+
+// The fee quote the server computed for the selected service (PORTAL-1 WP3).
+interface FeeQuote {
+  basis: 'fixed' | 'hourly-rate'
+  amount: string | null
+  rate: string | null
+  currency: string
+  description: string
+}
 
 // Plain-language services map to a friendly icon; anything unknown gets a doc icon.
 function ServiceIcon({ serviceKey, size = 22 }: { serviceKey: string; size?: number }) {
@@ -167,6 +183,26 @@ export default function BookPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // PORTAL-1: signed-in clients skip the contact step AND the account gate —
+  // identity comes from the session; the submit runs through the authed portal
+  // endpoint attributed to their own actor. undefined = still checking.
+  const [portalMe, setPortalMe] = useState<PortalMe | null | undefined>(undefined)
+  useEffect(() => {
+    fetch('/api/client/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) =>
+        setPortalMe(me && typeof me.email === 'string' ? { email: me.email, displayName: me.displayName ?? me.email } : null),
+      )
+      .catch(() => setPortalMe(null))
+  }, [])
+  const signedIn = Boolean(portalMe)
+
+  // The account gate (anonymous flow): password + the fee card.
+  const [password, setPassword] = useState('')
+  const [password2, setPassword2] = useState('')
+  const [feeQuote, setFeeQuote] = useState<FeeQuote | null>(null)
+  const [feeAccepted, setFeeAccepted] = useState(false)
+
   // CAPTCHA token + a reset handle the widget hands back. Both stay null when
   // the site key is unset (the widget never renders), and the submit flow below
   // only requires/sends a token in that case.
@@ -185,6 +221,10 @@ export default function BookPage() {
     // Null for intake-only services — the confirmation renders "request
     // received" copy instead of a consultation time.
     scheduledAt: string | null
+    // PORTAL-1: true when the intake gate just created their portal account —
+    // the confirmation tells them to confirm their email and sign in.
+    accountCreated?: boolean
+    accountExisted?: boolean
   } | null>(null)
 
   // Honor ?service=… (presets pick the service up-front and skip the picker)
@@ -208,6 +248,12 @@ export default function BookPage() {
       .then((r) => setServices(r.services.filter((s) => s.bookable === true)))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [])
+
+  // A signed-in client never sees the contact step (the ?service preset jumps
+  // there before the session check resolves).
+  useEffect(() => {
+    if (step === 'contact' && signedIn) setStep('intake')
+  }, [step, signedIn])
 
   // A ?service= preset jumps straight to the contact step before services have
   // loaded. Once they do, validate the preset: if it doesn't resolve to a real
@@ -294,7 +340,9 @@ export default function BookPage() {
       setError(t('error.pick_service'))
       return
     }
-    setStep('contact')
+    // Signed-in clients skip the contact step — the firm already knows them;
+    // the server resolves name/email from the session at submit.
+    setStep(signedIn ? 'intake' : 'contact')
   }
 
   function advanceFromContact() {
@@ -357,97 +405,207 @@ export default function BookPage() {
       return
     }
     setError(null)
-    // Intake-only services submit straight from this step — there is no slot
-    // to pick (the submit button hosting this handler renders the captcha).
+    // Intake-only services have no slot to pick: signed-in clients submit here;
+    // new clients go to the account gate (the FINAL step of intake).
     if (!needsSlot) {
-      void submitBooking()
+      if (signedIn) void submitBooking()
+      else void goToAccountGate()
       return
     }
     setStep('slot')
   }
 
+  // PORTAL-1 (WP1): entering the account gate STAGES the intake as a lead first
+  // — a client who balks at the password step stays recoverable and queryable.
+  // Fire-and-forget: staging failure must not block the funnel (finalize
+  // self-heals), and the response's fee quote drives the consent card.
+  async function goToAccountGate() {
+    setStep('account')
+    setFeeAccepted(false)
+    try {
+      const res = await fetch('/api/client/intake/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientFullName: contact.fullName.trim(),
+          clientEmail: contact.email.trim(),
+          clientPhone: contact.phone || null,
+          clientCompanyName: contact.companyName.trim() || null,
+          serviceKey: selectedServiceKey,
+          intakeResponses,
+        }),
+      })
+      const data = (await res.json().catch(() => null)) as { quote?: FeeQuote | null } | null
+      setFeeQuote(data?.quote ?? null)
+    } catch {
+      setFeeQuote(null)
+    }
+  }
+
+  // The intake answers + staged upload tokens the submit sends, shared by both
+  // doors (signed-in portal submit and the anonymous intake-gate finalize).
+  function buildSubmitPayload() {
+    if (!selectedService) return null
+    const responsesToSubmit = selectedService.intakeSchema.sections.some((s) =>
+      s.fields.some((f) => f.type === 'members_repeater'),
+    )
+      ? { ...intakeResponses, members: members.map(({ id: _id, ...rest }) => rest) }
+      : intakeResponses
+
+    // Staged file tokens for the SELECTED service's file_upload fields only —
+    // a file attached while browsing a different service (then abandoned via
+    // Back) must never bind to this booking's matter. The server verifies
+    // each token and binds the objects to the new matter.
+    const fileFieldIds = new Set(
+      selectedService.intakeSchema.sections.flatMap((s) =>
+        s.fields.filter((f) => f.type === 'file_upload').map((f) => f.id),
+      ),
+    )
+    const stagedTokens = Object.entries(stagedUploads)
+      .filter(([fieldId]) => fileFieldIds.has(fieldId))
+      .flatMap(([, files]) => files.map((f) => f.token))
+
+    return {
+      serviceKey: selectedService.serviceKey,
+      intakeResponses: responsesToSubmit,
+      // The server REJECTS a slot on an intake-only service — omit both.
+      ...(needsSlot && selectedSlot
+        ? { scheduledAtIso: selectedSlot.startIso, scheduledEndIso: selectedSlot.endIso }
+        : {}),
+      stagedUploads: stagedTokens.length > 0 ? stagedTokens : undefined,
+    }
+  }
+
+  function handleSubmitFailure(raw: string) {
+    // A Turnstile token is single-use; any failed submit consumed it, so
+    // reset the widget and require a fresh solve before the next attempt.
+    if (TURNSTILE_SITE_KEY) {
+      setCaptchaToken(null)
+      resetCaptchaRef.current?.()
+    }
+    if (raw.includes('SLOT_TAKEN') || raw.includes('another booking')) {
+      // Someone else grabbed this slot between when the calendar was last
+      // refreshed and when we hit submit. Translate the error, force a
+      // fresh availability fetch, and clear the now-invalid selection so
+      // the user has to pick again.
+      setError(t('slot.conflict'))
+      setSelectedSlot(null)
+      setStep('slot')
+      void fetchSlots(horizonDays, { serviceKey: selectedServiceKey ?? undefined })
+    } else {
+      setError(raw)
+    }
+  }
+
+  // SIGNED-IN submit (PORTAL-1 WP4): the authed portal endpoint books as the
+  // client's own actor — no contact step, no account gate, no captcha. A costed
+  // service answers 409 FEE_CONSENT_REQUIRED first; the fee card renders and
+  // the accepted resubmit records the consent server-side.
   async function submitBooking() {
     if (!selectedService) return
     if (needsSlot && !selectedSlot) return
-    // When the CAPTCHA is enabled, a verified token is mandatory before we hit
-    // the server (which would otherwise 403). When it's disabled the widget
-    // never renders, captchaToken stays null, and this guard is skipped.
+    const payload = buildSubmitPayload()
+    if (!payload) return
+    setBusy('submit')
+    setError(null)
+    try {
+      const res = await fetch('/api/client/portal/book', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, feeAccepted: feeAccepted || undefined }),
+      })
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean
+        error?: string
+        code?: string
+        quote?: FeeQuote
+        matterNumber?: string | null
+        scheduledAt?: string | null
+      } | null
+      if (res.status === 409 && data?.code === 'FEE_CONSENT_REQUIRED' && data.quote) {
+        // Show the exact cost; nothing proceeds until they accept (law 2).
+        setFeeQuote(data.quote)
+        setFeeAccepted(false)
+        return
+      }
+      if (!res.ok || !data?.ok) throw new Error(data?.error ?? 'Booking failed.')
+      setConfirmation({
+        matterNumber: data.matterNumber ?? '—',
+        scheduledAt: data.scheduledAt ?? null,
+      })
+      setStep('done')
+    } catch (err) {
+      handleSubmitFailure(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // ANONYMOUS submit (PORTAL-1 WP1): the account gate finalize — account
+  // creation + booking are atomic on success; the staged lead survives a balk.
+  async function submitWithAccount() {
+    if (!selectedService) return
+    if (password.length < 8) {
+      setError(t('account.password_short', undefined, 'Choose a password of at least 8 characters.'))
+      return
+    }
+    if (password !== password2) {
+      setError(t('account.password_mismatch', undefined, 'The passwords do not match.'))
+      return
+    }
+    if (feeQuote && !feeAccepted) {
+      setError(t('account.fee_required', undefined, 'Please review and accept the fee to continue.'))
+      return
+    }
     if (TURNSTILE_SITE_KEY && !captchaToken) {
       setError(t('error.captcha'))
       return
     }
+    const payload = buildSubmitPayload()
+    if (!payload) return
     setBusy('submit')
     setError(null)
     try {
-      const responsesToSubmit = selectedService.intakeSchema.sections.some((s) =>
-        s.fields.some((f) => f.type === 'members_repeater'),
-      )
-        ? { ...intakeResponses, members: members.map(({ id: _id, ...rest }) => rest) }
-        : intakeResponses
-
-      // Staged file tokens for the SELECTED service's file_upload fields only —
-      // a file attached while browsing a different service (then abandoned via
-      // Back) must never bind to this booking's matter. The server verifies
-      // each token and binds the objects to the new matter.
-      const fileFieldIds = new Set(
-        selectedService.intakeSchema.sections.flatMap((s) =>
-          s.fields.filter((f) => f.type === 'file_upload').map((f) => f.id),
-        ),
-      )
-      const stagedTokens = Object.entries(stagedUploads)
-        .filter(([fieldId]) => fileFieldIds.has(fieldId))
-        .flatMap(([, files]) => files.map((f) => f.token))
-
-      const result = await callClientMcp<{
-        actionId: string
-        // matter.open's effect (intake-only) has no scheduledAt; booking.create's does.
-        effects: Array<{ matterEntityId: string; matterNumber: string; scheduledAt?: string }>
-      }>({
-        toolName: 'legal.booking.submit',
-        input: {
+      const res = await fetch('/api/client/intake/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           clientFullName: contact.fullName.trim(),
           clientEmail: contact.email.trim(),
-          clientPhone: contact.phone,
+          clientPhone: contact.phone || undefined,
           clientCompanyName: contact.companyName.trim() || undefined,
           attributionSource: contact.attributionSource.trim(),
-          serviceKey: selectedService.serviceKey,
-          intakeResponses: responsesToSubmit,
-          // The server REJECTS a slot on an intake-only service — omit both.
-          ...(needsSlot && selectedSlot
-            ? { scheduledAtIso: selectedSlot.startIso, scheduledEndIso: selectedSlot.endIso }
-            : {}),
-          stagedUploads: stagedTokens.length > 0 ? stagedTokens : undefined,
-        },
-        // undefined when CAPTCHA is disabled → callClientMcp omits the field.
-        captchaToken: captchaToken ?? undefined,
+          ...payload,
+          password,
+          feeAccepted: feeQuote ? feeAccepted : undefined,
+          captchaToken: captchaToken ?? undefined,
+        }),
       })
-
-      const effect = result.effects[0]
-      if (!effect) throw new Error('Booking response missing matter id.')
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean
+        error?: string
+        code?: string
+        quote?: FeeQuote
+        matterNumber?: string | null
+        scheduledAt?: string | null
+        accountCreated?: boolean
+        accountExisted?: boolean
+      } | null
+      if (res.status === 409 && data?.code === 'FEE_CONSENT_REQUIRED' && data.quote) {
+        setFeeQuote(data.quote)
+        setFeeAccepted(false)
+        return
+      }
+      if (!res.ok || !data?.ok) throw new Error(data?.error ?? 'Booking failed.')
       setConfirmation({
-        matterNumber: effect.matterNumber,
-        scheduledAt: effect.scheduledAt ?? null,
+        matterNumber: data.matterNumber ?? '—',
+        scheduledAt: data.scheduledAt ?? null,
+        accountCreated: data.accountCreated,
+        accountExisted: data.accountExisted,
       })
       setStep('done')
     } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err)
-      // A Turnstile token is single-use; any failed submit consumed it, so
-      // reset the widget and require a fresh solve before the next attempt.
-      if (TURNSTILE_SITE_KEY) {
-        setCaptchaToken(null)
-        resetCaptchaRef.current?.()
-      }
-      if (raw.includes('SLOT_TAKEN')) {
-        // Someone else grabbed this slot between when the calendar was last
-        // refreshed and when we hit submit. Translate the error, force a
-        // fresh availability fetch, and clear the now-invalid selection so
-        // the user has to pick again.
-        setError(t('slot.conflict'))
-        setSelectedSlot(null)
-        void fetchSlots(horizonDays, { serviceKey: selectedServiceKey ?? undefined })
-      } else {
-        setError(raw)
-      }
+      handleSubmitFailure(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(null)
     }
@@ -500,6 +658,27 @@ export default function BookPage() {
             <div className="bk-matter-ref">
               {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
             </div>
+            {confirmation.accountCreated && (
+              <p className="bk-sub">
+                {t(
+                  'confirm.account_created',
+                  undefined,
+                  'Your client portal account is ready — check your email for a confirmation link, then sign in to track this matter, read documents, and pay invoices.',
+                )}
+              </p>
+            )}
+            {confirmation.accountExisted && (
+              <p className="bk-sub">
+                {t(
+                  'confirm.account_existed',
+                  undefined,
+                  'This booking is linked to your existing portal account — sign in with your usual password.',
+                )}
+              </p>
+            )}
+            <Link href="/portal" className="bk-btn bk-btn-primary bk-btn-wide">
+              {t('confirm.portal', undefined, 'Open your client portal')}
+            </Link>
             <Link href="/" className="bk-btn bk-btn-ghost bk-btn-wide">
               {t('confirm.back')}
             </Link>
@@ -516,7 +695,9 @@ export default function BookPage() {
         ? t('contact.heading')
         : step === 'intake'
           ? t('intake.heading')
-          : t('slot.heading')
+          : step === 'account'
+            ? t('account.heading', undefined, 'Create your account')
+            : t('slot.heading')
   const stepSubtitle =
     step === 'service'
       ? t('service.subtitle')
@@ -524,7 +705,9 @@ export default function BookPage() {
         ? t('contact.subtitle')
         : step === 'intake'
           ? t('intake.subtitle')
-          : t('slot.subtitle')
+          : step === 'account'
+            ? t('account.subtitle', undefined, 'Everything about your matter will live in your secure portal.')
+            : t('slot.subtitle')
 
   return (
     <main className="bk-shell">
@@ -533,7 +716,12 @@ export default function BookPage() {
         <BookTopbar />
         <BookProgress
           step={step}
-          steps={needsSlot ? PROGRESS_STEPS : PROGRESS_STEPS.filter((s) => s.key !== 'slot')}
+          steps={PROGRESS_STEPS.filter(
+            (s) =>
+              (needsSlot || s.key !== 'slot') &&
+              // Signed-in clients skip the contact step and the account gate.
+              (!signedIn || (s.key !== 'contact' && s.key !== 'account')),
+          )}
         />
 
         <section className="bk-card">
@@ -552,6 +740,28 @@ export default function BookPage() {
 
             {step === 'service' && (
               <>
+                {portalMe === null && (
+                  <div className="bk-notice" role="note">
+                    {t('funnel.existing', undefined, 'Already working with us?')}{' '}
+                    <a href="/portal/login?next=%2Fbook" style={{ fontWeight: 600 }}>
+                      {t('funnel.signin', undefined, 'Sign in to your client portal')}
+                    </a>{' '}
+                    {t(
+                      'funnel.existing_tail',
+                      undefined,
+                      'to book with your details prefilled — or continue below if you are new here.',
+                    )}
+                  </div>
+                )}
+                {portalMe && (
+                  <div className="bk-notice" role="note">
+                    {t('funnel.signedin', undefined, 'Booking as')} <strong>{portalMe.displayName}</strong>{' '}
+                    ({portalMe.email}) ·{' '}
+                    <a href="/portal" style={{ fontWeight: 600 }}>
+                      {t('funnel.portal', undefined, 'Go to your portal')}
+                    </a>
+                  </div>
+                )}
                 {services === null ? (
                   <div className="bk-loading">
                     <span className="bk-spinner" />
@@ -704,19 +914,11 @@ export default function BookPage() {
                       </div>
                     ))}
                 </div>
-                {/* Intake-only services submit HERE — the captcha renders on
-                    whichever step hosts the write (the public route 403s
-                    without a verified token). */}
-                {!needsSlot && TURNSTILE_SITE_KEY && (
-                  <div className="bk-captcha" aria-live="polite">
-                    <Turnstile
-                      siteKey={TURNSTILE_SITE_KEY}
-                      onToken={setCaptchaToken}
-                      onReady={(reset) => {
-                        resetCaptchaRef.current = reset
-                      }}
-                    />
-                  </div>
+                {/* PORTAL-1: a signed-in intake-only submit happens HERE (no
+                    captcha — the authed route is session-gated). Anonymous
+                    flows continue to the account gate, which hosts the captcha. */}
+                {!needsSlot && signedIn && feeQuote && (
+                  <FeeConsentCard quote={feeQuote} accepted={feeAccepted} onAccept={setFeeAccepted} t={t} />
                 )}
                 <div className="bk-actions">
                   {/* Back stays disabled during an in-flight intake-only submit —
@@ -725,7 +927,7 @@ export default function BookPage() {
                   <button
                     className="bk-btn bk-btn-ghost"
                     disabled={busy === 'submit'}
-                    onClick={() => setStep('contact')}
+                    onClick={() => setStep(signedIn ? 'service' : 'contact')}
                   >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
@@ -741,11 +943,15 @@ export default function BookPage() {
                   ) : (
                     <button
                       className="bk-btn bk-btn-primary bk-btn-grow"
-                      disabled={busy === 'submit' || (Boolean(TURNSTILE_SITE_KEY) && !captchaToken)}
+                      disabled={busy === 'submit'}
                       onClick={advanceFromIntake}
                     >
                       {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
-                      {busy === 'submit' ? t('intake.submitting') : t('intake.submit')}
+                      {busy === 'submit'
+                        ? t('intake.submitting')
+                        : signedIn
+                          ? t('intake.submit')
+                          : t('common.continue')}
                       {busy !== 'submit' && <CheckIcon size={18} />}
                     </button>
                   )}
@@ -811,6 +1017,81 @@ export default function BookPage() {
                   </div>
                 )}
 
+                {signedIn && feeQuote && (
+                  <FeeConsentCard quote={feeQuote} accepted={feeAccepted} onAccept={setFeeAccepted} t={t} />
+                )}
+                <div className="bk-actions">
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    disabled={busy === 'submit'}
+                    onClick={() => setStep('intake')}
+                  >
+                    <ChevronLeftIcon size={18} />
+                    {t('common.back')}
+                  </button>
+                  <button
+                    className="bk-btn bk-btn-primary bk-btn-grow"
+                    disabled={!selectedSlot || busy === 'submit'}
+                    onClick={() => {
+                      if (signedIn) void submitBooking()
+                      else void goToAccountGate()
+                    }}
+                  >
+                    {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
+                    {busy === 'submit'
+                      ? t('slot.booking')
+                      : signedIn
+                        ? t('slot.confirm')
+                        : t('common.continue')}
+                    {busy !== 'submit' && <CheckIcon size={18} />}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 'account' && (
+              <>
+                <p className="bk-sub" style={{ marginTop: 0 }}>
+                  {t(
+                    'account.blurb',
+                    undefined,
+                    'One last step: create your secure client portal account. You will use it to track your matter, read and sign documents, message the firm, and pay invoices.',
+                  )}
+                </p>
+                <div className="bk-fields">
+                  <ContactField
+                    label={t('contact.email')}
+                    icon={<MailIcon size={18} />}
+                    type="email"
+                    value={contact.email}
+                    onChange={() => undefined}
+                    disabled
+                  />
+                  <ContactField
+                    label={t('account.password', undefined, 'Choose a password')}
+                    icon={<LockIcon size={18} />}
+                    type="password"
+                    value={password}
+                    onChange={setPassword}
+                    autoComplete="new-password"
+                  />
+                  <ContactField
+                    label={t('account.password2', undefined, 'Confirm password')}
+                    icon={<LockIcon size={18} />}
+                    type="password"
+                    value={password2}
+                    onChange={setPassword2}
+                    autoComplete="new-password"
+                  />
+                </div>
+                {feeQuote && (
+                  <FeeConsentCard
+                    quote={feeQuote}
+                    accepted={feeAccepted}
+                    onAccept={setFeeAccepted}
+                    t={t}
+                  />
+                )}
                 {TURNSTILE_SITE_KEY && (
                   <div className="bk-captcha" aria-live="polite">
                     <Turnstile
@@ -826,7 +1107,7 @@ export default function BookPage() {
                   <button
                     className="bk-btn bk-btn-ghost"
                     disabled={busy === 'submit'}
-                    onClick={() => setStep('intake')}
+                    onClick={() => setStep(needsSlot ? 'slot' : 'intake')}
                   >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
@@ -834,17 +1115,26 @@ export default function BookPage() {
                   <button
                     className="bk-btn bk-btn-primary bk-btn-grow"
                     disabled={
-                      !selectedSlot ||
                       busy === 'submit' ||
-                      (Boolean(TURNSTILE_SITE_KEY) && !captchaToken)
+                      (Boolean(TURNSTILE_SITE_KEY) && !captchaToken) ||
+                      (Boolean(feeQuote) && !feeAccepted)
                     }
-                    onClick={submitBooking}
+                    onClick={submitWithAccount}
                   >
                     {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
-                    {busy === 'submit' ? t('slot.booking') : t('slot.confirm')}
+                    {busy === 'submit'
+                      ? t('slot.booking')
+                      : t('account.submit', undefined, 'Create account & submit')}
                     {busy !== 'submit' && <CheckIcon size={18} />}
                   </button>
                 </div>
+                <p className="bk-secure" style={{ marginTop: 12 }}>
+                  {t(
+                    'account.signin_hint',
+                    undefined,
+                    'Already have a portal account? Your booking will be linked to it — use your existing password after submitting.',
+                  )}
+                </p>
               </>
             )}
           </div>
@@ -934,6 +1224,7 @@ function ContactField({
   type = 'text',
   inputMode,
   autoComplete,
+  disabled,
 }: {
   label: string
   icon: React.ReactNode
@@ -942,6 +1233,7 @@ function ContactField({
   type?: string
   inputMode?: 'email' | 'text' | 'tel'
   autoComplete?: string
+  disabled?: boolean
 }) {
   const id = useId()
   return (
@@ -960,9 +1252,56 @@ function ContactField({
           inputMode={inputMode}
           autoComplete={autoComplete}
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
         />
       </div>
+    </div>
+  )
+}
+
+// PORTAL-1 (WP3) — the fee consent card: the exact cost, shown BEFORE anything
+// billable proceeds, with an explicit acceptance. The server enforces the gate;
+// this card is only the honest presentation of it.
+function FeeConsentCard({
+  quote,
+  accepted,
+  onAccept,
+  t,
+}: {
+  quote: { basis: string; amount: string | null; rate: string | null; currency: string; description: string }
+  accepted: boolean
+  onAccept: (v: boolean) => void
+  t: (key: string, vars?: Record<string, string | number>, fallback?: string) => string
+}) {
+  const price =
+    quote.basis === 'fixed' && quote.amount
+      ? `$${quote.amount}`
+      : quote.rate
+        ? `$${quote.rate}/hr`
+        : ''
+  return (
+    <div className="bk-notice" role="note" style={{ marginTop: 16 }}>
+      <strong>{t('fee.title', undefined, 'Fee for this service')}</strong>
+      <div style={{ margin: '6px 0' }}>
+        {quote.description} — <strong>{price}</strong>
+        {quote.basis === 'hourly-rate' && (
+          <> {t('fee.hourly_note', undefined, '(billed for time actually worked)')}</>
+        )}
+      </div>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={accepted}
+          onChange={(e) => onAccept(e.target.checked)}
+          style={{ marginTop: 3 }}
+        />
+        <span>
+          {quote.basis === 'fixed'
+            ? t('fee.accept_fixed', undefined, 'I accept this fee. It will be billed on my invoice for this service.')
+            : t('fee.accept_hourly', undefined, 'I accept this hourly rate for work on this service.')}
+        </span>
+      </label>
     </div>
   )
 }
