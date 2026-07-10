@@ -74,6 +74,28 @@ export async function createClientRequest(
   })
   const { requestId } = res.effects[0] as { requestId: string }
 
+  // PORTAL-1 (WP5) — pre-draft what can be pre-drafted: an acknowledgement /
+  // next-steps email lands in the ATTORNEY'S REVIEW QUEUE (never sent to the
+  // client until the attorney approves — approve IS the send). Best-effort:
+  // a drafting hiccup must not fail the request.
+  try {
+    const { enqueueAdHocCapabilityJob } = await import('./capabilityRuntime.js')
+    await enqueueAdHocCapabilityJob(ctx, {
+      capabilitySlug: 'email_generation',
+      matterEntityId: input.matterEntityId,
+      config: {
+        mode: 'ai_draft',
+        purpose:
+          `The client filed a "${TYPE_LABEL[input.requestType]}" request from the portal` +
+          (input.description ? `: "${input.description.slice(0, 500)}"` : '.') +
+          ` Draft a short acknowledgement telling the client the firm received it and what happens next. Do not promise an outcome or a timeline.`,
+        recipient_role: 'client',
+      },
+    })
+  } catch {
+    // The request stands on its own; the attorney still gets the notification.
+  }
+
   // Tell the attorney a new request came in (recipient resolves to the firm).
   await queueNotification(ctx, {
     routeKindName: 'attorney_new_request',

@@ -91,13 +91,14 @@ interface ClientRequest {
   createdAt: string
 }
 
-type Tab = 'matters' | 'documents' | 'billing' | 'messages' | 'schedule'
+type Tab = 'matters' | 'documents' | 'billing' | 'messages' | 'schedule' | 'assistant'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'matters', label: 'Matters' },
   { key: 'documents', label: 'Documents' },
   { key: 'billing', label: 'Billing' },
   { key: 'messages', label: 'Messages & Requests' },
   { key: 'schedule', label: 'Book & Schedule' },
+  { key: 'assistant', label: 'Assistant' },
 ]
 
 // Signed-in client portal — a tabbed shell (header + nav + wide content) over the
@@ -270,6 +271,7 @@ export default function ClientPortalPage() {
             {tab === 'documents' && <DocumentsPanel matterEntityId={selected} />}
             {tab === 'billing' && <InvoicesPanel />}
             {tab === 'schedule' && <SchedulePanel />}
+            {tab === 'assistant' && <AssistantPanel />}
             {tab === 'messages' &&
               (selected ? (
                 <>
@@ -648,6 +650,204 @@ function InvoicesPanel() {
           </div>
         </>
       )}
+    </section>
+  )
+}
+
+// PORTAL-1 (WP5) — the portal chatbot: streams over the client-scoped tool
+// surface; a request needing the client's consent renders as a card whose
+// button — the client's OWN click — files the cost-accepted request.
+interface ChatMsg {
+  role: 'user' | 'assistant'
+  content: string
+}
+interface RequestCard {
+  prefill: {
+    requestType: string
+    matterEntityId: string
+    description: string
+    durationMinutes: number | null
+  }
+  quote: { amount: string; currency: string; basis: string; label: string }
+}
+
+function AssistantPanel() {
+  const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [card, setCard] = useState<RequestCard | null>(null)
+  const [cardBusy, setCardBusy] = useState(false)
+  const [cardDone, setCardDone] = useState<string | null>(null)
+
+  async function send() {
+    const message = input.trim()
+    if (!message || busy) return
+    setInput('')
+    setCard(null)
+    setCardDone(null)
+    setMessages((prev) => [...prev, { role: 'user', content: message }, { role: 'assistant', content: '' }])
+    setBusy(true)
+    try {
+      const res = await fetch('/api/client/portal/assistant/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          history: messages.slice(-12),
+        }),
+      })
+      if (!res.ok || !res.body) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null
+        throw new Error(err?.error ?? 'The assistant is unavailable right now.')
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() ?? ''
+        for (const frame of frames) {
+          const line = frame.split('\n').find((l) => l.startsWith('data: '))
+          if (!line) continue
+          let event: { type: string; text?: string; card?: RequestCard }
+          try {
+            event = JSON.parse(line.slice(6))
+          } catch {
+            continue
+          }
+          if (event.type === 'text' && event.text) {
+            setMessages((prev) => {
+              const next = [...prev]
+              const last = next[next.length - 1]
+              if (last?.role === 'assistant') {
+                next[next.length - 1] = { role: 'assistant', content: last.content + event.text }
+              }
+              return next
+            })
+          } else if (event.type === 'request_card' && event.card) {
+            setCard(event.card)
+          } else if (event.type === 'error' && event.text) {
+            setMessages((prev) => {
+              const next = [...prev]
+              const last = next[next.length - 1]
+              if (last?.role === 'assistant' && !last.content) {
+                next[next.length - 1] = { role: 'assistant', content: event.text as string }
+              }
+              return next
+            })
+          }
+        }
+      }
+    } catch (e) {
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        const text = e instanceof Error ? e.message : String(e)
+        if (last?.role === 'assistant' && !last.content) {
+          next[next.length - 1] = { role: 'assistant', content: text }
+        }
+        return next
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function confirmRequest() {
+    if (!card || cardBusy) return
+    setCardBusy(true)
+    try {
+      await callClientPortalMcp({
+        toolName: 'legal.client.request_create',
+        input: {
+          matterEntityId: card.prefill.matterEntityId,
+          requestType: card.prefill.requestType,
+          description: card.prefill.description,
+          durationMinutes: card.prefill.durationMinutes ?? undefined,
+        },
+      })
+      setCard(null)
+      setCardDone(
+        'Request filed — the firm has been notified and will review it. You can track it in Messages & Requests.',
+      )
+    } catch (e) {
+      setCardDone(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCardBusy(false)
+    }
+  }
+
+  return (
+    <section className="pdash-card">
+      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+        Assistant
+      </h3>
+      <p className="text-muted text-sm">
+        Ask about your matters, documents, invoices, or scheduling. For legal questions the
+        assistant will route you to the attorney — it doesn&apos;t give legal advice.
+      </p>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          margin: 'var(--space-3) 0',
+          maxHeight: 420,
+          overflowY: 'auto',
+        }}
+      >
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            style={{
+              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: '85%',
+              padding: '8px 12px',
+              borderRadius: 12,
+              background: m.role === 'user' ? 'var(--color-navy, #16324f)' : 'var(--surface-2, #f1f3f6)',
+              color: m.role === 'user' ? '#fff' : 'inherit',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {m.content || (busy && i === messages.length - 1 ? '…' : '')}
+          </div>
+        ))}
+      </div>
+      {card && (
+        <div className="alert" role="note">
+          <strong>Confirm your request</strong>
+          <div style={{ margin: '6px 0' }}>
+            {card.prefill.description}
+            <br />
+            Fee: <strong>${card.quote.amount}</strong> <span className="text-muted">({card.quote.basis})</span>
+          </div>
+          <button className="pdash-btn pdash-btn-primary" disabled={cardBusy} onClick={confirmRequest}>
+            {cardBusy ? 'Filing…' : 'Accept fee & file request'}
+          </button>
+        </div>
+      )}
+      {cardDone && <div className="alert">{cardDone}</div>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="pdash-input"
+          style={{ flex: 1 }}
+          value={input}
+          placeholder="Ask the assistant…"
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              void send()
+            }
+          }}
+        />
+        <button className="pdash-btn pdash-btn-primary" disabled={busy || !input.trim()} onClick={() => void send()}>
+          {busy ? '…' : 'Send'}
+        </button>
+      </div>
     </section>
   )
 }
