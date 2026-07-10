@@ -29,10 +29,18 @@ import {
   type StepKey,
   type StepState,
   type WfStage,
+  type WfEdge,
   type WfStepState,
   type MatterWorkflow,
 } from './shared'
 import { WorkflowEditor } from './WorkflowEditor'
+import {
+  RunnerReview,
+  CapabilityStatePanel,
+  ClientReviewStep,
+  CompleteMatterStep,
+} from './RunnerReview'
+import { skipStep } from '@/lib/stepRunner'
 
 const GENERATABLE: Array<{ kind: string; label: string }> = [
   { kind: 'operating_agreement', label: 'operating agreement' },
@@ -418,7 +426,7 @@ function WorkflowWindow({
           matter={matter}
           workflow={workflow}
           stage={openEntry.stage}
-          isCurrent={openEntry.state === 'current'}
+          state={openEntry.state}
           onClose={() => setOpenKey(null)}
           onChanged={onChanged}
         />
@@ -436,126 +444,233 @@ function WorkflowWindow({
   )
 }
 
-// One step's pop-up. The body is dispatched by stage.action.kind onto the reused
-// step bodies; the current stage additionally gets the Continue advance affordance.
+// One step's pop-up — the in-place runner (WORKFLOW-RUNNER-1). The body is chosen
+// by stage.action.kind and its state; document steps render the FULL review inside
+// the modal (RunnerReview), capability steps render honest worker state, and the
+// terminal step completes/archives — all without ever navigating away. The current
+// stage carries the advance affordance: Continue on an attorney gate, Skip on a
+// client gate, a waiting note on a system/automatic gate.
 function WorkflowStepWindow({
   matter,
   stage,
-  isCurrent,
+  state,
   onClose,
   onChanged,
 }: {
   matter: MatterDetail
   workflow: MatterWorkflow
   stage: WfStage
-  isCurrent: boolean
+  state: WfStepState
   onClose: () => void
   onChanged: () => Promise<void>
 }) {
-  const [advancing, setAdvancing] = useState(false)
-  const [advanceErr, setAdvanceErr] = useState<string | null>(null)
-
-  // The manual (attorney/client) outgoing edge is the one a human "Continue" fires.
-  const manualEdge = isCurrent
-    ? (stage.advances_to.find((e) => e.gate === 'attorney' || e.gate === 'client') ?? null)
+  const isCurrent = state === 'current'
+  // Human advance edges for the current stage (attorney → Continue, client → Skip).
+  const attorneyEdge = isCurrent
+    ? (stage.advances_to.find((e) => e.gate === 'attorney') ?? null)
     : null
-  // A current stage with ONLY a system/automatic outgoing edge waits on its event.
-  const waitsOnSystem =
-    isCurrent &&
-    !manualEdge &&
-    stage.advances_to.some((e) => e.gate === 'system' || e.gate === 'automatic')
+  const clientEdge = isCurrent ? (stage.advances_to.find((e) => e.gate === 'client') ?? null) : null
+  const systemEdge = isCurrent
+    ? (stage.advances_to.find((e) => e.gate === 'system' || e.gate === 'automatic') ?? null)
+    : null
+  const waitsOnSystem = isCurrent && !attorneyEdge && !clientEdge && !!systemEdge
 
-  async function advance() {
-    if (!manualEdge) return
-    setAdvancing(true)
-    setAdvanceErr(null)
-    try {
-      await callAttorneyMcp({
-        toolName: 'legal.matter.advance',
-        input: {
-          matterEntityId: matter.matterEntityId,
-          toState: manualEdge.to,
-          gate: manualEdge.gate,
-          trigger: 'continue',
-        },
-      })
-      await onChanged()
-      onClose()
-    } catch (e) {
-      setAdvanceErr(e instanceof Error ? e.message : String(e))
-      setAdvancing(false)
-    }
+  // The advance control appended to a step's footer: Continue (attorney gate) or
+  // Skip (client gate — advance without the client). A system-only gate has none.
+  const advanceFooter = attorneyEdge ? (
+    <ContinueButton matter={matter} edge={attorneyEdge} onChanged={onChanged} onClose={onClose} />
+  ) : clientEdge ? (
+    <SkipButton
+      matter={matter}
+      stageKey={stage.key}
+      edge={clientEdge}
+      onChanged={onChanged}
+      onClose={onClose}
+    />
+  ) : null
+  const waitsNote = waitsOnSystem ? <WaitingNote /> : null
+
+  const kind = stage.action?.kind
+  const isDocKind = kind === 'review_send_document' || kind === 'generate_document'
+  const isProducingCapability = kind === 'invoke_capability' && (stage.documents?.length ?? 0) > 0
+
+  // ── Document steps: the full review, in the pop-up (WP2 flagship) ───────────
+  if (isDocKind || isProducingCapability) {
+    return (
+      <RunnerReview
+        matter={matter}
+        stage={stage}
+        isCurrent={isCurrent}
+        producing
+        onChanged={onChanged}
+        onClose={onClose}
+        advanceFooter={advanceFooter}
+        waitsNote={waitsNote}
+      />
+    )
   }
 
-  const continueButton = manualEdge ? (
-    <button className="primary" onClick={() => void advance()} disabled={advancing}>
-      {advancing && <span className="spinner" />}
-      {advancing ? 'Advancing…' : 'Continue'}
-    </button>
-  ) : null
-
-  // ── review_send_document: reuse ApproveBody + ClientBody in one window ──────
-  if (stage.action?.kind === 'review_send_document') {
+  // ── Complete + archive the matter (WP3) ─────────────────────────────────────
+  if (kind === 'complete_matter') {
     return (
-      <Modal
-        title={stage.label}
+      <CompleteMatterStep
+        stage={stage}
+        matter={matter}
+        terminalState={attorneyEdge?.to ?? null}
+        onChanged={onChanged}
         onClose={onClose}
-        footer={
-          <>
-            {matter.latestDraftVersionId && (
-              <Link href={`/attorney/review/${matter.latestDraftVersionId}`} className="button">
-                Open full review
-              </Link>
-            )}
-            {continueButton}
-          </>
-        }
-      >
-        {advanceErr && <div className="alert alert-error">{advanceErr}</div>}
-        <ApproveBody matter={matter} onChanged={onChanged} onClose={onClose} />
-        <div
-          style={{
-            marginTop: 'var(--space-5)',
-            borderTop: '1px solid var(--border)',
-            paddingTop: 'var(--space-4)',
-          }}
-        >
-          <ClientBody matter={matter} />
-        </div>
-        {waitsOnSystem && <WaitingNote />}
-      </Modal>
+        advanceFooter={advanceFooter}
+      />
     )
   }
 
   // ── approve_send_invoice: reuse the BillStep window verbatim ────────────────
-  if (stage.action?.kind === 'approve_send_invoice') {
+  if (kind === 'approve_send_invoice') {
     return (
       <BillStep
         matter={matter}
         onClose={onClose}
         onChanged={onChanged}
         title={stage.label}
-        extraFooter={
-          <>
-            {advanceErr && (
-              <span className="text-sm" style={{ color: 'var(--danger)' }}>
-                {advanceErr}
-              </span>
-            )}
-            {continueButton}
-          </>
-        }
+        extraFooter={advanceFooter}
       />
     )
   }
 
-  // ── All other kinds: a Modal with the matching body + Continue footer ───────
+  // ── invoke_capability (non-producing): honest worker state ──────────────────
+  if (kind === 'invoke_capability') {
+    return (
+      <CapabilityStatePanel
+        stage={stage}
+        matter={matter}
+        state={state}
+        onChanged={onChanged}
+        onClose={onClose}
+        advanceFooter={advanceFooter}
+        waitsNote={waitsNote}
+      />
+    )
+  }
+
+  // ── Client-gated wait (no attorney edge): client status + Skip (WP3) ────────
+  if (isCurrent && clientEdge && !attorneyEdge) {
+    return (
+      <ClientReviewStep
+        stage={stage}
+        matter={matter}
+        clientEdge={clientEdge}
+        onChanged={onChanged}
+        onClose={onClose}
+      />
+    )
+  }
+
+  // ── All other kinds (view_intake / view_consultation / await_payment /
+  //    manual_task): a Modal with the matching body + advance footer ───────────
   return (
-    <Modal title={stage.label} onClose={onClose} footer={continueButton}>
-      {advanceErr && <div className="alert alert-error">{advanceErr}</div>}
+    <Modal title={stage.label} onClose={onClose} footer={advanceFooter}>
       <WorkflowStepBody stage={stage} matter={matter} />
-      {waitsOnSystem && <WaitingNote />}
+      {waitsNote}
     </Modal>
+  )
+}
+
+// Continue: advance the matter along an attorney-gated edge, then close so the
+// window swaps to the next step in place.
+function ContinueButton({
+  matter,
+  edge,
+  onChanged,
+  onClose,
+}: {
+  matter: MatterDetail
+  edge: WfEdge
+  onChanged: () => Promise<void>
+  onClose: () => void
+}) {
+  const [advancing, setAdvancing] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  async function advance() {
+    setAdvancing(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.matter.advance',
+        input: {
+          matterEntityId: matter.matterEntityId,
+          toState: edge.to,
+          gate: edge.gate,
+          trigger: 'continue',
+        },
+      })
+      await onChanged()
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+      setAdvancing(false)
+    }
+  }
+  return (
+    <>
+      {err && (
+        <span className="text-sm" style={{ color: 'var(--danger)', marginRight: 'auto' }}>
+          {err}
+        </span>
+      )}
+      <button className="primary" onClick={() => void advance()} disabled={advancing}>
+        {advancing && <span className="spinner" />}
+        {advancing ? 'Advancing…' : 'Continue'}
+      </button>
+    </>
+  )
+}
+
+// Skip: attorney advances a client-gated step without the client's acceptance
+// (Contract W skip; falls back to legal.matter.advance along the client edge).
+function SkipButton({
+  matter,
+  stageKey,
+  edge,
+  onChanged,
+  onClose,
+}: {
+  matter: MatterDetail
+  stageKey: string
+  edge: WfEdge
+  onChanged: () => Promise<void>
+  onClose: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  async function skip() {
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm('Advance without the client’s acceptance of this step?')
+    )
+      return
+    setBusy(true)
+    setErr(null)
+    try {
+      await skipStep(matter.matterEntityId, stageKey, { toState: edge.to, gate: edge.gate })
+      await onChanged()
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      {err && (
+        <span className="text-sm" style={{ color: 'var(--danger)', marginRight: 'auto' }}>
+          {err}
+        </span>
+      )}
+      <button className="warn" onClick={() => void skip()} disabled={busy}>
+        {busy && <span className="spinner" />}
+        {busy ? 'Skipping…' : 'Skip this step'}
+      </button>
+    </>
   )
 }
 
@@ -592,21 +707,6 @@ function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDet
       <p className="text-sm">
         Waiting for the client’s payment. Once the invoice is marked paid, the matter moves on
         automatically.
-      </p>
-    )
-  }
-  if (kind === 'complete_matter') {
-    return (
-      <p className="text-sm">
-        This matter is <strong>complete</strong>. Every step in the workflow has run.
-      </p>
-    )
-  }
-  if (kind === 'generate_document') {
-    return (
-      <p className="text-sm">
-        Generate this step’s document from the <strong>Documents</strong> tab; it will appear here
-        once drafted.
       </p>
     )
   }
@@ -688,9 +788,6 @@ function DocumentStep({
   const footer =
     versionId && draft ? (
       <>
-        <Link href={`/attorney/review/${versionId}`} className="button">
-          Open full review
-        </Link>
         <button onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}>Download Word</button>
         <button className="primary" onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>
           Download PDF
@@ -798,11 +895,8 @@ function ApproveStep({
   return (
     <Modal title="Approve" onClose={onClose}>
       <ApproveBody matter={matter} onChanged={onChanged} onClose={onClose} />
-      {versionId && (
+      {versionId && extraFooter && (
         <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
-          <Link href={`/attorney/review/${versionId}`} className="button">
-            Open full review
-          </Link>
           {extraFooter}
         </div>
       )}

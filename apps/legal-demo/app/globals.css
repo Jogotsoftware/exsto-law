@@ -3817,6 +3817,131 @@ main.book-main {
   justify-content: flex-end;
   gap: 0.6rem;
 }
+/* Wide modal — the workflow runner's document steps (review/edit) need room to
+   show a document as a document, not a confirm box (WORKFLOW-RUNNER-1). */
+.modal-card-wide {
+  max-width: 1040px;
+}
+.modal-foot .modal-foot-spacer {
+  margin-right: auto;
+}
+
+/* ============================================================
+   Workflow runner — in-place step execution (WORKFLOW-RUNNER-1)
+   Every step runs inside its modal; nothing navigates away.
+   ============================================================ */
+
+/* Header line inside a runner step: version • status • generated-at. */
+.runner-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.85rem;
+}
+.runner-head .runner-head-spacer {
+  margin-left: auto;
+}
+/* The document as a document, inside the modal. Reuses the shared .doc-paper /
+   .doc-rendered look; caps height so long wills scroll within the step. */
+.runner-doc {
+  max-height: 52vh;
+  overflow-y: auto;
+  background: var(--surface-2, #f6f5f2);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.runner-doc .doc-paper {
+  margin: 0 auto;
+}
+/* Toolbar row: Edit | Regenerate | Approve, above the document. */
+.runner-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+.runner-toolbar .runner-toolbar-end {
+  margin-left: auto;
+}
+
+/* Capability / worker state panels — honest states, never fake progress. */
+.runner-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-2, #f6f5f2);
+}
+.runner-state-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.runner-state.running {
+  border-color: color-mix(in srgb, var(--accent, #b78a2e) 45%, transparent);
+}
+.runner-state.failed {
+  border-color: color-mix(in srgb, var(--danger, #b3261e) 45%, transparent);
+}
+.runner-state-title {
+  font-weight: 600;
+}
+.runner-state-detail {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+/* Inline document editor (TipTap) inside a runner step. */
+.runner-editor-wrap {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  overflow: hidden;
+}
+/* In-place sub-window (regenerate / approve) rendered inside the review modal. */
+.runner-subpanel {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+  background: var(--surface, #fff);
+}
+.runner-subpanel h3 {
+  font-size: 1rem;
+}
+
+/* The two-choice Approve confirmation. */
+.runner-approve-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+.runner-approve-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  width: 100%;
+}
+.runner-approve-choice:hover:not(:disabled) {
+  border-color: var(--accent, #b78a2e);
+}
+.runner-approve-choice .rc-title {
+  font-weight: 600;
+}
+.runner-approve-choice .rc-sub {
+  font-size: 0.84rem;
+  color: var(--muted);
+}
 
 .form-grid {
   display: grid;
