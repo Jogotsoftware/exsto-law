@@ -44,6 +44,10 @@ export interface SkipClientStageResult {
 export async function skipClientStage(
   ctx: ActionContext,
   matterEntityId: string,
+  // Contract W names the stage in the path; when given, the matter must actually be
+  // parked ON that stage — a stale UI skipping a stage the matter already left is a
+  // clear 409-style error, not a silent skip of a different stage.
+  expectedStageKey?: string,
 ): Promise<SkipClientStageResult> {
   if (!matterEntityId?.trim()) throw new Error('matterEntityId is required.')
 
@@ -66,6 +70,11 @@ export async function skipClientStage(
   })
   if (!info || info.graph.length === 0) {
     throw new Error(`Matter ${matterEntityId} has no running workflow to skip a stage on.`)
+  }
+  if (expectedStageKey && expectedStageKey !== info.currentState) {
+    throw new Error(
+      `The matter is at stage "${info.currentState}", not "${expectedStageKey}" — refresh and retry.`,
+    )
   }
   const clientEdge = allowedTransitions(info.graph, info.currentState, ['client'])[0]
   if (!clientEdge) {
