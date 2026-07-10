@@ -13,6 +13,8 @@ export interface CostProposal {
   costType: 'hourly' | 'fixed'
   amount: string
   hours: number | null
+  // BUILDER-CERT-1 (WP1) — per-document fees declared alongside the cost.
+  documentFees?: Record<string, string>
   summary: string
   confidence: number
 }
@@ -64,6 +66,7 @@ export function CostProposalCard({
             costType: proposal.costType,
             amount: proposal.amount,
             hours: proposal.hours,
+            ...(proposal.documentFees ? { documentFees: proposal.documentFees } : {}),
             summary: proposal.summary,
             confidence: proposal.confidence,
           }),

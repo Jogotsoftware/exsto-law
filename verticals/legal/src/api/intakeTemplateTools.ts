@@ -67,6 +67,11 @@ export interface TemplateProposal {
   docKind: string
   summary: string
   confidence: number
+  // BUILDER-CERT-1 (WP3) — the signability declaration from the attorney's answer to
+  // "does the finished document get signed, and by whom?" (author-template Step 3).
+  // Undefined = unsigned. Approving the card writes it onto the firm-library twin,
+  // where the e-sign composition validator reads it.
+  signature?: { required: boolean; signer_roles: string[] }
   // The {{tokens}} the body references, and the orphans (no matching question on THIS
   // service). With the documents→variables→questionnaire flow, orphans before the
   // questionnaire exists are NOT broken — they're the fields the questionnaire will
@@ -284,6 +289,21 @@ const PROPOSE_TEMPLATE_TOOL_DEF = {
         type: 'number',
         description: 'Your honest confidence in this proposal, 0–1 (never 1.0).',
       },
+      signature: {
+        type: 'object',
+        description:
+          'The document\'s signability, from the attorney\'s answer to "does the finished document get signed, and by whom?" (ask it for every document template — or derive it when the walkthrough already answered it). Omit entirely when unsigned. Approving the card declares it on the firm-library template, which is what lets an e-signature step compose after the step that drafts this document.',
+        properties: {
+          required: { type: 'boolean' },
+          signer_roles: {
+            type: 'array',
+            items: { type: 'string', enum: ['client', 'attorney', 'witness', 'notary'] },
+            description: 'Who signs, in signing order.',
+          },
+        },
+        required: ['required', 'signer_roles'],
+        additionalProperties: false,
+      },
     },
     required: ['service_key', 'name', 'body', 'doc_kind'],
     additionalProperties: false,
@@ -310,6 +330,7 @@ export function buildProposeTemplateTool(
         doc_kind?: string
         summary?: string
         confidence?: number
+        signature?: { required?: unknown; signer_roles?: unknown }
       }
       const serviceKey = (args.service_key ?? '').trim()
       const docKind = (args.doc_kind ?? '').trim()
@@ -351,6 +372,23 @@ export function buildProposeTemplateTool(
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
           : 0.7
+      // Signability (BUILDER-CERT-1 WP3): capture only a well-formed declaration —
+      // required:true with at least one valid role, or an explicit required:false.
+      // Anything malformed is dropped (reads as unsigned) rather than guessed.
+      const VALID_ROLES = ['client', 'attorney', 'witness', 'notary']
+      let signature: TemplateProposal['signature']
+      if (args.signature && typeof args.signature === 'object') {
+        const roles = Array.isArray(args.signature.signer_roles)
+          ? (args.signature.signer_roles as unknown[]).filter(
+              (r): r is string => typeof r === 'string' && VALID_ROLES.includes(r),
+            )
+          : []
+        if (args.signature.required === true && roles.length > 0) {
+          signature = { required: true, signer_roles: roles }
+        } else if (args.signature.required === false) {
+          signature = { required: false, signer_roles: [] }
+        }
+      }
       captured.push({
         serviceKey,
         name: name || docKind,
@@ -359,6 +397,7 @@ export function buildProposeTemplateTool(
         summary:
           (args.summary ?? '').trim() || `Proposed a "${docKind}" template for ${serviceKey}.`,
         confidence,
+        ...(signature ? { signature } : {}),
         tokens: validation.tokens,
         orphanTokens: validation.orphanTokens,
         hasQuestionnaire,

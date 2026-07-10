@@ -7,6 +7,7 @@
 // DISCIPLINE: whenever a NEW capability ships, add it here (and re-run) — the
 // library is only as useful as it is complete. A capability the builder can't see
 // is one it will wastefully try to build from scratch or wrongly say is missing.
+import { pathToFileURL } from 'node:url'
 import { upsertCapability, type UpsertCapabilityInput } from '@exsto/legal'
 import { type ActionContext } from '@exsto/substrate'
 
@@ -18,7 +19,7 @@ const ADMIN = '00000000-0000-0000-0001-000000000004' // seeded Claude agent acto
 
 // The current platform surface. `backed_by` names the workflow step / tool /
 // feature that implements it, so the builder knows HOW to wire it in.
-const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
+export const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
   {
     slug: 'booking_scheduling',
     spec: {
@@ -280,7 +281,7 @@ const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
 // registry raises a clear "not yet executable" error when invoked — never a silent
 // no-op or simulated output. (esignature joined the REAL handlers in ESIGN-BLOCK-1.)
 // The full T/F classification + one-line rationale lives in the decision log.
-const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>> = {
+export const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>> = {
   // CAPABILITY-UNIFY-1 (WP1) — document generation is the first fully-migrated LEGO
   // block: ONE capability, reused across services, drafting a DIFFERENT document per
   // step via per-step config. The template is named by EXACT firm-library entity id
@@ -464,7 +465,7 @@ const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>
 // 1.1 WP10: a real build declared a "notify me when the matter closes" gap in prose
 // but wrote nothing (a no-simulate violation). It is a genuine Tier-3 gap (a workflow
 // step/notification with no executor), so it belongs here as a tracked build request.
-const REQUESTED_CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
+export const REQUESTED_CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
   {
     slug: 'step_close_notification',
     spec: {
@@ -500,7 +501,14 @@ async function main(): Promise<void> {
   console.log(`Done — ${n} capabilities seeded.`)
 }
 
-main().catch((e) => {
-  console.error(e instanceof Error ? e.message : String(e))
-  process.exit(1)
-})
+// BUILDER-CERT-1 (WP2) — the seed DATA above is the in-repo source of truth for the
+// capability contracts, and the composition-contract test imports it to pin the
+// doctrine to it. Run main() only when this file is executed directly, so importing
+// the data never requires (or touches) a database.
+const isDirectRun = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+if (isDirectRun) {
+  main().catch((e) => {
+    console.error(e instanceof Error ? e.message : String(e))
+    process.exit(1)
+  })
+}

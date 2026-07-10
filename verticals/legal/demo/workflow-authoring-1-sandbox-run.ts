@@ -49,6 +49,16 @@ const SYS_ACTOR = '00000000-0000-0000-00fe-000000000002'
 const ctx: ActionContext = { tenantId: SANDBOX, actorId: SYS_ACTOR }
 const MODEL = 'claude-opus-4-8'
 
+// BUILDER-CERT-1 (WP2.5) — this script seeds THROWAWAY fixture capabilities; a run
+// against a real firm tenant would pollute that firm's live capability library (it
+// happened: six echo fixtures sat `available` in the shared-prod sandbox tenant,
+// offered to the wizard as real blocks). Hard guard: sandbox only, ever.
+if ((ctx.tenantId as string) === '00000000-0000-0000-0000-000000000001') {
+  throw new Error(
+    'workflow-authoring-1-sandbox-run seeds fixture capabilities — NEVER tenant-zero.',
+  )
+}
+
 // ── turn driver — mirrors assistantChat's Claude branch, exposing failedWorkflowAttempts ──
 async function driveTurn(message: string): Promise<{
   reply: string
@@ -251,12 +261,16 @@ async function main(): Promise<void> {
   // ═══ ACCEPTANCE E — generalization: seed a trivial 2nd invocable capability with ═══
   // NO playbook prose anywhere, confirm the builder composes a valid step for it
   // purely from get_workflow_context's generated stepTemplate.
-  const fixtureSlug = `demo_echo_note_${Date.now().toString(36)}`
+  // (WP2.5: fixture slugs must carry no prohibited string — the library is a
+  // user-visible surface — and every fixture this run seeds is DEPRECATED at the
+  // end of the run, plus any residue from older runs, so the sandbox library never
+  // accumulates throwaway blocks the wizard would be offered as real.)
+  const fixtureSlug = `echo_note_probe_${Date.now().toString(36)}`
   await upsertCapability(ctx, {
     slug: fixtureSlug,
     status: 'available',
     spec: {
-      name: 'Demo echo note (WORKFLOW-AUTHORING-1 fixture)',
+      name: 'Echo note probe (WORKFLOW-AUTHORING-1 fixture)',
       category: 'workflow',
       purpose:
         'Record a short internal note on the matter file — a no-op fixture capability used only to prove new capabilities are authorable by conversation with zero new prompt engineering.',
@@ -305,11 +319,11 @@ async function main(): Promise<void> {
     fixtureSlugSeededThisRun: fixtureSlug,
     capabilitySlugUsed: eCapSlug ?? null,
     // Generalization is proven if the builder composed a valid invoke_capability step
-    // for a `demo_echo_note_*` fixture — a capability that exists ONLY because this
+    // for an `echo_note_probe_*` fixture — a capability that exists ONLY because this
     // session seeded it, with ZERO playbook prose anywhere (the fixture is never
     // mentioned in build-service.md). Whether it is this run's exact slug or an older
     // fixture from a prior run, the point holds: authorable-by-context, no prose.
-    usesFixtureCapability: !!eCapSlug && eCapSlug.startsWith('demo_echo_note_'),
+    usesFixtureCapability: !!eCapSlug && eCapSlug.startsWith('echo_note_probe_'),
     revalidation: eGraph ? await validateProposedLifecycle(ctx, eGraph) : null,
     graph: eGraph,
   }
@@ -480,6 +494,20 @@ async function main(): Promise<void> {
     memos.length > 0 && (receipt.B_reasoningTraceIds as Array<string | null>).every((id) => !!id)
   receipt.B_finalState = stateSeq[stateSeq.length - 1]
   receipt.B_turnCount = stateSeq.length
+
+  // BUILDER-CERT-1 (WP2.5) — leave no throwaway blocks behind: deprecate this run's
+  // fixture AND any echo-fixture residue from older runs (both slug generations),
+  // through core (legal.capability.upsert), so the library never offers a probe as a
+  // real block. Idempotent: an already-deprecated fixture just re-upserts.
+  const residue = (await listCapabilities(ctx)).filter(
+    (c) =>
+      (c.slug.startsWith('echo_note_probe_') || c.slug.startsWith('demo_echo_note_')) &&
+      c.status !== 'deprecated',
+  )
+  for (const cap of residue) {
+    await upsertCapability(ctx, { slug: cap.slug, status: 'deprecated', spec: cap.spec })
+  }
+  receipt.fixturesDeprecatedAtEnd = residue.map((c) => c.slug)
 
   console.log('\n===WFAUTH1_RECEIPT_JSON===')
   console.log(JSON.stringify(receipt, null, 2))

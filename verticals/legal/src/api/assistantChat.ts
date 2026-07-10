@@ -203,6 +203,7 @@ export type AssistantChatStreamEvent =
       description: string | null
       route: ServiceProposal['route']
       generationMode: ServiceProposal['generationMode']
+      appointmentRequired: boolean
       summary: string
       confidence: number
     }
@@ -230,6 +231,9 @@ export type AssistantChatStreamEvent =
       docKind: string
       summary: string
       confidence: number
+      // BUILDER-CERT-1 (WP3) — the signability declaration the card forwards on
+      // approve (what lets an e-sign step compose after this document's drafting).
+      signature?: { required: boolean; signer_roles: string[] }
       tokens: string[]
       orphanTokens: string[]
       // Phase 7 — flow-aware framing: whether a questionnaire exists yet (so orphans
@@ -247,6 +251,8 @@ export type AssistantChatStreamEvent =
       costType: CostProposal['costType']
       amount: string
       hours: number | null
+      // BUILDER-CERT-1 (WP1) — per-document fees declared alongside the cost.
+      documentFees?: Record<string, string>
       summary: string
       confidence: number
     }
@@ -1425,6 +1431,7 @@ export async function* assistantChatStream(
         description: p.description,
         route: p.route,
         generationMode: p.generationMode,
+        appointmentRequired: p.appointmentRequired,
         summary: p.summary,
         confidence: p.confidence,
       }
@@ -1454,6 +1461,7 @@ export async function* assistantChatStream(
         docKind: p.docKind,
         summary: p.summary,
         confidence: p.confidence,
+        signature: p.signature,
         tokens: p.tokens,
         orphanTokens: p.orphanTokens,
         hasQuestionnaire: p.hasQuestionnaire,
@@ -1469,6 +1477,7 @@ export async function* assistantChatStream(
         costType: p.costType,
         amount: p.amount,
         hours: p.hours,
+        documentFees: p.documentFees,
         summary: p.summary,
         confidence: p.confidence,
       }

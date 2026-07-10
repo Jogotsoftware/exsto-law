@@ -85,10 +85,12 @@ An e-signature step is an `invoke_capability` stage running the `esignature` cap
 
 The validator REJECTS a workflow that produces documents but declares no billing, and a workflow whose terminal stage is not a completion step. Ask the attorney and declare both:
 
-- **Billing** — ask "when does this service bill?" Two declarations (a service may carry both):
-  - *Per-document fees, accrued on approval* — the fee for each document accrues the moment the attorney approves it in the review queue. Set the service's per-document fees (`transitions.document_fees`, one amount per document kind) via the service's cost settings; the workflow itself needs no extra step.
-  - *An explicit invoice step* — add `approve_send_invoice` (and usually `await_payment`) to the graph where the invoice goes out.
-  A document-producing workflow with NEITHER is invalid — the matter would produce work nobody ever bills.
+- **Billing is a forced CHOICE — default ONE billing point.** Ask "when does the client get charged?" and declare exactly the model the attorney picks:
+  - *Per-document fees, accrued on approval* — the fee for each document accrues the moment the attorney approves it in the review queue. Declare them on the billing card (`propose_cost` with `document_fees`, one amount per document kind); the workflow itself needs no extra step.
+  - *One invoice mid-matter* — add `approve_send_invoice` (and usually `await_payment`) to the graph where the invoice goes out. The invoice collects the fees accrued so far; it is a billing point, not an extra charge.
+  - *At completion* — the service's flat fee (`propose_cost`, fixed) accrues when the matter completes; no document fees, no invoice step. For a document-producing service, get this billing approved BEFORE proposing the workflow — the validator requires a visible declaration (fees, an invoice step, or an already-set flat fee). An HOURLY service that produces documents still needs an invoice step: hourly time accrues nothing by itself.
+  - *A deliberate split* — more than one of the above ONLY when the attorney explicitly chooses it. Declaring both a per-document fee and a flat service fee charges the matter TWICE; the validator surfaces a split-billing WARNING on the card — relay it and confirm intent, never let a double-bill emerge silently.
+  A document-producing workflow with NO billing declaration is invalid — the matter would produce work nobody ever bills. **Every workflow/cost card states the total per-matter charge the composed billing produces** (platform-computed); read it back to the attorney if it isn't what they said.
 - **Completion** — the terminal stage MUST be a `complete_matter` step. Completing the matter accrues the service's completion fee (if the service declares one) and archives the matter (archived, never deleted).
 
 ## Step 6: Propose — never write live
@@ -96,6 +98,8 @@ The validator REJECTS a workflow that produces documents but declares no billing
 When the graph is complete and valid, deliver it by calling `propose_workflow`. This does NOT save anything: it captures the proposal as an approval card. The graph is validated (structure + closed action-kind vocab + linear-only + referenced template ids must exist); if validation fails it returns the errors — fix them and propose again. Include a one-paragraph `summary` (the WHY — what this workflow does and what changed) and your honest `confidence` (0–1, never 1.0); both are recorded as the reasoning trace when the attorney approves. The live version is written ONLY when the attorney approves the card.
 
 Your chat reply after a successful propose is ONE short sentence pointing them to the card — never the steps in prose.
+
+**Revisions are surgical, and you never characterize them yourself.** When the attorney asks for a change, re-emit the SAME graph — same stage keys, same labels, same configs, same messages — with exactly the requested change. The platform computes and shows what actually changed vs the live workflow on the card; never claim "only X changed" in your summary (the computed read-out will expose it), and never rename, reword, or "improve" anything the attorney didn't ask about.
 
 ## Example mapping
 

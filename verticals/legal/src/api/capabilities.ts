@@ -37,16 +37,20 @@ export function slugifyCapability(name: string): string {
 // compose (a Tier-3 step/gate/field-type that needs code). File it into the
 // library as `requested` so it's tracked and flips to `available` when built.
 // Idempotent by slug: re-requesting the same capability updates it, never dupes.
+// (Idempotency here is LEXICAL — same name → same slug. The SEMANTIC dedupe —
+// "notify me on close" vs "matter-close notification" — is the model's job, armed
+// with get_capability_context's `pending_requests`; BUILDER-CERT-1 WP2.5.)
 export async function requestCapability(
   ctx: ActionContext,
   input: { name: string; purpose: string; whenToUse?: string; category?: string },
-): Promise<{ slug: string; alreadyExists: boolean }> {
+): Promise<{ slug: string; alreadyExists: boolean; existingStatus?: string }> {
   const slug = slugifyCapability(input.name)
   const existing = (await listCapabilities(ctx)).find((c) => c.slug === slug)
   // Don't downgrade an already-available capability to requested — if it exists
-  // and is live, the builder simply reuses it.
-  if (existing && existing.status === 'available') {
-    return { slug, alreadyExists: true }
+  // and is live, the builder simply reuses it. An already-pending request
+  // (requested/building) is not re-filed either — the ask is already logged.
+  if (existing && existing.status !== 'deprecated') {
+    return { slug, alreadyExists: true, existingStatus: existing.status }
   }
   await upsertCapability(ctx, {
     slug,

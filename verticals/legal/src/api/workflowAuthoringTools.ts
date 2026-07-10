@@ -19,6 +19,46 @@ import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import { AUTHORABLE_STEP_ACTION_KINDS, GATE_KINDS, type Lifecycle } from '../lifecycle/index.js'
 import { loadWorkflowAuthoringContext, validateProposedLifecycle } from './workflowAuthoring.js'
+import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
+import { getServiceLifecycle } from './serviceLifecycle.js'
+
+// Key-order-stable stringify so two semantically identical stages never read as
+// "changed" just because the model emitted their keys in a different order.
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v as Record<string, unknown>)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableJson((v as Record<string, unknown>)[k])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(v)
+}
+
+// BUILDER-CERT-1 (WP3) — the COMPUTED change read-out. A revision card must state
+// what actually changed vs the service's LIVE workflow, computed here — never the
+// model's own "only X changed" claim (a certification drive caught that claim being
+// false while the summary asserted it). Null when the service has no saved graph yet
+// (first authoring — everything is new, there is nothing to diff against).
+export function describeGraphChanges(
+  current: Lifecycle | null,
+  proposed: Lifecycle,
+): string | null {
+  if (!current || current.length === 0) return null
+  const cur = new Map(current.map((s) => [s.key, stableJson(s)]))
+  const nxt = new Map(proposed.map((s) => [s.key, stableJson(s)]))
+  const added = [...nxt.keys()].filter((k) => !cur.has(k))
+  const removed = [...cur.keys()].filter((k) => !nxt.has(k))
+  const changed = [...nxt.keys()].filter((k) => cur.has(k) && cur.get(k) !== nxt.get(k))
+  if (!added.length && !removed.length && !changed.length) {
+    return 'Computed vs the live workflow: no changes (identical graph).'
+  }
+  const parts: string[] = []
+  if (added.length) parts.push(`adds ${added.join(', ')}`)
+  if (removed.length) parts.push(`removes ${removed.join(', ')}`)
+  if (changed.length) parts.push(`modifies ${changed.join(', ')}`)
+  return `Computed vs the live workflow: ${parts.join('; ')}.`
+}
 
 // A workflow proposal captured this turn — the proposed graph plus the model's
 // reasoning. The chat surfaces it as an inline card; the attorney approves it, which
@@ -232,13 +272,30 @@ export function buildProposeWorkflowTool(
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
           : 0.7
+      // BUILDER-CERT-1 (WP1) — every workflow card STATES the total per-matter charge
+      // the composed billing produces (computed from the service's declared fees, not
+      // trusted from the model), so a double-bill is deliberate and visible.
+      const readout = await computeBillingReadout(ctx, serviceKey, { graph })
+      const billingLine = readout ? ` ${formatBillingReadout(readout)}` : ''
+      const warningText = validation.warnings.length
+        ? ` WARNINGS (non-blocking — the card shows them; relay them to the attorney in one short line): ${validation.warnings.join('; ')}`
+        : ''
+      // WP3 — computed change read-out vs the LIVE workflow: the card states what a
+      // revision actually changes; a false "only X changed" summary can't survive it.
+      const currentGraph = (await getServiceLifecycle(ctx, serviceKey))?.graph ?? null
+      const changeLine = describeGraphChanges(currentGraph, graph)
+      const changeText = changeLine ? ` ${changeLine}` : ''
       captured.push({
         serviceKey,
         graph,
-        summary: (args.summary ?? '').trim() || `Proposed workflow for ${serviceKey}.`,
+        summary:
+          ((args.summary ?? '').trim() || `Proposed workflow for ${serviceKey}.`) +
+          billingLine +
+          changeText +
+          (validation.warnings.length ? ` ⚠ ${validation.warnings.join(' ⚠ ')}` : ''),
         confidence,
       })
-      return `The proposed workflow for "${serviceKey}" (${graph.length} steps) is shown to the attorney as an approval card; it is NOT saved until they approve. The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the workflow steps in prose.`
+      return `The proposed workflow for "${serviceKey}" (${graph.length} steps) is shown to the attorney as an approval card; it is NOT saved until they approve.${billingLine}${changeText}${warningText} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the workflow steps in prose.`
     },
   }
 }

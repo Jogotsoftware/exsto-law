@@ -190,6 +190,12 @@ export interface ServiceProposal {
   description: string | null
   route: WorkflowRoute
   generationMode: GenerationMode
+  // BUILDER-CERT-1 (WP3) — does booking START with a consultation appointment
+  // (client picks a slot at booking), or does the work begin straight from intake
+  // (document-review services)? Derived from the walkthrough like route/mode; the
+  // certification drive found the wizard had NO way to express an intake-only
+  // front door, so every wizard-built service demanded a slot.
+  appointmentRequired: boolean
   summary: string
   confidence: number
 }
@@ -239,6 +245,10 @@ export interface CreateServiceAIInput {
   description?: string | null
   route?: WorkflowRoute
   generationMode?: GenerationMode
+  // Explicit booking mode (BUILDER-CERT-1 WP3). Undefined = the platform default
+  // (appointment required) so pre-existing callers are unchanged; the wizard's
+  // propose_service always sets it explicitly.
+  appointmentRequired?: boolean
 }
 
 // Persist a reasoning_trace for an AI service-creation write (mirrors
@@ -331,8 +341,14 @@ export async function createServiceAI(
       description: input.description ?? null,
       route,
       // generation_mode isn't a top-level upsert field — it merges through the
-      // transitions patch, the same path updateServiceMetadata uses for it.
-      transitions_patch: { generation_mode: generationMode },
+      // transitions patch, the same path updateServiceMetadata uses for it (as does
+      // appointment_required, written explicitly whenever the wizard chose it).
+      transitions_patch: {
+        generation_mode: generationMode,
+        ...(typeof input.appointmentRequired === 'boolean'
+          ? { appointment_required: input.appointmentRequired }
+          : {}),
+      },
     },
   })
   return res.effects[0] as { serviceKey: string; version: number }

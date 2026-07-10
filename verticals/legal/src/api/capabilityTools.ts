@@ -18,7 +18,7 @@ import { isHandlerImplemented } from './capabilityRuntime.js'
 const CAPABILITY_CONTEXT_TOOL_DEF = {
   name: 'get_capability_context',
   description:
-    "Get the platform's CAPABILITY LIBRARY, split into TWO distinct sections. `executable` = capabilities you can WIRE INTO A WORKFLOW STEP right now as an invoke_capability stage (they are step_invocable) — e.g. document generation, AI document review, request client materials. ONLY `executable` entries may become steps; each carries a `not_yet_executable` flag (true = contracted but no live handler yet, so surface the gap honestly and do NOT wire it in). `features` = platform abilities that back the product but are NOT wired as steps this way (booking, invoicing, Stripe/manual payments, client portal, mail, the template/questionnaire editors, the workflow engine, trust accounting, calendar/Granola sync). Each entry has a name, what it's FOR, when to use it, and what backs it. Call this when building or extending a service to decide REUSE vs. build-from-scratch: if an `executable` capability covers what the attorney needs, wire it into the workflow rather than inventing a step. Also returns any `requested`/`building` capabilities (asked for but not live yet). Read-only.",
+    "Get the platform's CAPABILITY LIBRARY, split into THREE distinct sections. `executable` = capabilities you can WIRE INTO A WORKFLOW STEP right now as an invoke_capability stage (they are step_invocable) — e.g. document generation, AI document review, request client materials. ONLY `executable` entries may become steps; each carries a `not_yet_executable` flag (true = contracted but no live handler yet, so surface the gap honestly and do NOT wire it in). `features` = platform abilities that back the product but are NOT wired as steps this way (booking, invoicing, Stripe/manual payments, client portal, mail, the template/questionnaire editors, the workflow engine, trust accounting, calendar/Granola sync). `pending_requests` = capabilities ALREADY FILED as build requests (status requested/building) but not live yet. Each entry has a name, what it's FOR, when to use it, and what backs it. Call this when building or extending a service to decide REUSE vs. build-from-scratch: if an `executable` capability covers what the attorney needs, wire it into the workflow rather than inventing a step. BEFORE filing a gap with request_capability, match the ask against `pending_requests` SEMANTICALLY (same ask in different words = the same request) — if it is already pending, tell the attorney it's already logged instead of filing a duplicate. Deprecated capabilities are not returned. Read-only.",
   input_schema: { type: 'object', properties: {}, additionalProperties: false },
 }
 
@@ -34,7 +34,12 @@ export function buildCapabilityContextTool(ctx: ActionContext): ClientTool {
       // = descriptive/platform-backed capabilities that are NOT wired as steps. A
       // contracted-but-unimplemented capability (e.g. esignature) appears under
       // executable WITH not_yet_executable:true — never silently omitted.
-      const executable = caps
+      // BUILDER-CERT-1 (WP2.5) — `pending_requests` = already-filed build requests
+      // (status requested/building), surfaced so the model dedupes SEMANTICALLY
+      // before filing a new one. Deprecated capabilities are excluded everywhere:
+      // a retired block must never be offered as real.
+      const live = caps.filter((c) => c.status === 'available')
+      const executable = live
         .filter((c) => c.spec.step_invocable === true)
         .map((c) => ({
           slug: c.slug,
@@ -47,7 +52,7 @@ export function buildCapabilityContextTool(ctx: ActionContext): ClientTool {
           default_gate: c.spec.default_gate,
           not_yet_executable: !isHandlerImplemented(c.spec.handler_key),
         }))
-      const features = caps
+      const features = live
         .filter((c) => c.spec.step_invocable !== true)
         .map((c) => ({
           slug: c.slug,
@@ -58,7 +63,17 @@ export function buildCapabilityContextTool(ctx: ActionContext): ClientTool {
           when_to_use: c.spec.when_to_use,
           backed_by: c.spec.backed_by,
         }))
-      return JSON.stringify({ executable, features })
+      const pendingRequests = caps
+        .filter((c) => c.status === 'requested' || c.status === 'building')
+        .map((c) => ({
+          slug: c.slug,
+          status: c.status,
+          name: c.spec.name,
+          category: c.spec.category,
+          purpose: c.spec.purpose,
+          when_to_use: c.spec.when_to_use,
+        }))
+      return JSON.stringify({ executable, features, pending_requests: pendingRequests })
     },
   }
 }
@@ -110,14 +125,17 @@ export function buildRequestCapabilityTool(ctx: ActionContext): ClientTool {
       if (!name || !purpose) {
         return 'A name and purpose are required to file a capability request; nothing was logged.'
       }
-      const { slug, alreadyExists } = await requestCapability(ctx, {
+      const { slug, alreadyExists, existingStatus } = await requestCapability(ctx, {
         name,
         purpose,
         whenToUse: (args.when_to_use ?? '').trim() || undefined,
         category: (args.category ?? '').trim() || undefined,
       })
-      if (alreadyExists) {
+      if (alreadyExists && existingStatus === 'available') {
         return `The platform ALREADY has "${slug}" available — do not request it; reuse it instead (see get_capability_context).`
+      }
+      if (alreadyExists) {
+        return `That capability is ALREADY LOGGED as "${slug}" (status ${existingStatus}) — nothing new was filed. Tell the attorney in ONE short line that this piece is already on the build list, then continue the build with the nearest existing step.`
       }
       return `Logged capability request "${slug}". Tell the attorney in ONE short line that this piece needs to be built and you've logged it, then continue the build with the nearest existing step.`
     },

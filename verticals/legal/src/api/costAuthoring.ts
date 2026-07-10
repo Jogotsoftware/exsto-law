@@ -20,9 +20,8 @@
 // for templates (createTemplateAI is also a cost-free upsert patch). CLAUDE.md hard
 // rule 4/7: every AI write has an agent source, a reasoning trace, and an intent kind.
 import { randomUUID } from 'node:crypto'
-import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import {
-  setServiceCost,
   getService,
   type ServiceCost,
   type ServiceCostType,
@@ -52,6 +51,11 @@ export interface CostProposal {
   costType: ServiceCostType
   amount: string
   hours: number | null
+  // BUILDER-CERT-1 (WP1) — per-document fees ({ document_kind: decimal-string }),
+  // each accrued once per matter when that document is approved. The billing model
+  // the doctrine offers as "per-document on approval": without this field the
+  // wizard could OFFER the model but never DECLARE it (review finding).
+  documentFees?: Record<string, string>
   summary: string
   confidence: number
 }
@@ -64,6 +68,7 @@ export function validateProposedCost(input: {
   costType: ServiceCostType
   amount: string
   hours?: number | null
+  documentFees?: Record<string, string>
 }): { ok: boolean; errors: string[] } {
   const errors: string[] = []
   if (!SERVICE_COST_TYPES.includes(input.costType)) {
@@ -76,6 +81,14 @@ export function validateProposedCost(input: {
   if (input.costType === 'hourly' && input.hours != null) {
     if (!Number.isFinite(input.hours) || input.hours < 0) {
       errors.push('hours must be a non-negative number')
+    }
+  }
+  for (const [kind, fee] of Object.entries(input.documentFees ?? {})) {
+    if (!/^[a-z][a-z0-9_]*$/.test(kind)) {
+      errors.push(`document fee kind "${kind}" must be a snake_case document kind`)
+    }
+    if (!MONEY_RE.test((fee ?? '').trim())) {
+      errors.push(`document fee for "${kind}" must be a decimal string like "350.00" (ADR 0044)`)
     }
   }
   return { ok: errors.length === 0, errors }
@@ -97,6 +110,9 @@ export interface CreateCostAIInput {
   costType: ServiceCostType
   amount: string
   hours?: number | null
+  // Per-document fees to declare alongside (or instead of meaningfully using) the
+  // flat/hourly cost — one decimal-string amount per document kind.
+  documentFees?: Record<string, string>
 }
 
 // Persist a reasoning_trace for an AI cost-set write (mirrors serviceAuthoring's):
@@ -152,10 +168,11 @@ export async function createCostAI(
   if (!key) throw new Error('A service_key is required to set billing.')
   const amount = (input.amount ?? '').trim()
   const hours = input.costType === 'hourly' ? (input.hours ?? null) : null
+  const documentFees = input.documentFees
 
   // Validate BEFORE any write (incl. the trace) so an invalid proposal leaves no trace
   // row behind. (The handler/normalizeCost validates again on write — defense in depth.)
-  const validation = validateProposedCost({ costType: input.costType, amount, hours })
+  const validation = validateProposedCost({ costType: input.costType, amount, hours, documentFees })
   if (!validation.ok) {
     throw new Error(`Invalid cost proposal: ${validation.errors.join('; ')}`)
   }
@@ -167,12 +184,30 @@ export async function createCostAI(
 
   // The write is AS THE AGENT, not the attorney — the trace and the action source
   // attribute the billing decision to the Claude agent actor, exactly like
-  // createTemplateAI. setServiceCost reads/writes the current version under this ctx.
+  // createTemplateAI. ONE legal.service.upsert carries the cost AND any per-document
+  // fees (the same transitions patch setServiceCost / the billing editor writes), so
+  // the whole billing declaration lands atomically in one new version.
   const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
   await persistReasoningTrace(agentCtx, key, { costType: input.costType, amount, hours }, reasoning)
 
   const cost: ServiceCost = { type: input.costType, amount, hours }
-  return setServiceCost(agentCtx, { serviceKey: key, cost })
+  await submitAction(agentCtx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: key,
+      display_name: existing.displayName,
+      transitions_patch: {
+        cost,
+        ...(documentFees && Object.keys(documentFees).length
+          ? { document_fees: documentFees }
+          : {}),
+      },
+    },
+  })
+  const updated = await getService(agentCtx, key)
+  if (!updated) throw new Error('Service cost saved but the new row could not be read back.')
+  return updated
 }
 
 // Honest confidence: an AI cost write must never claim certainty (ADR 0006). Same shape

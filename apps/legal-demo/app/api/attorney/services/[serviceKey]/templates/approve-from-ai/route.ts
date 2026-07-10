@@ -29,6 +29,9 @@ export async function POST(
     docKind?: string
     summary?: string
     confidence?: number
+    // BUILDER-CERT-1 (WP3) — the card's signability declaration; validated by the
+    // template handler's normalizeSignature on write.
+    signature?: { required: boolean; signer_roles: string[] }
   } | null
   const docBody = (body?.body ?? '').trim()
   const docKind = (body?.docKind ?? '').trim()
@@ -48,7 +51,23 @@ export async function POST(
     const result = await createTemplateAI(
       ctxOrError,
       serviceKey,
-      { name: (body?.name ?? '').trim() || docKind, body: docBody, docKind, category: 'document' },
+      {
+        name: (body?.name ?? '').trim() || docKind,
+        body: docBody,
+        docKind,
+        category: 'document',
+        ...(body?.signature
+          ? {
+              signature: {
+                required: body.signature.required === true,
+                signer_roles: (body.signature.signer_roles ?? []).filter(
+                  (r): r is 'client' | 'attorney' | 'witness' | 'notary' =>
+                    r === 'client' || r === 'attorney' || r === 'witness' || r === 'notary',
+                ),
+              },
+            }
+          : {}),
+      },
       {
         conclusion:
           (body?.summary ?? '').trim() || `Authored a "${docKind}" template for ${serviceKey}.`,

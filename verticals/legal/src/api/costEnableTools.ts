@@ -17,6 +17,7 @@
 import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import { validateProposedCost, SERVICE_COST_TYPES, type CostProposal } from './costAuthoring.js'
+import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 import type { ServiceCostType } from './services.js'
 
 // ─── propose_cost ───────────────────────────────────────────────────────────
@@ -47,6 +48,12 @@ const PROPOSE_COST_TOOL_DEF = {
         type: 'number',
         description: "For 'hourly' only: the estimated number of hours (optional).",
       },
+      document_fees: {
+        type: 'object',
+        description:
+          'For the PER-DOCUMENT billing model: one decimal-string fee per document kind (e.g. {"engagement_letter": "150.00"}), each accrued once per matter the moment the attorney approves that document. Combine with cost_type/amount ONLY for a deliberate split the attorney confirmed — the card will state the combined total and a split warning.',
+        additionalProperties: { type: 'string' },
+      },
       summary: {
         type: 'string',
         description:
@@ -64,12 +71,11 @@ const PROPOSE_COST_TOOL_DEF = {
 
 // Build the propose_cost tool for this turn. Its run() validates the price (the SAME
 // money contract the write path applies) and, on success, CAPTURES it into `captured`
-// (read back by the caller to surface the approval card) — it never writes.
+// (read back by the caller to surface the approval card) — it never writes. It READS
+// the service (BUILDER-CERT-1 WP1) to compute the composed-billing read-out the card
+// states: the total per-matter charge this cost + the service's declared document
+// fees produce, so a double-bill is deliberate and visible.
 export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[]): ClientTool {
-  // ctx is unused in run() (capture-only) but kept in the signature for symmetry with
-  // the other propose tools and so a future read (e.g. a service-exists check) needs no
-  // signature change.
-  void ctx
   return {
     definition: PROPOSE_COST_TOOL_DEF,
     name: 'propose_cost',
@@ -79,6 +85,7 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
         cost_type?: string
         amount?: string
         hours?: number
+        document_fees?: Record<string, string>
         summary?: string
         confidence?: number
       }
@@ -87,7 +94,13 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
       const costType = (args.cost_type ?? '') as ServiceCostType
       const amount = (args.amount ?? '').trim()
       const hours = costType === 'hourly' && typeof args.hours === 'number' ? args.hours : null
-      const validation = validateProposedCost({ costType, amount, hours })
+      const documentFees =
+        args.document_fees &&
+        typeof args.document_fees === 'object' &&
+        Object.keys(args.document_fees).length
+          ? args.document_fees
+          : undefined
+      const validation = validateProposedCost({ costType, amount, hours, documentFees })
       if (!validation.ok) {
         return `The proposed billing is not valid and was NOT captured. Fix these and call propose_cost AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
@@ -95,17 +108,31 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
           : 0.6 // matches costAuthoring.clampConfidence / serviceAuthoring (humble default)
+      // BUILDER-CERT-1 (WP1) — the cost card STATES the total per-matter charge the
+      // composed billing produces (this proposed cost + the service's declared
+      // per-document fees), computed from the real service row, never model prose.
+      const readout = await computeBillingReadout(ctx, serviceKey, {
+        proposedCost: { costType, amount, hours },
+        ...(documentFees ? { proposedDocumentFees: documentFees } : {}),
+      })
+      const billingLine = readout ? ` ${formatBillingReadout(readout)}` : ''
+      const warningText = readout?.splitWarning
+        ? ` WARNING (non-blocking — the card shows it; relay it to the attorney in one short line): ${readout.splitWarning}`
+        : ''
       captured.push({
         serviceKey,
         costType,
         amount,
         hours,
+        ...(documentFees ? { documentFees } : {}),
         summary:
-          (args.summary ?? '').trim() ||
-          `Proposed ${costType} billing of ${amount} for ${serviceKey}.`,
+          ((args.summary ?? '').trim() ||
+            `Proposed ${costType} billing of ${amount} for ${serviceKey}.`) +
+          billingLine +
+          (readout?.splitWarning ? ` ⚠ ${readout.splitWarning}` : ''),
         confidence,
       })
-      return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve. The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the price in prose.`
+      return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve.${billingLine}${warningText} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the price in prose.`
     },
   }
 }
