@@ -217,7 +217,7 @@ export function buildProposeWorkflowTool(
       if (!serviceKey || !graph) {
         return 'A service_key and a graph are both required to propose a workflow; nothing was captured.'
       }
-      const validation = await validateProposedLifecycle(ctx, graph)
+      const validation = await validateProposedLifecycle(ctx, graph, serviceKey)
       if (!validation.ok) {
         const errorText = validation.errors.join('; ')
         failedAttempts.push(errorText)

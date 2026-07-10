@@ -36,6 +36,7 @@ import {
   type StepAction,
 } from '../lifecycle/index.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
+import { getService } from './services.js'
 import { listStandaloneTemplates } from '../queries/templates.js'
 import { listWorkflowStepTemplates } from '../queries/workflowStepLibrary.js'
 import { listCapabilities, type Capability } from '../queries/capabilities.js'
@@ -183,19 +184,68 @@ export function collectReferencedTemplateIds(graph: Lifecycle): string[] {
   return [...ids]
 }
 
+// Does this stage PRODUCE a document (and so bear a potential fee)? The two
+// document-producing step shapes: the legacy generate_document kind and an
+// invoke_capability stage running document_generation (CAPABILITY-UNIFY-1).
+function isDocumentProducingStage(s: Lifecycle[number]): boolean {
+  if (s.action?.kind === 'generate_document') return true
+  if (s.action?.kind === 'invoke_capability') {
+    const cfg = (s.action.config ?? {}) as { capability_slug?: string }
+    return (cfg.capability_slug ?? '').trim() === 'document_generation'
+  }
+  return false
+}
+
 // Validate a PROPOSED graph the way the authoring path will write it: structural
 // validity (incl. the closed action-kind vocabulary), linear-only, every referenced
 // templateEntityId real, and — ADR 0046 — every invoke_capability stage names a
 // capability that is LIVE and step-invocable, with a config that satisfies its
 // config_schema. Returns the same shape as validateLifecycle so the propose tool can
 // surface the combined errors verbatim.
+//
+// BACKHALF-BLOCKS-1 (WP2) — a service's workflow must also DECLARE how it completes
+// and when it bills:
+//   • completion: the graph must end in a `complete_matter` terminal stage (the step
+//     Contract W's complete endpoint executes: legal.service.complete + archive).
+//   • billing: a graph that PRODUCES documents must carry a billing declaration —
+//     per-document fees on the service (transitions.document_fees, accrued on
+//     draft.approve — WP1) and/or an explicit approve_send_invoice step. Checked
+//     only when the caller passes `serviceKey` (both write paths do); a bare graph
+//     validation (no service context) skips just the fee lookup, not the completion
+//     check. Authoring-only, like every check here: existing saved definitions keep
+//     validating and running.
 export async function validateProposedLifecycle(
   ctx: ActionContext,
   graph: Lifecycle,
+  serviceKey?: string,
 ): Promise<{ ok: boolean; errors: string[] }> {
   const errors: string[] = []
   errors.push(...validateLifecycle(graph).errors)
   errors.push(...validateLinearLifecycle(graph).errors)
+
+  // WP2 — completion declaration: the workflow must END in a completion step. Same
+  // diagnostic style as the template_entity_id check: name the exact fix.
+  const terminals = graph.filter((s) => s.terminal)
+  if (terminals.length > 0 && !terminals.some((s) => s.action?.kind === 'complete_matter')) {
+    errors.push(
+      `the workflow has no completion step — its terminal stage "${terminals[0]!.key}" must be a complete_matter step (set action.kind to "complete_matter") so completing the matter accrues the service fee and archives it.`,
+    )
+  }
+
+  // WP2 — billing declaration: a workflow that produces documents must state when it
+  // bills. Either the service declares per-document fees (accrued on approve) or the
+  // graph carries an explicit invoice step.
+  const producingStages = graph.filter(isDocumentProducingStage)
+  const hasInvoiceStep = graph.some((s) => s.action?.kind === 'approve_send_invoice')
+  if (serviceKey && producingStages.length > 0 && !hasInvoiceStep) {
+    const svc = await getService(ctx, serviceKey)
+    const feeKinds = Object.keys(svc?.documentFees ?? {})
+    if (feeKinds.length === 0) {
+      errors.push(
+        `the workflow produces a document (stage "${producingStages[0]!.key}") but declares no billing — either set the service's per-document fees (transitions.document_fees, accrued when the document is approved) or add an approve_send_invoice step to the graph.`,
+      )
+    }
+  }
 
   // CAPABILITY-UNIFY-1 (WP5) — a NEW proposal must not author a deprecated step kind.
   // Authoring-only (not in validateLifecycle) so EXISTING definitions with the kind
@@ -356,7 +406,7 @@ export async function setServiceLifecycleAI(
 ): Promise<{ workflowDefinitionId: string; serviceKey: string; version: number }> {
   // Validate BEFORE any write (incl. the trace) so an invalid proposal leaves no
   // trace row behind. The handler re-validates, but failing fast here is cleaner.
-  const validation = await validateProposedLifecycle(ctx, graph)
+  const validation = await validateProposedLifecycle(ctx, graph, serviceKey)
   if (!validation.ok) {
     throw new Error(`Invalid workflow lifecycle: ${validation.errors.join('; ')}`)
   }
