@@ -11,6 +11,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm } from '@/components/ConfirmModal'
 import { PageHead } from '@/components/PageHead'
 import { PlusIcon, SearchIcon, XIcon } from '@/components/icons'
 
@@ -95,6 +96,7 @@ interface ServiceQuestion {
 }
 
 export default function QuestionLibraryPage() {
+  const { confirm, confirmElement } = useConfirm()
   const [items, setItems] = useState<LibQuestion[]>([])
   const [svcQuestions, setSvcQuestions] = useState<ServiceQuestion[]>([])
   const [loading, setLoading] = useState(true)
@@ -221,8 +223,13 @@ export default function QuestionLibraryPage() {
   }
 
   async function archive(it: LibQuestion) {
-    if (!window.confirm(`Archive “${it.label}”? It’s kept as history but removed from the picker.`))
-      return
+    const ok = await confirm({
+      title: `Archive “${it.label}”?`,
+      body: 'It’s kept as history but removed from the picker.',
+      confirmLabel: 'Archive',
+      danger: true,
+    })
+    if (!ok) return
     setBusy(true)
     setError(null)
     try {
@@ -260,6 +267,7 @@ export default function QuestionLibraryPage() {
 
   return (
     <main>
+      {confirmElement}
       <PageHead
         title="Question library"
         actions={

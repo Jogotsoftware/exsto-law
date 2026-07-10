@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm } from '@/components/ConfirmModal'
 import { SettingsIcon } from '@/components/icons'
 import { PageHead } from '@/components/PageHead'
 
@@ -21,6 +22,7 @@ interface ServiceDefinition {
 }
 
 export default function ServicesPage() {
+  const { confirm, confirmElement } = useConfirm()
   const router = useRouter()
   const [services, setServices] = useState<ServiceDefinition[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -110,12 +112,13 @@ export default function ServicesPage() {
 
   async function remove(svc: ServiceDefinition) {
     setMenuFor(null)
-    if (
-      !window.confirm(
-        `Delete "${svc.displayName}"? It is retired and removed from every listing (its history is kept, but it can't be re-enabled).`,
-      )
-    )
-      return
+    const ok = await confirm({
+      title: `Delete “${svc.displayName}”?`,
+      body: 'The service is retired and removed from every listing. Its history is kept, but it can’t be re-enabled.',
+      confirmLabel: 'Delete service',
+      danger: true,
+    })
+    if (!ok) return
     setBusy(svc.serviceKey)
     setError(null)
     try {
@@ -133,6 +136,7 @@ export default function ServicesPage() {
 
   return (
     <main>
+      {confirmElement}
       <PageHead
         title="Services"
         actions={

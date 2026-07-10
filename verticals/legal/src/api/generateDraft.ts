@@ -56,7 +56,9 @@ export interface GenerateDraftInput {
 // ───────────────────────────────────────────────────────────────────────────
 // requestDraft — ASYNC ALWAYS (binding Lesson #2, REQ-PERF-02). Enqueues the
 // drafting job and records draft.requested; the worker runs the model call.
-// Auto-generation is single-member only in Phase 0 (REQ-DRAFT-05).
+// Valid for ANY matter route: drafting is capability-routed (CAPABILITY-UNIFY-1),
+// so the Phase 0 auto-only guard is gone (RUNNER-FIXES-1 WP5 — it predated the
+// capability engine and 500'd regenerate on manual-route matters).
 // ───────────────────────────────────────────────────────────────────────────
 
 export async function requestDraft(
@@ -65,11 +67,6 @@ export async function requestDraft(
 ): Promise<{ jobId: string }> {
   const matter = await getMatter(ctx, input.matterEntityId)
   if (!matter) throw new Error(`Matter not found: ${input.matterEntityId}`)
-  if (matter.workflowRoute !== 'auto') {
-    throw new Error(
-      `Matter ${matter.matterNumber} follows the manual workflow (${matter.serviceKey}); Phase 0 auto-drafting covers single-member formations only.`,
-    )
-  }
 
   const jobId = await enqueueJob({
     tenantId: ctx.tenantId,

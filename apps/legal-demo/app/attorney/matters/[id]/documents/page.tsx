@@ -7,6 +7,7 @@
 import { use, useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm, usePrompt } from '@/components/ConfirmModal'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 import { formatDate } from '@/lib/datetime'
 import { humanizeKind, humanizeStatus, type MatterDetail } from '../shared'
@@ -43,6 +44,8 @@ function formatBytes(n: number): string {
 }
 
 export default function MatterDocumentsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { confirm, confirmElement } = useConfirm()
+  const { prompt, promptElement } = usePrompt()
   const { id } = use(params)
   const [matter, setMatter] = useState<MatterDetail | null>(null)
   const [draft, setDraft] = useState<DraftPayload | null>(null)
@@ -138,14 +141,17 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
 
   async function emailDraftLink() {
     if (!draft || !matter) return
-    const defaultTo = matter.clientEmail ?? ''
-    const to =
-      defaultTo ||
-      (typeof window !== 'undefined'
-        ? (
-            window.prompt('No client email on file. Send draft link to which email?', '') ?? ''
-          ).trim()
-        : '')
+    let to = matter.clientEmail ?? ''
+    if (!to) {
+      const entered = await prompt({
+        title: 'Send draft link to which email?',
+        body: 'No client email is on file for this matter.',
+        label: 'Recipient email',
+        placeholder: 'client@example.com',
+        confirmLabel: 'Continue',
+      })
+      to = entered ?? ''
+    }
     if (!to) {
       setEmailStatus({
         kind: 'err',
@@ -153,7 +159,12 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
       })
       return
     }
-    if (typeof window !== 'undefined' && !window.confirm(`Send draft link to ${to}?`)) return
+    const ok = await confirm({
+      title: 'Send the draft link?',
+      body: `Emails the client a secure link to this draft at ${to}.`,
+      confirmLabel: 'Send',
+    })
+    if (!ok) return
     setBusy('email')
     setEmailStatus(null)
     try {
@@ -190,6 +201,8 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
 
   return (
     <>
+      {confirmElement}
+      {promptElement}
       <section>
         <h2>Documents</h2>
         {!draft ? (

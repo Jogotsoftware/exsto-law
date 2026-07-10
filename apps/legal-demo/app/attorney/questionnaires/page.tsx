@@ -11,6 +11,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm } from '@/components/ConfirmModal'
 import { formatDate } from '@/lib/datetime'
 import { PageHead } from '@/components/PageHead'
 import { LayersIcon, SearchIcon } from '@/components/icons'
@@ -233,6 +234,7 @@ interface ServiceIntakeForm {
 }
 
 export default function QuestionnaireLibraryPage() {
+  const { confirm, confirmElement } = useConfirm()
   const [items, setItems] = useState<QuestionnaireTemplate[] | null>(null)
   const [svcForms, setSvcForms] = useState<ServiceIntakeForm[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -397,8 +399,13 @@ export default function QuestionnaireLibraryPage() {
   }
 
   async function archive(t: QuestionnaireTemplate) {
-    if (!window.confirm(`Archive "${t.name}"? It leaves the active library (kept as history).`))
-      return
+    const ok = await confirm({
+      title: `Archive “${t.name}”?`,
+      body: 'It leaves the active library — kept as history, removed from the pickers.',
+      confirmLabel: 'Archive',
+      danger: true,
+    })
+    if (!ok) return
     setError(null)
     try {
       await callAttorneyMcp({
@@ -435,6 +442,7 @@ export default function QuestionnaireLibraryPage() {
 
   return (
     <main>
+      {confirmElement}
       <PageHead
         title="Questionnaires"
         actions={

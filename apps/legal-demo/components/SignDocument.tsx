@@ -5,6 +5,7 @@
 // the adopted-signature input + ESIGN/UETA consent, and Sign / Decline. The
 // caller supplies onSign/onDecline (portal MCP vs /api/sign routes).
 import { useState } from 'react'
+import { useConfirm } from '@/components/ConfirmModal'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 
 export interface SignField {
@@ -49,6 +50,7 @@ export function SignDocument({
     Object.fromEntries(doc.fields.filter((f) => f.prefill).map((f) => [f.id, f.prefill!])),
   )
   const [busy, setBusy] = useState<null | 'sign' | 'decline'>(null)
+  const { confirm, confirmElement } = useConfirm()
   const [done, setDone] = useState<null | 'signed' | 'completed' | 'declined'>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -124,7 +126,13 @@ export function SignDocument({
     }
   }
   async function decline() {
-    if (typeof window !== 'undefined' && !window.confirm('Decline to sign this document?')) return
+    const ok = await confirm({
+      title: 'Decline to sign?',
+      body: 'Records that you decline to sign this document. The sender is notified.',
+      confirmLabel: 'Decline to sign',
+      danger: true,
+    })
+    if (!ok) return
     setBusy('decline')
     setError(null)
     try {
@@ -139,6 +147,7 @@ export function SignDocument({
 
   return (
     <div className="public-draft">
+      {confirmElement}
       {head()}
       <div className="text-sm text-muted">
         For signature{doc.signerName ? ` by ${doc.signerName}` : ''}

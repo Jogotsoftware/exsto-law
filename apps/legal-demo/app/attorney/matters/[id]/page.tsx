@@ -41,6 +41,7 @@ import {
   CompleteMatterStep,
 } from './RunnerReview'
 import { skipStep } from '@/lib/stepRunner'
+import { useConfirm, usePrompt } from '@/components/ConfirmModal'
 
 const GENERATABLE: Array<{ kind: string; label: string }> = [
   { kind: 'operating_agreement', label: 'operating agreement' },
@@ -480,13 +481,7 @@ function WorkflowStepWindow({
   const advanceFooter = attorneyEdge ? (
     <ContinueButton matter={matter} edge={attorneyEdge} onChanged={onChanged} onClose={onClose} />
   ) : clientEdge ? (
-    <SkipButton
-      matter={matter}
-      stageKey={stage.key}
-      edge={clientEdge}
-      onChanged={onChanged}
-      onClose={onClose}
-    />
+    <SkipButton matter={matter} stageKey={stage.key} onChanged={onChanged} onClose={onClose} />
   ) : null
   const waitsNote = waitsOnSystem ? <WaitingNote /> : null
 
@@ -516,7 +511,6 @@ function WorkflowStepWindow({
       <CompleteMatterStep
         stage={stage}
         matter={matter}
-        terminalState={attorneyEdge?.to ?? null}
         onChanged={onChanged}
         onClose={onClose}
         advanceFooter={advanceFooter}
@@ -555,13 +549,7 @@ function WorkflowStepWindow({
   // ── Client-gated wait (no attorney edge): client status + Skip (WP3) ────────
   if (isCurrent && clientEdge && !attorneyEdge) {
     return (
-      <ClientReviewStep
-        stage={stage}
-        matter={matter}
-        clientEdge={clientEdge}
-        onChanged={onChanged}
-        onClose={onClose}
-      />
+      <ClientReviewStep stage={stage} matter={matter} onChanged={onChanged} onClose={onClose} />
     )
   }
 
@@ -626,32 +614,33 @@ function ContinueButton({
 }
 
 // Skip: attorney advances a client-gated step without the client's acceptance
-// (Contract W skip; falls back to legal.matter.advance along the client edge).
+// (Contract W skip — records the override in the matter history).
 function SkipButton({
   matter,
   stageKey,
-  edge,
   onChanged,
   onClose,
 }: {
   matter: MatterDetail
   stageKey: string
-  edge: WfEdge
   onChanged: () => Promise<void>
   onClose: () => void
 }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const { confirm, confirmElement } = useConfirm()
   async function skip() {
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm('Advance without the client’s acceptance of this step?')
-    )
-      return
+    const ok = await confirm({
+      title: 'Skip this client step?',
+      body: 'Advances the matter without the client’s acceptance — the skip is recorded in the matter history as an attorney override.',
+      confirmLabel: 'Skip step',
+      danger: true,
+    })
+    if (!ok) return
     setBusy(true)
     setErr(null)
     try {
-      await skipStep(matter.matterEntityId, stageKey, { toState: edge.to, gate: edge.gate })
+      await skipStep(matter.matterEntityId, stageKey)
       await onChanged()
       onClose()
     } catch (e) {
@@ -661,6 +650,7 @@ function SkipButton({
   }
   return (
     <>
+      {confirmElement}
       {err && (
         <span className="text-sm" style={{ color: 'var(--danger)', marginRight: 'auto' }}>
           {err}
@@ -999,15 +989,22 @@ function ClientBody({ matter }: { matter: MatterDetail }) {
   const approved = matter.latestDraftStatus === 'approved'
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+  const { confirm, confirmElement } = useConfirm()
+  const { prompt, promptElement } = usePrompt()
 
   async function send() {
     if (!versionId) return
-    const defaultTo = matter.clientEmail ?? ''
-    const to =
-      defaultTo ||
-      (typeof window !== 'undefined'
-        ? (window.prompt('No client email on file. Send to which email?', '') ?? '').trim()
-        : '')
+    let to = matter.clientEmail ?? ''
+    if (!to) {
+      const entered = await prompt({
+        title: 'Send to which email?',
+        body: 'No client email is on file for this matter.',
+        label: 'Recipient email',
+        placeholder: 'client@example.com',
+        confirmLabel: 'Continue',
+      })
+      to = entered ?? ''
+    }
     if (!to) {
       setStatus({
         kind: 'err',
@@ -1015,7 +1012,12 @@ function ClientBody({ matter }: { matter: MatterDetail }) {
       })
       return
     }
-    if (typeof window !== 'undefined' && !window.confirm(`Email the document to ${to}?`)) return
+    const ok = await confirm({
+      title: 'Email the document?',
+      body: `Emails the client a link to this document at ${to}.`,
+      confirmLabel: 'Send',
+    })
+    if (!ok) return
     setBusy(true)
     setStatus(null)
     try {
@@ -1038,6 +1040,8 @@ function ClientBody({ matter }: { matter: MatterDetail }) {
 
   return (
     <>
+      {confirmElement}
+      {promptElement}
       {status && (
         <div className={`alert ${status.kind === 'ok' ? 'alert-success' : 'alert-error'}`}>
           {status.msg}

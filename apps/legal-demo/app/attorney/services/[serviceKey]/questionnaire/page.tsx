@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm, usePrompt } from '@/components/ConfirmModal'
 import { CopyIcon, LayersIcon, PlusIcon, SearchIcon, UsersIcon, XIcon } from '@/components/icons'
 
 // The exact field types the public booking page (apps/legal-demo/app/book)
@@ -231,6 +232,7 @@ function moveTo<T>(arr: T[], from: number, to: number): T[] {
 // service's form, or jump to the library builder. Applying loads the chosen
 // schema into the editor (in memory) — the attorney reviews and Saves a version.
 function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
+  const { confirm, confirmElement } = useConfirm()
   const [items, setItems] = useState<
     { questionnaireTemplateId: string; name: string; schema: WireDoc }[]
   >([])
@@ -251,6 +253,7 @@ function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
         margin: '0 0 var(--space-4)',
       }}
     >
+      {confirmElement}
       {items.length > 0 && (
         <select
           value=""
@@ -258,14 +261,14 @@ function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
           onChange={(e) => {
             const it = items.find((i) => i.questionnaireTemplateId === e.target.value)
             e.target.value = ''
-            if (
-              it &&
-              window.confirm(
-                `Replace this service's questionnaire with "${it.name}" from the library? You can edit it before saving.`,
-              )
-            ) {
-              onApply(it.schema)
-            }
+            if (!it) return
+            void confirm({
+              title: 'Replace this questionnaire?',
+              body: `Replaces this service’s questionnaire with “${it.name}” from the library. You can edit it before saving.`,
+              confirmLabel: 'Replace',
+            }).then((ok) => {
+              if (ok) onApply(it.schema)
+            })
           }}
         >
           <option value="">Start from a library questionnaire…</option>
@@ -281,6 +284,7 @@ function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
 }
 
 export default function QuestionnaireEditorPage() {
+  const { prompt, promptElement } = usePrompt()
   const params = useParams<{ serviceKey: string }>()
   const serviceKey = params.serviceKey
 
@@ -389,11 +393,14 @@ export default function QuestionnaireEditorPage() {
   // can seed other services (a copy outward — this service is untouched).
   async function saveToLibrary() {
     if (!doc) return
-    const name = window.prompt(
-      'Save this questionnaire to the library as:',
-      'Untitled questionnaire',
-    )
-    if (!name || !name.trim()) return
+    const name = await prompt({
+      title: 'Save to the library',
+      body: 'Adds a copy of this questionnaire to the firm library so it can seed other services.',
+      label: 'Name in the library',
+      defaultValue: 'Untitled questionnaire',
+      confirmLabel: 'Save to library',
+    })
+    if (!name) return
     setBusy(true)
     setError(null)
     try {
@@ -412,6 +419,7 @@ export default function QuestionnaireEditorPage() {
 
   return (
     <>
+      {promptElement}
       <div
         style={{
           display: 'flex',
