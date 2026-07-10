@@ -56,7 +56,17 @@ export async function POST(
         body: docBody,
         docKind,
         category: 'document',
-        ...(body?.signature ? { signature: body.signature } : {}),
+        ...(body?.signature
+          ? {
+              signature: {
+                required: body.signature.required === true,
+                signer_roles: (body.signature.signer_roles ?? []).filter(
+                  (r): r is 'client' | 'attorney' | 'witness' | 'notary' =>
+                    r === 'client' || r === 'attorney' || r === 'witness' || r === 'notary',
+                ),
+              },
+            }
+          : {}),
       },
       {
         conclusion:
