@@ -16,6 +16,9 @@ export interface TemplateProposal {
   docKind: string
   summary: string
   confidence: number
+  // BUILDER-CERT-1 (WP3) — signability declared on the card; forwarded on approve so
+  // the firm-library template carries it (what lets an e-sign step compose after it).
+  signature?: { required: boolean; signer_roles: string[] }
   // The {{tokens}} the body references, and the orphans (no matching question on THIS
   // service). With the documents→variables→questionnaire flow, orphans before the
   // questionnaire exists are NOT broken — they're the fields the questionnaire collects
@@ -103,6 +106,7 @@ export function TemplateProposalCard({
             docKind: proposal.docKind,
             summary: proposal.summary,
             confidence: proposal.confidence,
+            ...(proposal.signature ? { signature: proposal.signature } : {}),
           }),
         },
       )
@@ -138,6 +142,9 @@ export function TemplateProposalCard({
         </span>
         <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
           {proposal.serviceKey} · {humanKind(proposal.docKind)}
+          {proposal.signature?.required
+            ? ` · signed by ${proposal.signature.signer_roles.join(', ')}`
+            : ''}
         </span>
       </div>
 

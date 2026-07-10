@@ -43,7 +43,8 @@ import {
   type QuestionnaireDoc,
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
-import { listStandaloneTemplates } from '../queries/templates.js'
+import { listStandaloneTemplates, type TemplateSignature } from '../queries/templates.js'
+import { createTemplate, updateTemplate } from './standaloneTemplates.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
 // the SAME id intakeAuthoring.ts / serviceAuthoring.ts source their writes to.
@@ -348,6 +349,11 @@ export interface CreateTemplateAIInput {
   body: string
   docKind: string
   category?: 'document'
+  // BUILDER-CERT-1 (WP3) — the template's signability declaration, from the wizard's
+  // "does the finished document get signed, and by whom?" ask (author-template Step 3).
+  // Omitted/undefined = unsigned. Carried onto the FIRM-LIBRARY twin below, where the
+  // e-sign composition validator reads it.
+  signature?: TemplateSignature
 }
 
 // Persist a reasoning_trace for an AI template write (mirrors intakeAuthoring's):
@@ -424,7 +430,7 @@ export async function createTemplateAI(
   serviceKey: string,
   input: CreateTemplateAIInput,
   reasoning: TemplateReasoning,
-): Promise<{ serviceKey: string; documentKind: string }> {
+): Promise<{ serviceKey: string; documentKind: string; templateEntityId: string }> {
   const docKind = (input.docKind ?? '').trim()
   if (!docKind) throw new Error('A document kind is required to author a template.')
   // Validate the body BEFORE any write (incl. the trace) so an invalid proposal
@@ -521,7 +527,39 @@ export async function createTemplateAI(
 
   const saved = await getDocumentTemplate(agentCtx, serviceKey, docKind)
   if (!saved) throw new Error(`Document template not found after write: ${serviceKey}`)
-  return { serviceKey, documentKind: docKind }
+
+  // BUILDER-CERT-1 (WP3) — the FIRM-LIBRARY TWIN. The service-bound copy above is
+  // what auto-route drafting + completeness read; but the drafting CAPABILITY
+  // (invoke_capability{document_generation}) binds a template by EXACT firm-library
+  // entity id, and the e-sign validator reads signability off that entity — neither
+  // can see a service-bound body. Without this write, a wizard-authored template is
+  // invisible to get_workflow_context's availableTemplates and no drafting/e-sign
+  // step can ever bind it (the exact wall the certification drive hit). Upsert by
+  // (docKind, name): re-approving a revision updates the same library entity.
+  const library = await listStandaloneTemplates(agentCtx)
+  const twin = library.find(
+    (t) => t.category === 'document' && t.docKind === docKind && t.name === input.name,
+  )
+  let templateEntityId: string
+  if (twin) {
+    await updateTemplate(agentCtx, {
+      templateEntityId: twin.templateEntityId,
+      body,
+      ...(input.signature != null ? { signature: input.signature } : {}),
+    })
+    templateEntityId = twin.templateEntityId
+  } else {
+    const created = await createTemplate(agentCtx, {
+      name: input.name,
+      category: 'document',
+      body,
+      docKind,
+      ...(input.signature != null ? { signature: input.signature } : {}),
+    })
+    templateEntityId = created.templateEntityId
+  }
+
+  return { serviceKey, documentKind: docKind, templateEntityId }
 }
 
 // Honest confidence: an AI authoring write must never claim certainty (ADR 0006).

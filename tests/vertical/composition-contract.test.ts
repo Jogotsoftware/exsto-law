@@ -154,6 +154,36 @@ describe('composition contract — billing doctrine forces a choice (WP1)', () =
   })
 })
 
+describe('computed change read-out — describeGraphChanges (WP3)', () => {
+  const stage = (key: string, label: string): Record<string, unknown> => ({
+    key,
+    label,
+    action: { kind: 'manual_task' },
+    advances_to: [],
+  })
+
+  it('returns null on first authoring (no live graph to diff against)', async () => {
+    const { describeGraphChanges } = await import('@exsto/legal')
+    expect(describeGraphChanges(null, [stage('a', 'A')] as never)).toBeNull()
+    expect(describeGraphChanges([] as never, [stage('a', 'A')] as never)).toBeNull()
+  })
+
+  it('reports adds/removes/modifies by stage key, and key order never fakes a change', async () => {
+    const { describeGraphChanges } = await import('@exsto/legal')
+    const live = [stage('a', 'A'), stage('b', 'B')] as never
+    // Same stage semantically, keys emitted in a different order → not a change.
+    const reordered = [
+      { advances_to: [], action: { kind: 'manual_task' }, label: 'A', key: 'a' },
+      stage('b', 'B'),
+    ] as never
+    expect(describeGraphChanges(live, reordered)).toContain('no changes')
+    const revised = [stage('a', 'A'), stage('b', 'B RENAMED'), stage('c', 'C')] as never
+    const line = describeGraphChanges(live, revised)!
+    expect(line).toContain('adds c')
+    expect(line).toContain('modifies b')
+  })
+})
+
 describe('composition contract — every questionnaire field type is taught', () => {
   it('author-questionnaire.md teaches every KNOWN_FIELD_TYPES entry', () => {
     const body = skillFiles['author-questionnaire.md'] ?? ''
