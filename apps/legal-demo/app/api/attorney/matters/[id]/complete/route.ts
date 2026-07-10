@@ -23,7 +23,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const result = await completeMatter(ctx, matterId, { archive })
-    return NextResponse.json({ completed: result.completed, ...result })
+    return NextResponse.json(result)
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : 'Failed to complete the matter.' },
