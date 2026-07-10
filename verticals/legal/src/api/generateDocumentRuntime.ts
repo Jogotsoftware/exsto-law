@@ -80,7 +80,9 @@ async function resolveCurrentStage(
 
 // The document kind this generate_document stage produces: the stage's own document
 // ref wins; else the service's first registered document kind (transitions.documents).
-async function resolveStageDocumentKind(
+// Exported for the WP4 regenerate runtime (regenerateStage.ts), which re-drafts the
+// document a generate_document stage produces.
+export async function resolveStageDocumentKind(
   ctx: ActionContext,
   matterEntityId: string,
   stage: LifecycleStage,

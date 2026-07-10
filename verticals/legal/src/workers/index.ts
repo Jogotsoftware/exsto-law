@@ -69,8 +69,21 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
 // ever rides the request or an advance transaction. Transient errors throw → runtime
 // backoff → dead-letter; on failure the matter stays parked + re-invocable.
 registerWorkerHandler('legal.capability.run', async (ctx, payload) => {
+  const p = payload as {
+    matter_entity_id: string
+    stage_key?: string
+    // BACKHALF-BLOCKS-1 (WP4): a deliberate REGENERATE of the named stage's document
+    // — bypasses the capability.invoked and draft-exists guards, produces version
+    // n+1 with the attorney's change notes riding the producer's guidance input.
+    regenerate?: boolean
+    change_notes?: string
+  }
+  if (p.regenerate) {
+    const { regenerateStageDocument } = await import('../api/regenerateStage.js')
+    await regenerateStageDocument(ctx, p.matter_entity_id, p.stage_key ?? '', p.change_notes ?? '')
+    return
+  }
   const { invokeCapabilityForMatter } = await import('../api/capabilityRuntime.js')
-  const p = payload as { matter_entity_id: string; stage_key?: string }
   await invokeCapabilityForMatter(ctx, p.matter_entity_id)
 })
 

@@ -403,8 +403,9 @@ async function runDocumentGenerationCapability(
 
 // A document kind derived from a template name when the template carries no explicit
 // docKind (a firm template SHOULD have one; this keeps the draft-exists guard and the
-// draft's document_kind stable rather than failing on a config gap).
-function slugifyDocKind(name: string): string {
+// draft's document_kind stable rather than failing on a config gap). Exported for the
+// WP4 regenerate runtime, which must derive the SAME kind the original run did.
+export function slugifyDocKind(name: string): string {
   return (
     name
       .toLowerCase()
