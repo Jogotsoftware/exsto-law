@@ -21,6 +21,31 @@ import type { DbClient } from '@exsto/shared'
 import { insertAttribute, insertEvent, lookupKindId, getLatestAttributeValue } from './common.js'
 import { dispatchClientDelivery } from './clientDelivery.js'
 
+// Idempotent scope assignment: give the actor the client.portal rung unless it
+// already holds it (0136).
+async function ensureClientPortalScope(
+  client: DbClient,
+  tenantId: string,
+  actionId: string,
+  actorId: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO actor_scope_assignment (tenant_id, action_id, actor_id, permission_scope_definition_id)
+     SELECT $1, $2, $3, psd.id
+     FROM permission_scope_definition psd
+     WHERE psd.tenant_id = $1 AND psd.scope_name = 'client.portal'
+       AND (psd.valid_to IS NULL OR psd.valid_to > now())
+       AND NOT EXISTS (
+         SELECT 1 FROM actor_scope_assignment asa
+         WHERE asa.tenant_id = $1 AND asa.actor_id = $3
+           AND asa.permission_scope_definition_id = psd.id
+           AND (asa.valid_to IS NULL OR asa.valid_to > now())
+       )
+     LIMIT 1`,
+    [tenantId, actionId, actorId],
+  )
+}
+
 async function contactDisplayName(
   client: DbClient,
   tenantId: string,
@@ -54,7 +79,9 @@ registerActionHandler(
     )
     if (contact.rowCount === 0) throw new Error('Unknown client contact.')
 
-    // Idempotency: an existing mapping wins (re-invite, re-login, races).
+    // Idempotency: an existing mapping wins (re-invite, re-login, races) — but
+    // the RBAC assignment still self-heals below (an actor provisioned before
+    // the client.portal scope existed gets its rung on the next provision call).
     const existing = await getLatestAttributeValue<string>(
       client,
       ctx.tenantId,
@@ -62,6 +89,7 @@ registerActionHandler(
       'portal_actor_id',
     )
     if (existing) {
+      await ensureClientPortalScope(client, ctx.tenantId, actionId, existing)
       return { actorId: existing, clientContactId: p.client_contact_id, created: false }
     }
 
@@ -87,6 +115,12 @@ registerActionHandler(
         [actorId, ctx.tenantId, externalId, displayName],
       )
     }
+
+    // RBAC (0136): the client actor is a human actor, so it is scope-restricted
+    // — assign the client.portal rung (the explicit portal-action allowlist) in
+    // the same transaction. Direct insert for the same reason as the actor row:
+    // assignments are identity plumbing, written with this action's provenance.
+    await ensureClientPortalScope(client, ctx.tenantId, actionId, actorId)
 
     const attrKindId = await lookupKindId(
       client,

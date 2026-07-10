@@ -96,6 +96,7 @@ export async function getClientBillingSummary(
   const invoiceMatters = await matterOfInvoices(ctx, invoices)
 
   const matterIdsAll = new Set<string>([...accruedByMatter.keys(), ...invoiceMatters.values()])
+  const matterNames = await matterNamesById(ctx, [...matterIdsAll])
   const matters: ClientMatterBilling[] = []
   for (const matterId of matterIdsAll) {
     const accrued = accruedByMatter.get(matterId)
@@ -111,7 +112,7 @@ export async function getClientBillingSummary(
     const accruedCents = accrued?.totalCents ?? 0
     matters.push({
       matterEntityId: matterId,
-      matterNumber: accrued?.matterNumber ?? matterInvoices[0]?.invoiceNumber ?? '',
+      matterNumber: accrued?.matterNumber ?? matterNames.get(matterId) ?? '',
       invoices: matterInvoices,
       accrued: accrued?.entries ?? [],
       accruedTotal: toAmount(accruedCents),
@@ -244,4 +245,21 @@ export async function listClientTodos(
   })
 
   return todos
+}
+
+async function matterNamesById(
+  ctx: ActionContext,
+  matterIds: string[],
+): Promise<Map<string, string>> {
+  const { withActionContext } = await import('@exsto/substrate')
+  const map = new Map<string, string>()
+  if (matterIds.length === 0) return map
+  await withActionContext(ctx, async (client) => {
+    const res = await client.query<{ id: string; name: string }>(
+      `SELECT id, name FROM entity WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+      [ctx.tenantId, matterIds],
+    )
+    for (const row of res.rows) map.set(row.id, row.name)
+  })
+  return map
 }

@@ -324,6 +324,10 @@ export async function* clientAssistantChatStream(
 
   try {
     const stream = streamChatWithAssistant(ctx.tenantId, messages, {
+      // Pinned (not DEFAULT_MODEL): LEGAL_DRAFTING_MODEL is empty-not-unset in
+      // some deploys and '' is rejected by the API. Sonnet is the right
+      // cost/latency point for client Q&A.
+      model: 'claude-sonnet-4-6',
       workRate: 'balanced',
       supportsWorkRate: true,
       webSearch: false, // client PII in context — never exfiltrate to search
@@ -353,7 +357,7 @@ export async function* clientAssistantChatStream(
       message,
       reply,
       provider: 'anthropic',
-      model: 'portal-assistant',
+      model: 'claude-sonnet-4-6',
       kind: 'question',
       citations: [],
       scope: 'contact',

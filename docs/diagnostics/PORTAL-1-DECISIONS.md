@@ -1,8 +1,16 @@
 # PORTAL-1 — architectural decisions
 
 Session: portal-1 (fork of main @ 8ff78dc, MACHINE-COMMS-1 + STYLE-FIX-2 in history).
-Frontier re-verified 0119 on 2026-07-10. **Zero migrations used** (lease 0135–0149 untouched):
-every new concept is a runtime `kind.define` seed or a `legal.capability.upsert`.
+Frontier re-verified 0119 on 2026-07-10. **Two migrations used from the lease**
+(0135 kinds + 0136 RBAC scope; both APPLIED + stamped on prod 2026-07-10 — the
+prod ledger also shows UI-BUILDER-FIX-1's 0120 landed concurrently, no
+collision). The plan was zero migrations, but two facts forced rows-only
+migrations: `kind.define` has no `action` registry (action kinds are always
+migration rows in this repo), and the RBAC ladder (0078) scope-restricts every
+HUMAN actor — a client actor without its own rung cannot write at all
+(discovered live: the first client-actor write bounced off
+`action_scope_enforcement_insert`). 0136 defines the `client.portal` scope: an
+EXPLICIT action allowlist (rank 10), never a wildcard.
 
 ## Reconciliation (brief vs repo)
 
@@ -68,3 +76,21 @@ deltas only. Notable brief-vs-reality corrections:
     never imported there.
 11. **Billable-scheduling toggle** = `portal_scheduling_billable` attribute on the
     client entity (default absent = OFF), set via existing `legal.client.update`.
+
+12. **Client chat model pinned** to claude-sonnet-4-6 (not `DEFAULT_MODEL`):
+    LEGAL_DRAFTING_MODEL is empty-not-unset in real envs and '' is rejected by
+    the API (known gotcha).
+13. **The bot never consents.** prepare_request returns the quote + a
+    consent_required card; the CLIENT's own click fires
+    legal.client.request_create. A chat "yes" is never treated as fee
+    acceptance.
+14. **Deviation — invite delivery**: send_portal_invite delivers via the
+    existing client_portal_invite notification route (static transactional
+    template), NOT email_generation template mode. The brief's own WP boundary
+    assigns transactional templates (incl. the portal invite) to static
+    hand-written templates; email_generation would put an invite through the
+    drafting/review pipeline.
+15. **Deviation — finalize account ordering**: the fee-consent 409 fires BEFORE
+    the Supabase signUp, so a refused booking leaves no auth account behind
+    (found live: the original order created an account on the 409 path and then
+    tripped GoTrue's confirmation-resend rate limit on retry).

@@ -27,7 +27,6 @@ import {
   stageIntakeLead,
   findClientContactIdByEmail,
   provisionClientPortalActor,
-  resolvePortalActorId,
   resolveServiceFeeQuote,
   grantServiceFeeConsent,
   findServiceFeeConsent,
@@ -76,7 +75,7 @@ async function createUnconfirmedAccount(
   password: string,
 ): Promise<'created' | 'exists'> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY
   if (!url || !anon) throw new Error('Account creation is not configured.')
   const supabase = createClient(url, anon, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -89,6 +88,9 @@ async function createUnconfirmedAccount(
   if (error) {
     const m = error.message.toLowerCase()
     if (m.includes('already registered') || m.includes('already exists')) return 'exists'
+    // GoTrue rate-limits confirmation resends per email; a quick retry after a
+    // failed attempt means the account from that attempt already exists.
+    if (m.includes('you can only request this after')) return 'exists'
     throw new Error(error.message)
   }
   // Existing-email signUp "succeeds" with an identity-less stub user.
@@ -151,48 +153,48 @@ export async function POST(request: Request) {
       clientContactId = staged.clientEntityId
     }
 
-    // 2. The auth account. 'exists' is NOT an error: the booking proceeds and
+    // 2. Fee gate FIRST — a missing acceptance must refuse BEFORE any side
+    // effect (no auth account, no actor) so the 409 is a clean re-entry.
+    const quote = await resolveServiceFeeQuote(publicCtx, serviceKey, clientContactId)
+    const priorConsent = quote
+      ? await findServiceFeeConsent(publicCtx, clientContactId, quote)
+      : null
+    if (quote && !priorConsent && body.feeAccepted !== true) {
+      return NextResponse.json(
+        {
+          error: 'This service has a fee that needs your acceptance first.',
+          code: 'FEE_CONSENT_REQUIRED',
+          quote: {
+            basis: quote.basis,
+            amount: quote.amount,
+            rate: quote.rate,
+            currency: quote.currency,
+            description: quote.description,
+          },
+        },
+        { status: 409 },
+      )
+    }
+
+    // 3. The auth account. 'exists' is NOT an error: the booking proceeds and
     // the client signs in with the password they already have.
     const account = await createUnconfirmedAccount(email, password)
 
-    // 3. The client's own actor.
-    let clientActorId = await resolvePortalActorId(TENANT_ID, clientContactId)
-    if (!clientActorId) {
-      const provisioned = await provisionClientPortalActor(publicCtx, {
-        clientContactId,
-        trigger: 'intake_gate',
-      })
-      clientActorId = provisioned.actorId
-    }
+    // 4. The client's own actor (idempotent; also self-heals the RBAC scope
+    // assignment for actors provisioned before 0136).
+    const provisioned = await provisionClientPortalActor(publicCtx, {
+      clientContactId,
+      trigger: 'intake_gate',
+    })
+    const clientActorId = provisioned.actorId
     const clientCtx: ActionContext = { tenantId: TENANT_ID, actorId: clientActorId }
 
-    // 4. Fee consent — server-enforced. A costed service books only after the
-    // client's actor has accepted the exact quote.
-    const quote = await resolveServiceFeeQuote(publicCtx, serviceKey, clientContactId)
-    if (quote) {
-      const consent = await findServiceFeeConsent(publicCtx, clientContactId, quote)
-      if (!consent) {
-        if (body.feeAccepted !== true) {
-          return NextResponse.json(
-            {
-              error: 'This service has a fee that needs your acceptance first.',
-              code: 'FEE_CONSENT_REQUIRED',
-              quote: {
-                basis: quote.basis,
-                amount: quote.amount,
-                rate: quote.rate,
-                currency: quote.currency,
-                description: quote.description,
-              },
-            },
-            { status: 409 },
-          )
-        }
-        await grantServiceFeeConsent(clientCtx, { clientContactId, quote })
-      }
+    // 5. Record the acceptance as the client's OWN actor (the consent receipt).
+    if (quote && !priorConsent) {
+      await grantServiceFeeConsent(clientCtx, { clientContactId, quote })
     }
 
-    // 5. The booking, attributed to the client's own actor.
+    // 6. The booking, attributed to the client's own actor.
     const result = await submitBooking(clientCtx, {
       clientFullName: fullName,
       clientEmail: email,

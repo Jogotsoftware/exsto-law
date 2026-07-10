@@ -16,7 +16,6 @@ import {
   verifyPortalInviteToken,
   loadClientContactEmail,
   isClientContactActive,
-  resolvePortalActorId,
   provisionClientPortalActor,
   resolveClientMatterIds,
 } from '@exsto/legal'
@@ -119,7 +118,9 @@ export async function POST(request: Request) {
   // PORTAL-1: account creation provisions the client's OWN actor (idempotent) and
   // advances any matter parked on a send_portal_invite client gate. Done here —
   // not left to the mint's lazy backfill — so the receipt reads trigger:'invite'.
-  if (!(await resolvePortalActorId(invite.tenantId, invite.clientContactId))) {
+  {
+    // Idempotent (and self-heals the RBAC scope for pre-0136 actors); advances
+    // any matter parked on a send_portal_invite client gate.
     const matterIds = await resolveClientMatterIds(invite.tenantId, invite.clientContactId)
     await provisionClientPortalActor(
       { tenantId: invite.tenantId, actorId: PUBLIC_INTAKE_ACTOR_ID },
