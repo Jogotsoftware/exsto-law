@@ -19,6 +19,7 @@ import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import { AUTHORABLE_STEP_ACTION_KINDS, GATE_KINDS, type Lifecycle } from '../lifecycle/index.js'
 import { loadWorkflowAuthoringContext, validateProposedLifecycle } from './workflowAuthoring.js'
+import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 
 // A workflow proposal captured this turn — the proposed graph plus the model's
 // reasoning. The chat surfaces it as an inline card; the attorney approves it, which
@@ -232,13 +233,24 @@ export function buildProposeWorkflowTool(
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
           : 0.7
+      // BUILDER-CERT-1 (WP1) — every workflow card STATES the total per-matter charge
+      // the composed billing produces (computed from the service's declared fees, not
+      // trusted from the model), so a double-bill is deliberate and visible.
+      const readout = await computeBillingReadout(ctx, serviceKey, { graph })
+      const billingLine = readout ? ` ${formatBillingReadout(readout)}` : ''
+      const warningText = validation.warnings.length
+        ? ` WARNINGS (non-blocking — the card shows them; relay them to the attorney in one short line): ${validation.warnings.join('; ')}`
+        : ''
       captured.push({
         serviceKey,
         graph,
-        summary: (args.summary ?? '').trim() || `Proposed workflow for ${serviceKey}.`,
+        summary:
+          ((args.summary ?? '').trim() || `Proposed workflow for ${serviceKey}.`) +
+          billingLine +
+          (validation.warnings.length ? ` ⚠ ${validation.warnings.join(' ⚠ ')}` : ''),
         confidence,
       })
-      return `The proposed workflow for "${serviceKey}" (${graph.length} steps) is shown to the attorney as an approval card; it is NOT saved until they approve. The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the workflow steps in prose.`
+      return `The proposed workflow for "${serviceKey}" (${graph.length} steps) is shown to the attorney as an approval card; it is NOT saved until they approve.${billingLine}${warningText} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the workflow steps in prose.`
     },
   }
 }

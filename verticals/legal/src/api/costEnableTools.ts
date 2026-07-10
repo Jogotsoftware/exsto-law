@@ -17,6 +17,7 @@
 import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import { validateProposedCost, SERVICE_COST_TYPES, type CostProposal } from './costAuthoring.js'
+import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 import type { ServiceCostType } from './services.js'
 
 // ─── propose_cost ───────────────────────────────────────────────────────────
@@ -64,12 +65,11 @@ const PROPOSE_COST_TOOL_DEF = {
 
 // Build the propose_cost tool for this turn. Its run() validates the price (the SAME
 // money contract the write path applies) and, on success, CAPTURES it into `captured`
-// (read back by the caller to surface the approval card) — it never writes.
+// (read back by the caller to surface the approval card) — it never writes. It READS
+// the service (BUILDER-CERT-1 WP1) to compute the composed-billing read-out the card
+// states: the total per-matter charge this cost + the service's declared document
+// fees produce, so a double-bill is deliberate and visible.
 export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[]): ClientTool {
-  // ctx is unused in run() (capture-only) but kept in the signature for symmetry with
-  // the other propose tools and so a future read (e.g. a service-exists check) needs no
-  // signature change.
-  void ctx
   return {
     definition: PROPOSE_COST_TOOL_DEF,
     name: 'propose_cost',
@@ -95,17 +95,29 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
           : 0.6 // matches costAuthoring.clampConfidence / serviceAuthoring (humble default)
+      // BUILDER-CERT-1 (WP1) — the cost card STATES the total per-matter charge the
+      // composed billing produces (this proposed cost + the service's declared
+      // per-document fees), computed from the real service row, never model prose.
+      const readout = await computeBillingReadout(ctx, serviceKey, {
+        proposedCost: { costType, amount, hours },
+      })
+      const billingLine = readout ? ` ${formatBillingReadout(readout)}` : ''
+      const warningText = readout?.splitWarning
+        ? ` WARNING (non-blocking — the card shows it; relay it to the attorney in one short line): ${readout.splitWarning}`
+        : ''
       captured.push({
         serviceKey,
         costType,
         amount,
         hours,
         summary:
-          (args.summary ?? '').trim() ||
-          `Proposed ${costType} billing of ${amount} for ${serviceKey}.`,
+          ((args.summary ?? '').trim() ||
+            `Proposed ${costType} billing of ${amount} for ${serviceKey}.`) +
+          billingLine +
+          (readout?.splitWarning ? ` ⚠ ${readout.splitWarning}` : ''),
         confidence,
       })
-      return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve. The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the price in prose.`
+      return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve.${billingLine}${warningText} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the price in prose.`
     },
   }
 }

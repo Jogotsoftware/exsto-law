@@ -85,10 +85,12 @@ An e-signature step is an `invoke_capability` stage running the `esignature` cap
 
 The validator REJECTS a workflow that produces documents but declares no billing, and a workflow whose terminal stage is not a completion step. Ask the attorney and declare both:
 
-- **Billing** — ask "when does this service bill?" Two declarations (a service may carry both):
+- **Billing is a forced CHOICE — default ONE billing point.** Ask "when does the client get charged?" and declare exactly the model the attorney picks:
   - *Per-document fees, accrued on approval* — the fee for each document accrues the moment the attorney approves it in the review queue. Set the service's per-document fees (`transitions.document_fees`, one amount per document kind) via the service's cost settings; the workflow itself needs no extra step.
-  - *An explicit invoice step* — add `approve_send_invoice` (and usually `await_payment`) to the graph where the invoice goes out.
-  A document-producing workflow with NEITHER is invalid — the matter would produce work nobody ever bills.
+  - *One invoice mid-matter* — add `approve_send_invoice` (and usually `await_payment`) to the graph where the invoice goes out. The invoice collects the fees accrued so far; it is a billing point, not an extra charge.
+  - *At completion* — the service's flat fee (`propose_cost`, fixed) accrues when the matter completes; no document fees, no invoice step.
+  - *A deliberate split* — more than one of the above ONLY when the attorney explicitly chooses it. Declaring both a per-document fee and a flat service fee charges the matter TWICE; the validator surfaces a split-billing WARNING on the card — relay it and confirm intent, never let a double-bill emerge silently.
+  A document-producing workflow with NO billing declaration is invalid — the matter would produce work nobody ever bills. **Every workflow/cost card states the total per-matter charge the composed billing produces** (platform-computed); read it back to the attorney if it isn't what they said.
 - **Completion** — the terminal stage MUST be a `complete_matter` step. Completing the matter accrues the service's completion fee (if the service declares one) and archives the matter (archived, never deleted).
 
 ## Step 6: Propose — never write live

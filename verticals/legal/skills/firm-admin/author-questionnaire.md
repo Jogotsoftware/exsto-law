@@ -52,6 +52,7 @@ The platform validates the questionnaire against a FIXED set of field types (`KN
 | `number` | a numeric value | e.g. ownership_pct |
 | `address_autocomplete` | a postal address | structured; merges as the formatted address |
 | `members_repeater` | a repeating group (e.g. multiple members) | requires a non-empty `memberFields[]` of sub-fields |
+| `file_upload` | the client attaches document(s) at intake (e.g. the contract/lease to review) | the files bind to the matter on submit; the stored answer is the filename(s) — REQUIRED for any document-review service |
 
 Match the type to the token's nature: a `{{effective_date}}` token → `date`; `{{principal_office_address}}` → `address_autocomplete`; `{{ownership_pct}}` → `number`; a multi-member LLC's members → `members_repeater` with sub-fields. `select`/`checkbox` fields MUST carry a non-empty `options` array; `members_repeater` MUST carry non-empty `memberFields`.
 

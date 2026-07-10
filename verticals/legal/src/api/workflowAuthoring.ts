@@ -221,7 +221,11 @@ function producingStageTemplateIds(s: Lifecycle[number]): string[] {
 // templateEntityId real, and — ADR 0046 — every invoke_capability stage names a
 // capability that is LIVE and step-invocable, with a config that satisfies its
 // config_schema. Returns the same shape as validateLifecycle so the propose tool can
-// surface the combined errors verbatim.
+// surface the combined errors verbatim — plus `warnings` (BUILDER-CERT-1 WP1):
+// non-blocking diagnostics the propose tool surfaces on the card. Today's one
+// warning: the service declares BOTH per-document fees AND a fixed service fee, so
+// the composed billing charges twice per matter — legitimate only when deliberate
+// (a split), so it warns rather than rejects.
 //
 // BACKHALF-BLOCKS-1 (WP2) — a service's workflow must also DECLARE how it completes
 // and when it bills:
@@ -238,8 +242,9 @@ export async function validateProposedLifecycle(
   ctx: ActionContext,
   graph: Lifecycle,
   serviceKey?: string,
-): Promise<{ ok: boolean; errors: string[] }> {
+): Promise<{ ok: boolean; errors: string[]; warnings: string[] }> {
   const errors: string[] = []
+  const warnings: string[] = []
   errors.push(...validateLifecycle(graph).errors)
   errors.push(...validateLinearLifecycle(graph).errors)
 
@@ -257,12 +262,22 @@ export async function validateProposedLifecycle(
   // graph carries an explicit invoice step.
   const producingStages = graph.filter(isDocumentProducingStage)
   const hasInvoiceStep = graph.some((s) => s.action?.kind === 'approve_send_invoice')
-  if (serviceKey && producingStages.length > 0 && !hasInvoiceStep) {
+  if (serviceKey) {
     const svc = await getService(ctx, serviceKey)
     const feeKinds = Object.keys(svc?.documentFees ?? {})
-    if (feeKinds.length === 0) {
+    if (producingStages.length > 0 && !hasInvoiceStep && feeKinds.length === 0) {
       errors.push(
         `the workflow produces a document (stage "${producingStages[0]!.key}") but declares no billing — either set the service's per-document fees (transitions.document_fees, accrued when the document is approved) or add an approve_send_invoice step to the graph.`,
+      )
+    }
+    // BUILDER-CERT-1 (WP1) — split billing is a WARNING, never a rejection: both a
+    // per-document fee (accrued on approve) and a fixed service fee (accrued at
+    // completion) are declared, so a matter is charged twice. That is legitimate
+    // only when the attorney chose it deliberately; the card must say it out loud.
+    if (feeKinds.length > 0 && svc?.cost?.type === 'fixed') {
+      const feeTotal = feeKinds.reduce((sum, k) => sum + Number(svc.documentFees[k] ?? 0), 0)
+      warnings.push(
+        `split billing: this service charges per-document fee(s) totaling $${feeTotal.toFixed(2)} on approval AND a $${svc.cost.amount} service fee at completion — two charges per matter (total $${(feeTotal + Number(svc.cost.amount)).toFixed(2)}). Keep both ONLY if the attorney deliberately chose a split; otherwise remove one so the service has ONE billing point.`,
       )
     }
   }
@@ -427,7 +442,7 @@ export async function validateProposedLifecycle(
     }
   }
 
-  return { ok: errors.length === 0, errors }
+  return { ok: errors.length === 0, errors, warnings }
 }
 
 // Reasoning summary the approve route carries from the chat turn that produced the
