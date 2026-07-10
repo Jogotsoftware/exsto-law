@@ -149,9 +149,14 @@ describe('diagnoseCapabilityStepConfig — names the exact expected path', () =>
 // dispatch call site changes, this test is where it surfaces.
 describe('gate-transition vocabulary — pinned to the runtime dispatch tokens', () => {
   it('client via = the dispatchClientDelivery action kinds', () => {
-    // handlers/booking.ts, documentUpload.ts, clientMessage.ts.
+    // handlers/booking.ts, documentUpload.ts, clientMessage.ts, clientRequest.ts (WP3).
     expect(allowedTransitionTokens('client')?.sort()).toEqual(
-      ['booking.create', 'client.message.post', 'document.upload'].sort(),
+      [
+        'booking.create',
+        'client.message.post',
+        'document.upload',
+        'legal.client_request.accept',
+      ].sort(),
     )
   })
 

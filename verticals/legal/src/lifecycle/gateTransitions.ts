@@ -10,7 +10,8 @@
 // SINGLE SOURCE — these are the tokens the runtime matches on, verbatim:
 //   • client `via`  → dispatchClientDelivery matches `e.via === actionKind`
 //     (handlers/booking.ts 'booking.create', handlers/documentUpload.ts
-//      'document.upload', handlers/clientMessage.ts 'client.message.post').
+//      'document.upload', handlers/clientMessage.ts 'client.message.post',
+//      handlers/clientRequest.ts 'legal.client_request.accept' — WP3).
 //   • system `on`   → dispatchLifecycleEvent(eventKind) (handlers/invoice.ts
 //     'invoice.paid', handlers/esign.ts 'esign.completed', handlers/call.ts
 //     'transcript.received').
@@ -62,6 +63,11 @@ export const GATE_TRANSITION_VOCABULARY: Record<
       {
         token: 'client.message.post',
         label: 'The client sends a reply/message in the portal thread.',
+      },
+      {
+        token: 'legal.client_request.accept',
+        label:
+          'The client clicks Accept on the portal review step (accepts the draft/deliverable as-is).',
       },
     ],
   },
