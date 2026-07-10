@@ -26,6 +26,9 @@ interface PendingDraft {
   channel: 'document' | 'communication'
   emailSubject: string | null
   emailToRole: string | null
+  // STYLE-FIX-2: house-voice check flags recorded on the version ([] = clean,
+  // null = not checked — document drafts and template merges).
+  voiceViolations: { rule: string; where: string; offending: string }[] | null
 }
 
 // Batch actions map 1:1 to the per-draft review MCP tools the detail page already
@@ -431,6 +434,20 @@ export default function ReviewQueue() {
                             </span>
                             {d.emailSubject || humanizeKind(d.documentKind)}
                             <div className="text-sm text-muted">approve = send</div>
+                            {(d.voiceViolations?.length ?? 0) > 0 && (
+                              // STYLE-FIX-2: the deterministic house-voice check
+                              // flagged this version after its one corrective
+                              // retry — the draft still queues; the attorney
+                              // sees exactly what tripped before opening it.
+                              <div
+                                className="badge warn"
+                                style={{ marginTop: 'var(--space-1)' }}
+                                title={d.voiceViolations!.map((v) => v.offending).join('\n')}
+                              >
+                                Voice check: {d.voiceViolations!.length}{' '}
+                                {d.voiceViolations!.length === 1 ? 'flag' : 'flags'}
+                              </div>
+                            )}
                           </>
                         ) : (
                           humanizeKind(d.documentKind)
