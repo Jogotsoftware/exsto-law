@@ -721,13 +721,30 @@ export function ClientReviewStep({
     }
   }, [matter.matterEntityId, stage.key])
 
+  const [acceptNote, setAcceptNote] = useState<string | null>(null)
+
   async function run(kind: 'accept' | 'skip') {
     setConfirming(null)
     setBusy(kind)
     setErr(null)
     try {
-      if (kind === 'accept') await acceptClientStep(matter.matterEntityId, stage.key)
-      else await skipStep(matter.matterEntityId, stage.key)
+      if (kind === 'accept') {
+        const r = await acceptClientStep(matter.matterEntityId, stage.key)
+        if (!r.advancedTo) {
+          // Honest: the acceptance IS recorded (client_request.accepted), but this
+          // stage's client edge advances only on the client's own named action
+          // (its `via` — e.g. a portal reply or a booking), so the matter stayed
+          // put. Say so and keep the panel open; Skip still advances.
+          setAcceptNote(
+            'Acceptance recorded in the matter history. This step still advances only on the client’s own action — use Skip to move past it without that.',
+          )
+          setBusy(null)
+          await onChanged()
+          return
+        }
+      } else {
+        await skipStep(matter.matterEntityId, stage.key)
+      }
       await onChanged()
       onClose()
     } catch (e) {
@@ -761,6 +778,7 @@ export function ClientReviewStep({
         />
       )}
       {err && <div className="alert alert-error">{err}</div>}
+      {acceptNote && <div className="alert alert-success">{acceptNote}</div>}
 
       <div className="runner-state">
         <div className="runner-state-row">
