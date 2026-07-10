@@ -66,6 +66,16 @@ The workflow MUST be linear — this is enforced by the validator and it will re
 
 A step that hands the client a document (`generate_document`, `review_send_document`) attaches it via the `documents[]` array, referencing an EXISTING firm template by `templateEntityId` from `get_workflow_context` — never an invented id, never a made-up document. (A service-bound template may instead be referenced by `docKind`.) This is why templates are authored before the workflow: there must be a real id to bind.
 
+## Step 5b: Declare billing and completion — every workflow states both
+
+The validator REJECTS a workflow that produces documents but declares no billing, and a workflow whose terminal stage is not a completion step. Ask the attorney and declare both:
+
+- **Billing** — ask "when does this service bill?" Two declarations (a service may carry both):
+  - *Per-document fees, accrued on approval* — the fee for each document accrues the moment the attorney approves it in the review queue. Set the service's per-document fees (`transitions.document_fees`, one amount per document kind) via the service's cost settings; the workflow itself needs no extra step.
+  - *An explicit invoice step* — add `approve_send_invoice` (and usually `await_payment`) to the graph where the invoice goes out.
+  A document-producing workflow with NEITHER is invalid — the matter would produce work nobody ever bills.
+- **Completion** — the terminal stage MUST be a `complete_matter` step. Completing the matter accrues the service's completion fee (if the service declares one) and archives the matter (archived, never deleted).
+
 ## Step 6: Propose — never write live
 
 When the graph is complete and valid, deliver it by calling `propose_workflow`. This does NOT save anything: it captures the proposal as an approval card. The graph is validated (structure + closed action-kind vocab + linear-only + referenced template ids must exist); if validation fails it returns the errors — fix them and propose again. Include a one-paragraph `summary` (the WHY — what this workflow does and what changed) and your honest `confidence` (0–1, never 1.0); both are recorded as the reasoning trace when the attorney approves. The live version is written ONLY when the attorney approves the card.

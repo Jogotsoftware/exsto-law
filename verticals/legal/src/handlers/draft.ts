@@ -52,6 +52,12 @@ interface PersistDraftArgs {
   sourceRef: string
   confidence?: number
   versionMetadata?: Record<string, unknown>
+  // BACKHALF-BLOCKS-1 (WP4) — regenerate SUPERSEDES: when set, the new draft is
+  // written as version n+1 on THIS existing document_draft entity (prior versions
+  // retained, append-only — the document.edit pattern) instead of a brand-new
+  // entity at v1. No matter_status flip either: a deliberate regenerate must not
+  // yank the matter's stage mirror backwards (the workflow instance is authority).
+  supersedesDocumentEntityId?: string | null
 }
 
 async function persistDraftDocument(
@@ -72,41 +78,82 @@ async function persistDraftDocument(
     body: p.documentMarkdown,
   })
 
-  const docKindId = await lookupKindId(
-    client,
-    'entity_kind_definition',
-    ctx.tenantId,
-    'document_draft',
-  )
-  const draftEntityId = await insertEntity(
-    client,
-    ctx.tenantId,
-    actionId,
-    docKindId,
-    `${p.documentKind} draft`,
-    { document_kind: p.documentKind, jurisdiction: p.jurisdiction },
-  )
+  const supersedes = (p.supersedesDocumentEntityId ?? '').trim() || null
+  let draftEntityId: string
+  let versionNumber = 1
 
-  const draftAttrs: Array<{ kind: string; value: unknown; confidence?: number }> = [
-    { kind: 'document_kind', value: p.documentKind },
-    { kind: 'draft_status', value: 'pending_review' },
-    { kind: 'document_jurisdiction', value: p.jurisdiction },
-    { kind: 'generation_mode', value: p.generationMode },
-  ]
-  if (p.confidence != null)
-    draftAttrs.push({ kind: 'drafting_confidence', value: p.confidence, confidence: p.confidence })
-  for (const a of draftAttrs) {
-    const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)
+  if (supersedes) {
+    // Regenerate (WP4): reuse the EXISTING draft entity — new version n+1, prior
+    // versions retained. The entity + draft_of relationship already exist.
+    const maxRes = await client.query<{ max: number | null }>(
+      `SELECT max(version_number) AS max FROM document_version
+       WHERE tenant_id = $1 AND document_entity_id = $2`,
+      [ctx.tenantId, supersedes],
+    )
+    if (maxRes.rows[0]?.max == null) {
+      throw new Error(`supersedes_document_entity_id has no versions: ${supersedes}`)
+    }
+    draftEntityId = supersedes
+    versionNumber = (maxRes.rows[0].max ?? 0) + 1
+    // The draft goes back to pending_review (append-only supersession) — a
+    // regenerated document always re-enters the attorney review queue.
+    const statusAkId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'draft_status',
+    )
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
       entityId: draftEntityId,
-      attributeKindId: akId,
-      value: a.value,
-      confidence: a.confidence ?? 1.0,
+      attributeKindId: statusAkId,
+      value: 'pending_review',
+      confidence: 1.0,
       sourceType: p.sourceType,
       sourceRef: p.sourceRef,
     })
+  } else {
+    const docKindId = await lookupKindId(
+      client,
+      'entity_kind_definition',
+      ctx.tenantId,
+      'document_draft',
+    )
+    draftEntityId = await insertEntity(
+      client,
+      ctx.tenantId,
+      actionId,
+      docKindId,
+      `${p.documentKind} draft`,
+      { document_kind: p.documentKind, jurisdiction: p.jurisdiction },
+    )
+
+    const draftAttrs: Array<{ kind: string; value: unknown; confidence?: number }> = [
+      { kind: 'document_kind', value: p.documentKind },
+      { kind: 'draft_status', value: 'pending_review' },
+      { kind: 'document_jurisdiction', value: p.jurisdiction },
+      { kind: 'generation_mode', value: p.generationMode },
+    ]
+    if (p.confidence != null)
+      draftAttrs.push({
+        kind: 'drafting_confidence',
+        value: p.confidence,
+        confidence: p.confidence,
+      })
+    for (const a of draftAttrs) {
+      const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)
+      await insertAttribute(client, {
+        tenantId: ctx.tenantId,
+        actionId,
+        entityId: draftEntityId,
+        attributeKindId: akId,
+        value: a.value,
+        confidence: a.confidence ?? 1.0,
+        sourceType: p.sourceType,
+        sourceRef: p.sourceRef,
+      })
+    }
   }
 
   const versionId = await insertDocumentVersion(client, {
@@ -114,26 +161,32 @@ async function persistDraftDocument(
     actionId,
     documentEntityId: draftEntityId,
     contentBlobId,
-    versionNumber: 1,
+    versionNumber,
     status: 'pending_review',
     reasoningTraceId: p.reasoningTraceId,
-    metadata: { generation_mode: p.generationMode, ...(p.versionMetadata ?? {}) },
+    metadata: {
+      generation_mode: p.generationMode,
+      ...(supersedes ? { regenerated: true } : {}),
+      ...(p.versionMetadata ?? {}),
+    },
   })
 
-  const draftOfId = await lookupKindId(
-    client,
-    'relationship_kind_definition',
-    ctx.tenantId,
-    'draft_of',
-  )
-  await insertRelationship(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    sourceEntityId: draftEntityId,
-    targetEntityId: p.matterEntityId,
-    relationshipKindId: draftOfId,
-    properties: { document_kind: p.documentKind },
-  })
+  if (!supersedes) {
+    const draftOfId = await lookupKindId(
+      client,
+      'relationship_kind_definition',
+      ctx.tenantId,
+      'draft_of',
+    )
+    await insertRelationship(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      sourceEntityId: draftEntityId,
+      targetEntityId: p.matterEntityId,
+      relationshipKindId: draftOfId,
+      properties: { document_kind: p.documentKind },
+    })
+  }
 
   // An AI review MEMO is an internal attorney artifact, NOT a client
   // deliverable. It must not touch the client-visible matter workflow: no
@@ -143,14 +196,17 @@ async function persistDraftDocument(
   // the separate document.review.completed event runDocumentReview records.
   const isReviewMemo = p.generationMode === 'ai_review'
 
-  // Matter moves to in_review once a draft lands (unless already terminal).
+  // Matter moves to in_review once a draft lands (unless already terminal). A
+  // REGENERATE (supersede) never flips the status — the workflow instance is the
+  // stage authority and the matter stays where it is; the new version just re-enters
+  // the review queue.
   const currentStatus = await getLatestAttributeValue<string>(
     client,
     ctx.tenantId,
     p.matterEntityId,
     'matter_status',
   )
-  if (!isReviewMemo && currentStatus !== 'approved' && currentStatus !== 'closed') {
+  if (!isReviewMemo && !supersedes && currentStatus !== 'approved' && currentStatus !== 'closed') {
     const statusKindId = await lookupKindId(
       client,
       'attribute_kind_definition',
@@ -181,13 +237,14 @@ async function persistDraftDocument(
         document_version_id: versionId,
         generation_mode: p.generationMode,
         model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
+        ...(supersedes ? { regenerated: true, version_number: versionNumber } : {}),
       },
       sourceType: p.sourceType,
       sourceRef: p.sourceRef,
     })
   }
 
-  return { draftEntityId, contentBlobId, documentVersionId: versionId, versionNumber: 1 }
+  return { draftEntityId, contentBlobId, documentVersionId: versionId, versionNumber }
 }
 
 interface DraftGeneratePayload {
@@ -211,6 +268,8 @@ interface DraftGeneratePayload {
   review_source_text?: string | null
   review_redline_text?: string | null
   redline_reasoning_trace_id?: string | null
+  // WP4 regenerate: write this draft as version n+1 on the named existing entity.
+  supersedes_document_entity_id?: string | null
 }
 
 registerActionHandler('draft.generate', async (ctx, client, payload, actionId) => {
@@ -256,6 +315,7 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     sourceRef: p.model_identity,
     confidence: p.confidence,
     versionMetadata,
+    supersedesDocumentEntityId: p.supersedes_document_entity_id ?? null,
   })
 })
 
@@ -268,6 +328,8 @@ interface DraftMergePayload {
   template_id?: string
   // Slots left unfilled by the deterministic merge — surfaced to the attorney.
   missing_fields?: string[]
+  // WP4 regenerate: write this draft as version n+1 on the named existing entity.
+  supersedes_document_entity_id?: string | null
 }
 
 registerActionHandler('draft.merge', async (ctx, client, payload, actionId) => {
@@ -285,6 +347,7 @@ registerActionHandler('draft.merge', async (ctx, client, payload, actionId) => {
       template_id: p.template_id ?? null,
       missing_fields: p.missing_fields ?? [],
     },
+    supersedesDocumentEntityId: p.supersedes_document_entity_id ?? null,
   })
 })
 
@@ -569,7 +632,12 @@ async function accrueDocumentFeeOnApproval(
     args.matterEntityId,
     'service_key',
   )
-  if (!serviceKey) return
+  if (!serviceKey) {
+    // A matter with no service_key cannot resolve a billing declaration. Never
+    // silently pretend a fee accrued — record WHY on the matter timeline.
+    await recordNoFeeObservation(client, args, documentKind, 'no_service_key')
+    return
+  }
 
   const feeRes = await client.query<{
     document_fees: Record<string, string> | null
@@ -582,7 +650,15 @@ async function accrueDocumentFeeOnApproval(
   )
   const fees = feeRes.rows[0]?.document_fees ?? null
   const amount = fees && typeof fees === 'object' ? fees[documentKind] : null
-  if (!amount || !String(amount).trim()) return
+  if (!amount || !String(amount).trim()) {
+    // The service declares no per-document fee for THIS document kind (WP1: the
+    // modal promises accrual — if there's nothing to accrue we say so, we never
+    // pretend). Records an observation the timeline/billing can surface so a firm
+    // sees "approved, no fee declared for X" rather than a silent gap. WP2 makes
+    // the service DECLARE its fees so this branch stops firing where it shouldn't.
+    await recordNoFeeObservation(client, args, documentKind, 'no_fee_declared', serviceKey)
+    return
+  }
 
   await insertEvent(client, {
     tenantId: args.tenantId,
@@ -597,6 +673,40 @@ async function accrueDocumentFeeOnApproval(
       document_kind: documentKind,
       amount: String(amount),
       description: `Document fee — ${documentKind.replace(/_/g, ' ')}`,
+    },
+  })
+}
+
+// Record — never silently swallow — the case where an approved document accrues no
+// fee (WP1). An observation on the matter timeline, keyed so a query can tell
+// "approved but nothing to bill" apart from a bug. NOT a billing ledger entry, so it
+// never appears in the unbilled feed or an invoice.
+async function recordNoFeeObservation(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    matterEntityId: string
+    documentEntityId: string
+  },
+  documentKind: string,
+  reason: 'no_service_key' | 'no_fee_declared',
+  serviceKey?: string,
+): Promise<void> {
+  await insertEvent(client, {
+    tenantId: args.tenantId,
+    actionId: args.actionId,
+    eventKindName: 'observation',
+    primaryEntityId: args.matterEntityId,
+    secondaryEntityIds: [args.documentEntityId],
+    sourceType: 'system',
+    sourceRef: args.actorId,
+    data: {
+      kind: 'document_fee_not_declared',
+      reason,
+      document_kind: documentKind,
+      service_key: serviceKey ?? null,
     },
   })
 }

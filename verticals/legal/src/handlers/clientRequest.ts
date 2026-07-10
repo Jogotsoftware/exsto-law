@@ -8,6 +8,7 @@ import {
   lookupKindId,
   getLatestAttributeValue,
 } from './common.js'
+import { dispatchClientDelivery } from './clientDelivery.js'
 
 const REQUEST_TYPE_LABEL: Record<string, string> = {
   meeting: 'Meeting',
@@ -317,12 +318,78 @@ async function getStatus(
   return res.rows[0]?.value ?? null
 }
 
-registerTransition(
-  'legal.client_request.accept',
-  'accepted',
-  'client_request.accepted',
-  new Set(['requested']),
-)
+// BACKHALF-BLOCKS-1 (WP3) — legal.client_request.accept now has TWO payload forms:
+//   • { request_id }        — the original client_request-entity transition (the
+//     attorney accepts a portal ask). Unchanged.
+//   • { matter_entity_id }  — the CLIENT accepts the current client-gated stage
+//     (e.g. "Accept the draft" on the portal's client-review step). This is the
+//     dormant path wired live: the accept IS the client's delivery, so it advances
+//     the matter's client gate via the same dispatchClientDelivery every other
+//     client action (upload / reply / booking) uses — the edge's `via` must name
+//     'legal.client_request.accept' (now in the client gate vocabulary).
+registerActionHandler('legal.client_request.accept', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as {
+    request_id?: string
+    matter_entity_id?: string
+    client_contact_id?: string
+    note?: string
+  }
+  const requestId = (p.request_id ?? '').trim()
+  const matterEntityId = (p.matter_entity_id ?? '').trim()
+
+  if (requestId) {
+    // Original form: move the client_request entity requested → accepted.
+    const current = await getStatus(client, ctx.tenantId, requestId)
+    if (current === null) throw new Error('Request not found.')
+    if (current !== 'requested') {
+      throw new Error(`A ${current} request cannot be moved to accepted.`)
+    }
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: requestId,
+      kind: 'request_status',
+      value: 'accepted',
+    })
+    await insertEvent(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      eventKindName: 'client_request.accepted',
+      primaryEntityId: requestId,
+      secondaryEntityIds: [],
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+    return { requestId, status: 'accepted' }
+  }
+
+  if (!matterEntityId) throw new Error('request_id or matter_entity_id is required.')
+
+  // Matter form: the client's acceptance is recorded on the matter and advances
+  // its client gate (no-op when the current stage has no matching client edge —
+  // same idempotent contract as every dispatchClientDelivery caller).
+  const clientRef = (p.client_contact_id ?? '').trim()
+  await insertEvent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    eventKindName: 'client_request.accepted',
+    primaryEntityId: matterEntityId,
+    secondaryEntityIds: [],
+    sourceType: 'human',
+    sourceRef: clientRef ? `client_contact:${clientRef}` : ctx.actorId,
+    data: { accepted: 'client_review', note: (p.note ?? '').trim() || null },
+  })
+  const advanced = await dispatchClientDelivery(
+    client,
+    ctx,
+    matterEntityId,
+    'legal.client_request.accept',
+    actionId,
+    clientRef ? `client_contact:${clientRef}` : null,
+  )
+  return { matterEntityId, accepted: true, advancedTo: advanced?.to ?? null }
+})
 registerTransition(
   'legal.client_request.start',
   'in_progress',

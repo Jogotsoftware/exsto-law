@@ -1,9 +1,19 @@
 import { submitAction, type ActionContext, type ActionResult } from '@exsto/substrate'
+import { getDraftVersion } from '../queries/drafts.js'
+import { sendDraftLinkEmail } from './email.js'
 
 export interface DraftReviewInput {
   documentVersionId: string
   reviewNotes?: string
 }
+
+// Public base for the client-facing draft link (`/d/<versionId>`), server side —
+// mirrors clientRequests.ts. The browser builds the same URL via shareUrlFor().
+const BASE_URL = (
+  process.env.NEXT_PUBLIC_BASE_URL ??
+  process.env.URL ??
+  'https://exstolaw.netlify.app'
+).replace(/\/$/, '')
 
 export async function approveDraft(
   ctx: ActionContext,
@@ -17,6 +27,39 @@ export async function approveDraft(
       review_notes: input.reviewNotes,
     },
   })
+}
+
+export interface ApproveDocumentResult {
+  approved: boolean
+  sent: boolean
+}
+
+// Contract W — approve a document version and (optionally) send the client the draft
+// link in ONE call. Approval flows through draft.approve (which accrues the document
+// fee — WP1 — and advances the workflow). When `send` is set, the client gets the
+// Pacheco Law email with the public `/d/<versionId>` link, recorded through the
+// existing mail path. `send` failures do NOT roll back the approval (the fee/advance
+// already committed); they surface so the caller can retry the send alone.
+export async function approveDocument(
+  ctx: ActionContext,
+  input: { documentVersionId: string; send: boolean; reviewNotes?: string },
+): Promise<ApproveDocumentResult> {
+  if (!input.documentVersionId?.trim()) throw new Error('documentVersionId is required.')
+  await approveDraft(ctx, {
+    documentVersionId: input.documentVersionId,
+    reviewNotes: input.reviewNotes,
+  })
+  if (!input.send) return { approved: true, sent: false }
+
+  const draft = await getDraftVersion(ctx, input.documentVersionId)
+  if (!draft)
+    throw new Error(`Approved, but draft version not found to send: ${input.documentVersionId}`)
+  await sendDraftLinkEmail(ctx, {
+    matterEntityId: draft.matterEntityId,
+    documentVersionId: input.documentVersionId,
+    shareUrl: `${BASE_URL}/d/${input.documentVersionId}`,
+  })
+  return { approved: true, sent: true }
 }
 
 export async function requestDraftRevision(

@@ -47,6 +47,10 @@ export interface GenerateDraftInput {
   // docKind) convention. When set, it supersedes the config/repo template lookup for
   // both generation modes; everything downstream (persist, trace, notify) is identical.
   templateOverride?: { templateText: string; templateId: string }
+  // BACKHALF-BLOCKS-1 (WP4) — regenerate SUPERSEDES: write the produced draft as
+  // version n+1 on this existing document_draft entity (prior versions retained)
+  // instead of a fresh entity at v1. Set by the regenerate runtime only.
+  supersedesDocumentEntityId?: string
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -213,6 +217,7 @@ export async function runDraftGeneration(
         jurisdiction: 'NC',
         template_id: templateId,
         missing_fields: missingFields,
+        supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
       },
     })
 
@@ -312,6 +317,7 @@ export async function runDraftGeneration(
       reasoning_trace_id: reasoningTraceId,
       jurisdiction: 'NC',
       confidence: clampConfidence(result.reasoningTrace.confidence),
+      supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
       // Token usage (snake_case, same shape recordAssistantTurn writes on
       // assistant.turn) so the AI usage & cost view counts drafting spend. Read
       // back by getAiUsageSummary; model is read from model_identity above.
