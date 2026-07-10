@@ -1,5 +1,8 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import type { DbClient } from '@exsto/shared'
 import { signBookingManageToken } from '../api/bookingManageToken.js'
+import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
+import { stageByKey, clientLabel } from '../lifecycle/resolve.js'
 
 // Client-portal READ projection. This is DELIBERATELY a separate, narrow surface
 // from queries/history.ts (getMatterHistory): that one exposes internal actions,
@@ -46,6 +49,55 @@ function statusLabel(statusKey: string): string {
   return STATUS_LABELS.get(statusKey) ?? 'In progress'
 }
 
+// PORTAL-1 (WP2): the composed workflow's CLIENT-SAFE stage label, never the
+// internal stage key. Resolves the matter's workflow instance and reads the
+// current stage's client_label (falling back to the stage label, then to the
+// STATUS_LABELS map, then to a generic 'In progress' — raw keys never leak).
+async function resolveClientStageLabel(
+  client: DbClient,
+  tenantId: string,
+  matterEntityId: string,
+  statusKey: string,
+): Promise<string> {
+  try {
+    const instance = await getWorkflowInstanceForMatter(client, tenantId, matterEntityId)
+    if (instance) {
+      let graph =
+        instance.statesOverride && instance.statesOverride.length > 0
+          ? instance.statesOverride
+          : []
+      if (graph.length === 0) {
+        const bound = await resolveBoundWorkflowById(client, tenantId, instance.workflowDefinitionId)
+        graph = bound?.graph ?? []
+      }
+      const stage = stageByKey(graph, instance.currentState)
+      if (stage) return clientLabel(stage)
+    }
+  } catch {
+    // fall through to the static map
+  }
+  return statusLabel(statusKey)
+}
+
+// The service's client-facing name: client_display_name when the column exists
+// (UI-BUILDER-FIX-1 adds it), else display_name — read via to_jsonb so this
+// works before AND after that migration lands.
+async function resolveServiceClientName(
+  client: DbClient,
+  tenantId: string,
+  serviceKey: string | null,
+): Promise<string | null> {
+  if (!serviceKey) return null
+  const res = await client.query<{ name: string | null }>(
+    `SELECT COALESCE(to_jsonb(wd) ->> 'client_display_name', wd.display_name) AS name
+     FROM workflow_definition wd
+     WHERE wd.tenant_id = $1 AND wd.kind_name = $2 AND wd.status = 'active'
+     ORDER BY wd.version DESC LIMIT 1`,
+    [tenantId, serviceKey],
+  )
+  return res.rows[0]?.name ?? null
+}
+
 export interface ClientMatterMilestone {
   key: string
   label: string
@@ -56,6 +108,8 @@ export interface ClientMatterTimeline {
   matterNumber: string
   statusKey: string
   statusLabel: string
+  /** The service's client-facing name (client_display_name → display_name). */
+  serviceLabel: string | null
   scheduledAt: string | null
   /** True when there's an upcoming, non-cancelled consultation to manage. */
   canManageEvent: boolean
@@ -69,6 +123,9 @@ export interface ClientMatterListItem {
   matterNumber: string
   statusKey: string
   statusLabel: string
+  serviceLabel: string | null
+  /** Archived history is shown, marked — not hidden. */
+  archived: boolean
 }
 
 // Client-safe timeline for ONE matter. Returns null if the matter doesn't exist
@@ -104,6 +161,20 @@ export async function getClientMatterTimeline(
       [ctx.tenantId, matterEntityId],
     )
     const statusKey = statusRes.rows[0]?.value ?? 'intake_submitted'
+    const stageLabel = await resolveClientStageLabel(client, ctx.tenantId, matterEntityId, statusKey)
+    const serviceKeyRes = await client.query<{ value: string }>(
+      `SELECT a.value #>> '{}' AS value
+       FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+       WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'service_key'
+       ORDER BY a.valid_from DESC LIMIT 1`,
+      [ctx.tenantId, matterEntityId],
+    )
+    const serviceLabel = await resolveServiceClientName(
+      client,
+      ctx.tenantId,
+      serviceKeyRes.rows[0]?.value ?? null,
+    )
 
     // Whitelisted milestones only. We filter to the allowlist in SQL (so the
     // internal kinds never even leave the DB) and label them in app code. No
@@ -151,7 +222,8 @@ export async function getClientMatterTimeline(
     return {
       matterNumber: base.name,
       statusKey,
-      statusLabel: statusLabel(statusKey),
+      statusLabel: stageLabel,
+      serviceLabel,
       scheduledAt: base.scheduled_at,
       canManageEvent: upcoming,
       manageUrl,
@@ -172,15 +244,23 @@ export async function listClientMatters(
     const res = await client.query<{
       matter_id: string
       matter_number: string
+      entity_status: string
       status: string | null
+      service_key: string | null
     }>(
-      `SELECT m.id AS matter_id, m.name AS matter_number,
+      `SELECT m.id AS matter_id, m.name AS matter_number, m.status AS entity_status,
               (SELECT a.value #>> '{}'
                  FROM attribute a
                  JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
                  WHERE a.tenant_id = $1 AND a.entity_id = m.id
                    AND akd.kind_name = 'matter_status'
-                 ORDER BY a.valid_from DESC LIMIT 1) AS status
+                 ORDER BY a.valid_from DESC LIMIT 1) AS status,
+              (SELECT a.value #>> '{}'
+                 FROM attribute a
+                 JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+                 WHERE a.tenant_id = $1 AND a.entity_id = m.id
+                   AND akd.kind_name = 'service_key'
+                 ORDER BY a.valid_from DESC LIMIT 1) AS service_key
        FROM relationship r
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
        JOIN entity m ON m.id = r.target_entity_id
@@ -190,15 +270,22 @@ export async function listClientMatters(
          AND rkd.kind_name = 'client_of'
          AND (r.valid_to IS NULL OR r.valid_to > now())
          AND mekd.kind_name = 'matter'
-         AND m.status = 'active'
-       ORDER BY m.created_at DESC`,
+         AND m.status IN ('active', 'archived')
+       ORDER BY (m.status = 'archived'), m.created_at DESC`,
       [ctx.tenantId, clientContactId],
     )
-    return res.rows.map((row) => ({
-      matterEntityId: row.matter_id,
-      matterNumber: row.matter_number,
-      statusKey: row.status ?? 'intake_submitted',
-      statusLabel: statusLabel(row.status ?? 'intake_submitted'),
-    }))
+    const items: ClientMatterListItem[] = []
+    for (const row of res.rows) {
+      const statusKey = row.status ?? 'intake_submitted'
+      items.push({
+        matterEntityId: row.matter_id,
+        matterNumber: row.matter_number,
+        statusKey,
+        statusLabel: await resolveClientStageLabel(client, ctx.tenantId, row.matter_id, statusKey),
+        serviceLabel: await resolveServiceClientName(client, ctx.tenantId, row.service_key),
+        archived: row.entity_status === 'archived',
+      })
+    }
+    return items
   })
 }

@@ -56,8 +56,15 @@ export async function POST(request: Request) {
   }
 
   const ctx: ActionContext = { tenantId: TENANT_ID, actorId: ACTOR_ID }
+  // Strip reserved identity keys — on this UNAUTHENTICATED route the body must
+  // never be able to impersonate a signed-in client or a verified attorney
+  // (the authed routes stamp these from their sessions).
+  const input: Record<string, unknown> = { ...(body.input ?? {}) }
+  delete input.clientContactId
+  delete input.clientIp
+  delete input.__attorneySession
   try {
-    const result = await tool.handler(ctx, body.input ?? {})
+    const result = await tool.handler(ctx, input)
     return NextResponse.json({ result })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

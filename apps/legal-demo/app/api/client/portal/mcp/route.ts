@@ -7,6 +7,7 @@ import { isClientPortalAuthedTool } from '@exsto/legal/mcp'
 import { isClientContactActive } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 import { readClientSessionFromCookieHeader } from '@/lib/clientSession'
+import { clientIpFrom } from '@/lib/rateLimit'
 
 export const runtime = 'nodejs'
 // RUNTIME-AUTORUN-2: a client delivery here (an upload/message that advances a gate) may
@@ -87,6 +88,9 @@ export async function POST(request: Request) {
   // is never trusted to assert who the client is or which matters they own.
   const input: Record<string, unknown> = { ...(body.input ?? {}) }
   input.clientContactId = clientContactId
+  // Requester IP for audit trails (e-sign open/sign) — from the request, never
+  // the body.
+  input.clientIp = clientIpFrom(request)
 
   // PER-MATTER AUTHORIZATION (critical): any tool input naming a matterEntityId
   // must reference a matter THIS client is client_of. A miss returns the SAME

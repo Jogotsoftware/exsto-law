@@ -25,6 +25,7 @@ interface Timeline {
   matterNumber: string
   statusKey: string
   statusLabel: string
+  serviceLabel?: string | null
   scheduledAt: string | null
   canManageEvent: boolean
   manageUrl: string | null
@@ -227,6 +228,7 @@ export default function ClientPortalPage() {
               </div>
             )}
 
+            {tab === 'matters' && <TodosStrip onOpenTab={setTab} />}
             {tab === 'matters' &&
               (!timeline ? (
                 <div className="loading-block" role="status">
@@ -237,7 +239,11 @@ export default function ClientPortalPage() {
                   {timeline.scheduledAt && <UpcomingEventCard timeline={timeline} />}
                   <section className="pdash-card">
                     <div className="pdash-card-head">
-                      <h2>Matter {timeline.matterNumber}</h2>
+                      <h2>
+                        {timeline.serviceLabel
+                          ? `${timeline.serviceLabel} · ${timeline.matterNumber}`
+                          : `Matter ${timeline.matterNumber}`}
+                      </h2>
                       <span className="pdash-badge">{timeline.statusLabel}</span>
                     </div>
                     <h3 className="pdash-subhead">Timeline</h3>
@@ -518,8 +524,24 @@ function formatMoney(amount: string, currency: string): string {
 
 // All of the client's issued invoices, across matters. View-only for now; the
 // detail/pay page (/portal/pay/<number>) is where online payment will land.
+interface BillingSummary {
+  matters: Array<{
+    matterEntityId: string
+    matterNumber: string
+    invoices: ClientInvoice[]
+    accrued: Array<{ kind: string; date: string | null; description: string; amount: string }>
+    accruedTotal: string
+    dueTotal: string
+    paidTotal: string
+    runningTotal: string
+  }>
+  currency: string
+  totals: { due: string; paid: string; accrued: string; running: string }
+}
+
 function InvoicesPanel() {
   const [invoices, setInvoices] = useState<ClientInvoice[] | null>(null)
+  const [billing, setBilling] = useState<BillingSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -530,6 +552,11 @@ function InvoicesPanel() {
         setError(e instanceof Error ? e.message : String(e))
         setInvoices([])
       })
+    // Accrued not-yet-invoiced fees + running total — same computed source as
+    // the firm's own billing panel. Best-effort: the invoices list stands alone.
+    callClientPortalMcp<{ billing: BillingSummary }>({ toolName: 'legal.client.billing_summary' })
+      .then((r) => setBilling(r.billing))
+      .catch(() => setBilling(null))
   }, [])
 
   return (
@@ -581,6 +608,93 @@ function InvoicesPanel() {
           ))}
         </ul>
       )}
+
+      {billing && (billing.matters.some((m) => m.accrued.length > 0) || Number(billing.totals.running) > 0) && (
+        <>
+          <h3 className="pdash-subhead">Accruing fees (not yet invoiced)</h3>
+          {billing.matters.filter((m) => m.accrued.length > 0).length === 0 ? (
+            <p className="text-muted">No fees accruing right now.</p>
+          ) : (
+            billing.matters
+              .filter((m) => m.accrued.length > 0)
+              .map((m) => (
+                <div key={m.matterEntityId} style={{ marginBottom: 'var(--space-3)' }}>
+                  <div className="pdash-doc-title">Matter {m.matterNumber}</div>
+                  <ul className="pdash-docs">
+                    {m.accrued.map((e, i) => (
+                      <li key={i} className="pdash-doc">
+                        <div>
+                          <div>{e.description}</div>
+                          {e.date && <span className="text-sm text-muted">{formatDate(e.date)}</span>}
+                        </div>
+                        <strong>{formatMoney(e.amount, billing.currency)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="text-sm" style={{ textAlign: 'right' }}>
+                    Accrued: <strong>{formatMoney(m.accruedTotal, billing.currency)}</strong>
+                    {' · '}Running total (open + accrued):{' '}
+                    <strong>{formatMoney(m.runningTotal, billing.currency)}</strong>
+                  </div>
+                </div>
+              ))
+          )}
+          <div className="pdash-doc-title" style={{ textAlign: 'right', marginTop: 'var(--space-2)' }}>
+            Total open {formatMoney(billing.totals.due, billing.currency)} · accrued{' '}
+            {formatMoney(billing.totals.accrued, billing.currency)} · running{' '}
+            <strong>{formatMoney(billing.totals.running, billing.currency)}</strong>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+// PORTAL-1 (WP2) — Things to do: sign / pay / materials, one strip at the top.
+function TodosStrip({ onOpenTab }: { onOpenTab: (tab: Tab) => void }) {
+  const [todos, setTodos] = useState<Array<{
+    kind: 'sign' | 'pay' | 'materials'
+    label: string
+    ref: string
+  }> | null>(null)
+
+  useEffect(() => {
+    callClientPortalMcp<{ todos: Array<{ kind: 'sign' | 'pay' | 'materials'; label: string; ref: string }> }>(
+      { toolName: 'legal.client.todos' },
+    )
+      .then((r) => setTodos(r.todos))
+      .catch(() => setTodos(null))
+  }, [])
+
+  if (!todos || todos.length === 0) return null
+  return (
+    <section className="pdash-card" style={{ marginBottom: 'var(--space-3)' }}>
+      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+        Things to do
+      </h3>
+      <ul className="pdash-docs">
+        {todos.map((todo, i) => (
+          <li key={i} className="pdash-doc">
+            <div className="pdash-doc-title">{todo.label}</div>
+            {todo.kind === 'sign' ? (
+              <a className="pdash-btn pdash-btn-sm" href={`/portal/sign/${todo.ref}`}>
+                Sign
+              </a>
+            ) : todo.kind === 'pay' ? (
+              <a
+                className="pdash-btn pdash-btn-sm"
+                href={`/portal/pay/${encodeURIComponent(todo.ref)}`}
+              >
+                Pay
+              </a>
+            ) : (
+              <button className="pdash-btn pdash-btn-sm" onClick={() => onOpenTab('documents')}>
+                Respond
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

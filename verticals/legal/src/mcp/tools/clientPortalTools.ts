@@ -30,6 +30,10 @@ import {
   getClientPaymentMethods,
   reportInvoicePayment,
   type ManualPaymentMethods,
+  getClientBillingSummary,
+  listClientTodos,
+  type ClientBillingSummary,
+  type ClientTodo,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -329,6 +333,31 @@ const reportPaymentTool: Tool<ReportPaymentInput, { eventId: string }> = {
     }),
 }
 
+// PORTAL-1 (WP2) — Billing: invoices + accruing not-yet-invoiced fees + running
+// total, computed from the SAME source as the attorney's billing panel.
+const billingSummaryTool: Tool<{ clientContactId: string }, { billing: ClientBillingSummary }> = {
+  name: 'legal.client.billing_summary',
+  description:
+    "Per-matter billing for the signed-in client: invoices (open + paid), accrued not-yet-invoiced fees (recorded ledger events only — never estimates), and a running total.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    billing: await getClientBillingSummary(ctx, input.clientContactId),
+  }),
+}
+
+// PORTAL-1 (WP2) — Things to do: sign / pay / materials-requested in one list.
+const todosTool: Tool<{ clientContactId: string }, { todos: ClientTodo[] }> = {
+  name: 'legal.client.todos',
+  description:
+    "Everything waiting on the signed-in client: documents to sign, invoices to pay, materials the firm requested.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    todos: await listClientTodos(ctx, input.clientContactId),
+  }),
+}
+
+registerTool(billingSummaryTool)
+registerTool(todosTool)
 registerTool(matterTimelineTool)
 registerTool(mattersTool)
 registerTool(threadGetTool)

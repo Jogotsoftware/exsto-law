@@ -222,6 +222,7 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
 interface EsignOpenPayload {
   request_entity_id: string
   envelope_entity_id: string
+  signer_ip?: string | null
 }
 
 registerActionHandler('esign.open', async (ctx, client, payload, actionId) => {
@@ -241,6 +242,9 @@ registerActionHandler('esign.open', async (ctx, client, payload, actionId) => {
       eventKindName: 'esign.opened',
       primaryEntityId: p.envelope_entity_id,
       secondaryEntityIds: [p.request_entity_id],
+      // The open timestamp is this event's occurred_at; signer_ip completes the
+      // audit trail (PORTAL-1 WP2) — recorded on BOTH doors (portal + link).
+      data: { opened_at: new Date().toISOString(), signer_ip: p.signer_ip ?? null },
       sourceType: 'system',
       sourceRef,
     })
@@ -256,6 +260,7 @@ interface EsignSignPayload {
   consent_text: string
   field_values?: Record<string, string> | null
   signed_at?: string | null
+  signer_ip?: string | null
 }
 
 registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
@@ -296,7 +301,9 @@ registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
     eventKindName: 'esign.signed',
     primaryEntityId: p.envelope_entity_id,
     secondaryEntityIds: [p.request_entity_id],
-    data: { signature_name: p.signature_name, signed_at: signedAt },
+    // signer_ip completes the audit trail (PORTAL-1 WP2): delivery address =
+    // signer_email attr, open = esign.opened, sign = signed_at, IP = here.
+    data: { signature_name: p.signature_name, signed_at: signedAt, signer_ip: p.signer_ip ?? null },
     sourceType: 'human',
     sourceRef,
   })
@@ -376,6 +383,7 @@ interface EsignDeclinePayload {
   request_entity_id: string
   envelope_entity_id: string
   reason?: string | null
+  signer_ip?: string | null
 }
 
 registerActionHandler('esign.decline', async (ctx, client, payload, actionId) => {
@@ -397,7 +405,7 @@ registerActionHandler('esign.decline', async (ctx, client, payload, actionId) =>
     eventKindName: 'esign.declined',
     primaryEntityId: p.envelope_entity_id,
     secondaryEntityIds: [p.request_entity_id],
-    data: { reason: p.reason ?? null },
+    data: { reason: p.reason ?? null, signer_ip: p.signer_ip ?? null },
     sourceType: 'human',
     sourceRef,
   })

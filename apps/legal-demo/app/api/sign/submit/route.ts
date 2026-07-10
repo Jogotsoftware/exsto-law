@@ -38,6 +38,7 @@ export async function POST(request: Request) {
       signatureData,
       consent,
       fieldValues,
+      signerIp: clientIpFrom(request),
     })
     return NextResponse.json(result)
   } catch (err) {

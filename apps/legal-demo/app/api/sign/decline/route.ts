@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   const reason = typeof body?.reason === 'string' ? body.reason : undefined
 
   try {
-    const result = await declineSignature({ token, reason })
+    const result = await declineSignature({ token, reason, signerIp: clientIpFrom(request) })
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json(
