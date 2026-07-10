@@ -87,6 +87,7 @@ const CAPABILITY_HANDLERS: Record<string, CapabilityHandler> = {
   'legal.capability.document_generation.run': runDocumentGenerationCapability,
   'legal.capability.ai_document_review.run': runAiDocumentReviewCapability,
   'legal.capability.request_client_materials.run': runRequestClientMaterialsCapability,
+  'legal.capability.esignature.run': runEsignatureCapability,
 }
 
 export function isHandlerImplemented(handlerKey: string | undefined): boolean {
@@ -468,6 +469,74 @@ async function runAiDocumentReviewCapability(
       },
     ],
     summary: `AI review memo produced for "${doc.originalFilename}".`,
+  }
+}
+
+// ── Real handler: e-signature (ESIGN-BLOCK-1 WP2 — Session-5 native engine reuse) ──
+// Sends the matter's signable document for signature through the EXISTING
+// provider-agnostic e-sign path (api/esign.sendForSignature) — the same envelope,
+// signature_request, sign-by-link/portal delivery, and esign.* action kinds the
+// attorney's manual "Send for signature" uses. NOT a second adapter, NOT a second
+// webhook: envelope completion already fires esign.completed (handlers/esign.ts)
+// and dispatchLifecycleEvent already advances any matter whose stage waits ON
+// 'esign.completed' — so this handler only SENDS and PARKS. The stage's gate is
+// `system` (from the registry): invokeCapabilityForMatter finds no automatic edge,
+// the matter waits, and the signature completion is what advances it.
+//
+// The signable document = the latest APPROVED document version on the matter —
+// nothing unapproved ever goes out for signature (the review queue is the human
+// gate). Optional capability_config.document_kind pins WHICH document when a
+// matter produces several. No approved document → a recorded, honest park
+// (CapabilityInputMissingError), never a fake envelope.
+//
+// No-simulate: sendForSignature itself fails hard when the native engine cannot
+// dispatch (e.g. ESIGN_SIGNING_SECRET/OAUTH_STATE_SECRET absent → link tokens
+// cannot be signed; no client email on the matter). The runtime's catch records
+// capability_invoke_failed and the matter stays parked + re-invocable.
+async function runEsignatureCapability(
+  h: CapabilityHandlerContext,
+): Promise<CapabilityHandlerResult> {
+  const wantedKind = String((h.config.document_kind as string | undefined) ?? '').trim()
+
+  const { listMatterDraftVersions } = await import('../queries/drafts.js')
+  const versions = await listMatterDraftVersions(h.agentCtx, h.matterEntityId)
+  const approved = versions
+    .filter((v) => v.status === 'approved')
+    .filter((v) => !wantedKind || v.documentKind === wantedKind)
+    .sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : -1))
+  const doc = approved[0]
+  if (!doc) {
+    throw new CapabilityInputMissingError(
+      wantedKind
+        ? `Cannot send for signature — no APPROVED "${wantedKind}" document version on this matter yet (approve it in the review queue first).`
+        : 'Cannot send for signature — the matter has no approved document version yet (approve the draft in the review queue first).',
+    )
+  }
+
+  // Send through the ONE existing e-sign path (native provider by default). Signers
+  // default to the matter's client contact — the signer_roles declaration on the
+  // template steers composition (WP3); delivery beyond the client (witness/notary)
+  // is the attorney's prepare-UI call, not something this step invents.
+  const { sendForSignature } = await import('./esign.js')
+  const sent = await sendForSignature(h.agentCtx, { documentVersionId: doc.documentVersionId })
+  if (!sent.dispatched) {
+    // An undispatched envelope (external provider not connected) is a recorded
+    // pending_dispatch, not a sent signature request — surface it as the honest
+    // failure so the matter parks visibly instead of pretending it went out.
+    throw new CapabilityInputMissingError(
+      `E-sign envelope ${sent.envelopeId} was recorded but NOT dispatched (${sent.activation ?? 'provider not connected'}) — the matter stays parked until the provider is configured and the step is re-run.`,
+    )
+  }
+
+  return {
+    outputs: [
+      {
+        entityKind: 'signature_envelope',
+        entityId: sent.envelopeId,
+        note: `"${doc.documentKind}" v${doc.versionNumber} sent for signature (${sent.provider}, ${sent.signerCount} signer${sent.signerCount === 1 ? '' : 's'})`,
+      },
+    ],
+    summary: `Sent "${doc.documentKind}" for signature — matter waits at the system gate for esign.completed.`,
   }
 }
 

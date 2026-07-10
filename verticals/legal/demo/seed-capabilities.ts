@@ -85,9 +85,9 @@ const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
       name: 'Native e-signature',
       category: 'documents',
       purpose:
-        'Send a document for signature by link (DocuSign-style fields, signer order, portal + link delivery, status tracking) — no external service.',
+        'Send a document for signature by link (DocuSign-style fields, signer order, portal + link delivery, status tracking) — no external service. As a workflow step: sends the preceding step’s approved document and parks the matter at the system gate until every signer finishes (esign.completed).',
       when_to_use:
-        'Add a signature step to a workflow when a document must be signed (engagement letters, agreements).',
+        'Compose an e-signature step ONLY immediately after a step that produces a document whose template declares signature.required — never on unsigned documents, never free-floating. Gate: system, advancing on esign.completed.',
       backed_by: ['e-sign envelope', 'signature_tasks', 'sign-by-link route'],
     },
   },
@@ -276,9 +276,9 @@ const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
 // ADR 0046 — the EXECUTABLE CONTRACT per capability (WP1). Merged onto each spec at
 // seed time: every capability declares whether it is step_invocable, and each
 // invocable one carries its handler_key, inputs (+ who provides each), outputs, gate,
-// and config_schema. Only the two WP3 handlers are REAL; a contracted capability
-// whose handler is not yet in the runtime registry (e.g. esignature) raises a clear
-// "not yet executable" error when invoked — never a silent no-op or simulated output.
+// and config_schema. A contracted capability whose handler is not yet in the runtime
+// registry raises a clear "not yet executable" error when invoked — never a silent
+// no-op or simulated output. (esignature joined the REAL handlers in ESIGN-BLOCK-1.)
 // The full T/F classification + one-line rationale lives in the decision log.
 const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>> = {
   // CAPABILITY-UNIFY-1 (WP1) — document generation is the first fully-migrated LEGO
@@ -421,9 +421,12 @@ const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>
       },
     },
   },
-  // Contracted but NOT yet wired to a runtime handler — sending a document for
-  // signature as a workflow step. Invoking it raises the "not yet executable" error
-  // (the honest gap, never a fake success).
+  // ESIGN-BLOCK-1 (WP2) — WIRED: sends the matter's latest APPROVED document version
+  // for signature through the existing native e-sign engine (api/esign.sendForSignature),
+  // then PARKS at the system gate; envelope completion fires esign.completed, which
+  // advances the stage (handlers/esign.ts → dispatchLifecycleEvent). Composition rule
+  // (WP3, validator-enforced): an esignature step follows ONLY a document-producing
+  // step whose bound template declares signature.required.
   esignature: {
     step_invocable: true,
     handler_key: 'legal.capability.esignature.run',
@@ -433,12 +436,26 @@ const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>
         provided_by: 'system',
         source: 'prior_step_output',
         required: true,
-        description: 'the approved document to send for signature',
+        description:
+          'the approved document to send for signature — the latest approved version produced by the immediately preceding drafting step (whose template must declare signature.required)',
       },
     ],
-    outputs: [{ entity_kind: 'signature_task', description: 'a sign-by-link e-sign envelope' }],
+    outputs: [
+      {
+        entity_kind: 'signature_envelope',
+        description:
+          'a real e-sign envelope (sign-by-link / portal); the matter waits at the system gate and advances on esign.completed',
+      },
+    ],
     default_gate: 'system',
-    config_schema: {},
+    config_schema: {
+      document_kind: {
+        type: 'string',
+        required: false,
+        description:
+          'Optional: which document kind to send when the matter produces several (defaults to the latest approved document).',
+      },
+    },
   },
 }
 

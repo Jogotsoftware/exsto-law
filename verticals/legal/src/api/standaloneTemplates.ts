@@ -7,6 +7,7 @@ import {
   getStandaloneTemplate,
   type StandaloneTemplate,
   type StandaloneTemplateCategory,
+  type TemplateSignature,
   type TemplateVariables,
 } from '../queries/templates.js'
 
@@ -20,6 +21,9 @@ export interface CreateTemplateInput {
   body: string
   docKind?: string | null
   variables?: TemplateVariables
+  // ESIGN-BLOCK-1 (WP1) — does the finished document get signed, and by whom?
+  // Omitted = unsigned (the read default).
+  signature?: TemplateSignature
 }
 
 export async function createTemplate(
@@ -35,6 +39,7 @@ export async function createTemplate(
       body: input.body,
       doc_kind: input.docKind ?? null,
       variables: input.variables,
+      signature: input.signature,
     },
   })
   const { templateEntityId } = res.effects[0] as { templateEntityId: string }
@@ -49,6 +54,7 @@ export interface UpdateTemplateInput {
   body?: string
   docKind?: string | null
   variables?: TemplateVariables
+  signature?: TemplateSignature
 }
 
 export async function updateTemplate(
@@ -64,6 +70,7 @@ export async function updateTemplate(
       body: input.body,
       doc_kind: input.docKind,
       variables: input.variables,
+      signature: input.signature,
     },
   })
   const updated = await getStandaloneTemplate(ctx, input.templateEntityId)

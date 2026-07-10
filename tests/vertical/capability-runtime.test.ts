@@ -257,15 +257,15 @@ describe('generate_document autorun OFFLOAD — drafting leaves the request (PRO
 })
 
 describe('capability handler registry (ADR 0046)', () => {
-  it('knows the two REAL handler keys', () => {
+  it('knows the REAL handler keys', () => {
     expect(isHandlerImplemented('legal.capability.ai_document_review.run')).toBe(true)
     expect(isHandlerImplemented('legal.capability.request_client_materials.run')).toBe(true)
+    // ESIGN-BLOCK-1 (WP2): esignature joined the real handlers — send via the
+    // existing native e-sign engine, park at the system gate until esign.completed.
+    expect(isHandlerImplemented('legal.capability.esignature.run')).toBe(true)
   })
 
   it('reports a contracted-but-unbuilt capability as NOT implemented', () => {
-    // esignature is contracted (step_invocable) but has no runtime handler yet — the
-    // executor raises a clear "not yet executable" error, never a simulated success.
-    expect(isHandlerImplemented('legal.capability.esignature.run')).toBe(false)
     expect(isHandlerImplemented(undefined)).toBe(false)
     expect(isHandlerImplemented('nope')).toBe(false)
   })
