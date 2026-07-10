@@ -887,24 +887,37 @@ function splitDocumentAndTrace(raw: string): {
   documentMarkdown: string
   reasoningTrace: ClaudeDraftReasoningTrace
 } {
+  // BACKHALF-BLOCKS-1 WP5 — TOLERANT parse (defense in depth). A drafting prompt that
+  // never instructed the model to emit the fenced ```json trace used to THROW here,
+  // dead-lettering every ai_draft on that service (the Jun 20 → Jul 9 outage). Prompt
+  // save now auto-appends the trace contract (services.validateDraftingPrompt), but a
+  // legacy/hand-run prompt might still lack it — so a MISSING or UNPARSEABLE trace no
+  // longer fails the draft: the whole response is the document and the trace defaults
+  // to an empty-evidence trace. The document still drafts; the trace is just thin.
   const jsonFenceMatch = raw.match(/```json\s*\n([\s\S]*?)\n```/)
+  const emptyTrace = (): ClaudeDraftReasoningTrace => ({
+    evidence: [],
+    alternatives_considered: [],
+    conclusion:
+      'Draft produced without a structured reasoning trace (prompt omitted the trace contract).',
+    confidence: 0.5,
+    ambiguities: [],
+  })
   if (!jsonFenceMatch || !jsonFenceMatch[1]) {
-    throw new Error(
-      'Claude response did not include a fenced ```json reasoning trace block. ' +
-        'Check the drafting prompt and rerun.',
-    )
+    return { documentMarkdown: raw.trimEnd(), reasoningTrace: emptyTrace() }
   }
 
   const traceJson = jsonFenceMatch[1]
   let parsed: ClaudeDraftReasoningTrace
   try {
     parsed = JSON.parse(traceJson) as ClaudeDraftReasoningTrace
-  } catch (error) {
-    throw new Error(
-      `Failed to parse reasoning trace JSON from Claude response: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    )
+    if (!Array.isArray(parsed.evidence)) parsed.evidence = []
+  } catch {
+    // Unparseable trace → keep the document, fall back to an empty-evidence trace.
+    return {
+      documentMarkdown: raw.replace(/```json[\s\S]*$/, '').trimEnd(),
+      reasoningTrace: emptyTrace(),
+    }
   }
 
   // Document is everything before the first ```json fence, with the trailing

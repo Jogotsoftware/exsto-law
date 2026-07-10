@@ -1132,9 +1132,53 @@ export function resolveDraftingPromptDoc(
   }
 }
 
-// Validate a drafting prompt against the FIXED slot contract before persisting.
-// Throws a descriptive Error naming the missing slots (the editor surfaces
-// .message). Reads never validate — a legacy repo prompt always renders.
+// The OUTPUT/TRACE contract (BACKHALF-BLOCKS-1 WP5). The drafting worker's parser
+// (adapters/claude.splitDocumentAndTrace) needs the model to emit a fenced ```json
+// reasoning trace after the document; the model only does that when the PROMPT tells
+// it to. A config prompt saved WITHOUT these instructions produced draft output with
+// no fence → every ai_draft on that service dead-lettered silently (the Jun 20 → Jul 9
+// outage class). This block is auto-appended on save when a prompt lacks the contract,
+// so no service can ship a prompt that can't be parsed. (The worker parser is ALSO
+// made tolerant — a missing trace defaults to evidence:[] — as defense in depth.)
+export const DRAFTING_TRACE_CONTRACT = `
+
+# Reasoning trace (required)
+
+After the document text, you MUST also produce a JSON block (fenced with \`\`\`json) containing a structured reasoning trace. The attorney's review UI relies on this. Do not skip it.
+
+\`\`\`json
+{
+  "prompt_id": "<service>/<document_kind>",
+  "model_identity": "<model id you used>",
+  "evidence": [
+    { "source": "questionnaire | transcript", "field": "<field id>", "value": "<value>", "used_in": "<clause>" }
+  ],
+  "alternatives_considered": [],
+  "conclusion": "<one or two sentence summary of the draft's overall posture>",
+  "confidence": 0.7,
+  "ambiguities": [
+    { "topic": "<short label>", "explanation": "<what is uncertain>", "needs_input_from": "client | attorney | both" }
+  ]
+}
+\`\`\`
+
+# Output format
+
+Produce, in order: (1) the full document in markdown, (2) a horizontal rule (\`---\`), (3) the reasoning trace JSON block fenced as \`\`\`json. Do not produce any prose after the JSON block.`
+
+// A prompt carries the output/trace contract when it already instructs the model to
+// emit the two trace keys that appear ONLY in the reasoning-trace schema (never in an
+// input slot) — a robust signal that the repo prompt and any compliant config prompt
+// satisfy, and a bare prompt does not. Keeps auto-append from double-appending.
+export function hasDraftingTraceContract(promptText: string): boolean {
+  return promptText.includes('"conclusion"') && promptText.includes('"confidence"')
+}
+
+// Validate a drafting prompt before persisting, and RETURN the prompt to store —
+// possibly AUGMENTED (WP5): the FIXED mustache slots must be present (throws, naming
+// the missing slots), and the output/trace contract is auto-appended when absent so
+// the saved prompt is always parseable by the drafting worker. Reads never validate —
+// a legacy repo prompt always renders.
 export function validateDraftingPrompt(promptText: unknown): string {
   if (typeof promptText !== 'string' || !promptText.trim()) {
     throw new Error('The drafting prompt must be non-empty text.')
@@ -1146,7 +1190,9 @@ export function validateDraftingPrompt(promptText: unknown): string {
         `Every prompt must contain ${REQUIRED_DRAFTING_SLOTS.join(', ')} so the worker can fill them.`,
     )
   }
-  return promptText
+  return hasDraftingTraceContract(promptText)
+    ? promptText
+    : `${promptText.trimEnd()}\n${DRAFTING_TRACE_CONTRACT}`
 }
 
 // Write a service's drafting prompt for one document kind as a new immutable
