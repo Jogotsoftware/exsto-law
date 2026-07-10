@@ -75,6 +75,19 @@ export async function updateTemplate(
   })
   const updated = await getStandaloneTemplate(ctx, input.templateEntityId)
   if (!updated) throw new Error('Template updated but could not be read back.')
+  // Phase 10 (UI-BUILDER-FIX-1): template ⇄ questionnaire sync. A body edit that
+  // introduces fill-in tokens the feeding questionnaire doesn't capture confirms/
+  // creates the questionnaire_feeds_template edge and enqueues (worker_job) an AI
+  // rebuild PROPOSAL for the questionnaire — approval-gated, never auto-applied.
+  // Best-effort: a sync failure never fails the save.
+  if (typeof input.body === 'string' && input.body.trim()) {
+    try {
+      const { syncQuestionnaireForTemplate } = await import('./templateQuestionnaireSync.js')
+      await syncQuestionnaireForTemplate(ctx, input.templateEntityId, input.body)
+    } catch (err) {
+      console.error('updateTemplate: questionnaire sync failed (non-fatal)', err)
+    }
+  }
   return updated
 }
 

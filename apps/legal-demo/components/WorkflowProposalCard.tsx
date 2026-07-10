@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
-import { FileTextIcon, CheckIcon, LayersIcon } from '@/components/icons'
+import { CheckIcon, LayersIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { WorkflowStepList } from '@/components/WorkflowStepList'
 
 // CONSTRAINT (mirrors the workflow builder page): no server-package imports. These
 // shapes are a structural mirror of verticals/legal/src/lifecycle/types.ts — the
@@ -39,7 +40,15 @@ export interface WorkflowProposal {
   graph: WfLifecycle
   summary: string
   confidence: number
+  // UI-BUILDER-FIX-1 5c: on a REVISION, the chat attaches the graph of the
+  // proposal this one supersedes, so the card diffs revision-vs-live-proposal
+  // (unrelated steps must show as unchanged) instead of vs the saved service.
+  previousGraph?: WfLifecycle
 }
+
+// 5c: the Revise affordance hands the attorney's edit instruction + the full
+// live proposal back to the chat, which regenerates as a diff against it.
+export type OnRevise = (info: { proposal: WorkflowProposal; instruction: string }) => boolean
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
@@ -132,14 +141,20 @@ function diffGraphs(current: WfLifecycle | null, proposed: WfLifecycle): GraphDi
 // The inline approval card for an AI-proposed service workflow (PR5). It is the
 // HUMAN GATE: the proposing chat turn wrote nothing; clicking Approve POSTs the
 // proposed graph to the approve route, which is the only place a live version write
-// happens. Each stage also offers "Save to step library" (legal.workflow_step_template
-// .create) so a useful step becomes reusable. Visual style mirrors DocumentCard.
+// happens. Visual: the SAME WorkflowStepList a live matter's Workflow window uses
+// (UI-BUILDER-FIX-1 5b), so proposed steps look like the workflow they become.
+// 5a: "Save step" is deliberately NOT offered here — a step is saved to the
+// library from the service workflow builder page, not mid-approval.
+// 5c: "Revise" beside Approve captures the attorney's edit instruction and hands
+// it (with the full live proposal) back to the chat for a diff-regeneration.
 export function WorkflowProposalCard({
   proposal,
   onApproved,
+  onRevise,
 }: {
   proposal: WorkflowProposal
   onApproved?: OnApproved
+  onRevise?: OnRevise
 }) {
   const [current, setCurrent] = useState<WfLifecycle | null>(null)
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
@@ -148,6 +163,10 @@ export function WorkflowProposalCard({
   const [approveError, setApproveError] = useState<string | null>(null)
   const [version, setVersion] = useState<number | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  // 5c Revise state: closed → input open → sent (the chat takes over from there).
+  const [reviseOpen, setReviseOpen] = useState(false)
+  const [reviseText, setReviseText] = useState('')
+  const [reviseSent, setReviseSent] = useState(false)
 
   const ordered = orderStages(proposal.graph)
 
@@ -170,7 +189,10 @@ export function WorkflowProposalCard({
     }
   }, [proposal.serviceKey])
 
-  const diff = diffGraphs(current, proposal.graph)
+  // Diff base (5c): a revision diffs against the LIVE PROPOSAL it supersedes —
+  // unrelated steps must read as unchanged. A first proposal diffs against the
+  // service's saved lifecycle (the original behavior).
+  const diff = diffGraphs(proposal.previousGraph ?? current, proposal.graph)
 
   async function approve() {
     setApproveState('approving')
@@ -257,31 +279,30 @@ export function WorkflowProposalCard({
         </div>
       )}
 
-      {/* The proposed steps, in run order, each with a Save-to-library affordance. */}
-      <ol className="uac-doc-body" style={{ paddingLeft: 18, margin: 0 }}>
-        {ordered.map((s) => (
-          <li key={s.key} style={{ marginBottom: 6 }}>
-            <span>
-              <strong>{s.label}</strong>
-              {s.action && stageActionLabel(s) !== s.label ? (
-                <span className="text-muted"> · {stageActionLabel(s)}</span>
-              ) : null}
-              {!s.terminal && s.advances_to[0] ? (
-                <span className="text-muted"> · {gateLabel(s.advances_to[0].gate)}</span>
-              ) : null}
-              {s.terminal ? <span className="text-muted"> · final step</span> : null}
-            </span>
-            {s.documents && s.documents.length > 0 && (
-              <span className="text-muted">
-                {' '}
-                — docs:{' '}
-                {s.documents.map((d) => d.label || d.docKind || d.templateEntityId).join(', ')}
-              </span>
-            )}{' '}
-            <SaveStepButton stage={s} />
-          </li>
-        ))}
-      </ol>
+      {/* The proposed steps, in run order — the SAME visual a live matter's
+          Workflow window renders (5b). No run-state pill: a proposal isn't
+          running (no-simulate), so every row reads as a plain step. */}
+      <WorkflowStepList
+        showStatePill={false}
+        items={ordered.map((s) => {
+          const metaBits: string[] = []
+          if (s.action && stageActionLabel(s) !== s.label) metaBits.push(stageActionLabel(s))
+          if (!s.terminal && s.advances_to[0]) metaBits.push(gateLabel(s.advances_to[0].gate))
+          if (s.terminal) metaBits.push('final step')
+          if (s.documents && s.documents.length > 0) {
+            metaBits.push(
+              `docs: ${s.documents.map((d) => d.label || d.docKind || d.templateEntityId).join(', ')}`,
+            )
+          }
+          return {
+            key: s.key,
+            title: s.label,
+            subtitle: s.client_label && s.client_label !== s.label ? s.client_label : undefined,
+            state: 'pending' as const,
+            meta: metaBits.length ? metaBits.join(' · ') : undefined,
+          }
+        })}
+      />
 
       <div className="uac-doc-actions">
         <button
@@ -300,12 +321,56 @@ export function WorkflowProposalCard({
                 : 'Approved'
               : 'Approve & save workflow'}
         </button>
+        {onRevise && approveState !== 'approved' && (
+          <button
+            type="button"
+            className="uac-reply-btn"
+            onClick={() => setReviseOpen((v) => !v)}
+            disabled={approveState === 'approving' || reviseSent}
+            title="Ask for a change to this proposal before approving"
+          >
+            <EditIcon size={12} /> {reviseSent ? 'Revising…' : 'Revise'}
+          </button>
+        )}
         {link && (
           <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
             View workflow →
           </a>
         )}
       </div>
+
+      {/* 5c: the revise instruction input. Submit hands the FULL live proposal +
+          the instruction to the chat; the model regenerates as a diff and a new
+          card (with this graph as its previousGraph) replaces the conversation's
+          working proposal. */}
+      {reviseOpen && !reviseSent && (
+        <form
+          style={{ display: 'flex', gap: 6, marginTop: 6 }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            const instruction = reviseText.trim()
+            if (!instruction || !onRevise) return
+            const accepted = onRevise({ proposal, instruction })
+            if (accepted) {
+              setReviseSent(true)
+              setReviseOpen(false)
+            }
+          }}
+        >
+          <input
+            type="text"
+            className="uac-qcard-text"
+            style={{ flex: 1, fontSize: 'var(--text-sm)' }}
+            placeholder="What should change? (e.g. add an attorney review step before the invoice)"
+            value={reviseText}
+            onChange={(e) => setReviseText(e.target.value)}
+            autoFocus
+          />
+          <button type="submit" className="uac-reply-btn" disabled={!reviseText.trim()}>
+            Send
+          </button>
+        </form>
+      )}
       {approveError && (
         <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
           {approveError}
@@ -315,48 +380,7 @@ export function WorkflowProposalCard({
   )
 }
 
-// Per-stage "Save to step library" — captures one proposed stage as a reusable
-// workflow_step_template (legal.workflow_step_template.create). The saved STAGE is a
-// LifecycleStage WITHOUT edges/key/entry/terminal: { label, client_label?, action,
-// gate, documents?, blocking? } — the same shape the builder saves, so the wired
-// edge is assigned on insertion, never persisted on the template.
-function SaveStepButton({ stage }: { stage: WfStage }) {
-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  async function save() {
-    setState('saving')
-    try {
-      await callAttorneyMcp({
-        toolName: 'legal.workflow_step_template.create',
-        input: {
-          name: stage.label,
-          stage: {
-            label: stage.label,
-            client_label: stage.client_label,
-            blocking: stage.blocking,
-            action: stage.action ?? { kind: 'manual_task' },
-            // The default gate for the saved step's future outgoing edge: the gate of
-            // this stage's own outgoing edge, or 'attorney' for a terminal step.
-            gate: stage.advances_to[0]?.gate ?? 'attorney',
-            documents: stage.documents,
-          },
-        },
-      })
-      setState('saved')
-    } catch {
-      setState('error')
-    }
-  }
-  return (
-    <button
-      type="button"
-      className="uac-reply-btn"
-      onClick={save}
-      disabled={state === 'saving' || state === 'saved'}
-      title="Save this step to the firm's reusable step library"
-      style={{ fontSize: 11 }}
-    >
-      {state === 'saved' ? <CheckIcon size={11} /> : <FileTextIcon size={11} />}{' '}
-      {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : 'Save step'}
-    </button>
-  )
-}
+// 5a: the per-stage "Save to step library" affordance was removed from THIS card
+// (proposal review is for approving, not library curation). The capability
+// survives on the service workflow builder page
+// (app/attorney/services/[serviceKey]/workflow/page.tsx → legal.workflow_step_template.create).

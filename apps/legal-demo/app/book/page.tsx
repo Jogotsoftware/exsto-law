@@ -54,11 +54,24 @@ interface ServiceSection {
   fields: ServiceField[]
 }
 
+// TODO(UI-BUILDER-FIX-1 Phase 1): clientDisplayName/clientDescription are null for
+// services whose client copy hasn't been authored/approved yet — the tile falls
+// back to the ATTORNEY-facing displayName/description (jurisdiction-heavy) so
+// nothing renders blank. Remove this note once all live services carry client copy.
+function tileTitle(s: Service, t: (k: string, v?: undefined, f?: string) => string): string {
+  return s.clientDisplayName ?? t(`service.${s.serviceKey}.title`, undefined, s.displayName)
+}
+function tileDesc(s: Service, t: (k: string, v?: undefined, f?: string) => string): string {
+  return s.clientDescription ?? t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')
+}
+
 interface Service {
   id: string
   serviceKey: string
   displayName: string
   description: string | null
+  clientDisplayName: string | null
+  clientDescription: string | null
   intakeSchema: { sections: ServiceSection[] }
   // False = intake-only (document-review style): no slot step, submit happens
   // on the intake step, no consultation on the confirmation screen.
@@ -102,9 +115,43 @@ const PROGRESS_STEPS: ReadonlyArray<{ key: Exclude<Step, 'done'>; labelKey: stri
   { key: 'slot', labelKey: 'progress.time' },
 ]
 
+// "Something else" (UI-BUILDER-FIX-1 Phase 3): a SYNTHETIC picker tile tied to NO
+// workflow_definition. Selecting it runs the same wizard (contact → one free-text
+// question) but submits legal.intake.something_else — a client_request for
+// attorney triage. No matter opens, no workflow starts.
+const SOMETHING_ELSE_KEY = 'something_else'
+const SOMETHING_ELSE_TILE: Service = {
+  id: SOMETHING_ELSE_KEY,
+  serviceKey: SOMETHING_ELSE_KEY,
+  displayName: 'Something else',
+  description: "Not sure what you need? Tell us and we'll point you the right way.",
+  clientDisplayName: null,
+  clientDescription: null,
+  intakeSchema: {
+    sections: [
+      {
+        id: 'request',
+        title: 'Your request',
+        fields: [
+          {
+            id: 'request_text',
+            label: 'What do you need help with?',
+            type: 'textarea',
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
+  // Intake-only shape: no slot step, submit fires from the intake step.
+  appointmentRequired: false,
+  bookable: true,
+}
+
 // Plain-language services map to a friendly icon; anything unknown gets a doc icon.
 function ServiceIcon({ serviceKey, size = 22 }: { serviceKey: string; size?: number }) {
-  if (serviceKey === 'other') return <HelpCircleIcon size={size} />
+  if (serviceKey === 'other' || serviceKey === SOMETHING_ELSE_KEY)
+    return <HelpCircleIcon size={size} />
   if (serviceKey.includes('amendment')) return <FileTextIcon size={size} />
   if (
     serviceKey.includes('llc') ||
@@ -205,7 +252,11 @@ export default function BookPage() {
       // non-bookable one is simply excluded, never rendered disabled. A stale
       // ?service= preset pointing at one falls back to the picker via the
       // preset-validation effect below.
-      .then((r) => setServices(r.services.filter((s) => s.bookable === true)))
+      // The "Something else" tile is client-side (tied to no workflow_definition)
+      // and always renders LAST, whatever the firm's live services are.
+      .then((r) =>
+        setServices([...r.services.filter((s) => s.bookable === true), SOMETHING_ELSE_TILE]),
+      )
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [])
 
@@ -369,6 +420,41 @@ export default function BookPage() {
   async function submitBooking() {
     if (!selectedService) return
     if (needsSlot && !selectedSlot) return
+    // "Something else" submits a triage request, NOT a booking: no matter, no
+    // workflow. Same captcha discipline as the booking submit.
+    if (selectedService.serviceKey === SOMETHING_ELSE_KEY) {
+      if (TURNSTILE_SITE_KEY && !captchaToken) {
+        setError(t('error.captcha'))
+        return
+      }
+      setBusy('submit')
+      setError(null)
+      try {
+        await callClientMcp<{ requestId: string }>({
+          toolName: 'legal.intake.something_else',
+          input: {
+            clientFullName: contact.fullName.trim(),
+            clientEmail: contact.email.trim(),
+            clientPhone: contact.phone || undefined,
+            requestText: String(intakeResponses['request_text'] ?? '').trim(),
+          },
+          captchaToken: captchaToken ?? undefined,
+        })
+        // No matter exists — the confirmation renders the "request received"
+        // copy and hides the matter reference.
+        setConfirmation({ matterNumber: '', scheduledAt: null })
+        setStep('done')
+      } catch (err) {
+        if (TURNSTILE_SITE_KEY) {
+          setCaptchaToken(null)
+          resetCaptchaRef.current?.()
+        }
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusy(null)
+      }
+      return
+    }
     // When the CAPTCHA is enabled, a verified token is mandatory before we hit
     // the server (which would otherwise 403). When it's disabled the widget
     // never renders, captchaToken stays null, and this guard is skipped.
@@ -497,9 +583,11 @@ export default function BookPage() {
               <strong>{contact.email}</strong>
               {emailAfter}
             </p>
-            <div className="bk-matter-ref">
-              {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
-            </div>
+            {confirmation.matterNumber && (
+              <div className="bk-matter-ref">
+                {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
+              </div>
+            )}
             <Link href="/" className="bk-btn bk-btn-ghost bk-btn-wide">
               {t('confirm.back')}
             </Link>
@@ -573,12 +661,8 @@ export default function BookPage() {
                             <ServiceIcon serviceKey={s.serviceKey} />
                           </span>
                           <span className="bk-service-text">
-                            <span className="bk-service-title">
-                              {t(`service.${s.serviceKey}.title`, undefined, s.displayName)}
-                            </span>
-                            <span className="bk-service-desc">
-                              {t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')}
-                            </span>
+                            <span className="bk-service-title">{tileTitle(s, t)}</span>
+                            <span className="bk-service-desc">{tileDesc(s, t)}</span>
                           </span>
                           <span className="bk-service-tick" aria-hidden>
                             <CheckIcon size={14} />

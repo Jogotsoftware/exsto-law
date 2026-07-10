@@ -31,6 +31,7 @@ import './tools/reviewDraft.js'
 import './tools/getIntakeQuestionnaire.js'
 import './tools/bookingTools.js'
 import './tools/serviceLibraryTools.js'
+import './tools/buildSessionTools.js'
 // AI document review: manual (re)run of the review pipeline for one uploaded
 // matter document. Attorney-only.
 import './tools/documentReviewTools.js'

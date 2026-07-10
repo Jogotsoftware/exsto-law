@@ -11,6 +11,9 @@ export interface ServiceProposal {
   displayName: string
   derivedKey: string
   description: string | null
+  // Client-facing tile copy (UI-BUILDER-FIX-1 Phase 2): outcome-only, <=70 chars.
+  clientDisplayName?: string | null
+  clientDescription?: string | null
   route: 'auto' | 'manual'
   generationMode: 'template_merge' | 'ai_draft'
   // BUILDER-CERT-1 (WP3) — booking mode: true = booking opens with a consultation
@@ -71,6 +74,8 @@ export function ServiceProposalCard({
         body: JSON.stringify({
           displayName: proposal.displayName,
           description: proposal.description,
+          clientDisplayName: proposal.clientDisplayName ?? null,
+          clientDescription: proposal.clientDescription ?? null,
           route: proposal.route,
           generationMode: proposal.generationMode,
           ...(typeof proposal.appointmentRequired === 'boolean'
@@ -122,6 +127,14 @@ export function ServiceProposalCard({
       {/* The CLIENT-FACING description leads — it's what the attorney is actually
           approving onto their booking page. The AI's WHY (summary) is a muted
           footnote, not the headline: reasoning is context, not content. */}
+      {/* The client tile copy leads — it's what shows on the public intake tile,
+          which is what the attorney is actually approving (Phase 2). */}
+      {proposal.clientDisplayName && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
+          <strong>Client tile:</strong> {proposal.clientDisplayName}
+          {proposal.clientDescription ? ` — ${proposal.clientDescription}` : ''}
+        </div>
+      )}
       {proposal.description && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
           {proposal.description}

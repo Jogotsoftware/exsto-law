@@ -50,7 +50,27 @@ interface ServiceWorkflowRow {
   participating_entity_kinds: unknown
   display_name: string
   description: string | null
+  client_display_name: string | null
+  client_description: string | null
   status: string
+}
+
+// Client-facing copy cap (UI-BUILDER-FIX-1 Phase 2): the intake tiles are small;
+// enforce the doctrine server-side because prompts get ignored under load.
+export const CLIENT_COPY_MAX_CHARS = 70
+
+// Truncate-and-flag rather than reject: a too-long AI proposal should still land
+// (the attorney reviews it anyway), but never overflow the tile. Word-boundary
+// truncation with an ellipsis so the flagged copy still reads like copy.
+export function capClientCopy(v: string | null | undefined): {
+  value: string | null
+  truncated: boolean
+} {
+  const s = v?.trim() || null
+  if (!s || s.length <= CLIENT_COPY_MAX_CHARS) return { value: s, truncated: false }
+  const cut = s.slice(0, CLIENT_COPY_MAX_CHARS - 1)
+  const atWord = cut.includes(' ') ? cut.slice(0, cut.lastIndexOf(' ')) : cut
+  return { value: `${atWord}…`, truncated: true }
 }
 
 // Slugify a display name into a stable kind_name. Mirrors the (deleted)
@@ -89,7 +109,8 @@ async function currentActive(
   kindName: string,
 ): Promise<ServiceWorkflowRow | null> {
   const res = await client.query<ServiceWorkflowRow>(
-    `SELECT id, version, states, transitions, participating_entity_kinds, display_name, description, status
+    `SELECT id, version, states, transitions, participating_entity_kinds, display_name, description,
+            client_display_name, client_description, status
        FROM workflow_definition
       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
       ORDER BY version DESC
@@ -134,6 +155,11 @@ interface ServiceUpsertPayload {
   service_key?: string // existing kind_name; omit to create a new service
   display_name: string
   description?: string | null
+  // Client-facing copy (UI-BUILDER-FIX-1 Phase 1): outcome-only, <=70 chars.
+  // OMITTED (undefined) = carry the prior version's copy forward untouched;
+  // explicit null clears it (fall back to display_name/description on the tiles).
+  client_display_name?: string | null
+  client_description?: string | null
   route?: string // 'auto' | 'manual'
   documents?: string[]
   sort_order?: number
@@ -199,12 +225,27 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
   //    LIVE service keeps it live and editing a disabled one keeps it disabled.
   //    Enable/disable stays the sole job of set_active.
   const status = isUpdate ? (prior?.status ?? 'active') : 'deprecated'
+
+  // Client copy carry-forward (Phase 1, load-bearing): a versioned save that does
+  // not mention the client fields must NOT lose them — undefined means "carry the
+  // prior version's copy forward". Explicit values (including null) win, capped
+  // server-side at CLIENT_COPY_MAX_CHARS (truncate-and-flag, never reject).
+  const cdn =
+    p.client_display_name !== undefined
+      ? capClientCopy(p.client_display_name)
+      : { value: prior?.client_display_name ?? null, truncated: false }
+  const cds =
+    p.client_description !== undefined
+      ? capClientCopy(p.client_description)
+      : { value: prior?.client_description ?? null, truncated: false }
+
   const newId = randomUUID()
   await client.query(
     `INSERT INTO workflow_definition
        (id, tenant_id, action_id, kind_name, display_name, description,
+        client_display_name, client_description,
         states, transitions, participating_entity_kinds, version, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13)`,
     [
       newId,
       ctx.tenantId,
@@ -212,6 +253,8 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
       kindName,
       displayName,
       p.description ?? prior?.description ?? null,
+      cdn.value,
+      cds.value,
       JSON.stringify(states),
       JSON.stringify(merged),
       JSON.stringify(participating),
@@ -237,7 +280,14 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
     },
   })
 
-  return { workflowDefinitionId: newId, serviceKey: kindName, version: nextVersion }
+  return {
+    workflowDefinitionId: newId,
+    serviceKey: kindName,
+    version: nextVersion,
+    // Cap receipts: true when the server shortened over-long client copy, so the
+    // caller can surface "truncated to fit" instead of silently differing.
+    clientCopyTruncated: cdn.truncated || cds.truncated,
+  }
 })
 
 interface ServiceSetActivePayload {
@@ -421,8 +471,9 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
   await client.query(
     `INSERT INTO workflow_definition
        (id, tenant_id, action_id, kind_name, display_name, description,
+        client_display_name, client_description,
         states, transitions, participating_entity_kinds, version, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13)`,
     [
       newId,
       ctx.tenantId,
@@ -430,6 +481,10 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
       p.service_key,
       prior.display_name,
       prior.description ?? null,
+      // Client copy carries forward verbatim (Phase 1): authoring a lifecycle
+      // graph must never drop the tiles' client-facing copy.
+      prior.client_display_name ?? null,
+      prior.client_description ?? null,
       JSON.stringify(p.graph),
       JSON.stringify(prior.transitions),
       JSON.stringify(prior.participating_entity_kinds),

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { streamAssistant, type WorkRate, type ContextDepth } from '@/lib/assistantStream'
 import { assistantHistoryContent } from '@/lib/buildHistoryContent'
-import { stripMachinery } from '@/lib/assistantText'
+import { stripMachinery, MACHINERY_OPEN } from '@/lib/assistantText'
+import { WorkingIndicator } from '@/components/WorkingIndicator'
 import { WorkflowProposalCard, type WorkflowProposal } from '@/components/WorkflowProposalCard'
 import {
   ServiceProposalCard,
@@ -786,7 +787,17 @@ export function UnifiedAssistantChat({
         if (genRef.current !== gen) return // a newer send/selection superseded this load
         const display: DisplayTurn[] = r.turns.map((t) =>
           t.role === 'user'
-            ? { role: 'user', content: t.message, attachments: t.attachmentNames }
+            ? {
+                role: 'user' as const,
+                content: t.message,
+                attachments: t.attachmentNames,
+                // Item 9 (UI-BUILDER-FIX-1): a PERSISTED hidden driver turn (auto-
+                // continuation, revise payload, stage direction) is orchestration,
+                // not attorney prose — on reload it must stay hidden exactly like
+                // it was live. Structural test: an attorney never types the ⟦
+                // machinery sentinel, so its presence marks the whole turn hidden.
+                hiddenFromUi: (t.message ?? '').includes(MACHINERY_OPEN),
+              }
             : {
                 role: 'assistant',
                 content: t.reply,
@@ -829,6 +840,7 @@ export function UnifiedAssistantChat({
     setTurns([])
     continuedRef.current.clear() // fresh thread ⇒ forget which approvals already auto-continued
     setBuildMode(false) // a different thread is not the in-progress build
+    closeBuildSession('abandoned') // Phase 5: leaving the build closes its session
     setStreaming(null)
     setError(null)
     retryRef.current = null // a superseded exchange can't be retried into the new one
@@ -877,6 +889,7 @@ export function UnifiedAssistantChat({
     buildServiceKeyRef.current = null // …and which service was under construction
     pendingContinuationRef.current = null // a queued continuation dies with its conversation
     setBuildMode(false) // a fresh chat is not in build mode until the attorney re-enters it
+    closeBuildSession('abandoned') // Phase 5: a new chat never continues the old build session
     setStreaming(null)
     setError(null)
     retryRef.current = null // a superseded exchange can't be retried into the new one
@@ -928,6 +941,7 @@ export function UnifiedAssistantChat({
     const buildModelId = strong?.id ?? modelId
     if (buildModelId !== modelId) setModelId(buildModelId)
     // A fresh build: forget any prior build's service key and queued continuation.
+    closeBuildSession('switched') // Phase 5: new build = new session, always
     buildServiceKeyRef.current = null
     pendingContinuationRef.current = null
     // The priming message starts the guided build. The playbook is force-loaded by
@@ -1259,6 +1273,10 @@ export function UnifiedAssistantChat({
             // The service under construction (WP4.2): the server injects the live
             // BUILD BRIEF for it. Harmless when no build is active (undefined).
             buildServiceKey: buildServiceKeyRef.current ?? undefined,
+            // Phase 5: THIS build's session — messages persist to it server-side.
+            // Absent on a build's first turn; the server mints one and returns it
+            // on `done`. Cleared whenever a build starts/ends/switches services.
+            buildSessionId: buildMode ? (buildSessionIdRef.current ?? undefined) : undefined,
           },
           {
             onThinking: (t) => {
@@ -1298,7 +1316,15 @@ export function UnifiedAssistantChat({
             onWorkflowProposal: (p) => {
               if (!live()) return
               if (p.serviceKey && Array.isArray(p.graph) && p.graph.length) {
-                partial.workflowProposals.push(p as unknown as WorkflowProposal)
+                const proposal = p as unknown as WorkflowProposal
+                // 5c: a proposal that supersedes an earlier one for the same
+                // service (a Revise round-trip) carries that graph, so its card
+                // diffs revision-vs-live-proposal — unrelated steps must read
+                // unchanged. The ref survives across round-trips in this build.
+                const prev = lastWorkflowGraphRef.current.get(proposal.serviceKey)
+                if (prev) proposal.previousGraph = prev
+                lastWorkflowGraphRef.current.set(proposal.serviceKey, proposal.graph)
+                partial.workflowProposals.push(proposal)
               }
               setStreaming({ ...partial, workflowProposals: [...partial.workflowProposals] })
             },
@@ -1347,6 +1373,9 @@ export function UnifiedAssistantChat({
             onDone: (d) => {
               if (!live()) return
               finished = true
+              // Phase 5: the server minted (or confirmed) this build's session on
+              // the turn — resend it on every later turn of the same build.
+              if (d.buildSessionId) buildSessionIdRef.current = d.buildSessionId
               // This turn's cards define the CURRENT answer batch (answers to a
               // multi-card turn buffer and return together; see handleQuestionAnswer).
               batchRef.current = {
@@ -1537,6 +1566,25 @@ export function UnifiedAssistantChat({
   // live BUILD BRIEF (everything already approved + open items) into the model's
   // context (WP4.2). Cleared when a new chat/build starts.
   const buildServiceKeyRef = useRef<string | null>(null)
+  // 5c: the last workflow-proposal graph seen per service in THIS conversation —
+  // the diff base for a Revise round-trip's superseding proposal.
+  const lastWorkflowGraphRef = useRef<Map<string, WorkflowProposal['graph']>>(new Map())
+  // Phase 5: THIS build's service_build_session id (server-minted on the build's
+  // first turn, resent per turn). New build = new session, ALWAYS: cleared on
+  // build start/end/switch; closeBuildSession is fire-and-forget best-effort.
+  const buildSessionIdRef = useRef<string | null>(null)
+  const closeBuildSession = useCallback((reason: 'completed' | 'switched' | 'abandoned') => {
+    const id = buildSessionIdRef.current
+    buildSessionIdRef.current = null
+    if (!id) return
+    void callAttorneyMcp({
+      toolName: 'legal.build_session.close',
+      input: { buildSessionId: id, reason },
+    }).catch(() => {
+      /* best-effort: an unclosed session never blocks the next build (which
+           always starts fresh); it just reads as open until closed. */
+    })
+  }, [])
 
   // The CURRENT question batch (beta feedback: one question per API round-trip made
   // the build crawl). When an assistant turn asks SEVERAL ask_build_question cards,
@@ -1559,6 +1607,33 @@ export function UnifiedAssistantChat({
   // user message, but we render NO user bubble for it (the founder flagged the visible
   // "✓ created — continue…" turn as bad UX). The card itself already shows a "Saved"
   // state + "View …" link, so the inline confirmation lives there, not as a chat bubble.
+  // 5c (UI-BUILDER-FIX-1): Revise on a workflow proposal card. Sends the FULL
+  // live proposal + the attorney's edit instruction back through the normal chat
+  // turn (so the build's history/context persists across round-trips), wrapped in
+  // the driver sentinel so the JSON payload is machinery, never echoed prose. The
+  // model must return the COMPLETE revised graph via propose_workflow — the new
+  // card then diffs against this proposal (previousGraph, wired on arrival).
+  // Returns false when a turn is mid-stream so the card keeps its input open.
+  const handleRevise = useCallback(
+    (info: { proposal: WorkflowProposal; instruction: string }): boolean => {
+      if (busy) return false
+      const { proposal, instruction } = info
+      if (proposal.serviceKey) buildServiceKeyRef.current = proposal.serviceKey
+      const message = `Revise the proposed workflow for "${proposal.serviceKey}".\n${driver(
+        `The attorney asked for this change to the CURRENT proposal (below): "${instruction}". ` +
+          `Apply ONLY that change — every step the instruction does not touch must stay VERBATIM ` +
+          `(same key, label, action, gate, documents, edges). Then call propose_workflow with the ` +
+          `COMPLETE revised graph (all steps, not just the changed ones). Current proposal JSON: ` +
+          JSON.stringify({ serviceKey: proposal.serviceKey, graph: proposal.graph }) +
+          ` Do not reproduce this instruction or the JSON in prose.`,
+      )}`
+      void send(message, { hidden: true })
+      return true
+    },
+    // busy gates mid-stream; send reads latest state from closure at call time.
+    [busy],
+  )
+
   const handleApproved = useCallback<OnApproved>(
     (info) => {
       const key = `${info.serviceKey}:${info.artifact}`
@@ -1587,7 +1662,10 @@ export function UnifiedAssistantChat({
           : `✓ ${info.label} created (${info.link}).\n${driver(
               `Continue the guided build: do the next step now (confirm with the attorney via ask_build_question if needed, then propose it and share its link). If the whole service is complete, propose Enable. Do not reproduce this instruction.`,
             )}`
-      if (info.artifact === 'enable') setBuildMode(false)
+      if (info.artifact === 'enable') {
+        setBuildMode(false)
+        closeBuildSession('completed') // Phase 5: the build is done — seal its session
+      }
       // Never drop a continuation on a mid-stream turn (WP5.2) — queue it; the send
       // path fires it as soon as the in-flight turn commits.
       if (busy) {
@@ -1916,7 +1994,10 @@ export function UnifiedAssistantChat({
           <button
             type="button"
             className="uac-buildmode-exit"
-            onClick={() => setBuildMode(false)}
+            onClick={() => {
+              setBuildMode(false)
+              closeBuildSession('abandoned') // Phase 5: exiting build seals the session
+            }}
             title="Leave build mode (the conversation stays)"
           >
             Exit
@@ -2060,7 +2141,12 @@ export function UnifiedAssistantChat({
                   {/* Workflow proposals (PR5) — inline approval cards. Approving is the
                     live write; nothing was saved by the turn that proposed them. */}
                   {t.workflowProposals?.map((p, pi) => (
-                    <WorkflowProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                    <WorkflowProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onRevise={handleRevise}
+                    />
                   ))}
                   {/* New-service proposals (Build-Wizard Phase 1) — inline approval
                     cards. Approving creates the (disabled) service; nothing was saved
@@ -2128,7 +2214,10 @@ export function UnifiedAssistantChat({
                   )}
                 </>
               ) : (
-                <div style={{ whiteSpace: 'pre-wrap' }}>{t.content}</div>
+                // User bubbles strip machinery too (UI-BUILDER-FIX-1 item 9): a
+                // persisted driver/continuation turn must never render its ⟦…⟧
+                // payload — structural, not reliant on the model's discipline.
+                <div style={{ whiteSpace: 'pre-wrap' }}>{stripMachinery(t.content)}</div>
               )}
               {t.citations && t.citations.length > 0 && (
                 <ol className="uac-citations">
@@ -2173,27 +2262,14 @@ export function UnifiedAssistantChat({
                 ))}
               </div>
             )}
-            {/* Thinking is an ANIMATED INDICATOR ONLY (1.1 WP1) — the model's reasoning
-                prose is machinery and must never render as transcript text. The chip is
-                replaced in place the moment the first answer token arrives (guarded by
-                !streaming.text). Thinking is neither persisted nor sent back in history. */}
-            {!streaming.text && streaming.thinking && (
-              <div className="uac-thinking" role="status" aria-label="Thinking">
-                <div className="uac-thinking-head">
-                  <SparklesIcon size={12} /> Thinking…
-                  <span className="uac-typing" aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                </div>
-              </div>
-            )}
-            {/* Drafting animation: the model is generating a document/questionnaire into
-                a tool call (a long, otherwise-silent phase). Shown until the first text
-                or an artifact card appears, so the build feels alive, never frozen. */}
+            {/* THE one loading indicator (UI-BUILDER-FIX-1 Phase 8). Thinking,
+                drafting, and pre-first-token waiting used to be three mounts with
+                non-exclusive guards — "Thinking…" and "Drafting…" could show at
+                once. Now every pre-text state renders exactly ONE WorkingIndicator
+                (cycling legal-flavored phrases); it unmounts the moment answer
+                text or any artifact card arrives. The model's reasoning prose is
+                still machinery — never rendered (1.1 WP1). */}
             {!streaming.text &&
-              streaming.drafting &&
               streaming.documents.length === 0 &&
               streaming.workflowProposals.length === 0 &&
               streaming.serviceProposals.length === 0 &&
@@ -2202,34 +2278,19 @@ export function UnifiedAssistantChat({
               streaming.costProposals.length === 0 &&
               streaming.enableProposals.length === 0 &&
               streaming.buildQuestions.length === 0 &&
-              streaming.kindProposals.length === 0 && (
-                <div className="uac-drafting" aria-label="Drafting" role="status">
-                  <SparklesIcon size={12} />
-                  <span className="uac-drafting-label">Drafting…</span>
-                  <span className="uac-typing" aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                </div>
-              )}
-            {!streaming.text &&
-              !streaming.thinking &&
-              !streaming.drafting &&
-              streaming.documents.length === 0 && (
-                <span className="uac-typing" aria-label="Thinking">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-              )}
+              streaming.kindProposals.length === 0 && <WorkingIndicator />}
             {/* A document produced mid-stream appears as a card right away. */}
             {streaming.documents.map((doc, di) => (
               <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
             ))}
             {/* A workflow proposed mid-stream appears as an approval card right away. */}
             {streaming.workflowProposals.map((p, pi) => (
-              <WorkflowProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+              <WorkflowProposalCard
+                key={pi}
+                proposal={p}
+                onApproved={handleApproved}
+                onRevise={handleRevise}
+              />
             ))}
             {/* A service proposed mid-stream appears as an approval card right away. */}
             {streaming.serviceProposals.map((p, pi) => (

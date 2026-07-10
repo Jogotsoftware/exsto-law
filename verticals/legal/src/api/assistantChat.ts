@@ -50,6 +50,8 @@ import {
   buildServiceCompletenessTool,
 } from './serviceAuthoringTools.js'
 import type { ServiceProposal } from './serviceAuthoring.js'
+import { appendBuildMessages, isOpenBuildSession, startBuildSession } from './buildSession.js'
+import { collapseRoundStutter } from './replyAssembly.js'
 import {
   buildQuestionnaireContextTool,
   buildProposeQuestionnaireTool,
@@ -142,6 +144,10 @@ export interface AssistantChatInput {
   // approved). Injects the live BUILD BRIEF — everything already approved for this
   // service plus its open items — into the volatile system block (WP4.2).
   buildServiceKey?: string
+  // Phase 5 (UI-BUILDER-FIX-1): the open service_build_session this build turn
+  // belongs to. Omitted on a build's first turn — the server starts a fresh
+  // session and returns its id on `done`. Ignored when buildMode is false.
+  buildSessionId?: string
 }
 
 // A finished document the assistant produced this turn (via the produce_document
@@ -300,6 +306,10 @@ export type AssistantChatStreamEvent =
       model: string
       kind: AssistantTurnKind
       scope: AssistantScope
+      // Phase 5: the service_build_session this BUILD turn appended to (created
+      // server-side on the build's first turn). Null on non-build turns. The
+      // client resends it each turn and clears it when the build ends/switches.
+      buildSessionId?: string | null
     }
 
 export interface AssistantChatReply {
@@ -418,6 +428,12 @@ const SYSTEM_PROMPT = [
   // never bleed into the reply text. This is enforced at generation, not stripped after,
   // so the identifiers below structurally never enter the reply.
   'REPLY vs REASONING — your visible reply contains ONLY the attorney-facing answer in plain English, plus the cards/proposals/documents your tools surface. It must NEVER contain: (1) process narration — no "Using <skill>", "Let me call…", "I\'ll now run…", "Routing to…", or naming a tool, skill, router, or phase; (2) internal identifiers or data-structure vocabulary that appears in tool inputs/results — field/entity ids, service or capability slugs (e.g. capability_slug), config keys (e.g. availableTemplates, config_schema, gateTransitions, stepTemplate), advance tokens, snake_case keys, or raw JSON. Refer to things by their plain human names (say "the engagement-letter template", never a slug or key). Your step-by-step reasoning and any reference to that internal structure belong in your thinking, where they are shown to the attorney behind an expandable disclosure — keep them out of the reply entirely.',
+  // Structured read-outs render as BULLETS (UI-BUILDER-FIX-1 Phase 6): a summary
+  // of enumerable things is a scan surface, not an essay. This is the ONLY
+  // formatting rule for read-outs in the chain — nothing above overrides it (the
+  // "single short sentence" rules govern replies that DELIVER a tool artifact,
+  // not summaries the attorney asked for).
+  'STRUCTURED READ-OUTS ARE BULLETS — whenever your reply summarizes enumerable structure (a workflow\'s steps, a pricing/billing summary, a proposal recap, a service\'s configuration, a list of documents/questions/options), format each item as a markdown bullet ("- …"), one item per bullet, with a one-line lead-in at most. Never fold three or more enumerable items into a prose paragraph. Ordinary conversational answers stay prose.',
   'Keep replies focused and concise.',
 ].join(' ')
 
@@ -1177,7 +1193,7 @@ export async function assistantChat(
         kindProposals,
       }),
     })
-    reply = result.reply
+    reply = collapseRoundStutter(result.reply)
     citations = result.citations
     usage = result.usage
     if (result.toolCapHit) {
@@ -1523,6 +1539,14 @@ export async function* assistantChatStream(
     }
   }
 
+  // Item 8 (UI-BUILDER-FIX-1): a multi-round tool turn can restate its framing
+  // sentence after the tool result ("Here's the pricing to approve." → tool →
+  // "Here's the flat $450 pricing to approve…") — the rounds CONCATENATE, so the
+  // persisted reply stutters. Collapse the near-duplicate fragment; the richer
+  // restatement wins. (The live stream already paragraph-breaks rounds; this
+  // fixes the committed/persisted text, which is what re-renders from history.)
+  reply = collapseRoundStutter(reply)
+
   // WP9: if the streamed reply parroted internal machinery, record it (measurable).
   await recordQuestionWithoutCardObservation(ctx, reply)
 
@@ -1560,6 +1584,33 @@ export async function* assistantChatStream(
     console.error('assistantChatStream: failed to record assistant.turn', err)
   }
 
+  // Build-session scoping (UI-BUILDER-FIX-1 Phase 5): a BUILD turn persists its
+  // exchange to a service_build_session. The client resends the session id per
+  // turn; a missing/closed/foreign id starts a FRESH session (new build = new
+  // session, always). Best-effort like the turn record above — a session write
+  // failure must never destroy the streamed reply. Service-builder ONLY: the
+  // general chatbot's history is a separate thread (S-queue #13), not this.
+  let buildSessionId: string | null = null
+  if (input.buildMode) {
+    try {
+      const candidate = (input.buildSessionId ?? '').trim()
+      if (candidate && (await isOpenBuildSession(ctx, candidate))) {
+        buildSessionId = candidate
+      } else {
+        const started = await startBuildSession(ctx, {
+          serviceKey: input.buildServiceKey ?? null,
+        })
+        buildSessionId = started.buildSessionId
+      }
+      await appendBuildMessages(ctx, buildSessionId, [
+        { role: 'user', content: message, turnEventId: eventId || null },
+        { role: 'assistant', content: reply, turnEventId: eventId || null },
+      ])
+    } catch (err) {
+      console.error('assistantChatStream: failed to persist build session messages', err)
+    }
+  }
+
   yield {
     type: 'done',
     eventId,
@@ -1569,6 +1620,7 @@ export async function* assistantChatStream(
     model: model.model,
     kind,
     scope,
+    buildSessionId,
   }
 }
 

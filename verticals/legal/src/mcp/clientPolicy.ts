@@ -16,6 +16,7 @@ export const CLIENT_PORTAL_TOOLS: ReadonlySet<string> = new Set([
   'legal.service.list', // booking page: list bookable services
   'legal.calendar.availability', // booking page: open consultation slots
   'legal.booking.submit', // booking page: book a consultation (public intake)
+  'legal.intake.something_else', // "Something else" tile: free-text client_request for attorney triage
   'legal.draft.get_shared', // /d/[versionId]: client-safe shared-draft view (body only; no reasoning/model/notes)
 ])
 

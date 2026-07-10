@@ -95,7 +95,7 @@ const en: Record<string, string> = {
     'Set up your North Carolina LLC and get a tailored operating agreement for you and your co-owners.',
   'service.something_else.title': 'Something else',
   'service.something_else.desc':
-    "Not sure what you need? Book a general consultation and we'll point you the right way.",
+    "Not sure what you need? Tell us and we'll point you the right way.",
   'service.llc_formation.title': 'Start a business (LLC)',
   'service.llc_formation.desc':
     'Set up your North Carolina LLC and get a tailored operating agreement.',
@@ -129,6 +129,7 @@ const en: Record<string, string> = {
   'section.engagement.title': 'Engagement terms',
 
   // Field labels
+  'field.request_text.label': 'What do you need help with?',
   'field.company_name.label': 'Proposed LLC name',
   'field.company_purpose.label': 'Purpose of the LLC (one sentence)',
   'field.registered_agent_name.label': 'Registered agent name',
@@ -270,8 +271,8 @@ const es: Record<string, string> = {
   'service.nc_llc_multi_member.desc':
     'Constituye tu LLC en Carolina del Norte y obtén un acuerdo operativo a tu medida para ti y tus socios.',
   'service.something_else.title': 'Otra cosa',
-  'service.something_else.desc':
-    '¿No sabes qué necesitas? Agenda una consulta general y te orientamos.',
+  'service.something_else.desc': '¿No sabes qué necesitas? Cuéntanos y te orientamos.',
+  'field.request_text.label': '¿En qué necesitas ayuda?',
   'service.llc_formation.title': 'Inicia un negocio (LLC)',
   'service.llc_formation.desc':
     'Constituye tu LLC en Carolina del Norte y obtén un acuerdo operativo a tu medida.',

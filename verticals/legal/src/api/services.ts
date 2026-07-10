@@ -93,6 +93,11 @@ export interface ServiceDefinition {
   serviceKey: string
   displayName: string
   description: string | null
+  // Client-facing copy for the public intake tiles (UI-BUILDER-FIX-1 Phase 1):
+  // outcome-only, <=70 chars, no jurisdiction/process. Null = not authored yet;
+  // the tile falls back to displayName/description so nothing renders blank.
+  clientDisplayName: string | null
+  clientDescription: string | null
   route: WorkflowRoute
   intakeFormId: string
   intakeSchema: IntakeSchema
@@ -124,6 +129,8 @@ type WorkflowRow = {
   kind_name: string
   display_name: string
   description: string | null
+  client_display_name: string | null
+  client_description: string | null
   transitions: {
     route?: string
     intake_form_id?: string
@@ -311,6 +318,8 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     serviceKey: r.kind_name,
     displayName: r.display_name,
     description: r.description,
+    clientDisplayName: r.client_display_name,
+    clientDescription: r.client_description,
     route: r.transitions.route === 'auto' ? 'auto' : 'manual',
     intakeFormId,
     intakeSchema,
@@ -332,7 +341,8 @@ function compareServices(a: ServiceDefinition, b: ServiceDefinition): number {
 }
 
 const WORKFLOW_COLS = `
-  id, kind_name, display_name, description, transitions, status,
+  id, kind_name, display_name, description, client_display_name, client_description,
+  transitions, status,
   (jsonb_typeof(states) = 'array' AND jsonb_array_length(states) > 0) AS has_lifecycle,
   to_char(recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at
 `
@@ -432,6 +442,9 @@ export async function listServicesIncludingInactive(
 export interface CreateServiceInput {
   displayName: string
   description?: string | null
+  // Client-facing tile copy (Phase 1). Omit = none (new service starts null).
+  clientDisplayName?: string | null
+  clientDescription?: string | null
   route?: WorkflowRoute
   documents?: string[]
   sortOrder?: number
@@ -441,6 +454,10 @@ export interface UpdateServiceMetadataInput {
   serviceKey: string
   displayName: string
   description?: string | null
+  // Client-facing tile copy (Phase 1). OMIT to carry the prior version's copy
+  // forward untouched; explicit null clears it (tiles fall back to displayName).
+  clientDisplayName?: string | null
+  clientDescription?: string | null
   route?: WorkflowRoute
   documents?: string[]
   sortOrder?: number
@@ -470,6 +487,12 @@ export async function createService(
     payload: {
       display_name: input.displayName,
       description: input.description ?? null,
+      ...(input.clientDisplayName !== undefined
+        ? { client_display_name: input.clientDisplayName }
+        : {}),
+      ...(input.clientDescription !== undefined
+        ? { client_description: input.clientDescription }
+        : {}),
       route: input.route,
       documents: input.documents,
       sort_order: input.sortOrder,
@@ -516,6 +539,14 @@ export async function updateServiceMetadata(
       service_key: input.serviceKey,
       display_name: input.displayName,
       description: input.description ?? null,
+      // undefined stays OFF the payload entirely — the handler reads absence as
+      // "carry the prior version's client copy forward" (Phase 1 versioning rule).
+      ...(input.clientDisplayName !== undefined
+        ? { client_display_name: input.clientDisplayName }
+        : {}),
+      ...(input.clientDescription !== undefined
+        ? { client_description: input.clientDescription }
+        : {}),
       route: input.route,
       documents: input.documents,
       sort_order: input.sortOrder,

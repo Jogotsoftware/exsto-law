@@ -14,6 +14,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
 import { formatDate } from '@/lib/datetime'
 import { PageHead } from '@/components/PageHead'
+import { QuestionnaireConfigModal } from '@/components/configEditors'
 import { LayersIcon, SearchIcon } from '@/components/icons'
 
 type FieldType =
@@ -236,6 +237,8 @@ interface ServiceIntakeForm {
 export default function QuestionnaireLibraryPage() {
   const { confirm, confirmElement } = useConfirm()
   const [items, setItems] = useState<QuestionnaireTemplate[] | null>(null)
+  // Phase 9: the shared edit-in-modal, opened per library questionnaire row.
+  const [modalQuestionnaire, setModalQuestionnaire] = useState<QuestionnaireTemplate | null>(null)
   const [svcForms, setSvcForms] = useState<ServiceIntakeForm[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -733,6 +736,7 @@ export default function QuestionnaireLibraryPage() {
                     </td>
                     <td>{formatDate(t.updatedAt)}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button onClick={() => setModalQuestionnaire(t)}>Edit in window</button>{' '}
                       <button onClick={() => editFrom(t)}>Edit</button>{' '}
                       <button onClick={() => archive(t)}>Archive</button>
                     </td>
@@ -765,6 +769,19 @@ export default function QuestionnaireLibraryPage() {
             </table>
           </div>
         </section>
+      )}
+      {/* UI-BUILDER-FIX-1 Phase 9: the shared edit-in-modal (view / edit /
+          AI-regenerate via worker_job / save) — no navigation. */}
+      {modalQuestionnaire && (
+        <QuestionnaireConfigModal
+          questionnaire={{
+            questionnaireTemplateId: modalQuestionnaire.questionnaireTemplateId,
+            name: modalQuestionnaire.name,
+            schema: modalQuestionnaire.schema,
+          }}
+          onClose={() => setModalQuestionnaire(null)}
+          onChanged={load}
+        />
       )}
     </main>
   )

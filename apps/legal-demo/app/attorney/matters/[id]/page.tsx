@@ -34,6 +34,7 @@ import {
   type MatterWorkflow,
 } from './shared'
 import { WorkflowEditor } from './WorkflowEditor'
+import { WorkflowStepList } from '@/components/WorkflowStepList'
 import {
   RunnerReview,
   CapabilityStatePanel,
@@ -605,31 +606,18 @@ function WorkflowWindow({
             <EditIcon size={16} /> Edit steps for this matter
           </button>
         </div>
-        <div className="step-list">
-          {steps.map(({ stage, state }) => {
-            const stripState = workflowStripState(state)
-            return (
-              <button
-                key={stage.key}
-                type="button"
-                className={`step-row step-${stripState}`}
-                onClick={() => setOpenKey(stage.key)}
-              >
-                <span className="step-ico" aria-hidden>
-                  <StepIcon state={stripState} />
-                </span>
-                <span className="step-titles">
-                  <span className="step-title">{stage.label}</span>
-                  <span className="step-subtitle">{stage.client_label ?? stage.label}</span>
-                </span>
-                <span className="step-state-pill">{labelForState(stripState)}</span>
-                <span className="step-chevron" aria-hidden>
-                  <ChevronRightIcon size={16} />
-                </span>
-              </button>
-            )
-          })}
-        </div>
+        {/* The SHARED step-list visual (UI-BUILDER-FIX-1 5b) — the proposal-review
+            card renders this same component, so proposed and running workflows
+            look identical to the attorney. */}
+        <WorkflowStepList
+          items={steps.map(({ stage, state }) => ({
+            key: stage.key,
+            title: stage.label,
+            subtitle: stage.client_label ?? stage.label,
+            state: workflowStripState(state),
+            onClick: () => setOpenKey(stage.key),
+          }))}
+        />
         <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
           Click a step to view what it produced, or to advance the matter.
         </p>
