@@ -85,3 +85,50 @@ export async function findClientContactIdByEmail(
     return res.rows[0]?.entity_id ?? null
   })
 }
+
+// PORTAL-1 (WP4) — prefill for a signed-in repeat booking: the client's most
+// recent questionnaire answers, preferring the same service. Only the client's
+// OWN responses (via their matters' response_of links); the client edits and
+// confirms before submitting.
+export async function getClientIntakePrefill(
+  ctx: ActionContext,
+  clientContactId: string,
+  serviceKey?: string | null,
+): Promise<Record<string, unknown> | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ responses: Record<string, unknown> | null; form: string | null }>(
+      `SELECT
+         (SELECT a.value FROM attribute a
+            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = qr.id
+              AND akd.kind_name = 'questionnaire_responses'
+            ORDER BY a.valid_from DESC LIMIT 1) AS responses,
+         (SELECT a.value #>> '{}' FROM attribute a
+            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = qr.id
+              AND akd.kind_name = 'intake_form_id'
+            ORDER BY a.valid_from DESC LIMIT 1) AS form
+       FROM relationship cof
+       JOIN relationship_kind_definition cofk ON cofk.id = cof.relationship_kind_id
+       JOIN relationship rof ON rof.target_entity_id = cof.target_entity_id
+       JOIN relationship_kind_definition rofk ON rofk.id = rof.relationship_kind_id
+       JOIN entity qr ON qr.id = rof.source_entity_id
+       JOIN entity_kind_definition qrk ON qrk.id = qr.entity_kind_id
+       WHERE cof.tenant_id = $1 AND cof.source_entity_id = $2
+         AND cofk.kind_name = 'client_of'
+         AND rofk.kind_name = 'response_of'
+         AND qrk.kind_name = 'questionnaire_response'
+       ORDER BY (CASE WHEN $3::text IS NOT NULL AND (SELECT a.value #>> '{}' FROM attribute a
+            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = qr.id
+              AND akd.kind_name = 'intake_form_id'
+            ORDER BY a.valid_from DESC LIMIT 1) = $3 THEN 0 ELSE 1 END),
+         qr.created_at DESC
+       LIMIT 1`,
+      [ctx.tenantId, clientContactId, serviceKey ?? null],
+    )
+    const row = res.rows[0]
+    if (!row?.responses || typeof row.responses !== 'object') return null
+    return row.responses
+  })
+}

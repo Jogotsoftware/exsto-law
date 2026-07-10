@@ -11,6 +11,8 @@ export interface ClientSummary {
   name: string
   billableRate: string | null
   billingType: string | null
+  /** PORTAL-1 (WP3): portal-scheduled time is billable for this client. */
+  portalSchedulingBillable?: boolean
   mainContactId: string | null
   contactCount: number
   matterCount: number
@@ -106,6 +108,7 @@ export async function getClient(
       billable_rate: string | null
       billing_type: string | null
       main_contact_id: string | null
+      portal_scheduling_billable: string | null
       created_at: Date
     }>(
       `${ATTRS_CTE}
@@ -114,6 +117,7 @@ export async function getClient(
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_billable_rate') AS billable_rate,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_billing_type')  AS billing_type,
          (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_main_contact')  AS main_contact_id,
+         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'portal_scheduling_billable') AS portal_scheduling_billable,
          e.created_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
@@ -172,6 +176,7 @@ export async function getClient(
       name: c.name ?? '',
       billableRate: c.billable_rate,
       billingType: c.billing_type,
+      portalSchedulingBillable: c.portal_scheduling_billable === 'true',
       mainContactId,
       contactCount: contactsRes.rows.length,
       matterCount: mattersRes.rows.length,

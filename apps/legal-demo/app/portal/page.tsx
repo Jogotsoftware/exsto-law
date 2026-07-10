@@ -91,12 +91,13 @@ interface ClientRequest {
   createdAt: string
 }
 
-type Tab = 'matters' | 'documents' | 'billing' | 'messages'
+type Tab = 'matters' | 'documents' | 'billing' | 'messages' | 'schedule'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'matters', label: 'Matters' },
   { key: 'documents', label: 'Documents' },
   { key: 'billing', label: 'Billing' },
   { key: 'messages', label: 'Messages & Requests' },
+  { key: 'schedule', label: 'Book & Schedule' },
 ]
 
 // Signed-in client portal — a tabbed shell (header + nav + wide content) over the
@@ -268,6 +269,7 @@ export default function ClientPortalPage() {
 
             {tab === 'documents' && <DocumentsPanel matterEntityId={selected} />}
             {tab === 'billing' && <InvoicesPanel />}
+            {tab === 'schedule' && <SchedulePanel />}
             {tab === 'messages' &&
               (selected ? (
                 <>
@@ -647,6 +649,191 @@ function InvoicesPanel() {
         </>
       )}
     </section>
+  )
+}
+
+// PORTAL-1 (WP4) — book another service (prefilled /book) + schedule time on the
+// firm's real availability, with the fee consent card when the firm bills
+// portal-scheduled time.
+function SchedulePanel() {
+  const [availability, setAvailability] = useState<{
+    configured: boolean
+    timezone: string
+    meetingLengthsMinutes: number[]
+    durationMinutes: number
+    slots: Array<{ startIso: string; endIso: string; label: string }>
+  } | null>(null)
+  const [duration, setDuration] = useState<number | null>(null)
+  const [quote, setQuote] = useState<{
+    rate: string
+    amount: string
+    durationMinutes: number
+    description: string
+  } | null>(null)
+  const [feeAccepted, setFeeAccepted] = useState(false)
+  const [selectedSlot, setSelectedSlot] = useState<{ startIso: string; endIso: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    callClientPortalMcp<{ availability: typeof availability }>({
+      toolName: 'legal.client.schedule_availability',
+      input: duration ? { durationMinutes: duration } : {},
+    })
+      .then((r) => {
+        setAvailability(r.availability)
+        if (r.availability && duration === null) setDuration(r.availability.durationMinutes)
+      })
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return
+        setError(e instanceof Error ? e.message : String(e))
+      })
+  }, [duration])
+
+  useEffect(() => {
+    if (!duration) return
+    setFeeAccepted(false)
+    callClientPortalMcp<{ quote: typeof quote }>({
+      toolName: 'legal.client.schedule_quote',
+      input: { durationMinutes: duration },
+    })
+      .then((r) => setQuote(r.quote))
+      .catch(() => setQuote(null))
+  }, [duration])
+
+  async function book() {
+    if (!selectedSlot) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await callClientPortalMcp<{
+        result?: { bookingRef: string; startIso: string }
+        feeConsentRequired?: boolean
+        quote?: { rate: string; amount: string; durationMinutes: number; description: string }
+      }>({
+        toolName: 'legal.client.schedule_time',
+        input: {
+          startIso: selectedSlot.startIso,
+          endIso: selectedSlot.endIso,
+          durationMinutes: duration ?? undefined,
+          feeAccepted: feeAccepted || undefined,
+        },
+      })
+      if (r.feeConsentRequired && r.quote) {
+        setQuote(r.quote)
+        setError('Please review and accept the fee below, then confirm again.')
+        return
+      }
+      if (r.result) {
+        setNotice(
+          `Booked for ${new Date(r.result.startIso).toLocaleString()} — a calendar invitation and confirmation email are on the way.`,
+        )
+        setSelectedSlot(null)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <section className="pdash-card" style={{ marginBottom: 'var(--space-3)' }}>
+        <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+          Need help with something new?
+        </h3>
+        <p className="text-muted">
+          Book another service — signed in, your details and previous answers are prefilled.
+        </p>
+        <a className="pdash-btn" href="/book">
+          Book a service
+        </a>
+      </section>
+
+      <section className="pdash-card">
+        <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+          Schedule time with the firm
+        </h3>
+        {notice && <div className="alert">{notice}</div>}
+        {error && (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
+        {availability === null ? (
+          <div className="loading-block" role="status">
+            <span className="spinner" /> Checking availability…
+          </div>
+        ) : !availability.configured ? (
+          <p className="text-muted">
+            Online scheduling isn&apos;t available right now — message the firm and they&apos;ll
+            find a time with you.
+          </p>
+        ) : (
+          <>
+            {availability.meetingLengthsMinutes.length > 1 && (
+              <label className="text-sm" style={{ display: 'block', marginBottom: 'var(--space-2)' }}>
+                Length{' '}
+                <select
+                  value={duration ?? availability.durationMinutes}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                >
+                  {availability.meetingLengthsMinutes.map((m) => (
+                    <option key={m} value={m}>
+                      {m} min
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {availability.slots.length === 0 ? (
+              <p className="text-muted">No open times in the next few weeks.</p>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 'var(--space-2)' }}>
+                {availability.slots.slice(0, 24).map((slot) => (
+                  <button
+                    key={slot.startIso}
+                    className={`pdash-btn pdash-btn-sm ${selectedSlot?.startIso === slot.startIso ? 'pdash-btn-primary' : ''}`}
+                    onClick={() => setSelectedSlot(slot)}
+                  >
+                    {new Date(slot.startIso).toLocaleString(undefined, {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </button>
+                ))}
+              </div>
+            )}
+            {quote && (
+              <div className="alert" role="note">
+                <strong>This time is billable:</strong> {quote.description} —{' '}
+                <strong>${quote.amount}</strong>
+                <label style={{ display: 'flex', gap: 8, marginTop: 6, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={feeAccepted}
+                    onChange={(e) => setFeeAccepted(e.target.checked)}
+                  />
+                  <span>I accept this fee for the scheduled time.</span>
+                </label>
+              </div>
+            )}
+            <button
+              className="pdash-btn pdash-btn-primary"
+              disabled={!selectedSlot || busy || (Boolean(quote) && !feeAccepted)}
+              onClick={book}
+            >
+              {busy ? 'Booking…' : 'Confirm time'}
+            </button>
+          </>
+        )}
+      </section>
+    </>
   )
 }
 

@@ -6,6 +6,7 @@ import { X } from 'lucide-react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
 import { callClientMcp } from '@/lib/mcpClient'
+import { callClientPortalMcp } from '@/lib/mcpClientPortal'
 import { AddressAutocomplete, type StructuredAddress } from '@/components/AddressAutocomplete'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { LanguageToggle } from '@/components/LanguageToggle'
@@ -254,6 +255,25 @@ export default function BookPage() {
   useEffect(() => {
     if (step === 'contact' && signedIn) setStep('intake')
   }, [step, signedIn])
+
+  // PORTAL-1 (WP4): signed-in intake prefill from what the firm already knows —
+  // the client's most recent answers for this service. Merged only into fields
+  // the client hasn't touched this session; they edit and confirm before submit.
+  const prefilledFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!signedIn || step !== 'intake' || !selectedServiceKey) return
+    if (prefilledFor.current === selectedServiceKey) return
+    prefilledFor.current = selectedServiceKey
+    callClientPortalMcp<{ responses: Record<string, unknown> | null }>({
+      toolName: 'legal.client.intake_prefill',
+      input: { serviceKey: selectedServiceKey },
+    })
+      .then((r) => {
+        if (!r.responses) return
+        setIntakeResponses((prev) => ({ ...r.responses, ...prev }))
+      })
+      .catch(() => undefined)
+  }, [signedIn, step, selectedServiceKey])
 
   // A ?service= preset jumps straight to the contact step before services have
   // loaded. Once they do, validate the preset: if it doesn't resolve to a real

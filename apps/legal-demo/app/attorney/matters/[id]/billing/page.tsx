@@ -14,6 +14,21 @@
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+
+// PORTAL-1 (WP3): the client's fee-consent trail (who consented, to what
+// amount, for what, when) rendered beside the fees it authorized.
+interface ConsentEntry {
+  eventId: string
+  decision: 'accepted' | 'declined' | 'quoted'
+  subjectKind: string
+  subjectKey: string
+  amount: string | null
+  rate: string | null
+  durationMinutes: number | null
+  basis: string
+  description: string | null
+  at: string
+}
 import { TimeExpensePanel } from '@/components/TimeExpensePanel'
 import { humanizeKind, type MatterDetail } from '../shared'
 
@@ -82,6 +97,7 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
   const [matter, setMatter] = useState<MatterDetail | null>(null)
   const [unbilled, setUnbilled] = useState<UnbilledMatter | null>(null)
   const [invoiced, setInvoiced] = useState<InvoicedItem[]>([])
+  const [consents, setConsents] = useState<ConsentEntry[]>([])
   const [currency, setCurrency] = useState('USD')
   const [fee, setFee] = useState<ServiceCost | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -161,6 +177,12 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
   const load = useCallback(async () => {
     setError(null)
     try {
+      callAttorneyMcp<{ consents: ConsentEntry[] }>({
+        toolName: 'legal.matter.fee_consents',
+        input: { matterEntityId: id },
+      })
+        .then((r) => setConsents(r.consents))
+        .catch(() => setConsents([]))
       const mRes = await callAttorneyMcp<{ matter: MatterDetail | null }>({
         toolName: 'legal.matter.get',
         input: { matterEntityId: id },
@@ -205,10 +227,52 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
   }, [load])
 
   const entries = unbilled?.entries ?? []
+  const acceptedConsents = consents.filter((c) => c.decision !== 'quoted')
   const invoicedTotal = invoiced.reduce((s, i) => s + (Number(i.amount) || 0), 0).toFixed(2)
 
   return (
     <>
+      {acceptedConsents.length > 0 && (
+        <section>
+          <h2>Client fee consents</h2>
+          <p className="text-muted text-sm">
+            Fees the client explicitly accepted (or declined) in the portal, on the ledger.
+          </p>
+          <div className="table-wrap" style={{ marginTop: 'var(--space-3)' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Decision</th>
+                  <th>For</th>
+                  <th>Terms</th>
+                </tr>
+              </thead>
+              <tbody>
+                {acceptedConsents.map((c) => (
+                  <tr key={c.eventId}>
+                    <td>{fmtDate(c.at)}</td>
+                    <td>
+                      <span className={`badge ${c.decision === 'accepted' ? 'ok' : ''}`}>
+                        {c.decision}
+                      </span>
+                    </td>
+                    <td>{c.description ?? c.subjectKey}</td>
+                    <td>
+                      {c.amount
+                        ? `$${c.amount}`
+                        : c.rate
+                          ? `$${c.rate}/hr${c.durationMinutes ? ` × ${c.durationMinutes} min` : ''}`
+                          : c.basis}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       <section>
         <h2>Invoiced</h2>
         <p className="text-muted text-sm">

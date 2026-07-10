@@ -35,6 +35,7 @@ interface ClientDetail {
   name: string
   billableRate: string | null
   billingType: string | null
+  portalSchedulingBillable?: boolean
   mainContactId: string | null
   contactCount: number
   matterCount: number
@@ -59,7 +60,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     billingType: BillingType
     rate: string
     mainContactId: string
-  }>({ name: '', billingType: '', rate: '', mainContactId: '' })
+    portalSchedulingBillable: boolean
+  }>({ name: '', billingType: '', rate: '', mainContactId: '', portalSchedulingBillable: false })
 
   const load = useCallback(() => {
     callAttorneyMcp<{ client: ClientDetail | null }>({
@@ -81,6 +83,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       billingType: (client.billingType as BillingType) ?? '',
       rate: client.billableRate ?? '',
       mainContactId: client.mainContactId ?? '',
+      portalSchedulingBillable: Boolean(client.portalSchedulingBillable),
     })
     setError(null)
     setEditing(true)
@@ -108,6 +111,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         if (form.rate.trim()) input.billable_rate = form.rate.trim()
       }
       if (form.mainContactId) input.main_contact_id = form.mainContactId
+      input.portal_scheduling_billable = form.portalSchedulingBillable
       await callAttorneyMcp({ toolName: 'legal.client.update', input })
       setEditing(false)
       load()
@@ -196,7 +200,19 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
                   </label>
                 )}
                 {client.contacts.length > 0 && (
-                  <label>
+                  <label className="form-field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.portalSchedulingBillable}
+                    onChange={(e) =>
+                      setForm({ ...form, portalSchedulingBillable: e.target.checked })
+                    }
+                  />
+                  <span>
+                    Portal scheduling is billable (client accepts rate × duration before booking)
+                  </span>
+                </label>
+                <label>
                     <span>Main contact</span>
                     <select
                       value={form.mainContactId}

@@ -45,6 +45,10 @@ export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.client.thread_get', // read the client↔attorney portal thread for one matter
   'legal.client.message_post', // post a message to the attorney on one of the client's matters
   'legal.client.billing_summary', // invoices + accrued fees + running total (one truth with the attorney panel)
+  'legal.client.schedule_availability', // open slots on the firm's live calendar
+  'legal.client.schedule_quote', // the fee for billable portal-scheduled time (null = free)
+  'legal.client.schedule_time', // book a slot as the client (consent-gated when billable)
+  'legal.client.intake_prefill', // most recent intake answers for prefilled repeat booking
   'legal.client.todos', // sign / pay / materials-requested, in one list
   'legal.client.invoices', // list the signed-in client's own invoices (client-safe fields)
   'legal.client.invoice_get', // one of the client's own invoices by number, with line items

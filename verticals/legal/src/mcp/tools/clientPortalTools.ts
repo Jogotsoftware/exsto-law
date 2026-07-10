@@ -34,6 +34,14 @@ import {
   listClientTodos,
   type ClientBillingSummary,
   type ClientTodo,
+  getPortalSchedulingAvailability,
+  getSchedulingFeeQuote,
+  scheduleClientTime,
+  SchedulingFeeConsentRequiredError,
+  getClientIntakePrefill,
+  type PortalSchedulingAvailability,
+  type SchedulingFeeQuote,
+  type ScheduledTimeResult,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -356,6 +364,90 @@ const todosTool: Tool<{ clientContactId: string }, { todos: ClientTodo[] }> = {
   }),
 }
 
+// PORTAL-1 (WP4) — schedule time on the firm's REAL availability.
+const scheduleAvailabilityTool: Tool<
+  { durationMinutes?: number; daysOut?: number },
+  { availability: PortalSchedulingAvailability }
+> = {
+  name: 'legal.client.schedule_availability',
+  description:
+    'Open consultation slots on the firm’s live calendar (rules ∩ Google free/busy — never fabricated).',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    availability: await getPortalSchedulingAvailability(ctx, {
+      durationMinutes: input.durationMinutes,
+      daysOut: input.daysOut,
+    }),
+  }),
+}
+
+const scheduleQuoteTool: Tool<
+  { clientContactId: string; durationMinutes: number },
+  { quote: SchedulingFeeQuote | null }
+> = {
+  name: 'legal.client.schedule_quote',
+  description:
+    'The fee (rate × duration) for portal-scheduled time when the firm bills it — null when scheduling is free for this client.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    quote: await getSchedulingFeeQuote(ctx, input.clientContactId, input.durationMinutes ?? 30),
+  }),
+}
+
+interface ScheduleTimeInput {
+  clientContactId: string
+  startIso: string
+  endIso: string
+  durationMinutes?: number
+  reason?: string | null
+  feeAccepted?: boolean
+}
+const scheduleTimeTool: Tool<
+  ScheduleTimeInput,
+  { result?: ScheduledTimeResult; feeConsentRequired?: true; quote?: SchedulingFeeQuote }
+> = {
+  name: 'legal.client.schedule_time',
+  description:
+    'Book a consultation slot as the signed-in client. Billable time (per the firm’s setting) requires accepting the rate × duration fee first — enforced server-side.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => {
+    try {
+      const result = await scheduleClientTime(ctx, {
+        clientContactId: input.clientContactId,
+        startIso: input.startIso,
+        endIso: input.endIso,
+        durationMinutes: input.durationMinutes,
+        reason: input.reason ?? null,
+        feeAccepted: input.feeAccepted === true,
+      })
+      return { result }
+    } catch (err) {
+      if (err instanceof SchedulingFeeConsentRequiredError) {
+        return { feeConsentRequired: true, quote: err.quote }
+      }
+      throw err
+    }
+  },
+}
+
+// PORTAL-1 (WP4) — prefill a repeat booking from what the firm already knows.
+const intakePrefillTool: Tool<
+  { clientContactId: string; serviceKey?: string },
+  { responses: Record<string, unknown> | null }
+> = {
+  name: 'legal.client.intake_prefill',
+  description:
+    "The signed-in client's most recent intake answers (preferring the same service), for prefilled repeat booking. The client edits and confirms before submitting.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    responses: await getClientIntakePrefill(ctx, input.clientContactId, input.serviceKey ?? null),
+  }),
+}
+
+registerTool(scheduleAvailabilityTool)
+registerTool(scheduleQuoteTool)
+registerTool(scheduleTimeTool)
+registerTool(intakePrefillTool)
 registerTool(billingSummaryTool)
 registerTool(todosTool)
 registerTool(matterTimelineTool)
