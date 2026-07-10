@@ -99,6 +99,19 @@ const createTool: Tool<CreateTemplateInput, { template: StandaloneTemplate }> = 
           'Optional typed metadata per {{token}}, keyed by token id: { type, required, default, options }.',
         additionalProperties: true,
       },
+      signature: {
+        type: 'object',
+        description:
+          "Signability declaration: { required: boolean, signer_roles: ('client'|'attorney'|'witness'|'notary')[] }. Omit for an unsigned document (the default). Declaring required: true is what lets the workflow builder compose an e-signature step after this document's drafting step.",
+        properties: {
+          required: { type: 'boolean' },
+          signer_roles: {
+            type: 'array',
+            items: { type: 'string', enum: ['client', 'attorney', 'witness', 'notary'] },
+          },
+        },
+        additionalProperties: false,
+      },
     },
     required: ['name', 'category', 'body'],
     additionalProperties: false,
@@ -123,6 +136,19 @@ const updateTool: Tool<UpdateTemplateInput, { template: StandaloneTemplate }> = 
         description:
           'Optional typed metadata per {{token}}, keyed by token id: { type, required, default, options }. A provided map (including {}) supersedes the prior.',
         additionalProperties: true,
+      },
+      signature: {
+        type: 'object',
+        description:
+          "Signability declaration: { required: boolean, signer_roles: ('client'|'attorney'|'witness'|'notary')[] }. A provided declaration supersedes the prior; { required: false } unsigns.",
+        properties: {
+          required: { type: 'boolean' },
+          signer_roles: {
+            type: 'array',
+            items: { type: 'string', enum: ['client', 'attorney', 'witness', 'notary'] },
+          },
+        },
+        additionalProperties: false,
       },
     },
     required: ['templateEntityId'],

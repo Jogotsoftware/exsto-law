@@ -196,6 +196,26 @@ function isDocumentProducingStage(s: Lifecycle[number]): boolean {
   return false
 }
 
+// ESIGN-BLOCK-1 (WP3) — the template id(s) a DOCUMENT-PRODUCING stage binds, in both
+// shapes: an invoke_capability{document_generation} stage's capability_config.
+// template_entity_id, and the legacy generate_document stage's documents[]. Used to
+// decide whether the stage's output is SIGNABLE (its template declares
+// signature.required).
+function producingStageTemplateIds(s: Lifecycle[number]): string[] {
+  const ids: string[] = []
+  if (s.action?.kind === 'invoke_capability') {
+    const cfg = (s.action.config ?? {}) as {
+      capability_config?: { template_entity_id?: unknown }
+    }
+    const id = String(cfg.capability_config?.template_entity_id ?? '').trim()
+    if (id) ids.push(id)
+  }
+  for (const d of s.documents ?? []) {
+    if (d.templateEntityId) ids.push(d.templateEntityId)
+  }
+  return ids
+}
+
 // Validate a PROPOSED graph the way the authoring path will write it: structural
 // validity (incl. the closed action-kind vocabulary), linear-only, every referenced
 // templateEntityId real, and — ADR 0046 — every invoke_capability stage names a
@@ -268,17 +288,20 @@ export async function validateProposedLifecycle(
     }
   }
 
-  // The firm's active document-template ids, loaded at most ONCE and shared by both
-  // the documents[] check and the capability template_entity_id check below (a
-  // document_generation step names its template the same way, by exact entity id).
-  let knownDocTemplateIds: Set<string> | null = null
-  const loadKnownDocTemplateIds = async (): Promise<Set<string>> => {
-    if (knownDocTemplateIds) return knownDocTemplateIds
-    const library = await listStandaloneTemplates(ctx)
-    knownDocTemplateIds = new Set(
-      library.filter((t) => t.category === 'document').map((t) => t.templateEntityId),
+  // The firm's active document templates, loaded at most ONCE and shared by the
+  // documents[] check, the capability template_entity_id check, and the e-sign
+  // signability check below (a document_generation step names its template the same
+  // way, by exact entity id).
+  let docTemplateLibrary: Awaited<ReturnType<typeof listStandaloneTemplates>> | null = null
+  const loadDocTemplates = async (): Promise<NonNullable<typeof docTemplateLibrary>> => {
+    if (docTemplateLibrary) return docTemplateLibrary
+    docTemplateLibrary = (await listStandaloneTemplates(ctx)).filter(
+      (t) => t.category === 'document',
     )
-    return knownDocTemplateIds
+    return docTemplateLibrary
+  }
+  const loadKnownDocTemplateIds = async (): Promise<Set<string>> => {
+    return new Set((await loadDocTemplates()).map((t) => t.templateEntityId))
   }
 
   // Referenced template ids must exist in the firm's document library. Collect the
@@ -341,6 +364,66 @@ export async function validateProposedLifecycle(
           }
         }
       }
+    }
+  }
+
+  // ESIGN-BLOCK-1 (WP3) — e-sign composes ONLY where a document is signable: an
+  // invoke_capability{esignature} stage must IMMEDIATELY follow a document-producing
+  // stage whose bound template declares signature.required. Authoring-only, same
+  // style as the deprecated-kind and billing checks: existing saved definitions keep
+  // validating and running.
+  const esignStages = graph.filter((s) => {
+    if (s.action?.kind !== 'invoke_capability') return false
+    const cfg = (s.action.config ?? {}) as { capability_slug?: string }
+    return (cfg.capability_slug ?? '').trim() === 'esignature'
+  })
+  for (const s of esignStages) {
+    // Walk BACK to the document-producing stage this e-sign step signs. Linear graph
+    // → at most one predecessor per stage. The e-sign step sends the latest APPROVED
+    // version, and approval happens on the review step — so the canonical chain is
+    // draft → review_send_document → esign; the walk skips over the produced
+    // document's review stage(s), nothing else.
+    let producer: Lifecycle[number] | null = null
+    let cursor: Lifecycle[number] | undefined = s
+    while (cursor) {
+      const predecessor: Lifecycle[number] | undefined = graph.find((p) =>
+        p.advances_to.some((e) => e.to === cursor!.key),
+      )
+      if (!predecessor) break
+      if (isDocumentProducingStage(predecessor)) {
+        producer = predecessor
+        break
+      }
+      if (predecessor.action?.kind !== 'review_send_document') break
+      cursor = predecessor
+    }
+    if (!producer) {
+      errors.push(
+        `stage "${s.key}" runs the esignature capability but does not follow a document-producing step — an e-sign step goes right after the step that drafts (and reviews) the signable document: invoke_capability{document_generation}, optionally followed by its review_send_document step. Remove the e-sign step, or move it there.`,
+      )
+      continue
+    }
+    const predecessor = producer
+    const templateIds = producingStageTemplateIds(predecessor)
+    if (templateIds.length === 0) {
+      errors.push(
+        `stage "${s.key}" runs the esignature capability after stage "${predecessor.key}", but that stage binds no document template — bind the drafting stage's template (action.config.capability_config.template_entity_id) and declare signature.required on it before composing an e-sign step.`,
+      )
+      continue
+    }
+    const library = await loadDocTemplates()
+    const byId = new Map(library.map((t) => [t.templateEntityId, t]))
+    const signable = templateIds.some((id) => byId.get(id)?.signature.required === true)
+    if (!signable) {
+      const named = templateIds
+        .map((id) => {
+          const t = byId.get(id)
+          return t ? `"${t.name}" (${id})` : `"${id}"`
+        })
+        .join(', ')
+      errors.push(
+        `stage "${s.key}" runs the esignature capability, but the preceding stage "${predecessor.key}" drafts from ${named}, which does not declare signature.required — this document is unsigned, so an e-sign step cannot follow it. Either declare the signature block on the template (signature: { required: true, signer_roles: [...] } via legal.template.update) or remove the e-sign step.`,
+      )
     }
   }
 

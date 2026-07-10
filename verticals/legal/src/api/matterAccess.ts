@@ -102,7 +102,22 @@ export async function canSendOnMatter(
 ): Promise<boolean> {
   const access = await getMatterAccess(ctx, matterEntityId)
   if (hasDirectAccess(ctx, access)) return true
-  return isAdmin(ctx) // admins may send on any matter
+  if (await isAdmin(ctx)) return true // admins may send on any matter
+  // ESIGN-BLOCK-1 (WP2): the tenant's own NON-HUMAN actors (agent/system) may send.
+  // The workflow engine executes attorney-APPROVED definitions off-request as the
+  // agent actor (capability runtime, workers) — an e-sign step on an owned matter
+  // must not be refused because the engine is not the owner. The authorization is
+  // the attorney's approval of the workflow; the send still attributes to the agent
+  // actor (provenance unchanged). Human actors are unaffected. Authoritative read
+  // (withSuperuser), same as the owner/grant read above.
+  return withSuperuser(async (client) => {
+    const r = await client.query<{ n: string }>(
+      `SELECT count(*) AS n FROM actor
+        WHERE tenant_id = $1 AND id = $2 AND actor_type IN ('agent', 'system')`,
+      [ctx.tenantId, ctx.actorId],
+    )
+    return Number(r.rows[0]?.n ?? '0') > 0
+  })
 }
 
 export async function assertCanSendOnMatter(

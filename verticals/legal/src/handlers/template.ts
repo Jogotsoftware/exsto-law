@@ -40,12 +40,36 @@ async function setTemplateAttr(
 // single structured attribute on the template entity.
 type TemplateVariables = Record<string, unknown>
 
+// ESIGN-BLOCK-1 (WP1) — the signability declaration, stored as one structured
+// `template_signature` attribute (attribute kind defined via kind.define — data,
+// not DDL). Normalized on write so a malformed declaration can never be persisted;
+// reads coerce defensively anyway (queries/templates.parseTemplateSignature).
+const SIGNER_ROLES = ['client', 'attorney', 'witness', 'notary'] as const
+
+function normalizeSignature(raw: unknown): { required: boolean; signer_roles: string[] } {
+  const o = (raw && typeof raw === 'object' ? raw : {}) as {
+    required?: unknown
+    signer_roles?: unknown
+  }
+  const roles = Array.isArray(o.signer_roles)
+    ? [...new Set(o.signer_roles.filter((r) => SIGNER_ROLES.includes(r)))]
+    : []
+  const required = o.required === true
+  if (required && roles.length === 0) {
+    throw new Error(
+      `signature.required is true but signer_roles is empty — declare who signs (${SIGNER_ROLES.join(', ')}).`,
+    )
+  }
+  return { required, signer_roles: roles as string[] }
+}
+
 interface TemplateCreatePayload {
   name: string
   category: TemplateCategory
   body: string
   doc_kind?: string | null
   variables?: TemplateVariables
+  signature?: unknown
 }
 
 registerActionHandler('legal.template.create', async (ctx, client, payload, actionId) => {
@@ -76,6 +100,10 @@ registerActionHandler('legal.template.create', async (ctx, client, payload, acti
   if (p.variables && typeof p.variables === 'object' && Object.keys(p.variables).length > 0) {
     attrs.push({ kind: 'template_variables', value: p.variables })
   }
+  // Absent signature = unsigned (no attribute row) — the read default carries it.
+  if (p.signature != null) {
+    attrs.push({ kind: 'template_signature', value: normalizeSignature(p.signature) })
+  }
   for (const a of attrs) {
     await setTemplateAttr(client, {
       tenantId: ctx.tenantId,
@@ -96,6 +124,7 @@ interface TemplateUpdatePayload {
   body?: string
   doc_kind?: string | null
   variables?: TemplateVariables
+  signature?: unknown
 }
 
 registerActionHandler('legal.template.update', async (ctx, client, payload, actionId) => {
@@ -117,6 +146,10 @@ registerActionHandler('legal.template.update', async (ctx, client, payload, acti
   // clear all field metadata as well as set it.
   if (p.variables != null && typeof p.variables === 'object') {
     updates.push({ kind: 'template_variables', value: p.variables })
+  }
+  // A non-null signature supersedes the prior declaration; {required:false} unsigns.
+  if (p.signature != null) {
+    updates.push({ kind: 'template_signature', value: normalizeSignature(p.signature) })
   }
 
   for (const u of updates) {
