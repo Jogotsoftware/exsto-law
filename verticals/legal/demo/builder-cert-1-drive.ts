@@ -167,11 +167,11 @@ async function runApprove(file: string, artifact: string, index = 0): Promise<vo
         body: p.body,
         docKind: p.docKind,
         category: 'document',
-        ...(p.signature && p.signature.required
+        ...(p.signature
           ? {
               signature: {
-                required: true,
-                signer_roles: p.signature.signer_roles as Array<
+                required: p.signature.required === true,
+                signer_roles: (p.signature.signer_roles ?? []) as Array<
                   'client' | 'attorney' | 'witness' | 'notary'
                 >,
               },

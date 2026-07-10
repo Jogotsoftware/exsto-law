@@ -62,6 +62,9 @@ export interface ServiceProposalEvent {
   description: string | null
   route: 'auto' | 'manual'
   generationMode: 'template_merge' | 'ai_draft'
+  // BUILDER-CERT-1 (WP3) — booking mode (true = consultation slot at booking;
+  // false = intake-only); forwarded to the approve route.
+  appointmentRequired?: boolean
   summary: string
   confidence: number
 }
@@ -103,6 +106,8 @@ export interface TemplateProposalEvent {
   docKind: string
   summary: string
   confidence: number
+  // BUILDER-CERT-1 (WP3) — signability declaration; forwarded to the approve route.
+  signature?: { required: boolean; signer_roles: string[] }
   tokens: string[]
   orphanTokens: string[]
   // Phase 7 — flow-aware framing: whether a questionnaire exists yet (so orphans read
@@ -135,6 +140,9 @@ export interface CostProposalEvent {
   costType: 'hourly' | 'fixed'
   amount: string
   hours: number | null
+  // BUILDER-CERT-1 (WP1) — per-document fees declared alongside the cost; forwarded
+  // to the approve route.
+  documentFees?: Record<string, string>
   summary: string
   confidence: number
 }
@@ -277,6 +285,10 @@ export async function streamAssistant(
           description: typeof evt.description === 'string' ? evt.description : null,
           route: evt.route === 'auto' ? 'auto' : 'manual',
           generationMode: evt.generationMode === 'ai_draft' ? 'ai_draft' : 'template_merge',
+          // BUILDER-CERT-1 (WP3) — booking mode rides the card to the approve route.
+          ...(typeof evt.appointmentRequired === 'boolean'
+            ? { appointmentRequired: evt.appointmentRequired }
+            : {}),
           summary: String(evt.summary ?? ''),
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
         })
@@ -301,6 +313,11 @@ export async function streamAssistant(
           docKind: String(evt.docKind ?? ''),
           summary: String(evt.summary ?? ''),
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
+          // BUILDER-CERT-1 (WP3) — signability rides the card to the approve route
+          // (what declares signature.required on the firm-library template).
+          ...(evt.signature && typeof evt.signature === 'object'
+            ? { signature: evt.signature as { required: boolean; signer_roles: string[] } }
+            : {}),
           tokens: Array.isArray(evt.tokens) ? (evt.tokens as string[]) : [],
           orphanTokens: Array.isArray(evt.orphanTokens) ? (evt.orphanTokens as string[]) : [],
           hasQuestionnaire: evt.hasQuestionnaire === true,
@@ -315,6 +332,10 @@ export async function streamAssistant(
           costType: evt.costType === 'hourly' ? 'hourly' : 'fixed',
           amount: String(evt.amount ?? ''),
           hours: typeof evt.hours === 'number' ? evt.hours : null,
+          // BUILDER-CERT-1 (WP1) — per-document fees ride the card to the approve route.
+          ...(evt.documentFees && typeof evt.documentFees === 'object'
+            ? { documentFees: evt.documentFees as Record<string, string> }
+            : {}),
           summary: String(evt.summary ?? ''),
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
         })

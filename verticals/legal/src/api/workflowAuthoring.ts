@@ -265,19 +265,27 @@ export async function validateProposedLifecycle(
   if (serviceKey) {
     const svc = await getService(ctx, serviceKey)
     const feeKinds = Object.keys(svc?.documentFees ?? {})
-    if (producingStages.length > 0 && !hasInvoiceStep && feeKinds.length === 0) {
+    // A FIXED service cost is a real billing declaration too — it auto-accrues at
+    // completion (legal.service.complete). Only a producing workflow with NO fees,
+    // NO invoice step, and NO flat fee produces work nobody ever bills. (Hourly
+    // does not count here: nothing accrues unless time is recorded and invoiced,
+    // so hourly document-producing services still need an invoice step.)
+    const hasFixedFee = svc?.cost?.type === 'fixed'
+    if (producingStages.length > 0 && !hasInvoiceStep && feeKinds.length === 0 && !hasFixedFee) {
       errors.push(
-        `the workflow produces a document (stage "${producingStages[0]!.key}") but declares no billing — either set the service's per-document fees (transitions.document_fees, accrued when the document is approved) or add an approve_send_invoice step to the graph.`,
+        `the workflow produces a document (stage "${producingStages[0]!.key}") but declares no billing — set the service's per-document fees (transitions.document_fees, accrued when the document is approved), or a flat service fee (accrued at completion), or add an approve_send_invoice step to the graph.`,
       )
     }
-    // BUILDER-CERT-1 (WP1) — split billing is a WARNING, never a rejection: both a
-    // per-document fee (accrued on approve) and a fixed service fee (accrued at
-    // completion) are declared, so a matter is charged twice. That is legitimate
-    // only when the attorney chose it deliberately; the card must say it out loud.
-    if (feeKinds.length > 0 && svc?.cost?.type === 'fixed') {
+    // BUILDER-CERT-1 (WP1) — split billing is a WARNING, never a rejection: per-
+    // document fees PLUS a service cost (fixed doubles the total; hourly stacks
+    // time-billing on top) charge the matter twice. Legitimate only when the
+    // attorney chose it deliberately; the card must say it out loud.
+    if (feeKinds.length > 0 && svc?.cost) {
       const feeTotal = feeKinds.reduce((sum, k) => sum + Number(svc.documentFees[k] ?? 0), 0)
       warnings.push(
-        `split billing: this service charges per-document fee(s) totaling $${feeTotal.toFixed(2)} on approval AND a $${svc.cost.amount} service fee at completion — two charges per matter (total $${(feeTotal + Number(svc.cost.amount)).toFixed(2)}). Keep both ONLY if the attorney deliberately chose a split; otherwise remove one so the service has ONE billing point.`,
+        svc.cost.type === 'fixed'
+          ? `split billing: this service charges per-document fee(s) totaling $${feeTotal.toFixed(2)} on approval AND a $${svc.cost.amount} service fee at completion — two charges per matter (total $${(feeTotal + Number(svc.cost.amount)).toFixed(2)}). Keep both ONLY if the attorney deliberately chose a split; otherwise remove one so the service has ONE billing point.`
+          : `split billing: this service charges per-document fee(s) totaling $${feeTotal.toFixed(2)} on approval AND hourly billing at $${svc.cost.amount}/hour — two charge declarations per matter. Keep both ONLY if the attorney deliberately chose a split; otherwise remove one so the service has ONE billing point.`,
       )
     }
   }

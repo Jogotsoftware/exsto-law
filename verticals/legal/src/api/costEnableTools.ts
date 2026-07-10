@@ -48,6 +48,12 @@ const PROPOSE_COST_TOOL_DEF = {
         type: 'number',
         description: "For 'hourly' only: the estimated number of hours (optional).",
       },
+      document_fees: {
+        type: 'object',
+        description:
+          'For the PER-DOCUMENT billing model: one decimal-string fee per document kind (e.g. {"engagement_letter": "150.00"}), each accrued once per matter the moment the attorney approves that document. Combine with cost_type/amount ONLY for a deliberate split the attorney confirmed — the card will state the combined total and a split warning.',
+        additionalProperties: { type: 'string' },
+      },
       summary: {
         type: 'string',
         description:
@@ -79,6 +85,7 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
         cost_type?: string
         amount?: string
         hours?: number
+        document_fees?: Record<string, string>
         summary?: string
         confidence?: number
       }
@@ -87,7 +94,13 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
       const costType = (args.cost_type ?? '') as ServiceCostType
       const amount = (args.amount ?? '').trim()
       const hours = costType === 'hourly' && typeof args.hours === 'number' ? args.hours : null
-      const validation = validateProposedCost({ costType, amount, hours })
+      const documentFees =
+        args.document_fees &&
+        typeof args.document_fees === 'object' &&
+        Object.keys(args.document_fees).length
+          ? args.document_fees
+          : undefined
+      const validation = validateProposedCost({ costType, amount, hours, documentFees })
       if (!validation.ok) {
         return `The proposed billing is not valid and was NOT captured. Fix these and call propose_cost AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
@@ -100,6 +113,7 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
       // per-document fees), computed from the real service row, never model prose.
       const readout = await computeBillingReadout(ctx, serviceKey, {
         proposedCost: { costType, amount, hours },
+        ...(documentFees ? { proposedDocumentFees: documentFees } : {}),
       })
       const billingLine = readout ? ` ${formatBillingReadout(readout)}` : ''
       const warningText = readout?.splitWarning
@@ -110,6 +124,7 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
         costType,
         amount,
         hours,
+        ...(documentFees ? { documentFees } : {}),
         summary:
           ((args.summary ?? '').trim() ||
             `Proposed ${costType} billing of ${amount} for ${serviceKey}.`) +

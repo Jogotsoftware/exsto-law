@@ -8,9 +8,8 @@
 //   node --import tsx --env-file=<main-worktree>/.env.local \
 //     verticals/legal/demo/deprecate-echo-fixtures.ts [tenantId]
 //
-// Defaults to the Exsto Sandbox tenant (where the residue lives). Refuses nothing —
-// deprecating fixtures is safe in any tenant — but only fixture-prefixed slugs are
-// ever touched.
+// Defaults to the sandbox tenant (where the residue lives); accepts tenant-zero as
+// the one other known tenant. Only fixture-prefixed slugs are ever touched.
 import '@exsto/legal'
 import { listCapabilities, upsertCapability } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
@@ -23,6 +22,14 @@ const TENANT_ZERO_AGENT = '00000000-0000-0000-0001-000000000004'
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required.')
   const tenantId = process.argv[2] ?? SANDBOX
+  // Known tenants only: each write must carry an actor that belongs to its tenant
+  // (review finding: an arbitrary tenant would have been swept with the SANDBOX
+  // actor as the source — wrong-tenant provenance).
+  if (tenantId !== SANDBOX && tenantId !== TENANT_ZERO) {
+    throw new Error(
+      `Unknown tenant ${tenantId} — this sweep knows actors only for the sandbox and tenant-zero.`,
+    )
+  }
   const actorId = tenantId === TENANT_ZERO ? TENANT_ZERO_AGENT : SANDBOX_ACTOR
   const ctx: ActionContext = { tenantId, actorId }
 

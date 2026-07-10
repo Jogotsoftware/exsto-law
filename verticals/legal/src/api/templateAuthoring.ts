@@ -436,6 +436,15 @@ export async function createTemplateAI(
   // Validate the body BEFORE any write (incl. the trace) so an invalid proposal
   // leaves no trace row behind.
   const body = validateDocumentTemplate(input.body)
+  // Validate the signature declaration BEFORE any write too — the twin write (below)
+  // is a separate action AFTER the service-bound write commits, so a malformed
+  // declaration must fail HERE, not half-way through (review finding: the HTTP
+  // approve route forwards it unvalidated).
+  if (input.signature?.required === true && (input.signature.signer_roles ?? []).length === 0) {
+    throw new Error(
+      'signature.required is true but signer_roles is empty — declare who signs (client, attorney, witness, notary).',
+    )
+  }
 
   // Read the current row to MERGE into its document_templates (so other kinds'
   // bodies survive), its `documents` list (the doc kinds the service produces — a
@@ -534,16 +543,26 @@ export async function createTemplateAI(
   // entity id, and the e-sign validator reads signability off that entity — neither
   // can see a service-bound body. Without this write, a wizard-authored template is
   // invisible to get_workflow_context's availableTemplates and no drafting/e-sign
-  // step can ever bind it (the exact wall the certification drive hit). Upsert by
-  // (docKind, name): re-approving a revision updates the same library entity.
-  const library = await listStandaloneTemplates(agentCtx)
-  const twin = library.find(
-    (t) => t.category === 'document' && t.docKind === docKind && t.name === input.name,
+  // step can ever bind it (the exact wall the certification drive hit).
+  //
+  // Upsert key: docKind ALONE — the same key the service-bound store uses and the
+  // same association the docKind→service autobind model rests on. Keying by
+  // (docKind, name) duplicated the twin whenever a revision arrived under a new
+  // display name, stranding any workflow step bound to the old twin's entity id on
+  // stale content (review finding). Renames update the SAME entity in place; when
+  // several twins already share the docKind (legacy data), the exact-name match
+  // wins, else the newest.
+  const library = (await listStandaloneTemplates(agentCtx)).filter(
+    (t) => t.category === 'document' && t.docKind === docKind,
   )
+  const twin =
+    library.find((t) => t.name === input.name) ??
+    [...library].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0]
   let templateEntityId: string
   if (twin) {
     await updateTemplate(agentCtx, {
       templateEntityId: twin.templateEntityId,
+      name: input.name,
       body,
       ...(input.signature != null ? { signature: input.signature } : {}),
     })

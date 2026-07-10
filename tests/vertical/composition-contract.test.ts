@@ -50,7 +50,7 @@ describe('composition contract — doctrine teaches no deprecated step kind', ()
         const offending = body
           .split('\n')
           .filter((line) => line.includes(kind))
-          .filter((line) => !/deprecat|never author|reject/i.test(line))
+          .filter((line) => !/deprecat|never author/i.test(line))
         expect(
           offending,
           `${file} teaches deprecated step kind "${kind}" without marking it deprecated: ${JSON.stringify(offending)}`,
@@ -59,10 +59,15 @@ describe('composition contract — doctrine teaches no deprecated step kind', ()
     }
   })
 
-  it('every authorable step kind is taught in author-workflow.md', () => {
+  it('every authorable step kind is taught in author-workflow.md (as a backticked token)', () => {
     const body = skillFiles['author-workflow.md'] ?? ''
     for (const kind of AUTHORABLE_STEP_ACTION_KINDS) {
-      expect(body, `author-workflow.md does not teach authorable kind "${kind}"`).toContain(kind)
+      // Backticked exact token — a bare substring ('date' inside 'validated') must
+      // never satisfy the pin (review finding: vacuous passes).
+      expect(
+        body.includes('\`' + kind + '\`'),
+        `author-workflow.md does not teach authorable kind \`${kind}\``,
+      ).toBe(true)
     }
   })
 })
@@ -120,14 +125,17 @@ describe('composition contract — every gate token the doctrine names exists', 
 
   it('gate-teaching lines (on:/via:/advances on) name only real advance tokens', () => {
     // Matches the doctrine's gate-teaching notation: `on: esign.completed`,
-    // `via: draft.approve`, "advances on invoice.paid". A dotted token in one of
-    // those positions IS the runtime dispatch token — prose or a typo there ships a
-    // wizard that composes edges that never fire.
-    const re = /(?:\b(?:on|via):\s*`?|advanc(?:es|ing)\s+on\s+`?)([a-z][a-z_]*(?:\.[a-z_]+)+)/gi
+    // `via: draft.approve`, "advances on invoice.paid". A token in one of those
+    // positions IS the runtime dispatch token — prose or a typo there ships a wizard
+    // that composes edges that never fire. The structured `on:`/`via:` markers also
+    // catch DOTLESS typos (the documented real-world failure: "invoice_paid" vs
+    // "invoice.paid"); the prose form requires a dot to avoid false positives.
+    const re =
+      /(?:`(?:on|via):\s*([a-z][a-z_]*(?:\.[a-z_]+)*)`|advanc(?:es|ing)\s+on\s+`?([a-z][a-z_]*(?:\.[a-z_]+)+))/gi
     const named: Array<{ file: string; token: string }> = []
     for (const [file, body] of Object.entries(skillFiles)) {
       for (const m of body.matchAll(re)) {
-        named.push({ file, token: m[1]!.toLowerCase() })
+        named.push({ file, token: (m[1] ?? m[2])!.toLowerCase() })
       }
     }
     expect(named.length, 'expected the doctrine to teach at least one gate token').toBeGreaterThan(
@@ -185,10 +193,13 @@ describe('computed change read-out — describeGraphChanges (WP3)', () => {
 })
 
 describe('composition contract — every questionnaire field type is taught', () => {
-  it('author-questionnaire.md teaches every KNOWN_FIELD_TYPES entry', () => {
+  it('author-questionnaire.md teaches every KNOWN_FIELD_TYPES entry (as a backticked token)', () => {
     const body = skillFiles['author-questionnaire.md'] ?? ''
     for (const type of KNOWN_FIELD_TYPES) {
-      expect(body, `author-questionnaire.md does not teach field type "${type}"`).toContain(type)
+      expect(
+        body.includes('\`' + type + '\`'),
+        `author-questionnaire.md does not teach field type \`${type}\``,
+      ).toBe(true)
     }
   })
 })

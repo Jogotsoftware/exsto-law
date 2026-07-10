@@ -12,7 +12,7 @@
 //     sign    <matterId>               # client signs the open envelope (portal path)
 //     upload  <matterId> <contactId> <objectKey> <sha256> <bytes>  # client delivers the lease
 //     invoice <matterId> <clientId>    # attorney: accrue $450 service fee + issue + send
-//     pay     <matterId>               # payment recorded via the manual path (invoice.pay)
+//     pay     <invoiceEntityId>        # payment recorded via the manual path (invoice.pay)
 //     complete <matterId>              # attorney completes + archives the matter
 process.env.LEGAL_WORKFLOW_ENGINE = '1'
 

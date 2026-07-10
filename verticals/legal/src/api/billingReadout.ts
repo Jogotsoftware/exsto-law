@@ -44,6 +44,9 @@ export async function computeBillingReadout(
   serviceKey: string,
   opts?: {
     proposedCost?: { costType: 'fixed' | 'hourly'; amount: string; hours: number | null }
+    // Per-document fees proposed alongside the cost (the propose_cost card) — when
+    // present they REPLACE the service's declared fees in the read-out.
+    proposedDocumentFees?: Record<string, string>
     graph?: Lifecycle
   },
 ): Promise<BillingReadout | null> {
@@ -56,20 +59,21 @@ export async function computeBillingReadout(
         hours: opts.proposedCost.hours,
       }
     : svc.cost
+  const documentFees = opts?.proposedDocumentFees ?? svc.documentFees
 
   const lines: string[] = []
   let total = 0
   let chargePoints = 0
   let hourly = false
 
-  const feeKinds = Object.keys(svc.documentFees)
+  const feeKinds = Object.keys(documentFees)
   if (feeKinds.length > 0) {
     chargePoints++
     for (const kind of feeKinds) {
-      const amt = Number(svc.documentFees[kind])
+      const amt = Number(documentFees[kind])
       total += Number.isFinite(amt) ? amt : 0
       lines.push(
-        `$${svc.documentFees[kind]} accrues when the ${kind.replace(/_/g, ' ')} document is approved`,
+        `$${documentFees[kind]} accrues when the ${kind.replace(/_/g, ' ')} document is approved`,
       )
     }
   }
@@ -99,9 +103,14 @@ export async function computeBillingReadout(
     lines.push('no billing is declared on this service yet')
   }
 
+  // Split = per-document fees PLUS a service cost of either type. Fixed doubles a
+  // deterministic total; hourly stacks time-billing on top of document fees — both
+  // are two charge declarations and legitimate only when deliberate.
   const splitWarning =
-    feeKinds.length > 0 && cost?.type === 'fixed'
-      ? `this composition bills TWICE per matter — per-document fee(s) on approval AND a $${cost.amount} service fee at completion (total $${money(total)}). A split is legitimate only when the attorney chose it deliberately; if they wanted ONE billing point, drop either the document fee(s) or the service fee.`
+    feeKinds.length > 0 && cost
+      ? cost.type === 'fixed'
+        ? `this composition bills TWICE per matter — per-document fee(s) on approval AND a $${cost.amount} service fee at completion (total $${money(total)}). A split is legitimate only when the attorney chose it deliberately; if they wanted ONE billing point, drop either the document fee(s) or the service fee.`
+        : `this composition bills TWICE per matter — per-document fee(s) on approval AND hourly billing at $${cost.amount}/hour. A split is legitimate only when the attorney chose it deliberately; if they wanted ONE billing point, drop either the document fee(s) or the hourly rate.`
       : null
 
   return {
@@ -116,8 +125,10 @@ export async function computeBillingReadout(
 // workflow/cost approval card so the attorney owns the composed total explicitly.
 export function formatBillingReadout(r: BillingReadout): string {
   const total =
-    r.totalFixed !== null
-      ? `Total per matter: $${r.totalFixed}.`
-      : 'Total per matter: hourly — depends on time recorded.'
+    r.chargePoints === 0
+      ? 'No charge is declared yet — the billing step sets it.'
+      : r.totalFixed !== null
+        ? `Total per matter: $${r.totalFixed}.`
+        : 'Total per matter: hourly — depends on time recorded.'
   return `Billing read-out — ${r.lines.join('; ')}. ${total}`
 }

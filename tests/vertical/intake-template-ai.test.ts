@@ -15,6 +15,8 @@ import {
   getDocumentTemplate,
   getQuestionnaire,
   retireService,
+  listStandaloneTemplates,
+  archiveTemplate,
 } from '@exsto/legal'
 import { withSuperuser, closeDbPool } from '@exsto/shared'
 import type { ActionContext } from '@exsto/substrate'
@@ -55,9 +57,14 @@ async function latestProvenance(serviceKey: string) {
 
 run('Author questionnaire + template via AI (live DB)', { timeout: 120_000 }, () => {
   const created: string[] = []
+  const twinIds: string[] = []
   afterAll(async () => {
     for (const key of created) {
       await retireService(attorneyCtx, key).catch(() => {})
+    }
+    // The firm-library twins the template test created (BUILDER-CERT-1 WP3).
+    for (const id of twinIds) {
+      await archiveTemplate(attorneyCtx, id).catch(() => {})
     }
     await closeDbPool()
   })
@@ -65,12 +72,16 @@ run('Author questionnaire + template via AI (live DB)', { timeout: 120_000 }, ()
   it('createTemplateAI writes an agent-sourced, reasoning-traced, tenant-scoped template bound to the service', async () => {
     const svc = await createServiceAI(
       attorneyCtx,
-      { displayName: `Wizard Svc ${Date.now()}`, route: 'manual' },
+      {
+        displayName: `Wizard Svc ${Date.now()}`,
+        route: 'manual',
+        generationMode: 'template_merge',
+      },
       { conclusion: 'shell', confidence: 0.8 },
     )
     created.push(svc.serviceKey)
 
-    await createTemplateAI(
+    const result = await createTemplateAI(
       attorneyCtx,
       svc.serviceKey,
       {
@@ -78,15 +89,28 @@ run('Author questionnaire + template via AI (live DB)', { timeout: 120_000 }, ()
         body: 'Dear {{primary_client_name}}, re: {{company_name}}.',
         docKind: 'engagement_letter',
         category: 'document',
+        signature: { required: true, signer_roles: ['client'] },
       },
       { conclusion: 'The firm needs an engagement letter.', confidence: 0.7 },
     )
+    twinIds.push(result.templateEntityId)
 
     // The template is bound to the service (readable by docKind) with its body.
     const tpl = await getDocumentTemplate(attorneyCtx, svc.serviceKey, 'engagement_letter')
     expect(tpl).not.toBeNull()
     expect(tpl!.source).toBe('config')
     expect(tpl!.templateText).toContain('{{company_name}}')
+
+    // BUILDER-CERT-1 (WP3) — the FIRM-LIBRARY TWIN: the approved template also lands
+    // as a standalone library entity (what document_generation binds by exact id and
+    // the e-sign validator reads signability from).
+    const twin = (await listStandaloneTemplates(attorneyCtx)).find(
+      (t) => t.templateEntityId === result.templateEntityId,
+    )
+    expect(twin).toBeDefined()
+    expect(twin!.docKind).toBe('engagement_letter')
+    expect(twin!.signature.required).toBe(true)
+    expect(twin!.signature.signer_roles).toEqual(['client'])
 
     // Agent-sourced + traced + intent 'exploration', all on TENANT.
     const prov = await latestProvenance(svc.serviceKey)
@@ -102,7 +126,11 @@ run('Author questionnaire + template via AI (live DB)', { timeout: 120_000 }, ()
   it('createQuestionnaireAI writes an agent-sourced, reasoning-traced, tenant-scoped intake schema', async () => {
     const svc = await createServiceAI(
       attorneyCtx,
-      { displayName: `Wizard Q Svc ${Date.now()}`, route: 'manual' },
+      {
+        displayName: `Wizard Q Svc ${Date.now()}`,
+        route: 'manual',
+        generationMode: 'template_merge',
+      },
       { conclusion: 'shell', confidence: 0.8 },
     )
     created.push(svc.serviceKey)
