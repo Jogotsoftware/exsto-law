@@ -531,6 +531,17 @@ function WorkflowStepWindow({
     )
   }
 
+  // ── Client-gated wait (no attorney edge): the honest client-status panel ────
+  // Checked BEFORE invoke_capability: a current client-gated capability stage
+  // (e.g. request_client_materials → wait for the client) is WAITING ON THE
+  // CLIENT, not "running on the worker" — the capability fired on entry and
+  // finished; the spinner panel would spin forever on a client wait.
+  if (isCurrent && clientEdge && !attorneyEdge) {
+    return (
+      <ClientReviewStep stage={stage} matter={matter} onChanged={onChanged} onClose={onClose} />
+    )
+  }
+
   // ── invoke_capability (non-producing): honest worker state ──────────────────
   if (kind === 'invoke_capability') {
     return (
@@ -543,13 +554,6 @@ function WorkflowStepWindow({
         advanceFooter={advanceFooter}
         waitsNote={waitsNote}
       />
-    )
-  }
-
-  // ── Client-gated wait (no attorney edge): client status + Skip (WP3) ────────
-  if (isCurrent && clientEdge && !attorneyEdge) {
-    return (
-      <ClientReviewStep stage={stage} matter={matter} onChanged={onChanged} onClose={onClose} />
     )
   }
 
