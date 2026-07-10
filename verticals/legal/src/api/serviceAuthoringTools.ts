@@ -79,6 +79,11 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description:
           "How documents are produced: 'template_merge' (deterministic merge, no AI) or 'ai_draft' (AI drafting). REQUIRED and NEVER assumed — DERIVE it from the walkthrough, then CONFIRM in plain attorney language via ask_build_question (e.g. \"Should the documents fill a fixed template word-for-word, or should AI adapt the wording to each client?\"). Never say 'generation mode' to the attorney; translate silently here.",
       },
+      appointment_required: {
+        type: 'boolean',
+        description:
+          "Does booking this service START with a consultation appointment? true = the client picks a time slot when they book (services that open with a meeting); false = intake-only — the work starts straight from the client's answers/upload with no slot (document-review services, most pure document-production). REQUIRED and NEVER assumed — DERIVE it from the walkthrough (a process that opens with a consult → true; \"they upload the lease and I review it\" → false) and confirm in plain language only when genuinely ambiguous. Never say 'appointment_required' to the attorney.",
+      },
       summary: {
         type: 'string',
         description:
@@ -89,7 +94,7 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description: 'Your honest confidence in this proposal, 0–1 (never 1.0).',
       },
     },
-    required: ['display_name', 'route', 'generation_mode'],
+    required: ['display_name', 'route', 'generation_mode', 'appointment_required'],
     additionalProperties: false,
   },
 }
@@ -111,6 +116,7 @@ export function buildProposeServiceTool(
         description?: string
         route?: string
         generation_mode?: string
+        appointment_required?: unknown
         summary?: string
         confidence?: number
       }
@@ -139,6 +145,12 @@ export function buildProposeServiceTool(
       if (!route || !generationMode) {
         return 'route and generation_mode are REQUIRED and must NOT be assumed — derive them from the attorney\'s process walkthrough and CONFIRM each in plain language via ask_build_question (no platform vocabulary: describe who drives the matter and how documents are produced, not "route"/"generation_mode") before proposing. Nothing was captured.'
       }
+      // Booking mode is the same class of choice as route/mode: explicit, never
+      // defaulted (BUILDER-CERT-1 WP3 — the drive found document-review services
+      // silently demanding a consultation slot because nothing could say otherwise).
+      if (typeof args.appointment_required !== 'boolean') {
+        return 'appointment_required is REQUIRED and must NOT be assumed — derive from the walkthrough whether booking starts with a consultation appointment (true) or the work starts straight from intake (false, e.g. document-review), and confirm in plain language only if genuinely ambiguous. Nothing was captured.'
+      }
 
       // Uniqueness needs the existing keys — one read, shared with the validation.
       const context = await loadServiceAuthoringContext(ctx)
@@ -160,6 +172,7 @@ export function buildProposeServiceTool(
         description: description || null,
         route,
         generationMode,
+        appointmentRequired: args.appointment_required,
         summary: (args.summary ?? '').trim() || `Proposed new service "${displayName}".`,
         confidence,
       })

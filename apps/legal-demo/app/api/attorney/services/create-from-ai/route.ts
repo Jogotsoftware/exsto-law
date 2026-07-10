@@ -18,6 +18,7 @@ export async function POST(request: Request) {
     description?: string | null
     route?: WorkflowRoute
     generationMode?: GenerationMode
+    appointmentRequired?: boolean
     summary?: string
     confidence?: number
   } | null
@@ -39,6 +40,9 @@ export async function POST(request: Request) {
         description: body?.description ?? null,
         route: body?.route,
         generationMode: body?.generationMode,
+        ...(typeof body?.appointmentRequired === 'boolean'
+          ? { appointmentRequired: body.appointmentRequired }
+          : {}),
       },
       {
         conclusion: (body?.summary ?? '').trim() || `Created the service "${displayName}".`,

@@ -125,6 +125,10 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     'signature_request',
   )
   const requestIds: string[] = []
+  // The lowest routing order is the group delivered at send time (sequential
+  // routing delivers group 1; pure-parallel envelopes share one order).
+  const firstOrder = Math.min(...p.signers.map((sg, ix) => Number(sg.order ?? ix + 1) || 1))
+  const deliveredAtSend: string[] = []
   for (let i = 0; i < p.signers.length; i++) {
     const s = p.signers[i]!
     const requestId = await insertEntity(
@@ -156,10 +160,20 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     await setAttr(client, tenantId, actionId, requestId, 'signer_channel', s.channel ?? 'link', {
       sourceRef: ctx.actorId,
     })
-    // Everyone starts pending; deliverNextGroup promotes the active routing group.
-    await setAttr(client, tenantId, actionId, requestId, 'signer_status', 'pending', {
+    // BUILDER-CERT-1 (WP4) — write each signer's INITIAL status exactly once.
+    // The first routing group starts 'delivered' directly; later groups start
+    // 'pending' (deliverNextGroup promotes them on later sign actions). The old
+    // shape (write 'pending', then deliverNextGroup overwrites 'delivered' in the
+    // SAME transaction) produced two open attribute rows with an identical
+    // valid_from — an UNDEFINED current state that the first workflow-driven
+    // e-sign run hit for real: latestAttr read back 'pending' and
+    // assertSignerTurn blocked the envelope's only signer forever.
+    const signerOrder = Number(s.order ?? i + 1) || 1
+    const initialStatus = signerOrder === firstOrder ? 'delivered' : 'pending'
+    await setAttr(client, tenantId, actionId, requestId, 'signer_status', initialStatus, {
       sourceRef: ctx.actorId,
     })
+    if (initialStatus === 'delivered') deliveredAtSend.push(requestId)
     await insertRelationship(client, {
       tenantId,
       actionId,
@@ -188,10 +202,21 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     sourceRef: ctx.actorId,
   })
 
-  // Deliver the first routing group (sequential) or everyone (parallel).
-  const { delivered } = await deliverNextGroup(client, tenantId, actionId, envelopeId, ctx.actorId)
+  // The first routing group was initialized as delivered above (one status write
+  // per request); record the delivery events it used to get from deliverNextGroup.
+  for (const requestId of deliveredAtSend) {
+    await insertEvent(client, {
+      tenantId,
+      actionId,
+      eventKindName: 'esign.delivered',
+      primaryEntityId: envelopeId,
+      secondaryEntityIds: [requestId],
+      sourceType: 'system',
+      sourceRef: ctx.actorId,
+    })
+  }
 
-  return { envelopeId, requestIds, deliveredRequestIds: delivered, status: envelopeStatus }
+  return { envelopeId, requestIds, deliveredRequestIds: deliveredAtSend, status: envelopeStatus }
 })
 
 interface EsignOpenPayload {

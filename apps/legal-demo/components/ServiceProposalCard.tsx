@@ -13,6 +13,9 @@ export interface ServiceProposal {
   description: string | null
   route: 'auto' | 'manual'
   generationMode: 'template_merge' | 'ai_draft'
+  // BUILDER-CERT-1 (WP3) — booking mode: true = booking opens with a consultation
+  // slot; false = intake-only (document-review). Forwarded on approve.
+  appointmentRequired?: boolean
   summary: string
   confidence: number
 }
@@ -70,6 +73,9 @@ export function ServiceProposalCard({
           description: proposal.description,
           route: proposal.route,
           generationMode: proposal.generationMode,
+          ...(typeof proposal.appointmentRequired === 'boolean'
+            ? { appointmentRequired: proposal.appointmentRequired }
+            : {}),
           summary: proposal.summary,
           confidence: proposal.confidence,
         }),

@@ -146,6 +146,9 @@ async function runApprove(file: string, artifact: string, index = 0): Promise<vo
         description: p.description ?? null,
         route: p.route,
         generationMode: p.generationMode,
+        ...(typeof p.appointmentRequired === 'boolean'
+          ? { appointmentRequired: p.appointmentRequired }
+          : {}),
       },
       { conclusion: p.summary, confidence: p.confidence },
     )
