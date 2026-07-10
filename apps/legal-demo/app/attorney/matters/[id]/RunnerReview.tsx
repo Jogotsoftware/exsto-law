@@ -5,17 +5,24 @@
 // Opening the step IS opening the review; there is no intermediate confirm and no
 // navigation to /attorney/review. It reuses the exact pieces the standalone review
 // page uses (renderDocumentHtml for the document; the TipTap TemplateEditor for
-// Word-like editing; legal.draft.edit for the write path) and drives the four
-// Contract W write ops through lib/stepRunner (which falls back to the proven MCP
-// operations until the sibling session's routes land).
+// Word-like editing; legal.draft.edit for the write path) and drives the write ops
+// through lib/stepRunner — Contract W only (the interim MCP fallback was retired
+// in RUNNER-FIXES-1 once BACKHALF-BLOCKS-1's routes were verified deployed).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
+import { ConfirmModal } from '@/components/ConfirmModal'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
-import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
-import { approveDocument, regenerateStep, skipStep, completeMatter } from '@/lib/stepRunner'
+import {
+  acceptClientStep,
+  approveDocument,
+  regenerateStep,
+  skipStep,
+  completeMatter,
+} from '@/lib/stepRunner'
 import { humanizeKind, humanizeService, type MatterDetail, type WfStage } from './shared'
 
 interface DraftPayload {
@@ -153,11 +160,46 @@ export function RunnerReview({
   const [err, setErr] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
+  // Unsaved-changes guard (RUNNER-FIXES-1 WP1): the editor is dirty after any
+  // keystroke (TemplateEditor's onChange never fires on the initial seed). Leaving
+  // edit mode with unsaved changes — Cancel, or closing the modal via ×/backdrop/
+  // Escape — asks first via an in-app dialog. Never a silent discard, never a
+  // native confirm. `discardGuard` also remembers what discarding should do:
+  // return to the review view ('cancel') or close the whole step ('close').
+  const [dirty, setDirty] = useState(false)
+  const [discardGuard, setDiscardGuard] = useState<null | 'cancel' | 'close'>(null)
+
   function openEdit() {
     setErr(null)
     setNotice(null)
     setEditNote('')
+    setDirty(false)
     setEditing(true)
+  }
+
+  function cancelEdit() {
+    if (dirty) {
+      setDiscardGuard('cancel')
+      return
+    }
+    setEditing(false)
+  }
+
+  function requestClose() {
+    if (editing && dirty) {
+      // The guard is already up (e.g. Escape pressed twice): keep it, don't stack.
+      if (!discardGuard) setDiscardGuard('close')
+      return
+    }
+    onClose()
+  }
+
+  function discardEdits() {
+    const mode = discardGuard
+    setDiscardGuard(null)
+    setDirty(false)
+    setEditing(false)
+    if (mode === 'close') onClose()
   }
 
   async function saveEdit() {
@@ -176,6 +218,7 @@ export function RunnerReview({
           note: editNote.trim() || undefined,
         },
       })
+      setDirty(false)
       setEditing(false)
       setNotice('Saved as a new version — the original is preserved in history.')
       await onChanged() // new version becomes latest; reload
@@ -197,17 +240,12 @@ export function RunnerReview({
     setErr(null)
     try {
       const startVersionId = versionId
-      const r = await regenerateStep(matter.matterEntityId, stage.key, {
+      await regenerateStep(matter.matterEntityId, stage.key, {
         changeNotes: changeNotes.trim(),
-        documentKind: draft.documentKind,
       })
       setRegenOpen(false)
       setChangeNotes('')
-      setNotice(
-        r.via === 'contract-w'
-          ? 'Re-drafting on the worker — the new version will appear here when it lands.'
-          : 'Re-drafting on the worker — the new version supersedes this one and appears here when it lands.',
-      )
+      setNotice('Re-drafting on the worker — the new version will appear here when it lands.')
       void pollForNewVersion(startVersionId)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -225,12 +263,7 @@ export function RunnerReview({
     setBusy(send ? 'approve-send' : 'approve')
     setErr(null)
     try {
-      const r = await approveDocument(versionId, {
-        send,
-        matterEntityId: matter.matterEntityId,
-        shareUrl: shareUrlFor(versionId),
-        to: matter.clientEmail,
-      })
+      const r = await approveDocument(versionId, { send })
       setApproveOpen(false)
       setNotice(
         r.sent
@@ -256,7 +289,23 @@ export function RunnerReview({
   )
 
   return (
-    <Modal title={stage.label} onClose={onClose} size="wide" footer={advanceFooter ? footer : null}>
+    <Modal
+      title={stage.label}
+      onClose={requestClose}
+      size="wide"
+      footer={advanceFooter ? footer : null}
+    >
+      {discardGuard && (
+        <ConfirmModal
+          title="Discard unsaved changes?"
+          body="Your edits to this document haven’t been saved. Discarding returns to the last saved version."
+          confirmLabel="Discard"
+          cancelLabel="Keep editing"
+          danger
+          onConfirm={discardEdits}
+          onCancel={() => setDiscardGuard(null)}
+        />
+      )}
       {err && <div className="alert alert-error">{err}</div>}
       {notice && <div className="alert alert-success">{notice}</div>}
 
@@ -308,6 +357,7 @@ export function RunnerReview({
               initialHtml={markdownToHtml(draft.bodyMarkdown)}
               editorRef={editorRef}
               placeholder="Edit the document…"
+              onChange={() => setDirty(true)}
             />
           </div>
           <input
@@ -323,7 +373,7 @@ export function RunnerReview({
               {busy === 'edit' && <span className="spinner" />}
               {busy === 'edit' ? 'Saving…' : 'Save as new version'}
             </button>
-            <button onClick={() => setEditing(false)} disabled={busy === 'edit'}>
+            <button onClick={cancelEdit} disabled={busy === 'edit'}>
               Cancel
             </button>
             <span className="text-muted text-sm runner-toolbar-end">
@@ -598,115 +648,231 @@ export function CapabilityStatePanel({
 
 // ── Client-review step ────────────────────────────────────────────────────────
 // A current step gated on the CLIENT (e.g. client reviews/accepts the document).
-// Shows the client-facing status + an attorney "Skip this step" override that
-// advances without the client's acceptance (Contract W skip; falls back to
-// legal.matter.advance along the client edge).
+// RUNNER-FIXES-1 WP4: an HONEST status panel — what was asked of the client and
+// when (the workflow.advanced event that parked the matter here), plus what has
+// actually come back since (client uploads / portal messages, read from the real
+// matter history — "nothing yet" is said plainly). Two ways forward, both in-app
+// confirmed: record the client's out-of-band acceptance (phone/email → Contract W
+// accept, fires legal.client_request.accept) or skip the step entirely (Contract W
+// skip, records client_step_skipped_by_attorney).
+interface ClientStageActivity {
+  requestedAt: string | null
+  uploads: Array<{ name: string; at: string }>
+  messages: Array<{ preview: string; at: string }>
+}
+
 export function ClientReviewStep({
   stage,
   matter,
-  clientEdge,
   onChanged,
   onClose,
 }: {
   stage: WfStage
   matter: MatterDetail
-  clientEdge: { to: string; gate: string }
   onChanged: () => Promise<void>
   onClose: () => void
 }) {
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<null | 'accept' | 'skip'>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<null | 'accept' | 'skip'>(null)
+  // null = loading; 'failed' = the history read errored (said as such — an empty
+  // panel would misread as "the client has done nothing").
+  const [activity, setActivity] = useState<ClientStageActivity | 'failed' | null>(null)
 
-  async function skip() {
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm(
-        'Advance this matter without the client’s acceptance of this step? This overrides the client gate.',
-      )
-    )
-      return
-    setBusy(true)
+  useEffect(() => {
+    let cancelled = false
+    callAttorneyMcp<{
+      events: Array<{ kindName: string; data: Record<string, unknown>; occurredAt: string }>
+    }>({
+      toolName: 'legal.matter.history',
+      input: { matterEntityId: matter.matterEntityId },
+    })
+      .then((h) => {
+        if (cancelled) return
+        // When this stage was handed to the client: the LAST advance into it.
+        const entered = [...h.events]
+          .reverse()
+          .find((e) => e.kindName === 'workflow.advanced' && e.data.to === stage.key)
+        const since = entered?.occurredAt ?? null
+        const after = (at: string) => !since || at >= since
+        setActivity({
+          requestedAt: since,
+          uploads: h.events
+            .filter(
+              (e) =>
+                e.kindName === 'document.uploaded' &&
+                e.data.document_source === 'client_uploaded' &&
+                after(e.occurredAt),
+            )
+            .map((e) => ({
+              name: String(e.data.original_filename ?? 'document'),
+              at: e.occurredAt,
+            })),
+          messages: h.events
+            .filter((e) => e.kindName === 'client.message.received' && after(e.occurredAt))
+            .map((e) => ({ preview: String(e.data.preview ?? ''), at: e.occurredAt })),
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setActivity('failed')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [matter.matterEntityId, stage.key])
+
+  async function run(kind: 'accept' | 'skip') {
+    setConfirming(null)
+    setBusy(kind)
     setErr(null)
     try {
-      await skipStep(matter.matterEntityId, stage.key, {
-        toState: clientEdge.to,
-        gate: clientEdge.gate,
-      })
+      if (kind === 'accept') await acceptClientStep(matter.matterEntityId, stage.key)
+      else await skipStep(matter.matterEntityId, stage.key)
       await onChanged()
       onClose()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
-      setBusy(false)
+      setBusy(null)
     }
   }
 
+  const cameBack =
+    activity && activity !== 'failed' ? activity.uploads.length + activity.messages.length : 0
+
   return (
     <Modal title={stage.label} onClose={onClose}>
+      {confirming === 'accept' && (
+        <ConfirmModal
+          title="Record client acceptance?"
+          body="Records that the client accepted this step out-of-band (phone or email) and advances the matter. The acceptance is attributed and kept in the matter history."
+          confirmLabel="Record acceptance"
+          onConfirm={() => void run('accept')}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+      {confirming === 'skip' && (
+        <ConfirmModal
+          title="Skip this client step?"
+          body="Advances the matter without the client’s acceptance — the skip is recorded in the matter history as an attorney override."
+          confirmLabel="Skip step"
+          danger
+          onConfirm={() => void run('skip')}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
       {err && <div className="alert alert-error">{err}</div>}
+
       <div className="runner-state">
         <div className="runner-state-row">
           <span className="runner-state-title">Waiting on the client</span>
         </div>
         <p className="runner-state-detail">
           {stage.client_label
-            ? `The client sees: “${stage.client_label}”. `
-            : 'This step is with the client. '}
-          It advances when the client completes it. There’s no acceptance recorded yet.
+            ? `The client was asked to: “${stage.client_label}”`
+            : 'This step is with the client'}
+          {activity && activity !== 'failed' && activity.requestedAt
+            ? ` — since ${new Date(activity.requestedAt).toLocaleDateString()}.`
+            : '.'}
         </p>
       </div>
-      <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-        You can advance the matter without waiting — the client step is skipped.
+
+      {/* What has come back — the real reads, stated plainly. */}
+      <div style={{ marginTop: 'var(--space-3)' }}>
+        {activity === null ? (
+          <p className="text-muted text-sm">
+            <span className="spinner" /> Checking for client activity…
+          </p>
+        ) : activity === 'failed' ? (
+          <p className="text-muted text-sm">
+            Couldn’t load the client activity for this step — the actions below still work.
+          </p>
+        ) : cameBack === 0 ? (
+          <p className="text-muted text-sm">Nothing has come back from the client yet.</p>
+        ) : (
+          <>
+            {activity.uploads.length > 0 && (
+              <div className="text-sm" style={{ marginBottom: 'var(--space-2)' }}>
+                <strong>Materials received:</strong>
+                <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: 'var(--space-4)' }}>
+                  {activity.uploads.map((u, i) => (
+                    <li key={i}>
+                      {u.name} — {new Date(u.at).toLocaleDateString()}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {activity.messages.length > 0 && (
+              <div className="text-sm">
+                <strong>
+                  {activity.messages.length === 1
+                    ? 'Message from the client:'
+                    : `${activity.messages.length} messages from the client:`}
+                </strong>
+                <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: 'var(--space-4)' }}>
+                  {activity.messages.map((m, i) => (
+                    <li key={i}>
+                      “{m.preview}” — {new Date(m.at).toLocaleDateString()}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <p className="text-muted text-sm" style={{ marginTop: 'var(--space-4)' }}>
+        The step advances when the client completes it in the portal. If they’ve already accepted by
+        phone or email, record it; or skip the step entirely.
       </p>
-      <button
-        className="warn"
-        onClick={() => void skip()}
-        disabled={busy}
-        style={{ marginTop: 'var(--space-2)' }}
-      >
-        {busy && <span className="spinner" />}
-        {busy ? 'Skipping…' : 'Skip this step'}
-      </button>
+      <div className="runner-toolbar" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
+        <button
+          className="primary"
+          onClick={() => setConfirming('accept')}
+          disabled={busy !== null}
+        >
+          {busy === 'accept' && <span className="spinner" />}
+          {busy === 'accept' ? 'Recording…' : 'Record client acceptance'}
+        </button>
+        <button className="warn" onClick={() => setConfirming('skip')} disabled={busy !== null}>
+          {busy === 'skip' && <span className="spinner" />}
+          {busy === 'skip' ? 'Skipping…' : 'Skip this step'}
+        </button>
+      </div>
     </Modal>
   )
 }
 
 // ── Complete matter step ──────────────────────────────────────────────────────
-// Replaces the static "this matter is complete" text with the matter summary + a
-// real "Complete & archive" action (Contract W complete { archive: true }). When
-// the endpoint isn't deployed yet the matter is still completed via the workflow
-// advance and archiving is reported as pending — never faked.
+// The matter summary + a real "Complete & archive" action (Contract W complete
+// { archive: true } — advance to terminal, accrue the completion fee, archive).
+// Archived, never deleted.
 export function CompleteMatterStep({
   stage,
   matter,
-  terminalState,
   onChanged,
   onClose,
   advanceFooter,
 }: {
   stage: WfStage
   matter: MatterDetail
-  // The state to advance to in order to complete, or null if the matter is already
-  // at its terminal step (then only Contract W can archive).
-  terminalState: string | null
   onChanged: () => Promise<void>
   onClose: () => void
   advanceFooter?: React.ReactNode
 }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [done, setDone] = useState<{ archived: boolean; archivePending: boolean } | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [done, setDone] = useState<{ archived: boolean } | null>(null)
 
   async function complete() {
-    if (
-      typeof window !== 'undefined' &&
-      !window.confirm('Complete and archive this matter? It moves out of the active list.')
-    )
-      return
+    setConfirming(false)
     setBusy(true)
     setErr(null)
     try {
-      const r = await completeMatter(matter.matterEntityId, { terminalState })
-      setDone({ archived: r.archived, archivePending: r.archivePending })
+      const r = await completeMatter(matter.matterEntityId)
+      setDone({ archived: r.archived })
       await onChanged()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -717,15 +883,20 @@ export function CompleteMatterStep({
 
   return (
     <Modal title={stage.label} onClose={onClose} footer={advanceFooter ?? null}>
+      {confirming && (
+        <ConfirmModal
+          title="Complete and archive this matter?"
+          body="The matter moves out of the active list — it is archived, not deleted, and stays available in the archived view."
+          confirmLabel="Complete matter"
+          onConfirm={() => void complete()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
       {err && <div className="alert alert-error">{err}</div>}
       {done ? (
         <div className="alert alert-success">
           Matter completed
-          {done.archived
-            ? ' and archived — it’s moved out of the active list.'
-            : done.archivePending
-              ? '. Archiving is pending the completion endpoint; the matter is marked complete.'
-              : '.'}
+          {done.archived ? ' and archived — it’s moved out of the active list.' : '.'}
         </div>
       ) : (
         <>
@@ -749,7 +920,7 @@ export function CompleteMatterStep({
           </p>
           <button
             className="primary"
-            onClick={() => void complete()}
+            onClick={() => setConfirming(true)}
             disabled={busy}
             style={{ marginTop: 'var(--space-3)' }}
           >

@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm } from '@/components/ConfirmModal'
 import { readDevSession } from '@/lib/auth'
 import {
   SparklesIcon,
@@ -222,6 +223,7 @@ function DocKindCombobox({
 }
 
 export default function TemplatesPage() {
+  const { confirm, confirmElement } = useConfirm()
   const [templates, setTemplates] = useState<Template[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -748,12 +750,13 @@ export default function TemplatesPage() {
   }
 
   async function archive(t: Template) {
-    if (
-      !window.confirm(
-        `Archive "${t.name}"? It will be removed from the active library (kept as history).`,
-      )
-    )
-      return
+    const ok = await confirm({
+      title: `Archive “${t.name}”?`,
+      body: 'It will be removed from the active library — kept as history.',
+      confirmLabel: 'Archive',
+      danger: true,
+    })
+    if (!ok) return
     setError(null)
     try {
       await callAttorneyMcp({
@@ -783,6 +786,7 @@ export default function TemplatesPage() {
 
   return (
     <main>
+      {confirmElement}
       <PageHead
         title="Templates"
         actions={

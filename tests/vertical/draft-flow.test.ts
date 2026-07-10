@@ -173,7 +173,7 @@ run('draft pipeline (live DB)', { timeout: 120_000 }, () => {
     ).rejects.toThrow(/reasoning/i)
   })
 
-  it('requestDraft enqueues the worker job + draft.requested; manual route refuses', async () => {
+  it('requestDraft enqueues the worker job + draft.requested for ANY route', async () => {
     const { requestDraft } = await import('@exsto/legal')
     const autoMatter = await makeConsultedMatter('nc_llc_single_member')
     const { jobId } = await requestDraft(
@@ -192,14 +192,19 @@ run('draft pipeline (live DB)', { timeout: 120_000 }, () => {
     )
     expect(evt.rowCount).toBe(1)
 
-    // 'something_else' is the catch-all that STAYS manual (nc_llc_multi_member
-    // flipped to auto in vertical migration 0013), so it is the manual-refusal case.
+    // Manual-route matters enqueue too: drafting is capability-routed
+    // (CAPABILITY-UNIFY-1), so the Phase 0 auto-only refusal is gone
+    // (RUNNER-FIXES-1 WP5 — it 500'd the runner's regenerate on manual matters).
+    // 'something_else' is the catch-all that stays route='manual'.
     const manualMatter = await makeConsultedMatter('something_else')
-    await expect(
-      requestDraft(
-        { tenantId: TENANT, actorId: ATTORNEY_ACTOR },
-        { matterEntityId: manualMatter, documentKind: 'operating_agreement' },
-      ),
-    ).rejects.toThrow(/manual workflow/)
+    const manual = await requestDraft(
+      { tenantId: TENANT, actorId: ATTORNEY_ACTOR },
+      { matterEntityId: manualMatter, documentKind: 'operating_agreement' },
+    )
+    const manualJob = await db.query<{ job_kind: string }>(
+      `SELECT job_kind FROM worker_job WHERE tenant_id=$1 AND id=$2`,
+      [TENANT, manual.jobId],
+    )
+    expect(manualJob.rows[0].job_kind).toBe('legal.draft.run')
   })
 })

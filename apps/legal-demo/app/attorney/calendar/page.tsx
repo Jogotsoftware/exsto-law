@@ -12,6 +12,7 @@ import { Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { PageHead } from '@/components/PageHead'
 import { Modal } from '@/components/Modal'
+import { useConfirm } from '@/components/ConfirmModal'
 import { ActionsMenu, type ActionItem } from '@/components/ActionsMenu'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
 
@@ -199,6 +200,7 @@ type DragState =
   | { kind: 'resize'; e: WorkspaceEvent; day: Date; top: number; height: number; moved: boolean }
 
 export default function CalendarPage() {
+  const { confirm, confirmElement } = useConfirm()
   const [anchor, setAnchor] = useState(() => new Date())
   const [view, setView] = useState<View>('week')
   const [events, setEvents] = useState<WorkspaceEvent[]>([])
@@ -409,12 +411,19 @@ export default function CalendarPage() {
         label: 'Cancel event',
         onClick: () => {
           const who = e.contactName ? ` with ${e.contactName}` : ''
-          if (window.confirm(`Cancel this meeting${who}?`)) {
-            run('legal.meeting.cancel', {
-              calendarEventEntityId: e.meetingEntityId,
-              googleEventId: e.eventId,
-            })
-          }
+          void confirm({
+            title: 'Cancel this meeting?',
+            body: `Cancels the meeting${who} and removes it from the calendar.`,
+            confirmLabel: 'Cancel meeting',
+            cancelLabel: 'Keep it',
+            danger: true,
+          }).then((ok) => {
+            if (ok)
+              run('legal.meeting.cancel', {
+                calendarEventEntityId: e.meetingEntityId,
+                googleEventId: e.eventId,
+              })
+          })
         },
       })
       return items
@@ -445,9 +454,15 @@ export default function CalendarPage() {
       {
         label: 'Cancel event',
         onClick: () => {
-          if (window.confirm(`Cancel the consultation for ${e.matterNumber}?`)) {
-            run('legal.booking.cancel', { matterEntityId: e.matterEntityId })
-          }
+          void confirm({
+            title: 'Cancel the consultation?',
+            body: `Cancels the consultation for ${e.matterNumber} and removes it from the calendar.`,
+            confirmLabel: 'Cancel consultation',
+            cancelLabel: 'Keep it',
+            danger: true,
+          }).then((ok) => {
+            if (ok) run('legal.booking.cancel', { matterEntityId: e.matterEntityId })
+          })
         },
       },
     ]
@@ -1054,6 +1069,7 @@ export default function CalendarPage() {
   return (
     <main>
       <PageHead title="Calendar" />
+      {confirmElement}
       {source === 'disconnected' && (
         <div className="alert alert-error">
           <strong>Google Calendar is not connected.</strong> The calendar cannot load.{' '}

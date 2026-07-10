@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm } from '@/components/ConfirmModal'
 import { streamTemplateAi } from '@/lib/templateAiStream'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
@@ -638,6 +639,7 @@ function KindEditor({
   onAddFields: (f: { id: string; label: string }[]) => Promise<void>
   onSavedToLibrary: () => Promise<void>
 }) {
+  const { confirm, confirmElement } = useConfirm()
   const [text, setText] = useState(template.templateText ?? '')
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -746,6 +748,7 @@ function KindEditor({
 
   return (
     <section style={{ borderLeft: '3px solid var(--border)' }}>
+      {confirmElement}
       <div
         style={{
           display: 'flex',
@@ -810,15 +813,21 @@ function KindEditor({
             onChange={(e) => {
               const pick = library.find((l) => l.docKind === e.target.value)
               if (!pick) return
-              if (
-                text.trim() &&
-                !window.confirm('Replace this document body with the library template?')
-              )
-                return
-              setText(pick.body)
-              setSeedHtml(markdownToHtml(pick.body))
-              setEditorKey((k) => k + 1)
-              setSaved(false)
+              const apply = () => {
+                setText(pick.body)
+                setSeedHtml(markdownToHtml(pick.body))
+                setEditorKey((k) => k + 1)
+                setSaved(false)
+              }
+              if (!text.trim()) return apply()
+              void confirm({
+                title: 'Replace this document body?',
+                body: `Replaces the current body with the “${pick.name}” library template. Unsaved edits to the body are lost.`,
+                confirmLabel: 'Replace',
+                danger: true,
+              }).then((ok) => {
+                if (ok) apply()
+              })
             }}
           >
             <option value="">Start from a library template…</option>

@@ -183,7 +183,7 @@ Zero `font-variant-numeric` in the codebase, yet there are number columns everyw
 ### Strengths
 - Consent checkbox correct: `<label>` wraps the `<input type="checkbox">` + disclosure (`SignDocument.tsx:188-194`), one hit target, starts unchecked (`:47`). The single most important legal-UX detail, done right.
 - Double-submit prevented: Sign disabled on `busy || !signatureName.trim() || !consent` with spinner + "Signing…" (`:203-210`); Decline disabled while busy; handlers guard with `finally` (`:110-134`).
-- Decline is confirmed + subordinate: `window.confirm` (`:123`), secondary `.danger` style, specific copy.
+- Decline is confirmed + subordinate: in-app confirm dialog (native confirm replaced in RUNNER-FIXES-1), secondary `.danger` style, specific copy.
 - Strong state coverage: distinct screens for already-resolved, not-your-turn, signed, all-completed, declined (`:69-108`).
 - Attorney prepare validates before send: blocks on zero signers + unknown signer keys with a fixable message (`prepare/[versionId]/page.tsx:121-131,303-307`).
 - Public token page degrades gracefully: failed load → "invalid or expired" + fallback (`sign/[token]/page.tsx:22,28-34`).
@@ -269,7 +269,7 @@ Zero `font-variant-numeric` in the codebase, yet there are number columns everyw
 - `[P2] FORMS — app/attorney/matters/[id]/page.tsx:315-335,666-678 — transcript & client-reply textareas have no label (placeholder only) → add visually-hidden labels; aria-label the Cmd/Ctrl+Enter send affordance.`
 - `[P2] CONTENT — app/attorney/matters/page.tsx:216-220 — matter summary renders untruncated with no min-w-0/line-clamp → clamp to 1-2 lines, allow min-width:0.`
 - `[P2] NAV & STATE — components/TimeExpensePanel.tsx:115-165 — entries can be created but never edited/deleted, no confirm/undo for a mis-keyed billable entry → add delete-with-confirm (or correcting entry).`
-- `[P2] COPY — app/attorney/matters/[id]/page.tsx:167-184 — emailDraftLink uses window.prompt/confirm (unstyled, blocking) → replace with in-app inline field + confirm UI.`
+- `[P2] COPY — app/attorney/matters/[id]/page.tsx:167-184 — emailDraftLink used native prompt/confirm (unstyled, blocking) → FIXED in RUNNER-FIXES-1: in-app PromptModal + ConfirmModal.`
 - `[P3] CONTENT — app/attorney/clients/page.tsx:181 — client list is a stack of <Link> rows, metadata doesn't align into columns → consider a semantic table or column alignment + tabular-nums.`
 - `[P3] PERFORMANCE — app/attorney/matters/page.tsx:195-237 & components/SearchBar.tsx:181-193 — no virtualization; SearchBar loads all contacts+matters+clients and filters per keystroke → add virtualization/debounce before ~50-100 rows.`
 - `[P3] ACCESSIBILITY — app/attorney/matters/[id]/page.tsx:530 — reasoning-trace status is a bare ✓/— glyph; status badges convey state largely by color → add visually-hidden text + ensure badge text carries status.`

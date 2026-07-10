@@ -77,12 +77,16 @@ function variablePlugin(getItems: () => string[]): Plugin {
   }
 
   // Park the ghost "+" just after the caret. Hidden while the dropdown is open
-  // (the two would overlap) and whenever the editor loses focus or has a range
-  // selection (inserting mid-selection would clobber it).
+  // (the two would overlap), whenever the editor loses focus or has a range
+  // selection (inserting mid-selection would clobber it), and — RUNNER-FIXES-1
+  // WP2 — whenever there are no variables to offer: hosts without a variable set
+  // (the workflow runner's document editor) would otherwise show a ⊕ whose click
+  // does nothing, a dead affordance.
   function placeGhost(view: EditorView) {
     if (!ghost) return
     const { selection } = view.state
-    if (!view.hasFocus() || !selection.empty || state.active) return hideGhost()
+    if (!view.hasFocus() || !selection.empty || state.active || getItems().length === 0)
+      return hideGhost()
     const coords = view.coordsAtPos(selection.from)
     ghost.style.display = 'flex'
     ghost.style.left = `${coords.right + 6}px`
