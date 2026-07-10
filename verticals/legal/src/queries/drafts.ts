@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import type { VoiceViolation } from '../api/emailVoiceChecks.js'
 
 export interface PendingDraftSummary {
   documentVersionId: string
@@ -16,6 +17,11 @@ export interface PendingDraftSummary {
   channel: 'document' | 'communication'
   emailSubject: string | null
   emailToRole: string | null
+  // STYLE-FIX-2: the deterministic house-voice check result recorded on this
+  // VERSION when it was drafted ([] = clean pass; null = never checked, i.e.
+  // document drafts and template merges). The queue card surfaces non-empty
+  // flags so the attorney sees them before opening the editor.
+  voiceViolations: VoiceViolation[] | null
 }
 
 export interface DraftDetail extends PendingDraftSummary {
@@ -52,6 +58,7 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
       rel_kind: string
       email_subject: string | null
       email_to_role: string | null
+      voice_violations: VoiceViolation[] | null
     }>(
       `SELECT
          dv.id AS version_id,
@@ -64,7 +71,8 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
          to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
          rkd.kind_name AS rel_kind,
          e_doc.metadata->>'email_subject' AS email_subject,
-         e_doc.metadata->>'email_to_role' AS email_to_role
+         e_doc.metadata->>'email_to_role' AS email_to_role,
+         dv.metadata->'voice_violations' AS voice_violations
        FROM document_version dv
        JOIN entity e_doc ON e_doc.id = dv.document_entity_id
        JOIN relationship r ON r.source_entity_id = dv.document_entity_id
@@ -89,6 +97,7 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
         row.rel_kind === 'comm_draft_of' ? ('communication' as const) : ('document' as const),
       emailSubject: row.email_subject,
       emailToRole: row.email_to_role,
+      voiceViolations: row.voice_violations ?? null,
     }))
   })
 }
@@ -147,6 +156,7 @@ export async function listMatterDraftVersions(
       channel: 'document' as const,
       emailSubject: null,
       emailToRole: null,
+      voiceViolations: null,
     }))
   })
 }
@@ -277,6 +287,7 @@ export async function getSharedDraftVersion(
       channel: 'document' as const,
       emailSubject: null,
       emailToRole: null,
+      voiceViolations: null,
       bodyMarkdown: row.body,
     }
   })
@@ -308,6 +319,7 @@ export async function getDraftVersion(
       rel_kind: string
       email_subject: string | null
       email_to_role: string | null
+      voice_violations: VoiceViolation[] | null
     }>(
       `SELECT
          dv.id AS version_id,
@@ -319,6 +331,7 @@ export async function getDraftVersion(
          dv.status,
          to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
          cb.body,
+         dv.metadata->'voice_violations' AS voice_violations,
          dv.reasoning_trace_id,
          dv.metadata->>'model_identity' AS model_identity,
          dv.metadata->>'generation_mode' AS generation_mode,
@@ -422,6 +435,7 @@ export async function getDraftVersion(
         row.rel_kind === 'comm_draft_of' ? ('communication' as const) : ('document' as const),
       emailSubject: row.email_subject,
       emailToRole: row.email_to_role,
+      voiceViolations: row.voice_violations ?? null,
       bodyMarkdown: row.body,
       reasoningTrace,
       modelIdentity: row.model_identity,

@@ -19,6 +19,11 @@ import {
   type ActionResult,
 } from '@exsto/substrate'
 import { callClaudeDrafter, type ClaudeDraftResult } from '../adapters/claude.js'
+import {
+  checkEmailVoice,
+  buildVoiceCorrectionSection,
+  type VoiceViolation,
+} from './emailVoiceChecks.js'
 import { loadEmailDraftingPrompt } from '../templates/loader.js'
 import { getMatter } from '../queries/matters.js'
 import { getClientContext, formatClientContext } from '../queries/clientContext.js'
@@ -170,9 +175,39 @@ export async function composeEmailDraft(
       input.guidance.trim()
   }
 
-  const model = await callClaudeDrafter(agentCtx.tenantId, { prompt, maxTokens: 4000 })
-  const parsed = parseEmailDraftOutput(model.documentMarkdown, fallbackSubject)
-  const reasoningTraceId = await persistEmailTrace(agentCtx, { prompt, result: model })
+  // STYLE-FIX-2 — bind, don't just steer: a deterministic house-voice check
+  // (emailVoiceChecks.ts, mirroring templates/house-voice.md) after the parse,
+  // ONE corrective regenerate naming the exact violations, then flag-and-queue.
+  // Never a rewrite, never a block — a still-failing draft reaches the attorney
+  // flagged, and a clean pass records voice_violations: [] so the receipt is
+  // queryable either way.
+  let chosen = await callClaudeDrafter(agentCtx.tenantId, { prompt, maxTokens: 4000 })
+  let promptUsed = prompt
+  let parsed = parseEmailDraftOutput(chosen.documentMarkdown, fallbackSubject)
+  let violations = checkEmailVoice(parsed.subject, parsed.body)
+  let firstPassViolations: VoiceViolation[] | null = null
+  let regenerated = false
+  if (violations.length > 0) {
+    firstPassViolations = violations
+    try {
+      const retryPrompt = prompt + buildVoiceCorrectionSection(parsed, violations)
+      const retry = await callClaudeDrafter(agentCtx.tenantId, {
+        prompt: retryPrompt,
+        maxTokens: 4000,
+      })
+      const reparsed = parseEmailDraftOutput(retry.documentMarkdown, fallbackSubject)
+      chosen = retry
+      promptUsed = retryPrompt
+      parsed = reparsed
+      violations = checkEmailVoice(reparsed.subject, reparsed.body)
+      regenerated = true
+    } catch {
+      // The retry died (model/API error). Keep draft 1 with its violations —
+      // voice_regenerated: false in the payload is the honest record of the
+      // failed attempt, and the flagged draft still reaches the queue.
+    }
+  }
+  const reasoningTraceId = await persistEmailTrace(agentCtx, { prompt: promptUsed, result: chosen })
 
   const result = await submitAction(agentCtx, {
     actionKindName: 'draft.generate',
@@ -182,19 +217,26 @@ export async function composeEmailDraft(
       matter_entity_id: input.matterEntityId,
       document_kind: CLIENT_EMAIL_DOCUMENT_KIND,
       document_markdown: parsed.body,
-      model_identity: model.modelIdentity,
+      model_identity: chosen.modelIdentity,
       reasoning_trace_id: reasoningTraceId,
       jurisdiction: 'NC',
-      confidence: clampConfidence(model.reasoningTrace.confidence),
+      confidence: clampConfidence(chosen.reasoningTrace.confidence),
       supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
       channel: 'communication',
       email_subject: parsed.subject,
       email_to_role: recipientRole,
+      voice_violations: violations,
+      ...(firstPassViolations
+        ? {
+            voice_regenerated: regenerated,
+            voice_first_pass_violations: firstPassViolations,
+          }
+        : {}),
       usage: {
-        input_tokens: model.usage.inputTokens,
-        output_tokens: model.usage.outputTokens,
-        cache_creation_tokens: model.usage.cacheCreationTokens,
-        cache_read_tokens: model.usage.cacheReadTokens,
+        input_tokens: chosen.usage.inputTokens,
+        output_tokens: chosen.usage.outputTokens,
+        cache_creation_tokens: chosen.usage.cacheCreationTokens,
+        cache_read_tokens: chosen.usage.cacheReadTokens,
       },
     },
   })

@@ -2,8 +2,14 @@
 // pipelines: the email output parser (SUBJECT line contract), the transcript
 // extraction parser ([fact]/[action] bullet contract), and the client-context
 // formatter's hard budget + archived-matter visibility. Pure — no DB, no model.
+import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
 import { parseEmailDraftOutput } from '../../verticals/legal/src/api/generateEmail.js'
+import {
+  checkEmailVoice,
+  buildVoiceCorrectionSection,
+} from '../../verticals/legal/src/api/emailVoiceChecks.js'
+import { loadEmailDraftingPrompt } from '../../verticals/legal/src/templates/loader.js'
 import { parseExtractionOutput } from '../../verticals/legal/src/api/transcriptExtraction.js'
 import {
   formatClientContext,
@@ -127,5 +133,91 @@ describe('formatClientContext — hard budget + archived visibility', () => {
     const text = formatClientContext(context, 200)
     expect(text.length).toBeLessThanOrEqual(200)
     expect(text).toContain('truncated')
+  })
+})
+
+describe('checkEmailVoice — the STYLE-FIX-2 deterministic house-voice validator', () => {
+  const CLEAN_BODY =
+    'Dana,\n\nWe compared the revised lease against our memo. The deposit is now $1,850.\n\nReply and tell us whether to proceed.\n\nBest,\nJoe Pacheco'
+
+  it('a clean draft passes with zero violations', () => {
+    expect(checkEmailVoice('Hollowstone Lease: Results', CLEAN_BODY)).toEqual([])
+  })
+
+  it('flags an em dash in the subject — the historical 3-for-3 failure site', () => {
+    const v = checkEmailVoice('Lease review — results inside', CLEAN_BODY)
+    expect(v.some((x) => x.rule === 'em_dash' && x.where === 'subject')).toBe(true)
+  })
+
+  it('flags the exact 5/8-draft failure modes: bold headers, em dashes, "actually"', () => {
+    const body =
+      'Dana,\n\n**What made it in — exactly as negotiated:**\n\n- Deposit: $1,850.\n- Late fee: $75.\n\n**Your next step:** Reply and let us know.\n\nThere is no requirement to actually list the property.\n\nBest,\nJoe Pacheco'
+    const v = checkEmailVoice('Results', body)
+    const rules = v.map((x) => x.rule)
+    expect(rules).toContain('em_dash')
+    expect(rules).toContain('body_header')
+    expect(rules).toContain('filler_adverb')
+    // Both header shapes tripped: the whole-line bold and the bold lead-in label.
+    expect(v.filter((x) => x.rule === 'body_header').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('adverbs match on word boundaries — "adjustment" and "justice" stay clean', () => {
+    expect(
+      checkEmailVoice('Update', 'Dana,\n\nThe adjustment serves justice.\n\nBest,\nJoe'),
+    ).toEqual([])
+    const v = checkEmailVoice('Update', 'Dana,\n\nWe just need one signature.\n\nBest,\nJoe')
+    expect(v.some((x) => x.rule === 'filler_adverb' && x.offending.includes('"just"'))).toBe(true)
+  })
+
+  it('banned phrases match through curly apostrophes and both spellings', () => {
+    const curly = checkEmailVoice('Update', 'Dana,\n\nIt’s worth noting the cap.\n\nBest,\nJoe')
+    expect(curly.some((x) => x.rule === 'banned_phrase')).toBe(true)
+    const spelled = checkEmailVoice('Update', 'Dana,\n\nHere is what we found.\n\nBest,\nJoe')
+    expect(spelled.some((x) => x.rule === 'banned_phrase')).toBe(true)
+  })
+
+  it('requires the plain sign-off near the end of the body', () => {
+    const v = checkEmailVoice('Update', 'Dana,\n\nAll set.\n\nWarm regards,\nJoe')
+    expect(v.some((x) => x.rule === 'sign_off')).toBe(true)
+    expect(
+      checkEmailVoice('Update', 'Dana,\n\nAll set.\n\nThanks,\nJoe').some(
+        (x) => x.rule === 'sign_off',
+      ),
+    ).toBe(false)
+  })
+
+  it("the doctrine's own exemplar validates clean — house-voice.md can never drift from the checks silently", () => {
+    const doctrine = readFileSync(
+      new URL('../../verticals/legal/templates/house-voice.md', import.meta.url),
+      'utf8',
+    )
+    const m = doctrine.match(/### Match this register:[\s\S]*?```\n([\s\S]*?)```/)
+    expect(m).not.toBeNull()
+    expect(checkEmailVoice('Hollowstone Lease: Results', m![1]!.trim())).toEqual([])
+  })
+
+  it('the corrective section names each violation with its offending text and shows the failing draft', () => {
+    const violations = checkEmailVoice('Results — inside', CLEAN_BODY)
+    const section = buildVoiceCorrectionSection(
+      { subject: 'Results — inside', body: CLEAN_BODY },
+      violations,
+    )
+    expect(section).toContain('Your previous draft violated these house-voice rules')
+    expect(section).toContain('No em dashes anywhere')
+    expect(section).toContain('Results — inside')
+    expect(section).toContain('Produce a corrected draft')
+  })
+})
+
+describe('loadEmailDraftingPrompt — composes the house-voice doctrine (STYLE-FIX-2)', () => {
+  it('the doctrine is included whole and the slot is consumed', () => {
+    const prompt = loadEmailDraftingPrompt()
+    expect(prompt).not.toContain('{{house_voice_doctrine}}')
+    expect(prompt).toContain('Adapted from stop-slop by Hardik Pandya')
+    expect(prompt).toContain('Match this register')
+    expect(prompt).toContain('No em dashes anywhere.')
+    // The data slots the compose path fills are untouched.
+    expect(prompt).toContain('{{purpose}}')
+    expect(prompt).toContain('{{client_context}}')
   })
 })

@@ -11,6 +11,7 @@ import {
   insertRelationship,
   lookupKindId,
 } from './common.js'
+import { sanitizeVoiceViolations, type VoiceViolation } from '../api/emailVoiceChecks.js'
 import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
@@ -69,6 +70,14 @@ interface PersistDraftArgs {
   channel?: 'document' | 'communication'
   emailSubject?: string | null
   emailToRole?: string | null
+  // STYLE-FIX-2 — deterministic house-voice check results for the EMAIL channel
+  // (api/emailVoiceChecks.ts). Recorded on the version metadata (what the review
+  // queue reads) AND the comm_draft.completed event payload (the audit receipt).
+  // null = the producing path never ran the validator (documents, template
+  // merges); [] = a clean pass, queryable as such.
+  voiceViolations?: VoiceViolation[] | null
+  voiceFirstPassViolations?: VoiceViolation[] | null
+  voiceRegenerated?: boolean
 }
 
 async function persistDraftDocument(
@@ -200,6 +209,7 @@ async function persistDraftDocument(
     metadata: {
       generation_mode: p.generationMode,
       ...(supersedes ? { regenerated: true } : {}),
+      ...(p.voiceViolations ? { voice_violations: p.voiceViolations } : {}),
       ...(p.versionMetadata ?? {}),
     },
   })
@@ -284,6 +294,21 @@ async function persistDraftDocument(
         generation_mode: p.generationMode,
         model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
         ...(isComm ? { email_subject: p.emailSubject ?? null } : {}),
+        // STYLE-FIX-2: the voice-check receipt rides the completion event —
+        // final violations always (empty array = clean pass), plus the first
+        // pass and whether the one corrective regenerate produced the persisted
+        // draft (false = retry attempted but errored; draft 1 queued flagged).
+        ...(isComm && p.voiceViolations
+          ? {
+              voice_violations: p.voiceViolations,
+              ...(p.voiceFirstPassViolations
+                ? {
+                    voice_first_pass_violations: p.voiceFirstPassViolations,
+                    voice_regenerated: p.voiceRegenerated === true,
+                  }
+                : {}),
+            }
+          : {}),
         ...(supersedes ? { regenerated: true, version_number: versionNumber } : {}),
       },
       sourceType: p.sourceType,
@@ -322,6 +347,11 @@ interface DraftGeneratePayload {
   channel?: string
   email_subject?: string | null
   email_to_role?: string | null
+  // STYLE-FIX-2: house-voice check results from composeEmailDraft (email path
+  // only; sanitized at this payload boundary).
+  voice_violations?: unknown
+  voice_first_pass_violations?: unknown
+  voice_regenerated?: boolean
 }
 
 registerActionHandler('draft.generate', async (ctx, client, payload, actionId) => {
@@ -371,6 +401,9 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     channel: p.channel === 'communication' ? 'communication' : 'document',
     emailSubject: p.email_subject ?? null,
     emailToRole: p.email_to_role ?? null,
+    voiceViolations: sanitizeVoiceViolations(p.voice_violations),
+    voiceFirstPassViolations: sanitizeVoiceViolations(p.voice_first_pass_violations),
+    voiceRegenerated: p.voice_regenerated === true,
   })
 })
 
