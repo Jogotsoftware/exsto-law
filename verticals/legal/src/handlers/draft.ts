@@ -569,7 +569,12 @@ async function accrueDocumentFeeOnApproval(
     args.matterEntityId,
     'service_key',
   )
-  if (!serviceKey) return
+  if (!serviceKey) {
+    // A matter with no service_key cannot resolve a billing declaration. Never
+    // silently pretend a fee accrued — record WHY on the matter timeline.
+    await recordNoFeeObservation(client, args, documentKind, 'no_service_key')
+    return
+  }
 
   const feeRes = await client.query<{
     document_fees: Record<string, string> | null
@@ -582,7 +587,15 @@ async function accrueDocumentFeeOnApproval(
   )
   const fees = feeRes.rows[0]?.document_fees ?? null
   const amount = fees && typeof fees === 'object' ? fees[documentKind] : null
-  if (!amount || !String(amount).trim()) return
+  if (!amount || !String(amount).trim()) {
+    // The service declares no per-document fee for THIS document kind (WP1: the
+    // modal promises accrual — if there's nothing to accrue we say so, we never
+    // pretend). Records an observation the timeline/billing can surface so a firm
+    // sees "approved, no fee declared for X" rather than a silent gap. WP2 makes
+    // the service DECLARE its fees so this branch stops firing where it shouldn't.
+    await recordNoFeeObservation(client, args, documentKind, 'no_fee_declared', serviceKey)
+    return
+  }
 
   await insertEvent(client, {
     tenantId: args.tenantId,
@@ -597,6 +610,40 @@ async function accrueDocumentFeeOnApproval(
       document_kind: documentKind,
       amount: String(amount),
       description: `Document fee — ${documentKind.replace(/_/g, ' ')}`,
+    },
+  })
+}
+
+// Record — never silently swallow — the case where an approved document accrues no
+// fee (WP1). An observation on the matter timeline, keyed so a query can tell
+// "approved but nothing to bill" apart from a bug. NOT a billing ledger entry, so it
+// never appears in the unbilled feed or an invoice.
+async function recordNoFeeObservation(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    matterEntityId: string
+    documentEntityId: string
+  },
+  documentKind: string,
+  reason: 'no_service_key' | 'no_fee_declared',
+  serviceKey?: string,
+): Promise<void> {
+  await insertEvent(client, {
+    tenantId: args.tenantId,
+    actionId: args.actionId,
+    eventKindName: 'observation',
+    primaryEntityId: args.matterEntityId,
+    secondaryEntityIds: [args.documentEntityId],
+    sourceType: 'system',
+    sourceRef: args.actorId,
+    data: {
+      kind: 'document_fee_not_declared',
+      reason,
+      document_kind: documentKind,
+      service_key: serviceKey ?? null,
     },
   })
 }
