@@ -9,7 +9,12 @@
 //      billing declaration) with the exact-path errors (negative receipt).
 // Run with the prod DATABASE_URL: tsx --env-file=<main-worktree>/.env.local this-file.
 // Fee amount override: BACKHALF_WILL_FEE=350.00 (decimal string).
-import { updateServiceMetadata, getServiceLifecycle, validateProposedLifecycle } from '@exsto/legal'
+import {
+  updateServiceMetadata,
+  getService,
+  getServiceLifecycle,
+  validateProposedLifecycle,
+} from '@exsto/legal'
 import type { Lifecycle } from '@exsto/legal'
 import { type ActionContext } from '@exsto/substrate'
 
@@ -24,8 +29,11 @@ async function main(): Promise<void> {
   const ctx: ActionContext = { tenantId: TENANT, actorId: ADMIN }
 
   // 1. Declare the billing: per-document fee for the will (new service version).
+  const current = await getService(ctx, SERVICE_KEY)
+  if (!current) throw new Error(`Service not found: ${SERVICE_KEY}`)
   const updated = await updateServiceMetadata(ctx, {
     serviceKey: SERVICE_KEY,
+    displayName: current.displayName,
     documentFees: { [WILL_DOC_KIND]: FEE },
   })
   console.log(`✓ ${SERVICE_KEY} v-next declares document_fees:`)

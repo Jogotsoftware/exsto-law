@@ -76,5 +76,31 @@ outage class). Fix: on save, **validate AND auto-append** the output/trace contr
 and make the worker parse **default missing evidence to `[]`** so a bare prompt still yields a
 parseable draft. Receipt: a deliberately bare prompt on a throwaway service still drafts.
 
+## D6 — acceptance fee amounts (demo values, Joe can retune in Settings)
+- `nc_will_drafting` document fee: **$350.00** (`document_fees.last_will_and_testament`,
+  service v10). Its pre-existing fixed service cost ($1000) still accrues at completion —
+  the two are separate declared fees (document fee on approve + service fee on complete);
+  if Joe wants approve-only billing, clear the fixed cost in Settings → the service.
+- `capunify_reuse_demo_operating_agreement`: $200.00 OA document fee (demo service).
+- Receipt clone `nc_will_drafting_copy`: $100.00 (throwaway).
+
+## D7 — regenerate job vs. function receipts (deploy dependency)
+The regenerate WORKER branch (legal.capability.run `{regenerate:true}`) ships in this PR;
+the deployed Render worker only gains it when the PR merges + deploys. Acceptance #4 was
+proven by running the worker-side function (`regenerateStageDocument`) locally against
+prod — the exact code the worker handler dispatches to. A regenerate job enqueued BEFORE
+the worker deploy would be claimed by the old worker and run as a plain
+`invokeCapabilityForMatter` (idempotent skip — harmless no-op, no double-draft). Post-
+deploy, the queue path is end-to-end.
+
 ## Open / risks
-- (tracked below as work proceeds)
+- **Post-deploy re-verify:** curl the four Contract W endpoints on the deployed site and
+  run one regenerate through the REAL queue path (enqueue → deployed worker → v-next).
+- **Portal Accept UI:** the accept endpoint/action is live; the portal button + which
+  services' client edges switch `via` to `legal.client_request.accept` is the runner
+  session's UI turf + a product decision per service (an accept edge replaces the
+  message/upload edge on a linear graph).
+- **nc_will_drafting client edge** still advances via `client.message.post` (unchanged —
+  deliberately not switched under the runner session's feet).
+- Firm-admin skills re-seed to prod (seed-firm-admin-skills.ts, reads the updated .md
+  doctrine) — run at merge time so tool and skill move together.

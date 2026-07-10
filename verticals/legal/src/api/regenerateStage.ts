@@ -204,7 +204,7 @@ export async function regenerateStageDocument(
          JOIN relationship_kind_definition rkd ON rkd.id = rel.relationship_kind_id
         WHERE dv.tenant_id = $1 AND rel.target_entity_id = $2 AND rkd.kind_name = 'draft_of'
           AND coalesce(e_doc.metadata ->> 'document_kind', 'operating_agreement') = $3
-        ORDER BY dv.created_at DESC LIMIT 1`,
+        ORDER BY dv.recorded_at DESC LIMIT 1`,
       [ctx.tenantId, matterEntityId, documentKind],
     )
     return res.rows[0]?.id ?? null
