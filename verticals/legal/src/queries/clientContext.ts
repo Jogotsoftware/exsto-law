@@ -56,6 +56,10 @@ export interface ClientContext {
 const INTAKE_FACT_CAP = 8
 const TRANSCRIPT_EXCERPT_CHARS = 240
 const MESSAGE_CAP = 8
+// Most-recent N matters assembled in detail; older ones only truncate out of the
+// formatted budget anyway, so bounding the assembly keeps the query count flat
+// for a client with a long history.
+const MATTER_CAP = 20
 export const CLIENT_CONTEXT_DEFAULT_BUDGET = 12_000
 
 export async function getClientContext(
@@ -99,7 +103,8 @@ export async function getClientContext(
          JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
               AND rkd.kind_name = 'matter_of'
         WHERE e.tenant_id = $1
-        ORDER BY e.created_at DESC`,
+        ORDER BY e.created_at DESC
+        LIMIT ${MATTER_CAP}`,
       [ctx.tenantId, clientEntityId],
     )
     const matterIds = mattersRes.rows.map((m) => m.matter_id)

@@ -280,6 +280,7 @@ export default function MattersPage() {
 interface ServiceOpt {
   serviceKey: string
   displayName: string
+  bookable?: boolean
 }
 
 // Open a matter by hand (legal.matter.open → intake.submit + matter.open). Most
@@ -301,8 +302,11 @@ function NewMatterModal({ onClose }: { onClose: () => void }) {
     callAttorneyMcp<{ services: ServiceOpt[] }>({ toolName: 'legal.service.list' })
       .then((r) => {
         if (cancelled) return
-        setServices(r.services)
-        setServiceKey((cur) => cur || r.services[0]?.serviceKey || '')
+        // Booking honesty (MACHINE-COMMS-1 WP0): a service with no active workflow
+        // definition cannot open matters (matter.open fails loudly) — don't offer it.
+        const openable = r.services.filter((s) => s.bookable !== false)
+        setServices(openable)
+        setServiceKey((cur) => cur || openable[0]?.serviceKey || '')
       })
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
     return () => {

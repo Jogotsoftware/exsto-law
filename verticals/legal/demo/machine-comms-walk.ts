@@ -23,6 +23,11 @@ import {
   listPendingDraftVersions,
   recordManualCall,
   createNote,
+  createService,
+  setServiceLifecycle,
+  updateServiceMetadata,
+  setServiceActive,
+  submitBooking,
 } from '@exsto/legal'
 import '@exsto/legal'
 
@@ -82,6 +87,80 @@ async function main(): Promise<void> {
         transcriptEntityId: a2 || undefined,
       })
       console.log(JSON.stringify(r, null, 2))
+      return
+    }
+    case 'compose-email-service': {
+      // The COMPOSED-stage receipt rig: a minimal real service whose ENTRY stage is
+      // an email_generation step (auto-runs on matter.open → the deployed worker
+      // drafts → parks at the attorney gate; approve = send + advance → terminal
+      // complete). Created through the same server functions the wizard's approve
+      // routes call. Left DISABLED until the walk enables it.
+      const created = await createService(ctx, {
+        displayName: 'Lease review follow-up',
+        description:
+          'A personal follow-up from your attorney on your completed lease review — what we found, what was delivered, and your next steps.',
+        route: 'manual',
+      })
+      const graph = [
+        {
+          key: 'send_update',
+          entry: true,
+          label: 'Send the client update',
+          blocking: true,
+          action: {
+            kind: 'invoke_capability',
+            config: {
+              capability_slug: 'email_generation',
+              capability_config: {
+                purpose:
+                  'Write the client a personal follow-up on their completed residential lease review: recap what the firm found and delivered (use their history), confirm everything is available in their portal, and invite them to book again when they next need a document reviewed.',
+              },
+            },
+          },
+          advances_to: [{ to: 'complete', gate: 'attorney', via: 'draft.approve' }],
+        },
+        {
+          key: 'complete',
+          label: 'Complete matter',
+          terminal: true,
+          blocking: false,
+          action: { kind: 'complete_matter' },
+          advances_to: [],
+        },
+      ]
+      const lifecycle = await setServiceLifecycle(ctx, created.serviceKey, graph as never)
+      await updateServiceMetadata(ctx, {
+        serviceKey: created.serviceKey,
+        displayName: 'Lease review follow-up',
+        description:
+          'A personal follow-up from your attorney on your completed lease review — what we found, what was delivered, and your next steps.',
+        appointmentRequired: false,
+      })
+      console.log(JSON.stringify({ serviceKey: created.serviceKey, lifecycle }, null, 2))
+      return
+    }
+    case 'enable-service': {
+      if (!a1) throw new Error('enable-service <serviceKey> [off]')
+      const r = await setServiceActive(ctx, a1, a2 !== 'off')
+      console.log(JSON.stringify(r, null, 2))
+      return
+    }
+    case 'book': {
+      // Public intake-only booking as Dana (the client with the archived history).
+      if (!a1) throw new Error('book <serviceKey>')
+      const publicCtx: ActionContext = {
+        tenantId: TENANT,
+        actorId: '00000000-0000-0000-0001-000000000005', // public booking actor
+      }
+      const res = await submitBooking(publicCtx, {
+        clientFullName: 'Dana Whitfield',
+        clientEmail: 'pachecojoseph824+leasecert@gmail.com',
+        clientPhone: '9195550117',
+        attributionSource: 'public_booking',
+        serviceKey: a1,
+        intakeResponses: {},
+      })
+      console.log(JSON.stringify(res.effects, null, 2))
       return
     }
     case 'add-note': {

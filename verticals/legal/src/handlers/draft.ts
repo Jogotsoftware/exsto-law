@@ -530,6 +530,14 @@ async function advanceInstanceOnApprove(
   ctx: { tenantId: string; actorId: string },
   matterEntityId: string,
   actionId: string,
+  // MACHINE-COMMS-1 (WP2): which CHANNEL's approval is driving this. A
+  // communication (email) approval may only advance a stage that is itself an
+  // email step (invoke_capability running email_generation); a document approval
+  // may only advance a NON-email stage. Without this, approving an ad-hoc email
+  // on a matter parked at a document-review stage would fire that stage's
+  // draft.approve edge — advancing the matter past a document the attorney
+  // never approved (and vice versa).
+  channel: 'document' | 'communication' = 'document',
 ): Promise<void> {
   if (!workflowEngineEnabled()) return
   const instance = await getWorkflowInstanceForMatter(client, ctx.tenantId, matterEntityId)
@@ -548,6 +556,15 @@ async function advanceInstanceOnApprove(
     graph = bound?.graph ?? []
   }
   if (graph.length === 0) return
+
+  // Channel ↔ stage agreement: the current stage must be the KIND of stage this
+  // approval reviews.
+  const currentStage = stageByKey(graph, from)
+  const stageConfig = (currentStage?.action?.config ?? {}) as { capability_slug?: unknown }
+  const isEmailStage =
+    currentStage?.action?.kind === 'invoke_capability' &&
+    String(stageConfig.capability_slug ?? '') === 'email_generation'
+  if (channel === 'communication' ? !isEmailStage : isEmailStage) return
 
   // Only the attorney 'draft.approve' edge out of the current stage. If the instance
   // is already past it (idempotent re-approve) there is no such edge → no-op.
@@ -652,10 +669,9 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
   if (matterEntityId && isCommunication) {
     // MACHINE-COMMS-1 (WP2): approving an EMAIL draft is not a document milestone —
     // no matter_status='approved' mirror (the matter's document pipeline did not
-    // move) and no document fee. The workflow DOES advance when the current stage's
-    // attorney edge waits on draft.approve (a composed email_generation stage) —
-    // same advance the document path uses, and a plain no-op ad hoc.
-    await advanceInstanceOnApprove(client, ctx, matterEntityId, actionId)
+    // move) and no document fee. The workflow DOES advance — but ONLY when the
+    // current stage is itself an email_generation stage (channel-gated inside).
+    await advanceInstanceOnApprove(client, ctx, matterEntityId, actionId, 'communication')
   }
   return {
     documentVersionId: p.document_version_id,
