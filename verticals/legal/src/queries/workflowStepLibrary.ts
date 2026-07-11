@@ -43,16 +43,11 @@ type WstRow = {
 }
 
 const WST_SELECT = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
-    FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1 ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )
   SELECT
     e.id AS workflow_step_template_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'workflow_step_template_name')        AS name,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'workflow_step_template_description') AS description,
-    (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'workflow_step_template_stage')                AS stage,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'workflow_step_template_name' ORDER BY a.valid_from DESC LIMIT 1)        AS name,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'workflow_step_template_description' ORDER BY a.valid_from DESC LIMIT 1) AS description,
+    (SELECT a.value FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'workflow_step_template_stage' ORDER BY a.valid_from DESC LIMIT 1)                AS stage,
     e.created_at AS updated_at
   FROM entity e
   JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'workflow_step_template'
