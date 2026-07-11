@@ -1304,7 +1304,7 @@ export async function assistantChat(
       if (candidate && (await isOpenBuildSession(ctx, candidate))) {
         buildSessionId = candidate
       } else {
-        buildSessionId = await findOpenBuildSessionForActor(ctx)
+        buildSessionId = await findOpenBuildSessionForActor(ctx, input.buildServiceKey)
         if (!buildSessionId) {
           const started = await startBuildSession(ctx, {
             serviceKey: input.buildServiceKey ?? null,
@@ -1754,7 +1754,7 @@ export async function* assistantChatStream(
       if (candidate && (await isOpenBuildSession(ctx, candidate))) {
         buildSessionId = candidate
       } else {
-        buildSessionId = await findOpenBuildSessionForActor(ctx)
+        buildSessionId = await findOpenBuildSessionForActor(ctx, input.buildServiceKey)
         if (!buildSessionId) {
           const started = await startBuildSession(ctx, {
             serviceKey: input.buildServiceKey ?? null,

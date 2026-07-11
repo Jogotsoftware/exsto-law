@@ -171,14 +171,26 @@ export async function closeBuildSession(
   })
 }
 
-// HARDENING-RESIDUALS-1 (WP-D5) — the anti-shredding fallback. Prod showed one
-// build fragmented into SIX+ sessions of one exchange each: a client that
-// never resends the session id (stale bundle, dropped ref) minted a fresh
-// session per TURN. A build turn arriving with no/invalid session id now
-// REUSES the caller's most-recent open session (found via the session.started
-// event's source_ref — the actor who opened it) instead of silently minting.
-// Only a caller with NO open session starts a new one.
-export async function findOpenBuildSessionForActor(ctx: ActionContext): Promise<string | null> {
+// HARDENING-RESIDUALS-1 (WP-D5) — the anti-shredding fallback, SCOPED TO THE
+// BUILD. Prod showed one build fragmented into SIX+ single-exchange sessions: a
+// client that never resends the session id (stale bundle, dropped ref) minted a
+// fresh session per TURN. A build turn arriving with no/invalid session id
+// reuses the caller's most-recent open session FOR THE SAME SERVICE — matched on
+// the session's build_session_service_key — instead of silently minting another.
+//
+// The service-key match is load-bearing: an early fix reused the actor's most-
+// recent open session of ANY build, so starting a brand-new build (service B)
+// while an unrelated session for build A was still open hijacked A's session and
+// appended B's messages to it. A build only ever reuses its OWN service's open
+// session; without a serviceKey (the pre-shell turns of a genuinely new build)
+// it mints fresh — and the caller then closes the actor's stale open sessions,
+// which self-heals any strays a prior stale client left behind.
+export async function findOpenBuildSessionForActor(
+  ctx: ActionContext,
+  serviceKey?: string | null,
+): Promise<string | null> {
+  const key = serviceKey?.trim()
+  if (!key) return null // a new build with no service key yet: mint fresh, never hijack another build
   return withActionContext(ctx, async (client) => {
     const r = await client.query<{ id: string }>(
       `SELECT e.id
@@ -197,9 +209,17 @@ export async function findOpenBuildSessionForActor(ctx: ActionContext): Promise<
               AND akd.kind_name = 'build_session_status'
             ORDER BY a.valid_from DESC LIMIT 1
          ) = 'open'
+         AND (
+           SELECT a.value #>> '{}'
+             FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = e.tenant_id AND a.entity_id = e.id
+              AND akd.kind_name = 'build_session_service_key'
+            ORDER BY a.valid_from DESC LIMIT 1
+         ) = $4
        ORDER BY e.created_at DESC
        LIMIT 1`,
-      [ctx.tenantId, SESSION_KIND, ctx.actorId],
+      [ctx.tenantId, SESSION_KIND, ctx.actorId, key],
     )
     return r.rows[0]?.id ?? null
   })
