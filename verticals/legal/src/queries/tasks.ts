@@ -61,12 +61,7 @@ type TaskRow = {
 }
 
 const TASK_SELECT = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value, a.valid_from
-    FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1 ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  ),
-  task_of AS (
+  WITH task_of AS (
     SELECT id FROM relationship_kind_definition
     WHERE tenant_id = $1 AND kind_name = 'task_of' AND status = 'active' LIMIT 1
   )
@@ -76,18 +71,54 @@ const TASK_SELECT = `
        WHERE r.tenant_id = $1 AND r.source_entity_id = e.id
          AND r.relationship_kind_id = (SELECT id FROM task_of)
          AND (r.valid_to IS NULL OR r.valid_to > now()) LIMIT 1)                  AS matter_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_title')             AS title,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_status')            AS status,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_due_date')          AS due_date,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_assignee_actor_id') AS assignee_actor_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_billing_mode')      AS billing_mode,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_hours')             AS hours,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_fee_amount')        AS fee_amount,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_invoice_id')        AS invoice_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_kind')                AS kind,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_document_version_id') AS document_version_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_esign_envelope_id')   AS esign_envelope_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_reviewed_at')          AS reviewed_at,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_title'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS title,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_status'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS status,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_due_date'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS due_date,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_assignee_actor_id'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS assignee_actor_id,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_billing_mode'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS billing_mode,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_hours'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS hours,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_fee_amount'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS fee_amount,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_invoice_id'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS invoice_id,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_kind'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS kind,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_document_version_id'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS document_version_id,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_esign_envelope_id'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS esign_envelope_id,
+    (SELECT a.value #>> '{}' FROM attribute a
+      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+     WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_reviewed_at'
+     ORDER BY a.valid_from DESC LIMIT 1)                                            AS reviewed_at,
     e.created_at,
     (SELECT max(a.valid_from) FROM attribute a WHERE a.tenant_id = $1 AND a.entity_id = e.id)          AS updated_at
   FROM entity e
