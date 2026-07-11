@@ -200,7 +200,7 @@ export async function POST(request: Request) {
       clientEmail: email,
       clientPhone: str(body.clientPhone) || undefined,
       clientCompanyName: str(body.clientCompanyName) || undefined,
-      attributionSource: str(body.attributionSource) || undefined,
+      attributionSource: str(body.attributionSource) || 'client_portal_intake_gate',
       serviceKey,
       intakeResponses,
       scheduledAtIso: str(body.scheduledAtIso) || undefined,
