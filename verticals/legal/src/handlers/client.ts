@@ -169,6 +169,7 @@ interface ClientUpdatePayload {
   // Optional re-parenting of an existing contact/matter under this client.
   attach_contact_id?: string | null
   attach_matter_id?: string | null
+  portal_scheduling_billable?: boolean | null
 }
 
 registerActionHandler('legal.client.update', async (ctx, client, payload, actionId) => {
@@ -182,6 +183,10 @@ registerActionHandler('legal.client.update', async (ctx, client, payload, action
   if (p.billing_type != null) updates.push({ kind: 'client_billing_type', value: p.billing_type })
   if (p.main_contact_id != null)
     updates.push({ kind: 'client_main_contact', value: p.main_contact_id })
+  // PORTAL-1 (WP3): when ON, portal-scheduled time for this client is billable
+  // at the governing rate and gated on a rate × duration fee consent.
+  if (p.portal_scheduling_billable != null)
+    updates.push({ kind: 'portal_scheduling_billable', value: p.portal_scheduling_billable })
 
   for (const u of updates) {
     await setClientAttr(client, {

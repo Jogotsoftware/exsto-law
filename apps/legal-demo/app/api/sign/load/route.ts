@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { token?: unknown } | null
   const token = typeof body?.token === 'string' ? body.token : ''
   try {
-    const document = await loadSignableDocument(token)
+    const document = await loadSignableDocument(token, clientIpFrom(request))
     return NextResponse.json({ ok: true, document })
   } catch (err) {
     return NextResponse.json(

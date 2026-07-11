@@ -1822,6 +1822,24 @@ export async function submitBooking(
       console.error('[submitBooking] manage-link token not minted (booking still saved):', err)
     }
   }
+  // PORTAL-1: the "create your account" link for the confirmation email — an
+  // invite set-password link for accountless contacts, a prefilled login link
+  // otherwise. Best-effort: any failure falls back to the login link.
+  async function buildAccountUrl(): Promise<string> {
+    const loginUrl = `${baseUrl}/portal/login?email=${encodeURIComponent(input.clientEmail)}`
+    const contactId = intakeEffects.clientEntityId
+    if (!contactId) return loginUrl
+    try {
+      const { resolvePortalActorId } = await import('./portalAccount.js')
+      if (await resolvePortalActorId(ctx.tenantId, contactId)) return loginUrl
+      const { signPortalInviteToken } = await import('./portalInviteToken.js')
+      const token = signPortalInviteToken({ clientContactId: contactId, tenantId: ctx.tenantId })
+      return `${baseUrl}/portal/set-password?token=${encodeURIComponent(token)}`
+    } catch {
+      return loginUrl
+    }
+  }
+
   const commonVars = {
     matter_entity_id: matterEntityId,
     matter_number: matterNumber,
@@ -1846,13 +1864,13 @@ export async function submitBooking(
         })
       : null,
     matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
-    // Client account access (S10): magic-link portal sign-in. The prospect
-    // booking confirmation email links here, pre-filled with the email they just
-    // booked with, so "Create your account" lands them one click from a link.
+    // Client account access (PORTAL-1): when the contact has no portal account
+    // yet, "Create your account" is a signed set-password invite (the same
+    // token the send_portal_invite capability mints) — one click to a real
+    // account, not a login form they have no password for. Existing accounts
+    // get the login link, email pre-filled.
     portal_url: baseUrl ? `${baseUrl}/portal/login` : null,
-    account_url: baseUrl
-      ? `${baseUrl}/portal/login?email=${encodeURIComponent(input.clientEmail)}`
-      : null,
+    account_url: baseUrl ? await buildAccountUrl() : null,
     // Self-service reschedule / cancel: one HMAC-signed, tenant-bound token gates
     // the public /book/manage page (exsto-public-surface). The page opens on
     // reschedule; ?intent=cancel jumps straight to the cancel panel.

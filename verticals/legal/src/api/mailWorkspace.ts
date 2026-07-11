@@ -443,6 +443,10 @@ export interface EnqueueClientEmailInput {
   // Trusted, server-generated attachments (e.g. an invoice PDF) — NOT scope-checked
   // because the server produced them. Never populate this from client input.
   systemAttachments?: EmailAttachment[]
+  // PORTAL-1 (WP6): the CTA button on the rendered HTML part. Default = "Open
+  // your client portal" → /portal; pass a deep link to override; pass null to
+  // suppress (rare — e.g. a message that must not reference the portal).
+  portalCta?: { label: string; url: string } | null
 }
 
 export interface EnqueueClientEmailResult {
@@ -489,11 +493,25 @@ export async function enqueueClientEmail(
   // (the matter this send is authorized for), then append trusted server bytes.
   const attachments = await buildSendAttachments(ctx, matterEntityId, input)
 
+  // PORTAL-1 (WP6) — render, don't leak markdown: a send with no HTML part gets
+  // its body rendered markdown → branded HTML here, at the send path, so every
+  // producer (approved AI drafts, template merges, share links) inherits it —
+  // clients never see literal **bold** or - bullets again. The rendered HTML
+  // carries the portal CTA button (every Contract B recipient is a client).
+  let html = input.html
+  if (!html) {
+    try {
+      const { renderMarkdownEmailHtml } = await import('../email/markdown.js')
+      html = renderMarkdownEmailHtml(input.body, {
+        portalCta: input.portalCta === null ? null : (input.portalCta ?? undefined),
+      }).html
+    } catch {
+      html = undefined // plaintext-only is still a correct email
+    }
+  }
+
   // Sign centrally: every Contract B send carries the firm signature (fix #10).
-  const signed = withSignature(
-    { body: input.body, html: input.html },
-    await resolveEmailSignature(ctx),
-  )
+  const signed = withSignature({ body: input.body, html }, await resolveEmailSignature(ctx))
   // Send FROM the matter owner's mailbox when possible (beta feedback), else fall
   // back to the sender / firm-primary.
   const sendAsActor = await resolveSendAsActor(ctx, matterEntityId)

@@ -466,10 +466,13 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
 
 // ── Token (link) surface ──────────────────────────────────────────────────────
 
-export async function loadSignableDocument(token: string): Promise<SignableDocument> {
+export async function loadSignableDocument(
+  token: string,
+  signerIp?: string | null,
+): Promise<SignableDocument> {
   const tok = verifySigningToken(token)
   const ctx = signingCtx(tok.tenantId)
-  await recordOpen(ctx, tok.requestId, tok.envelopeId)
+  await recordOpen(ctx, tok.requestId, tok.envelopeId, signerIp)
   return buildSignable(ctx, tok.requestId)
 }
 
@@ -479,6 +482,8 @@ export interface RecordSignatureInput {
   signatureData?: string | null
   consent: string
   fieldValues?: Record<string, string>
+  /** Requester IP, captured by the route for the audit trail (PORTAL-1 WP2). */
+  signerIp?: string | null
 }
 export interface RecordSignatureResult {
   ok: boolean
@@ -495,16 +500,18 @@ export async function recordSignature(input: RecordSignatureInput): Promise<Reco
     signatureData: input.signatureData ?? null,
     consent: input.consent,
     fieldValues: input.fieldValues,
+    signerIp: input.signerIp ?? null,
   })
 }
 
 export async function declineSignature(input: {
   token: string
   reason?: string
+  signerIp?: string | null
 }): Promise<{ ok: boolean; envelopeId: string }> {
   const tok = verifySigningToken(input.token)
   const ctx = signingCtx(tok.tenantId)
-  await declineRequest(ctx, tok.requestId, tok.envelopeId, input.reason)
+  await declineRequest(ctx, tok.requestId, tok.envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId: tok.envelopeId }
 }
 
@@ -655,10 +662,11 @@ async function assertClientOwnsRequest(p: ClientPrincipal, requestId: string): P
 export async function loadSignableForClient(
   p: ClientPrincipal,
   requestId: string,
+  signerIp?: string | null,
 ): Promise<SignableDocument> {
   const envelopeId = await assertClientOwnsRequest(p, requestId)
   const ctx = signingCtx(p.tenantId)
-  await recordOpen(ctx, requestId, envelopeId)
+  await recordOpen(ctx, requestId, envelopeId, signerIp)
   return buildSignable(ctx, requestId)
 }
 
@@ -670,6 +678,7 @@ export async function recordSignatureForClient(
     signatureData?: string | null
     consent: string
     fieldValues?: Record<string, string>
+    signerIp?: string | null
   },
 ): Promise<RecordSignatureResult> {
   const envelopeId = await assertClientOwnsRequest(p, input.requestId)
@@ -679,16 +688,17 @@ export async function recordSignatureForClient(
     signatureData: input.signatureData ?? null,
     consent: input.consent,
     fieldValues: input.fieldValues,
+    signerIp: input.signerIp ?? null,
   })
 }
 
 export async function declineForClient(
   p: ClientPrincipal,
-  input: { requestId: string; reason?: string },
+  input: { requestId: string; reason?: string; signerIp?: string | null },
 ): Promise<{ ok: boolean; envelopeId: string }> {
   const envelopeId = await assertClientOwnsRequest(p, input.requestId)
   const ctx = signingCtx(p.tenantId)
-  await declineRequest(ctx, input.requestId, envelopeId, input.reason)
+  await declineRequest(ctx, input.requestId, envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId }
 }
 
@@ -703,6 +713,7 @@ async function signRequest(
     signatureData?: string | null
     consent: string
     fieldValues?: Record<string, string>
+    signerIp?: string | null
   },
 ): Promise<RecordSignatureResult> {
   if (!input.signatureName?.trim()) throw new Error('A signature (typed name) is required.')
@@ -718,6 +729,7 @@ async function signRequest(
       signature_data: input.signatureData ?? null,
       consent_text: input.consent.trim(),
       field_values: input.fieldValues ?? null,
+      signer_ip: input.signerIp ?? null,
     },
   })
   const eff = (result.effects[0] ?? {}) as {
@@ -740,6 +752,7 @@ async function declineRequest(
   requestId: string,
   envelopeId: string,
   reason?: string,
+  signerIp?: string | null,
 ): Promise<void> {
   await assertSignerTurn(ctx, requestId)
   await submitAction(ctx, {
@@ -749,6 +762,7 @@ async function declineRequest(
       request_entity_id: requestId,
       envelope_entity_id: envelopeId,
       reason: reason ?? null,
+      signer_ip: signerIp ?? null,
     },
   })
 }
@@ -757,11 +771,16 @@ async function recordOpen(
   ctx: ActionContext,
   requestId: string,
   envelopeId: string,
+  signerIp?: string | null,
 ): Promise<void> {
   await submitAction(ctx, {
     actionKindName: 'esign.open',
     intentKind: 'automatic_sync',
-    payload: { request_entity_id: requestId, envelope_entity_id: envelopeId },
+    payload: {
+      request_entity_id: requestId,
+      envelope_entity_id: envelopeId,
+      signer_ip: signerIp ?? null,
+    },
   })
 }
 

@@ -7,6 +7,7 @@ import { isClientPortalAuthedTool } from '@exsto/legal/mcp'
 import { isClientContactActive } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 import { readClientSessionFromCookieHeader } from '@/lib/clientSession'
+import { clientIpFrom } from '@/lib/rateLimit'
 
 export const runtime = 'nodejs'
 // RUNTIME-AUTORUN-2: a client delivery here (an upload/message that advances a gate) may
@@ -15,12 +16,6 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-// The firm's public-intake SYSTEM actor. Client portal reads run as this actor;
-// the client's identity lives on the client_contact entity, NOT on the action's
-// actor (ADR 0035). The cookie carries clientContactId + matterIds; the route
-// stamps those into the tool input so the body can never assert them.
-const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 interface ClientCtx {
   ctx: ActionContext
@@ -44,8 +39,8 @@ async function resolveClientCtx(
   if (!session) {
     return { error: 'Not signed in. Request a sign-in link to continue.', status: 401 }
   }
-  const { clientContactId, tenantId, matterIds } = session
-  if (!UUID_RE.test(clientContactId) || !UUID_RE.test(tenantId)) {
+  const { clientContactId, tenantId, matterIds, clientActorId } = session
+  if (!UUID_RE.test(clientContactId) || !UUID_RE.test(tenantId) || !UUID_RE.test(clientActorId)) {
     return { error: 'Invalid session.', status: 401 }
   }
   if (!Array.isArray(matterIds) || !matterIds.every((m) => UUID_RE.test(m))) {
@@ -55,8 +50,12 @@ async function resolveClientCtx(
   const active = await isClientContactActive(tenantId, clientContactId)
   if (!active) return { error: 'Session no longer valid.', status: 401 }
 
+  // PORTAL-1: every authed portal read/write runs AS THE CLIENT'S OWN ACTOR
+  // (minted into the session at sign-in) — intake, bookings, payments, consents
+  // and messages are attributed to the person, not the shared public-intake
+  // system actor. The clientContactId is still stamped into tool input below.
   return {
-    ctx: { tenantId, actorId: ACTOR_ID },
+    ctx: { tenantId, actorId: clientActorId },
     clientContactId,
     matterIds,
   }
@@ -85,6 +84,9 @@ export async function POST(request: Request) {
   // is never trusted to assert who the client is or which matters they own.
   const input: Record<string, unknown> = { ...(body.input ?? {}) }
   input.clientContactId = clientContactId
+  // Requester IP for audit trails (e-sign open/sign) — from the request, never
+  // the body.
+  input.clientIp = clientIpFrom(request)
 
   // PER-MATTER AUTHORIZATION (critical): any tool input naming a matterEntityId
   // must reference a matter THIS client is client_of. A miss returns the SAME

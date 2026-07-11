@@ -33,7 +33,7 @@ Use ONLY these step-action kinds (the closed `STEP_ACTION_KINDS` catalog). Each 
 |---|---|---|---|
 | `view_intake` | client fills the intake questionnaire; attorney reads answers | `client` | yes |
 | `view_consultation` | shows the consultation (Granola) summary; informational | `attorney` | no |
-| `invoke_capability` | runs a registered platform capability as a step — **drafting is authored this way** (the `document_generation` capability), as are AI review (`ai_document_review`), client materials (`request_client_materials`), e-signature (`esignature`), client emails (`email_generation`), and transcript extraction (`transcript_extraction`) | the capability's `default_gate` | yes |
+| `invoke_capability` | runs a registered platform capability as a step — **drafting is authored this way** (the `document_generation` capability), as are AI review (`ai_document_review`), client materials (`request_client_materials`), the portal-account invite (`send_portal_invite` — parks at the client gate until the client creates their account; skipped honestly when one exists), e-signature (`esignature`), client emails (`email_generation`), and transcript extraction (`transcript_extraction`) | the capability's `default_gate` | yes |
 | `review_send_document` | attorney reviews → approves → sends the document to the client | `attorney` | yes |
 | `approve_send_invoice` | attorney approves the invoice; it auto-sends to the client | `attorney` | yes |
 | `await_payment` | holds the matter until the invoice is marked paid | `system` | yes |

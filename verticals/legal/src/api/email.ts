@@ -1,5 +1,6 @@
 import type { ActionContext } from '@exsto/substrate'
 import { enqueueClientEmail } from './mailWorkspace.js'
+import { signDraftLinkToken } from './draftLinkToken.js'
 import { getMatter } from '../queries/matters.js'
 import { getDraftVersion } from '../queries/drafts.js'
 
@@ -40,13 +41,23 @@ export async function sendDraftLinkEmail(
   const firstName = matter.clientName?.split(' ')[0]?.trim() || ''
   const greeting = firstName ? `Hi ${firstName},` : 'Hi,'
 
+  // PORTAL-1 (WP2): the emailed link carries a SHORT-LIVED signed token — the
+  // bare /d/<versionId> capability URL is no longer publicly readable. Signed-in
+  // clients reach the same document through their portal session instead.
+  const token = signDraftLinkToken({
+    documentVersionId: input.documentVersionId,
+    tenantId: ctx.tenantId,
+  })
+  const sep = input.shareUrl.includes('?') ? '&' : '?'
+  const tokenizedUrl = `${input.shareUrl}${sep}t=${encodeURIComponent(token)}`
+
   const subject = `Your draft ${docTitle} — ${matter.matterNumber}`
   const body = [
     greeting,
     '',
     `Your draft ${docTitle} is ready for review:`,
     '',
-    input.shareUrl,
+    tokenizedUrl,
     '',
     'You can view it in your browser and download a PDF or Word copy from the page.',
     '',
