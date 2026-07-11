@@ -77,20 +77,15 @@ type TemplateRow = {
 }
 
 const TEMPLATE_SELECT = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
-    FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1 ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )
   SELECT
     e.id AS template_entity_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'template_name')     AS name,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'template_category') AS category,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'template_body')     AS body,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'template_doc_kind') AS doc_kind,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'template_name' ORDER BY a.valid_from DESC LIMIT 1)     AS name,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'template_category' ORDER BY a.valid_from DESC LIMIT 1) AS category,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'template_body' ORDER BY a.valid_from DESC LIMIT 1)     AS body,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'template_doc_kind' ORDER BY a.valid_from DESC LIMIT 1) AS doc_kind,
     -- json attribute: take the value as-is (the pg driver parses jsonb to an object).
-    (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'template_variables')         AS variables,
-    (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'template_signature')         AS signature,
+    (SELECT a.value FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'template_variables' ORDER BY a.valid_from DESC LIMIT 1)         AS variables,
+    (SELECT a.value FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'template_signature' ORDER BY a.valid_from DESC LIMIT 1)         AS signature,
     e.created_at AS updated_at
   FROM entity e
   JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'template'

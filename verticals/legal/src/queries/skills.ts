@@ -40,20 +40,15 @@ type SkillRow = {
 // read so the catalog never pulls the long bodies into memory.
 function skillSelect(includeBody: boolean): string {
   return `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
-    FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1 ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )
   SELECT
     e.id AS skill_entity_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'skill_slug')          AS slug,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'skill_name')          AS name,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'skill_practice_area') AS practice_area,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'skill_description')   AS description,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'skill_when_to_use')   AS when_to_use,
-    (SELECT (value #>> '{}')::boolean FROM attrs WHERE entity_id = e.id AND kind_name = 'skill_user_invocable') AS user_invocable,
-    ${includeBody ? `(SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'skill_body')` : 'NULL'} AS body,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_slug' ORDER BY a.valid_from DESC LIMIT 1)          AS slug,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_name' ORDER BY a.valid_from DESC LIMIT 1)          AS name,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_practice_area' ORDER BY a.valid_from DESC LIMIT 1) AS practice_area,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_description' ORDER BY a.valid_from DESC LIMIT 1)   AS description,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_when_to_use' ORDER BY a.valid_from DESC LIMIT 1)   AS when_to_use,
+    (SELECT (a.value #>> '{}')::boolean FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_user_invocable' ORDER BY a.valid_from DESC LIMIT 1) AS user_invocable,
+    ${includeBody ? `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_body' ORDER BY a.valid_from DESC LIMIT 1)` : 'NULL'} AS body,
     e.created_at AS updated_at
   FROM entity e
   JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'skill'
@@ -92,9 +87,12 @@ export async function listSkillCatalog(ctx: ActionContext): Promise<SkillCatalog
 export async function getSkillBySlug(ctx: ActionContext, slug: string): Promise<Skill | null> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<SkillRow>(
-      `${skillSelect(true)} AND e.id = (
-        SELECT entity_id FROM attrs WHERE kind_name = 'skill_slug' AND value #>> '{}' = $2 LIMIT 1
-      )`,
+      `${skillSelect(true)} AND (
+        SELECT a2.value #>> '{}' FROM attribute a2
+        JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id
+        WHERE a2.tenant_id = $1 AND a2.entity_id = e.id AND akd2.kind_name = 'skill_slug'
+        ORDER BY a2.valid_from DESC LIMIT 1
+      ) = $2`,
       [ctx.tenantId, slug],
     )
     const r = res.rows[0]

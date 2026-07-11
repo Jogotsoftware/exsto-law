@@ -8,17 +8,6 @@ import { readFirmDefault } from '../api/rates.js'
 // (migration 0018) is unbilled when no time.billed / expense.billed event names it
 // as source_event_id. Money math is integer-cents (ADR 0044) — no float drift.
 
-// Latest value of every attribute kind for the tenant, keyed (entity, kind).
-const ATTRS_CTE = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-      a.entity_id, akd.kind_name, a.value
-    FROM attribute a
-    JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1
-    ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )`
-
 function amountToCents(amount: string): number {
   const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec((amount ?? '').trim())
   if (!m) return 0
@@ -97,31 +86,31 @@ async function listBillableTasks(
   tenantId: string,
 ): Promise<BillableTaskRow[]> {
   const res = await client.query<BillableTaskRow>(
-    `${ATTRS_CTE},
+    `WITH
      task_of AS (SELECT id FROM relationship_kind_definition
                   WHERE tenant_id = $1 AND kind_name = 'task_of' AND status = 'active' LIMIT 1),
      matter_of AS (SELECT id FROM relationship_kind_definition
                   WHERE tenant_id = $1 AND kind_name = 'matter_of' AND status = 'active' LIMIT 1)
      SELECT
        e.id AS task_id,
-       (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_title')        AS title,
-       (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_billing_mode') AS billing_mode,
-       (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_hours')        AS hours,
-       (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_fee_amount')   AS fee_amount,
+       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_title' ORDER BY a.valid_from DESC LIMIT 1)        AS title,
+       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_billing_mode' ORDER BY a.valid_from DESC LIMIT 1) AS billing_mode,
+       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_hours' ORDER BY a.valid_from DESC LIMIT 1)        AS hours,
+       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_fee_amount' ORDER BY a.valid_from DESC LIMIT 1)   AS fee_amount,
        m.id AS matter_id,
        m.name AS matter_number,
-       (SELECT value #>> '{}' FROM attrs WHERE entity_id = m.id AND kind_name = 'matter_summary')        AS matter_summary,
+       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = m.id AND akd.kind_name = 'matter_summary' ORDER BY a.valid_from DESC LIMIT 1)        AS matter_summary,
        cli.id AS client_id,
-       (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_name')          AS client_name,
-       (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billable_rate') AS billable_rate,
-       (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billing_type')  AS billing_type,
+       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = cli.id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)          AS client_name,
+       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = cli.id AND akd.kind_name = 'client_billable_rate' ORDER BY a.valid_from DESC LIMIT 1) AS billable_rate,
+       (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = cli.id AND akd.kind_name = 'client_billing_type' ORDER BY a.valid_from DESC LIMIT 1)  AS billing_type,
        (SELECT co.source_entity_id FROM relationship co
           JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id
          WHERE co.tenant_id = $1 AND co.target_entity_id = m.id AND cok.kind_name = 'client_of'
            AND (co.valid_to IS NULL OR co.valid_to > now()) LIMIT 1) AS contact_id,
        (SELECT COALESCE(
-          (SELECT value #>> '{}' FROM attrs WHERE entity_id = c2.cid AND kind_name = 'contact_full_name'),
-          (SELECT value #>> '{}' FROM attrs WHERE entity_id = c2.cid AND kind_name = 'full_name'))
+          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = c2.cid AND akd.kind_name = 'contact_full_name' ORDER BY a.valid_from DESC LIMIT 1),
+          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = c2.cid AND akd.kind_name = 'full_name' ORDER BY a.valid_from DESC LIMIT 1))
         FROM (SELECT co.source_entity_id AS cid FROM relationship co
                 JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id
                WHERE co.tenant_id = $1 AND co.target_entity_id = m.id AND cok.kind_name = 'client_of'
@@ -137,9 +126,9 @@ async function listBillableTasks(
        AND (r.valid_to IS NULL OR r.valid_to > now())
      LEFT JOIN entity cli ON cli.id = r.target_entity_id AND cli.status = 'active'
      WHERE e.tenant_id = $1 AND e.status = 'active'
-       AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_status') = 'done'
-       AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_billing_mode') IN ('hours','fixed')
-       AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'task_invoice_id') IS NULL`,
+       AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_status' ORDER BY a.valid_from DESC LIMIT 1) = 'done'
+       AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_billing_mode' ORDER BY a.valid_from DESC LIMIT 1) IN ('hours','fixed')
+       AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'task_invoice_id' ORDER BY a.valid_from DESC LIMIT 1) IS NULL`,
     [tenantId],
   )
   return res.rows
@@ -171,7 +160,7 @@ export async function listUnbilled(
       amount: string | null
       entry_date: string | null
     }>(
-      `${ATTRS_CTE},
+      `WITH
        -- A ledger entry leaves the unbilled feed when it is billed onto an invoice
        -- (*.billed) OR voided by the attorney (billing_entry.voided) — both name the
        -- source ledger event, so one NOT EXISTS handles both.
@@ -191,11 +180,11 @@ export async function listUnbilled(
          ekd.kind_name AS kind,
          m.id AS matter_id,
          m.name AS matter_number,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = m.id AND kind_name = 'matter_summary') AS matter_summary,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = m.id AND akd.kind_name = 'matter_summary' ORDER BY a.valid_from DESC LIMIT 1) AS matter_summary,
          cli.id AS client_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_name')          AS client_name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billable_rate') AS billable_rate,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = cli.id AND kind_name = 'client_billing_type')  AS billing_type,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = cli.id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)          AS client_name,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = cli.id AND akd.kind_name = 'client_billable_rate' ORDER BY a.valid_from DESC LIMIT 1) AS billable_rate,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = cli.id AND akd.kind_name = 'client_billing_type' ORDER BY a.valid_from DESC LIMIT 1)  AS billing_type,
          -- The matter's contact (client_of: contact -> matter). For an ORPHANED
          -- matter (no client parent), this lets the UI offer a one-click "set up
          -- billing" that creates the client from this contact. LIMIT 1 keeps the
@@ -205,8 +194,8 @@ export async function listUnbilled(
            WHERE co.tenant_id = $1 AND co.target_entity_id = m.id AND cok.kind_name = 'client_of'
              AND (co.valid_to IS NULL OR co.valid_to > now()) LIMIT 1) AS contact_id,
          (SELECT COALESCE(
-            (SELECT value #>> '{}' FROM attrs WHERE entity_id = c2.cid AND kind_name = 'contact_full_name'),
-            (SELECT value #>> '{}' FROM attrs WHERE entity_id = c2.cid AND kind_name = 'full_name'))
+            (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = c2.cid AND akd.kind_name = 'contact_full_name' ORDER BY a.valid_from DESC LIMIT 1),
+            (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = c2.cid AND akd.kind_name = 'full_name' ORDER BY a.valid_from DESC LIMIT 1))
           FROM (SELECT co.source_entity_id AS cid FROM relationship co
                   JOIN relationship_kind_definition cok ON cok.id = co.relationship_kind_id
                  WHERE co.tenant_id = $1 AND co.target_entity_id = m.id AND cok.kind_name = 'client_of'
@@ -444,14 +433,14 @@ export async function listInvoices(ctx: ActionContext): Promise<InvoiceSummary[]
       line_count: string
       created_at: Date
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id AS invoice_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_number')   AS number,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_status')   AS status,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_total')    AS total,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_currency') AS currency,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_issued_date') AS issued_date,
-         (SELECT (SELECT value #>> '{}' FROM attrs WHERE entity_id = r.target_entity_id AND kind_name = 'client_name')
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_number' ORDER BY a.valid_from DESC LIMIT 1)   AS number,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_status' ORDER BY a.valid_from DESC LIMIT 1)   AS status,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_total' ORDER BY a.valid_from DESC LIMIT 1)    AS total,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_currency' ORDER BY a.valid_from DESC LIMIT 1) AS currency,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_issued_date' ORDER BY a.valid_from DESC LIMIT 1) AS issued_date,
+         (SELECT (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = r.target_entity_id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)
             FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
             WHERE r.tenant_id = $1 AND r.source_entity_id = e.id AND rkd.kind_name = 'invoice_of'
@@ -518,18 +507,18 @@ export async function getInvoice(
       client_name: string | null
       created_at: Date
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id AS invoice_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_number')      AS number,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_status')      AS status,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_client_id')   AS client_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_matter_id')   AS matter_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_total')       AS total,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_currency')    AS currency,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_issued_date') AS issued_date,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_due_date')    AS due_date,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_notes')       AS notes,
-         (SELECT (SELECT value #>> '{}' FROM attrs WHERE entity_id = r.target_entity_id AND kind_name = 'client_name')
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_number' ORDER BY a.valid_from DESC LIMIT 1)      AS number,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_status' ORDER BY a.valid_from DESC LIMIT 1)      AS status,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_client_id' ORDER BY a.valid_from DESC LIMIT 1)   AS client_id,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_matter_id' ORDER BY a.valid_from DESC LIMIT 1)   AS matter_id,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_total' ORDER BY a.valid_from DESC LIMIT 1)       AS total,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_currency' ORDER BY a.valid_from DESC LIMIT 1)    AS currency,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_issued_date' ORDER BY a.valid_from DESC LIMIT 1) AS issued_date,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_due_date' ORDER BY a.valid_from DESC LIMIT 1)    AS due_date,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_notes' ORDER BY a.valid_from DESC LIMIT 1)       AS notes,
+         (SELECT (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = r.target_entity_id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)
             FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
             WHERE r.tenant_id = $1 AND r.source_entity_id = e.id AND rkd.kind_name = 'invoice_of'
@@ -553,16 +542,16 @@ export async function getInvoice(
       source_event_id: string | null
       matter_number: string | null
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT le.id AS line_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_kind')            AS kind,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_description')     AS description,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_quantity')        AS quantity,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_rate')            AS rate,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_amount')          AS amount,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_source_event_id') AS source_event_id,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_kind' ORDER BY a.valid_from DESC LIMIT 1)            AS kind,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_description' ORDER BY a.valid_from DESC LIMIT 1)     AS description,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_quantity' ORDER BY a.valid_from DESC LIMIT 1)        AS quantity,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_rate' ORDER BY a.valid_from DESC LIMIT 1)            AS rate,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_amount' ORDER BY a.valid_from DESC LIMIT 1)          AS amount,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_source_event_id' ORDER BY a.valid_from DESC LIMIT 1) AS source_event_id,
          (SELECT m.name FROM entity m
-            WHERE m.id = (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_matter_id')::uuid) AS matter_number
+            WHERE m.id = (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_matter_id' ORDER BY a.valid_from DESC LIMIT 1)::uuid) AS matter_number
        FROM entity le
        JOIN relationship r ON r.source_entity_id = le.id
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
@@ -635,25 +624,25 @@ export async function listMatterInvoiced(
       currency: string | null
       issued_date: string | null
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT le.id AS line_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_kind')        AS kind,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_description') AS description,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_quantity')    AS quantity,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_rate')        AS rate,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_amount')      AS amount,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_kind' ORDER BY a.valid_from DESC LIMIT 1)        AS kind,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_description' ORDER BY a.valid_from DESC LIMIT 1) AS description,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_quantity' ORDER BY a.valid_from DESC LIMIT 1)    AS quantity,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_rate' ORDER BY a.valid_from DESC LIMIT 1)        AS rate,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_amount' ORDER BY a.valid_from DESC LIMIT 1)      AS amount,
          inv.id AS invoice_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = inv.id AND kind_name = 'invoice_number')      AS invoice_number,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = inv.id AND kind_name = 'invoice_status')      AS invoice_status,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = inv.id AND kind_name = 'invoice_currency')    AS currency,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = inv.id AND kind_name = 'invoice_issued_date') AS issued_date
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = inv.id AND akd.kind_name = 'invoice_number' ORDER BY a.valid_from DESC LIMIT 1)      AS invoice_number,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = inv.id AND akd.kind_name = 'invoice_status' ORDER BY a.valid_from DESC LIMIT 1)      AS invoice_status,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = inv.id AND akd.kind_name = 'invoice_currency' ORDER BY a.valid_from DESC LIMIT 1)    AS currency,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = inv.id AND akd.kind_name = 'invoice_issued_date' ORDER BY a.valid_from DESC LIMIT 1) AS issued_date
        FROM entity le
        JOIN relationship r ON r.source_entity_id = le.id AND r.tenant_id = $1
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'line_of'
        JOIN entity inv ON inv.id = r.target_entity_id AND inv.status = 'active'
        WHERE le.tenant_id = $1 AND le.status = 'active'
          AND (r.valid_to IS NULL OR r.valid_to > now())
-         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_matter_id') = $2
+         AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_matter_id' ORDER BY a.valid_from DESC LIMIT 1) = $2
        ORDER BY inv.created_at DESC, le.created_at`,
       [ctx.tenantId, matterEntityId],
     )

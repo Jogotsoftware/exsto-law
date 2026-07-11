@@ -6,16 +6,6 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 // Both project from the request's attributes + its request_of (matter) /
 // request_from (client_contact) relationships.
 
-const ATTRS_CTE = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-      a.entity_id, akd.kind_name, a.value
-    FROM attribute a
-    JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1
-    ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )`
-
 export type RequestStatus = 'requested' | 'accepted' | 'in_progress' | 'fulfilled' | 'declined'
 const ACTIVE_STATUSES = ['requested', 'accepted', 'in_progress']
 
@@ -39,12 +29,12 @@ export interface AttorneyRequestItem extends ClientRequestSummary {
 // The columns common to both projections (request head + matter/client joins).
 const SELECT_COLS = `
   e.id AS request_id,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'request_type')        AS request_type,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'request_status')      AS status,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'request_description') AS description,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'request_price_amount') AS amount,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'request_currency')    AS currency,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'request_price_basis') AS price_basis,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'request_type' ORDER BY a.valid_from DESC LIMIT 1)        AS request_type,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'request_status' ORDER BY a.valid_from DESC LIMIT 1)      AS status,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'request_description' ORDER BY a.valid_from DESC LIMIT 1) AS description,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'request_price_amount' ORDER BY a.valid_from DESC LIMIT 1) AS amount,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'request_currency' ORDER BY a.valid_from DESC LIMIT 1)    AS currency,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'request_price_basis' ORDER BY a.valid_from DESC LIMIT 1) AS price_basis,
   e.created_at`
 
 interface HeadRow {
@@ -78,7 +68,7 @@ export async function listClientRequests(
 ): Promise<ClientRequestSummary[]> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<HeadRow>(
-      `${ATTRS_CTE}
+      `
        SELECT ${SELECT_COLS}
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
@@ -105,14 +95,14 @@ export async function listPendingRequests(ctx: ActionContext): Promise<AttorneyR
         client_name: string | null
       }
     >(
-      `${ATTRS_CTE}
+      `
        SELECT ${SELECT_COLS},
          mat.id AS matter_id,
          mat.name AS matter_number,
          COALESCE(
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = con.id AND kind_name = 'contact_full_name'),
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = con.id AND kind_name = 'full_name'),
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = con.id AND kind_name = 'email')
+           (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = con.id AND akd.kind_name = 'contact_full_name' ORDER BY a.valid_from DESC LIMIT 1),
+           (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = con.id AND akd.kind_name = 'full_name' ORDER BY a.valid_from DESC LIMIT 1),
+           (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = con.id AND akd.kind_name = 'email' ORDER BY a.valid_from DESC LIMIT 1)
          ) AS client_name
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
@@ -125,7 +115,7 @@ export async function listPendingRequests(ctx: ActionContext): Promise<AttorneyR
          AND rfr.relationship_kind_id = (SELECT id FROM relationship_kind_definition WHERE tenant_id = $1 AND kind_name = 'client_request_from')
        LEFT JOIN entity con ON con.id = rfr.target_entity_id
        WHERE e.tenant_id = $1 AND ekd.kind_name = 'client_request' AND e.status = 'active'
-         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'request_status')
+         AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'request_status' ORDER BY a.valid_from DESC LIMIT 1)
              = ANY($2::text[])
        ORDER BY e.created_at DESC`,
       [ctx.tenantId, ACTIVE_STATUSES],
@@ -160,7 +150,7 @@ export async function getRequestRecord(
     const res = await client.query<
       HeadRow & { matter_id: string | null; contact_id: string | null }
     >(
-      `${ATTRS_CTE}
+      `
        SELECT ${SELECT_COLS},
          (SELECT r.target_entity_id FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id

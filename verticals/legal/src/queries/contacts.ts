@@ -107,14 +107,7 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
       first_seen_at: Date
       last_activity_at: Date
     }>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       ),
+      `WITH
        -- A contact's matters come from three relationship paths:
        --   • client_of (the LIVE intake path: contact -client_of-> matter),
        --   • matter_has_client (legacy booking: matter -> contact),
@@ -149,7 +142,14 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
                 max(me.created_at) AS last_at
          FROM contact_matter cm
          JOIN entity me ON me.id = cm.matter_id AND me.tenant_id = $1
-         LEFT JOIN attrs ms ON ms.entity_id = cm.matter_id AND ms.kind_name = 'matter_status'
+         LEFT JOIN LATERAL (
+           SELECT a.value
+           FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+           WHERE a.tenant_id = $1 AND a.entity_id = cm.matter_id AND akd.kind_name = 'matter_status'
+           ORDER BY a.valid_from DESC
+           LIMIT 1
+         ) ms ON true
          GROUP BY cm.contact_id
        )
        -- Contact attributes are written under two historical conventions — the
@@ -160,24 +160,54 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
        SELECT
          e.id AS contact_entity_id,
          COALESCE(
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_full_name'),
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'full_name')
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'contact_full_name'
+            ORDER BY a.valid_from DESC LIMIT 1),
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'full_name'
+            ORDER BY a.valid_from DESC LIMIT 1)
          ) AS full_name,
          COALESCE(
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_email'),
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'email')
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'contact_email'
+            ORDER BY a.valid_from DESC LIMIT 1),
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'email'
+            ORDER BY a.valid_from DESC LIMIT 1)
          ) AS email,
          COALESCE(
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_phone'),
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'phone')
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'contact_phone'
+            ORDER BY a.valid_from DESC LIMIT 1),
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'phone'
+            ORDER BY a.valid_from DESC LIMIT 1)
          ) AS phone,
          COALESCE(
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_company_name'),
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_name')
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'contact_company_name'
+            ORDER BY a.valid_from DESC LIMIT 1),
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_name'
+            ORDER BY a.valid_from DESC LIMIT 1)
          ) AS company_name,
          COALESCE(
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'contact_attribution_source'),
-           (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'attribution_source')
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'contact_attribution_source'
+            ORDER BY a.valid_from DESC LIMIT 1),
+           (SELECT a.value #>> '{}' FROM attribute a
+             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'attribution_source'
+            ORDER BY a.valid_from DESC LIMIT 1)
          ) AS attribution_source,
          COALESCE(mr.n, 0)::text AS matter_count,
          mr.statuses AS matter_statuses,
@@ -245,20 +275,21 @@ export async function getContact(
       summary: string | null
       created_at: string
     }>(
-      `WITH matter_attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT
+      `SELECT
          e.id AS matter_entity_id,
          e.name AS matter_number,
-         (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'practice_area') AS service_key,
-         (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
-         (SELECT value #>> '{}' FROM matter_attrs WHERE entity_id = e.id AND kind_name = 'matter_summary') AS summary,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'practice_area'
+          ORDER BY a.valid_from DESC LIMIT 1) AS service_key,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_status'
+          ORDER BY a.valid_from DESC LIMIT 1) AS status,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_summary'
+          ORDER BY a.valid_from DESC LIMIT 1) AS summary,
          to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS created_at
        FROM entity e
        WHERE e.tenant_id = $1

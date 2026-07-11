@@ -85,15 +85,7 @@ export async function buildMatterEmailIndex(ctx: ActionContext): Promise<MatterE
       matter_number: string
       created_at: string
     }>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT
+      `SELECT
          lower(ea.value #>> '{}') AS email,
          na.value #>> '{}'        AS full_name,
          e.id                     AS matter_entity_id,
@@ -105,8 +97,22 @@ export async function buildMatterEmailIndex(ctx: ActionContext): Promise<MatterE
          ON r.target_entity_id = e.id AND r.tenant_id = e.tenant_id
        JOIN relationship_kind_definition rkd
          ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'client_of'
-       JOIN attrs ea ON ea.entity_id = r.source_entity_id AND ea.kind_name = 'email'
-       LEFT JOIN attrs na ON na.entity_id = r.source_entity_id AND na.kind_name = 'full_name'
+       JOIN LATERAL (
+         SELECT a.value
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+         WHERE a.tenant_id = $1 AND a.entity_id = r.source_entity_id AND akd.kind_name = 'email'
+         ORDER BY a.valid_from DESC
+         LIMIT 1
+       ) ea ON true
+       LEFT JOIN LATERAL (
+         SELECT a.value
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+         WHERE a.tenant_id = $1 AND a.entity_id = r.source_entity_id AND akd.kind_name = 'full_name'
+         ORDER BY a.valid_from DESC
+         LIMIT 1
+       ) na ON true
        WHERE e.tenant_id = $1
          AND e.status = 'active'
          AND (r.valid_to IS NULL OR r.valid_to > now())
