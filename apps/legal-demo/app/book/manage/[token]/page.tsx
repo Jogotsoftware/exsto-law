@@ -51,7 +51,7 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
 
   // Slot picker state (reschedule view), mirroring the booking form.
   const [slots, setSlots] = useState<CalendarSlot[] | null>(null)
-  const [slotsSource, setSlotsSource] = useState<'google' | 'stub' | null>(null)
+  const [slotsSource, setSlotsSource] = useState<'google' | 'unavailable' | null>(null)
   const [slotsRefreshing, setSlotsRefreshing] = useState(false)
   const [slotsLastUpdated, setSlotsLastUpdated] = useState<Date | null>(null)
   const [horizonDays, setHorizonDays] = useState(INITIAL_HORIZON_DAYS)
@@ -87,7 +87,7 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
       const seq = ++slotsReqSeq.current
       if (!opts.silent) setSlotsRefreshing(true)
       try {
-        const r = await callClientMcp<{ slots: CalendarSlot[]; source: 'google' | 'stub' }>({
+        const r = await callClientMcp<{ slots: CalendarSlot[]; source: 'google' | 'unavailable' }>({
           toolName: 'legal.calendar.availability',
           input: { daysOut, serviceKey: opts.serviceKey },
         })
@@ -292,11 +292,14 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
                         Loading available times…
                       </div>
                     ) : slots.length === 0 ? (
-                      <p className="bk-empty">No open times right now — please check back soon.</p>
+                      <p className="bk-empty">
+                        {slotsSource === 'unavailable'
+                          ? 'Online scheduling is temporarily unavailable. Please email us and we’ll set up a time.'
+                          : 'No open times right now — please check back soon.'}
+                      </p>
                     ) : (
                       <AvailabilityCalendar
                         slots={slots}
-                        live={slotsSource !== 'stub'}
                         selectedStartIso={selectedSlot?.startIso ?? null}
                         onSelect={setSelectedSlot}
                         lastUpdated={slotsLastUpdated}

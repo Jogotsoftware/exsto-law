@@ -9,6 +9,11 @@ import {
   listAssistantFeedback,
   getAiUsageSummary,
   saveAssistantReplyToMatter,
+  listChatSessions,
+  closeChatSession,
+  getAssistantSettings,
+  setAssistantSettings,
+  recordBuildArtifactEdited,
   type AssistantChatInput,
   type AssistantChatReply,
   type SubmitFeedbackInput,
@@ -18,6 +23,8 @@ import {
   type AssistantFeedbackEntry,
   type AiUsageSummary,
   type SaveAssistantReplyInput,
+  type ChatSessionSummary,
+  type AssistantSettings,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -121,6 +128,11 @@ registerTool({
         description: 'Where the attorney was (e.g. { path }) when leaving feedback.',
         additionalProperties: true,
       },
+      chatSessionId: {
+        type: 'string',
+        description:
+          'The saved conversation this turn continues (from a prior reply). Omit to start a new conversation; the reply returns the session id to resend.',
+      },
     },
     required: ['message', 'modelId'],
     additionalProperties: false,
@@ -131,13 +143,18 @@ registerTool({
 registerTool({
   name: 'legal.assistant.thread',
   description:
-    'Prior assistant-chat turns for a matter or client (oldest-first), so reopening the chat shows its history. Omit both ids for the global thread.',
+    'Prior assistant-chat turns (oldest-first), so reopening the chat shows its history. Pass chatSessionId to read ONE saved conversation; else pass matterEntityId/contactEntityId for that legacy scope thread, or omit all for the global thread.',
   mode: 'read',
   inputSchema: {
     type: 'object',
     properties: {
       matterEntityId: { type: 'string' },
       contactEntityId: { type: 'string' },
+      chatSessionId: {
+        type: 'string',
+        description:
+          'Read the turns of this saved conversation (from legal.assistant.chat_sessions).',
+      },
     },
     additionalProperties: false,
   },
@@ -145,9 +162,90 @@ registerTool({
     turns: await listAssistantThread(ctx, input ?? {}),
   }),
 } satisfies Tool<
-  { matterEntityId?: string; contactEntityId?: string },
+  { matterEntityId?: string; contactEntityId?: string; chatSessionId?: string },
   { turns: AssistantThreadEntry[] }
 >)
+
+registerTool({
+  name: 'legal.assistant.chat_sessions',
+  description:
+    "The attorney's saved assistant conversations (assistant_chat_session), most-recent-activity first — title, scope, status, turn count. Powers the conversation switcher; a conversation's turns come from legal.assistant.thread with chatSessionId.",
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ sessions: await listChatSessions(ctx) }),
+} satisfies Tool<Record<string, never>, { sessions: ChatSessionSummary[] }>)
+
+registerTool({
+  name: 'legal.assistant.chat_session_close',
+  description:
+    'Close a saved assistant conversation (it stays readable in history; new messages start a fresh conversation).',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: { chatSessionId: { type: 'string' } },
+    required: ['chatSessionId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => {
+    await closeChatSession(ctx, input.chatSessionId)
+    return { closed: true }
+  },
+} satisfies Tool<{ chatSessionId: string }, { closed: boolean }>)
+
+registerTool({
+  name: 'legal.assistant.build_artifact_edited',
+  description:
+    'Record that the attorney hand-edited a proposed artifact in the wizard pop-up editor before approving it (an observation event threaded on the build session), so the build trail reads proposal → human edit → approval.',
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      buildSessionId: { type: 'string', description: 'The open build session, when known.' },
+      note: { type: 'string', description: 'What was edited, e.g. the artifact label.' },
+    },
+    required: ['note'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => {
+    await recordBuildArtifactEdited(ctx, input)
+    return { recorded: true }
+  },
+} satisfies Tool<{ buildSessionId?: string; note: string }, { recorded: boolean }>)
+
+registerTool({
+  name: 'legal.assistant.settings_get',
+  description:
+    "The attorney's persisted assistant settings (model, effort, web-search/research, context depth) — per-attorney, stored through core. Null when never saved (the client uses its defaults).",
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ settings: await getAssistantSettings(ctx) }),
+} satisfies Tool<Record<string, never>, { settings: AssistantSettings | null }>)
+
+registerTool({
+  name: 'legal.assistant.settings_set',
+  description:
+    "Persist the attorney's assistant settings (whole payload; the client sends its full current settings object). Stored per-attorney through core — each save is a superseding attribute row, so the history is the audit trail.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      settings: {
+        type: 'object',
+        properties: {
+          modelId: { type: 'string' },
+          workRate: { type: 'string', enum: ['quick', 'balanced', 'thorough'] },
+          webSearch: { type: 'boolean' },
+          research: { type: 'boolean' },
+          contextDepth: { type: 'string', enum: ['lean', 'balanced', 'generous'] },
+        },
+        additionalProperties: false,
+      },
+    },
+    required: ['settings'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => setAssistantSettings(ctx, input.settings),
+} satisfies Tool<{ settings: AssistantSettings }, { settingsEntityId: string }>)
 
 registerTool({
   name: 'legal.assistant.threads',

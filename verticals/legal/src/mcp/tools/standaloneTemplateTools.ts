@@ -5,6 +5,7 @@ import {
   createTemplate,
   updateTemplate,
   archiveTemplate,
+  retireTemplate,
   aiDraftTemplate,
   aiEnhanceTemplate,
   loadFirmFieldLibrary,
@@ -174,6 +175,25 @@ const archiveTool: Tool<
   handler: async (ctx: ActionContext, input) => archiveTemplate(ctx, input.templateEntityId),
 }
 
+// HARDENING-RESIDUALS-1 (WP-F): soft retire, mirroring legal.service.retire.
+// Unlike archive, retire REFUSES while the template is attached to an active
+// service's workflow or fed by a questionnaire — the error names the holder so
+// the attorney detaches there first. Existing document drafts are untouched.
+const retireTool: Tool<{ templateEntityId: string }, { templateEntityId: string; retired: true }> =
+  {
+    name: 'legal.template.retire',
+    description:
+      'Retire a standalone template: it leaves the Templates library and every picker while history and existing document drafts stay untouched. Blocked with "in use by X" while an active service workflow or questionnaire still references it — detach there first.',
+    mode: 'write',
+    inputSchema: {
+      type: 'object',
+      properties: { templateEntityId: { type: 'string' } },
+      required: ['templateEntityId'],
+      additionalProperties: false,
+    },
+    handler: async (ctx: ActionContext, input) => retireTemplate(ctx, input.templateEntityId),
+  }
+
 // AI draft (Templates wizard). Generates a template body from a plain-language
 // description using the firm's Anthropic key. Returns text only — the attorney
 // reviews it in the editor and SAVES via create/update (that's the recorded write),
@@ -262,5 +282,6 @@ registerTool(getTool)
 registerTool(createTool)
 registerTool(updateTool)
 registerTool(archiveTool)
+registerTool(retireTool)
 registerTool(aiDraftTool)
 registerTool(aiEnhanceTool)

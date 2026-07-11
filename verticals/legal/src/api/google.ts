@@ -291,7 +291,7 @@ export async function fetchAvailability(
   ctx: ActionContext,
   daysOut: number,
   opts: { serviceKey?: string } = {},
-): Promise<{ slots: AvailabilitySlot[]; source: 'google' | 'stub' }> {
+): Promise<{ slots: AvailabilitySlot[]; source: 'google' | 'unavailable'; reason?: string }> {
   // Public booking page: no signed-in attorney, so read the firm's primary
   // connected attorney's calendar. (Per-link attorney selection is track B.)
   const firmActor = await resolveFirmPrimaryActor(ctx.tenantId, 'google')

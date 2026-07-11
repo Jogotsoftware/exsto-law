@@ -5,6 +5,8 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
 import { CheckIcon, LayersIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { ConfigEditModal } from '@/components/ConfigEditModal'
+import { WorkflowView, jsonEditor } from '@/components/configEditors'
 import { WorkflowStepList } from '@/components/WorkflowStepList'
 
 // CONSTRAINT (mirrors the workflow builder page): no server-package imports. These
@@ -151,10 +153,13 @@ export function WorkflowProposalCard({
   proposal,
   onApproved,
   onRevise,
+  onEdited,
 }: {
   proposal: WorkflowProposal
   onApproved?: OnApproved
   onRevise?: OnRevise
+  // WP-H: fired after the attorney edits the proposal in the pop-up editor.
+  onEdited?: (note: string) => void
 }) {
   const [current, setCurrent] = useState<WfLifecycle | null>(null)
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
@@ -167,8 +172,13 @@ export function WorkflowProposalCard({
   const [reviseOpen, setReviseOpen] = useState(false)
   const [reviseText, setReviseText] = useState('')
   const [reviseSent, setReviseSent] = useState(false)
+  // WP-H: the attorney's hand-edited graph (null until they edit in the pop-up);
+  // Approve captures this over the AI's proposal when set.
+  const [editedGraph, setEditedGraph] = useState<WorkflowProposal['graph'] | null>(null)
+  const [editing, setEditing] = useState(false)
+  const liveGraph = editedGraph ?? proposal.graph
 
-  const ordered = orderStages(proposal.graph)
+  const ordered = orderStages(liveGraph)
 
   // Load the service's CURRENT lifecycle so the card can show the diff (added/
   // removed/reordered). Best-effort — if it fails, the card still shows the proposal.
@@ -213,7 +223,7 @@ export function WorkflowProposalCard({
           headers,
           credentials: 'same-origin',
           body: JSON.stringify({
-            graph: proposal.graph,
+            graph: liveGraph,
             summary: proposal.summary,
             confidence: proposal.confidence,
           }),
@@ -307,6 +317,15 @@ export function WorkflowProposalCard({
       <div className="uac-doc-actions">
         <button
           type="button"
+          className="uac-reply-btn"
+          onClick={() => setEditing(true)}
+          disabled={approveState === 'approving' || approveState === 'approved'}
+          title="Edit the proposed workflow before approving"
+        >
+          <EditIcon size={12} /> Edit
+        </button>
+        <button
+          type="button"
           className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
           onClick={approve}
           disabled={approveState === 'approving' || approveState === 'approved'}
@@ -375,6 +394,24 @@ export function WorkflowProposalCard({
         <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
           {approveError}
         </div>
+      )}
+      {editing && (
+        <ConfigEditModal
+          artifactKind="workflow"
+          targetId={`proposal:${proposal.serviceKey}`}
+          title={`Edit proposed workflow — ${proposal.serviceKey}`}
+          initialContent={JSON.stringify(liveGraph ?? [], null, 2)}
+          renderView={(content) => <WorkflowView content={content} />}
+          renderEdit={jsonEditor}
+          aiRegenerate={false}
+          saveLabel="Save"
+          onSave={async (content) => {
+            // Save updates the CARD; the validated live write is still Approve.
+            setEditedGraph(JSON.parse(content) as WorkflowProposal['graph'])
+            onEdited?.(`workflow for "${proposal.serviceKey}"`)
+          }}
+          onClose={() => setEditing(false)}
+        />
       )}
     </div>
   )

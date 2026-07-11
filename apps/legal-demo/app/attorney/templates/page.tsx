@@ -754,16 +754,16 @@ export default function TemplatesPage() {
 
   async function archive(t: Template) {
     const ok = await confirm({
-      title: `Archive “${t.name}”?`,
-      body: 'It will be removed from the active library — kept as history.',
-      confirmLabel: 'Archive',
+      title: `Retire “${t.name}”?`,
+      body: 'It will leave the library and every picker — kept as history; documents already generated from it are untouched. Retiring is blocked while a service or questionnaire still uses it.',
+      confirmLabel: 'Retire',
       danger: true,
     })
     if (!ok) return
     setError(null)
     try {
       await callAttorneyMcp({
-        toolName: 'legal.template.archive',
+        toolName: 'legal.template.retire',
         input: { templateEntityId: t.templateEntityId },
       })
       if (draft?.templateEntityId === t.templateEntityId) setDraft(null)
@@ -1375,7 +1375,7 @@ export default function TemplatesPage() {
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button onClick={() => setModalTemplate(t)}>Edit in window</button>{' '}
                       <button onClick={() => edit(t)}>Edit</button>{' '}
-                      <button onClick={() => archive(t)}>Archive</button>
+                      <button onClick={() => archive(t)}>Retire</button>
                     </td>
                   </tr>
                 ))}

@@ -368,17 +368,6 @@ function generateCandidateSlots(
   return slots
 }
 
-// Returns the rules-shaped template with every slot marked available. Used as a
-// fallback when Google isn't connected or the freebusy call fails — so even the
-// honestly-labeled "sample times" reflect the firm's configured hours/duration.
-export function getStubAvailability(
-  daysOut: number,
-  rules: FirmBookingRules,
-  durationMinutes: number,
-): AvailabilitySlot[] {
-  return generateCandidateSlots(daysOut, rules, durationMinutes)
-}
-
 // Raw busy blocks (epoch ms) from the synced Google calendar's freebusy for a
 // window. Throws when Google isn't connected (authedClient) so the api layer can
 // tag the result 'disconnected' vs 'error' explicitly. Shared by the slot-based
@@ -474,16 +463,18 @@ export async function fetchBusyIntervals(
   return mergeBusyIntervals(busy, new Date(fromIso).getTime(), new Date(toIso).getTime())
 }
 
-// Tries Google first; falls back to stub if anything goes wrong. Logs the
-// actual error so we can diagnose silent fallbacks without the UI hiding the
-// problem.
+// Real Google free/busy only (HARDENING-RESIDUALS-1 WP-B3, the no-simulate
+// ruling): when the calendar integration is unavailable, booking is HONESTLY
+// unavailable — zero slots, never fabricated "sample times" however labeled.
+// (The old stub fallback returned every rules-shaped slot as available; it is
+// deleted, not just hidden.)
 export async function getAvailability(
   tenantId: string,
   daysOut: number,
   actorId: string | null | undefined,
   rules: FirmBookingRules,
   durationMinutes: number,
-): Promise<{ slots: AvailabilitySlot[]; source: 'google' | 'stub'; reason?: string }> {
+): Promise<{ slots: AvailabilitySlot[]; source: 'google' | 'unavailable'; reason?: string }> {
   try {
     const slots = await getGoogleAvailability(tenantId, daysOut, actorId, rules, durationMinutes)
     return { slots, source: 'google' }
@@ -494,12 +485,12 @@ export async function getAvailability(
     // so the pattern backstop in redactSecret does the work.
     const reason = redactSecret(err instanceof Error ? err.message : String(err))
     console.error(
-      `[getAvailability] Google availability failed for tenant ${tenantId}; falling back to stub. Reason: ${reason}`,
+      `[getAvailability] Google availability failed for tenant ${tenantId}; booking shows honestly unavailable. Reason: ${reason}`,
     )
     // Flip the connection to 'error' so Settings shows the broken sync
-    // prominently instead of the UI silently serving stub slots.
+    // prominently instead of the UI hiding the problem.
     await markConnectionError(tenantId, 'google', reason, actorId).catch(() => {})
-    return { slots: getStubAvailability(daysOut, rules, durationMinutes), source: 'stub', reason }
+    return { slots: [], source: 'unavailable', reason }
   }
 }
 
