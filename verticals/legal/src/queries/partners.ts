@@ -68,23 +68,31 @@ export async function listReferralPartners(ctx: ActionContext): Promise<Referral
       created_at: Date
       updated_at: Date | null
     }>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value, a.valid_from
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT
+      `SELECT
          e.id AS entity_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'partner_full_name')  AS full_name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'partner_email')      AS email,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'partner_phone')      AS phone,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'partner_firm')       AS firm,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'partner_specialty')  AS specialty,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'partner_full_name'
+          ORDER BY a.valid_from DESC LIMIT 1) AS full_name,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'partner_email'
+          ORDER BY a.valid_from DESC LIMIT 1) AS email,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'partner_phone'
+          ORDER BY a.valid_from DESC LIMIT 1) AS phone,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'partner_firm'
+          ORDER BY a.valid_from DESC LIMIT 1) AS firm,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'partner_specialty'
+          ORDER BY a.valid_from DESC LIMIT 1) AS specialty,
          e.created_at,
-         (SELECT max(valid_from) FROM attrs WHERE entity_id = e.id) AS updated_at
+         (SELECT max(a.valid_from) FROM attribute a
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id) AS updated_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1 AND ekd.kind_name = 'referral_partner' AND e.status = 'active'
@@ -146,23 +154,31 @@ export async function listOtherAttorneys(ctx: ActionContext): Promise<OtherAttor
       created_at: Date
       updated_at: Date | null
     }>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value, a.valid_from
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT
+      `SELECT
          e.id AS entity_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'attorney_full_name') AS full_name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'attorney_email')     AS email,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'attorney_phone')     AS phone,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'attorney_firm')      AS firm,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'attorney_role')      AS role,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'attorney_full_name'
+          ORDER BY a.valid_from DESC LIMIT 1) AS full_name,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'attorney_email'
+          ORDER BY a.valid_from DESC LIMIT 1) AS email,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'attorney_phone'
+          ORDER BY a.valid_from DESC LIMIT 1) AS phone,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'attorney_firm'
+          ORDER BY a.valid_from DESC LIMIT 1) AS firm,
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'attorney_role'
+          ORDER BY a.valid_from DESC LIMIT 1) AS role,
          e.created_at,
-         (SELECT max(valid_from) FROM attrs WHERE entity_id = e.id) AS updated_at
+         (SELECT max(a.valid_from) FROM attribute a
+          WHERE a.tenant_id = $1 AND a.entity_id = e.id) AS updated_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1 AND ekd.kind_name = 'other_attorney' AND e.status = 'active'
