@@ -38,6 +38,8 @@ import {
   dismissPaymentReport,
   type ManualPaymentMethods,
   type PaymentReport,
+  listFeeConsentTrail,
+  type FeeConsentTrailEntry,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -54,6 +56,22 @@ registerTool({
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => await listUnbilled(ctx),
 } satisfies Tool<Record<string, never>, { clients: UnbilledClient[]; currency: string }>)
+
+registerTool({
+  name: 'legal.matter.fee_consents',
+  description:
+    'PORTAL-1 (WP3): the client fee-consent trail for one matter — every fee.quoted / fee.accepted / fee.declined event, newest first — rendered next to the fees it authorized.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { matterEntityId: { type: 'string' } },
+    required: ['matterEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    consents: await listFeeConsentTrail(ctx, input.matterEntityId),
+  }),
+} satisfies Tool<{ matterEntityId: string }, { consents: FeeConsentTrailEntry[] }>)
 
 registerTool({
   name: 'legal.billing.matter_invoiced',

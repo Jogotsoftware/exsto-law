@@ -165,3 +165,41 @@ export async function getClientInvoiceByNumber(
     }
   })
 }
+
+// PORTAL-1 (WP6) — the magic-link pay door: resolve the CLIENT CONTACT the
+// invoice bills, from the invoice itself (invoice_client_id → the client's main
+// contact, else any contact). The pay token (bound to this invoice + tenant,
+// emailed only to the on-file address) is the authorization; this lookup only
+// supplies the contact the existing session-door functions expect.
+export async function resolveInvoiceClientContact(
+  ctx: ActionContext,
+  invoiceNumber: string,
+): Promise<string | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ contact_id: string }>(
+      `${ATTRS_CTE}
+       SELECT COALESCE(
+         (SELECT value #>> '{}' FROM attrs
+           WHERE entity_id = (SELECT value #>> '{}' FROM attrs a2
+                              WHERE a2.entity_id = e.id AND a2.kind_name = 'invoice_client_id')::uuid
+             AND kind_name = 'client_main_contact'),
+         (SELECT r.source_entity_id::text
+            FROM relationship r
+            JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+           WHERE r.tenant_id = $1
+             AND r.target_entity_id = (SELECT value #>> '{}' FROM attrs a2
+                                       WHERE a2.entity_id = e.id AND a2.kind_name = 'invoice_client_id')::uuid
+             AND rkd.kind_name = 'contact_of'
+             AND (r.valid_to IS NULL OR r.valid_to > now())
+           ORDER BY r.recorded_at DESC LIMIT 1)
+       ) AS contact_id
+       FROM entity e
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+       WHERE e.tenant_id = $1 AND ekd.kind_name = 'invoice' AND e.status = 'active'
+         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_number') = $2
+       LIMIT 1`,
+      [ctx.tenantId, invoiceNumber],
+    )
+    return res.rows[0]?.contact_id ?? null
+  })
+}

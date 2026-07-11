@@ -30,6 +30,8 @@ async function principal(ctx: ActionContext, clientContactId: string): Promise<C
 
 interface WithClient {
   clientContactId: string
+  /** Stamped by the authed portal route from the request — never body-supplied. */
+  clientIp?: string | null
 }
 
 const listTool: Tool<WithClient, { signatures: PendingSignature[] }> = {
@@ -59,6 +61,7 @@ const loadTool: Tool<WithClient & { requestId: string }, { document: SignableDoc
     document: await loadSignableForClient(
       await principal(ctx, input.clientContactId),
       input.requestId,
+      input.clientIp ?? null,
     ),
   }),
 }
@@ -81,6 +84,7 @@ const signTool: Tool<SignInput, RecordSignatureResult> = {
       signatureData: input.signatureData ?? null,
       consent: input.consent,
       fieldValues: input.fieldValues,
+      signerIp: input.clientIp ?? null,
     }),
 }
 
@@ -95,6 +99,7 @@ const declineTool: Tool<
     declineForClient(await principal(ctx, input.clientContactId), {
       requestId: input.requestId,
       reason: input.reason,
+      signerIp: input.clientIp ?? null,
     }),
 }
 

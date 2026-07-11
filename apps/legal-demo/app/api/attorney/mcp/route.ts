@@ -27,8 +27,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: ctxOrError.error }, { status: ctxOrError.status })
   }
 
+  // PORTAL-1: the shared-draft view is no longer publicly readable; the
+  // attorney door is this session-verified stamp (stripped on public routes).
+  const input: Record<string, unknown> = { ...(body.input ?? {}) }
+  if (body.toolName === 'legal.draft.get_shared') input.__attorneySession = true
+
   try {
-    const result = await tool.handler(ctxOrError, body.input ?? {})
+    const result = await tool.handler(ctxOrError, input)
     return NextResponse.json({ result })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

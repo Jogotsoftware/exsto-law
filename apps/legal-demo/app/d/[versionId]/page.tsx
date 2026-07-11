@@ -2,6 +2,8 @@
 
 import { use, useEffect, useState } from 'react'
 import { callClientMcp } from '@/lib/mcpClient'
+import { callClientPortalMcp } from '@/lib/mcpClientPortal'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import { formatDate } from '@/lib/datetime'
 import { renderDocumentHtml } from '@/lib/documentHtml'
@@ -27,15 +29,40 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    callClientMcp<{ draft: DraftPayload | null }>({
-      toolName: 'legal.draft.get_shared',
-      input: { documentVersionId: versionId },
-    })
+    // PORTAL-1 (WP2): the bare public capability URL is closed. Three doors, in
+    // order: the emailed link's signed ?t= token (public), the client portal
+    // session, then the attorney session (internal preview links).
+    const token = new URLSearchParams(window.location.search).get('t')
+    const req = { toolName: 'legal.draft.get_shared' as const }
+    const attempt = async (): Promise<{ draft: DraftPayload | null }> => {
+      if (token) {
+        return callClientMcp<{ draft: DraftPayload | null }>({
+          ...req,
+          input: { documentVersionId: versionId, token },
+        })
+      }
+      try {
+        return await callClientPortalMcp<{ draft: DraftPayload | null }>({
+          ...req,
+          input: { documentVersionId: versionId },
+        })
+      } catch {
+        return callAttorneyMcp<{ draft: DraftPayload | null }>({
+          ...req,
+          input: { documentVersionId: versionId },
+        })
+      }
+    }
+    attempt()
       .then((r) => {
         if (!r.draft) setError('This draft is no longer available.')
         else setDraft(r.draft)
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch(() =>
+        setError(
+          'This document needs a valid link or a signed-in portal session. Open it from your email link, or sign in to your client portal.',
+        ),
+      )
   }, [versionId])
 
   if (error) {

@@ -158,7 +158,7 @@ export async function getPublicAvailability(
 // prospect is the sole guest). Matter-LESS (createCalendarEvent, not the in-service
 // createBookingEvent). Returns the event id/link, or null if Google isn't connected
 // or the write fails — the booking is still recorded either way.
-async function tryCreateStandaloneEvent(
+export async function tryCreateStandaloneEvent(
   ctx: ActionContext,
   args: {
     firmName: string

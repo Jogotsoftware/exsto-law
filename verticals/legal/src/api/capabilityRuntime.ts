@@ -87,6 +87,7 @@ const CAPABILITY_HANDLERS: Record<string, CapabilityHandler> = {
   'legal.capability.document_generation.run': runDocumentGenerationCapability,
   'legal.capability.ai_document_review.run': runAiDocumentReviewCapability,
   'legal.capability.request_client_materials.run': runRequestClientMaterialsCapability,
+  'legal.capability.send_portal_invite.run': runSendPortalInviteCapability,
   'legal.capability.esignature.run': runEsignatureCapability,
   'legal.capability.email_generation.run': runEmailGenerationCapability,
   'legal.capability.transcript_extraction.run': runTranscriptExtractionCapability,
@@ -593,6 +594,59 @@ async function runRequestClientMaterialsCapability(
       },
     ],
     summary: 'Requested materials from the client (portal message); parked at the client gate.',
+  }
+}
+
+// ── Real handler: send portal invite (PORTAL-1 WP1 — first §3b promotion) ─────────
+// ONE implementation backs the composed workflow stage, the attorney's "Invite to
+// portal" button, and the booking-confirmation account link: inviteClientToPortal
+// (signed set-password token + the client_portal_invite notification route). The
+// stage's gate is `client`: the matter PARKS until the client creates the account —
+// legal.client.provision_portal_actor dispatches the client-gate advance (edge
+// `via: 'legal.client.provision_portal_actor'`).
+async function runSendPortalInviteCapability(
+  h: CapabilityHandlerContext,
+): Promise<CapabilityHandlerResult> {
+  const { withActionContext } = await import('@exsto/substrate')
+  // The matter's client contact (client_of source).
+  const contactId = await withActionContext(h.agentCtx, async (client) => {
+    const res = await client.query<{ id: string }>(
+      `SELECT r.source_entity_id AS id
+       FROM relationship r
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+       WHERE r.tenant_id = $1 AND r.target_entity_id = $2
+         AND rkd.kind_name = 'client_of'
+         AND (r.valid_to IS NULL OR r.valid_to > now())
+       ORDER BY r.recorded_at DESC LIMIT 1`,
+      [h.agentCtx.tenantId, h.matterEntityId],
+    )
+    return res.rows[0]?.id ?? null
+  })
+  if (!contactId) {
+    throw new CapabilityInputMissingError(
+      'send_portal_invite: this matter has no client contact to invite.',
+    )
+  }
+  // Already provisioned? The stage is satisfied — say so honestly instead of
+  // spamming a redundant invite.
+  const { resolvePortalActorId } = await import('./portalAccount.js')
+  const existing = await resolvePortalActorId(h.agentCtx.tenantId, contactId)
+  if (existing) {
+    return {
+      outputs: [],
+      summary:
+        'The client already has a portal account — no invite sent; the client gate advances on their account activity.',
+    }
+  }
+  const { inviteClientToPortal } = await import('./portalInvite.js')
+  const invite = await inviteClientToPortal(h.agentCtx, contactId)
+  if (!invite.ok) {
+    throw new CapabilityInputMissingError(`send_portal_invite: ${invite.error}`)
+  }
+  return {
+    outputs: [],
+    summary:
+      'Portal invite emailed; the matter waits at the client gate until the client creates their account.',
   }
 }
 

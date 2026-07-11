@@ -25,6 +25,7 @@ interface Timeline {
   matterNumber: string
   statusKey: string
   statusLabel: string
+  serviceLabel?: string | null
   scheduledAt: string | null
   canManageEvent: boolean
   manageUrl: string | null
@@ -90,12 +91,14 @@ interface ClientRequest {
   createdAt: string
 }
 
-type Tab = 'matters' | 'documents' | 'billing' | 'messages'
+type Tab = 'matters' | 'documents' | 'billing' | 'messages' | 'schedule' | 'assistant'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'matters', label: 'Matters' },
   { key: 'documents', label: 'Documents' },
   { key: 'billing', label: 'Billing' },
   { key: 'messages', label: 'Messages & Requests' },
+  { key: 'schedule', label: 'Book & Schedule' },
+  { key: 'assistant', label: 'Assistant' },
 ]
 
 // Signed-in client portal — a tabbed shell (header + nav + wide content) over the
@@ -227,6 +230,7 @@ export default function ClientPortalPage() {
               </div>
             )}
 
+            {tab === 'matters' && <TodosStrip onOpenTab={setTab} />}
             {tab === 'matters' &&
               (!timeline ? (
                 <div className="loading-block" role="status">
@@ -237,7 +241,11 @@ export default function ClientPortalPage() {
                   {timeline.scheduledAt && <UpcomingEventCard timeline={timeline} />}
                   <section className="pdash-card">
                     <div className="pdash-card-head">
-                      <h2>Matter {timeline.matterNumber}</h2>
+                      <h2>
+                        {timeline.serviceLabel
+                          ? `${timeline.serviceLabel} · ${timeline.matterNumber}`
+                          : `Matter ${timeline.matterNumber}`}
+                      </h2>
                       <span className="pdash-badge">{timeline.statusLabel}</span>
                     </div>
                     <h3 className="pdash-subhead">Timeline</h3>
@@ -262,6 +270,8 @@ export default function ClientPortalPage() {
 
             {tab === 'documents' && <DocumentsPanel matterEntityId={selected} />}
             {tab === 'billing' && <InvoicesPanel />}
+            {tab === 'schedule' && <SchedulePanel />}
+            {tab === 'assistant' && <AssistantPanel />}
             {tab === 'messages' &&
               (selected ? (
                 <>
@@ -518,8 +528,24 @@ function formatMoney(amount: string, currency: string): string {
 
 // All of the client's issued invoices, across matters. View-only for now; the
 // detail/pay page (/portal/pay/<number>) is where online payment will land.
+interface BillingSummary {
+  matters: Array<{
+    matterEntityId: string
+    matterNumber: string
+    invoices: ClientInvoice[]
+    accrued: Array<{ kind: string; date: string | null; description: string; amount: string }>
+    accruedTotal: string
+    dueTotal: string
+    paidTotal: string
+    runningTotal: string
+  }>
+  currency: string
+  totals: { due: string; paid: string; accrued: string; running: string }
+}
+
 function InvoicesPanel() {
   const [invoices, setInvoices] = useState<ClientInvoice[] | null>(null)
+  const [billing, setBilling] = useState<BillingSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -530,6 +556,11 @@ function InvoicesPanel() {
         setError(e instanceof Error ? e.message : String(e))
         setInvoices([])
       })
+    // Accrued not-yet-invoiced fees + running total — same computed source as
+    // the firm's own billing panel. Best-effort: the invoices list stands alone.
+    callClientPortalMcp<{ billing: BillingSummary }>({ toolName: 'legal.client.billing_summary' })
+      .then((r) => setBilling(r.billing))
+      .catch(() => setBilling(null))
   }, [])
 
   return (
@@ -581,6 +612,509 @@ function InvoicesPanel() {
           ))}
         </ul>
       )}
+
+      {billing &&
+        (billing.matters.some((m) => m.accrued.length > 0) ||
+          Number(billing.totals.running) > 0) && (
+          <>
+            <h3 className="pdash-subhead">Accruing fees (not yet invoiced)</h3>
+            {billing.matters.filter((m) => m.accrued.length > 0).length === 0 ? (
+              <p className="text-muted">No fees accruing right now.</p>
+            ) : (
+              billing.matters
+                .filter((m) => m.accrued.length > 0)
+                .map((m) => (
+                  <div key={m.matterEntityId} style={{ marginBottom: 'var(--space-3)' }}>
+                    <div className="pdash-doc-title">Matter {m.matterNumber}</div>
+                    <ul className="pdash-docs">
+                      {m.accrued.map((e, i) => (
+                        <li key={i} className="pdash-doc">
+                          <div>
+                            <div>{e.description}</div>
+                            {e.date && (
+                              <span className="text-sm text-muted">{formatDate(e.date)}</span>
+                            )}
+                          </div>
+                          <strong>{formatMoney(e.amount, billing.currency)}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="text-sm" style={{ textAlign: 'right' }}>
+                      Accrued: <strong>{formatMoney(m.accruedTotal, billing.currency)}</strong>
+                      {' · '}Running total (open + accrued):{' '}
+                      <strong>{formatMoney(m.runningTotal, billing.currency)}</strong>
+                    </div>
+                  </div>
+                ))
+            )}
+            <div
+              className="pdash-doc-title"
+              style={{ textAlign: 'right', marginTop: 'var(--space-2)' }}
+            >
+              Total open {formatMoney(billing.totals.due, billing.currency)} · accrued{' '}
+              {formatMoney(billing.totals.accrued, billing.currency)} · running{' '}
+              <strong>{formatMoney(billing.totals.running, billing.currency)}</strong>
+            </div>
+          </>
+        )}
+    </section>
+  )
+}
+
+// PORTAL-1 (WP5) — the portal chatbot: streams over the client-scoped tool
+// surface; a request needing the client's consent renders as a card whose
+// button — the client's OWN click — files the cost-accepted request.
+interface ChatMsg {
+  role: 'user' | 'assistant'
+  content: string
+}
+interface RequestCard {
+  prefill: {
+    requestType: string
+    matterEntityId: string
+    description: string
+    durationMinutes: number | null
+  }
+  quote: { amount: string; currency: string; basis: string; label: string }
+}
+
+function AssistantPanel() {
+  const [messages, setMessages] = useState<ChatMsg[]>([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [card, setCard] = useState<RequestCard | null>(null)
+  const [cardBusy, setCardBusy] = useState(false)
+  const [cardDone, setCardDone] = useState<string | null>(null)
+
+  async function send() {
+    const message = input.trim()
+    if (!message || busy) return
+    setInput('')
+    setCard(null)
+    setCardDone(null)
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: message },
+      { role: 'assistant', content: '' },
+    ])
+    setBusy(true)
+    try {
+      const res = await fetch('/api/client/portal/assistant/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          history: messages.slice(-12),
+        }),
+      })
+      if (!res.ok || !res.body) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null
+        throw new Error(err?.error ?? 'The assistant is unavailable right now.')
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() ?? ''
+        for (const frame of frames) {
+          const line = frame.split('\n').find((l) => l.startsWith('data: '))
+          if (!line) continue
+          let event: { type: string; text?: string; card?: RequestCard }
+          try {
+            event = JSON.parse(line.slice(6))
+          } catch {
+            continue
+          }
+          if (event.type === 'text' && event.text) {
+            setMessages((prev) => {
+              const next = [...prev]
+              const last = next[next.length - 1]
+              if (last?.role === 'assistant') {
+                next[next.length - 1] = { role: 'assistant', content: last.content + event.text }
+              }
+              return next
+            })
+          } else if (event.type === 'request_card' && event.card) {
+            setCard(event.card)
+          } else if (event.type === 'error' && event.text) {
+            setMessages((prev) => {
+              const next = [...prev]
+              const last = next[next.length - 1]
+              if (last?.role === 'assistant' && !last.content) {
+                next[next.length - 1] = { role: 'assistant', content: event.text as string }
+              }
+              return next
+            })
+          }
+        }
+      }
+    } catch (e) {
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        const text = e instanceof Error ? e.message : String(e)
+        if (last?.role === 'assistant' && !last.content) {
+          next[next.length - 1] = { role: 'assistant', content: text }
+        }
+        return next
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function confirmRequest() {
+    if (!card || cardBusy) return
+    setCardBusy(true)
+    try {
+      await callClientPortalMcp({
+        toolName: 'legal.client.request_create',
+        input: {
+          matterEntityId: card.prefill.matterEntityId,
+          requestType: card.prefill.requestType,
+          description: card.prefill.description,
+          durationMinutes: card.prefill.durationMinutes ?? undefined,
+        },
+      })
+      setCard(null)
+      setCardDone(
+        'Request filed — the firm has been notified and will review it. You can track it in Messages & Requests.',
+      )
+    } catch (e) {
+      setCardDone(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCardBusy(false)
+    }
+  }
+
+  return (
+    <section className="pdash-card">
+      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+        Assistant
+      </h3>
+      <p className="text-muted text-sm">
+        Ask about your matters, documents, invoices, or scheduling. For legal questions the
+        assistant will route you to the attorney — it doesn&apos;t give legal advice.
+      </p>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          margin: 'var(--space-3) 0',
+          maxHeight: 420,
+          overflowY: 'auto',
+        }}
+      >
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            style={{
+              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: '85%',
+              padding: '8px 12px',
+              borderRadius: 12,
+              background:
+                m.role === 'user' ? 'var(--color-navy, #16324f)' : 'var(--surface-2, #f1f3f6)',
+              color: m.role === 'user' ? '#fff' : 'inherit',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {m.content || (busy && i === messages.length - 1 ? '…' : '')}
+          </div>
+        ))}
+      </div>
+      {card && (
+        <div className="alert" role="note">
+          <strong>Confirm your request</strong>
+          <div style={{ margin: '6px 0' }}>
+            {card.prefill.description}
+            <br />
+            Fee: <strong>${card.quote.amount}</strong>{' '}
+            <span className="text-muted">({card.quote.basis})</span>
+          </div>
+          <button
+            className="pdash-btn pdash-btn-primary"
+            disabled={cardBusy}
+            onClick={confirmRequest}
+          >
+            {cardBusy ? 'Filing…' : 'Accept fee & file request'}
+          </button>
+        </div>
+      )}
+      {cardDone && <div className="alert">{cardDone}</div>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="pdash-input"
+          style={{ flex: 1 }}
+          value={input}
+          placeholder="Ask the assistant…"
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              void send()
+            }
+          }}
+        />
+        <button
+          className="pdash-btn pdash-btn-primary"
+          disabled={busy || !input.trim()}
+          onClick={() => void send()}
+        >
+          {busy ? '…' : 'Send'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// PORTAL-1 (WP4) — book another service (prefilled /book) + schedule time on the
+// firm's real availability, with the fee consent card when the firm bills
+// portal-scheduled time.
+function SchedulePanel() {
+  const [availability, setAvailability] = useState<{
+    configured: boolean
+    timezone: string
+    meetingLengthsMinutes: number[]
+    durationMinutes: number
+    slots: Array<{ startIso: string; endIso: string; label: string }>
+  } | null>(null)
+  const [duration, setDuration] = useState<number | null>(null)
+  const [quote, setQuote] = useState<{
+    rate: string
+    amount: string
+    durationMinutes: number
+    description: string
+  } | null>(null)
+  const [feeAccepted, setFeeAccepted] = useState(false)
+  const [selectedSlot, setSelectedSlot] = useState<{ startIso: string; endIso: string } | null>(
+    null,
+  )
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    callClientPortalMcp<{ availability: typeof availability }>({
+      toolName: 'legal.client.schedule_availability',
+      input: duration ? { durationMinutes: duration } : {},
+    })
+      .then((r) => {
+        setAvailability(r.availability)
+        if (r.availability && duration === null) setDuration(r.availability.durationMinutes)
+      })
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return
+        setError(e instanceof Error ? e.message : String(e))
+      })
+  }, [duration])
+
+  useEffect(() => {
+    if (!duration) return
+    setFeeAccepted(false)
+    callClientPortalMcp<{ quote: typeof quote }>({
+      toolName: 'legal.client.schedule_quote',
+      input: { durationMinutes: duration },
+    })
+      .then((r) => setQuote(r.quote))
+      .catch(() => setQuote(null))
+  }, [duration])
+
+  async function book() {
+    if (!selectedSlot) return
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await callClientPortalMcp<{
+        result?: { bookingRef: string; startIso: string }
+        feeConsentRequired?: boolean
+        quote?: { rate: string; amount: string; durationMinutes: number; description: string }
+      }>({
+        toolName: 'legal.client.schedule_time',
+        input: {
+          startIso: selectedSlot.startIso,
+          endIso: selectedSlot.endIso,
+          durationMinutes: duration ?? undefined,
+          feeAccepted: feeAccepted || undefined,
+        },
+      })
+      if (r.feeConsentRequired && r.quote) {
+        setQuote(r.quote)
+        setError('Please review and accept the fee below, then confirm again.')
+        return
+      }
+      if (r.result) {
+        setNotice(
+          `Booked for ${new Date(r.result.startIso).toLocaleString()} — a calendar invitation and confirmation email are on the way.`,
+        )
+        setSelectedSlot(null)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <section className="pdash-card" style={{ marginBottom: 'var(--space-3)' }}>
+        <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+          Need help with something new?
+        </h3>
+        <p className="text-muted">
+          Book another service — signed in, your details and previous answers are prefilled.
+        </p>
+        <a className="pdash-btn" href="/book">
+          Book a service
+        </a>
+      </section>
+
+      <section className="pdash-card">
+        <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+          Schedule time with the firm
+        </h3>
+        {notice && <div className="alert">{notice}</div>}
+        {error && (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
+        {availability === null ? (
+          <div className="loading-block" role="status">
+            <span className="spinner" /> Checking availability…
+          </div>
+        ) : !availability.configured ? (
+          <p className="text-muted">
+            Online scheduling isn&apos;t available right now — message the firm and they&apos;ll
+            find a time with you.
+          </p>
+        ) : (
+          <>
+            {availability.meetingLengthsMinutes.length > 1 && (
+              <label
+                className="text-sm"
+                style={{ display: 'block', marginBottom: 'var(--space-2)' }}
+              >
+                Length{' '}
+                <select
+                  value={duration ?? availability.durationMinutes}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                >
+                  {availability.meetingLengthsMinutes.map((m) => (
+                    <option key={m} value={m}>
+                      {m} min
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {availability.slots.length === 0 ? (
+              <p className="text-muted">No open times in the next few weeks.</p>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  marginBottom: 'var(--space-2)',
+                }}
+              >
+                {availability.slots.slice(0, 24).map((slot) => (
+                  <button
+                    key={slot.startIso}
+                    className={`pdash-btn pdash-btn-sm ${selectedSlot?.startIso === slot.startIso ? 'pdash-btn-primary' : ''}`}
+                    onClick={() => setSelectedSlot(slot)}
+                  >
+                    {new Date(slot.startIso).toLocaleString(undefined, {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </button>
+                ))}
+              </div>
+            )}
+            {quote && (
+              <div className="alert" role="note">
+                <strong>This time is billable:</strong> {quote.description} —{' '}
+                <strong>${quote.amount}</strong>
+                <label style={{ display: 'flex', gap: 8, marginTop: 6, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={feeAccepted}
+                    onChange={(e) => setFeeAccepted(e.target.checked)}
+                  />
+                  <span>I accept this fee for the scheduled time.</span>
+                </label>
+              </div>
+            )}
+            <button
+              className="pdash-btn pdash-btn-primary"
+              disabled={!selectedSlot || busy || (Boolean(quote) && !feeAccepted)}
+              onClick={book}
+            >
+              {busy ? 'Booking…' : 'Confirm time'}
+            </button>
+          </>
+        )}
+      </section>
+    </>
+  )
+}
+
+// PORTAL-1 (WP2) — Things to do: sign / pay / materials, one strip at the top.
+function TodosStrip({ onOpenTab }: { onOpenTab: (tab: Tab) => void }) {
+  const [todos, setTodos] = useState<Array<{
+    kind: 'sign' | 'pay' | 'materials'
+    label: string
+    ref: string
+  }> | null>(null)
+
+  useEffect(() => {
+    callClientPortalMcp<{
+      todos: Array<{ kind: 'sign' | 'pay' | 'materials'; label: string; ref: string }>
+    }>({ toolName: 'legal.client.todos' })
+      .then((r) => setTodos(r.todos))
+      .catch(() => setTodos(null))
+  }, [])
+
+  if (!todos || todos.length === 0) return null
+  return (
+    <section className="pdash-card" style={{ marginBottom: 'var(--space-3)' }}>
+      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+        Things to do
+      </h3>
+      <ul className="pdash-docs">
+        {todos.map((todo, i) => (
+          <li key={i} className="pdash-doc">
+            <div className="pdash-doc-title">{todo.label}</div>
+            {todo.kind === 'sign' ? (
+              <a className="pdash-btn pdash-btn-sm" href={`/portal/sign/${todo.ref}`}>
+                Sign
+              </a>
+            ) : todo.kind === 'pay' ? (
+              <a
+                className="pdash-btn pdash-btn-sm"
+                href={`/portal/pay/${encodeURIComponent(todo.ref)}`}
+              >
+                Pay
+              </a>
+            ) : (
+              <button className="pdash-btn pdash-btn-sm" onClick={() => onOpenTab('documents')}>
+                Respond
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }
