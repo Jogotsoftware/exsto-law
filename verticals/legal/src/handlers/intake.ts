@@ -35,7 +35,9 @@ interface IntakeSubmitPayload {
 
 // Implicit accounts are indexed by email (+ phone history). Find an existing
 // client_contact whose latest email attribute matches, case-insensitively.
-async function findContactByEmail(
+// Exported for the public something-else intake (clientRequest.ts), so both
+// public entry points dedupe contacts by the same rule.
+export async function findContactByEmail(
   client: DbClient,
   tenantId: string,
   email: string,

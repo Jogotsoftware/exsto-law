@@ -246,3 +246,13 @@ export async function ensureStaleDraftReconcileScheduled(tenantId: string): Prom
   if (pending > 0) return
   await enqueueJob({ tenantId, jobKind: 'legal.draft.reconcile', runAt: new Date() })
 }
+
+// UI-BUILDER-FIX-1 Phase 9 — AI-regenerate of CONFIG artifacts (template /
+// questionnaire / workflow / billing) runs OFF-REQUEST here. The edit modal
+// enqueues; this generates a validated PROPOSAL and records it as a
+// config.regenerate.completed/.failed event; the modal polls that read. Nothing
+// auto-applies — the attorney saves/approves through the type's write action.
+registerWorkerHandler('legal.config.regenerate', async (ctx, payload) => {
+  const { runConfigRegenerateJob } = await import('../api/configRegenerate.js')
+  await runConfigRegenerateJob(ctx, payload as Record<string, unknown>)
+})

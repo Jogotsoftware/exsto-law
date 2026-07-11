@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
+import { TemplateConfigModal } from '@/components/configEditors'
 import { readDevSession } from '@/lib/auth'
 import {
   SparklesIcon,
@@ -253,6 +254,8 @@ export default function TemplatesPage() {
   // "New template" start-options chooser: scratch / clone existing / from a
   // questionnaire. Questionnaires load lazily the first time the chooser opens.
   const [showNew, setShowNew] = useState(false)
+  // Phase 9: the shared edit-in-modal, opened per template row.
+  const [modalTemplate, setModalTemplate] = useState<Template | null>(null)
   const [questionnaires, setQuestionnaires] = useState<QuestionnaireOpt[] | null>(null)
   // Page setup (paper size + font scale) — a per-template VIEW/print preference,
   // persisted client-side (localStorage), so the canvas + preview render true to
@@ -1370,6 +1373,7 @@ export default function TemplatesPage() {
                     <td>{t.docKind ? humanKind(t.docKind) : '—'}</td>
                     <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button onClick={() => setModalTemplate(t)}>Edit in window</button>{' '}
                       <button onClick={() => edit(t)}>Edit</button>{' '}
                       <button onClick={() => archive(t)}>Archive</button>
                     </td>
@@ -1379,6 +1383,15 @@ export default function TemplatesPage() {
             </table>
           </div>
         </section>
+      )}
+      {/* UI-BUILDER-FIX-1 Phase 9: the shared edit-in-modal (view / rich-text
+          edit / AI-regenerate via worker_job / save) — no navigation. */}
+      {modalTemplate && (
+        <TemplateConfigModal
+          template={modalTemplate}
+          onClose={() => setModalTemplate(null)}
+          onChanged={load}
+        />
       )}
     </main>
   )

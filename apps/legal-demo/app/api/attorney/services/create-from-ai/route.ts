@@ -16,6 +16,8 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     displayName?: string
     description?: string | null
+    clientDisplayName?: string | null
+    clientDescription?: string | null
     route?: WorkflowRoute
     generationMode?: GenerationMode
     appointmentRequired?: boolean
@@ -38,6 +40,8 @@ export async function POST(request: Request) {
       {
         displayName,
         description: body?.description ?? null,
+        clientDisplayName: body?.clientDisplayName ?? null,
+        clientDescription: body?.clientDescription ?? null,
         route: body?.route,
         generationMode: body?.generationMode,
         ...(typeof body?.appointmentRequired === 'boolean'

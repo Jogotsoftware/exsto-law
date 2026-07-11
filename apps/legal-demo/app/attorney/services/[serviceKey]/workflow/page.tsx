@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { WorkflowConfigModal } from '@/components/configEditors'
 // The pure builder data-model (wire shapes + graph round-trip). Kept in a sibling,
 // React-free module so the lossless round-trip is unit-testable — see
 // workflowBuilderModel.ts.
@@ -125,6 +126,9 @@ export default function ServiceWorkflowPage() {
   const [saveErrors, setSaveErrors] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
+  // Phase 9: the shared edit-in-modal over this service's workflow graph.
+  const [modalOpen, setModalOpen] = useState(false)
+  const [rawGraph, setRawGraph] = useState<unknown[]>([])
 
   // Refresh just the step library (after a Save to library). Tolerant: a library
   // load failure must not blank the builder.
@@ -159,6 +163,7 @@ export default function ServiceWorkflowPage() {
       setLibrary(lib.steps ?? [])
       setVersion(lc.lifecycle?.version ?? null)
       setSteps(lc.lifecycle ? graphToSteps(lc.lifecycle.graph) : [])
+      setRawGraph(lc.lifecycle?.graph ?? [])
       setDisplayName(svc.service?.displayName ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -358,6 +363,9 @@ export default function ServiceWorkflowPage() {
         <button type="button" className="outline" onClick={buildWithAi}>
           ✨ Build with AI
         </button>
+        <button type="button" className="outline" onClick={() => setModalOpen(true)}>
+          Edit in window
+        </button>
         <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
           Describe the workflow to the assistant and it&apos;ll draft the steps for you to review.
         </span>
@@ -486,6 +494,17 @@ export default function ServiceWorkflowPage() {
           one below it.
         </span>
       </div>
+      {/* UI-BUILDER-FIX-1 Phase 9: the shared edit-in-modal (view via the same
+          step-list a live matter renders / edit / AI-regenerate via worker_job /
+          save = a new immutable version) — no navigation. */}
+      {modalOpen && (
+        <WorkflowConfigModal
+          serviceKey={serviceKey}
+          graph={rawGraph}
+          onClose={() => setModalOpen(false)}
+          onChanged={load}
+        />
+      )}
     </section>
   )
 }

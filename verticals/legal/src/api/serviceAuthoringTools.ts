@@ -65,7 +65,17 @@ const PROPOSE_SERVICE_TOOL_DEF = {
       description: {
         type: 'string',
         description:
-          "The CLIENT-FACING blurb shown on the public booking page. Write it for the CLIENT in plain language about WHAT they get and the value (e.g. 'A mutual non-disclosure agreement to protect confidential information shared between two parties, prepared under North Carolina law.'). NEVER describe HOW it is produced internally — no mention of the workflow, the system, automation, 'auto-generated', 'template merge', intake mechanics, or attorney review steps. Describe the deliverable, not the assembly line.",
+          "The ATTORNEY-FACING description — jurisdiction-specific and process-detailed is CORRECT here (e.g. 'Reviews NC residential leases against Chapter 42; returns annotated lease + client letter.'). Clients never see this field (they see client_description); still never marketing fluff.",
+      },
+      client_display_name: {
+        type: 'string',
+        description:
+          "The CLIENT-FACING service name shown on the public intake tiles. OUTCOME-ONLY, in words a client would actually say: 'Last Will & Testament', NOT 'NC Will Drafting'. NEVER include a jurisdiction/state (no 'NC', 'Georgia', …), never legal-industry jargon, never process words. Max 70 characters. REQUIRED.",
+      },
+      client_description: {
+        type: 'string',
+        description:
+          "The CLIENT-FACING one-liner under the tile name: WHAT THE CLIENT RECEIVES, max 70 characters (hard server-side cap). Outcome only — e.g. 'A will that protects your family and your wishes'. NEVER the process, scope, jurisdiction, or how it is produced. REQUIRED.",
       },
       route: {
         type: 'string',
@@ -94,9 +104,40 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description: 'Your honest confidence in this proposal, 0–1 (never 1.0).',
       },
     },
-    required: ['display_name', 'route', 'generation_mode', 'appointment_required'],
+    required: [
+      'display_name',
+      'client_display_name',
+      'client_description',
+      'route',
+      'generation_mode',
+      'appointment_required',
+    ],
     additionalProperties: false,
   },
+}
+
+// US state names + standalone UPPERCASE two-letter codes — the client tile copy
+// doctrine forbids jurisdiction entirely (Phase 2). Case-insensitive on the full
+// names; the two-letter codes only match as uppercase standalone words so 'in',
+// 'me', 'or' in normal prose never false-positive.
+const STATE_NAME_RE =
+  /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)\b/i
+const STATE_CODE_RE =
+  /\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/
+
+// Capture-time doctrine check for the client tile copy: no jurisdiction, hard
+// 70-char budget. Returns the rejection message (model rewrites and re-proposes)
+// or null when clean. The upsert handler's capClientCopy is the last-resort
+// truncate-and-flag; THIS check exists so the copy gets rewritten well, not chopped.
+export function clientCopyViolation(field: string, value: string): string | null {
+  if (value.length > 70) {
+    return `${field} is ${value.length} characters — the hard cap is 70 (it renders on a small tile). Shorten it and call propose_service again.`
+  }
+  const state = value.match(STATE_NAME_RE) ?? value.match(STATE_CODE_RE)
+  if (state) {
+    return `${field} must NEVER name a jurisdiction ("${state[0]}") — client tile copy is outcome-only ('Last Will & Testament', not 'NC Will Drafting'). Jurisdiction belongs in the attorney-facing display_name/description. Rewrite and call propose_service again.`
+  }
+  return null
 }
 
 // Build the propose_service tool for this turn. Its run() validates the shell (the
@@ -114,6 +155,8 @@ export function buildProposeServiceTool(
       const args = (raw ?? {}) as {
         display_name?: string
         description?: string
+        client_display_name?: string
+        client_description?: string
         route?: string
         generation_mode?: string
         appointment_required?: unknown
@@ -123,6 +166,21 @@ export function buildProposeServiceTool(
       const displayName = (args.display_name ?? '').trim()
       if (!displayName) {
         return 'A display_name is required to propose a service; nothing was captured.'
+      }
+      // Client tile copy (Phase 2): required, outcome-only, no jurisdiction, <=70
+      // chars. Rejected here so the MODEL rewrites it well; the upsert handler's
+      // truncate-and-flag cap stays as the last line if something slips through.
+      const clientDisplayName = (args.client_display_name ?? '').trim()
+      const clientDescription = (args.client_description ?? '').trim()
+      if (!clientDisplayName || !clientDescription) {
+        return 'client_display_name and client_description are REQUIRED — the outcome-only copy the public intake tile shows ("Last Will & Testament", not the attorney-facing name). Nothing was captured.'
+      }
+      for (const [field, value] of [
+        ['client_display_name', clientDisplayName],
+        ['client_description', clientDescription],
+      ] as const) {
+        const violation = clientCopyViolation(field, value)
+        if (violation) return `The proposal was NOT captured: ${violation}`
       }
       // The description is CLIENT-FACING (it shows on the public booking page). The firm
       // rule: it must never expose internal mechanics. Reject the most unambiguous
@@ -170,6 +228,8 @@ export function buildProposeServiceTool(
         displayName,
         derivedKey,
         description: description || null,
+        clientDisplayName,
+        clientDescription,
         route,
         generationMode,
         appointmentRequired: args.appointment_required,

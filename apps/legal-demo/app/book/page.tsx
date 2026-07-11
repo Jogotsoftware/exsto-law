@@ -55,11 +55,24 @@ interface ServiceSection {
   fields: ServiceField[]
 }
 
+// TODO(UI-BUILDER-FIX-1 Phase 1): clientDisplayName/clientDescription are null for
+// services whose client copy hasn't been authored/approved yet — the tile falls
+// back to the ATTORNEY-facing displayName/description (jurisdiction-heavy) so
+// nothing renders blank. Remove this note once all live services carry client copy.
+function tileTitle(s: Service, t: (k: string, v?: undefined, f?: string) => string): string {
+  return s.clientDisplayName ?? t(`service.${s.serviceKey}.title`, undefined, s.displayName)
+}
+function tileDesc(s: Service, t: (k: string, v?: undefined, f?: string) => string): string {
+  return s.clientDescription ?? t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')
+}
+
 interface Service {
   id: string
   serviceKey: string
   displayName: string
   description: string | null
+  clientDisplayName: string | null
+  clientDescription: string | null
   intakeSchema: { sections: ServiceSection[] }
   // False = intake-only (document-review style): no slot step, submit happens
   // on the intake step, no consultation on the confirmation screen.
@@ -104,6 +117,39 @@ const PROGRESS_STEPS: ReadonlyArray<{ key: Exclude<Step, 'done'>; labelKey: stri
   { key: 'account', labelKey: 'progress.account' },
 ]
 
+// "Something else" (UI-BUILDER-FIX-1 Phase 3): a SYNTHETIC picker tile tied to NO
+// workflow_definition. Selecting it runs the same wizard (contact → one free-text
+// question) but submits legal.intake.something_else — a client_request for
+// attorney triage. No matter opens, no workflow starts.
+const SOMETHING_ELSE_KEY = 'something_else'
+const SOMETHING_ELSE_TILE: Service = {
+  id: SOMETHING_ELSE_KEY,
+  serviceKey: SOMETHING_ELSE_KEY,
+  displayName: 'Something else',
+  description: "Not sure what you need? Tell us and we'll point you the right way.",
+  clientDisplayName: null,
+  clientDescription: null,
+  intakeSchema: {
+    sections: [
+      {
+        id: 'request',
+        title: 'Your request',
+        fields: [
+          {
+            id: 'request_text',
+            label: 'What do you need help with?',
+            type: 'textarea',
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
+  // Intake-only shape: no slot step, submit fires from the intake step.
+  appointmentRequired: false,
+  bookable: true,
+}
+
 // PORTAL-1: the signed-in portal identity, when a client session cookie exists.
 interface PortalMe {
   email: string
@@ -121,7 +167,8 @@ interface FeeQuote {
 
 // Plain-language services map to a friendly icon; anything unknown gets a doc icon.
 function ServiceIcon({ serviceKey, size = 22 }: { serviceKey: string; size?: number }) {
-  if (serviceKey === 'other') return <HelpCircleIcon size={size} />
+  if (serviceKey === 'other' || serviceKey === SOMETHING_ELSE_KEY)
+    return <HelpCircleIcon size={size} />
   if (serviceKey.includes('amendment')) return <FileTextIcon size={size} />
   if (
     serviceKey.includes('llc') ||
@@ -250,7 +297,11 @@ export default function BookPage() {
       // non-bookable one is simply excluded, never rendered disabled. A stale
       // ?service= preset pointing at one falls back to the picker via the
       // preset-validation effect below.
-      .then((r) => setServices(r.services.filter((s) => s.bookable === true)))
+      // The "Something else" tile is client-side (tied to no workflow_definition)
+      // and always renders LAST, whatever the firm's live services are.
+      .then((r) =>
+        setServices([...r.services.filter((s) => s.bookable === true), SOMETHING_ELSE_TILE]),
+      )
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [])
 
@@ -429,6 +480,14 @@ export default function BookPage() {
       return
     }
     setError(null)
+    // "Something else" (UI-BUILDER-FIX-1 item 3) is a TRIAGE REQUEST, not a
+    // booking: no matter, no workflow — and no account gate (there is nothing
+    // to put in a portal yet). It submits straight from this step, captcha-
+    // gated by the widget this step hosts for it.
+    if (selectedServiceKey === SOMETHING_ELSE_KEY) {
+      void submitSomethingElse()
+      return
+    }
     // Intake-only services have no slot to pick: signed-in clients submit here;
     // new clients go to the account gate (the FINAL step of intake).
     if (!needsSlot) {
@@ -437,6 +496,44 @@ export default function BookPage() {
       return
     }
     setStep('slot')
+  }
+
+  // "Something else" submit (UI-BUILDER-FIX-1 item 3): a client_request for
+  // attorney triage via the public legal.intake.something_else tool. Same
+  // captcha discipline as the booking submit; single-use token resets on error.
+  async function submitSomethingElse() {
+    if (TURNSTILE_SITE_KEY && !captchaToken) {
+      setError(t('error.captcha'))
+      return
+    }
+    setBusy('submit')
+    setError(null)
+    try {
+      // Signed-in clients skipped the contact step — their portal identity is
+      // the requester; the handler dedupes the contact by email either way.
+      await callClientMcp<{ requestId: string }>({
+        toolName: 'legal.intake.something_else',
+        input: {
+          clientFullName: (signedIn ? portalMe?.displayName : contact.fullName)?.trim() ?? '',
+          clientEmail: (signedIn ? portalMe?.email : contact.email)?.trim() ?? '',
+          clientPhone: contact.phone || undefined,
+          requestText: String(intakeResponses['request_text'] ?? '').trim(),
+        },
+        captchaToken: captchaToken ?? undefined,
+      })
+      // No matter exists — the confirmation renders the "request received" copy
+      // and hides the matter reference + portal link.
+      setConfirmation({ matterNumber: '', scheduledAt: null })
+      setStep('done')
+    } catch (err) {
+      if (TURNSTILE_SITE_KEY) {
+        setCaptchaToken(null)
+        resetCaptchaRef.current?.()
+      }
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
   }
 
   // PORTAL-1 (WP1): entering the account gate STAGES the intake as a lead first
@@ -683,9 +780,13 @@ export default function BookPage() {
               <strong>{contact.email}</strong>
               {emailAfter}
             </p>
-            <div className="bk-matter-ref">
-              {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
-            </div>
+            {/* No matter reference on a "Something else" triage request (item 3):
+                nothing was booked, so an empty matterNumber hides the block. */}
+            {confirmation.matterNumber && (
+              <div className="bk-matter-ref">
+                {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
+              </div>
+            )}
             {confirmation.accountCreated && (
               <p className="bk-sub">
                 {t(
@@ -704,9 +805,13 @@ export default function BookPage() {
                 )}
               </p>
             )}
-            <Link href="/portal" className="bk-btn bk-btn-primary bk-btn-wide">
-              {t('confirm.portal', undefined, 'Open your client portal')}
-            </Link>
+            {/* A triage request creates no matter/portal — only link the portal
+                when something was actually booked. */}
+            {confirmation.matterNumber && (
+              <Link href="/portal" className="bk-btn bk-btn-primary bk-btn-wide">
+                {t('confirm.portal', undefined, 'Open your client portal')}
+              </Link>
+            )}
             <Link href="/" className="bk-btn bk-btn-ghost bk-btn-wide">
               {t('confirm.back')}
             </Link>
@@ -752,7 +857,9 @@ export default function BookPage() {
             (s) =>
               (needsSlot || s.key !== 'slot') &&
               // Signed-in clients skip the contact step and the account gate.
-              (!signedIn || (s.key !== 'contact' && s.key !== 'account')),
+              (!signedIn || (s.key !== 'contact' && s.key !== 'account')) &&
+              // "Something else" (item 3) is a triage request — no account gate.
+              (selectedServiceKey !== SOMETHING_ELSE_KEY || s.key !== 'account'),
           )}
         />
 
@@ -815,12 +922,8 @@ export default function BookPage() {
                             <ServiceIcon serviceKey={s.serviceKey} />
                           </span>
                           <span className="bk-service-text">
-                            <span className="bk-service-title">
-                              {t(`service.${s.serviceKey}.title`, undefined, s.displayName)}
-                            </span>
-                            <span className="bk-service-desc">
-                              {t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')}
-                            </span>
+                            <span className="bk-service-title">{tileTitle(s, t)}</span>
+                            <span className="bk-service-desc">{tileDesc(s, t)}</span>
                           </span>
                           <span className="bk-service-tick" aria-hidden>
                             <CheckIcon size={14} />
@@ -957,6 +1060,20 @@ export default function BookPage() {
                     t={t}
                   />
                 )}
+                {/* "Something else" (item 3) submits from THIS step (a triage
+                    request never reaches the account gate), so it hosts its own
+                    captcha — the same public-write discipline as the booking. */}
+                {selectedServiceKey === SOMETHING_ELSE_KEY && TURNSTILE_SITE_KEY && (
+                  <div className="bk-captcha" aria-live="polite">
+                    <Turnstile
+                      siteKey={TURNSTILE_SITE_KEY}
+                      onToken={setCaptchaToken}
+                      onReady={(reset) => {
+                        resetCaptchaRef.current = reset
+                      }}
+                    />
+                  </div>
+                )}
                 <div className="bk-actions">
                   {/* Back stays disabled during an in-flight intake-only submit —
                       navigating away mid-write lets the user edit fields the
@@ -980,13 +1097,20 @@ export default function BookPage() {
                   ) : (
                     <button
                       className="bk-btn bk-btn-primary bk-btn-grow"
-                      disabled={busy === 'submit'}
+                      disabled={
+                        busy === 'submit' ||
+                        // Something-else submits from here, so its captcha must
+                        // be solved before the button arms (same as the gate).
+                        (selectedServiceKey === SOMETHING_ELSE_KEY &&
+                          Boolean(TURNSTILE_SITE_KEY) &&
+                          !captchaToken)
+                      }
                       onClick={advanceFromIntake}
                     >
                       {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
                       {busy === 'submit'
                         ? t('intake.submitting')
-                        : signedIn
+                        : signedIn || selectedServiceKey === SOMETHING_ELSE_KEY
                           ? t('intake.submit')
                           : t('common.continue')}
                       {busy !== 'submit' && <CheckIcon size={18} />}

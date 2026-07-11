@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { BillingConfigModal } from '@/components/configEditors'
 
 type CostType = '' | 'hourly' | 'fixed'
 const MONEY_RE = /^\d+(\.\d{1,2})?$/
@@ -35,6 +36,8 @@ export default function ServiceBillingPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
+  // Phase 9: the shared edit-in-modal over this service's billing config.
+  const [modalOpen, setModalOpen] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -166,11 +169,35 @@ export default function ServiceBillingPage() {
           )}
         </div>
       </fieldset>
-      <div style={{ marginTop: 'var(--space-4)' }}>
+      <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: '0.6rem' }}>
         <button className="primary" onClick={save} disabled={busy}>
           {busy ? 'Saving…' : 'Save new version'}
         </button>
+        <button className="outline" onClick={() => setModalOpen(true)} disabled={busy}>
+          Edit in window
+        </button>
       </div>
+      {/* UI-BUILDER-FIX-1 Phase 9: the shared edit-in-modal (view / edit /
+          AI-regenerate via worker_job / save = a new immutable version). */}
+      {modalOpen && (
+        <BillingConfigModal
+          serviceKey={serviceKey}
+          meta={{
+            displayName: meta.displayName,
+            description: meta.description,
+            route: meta.route,
+            documents: meta.documents,
+            sortOrder: meta.sortOrder,
+          }}
+          cost={
+            meta.cost
+              ? { costType: meta.cost.type, amount: meta.cost.amount, hours: meta.cost.hours }
+              : null
+          }
+          onClose={() => setModalOpen(false)}
+          onChanged={load}
+        />
+      )}
     </section>
   )
 }

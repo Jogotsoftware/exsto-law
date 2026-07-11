@@ -28,6 +28,7 @@ export interface AssistantStreamInput {
   // The service under construction in the active build — the server injects the
   // live BUILD BRIEF for it into the model's context (WP4.2).
   buildServiceKey?: string
+  buildSessionId?: string
 }
 
 export interface StreamMeta {
@@ -43,6 +44,9 @@ export interface StreamDone {
   reply: string
   citations: string[]
   model: string
+  // Phase 5 (UI-BUILDER-FIX-1): the service_build_session this BUILD turn wrote
+  // to — resent on subsequent build turns; absent on non-build turns.
+  buildSessionId?: string | null
 }
 
 // A workflow lifecycle the assistant proposed this turn (PR5) — surfaced as an

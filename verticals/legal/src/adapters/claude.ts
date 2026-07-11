@@ -710,7 +710,14 @@ export async function chatWithAssistantDetailed(
         context: 'Assistant chat failed',
       })
     }
-    reply += extractText(response.content)
+    // Rounds are separate prose fragments — join with a paragraph break so a
+    // post-tool reply never glues mid-sentence onto the framing line (the
+    // streaming path has done this since the founder-reported formatting bug;
+    // UI-BUILDER-FIX-1 item 8 brings the non-streaming path in line).
+    {
+      const roundText = extractText(response.content)
+      reply = reply && roundText ? `${reply}\n\n${roundText}` : reply + roundText
+    }
     addUsage(usage, response.usage)
     mergeCitations(citations, collectCitations(response.content))
 

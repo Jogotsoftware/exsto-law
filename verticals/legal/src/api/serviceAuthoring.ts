@@ -188,6 +188,11 @@ export interface ServiceProposal {
   // attorney sees the key before approving (the handler has the final say).
   derivedKey: string
   description: string | null
+  // Client-facing tile copy (UI-BUILDER-FIX-1 Phase 2): outcome-only, no
+  // jurisdiction, <=70 chars. Distinct from displayName/description, which stay
+  // attorney-facing (jurisdiction- and process-specific is CORRECT there).
+  clientDisplayName: string | null
+  clientDescription: string | null
   route: WorkflowRoute
   generationMode: GenerationMode
   // BUILDER-CERT-1 (WP3) — does booking START with a consultation appointment
@@ -243,6 +248,10 @@ export interface ServiceReasoning {
 export interface CreateServiceAIInput {
   displayName: string
   description?: string | null
+  // Client-facing tile copy (Phase 2). The upsert handler caps both at 70 chars
+  // server-side (truncate-and-flag) — never trust the prompt alone.
+  clientDisplayName?: string | null
+  clientDescription?: string | null
   route?: WorkflowRoute
   generationMode?: GenerationMode
   // Explicit booking mode (BUILDER-CERT-1 WP3). Undefined = the platform default
@@ -339,6 +348,8 @@ export async function createServiceAI(
       // No service_key → the handler creates a new version-1, DISABLED row.
       display_name: displayName,
       description: input.description ?? null,
+      client_display_name: input.clientDisplayName ?? null,
+      client_description: input.clientDescription ?? null,
       route,
       // generation_mode isn't a top-level upsert field — it merges through the
       // transitions patch, the same path updateServiceMetadata uses for it (as does
