@@ -17,6 +17,7 @@
 // Everything flows through EXISTING core actions (entity.create /
 // attribute.set / event.record) — no new action kinds needed.
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
+import { stripMachinerySpans } from './assistantMachinery.js'
 
 const SESSION_KIND = 'assistant_chat_session'
 const TITLE_CAP = 80
@@ -38,7 +39,13 @@ export async function startChatSession(
   ctx: ActionContext,
   input: { firstMessage: string; scope: ChatSessionScope; scopeEntityId?: string | null },
 ): Promise<{ chatSessionId: string }> {
-  const title = input.firstMessage.replace(/\s+/g, ' ').trim().slice(0, TITLE_CAP) || 'Conversation'
+  // WP-D6: strip ⟦…⟧ orchestration machinery BEFORE titling — a hidden priming/
+  // wrap-up continuation sent while buildMode is momentarily false can reach this
+  // path as a conversation's first message, and its raw driver text must never
+  // become the session title shown in the conversation switcher.
+  const title =
+    stripMachinerySpans(input.firstMessage).replace(/\s+/g, ' ').trim().slice(0, TITLE_CAP) ||
+    'Conversation'
   const created = await submitAction(ctx, {
     actionKindName: 'entity.create',
     intentKind: 'exploration',
