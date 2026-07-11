@@ -165,3 +165,78 @@ registerActionHandler('legal.template.update', async (ctx, client, payload, acti
 
   return { templateEntityId: p.template_entity_id, updated: updates.map((u) => u.kind) }
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// legal.template.retire (HARDENING-RESIDUALS-1 WP-F, migration 0150) — soft
+// retire, mirroring legal.service.retire one shelf over. The entity's status
+// flips to 'archived' (all library/picker reads filter status = 'active'), its
+// history stays immutable, and document_drafts already generated from it are
+// untouched (they reference their own content, not the template row).
+//
+// BLOCKED while the template is in use: attached to an ACTIVE service's
+// workflow (a stage.documents[].templateEntityId in a current
+// workflow_definition) or fed by a questionnaire (an open
+// questionnaire_feeds_template relationship). The error names what holds it —
+// "in use by X" — so the attorney detaches there first, then retires.
+// ───────────────────────────────────────────────────────────────────────────
+
+interface TemplateRetirePayload {
+  template_entity_id: string
+}
+
+registerActionHandler('legal.template.retire', async (ctx, client, payload) => {
+  const p = payload as unknown as TemplateRetirePayload
+  if (!p.template_entity_id) throw new Error('template_entity_id is required')
+
+  const found = await client.query<{ id: string; name: string; status: string }>(
+    `SELECT e.id, e.name, e.status
+       FROM entity e
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+      WHERE e.tenant_id = $1 AND e.id = $2 AND ekd.kind_name = $3`,
+    [ctx.tenantId, p.template_entity_id, TEMPLATE_ENTITY_KIND],
+  )
+  const tpl = found.rows[0]
+  if (!tpl) throw new Error('Template not found.')
+  if (tpl.status !== 'active') throw new Error(`Template is already ${tpl.status}.`)
+
+  // In-use check A: current service workflows referencing this template.
+  const services = await client.query<{ kind_name: string }>(
+    `SELECT wd.kind_name
+       FROM workflow_definition wd
+      WHERE wd.tenant_id = $1
+        AND wd.valid_to IS NULL
+        AND wd.states::text LIKE '%' || $2 || '%'`,
+    [ctx.tenantId, p.template_entity_id],
+  )
+  // In-use check B: questionnaires that feed this template (open relationships).
+  const questionnaires = await client.query<{ name: string }>(
+    `SELECT src.name
+       FROM relationship r
+       JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+       JOIN entity src ON src.id = r.source_entity_id
+      WHERE r.tenant_id = $1
+        AND rkd.kind_name = 'questionnaire_feeds_template'
+        AND r.target_entity_id = $2
+        AND r.valid_to IS NULL
+        AND src.status = 'active'`,
+    [ctx.tenantId, p.template_entity_id],
+  )
+  const holders = [
+    ...services.rows.map((r) => `service "${r.kind_name}"`),
+    ...questionnaires.rows.map((r) => `questionnaire "${r.name}"`),
+  ]
+  if (holders.length > 0) {
+    throw new Error(
+      `Template "${tpl.name}" is in use by ${holders.join(', ')} — detach it there first, then retire.`,
+    )
+  }
+
+  // Same soft mechanics as core entity.archive (primitives/handlers/core.ts) —
+  // run here so the block-if-in-use gate and the archive land in ONE action.
+  await client.query(`UPDATE entity SET status = 'archived' WHERE tenant_id = $1 AND id = $2`, [
+    ctx.tenantId,
+    p.template_entity_id,
+  ])
+
+  return { templateEntityId: p.template_entity_id, retired: true }
+})

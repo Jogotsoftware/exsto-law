@@ -50,8 +50,16 @@ import {
   buildServiceCompletenessTool,
 } from './serviceAuthoringTools.js'
 import type { ServiceProposal } from './serviceAuthoring.js'
-import { appendBuildMessages, isOpenBuildSession, startBuildSession } from './buildSession.js'
-import { collapseRoundStutter } from './replyAssembly.js'
+import {
+  appendBuildMessages,
+  isOpenBuildSession,
+  startBuildSession,
+  findOpenBuildSessionForActor,
+  closeStaleBuildSessionsForActor,
+} from './buildSession.js'
+import { isOpenChatSession, startChatSession } from './chatSession.js'
+import { containsMachinery, stripMachinerySpans } from './assistantMachinery.js'
+import { collapseRoundStutter, framingSentenceForCardTurn } from './replyAssembly.js'
 import {
   buildQuestionnaireContextTool,
   buildProposeQuestionnaireTool,
@@ -69,6 +77,7 @@ import { buildAskQuestionTool, type BuildQuestion } from './buildQuestionTools.j
 import type { CostProposal } from './costAuthoring.js'
 import { buildCapabilityContextTool, buildRequestCapabilityTool } from './capabilityTools.js'
 import { buildKindContextTool, buildProposeKindTool } from './kindAuthoringTools.js'
+import { buildOpenEditorTool, type EditorLaunch } from './editorLaunchTools.js'
 import type { KindProposal } from './kindAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 import { buildBuildBriefText } from './buildBrief.js'
@@ -148,6 +157,11 @@ export interface AssistantChatInput {
   // belongs to. Omitted on a build's first turn — the server starts a fresh
   // session and returns its id on `done`. Ignored when buildMode is false.
   buildSessionId?: string
+  // HARDENING-RESIDUALS-1 (WP-D2): the assistant_chat_session this GENERAL
+  // (non-build) turn belongs to. Omitted on a conversation's first turn — the
+  // server starts a fresh session and returns its id on `done`. Ignored when
+  // buildMode is true (build turns scope to their build session instead).
+  chatSessionId?: string
 }
 
 // A finished document the assistant produced this turn (via the produce_document
@@ -297,6 +311,16 @@ export type AssistantChatStreamEvent =
       summary: string
       confidence: number
     }
+  // WP-H2: the assistant resolved an existing artifact and the client opens its
+  // REAL editor pop-up (ConfigEditModal), pre-loaded with `content`.
+  | {
+      type: 'editor_launch'
+      artifactType: EditorLaunch['artifactType']
+      id: string
+      name: string
+      content: unknown
+      variables?: unknown
+    }
   | {
       type: 'done'
       eventId: string
@@ -310,6 +334,10 @@ export type AssistantChatStreamEvent =
       // server-side on the build's first turn). Null on non-build turns. The
       // client resends it each turn and clears it when the build ends/switches.
       buildSessionId?: string | null
+      // WP-D2: the assistant_chat_session this GENERAL turn appended to
+      // (created server-side on the conversation's first turn). Null on build
+      // turns. The client resends it each turn; "New chat" clears it.
+      chatSessionId?: string | null
     }
 
 export interface AssistantChatReply {
@@ -320,6 +348,10 @@ export interface AssistantChatReply {
   model: string
   kind: AssistantTurnKind
   scope: AssistantScope
+  // The session this turn appended to (WP-D2/D5): the build session for build
+  // turns, the chat session for general turns. Null when resolution failed.
+  buildSessionId?: string | null
+  chatSessionId?: string | null
   // Documents the assistant produced this turn (deliverables to download/save),
   // distinct from the prose reply. Empty for ordinary answers.
   documents?: ProducedDocument[]
@@ -347,6 +379,8 @@ export interface AssistantChatReply {
   // New data-kind proposals captured this turn (Tier 1 data-as-schema) — approval
   // cards. Empty for ordinary answers and whenever the wizard flag is off.
   kindProposals?: KindProposal[]
+  // Editor launches resolved this turn (WP-H2) — the client opens the editor.
+  editorLaunches?: EditorLaunch[]
 }
 
 export interface AssistantThreadEntry {
@@ -359,6 +393,9 @@ export interface AssistantThreadEntry {
   kind: AssistantTurnKind
   citations: string[]
   recordedAt: string
+  // WP-D6: true when the user half of this turn was app orchestration (a
+  // hidden continuation), not attorney prose — the client hides it on replay.
+  syntheticDriver?: boolean
   // The model's own reasoning/process for this turn (assistant side), relocated out of
   // the reply and shown behind an expandable "thinking" disclosure (BUILDER-REASONING-
   // CHANNEL-1). Empty/absent for quick turns (no thinking) or pre-1 turns.
@@ -434,6 +471,7 @@ const SYSTEM_PROMPT = [
   // "single short sentence" rules govern replies that DELIVER a tool artifact,
   // not summaries the attorney asked for).
   'STRUCTURED READ-OUTS ARE BULLETS — whenever your reply summarizes enumerable structure (a workflow\'s steps, a pricing/billing summary, a proposal recap, a service\'s configuration, a list of documents/questions/options), format each item as a markdown bullet ("- …"), one item per bullet, with a one-line lead-in at most. Never fold three or more enumerable items into a prose paragraph. Ordinary conversational answers stay prose.',
+  "EDITING EXISTING ARTIFACTS — when the attorney asks to edit an existing document template, a service's intake questionnaire, or a service's workflow, call the open_artifact_editor tool: it opens the firm's real editor in a pop-up on that artifact. If the reference is ambiguous, ask WHICH one first. Never paste an artifact's content into chat for editing.",
   'Keep replies focused and concise.',
 ].join(' ')
 
@@ -563,6 +601,8 @@ export function buildAttorneyClientTools(
     enableProposals: EnableProposal[]
     buildQuestions: BuildQuestion[]
     kindProposals: KindProposal[]
+    // WP-H2: editor launches resolved this turn (open_artifact_editor).
+    editorLaunches: EditorLaunch[]
   },
 ): ClientTool[] {
   const tools: ClientTool[] = [buildFeedbackTool(ctx, input)]
@@ -576,6 +616,9 @@ export function buildAttorneyClientTools(
   tools.push(
     buildProposeWorkflowTool(ctx, capture.workflowProposals, capture.failedWorkflowAttempts),
   )
+  // WP-H2: open a real editor on an EXISTING artifact from chat (unflagged —
+  // editing what already exists is standalone, like workflow authoring above).
+  tools.push(buildOpenEditorTool(ctx, capture.editorLaunches))
   // Build-Wizard (Phases 1–4): the authoring tools are dormant unless the
   // LEGAL_BUILD_WIZARD flag is on. With the flag off they're never registered (and
   // the orchestrator system-prompt block below is absent), so the chatbot is
@@ -695,7 +738,9 @@ export function buildClaudeSystem(
       '\n\nBUILDING A WHOLE SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a whole new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service"), the firm-admin.build-service skill is your AUTHORITATIVE PLAYBOOK: load_skill it and FOLLOW IT — the doctrine, the process-first interview, the build order (shell → documents → questionnaire → workflow → billing → enable), when you may propose a new data kind vs. request a capability, and how to finish. Do not improvise the flow from memory. Three behaviors hold no matter what: ' +
       '(1) EVERY interview question goes through the ask_build_question tool (a click-to-answer card), NEVER free-text prose. Open with the attorney describing their process in their own words; DERIVE the platform choices (how automated the service is, how documents are produced, the gates) from that walkthrough and present them as plain-language CONFIRMATIONS to click, never as open questions. Never silently default a derived choice — confirm it. ' +
       '(2) NEVER use platform vocabulary with the attorney — no "route", "generation_mode", "kind", "gate", "entity" in any question or confirmation; say it in attorney language ("the draft comes to you before the client sees it — right?") and translate to the schema silently inside the proposal. ' +
-      '(3) DO NOT NARRATE your process — run reads/lookups silently, and keep your OWN prose to at most ONE short sentence per turn (the questions and proposals live in the cards, never duplicated in text). Before building from scratch, REUSE first: check the capability library (get_capability_context) and existing kinds (get_kind_context) so you wire in what the platform already does rather than reinventing it.'
+      '(3) DO NOT NARRATE your process — run reads/lookups silently, and keep your OWN prose to at most ONE short sentence per turn (the questions and proposals live in the cards, never duplicated in text). Before building from scratch, REUSE first: check the capability library (get_capability_context) and existing kinds (get_kind_context) so you wire in what the platform already does rather than reinventing it. ' +
+      'CARD TURNS SAY WHAT, NOT WHY — when a turn shows a card, your entire visible reply is ONE sentence of at most 15 words naming what the card is ("Here\'s the intake form to approve."), spoken BEFORE the card, never restated after it. The reasoning behind the proposal ("this is a document-review service with no documents to author, so…") is thinking-channel content or nothing — never reply text. Card blurbs follow house voice: no em dashes, no self-evaluation filler like "no gaps" or "fully covered". ' +
+      'THE TWO-ENDS RULE for every piece of CLIENT-VISIBLE copy you author (tile names, tile descriptions, client-facing blurbs): describe only the two ends the client touches — what they PROVIDE ("upload your lease") and what they RECEIVE ("a plain-English review of your lease") — never the machinery between, however paraphrased (who or what does the work, review steps, queues, drafting, approval). Attorney-facing copy leads with the outcome in one sentence; mechanics may follow.'
   }
   if (skillCatalogText) system += `\n\n${skillCatalogText}`
   // Force-loaded skill bodies live in the cached prefix now (WP8.1), after the catalog.
@@ -908,8 +953,21 @@ export async function recordAssistantTurn(
     // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
     // Recorded additively in the event payload; powers the AI usage/cost view.
     usage?: AssistantUsage | null
+    // WP-D2/D5: the session this turn belongs to (assistant_chat_session for
+    // general turns, service_build_session for build turns). Additive.
+    chatSessionId?: string | null
+    buildSessionId?: string | null
   },
 ): Promise<{ eventId: string }> {
+  // WP-D6 — orchestration text is never persisted as anyone's words. A hidden
+  // driver/continuation message (the ⟦…⟧ machinery the app injects) is stripped
+  // of its sentinel spans and the turn is flagged synthetic_driver, so history
+  // readers know the turn was app orchestration without re-leaking the
+  // instruction text. Replies are stripped too (a model that parrots a sentinel
+  // is already recorded via the question_without_card observation).
+  const syntheticDriver = containsMachinery(input.message)
+  const message = syntheticDriver ? stripMachinerySpans(input.message) : input.message
+  const reply = containsMachinery(input.reply) ? stripMachinerySpans(input.reply) : input.reply
   const res = await submitAction(ctx, {
     actionKindName: 'event.record',
     intentKind: input.kind === 'feedback' ? 'reflection' : 'exploration',
@@ -921,8 +979,14 @@ export async function recordAssistantTurn(
       source_type: input.provider === 'perplexity' ? 'integration' : 'human',
       source_ref: input.provider === 'perplexity' ? 'integration:perplexity' : ctx.actorId,
       data: {
-        message: input.message,
-        reply: input.reply,
+        message,
+        reply,
+        // True when the user half of this turn was app orchestration (a hidden
+        // continuation/stage direction), not something the attorney typed.
+        synthetic_driver: syntheticDriver || null,
+        // Conversation scoping (WP-D2/D5) — null for legacy/unscoped turns.
+        chat_session_id: input.chatSessionId ?? null,
+        build_session_id: input.buildSessionId ?? null,
         // The model's reasoning for this turn, relocated out of the reply. Null when the
         // turn produced none, so a reopened thread's disclosure only shows when there's
         // something to show. Additive — never affects the reply text itself.
@@ -1135,6 +1199,8 @@ export async function assistantChat(
   // New data-kind proposals captured this turn (Claude only, build-wizard flag on) —
   // surfaced as approval cards; the live mint (kind.define) is the approve route.
   const kindProposals: KindProposal[] = []
+  // Editor launches resolved this turn (WP-H2) — surfaced as editor pop-ups.
+  const editorLaunches: EditorLaunch[] = []
   // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
   let usage: AssistantUsage | null = null
 
@@ -1191,9 +1257,25 @@ export async function assistantChat(
         enableProposals,
         buildQuestions,
         kindProposals,
+        editorLaunches,
       }),
     })
-    reply = collapseRoundStutter(result.reply)
+    // WP-D4: a wizard card turn persists ONE framing sentence (the stream path
+    // collapses per-round; here the rounds are already concatenated, so the
+    // first sentence is the framing by construction — pre-tool text leads).
+    const cardCount =
+      workflowProposals.length +
+      serviceProposals.length +
+      questionnaireProposals.length +
+      templateProposals.length +
+      costProposals.length +
+      enableProposals.length +
+      buildQuestions.length +
+      kindProposals.length
+    reply =
+      input.buildMode && cardCount > 0
+        ? framingSentenceForCardTurn([result.reply])
+        : collapseRoundStutter(result.reply)
     citations = result.citations
     usage = result.usage
     if (result.toolCapHit) {
@@ -1210,6 +1292,46 @@ export async function assistantChat(
     }
     // WP9: if the reply parroted internal machinery, record it (measurable card-leak).
     await recordQuestionWithoutCardObservation(ctx, reply)
+  }
+
+  // Session scoping (WP-D2/D5) — mirrors the streaming path exactly; see
+  // assistantChatStream for the doctrine. Best-effort: never fails the turn.
+  let buildSessionId: string | null = null
+  let chatSessionId: string | null = null
+  if (input.buildMode) {
+    try {
+      const candidate = (input.buildSessionId ?? '').trim()
+      if (candidate && (await isOpenBuildSession(ctx, candidate))) {
+        buildSessionId = candidate
+      } else {
+        buildSessionId = await findOpenBuildSessionForActor(ctx)
+        if (!buildSessionId) {
+          const started = await startBuildSession(ctx, {
+            serviceKey: input.buildServiceKey ?? null,
+          })
+          buildSessionId = started.buildSessionId
+          await closeStaleBuildSessionsForActor(ctx, buildSessionId)
+        }
+      }
+    } catch (err) {
+      console.error('assistantChat: failed to resolve build session', err)
+    }
+  } else {
+    try {
+      const candidate = (input.chatSessionId ?? '').trim()
+      if (candidate && (await isOpenChatSession(ctx, candidate))) {
+        chatSessionId = candidate
+      } else {
+        const started = await startChatSession(ctx, {
+          firstMessage: message,
+          scope,
+          scopeEntityId: primaryEntityId,
+        })
+        chatSessionId = started.chatSessionId
+      }
+    } catch (err) {
+      console.error('assistantChat: failed to resolve chat session', err)
+    }
   }
 
   const { eventId } = await recordAssistantTurn(ctx, {
@@ -1233,7 +1355,20 @@ export async function assistantChat(
     enableProposals,
     kindProposals,
     usage,
+    chatSessionId,
+    buildSessionId,
   })
+
+  if (buildSessionId) {
+    try {
+      await appendBuildMessages(ctx, buildSessionId, [
+        { role: 'user', content: message, turnEventId: eventId || null },
+        { role: 'assistant', content: reply, turnEventId: eventId || null },
+      ])
+    } catch (err) {
+      console.error('assistantChat: failed to persist build session messages', err)
+    }
+  }
 
   return {
     eventId,
@@ -1243,6 +1378,8 @@ export async function assistantChat(
     model: model.model,
     kind,
     scope,
+    buildSessionId,
+    chatSessionId,
     documents: producedDocuments.length ? producedDocuments : undefined,
     workflowProposals: workflowProposals.length ? workflowProposals : undefined,
     serviceProposals: serviceProposals.length ? serviceProposals : undefined,
@@ -1252,6 +1389,7 @@ export async function assistantChat(
     enableProposals: enableProposals.length ? enableProposals : undefined,
     buildQuestions: buildQuestions.length ? buildQuestions : undefined,
     kindProposals: kindProposals.length ? kindProposals : undefined,
+    editorLaunches: editorLaunches.length ? editorLaunches : undefined,
   }
 }
 
@@ -1311,7 +1449,23 @@ export async function* assistantChatStream(
   // New data-kind proposals captured this turn (Phase E) — surfaced as approval
   // cards after the loop; the live mint (kind.define) is the approve route.
   const kindProposals: KindProposal[] = []
+  // Editor launches resolved this turn (WP-H2) — surfaced as editor pop-ups
+  // after the loop.
+  const editorLaunches: EditorLaunch[] = []
   let usage: AssistantUsage | null = null
+  // WP-D4 — per-round text, so a wizard card turn can be collapsed to its
+  // pre-tool framing sentence deterministically (rounds are delimited by tool
+  // calls; the framing sentence is round 0's text).
+  const roundTexts: string[] = ['']
+  const cardsCapturedSoFar = (): number =>
+    workflowProposals.length +
+    serviceProposals.length +
+    questionnaireProposals.length +
+    templateProposals.length +
+    costProposals.length +
+    enableProposals.length +
+    buildQuestions.length +
+    kindProposals.length
 
   if (model.provider === 'perplexity') {
     // External research: only the non-confidential framing leaves the firm.
@@ -1372,13 +1526,25 @@ export async function* assistantChatStream(
         enableProposals,
         buildQuestions,
         kindProposals,
+        editorLaunches,
       }),
     })) {
+      // WP-D4: a tool call ends the current text round (only if it had text —
+      // consecutive tool calls don't mint empty rounds).
+      if (chunk.type === 'tool' && roundTexts[roundTexts.length - 1]!.trim()) {
+        roundTexts.push('')
+      }
       if (chunk.type === 'drafting') {
         yield { type: 'drafting' }
       } else if (chunk.type === 'text') {
         reply += chunk.text
-        yield { type: 'text', text: chunk.text }
+        roundTexts[roundTexts.length - 1] += chunk.text
+        // WP-D4: in a build, once a card has rendered, later text rounds are the
+        // restate/reasoning stutter — the persisted reply drops them (below), so
+        // the live stream must not show text that would vanish on commit.
+        if (!(input.buildMode && cardsCapturedSoFar() > 0)) {
+          yield { type: 'text', text: chunk.text }
+        }
       } else if (chunk.type === 'thinking') {
         // Relocated, not destroyed: the same summarized reasoning the client shows live
         // is accumulated here so it persists with the turn and re-shows in the thinking
@@ -1537,18 +1703,89 @@ export async function* assistantChatStream(
         confidence: p.confidence,
       }
     }
+    // Surface editor launches resolved this turn (WP-H2) — the client opens the
+    // real editor pop-up pre-loaded with the artifact's current content.
+    for (const l of editorLaunches) {
+      yield {
+        type: 'editor_launch',
+        artifactType: l.artifactType,
+        id: l.id,
+        name: l.name,
+        content: l.content,
+        variables: l.variables,
+      }
+    }
   }
 
-  // Item 8 (UI-BUILDER-FIX-1): a multi-round tool turn can restate its framing
-  // sentence after the tool result ("Here's the pricing to approve." → tool →
-  // "Here's the flat $450 pricing to approve…") — the rounds CONCATENATE, so the
-  // persisted reply stutters. Collapse the near-duplicate fragment; the richer
-  // restatement wins. (The live stream already paragraph-breaks rounds; this
-  // fixes the committed/persisted text, which is what re-renders from history.)
-  reply = collapseRoundStutter(reply)
+  // WP-D4 (HARDENING-RESIDUALS-1): a wizard turn that rendered a card persists
+  // exactly ONE framing sentence — the pre-tool framing wins, every post-tool
+  // text round is dropped (deterministic; no similarity heuristics). Non-card
+  // turns keep the item-8 stutter collapse.
+  if (input.buildMode && cardsCapturedSoFar() > 0) {
+    reply = framingSentenceForCardTurn(roundTexts)
+  } else {
+    // Item 8 (UI-BUILDER-FIX-1): a multi-round tool turn can restate its framing
+    // sentence after the tool result ("Here's the pricing to approve." → tool →
+    // "Here's the flat $450 pricing to approve…") — the rounds CONCATENATE, so the
+    // persisted reply stutters. Collapse the near-duplicate fragment; the richer
+    // restatement wins. (The live stream already paragraph-breaks rounds; this
+    // fixes the committed/persisted text, which is what re-renders from history.)
+    reply = collapseRoundStutter(reply)
+  }
 
   // WP9: if the streamed reply parroted internal machinery, record it (measurable).
   await recordQuestionWithoutCardObservation(ctx, reply)
+
+  // Session scoping happens BEFORE the turn record so the assistant.turn event
+  // carries its session id (WP-D2/D5). Best-effort: a session failure must
+  // never destroy a reply the attorney has already watched stream in.
+  //
+  // BUILD turns (UI-BUILDER-FIX-1 Phase 5 + WP-D5 hardening): a valid open
+  // session id is reused; a MISSING/invalid id no longer silently mints a new
+  // session — the actor's most-recent open session is reused first (a stale
+  // client must not shred one build into per-turn sessions). Only when the
+  // actor has NO open session does a fresh one start, and starting one closes
+  // any other open sessions the actor left behind (self-healing).
+  let buildSessionId: string | null = null
+  let chatSessionId: string | null = null
+  if (input.buildMode) {
+    try {
+      const candidate = (input.buildSessionId ?? '').trim()
+      if (candidate && (await isOpenBuildSession(ctx, candidate))) {
+        buildSessionId = candidate
+      } else {
+        buildSessionId = await findOpenBuildSessionForActor(ctx)
+        if (!buildSessionId) {
+          const started = await startBuildSession(ctx, {
+            serviceKey: input.buildServiceKey ?? null,
+          })
+          buildSessionId = started.buildSessionId
+          await closeStaleBuildSessionsForActor(ctx, buildSessionId)
+        }
+      }
+    } catch (err) {
+      console.error('assistantChatStream: failed to resolve build session', err)
+    }
+  } else {
+    // GENERAL turns (WP-D2): one conversation = one assistant_chat_session.
+    // A valid open id appends; anything else starts a fresh conversation (for
+    // chat, "no id" legitimately means New chat — minting is correct here).
+    try {
+      const candidate = (input.chatSessionId ?? '').trim()
+      if (candidate && (await isOpenChatSession(ctx, candidate))) {
+        chatSessionId = candidate
+      } else {
+        const started = await startChatSession(ctx, {
+          firstMessage: message,
+          scope,
+          scopeEntityId: primaryEntityId,
+        })
+        chatSessionId = started.chatSessionId
+      }
+    } catch (err) {
+      console.error('assistantChatStream: failed to resolve chat session', err)
+    }
+  }
 
   // A persistence failure here must not destroy a reply the attorney has already
   // watched stream in — the client treats a missing `done` as a hard error and
@@ -1578,30 +1815,18 @@ export async function* assistantChatStream(
       enableProposals,
       kindProposals,
       usage,
+      chatSessionId,
+      buildSessionId,
     })
     eventId = recorded.eventId
   } catch (err) {
     console.error('assistantChatStream: failed to record assistant.turn', err)
   }
 
-  // Build-session scoping (UI-BUILDER-FIX-1 Phase 5): a BUILD turn persists its
-  // exchange to a service_build_session. The client resends the session id per
-  // turn; a missing/closed/foreign id starts a FRESH session (new build = new
-  // session, always). Best-effort like the turn record above — a session write
-  // failure must never destroy the streamed reply. Service-builder ONLY: the
-  // general chatbot's history is a separate thread (S-queue #13), not this.
-  let buildSessionId: string | null = null
-  if (input.buildMode) {
+  // Append the exchange to its build session (audit record). Best-effort like
+  // the turn record above.
+  if (buildSessionId) {
     try {
-      const candidate = (input.buildSessionId ?? '').trim()
-      if (candidate && (await isOpenBuildSession(ctx, candidate))) {
-        buildSessionId = candidate
-      } else {
-        const started = await startBuildSession(ctx, {
-          serviceKey: input.buildServiceKey ?? null,
-        })
-        buildSessionId = started.buildSessionId
-      }
       await appendBuildMessages(ctx, buildSessionId, [
         { role: 'user', content: message, turnEventId: eventId || null },
         { role: 'assistant', content: reply, turnEventId: eventId || null },
@@ -1621,6 +1846,7 @@ export async function* assistantChatStream(
     kind,
     scope,
     buildSessionId,
+    chatSessionId,
   }
 }
 
@@ -1671,7 +1897,7 @@ export async function submitAssistantFeedback(
 // thread; omitting both reads the global (feedback) thread.
 export async function listAssistantThread(
   ctx: ActionContext,
-  scope: { matterEntityId?: string; contactEntityId?: string },
+  scope: { matterEntityId?: string; contactEntityId?: string; chatSessionId?: string },
 ): Promise<AssistantThreadEntry[]> {
   const primary = scope.matterEntityId ?? scope.contactEntityId ?? null
   return withActionContext(ctx, async (client) => {
@@ -1685,6 +1911,7 @@ export async function listAssistantThread(
         model?: string
         kind?: AssistantTurnKind
         citations?: string[]
+        synthetic_driver?: boolean | null
         attachment_names?: string[] | null
         produced_documents?: ProducedDocument[] | null
         workflow_proposals?: WorkflowProposal[] | null
@@ -1697,16 +1924,29 @@ export async function listAssistantThread(
       }
       occurred_at: string
     }>(
-      `SELECT e.id AS event_id, e.payload,
-              to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
-       FROM event e
-       JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
-       WHERE e.tenant_id = $1
-         AND ekd.kind_name = 'assistant.turn'
-         AND e.primary_entity_id IS NOT DISTINCT FROM $2::uuid
-         AND COALESCE(e.payload->>'kind', '') <> 'feedback'
-       ORDER BY e.occurred_at ASC`,
-      [ctx.tenantId, primary],
+      // A chat-session read (WP-D2) selects that conversation's turns by the
+      // session id in the payload; the legacy scope read (per-matter/contact/
+      // global) is unchanged so pre-session history still opens.
+      scope.chatSessionId
+        ? `SELECT e.id AS event_id, e.payload,
+                  to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
+           FROM event e
+           JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
+           WHERE e.tenant_id = $1
+             AND ekd.kind_name = 'assistant.turn'
+             AND e.payload->>'chat_session_id' = $2
+             AND COALESCE(e.payload->>'kind', '') <> 'feedback'
+           ORDER BY e.occurred_at ASC`
+        : `SELECT e.id AS event_id, e.payload,
+                  to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
+           FROM event e
+           JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
+           WHERE e.tenant_id = $1
+             AND ekd.kind_name = 'assistant.turn'
+             AND e.primary_entity_id IS NOT DISTINCT FROM $2::uuid
+             AND COALESCE(e.payload->>'kind', '') <> 'feedback'
+           ORDER BY e.occurred_at ASC`,
+      [ctx.tenantId, scope.chatSessionId ?? primary],
     )
     return res.rows.flatMap((r) => {
       const base = {
@@ -1725,6 +1965,7 @@ export async function listAssistantThread(
           role: 'user' as const,
           message: r.payload.message ?? '',
           reply: '',
+          syntheticDriver: r.payload.synthetic_driver === true || undefined,
           attachmentNames: r.payload.attachment_names ?? undefined,
         },
         {

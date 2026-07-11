@@ -29,6 +29,10 @@ export interface AssistantStreamInput {
   // live BUILD BRIEF for it into the model's context (WP4.2).
   buildServiceKey?: string
   buildSessionId?: string
+  // The saved conversation this GENERAL (non-build) turn continues (WP-D2).
+  // Absent on a conversation's first turn; the server mints one and returns it
+  // on `done`.
+  chatSessionId?: string
 }
 
 export interface StreamMeta {
@@ -39,6 +43,16 @@ export interface StreamMeta {
   webSearch: boolean
 }
 
+// WP-H2: an editor launch resolved server-side (open_artifact_editor) — the
+// chat opens the matching Config*Modal pre-loaded with `content`.
+export interface EditorLaunchEvent {
+  artifactType: 'template' | 'questionnaire' | 'workflow'
+  id: string
+  name: string
+  content: unknown
+  variables?: unknown
+}
+
 export interface StreamDone {
   eventId: string
   reply: string
@@ -47,6 +61,9 @@ export interface StreamDone {
   // Phase 5 (UI-BUILDER-FIX-1): the service_build_session this BUILD turn wrote
   // to — resent on subsequent build turns; absent on non-build turns.
   buildSessionId?: string | null
+  // WP-D2: the assistant_chat_session this GENERAL turn wrote to — resent on
+  // subsequent turns of the same conversation; null on build turns.
+  chatSessionId?: string | null
 }
 
 // A workflow lifecycle the assistant proposed this turn (PR5) — surfaced as an
@@ -188,6 +205,8 @@ export interface AssistantStreamHandlers {
   onEnableProposal?: (proposal: EnableProposalEvent) => void
   // The assistant asked a structured interview question (Build-Wizard Phase 7).
   onBuildQuestion?: (question: BuildQuestionEvent) => void
+  // WP-H2: the assistant resolved an existing artifact — open its real editor.
+  onEditorLaunch?: (launch: EditorLaunchEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -380,6 +399,18 @@ export async function streamAssistant(
             : [],
           allowFreeText: evt.allowFreeText === true,
           multiSelect: evt.multiSelect === true,
+        })
+        break
+      case 'editor_launch':
+        handlers.onEditorLaunch?.({
+          artifactType:
+            evt.artifactType === 'questionnaire' || evt.artifactType === 'workflow'
+              ? evt.artifactType
+              : 'template',
+          id: String(evt.id ?? ''),
+          name: String(evt.name ?? ''),
+          content: evt.content,
+          variables: evt.variables,
         })
         break
       case 'done':

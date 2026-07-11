@@ -41,8 +41,8 @@ const en: Record<string, string> = {
   'slot.none': 'No availability found. Please email us.',
   'slot.booking': 'Booking…',
   'slot.confirm': 'Confirm booking',
-  'slot.stub_notice':
-    'Showing sample times — Juan Carlos’s live calendar isn’t connected right now, so these slots may need to be reconfirmed.',
+  'slot.unavailable':
+    'Online scheduling is temporarily unavailable. Please email us and we’ll set up a time.',
   'slot.conflict':
     'That time was just booked by someone else. Please pick another from the refreshed calendar below.',
 
@@ -172,7 +172,6 @@ const en: Record<string, string> = {
   'cal.next_week': 'Next week',
   'cal.local_time': 'All times in your local time ({tz})',
   'cal.live': 'Live availability',
-  'cal.sample': 'Sample times',
   'cal.updated': 'updated {time}',
   'cal.refresh': 'Refresh availability',
   'cal.taken': 'Taken',
@@ -219,8 +218,8 @@ const es: Record<string, string> = {
   'slot.none': 'No hay disponibilidad. Por favor envíanos un correo.',
   'slot.booking': 'Reservando…',
   'slot.confirm': 'Confirmar reserva',
-  'slot.stub_notice':
-    'Mostrando horarios de muestra — el calendario en vivo de Juan Carlos no está conectado, así que estos horarios podrían necesitar confirmación.',
+  'slot.unavailable':
+    'La programación en línea no está disponible por el momento. Escríbenos por correo y coordinamos una hora.',
   'slot.conflict':
     'Ese horario acaba de reservarse por otra persona. Por favor elige otro del calendario actualizado.',
 
@@ -349,7 +348,6 @@ const es: Record<string, string> = {
   'cal.next_week': 'Semana siguiente',
   'cal.local_time': 'Horarios en tu zona local ({tz})',
   'cal.live': 'Disponibilidad en vivo',
-  'cal.sample': 'Horarios de muestra',
   'cal.updated': 'actualizado {time}',
   'cal.refresh': 'Actualizar disponibilidad',
   'cal.taken': 'Ocupado',

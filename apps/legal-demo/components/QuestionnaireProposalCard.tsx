@@ -2,8 +2,10 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { ConfigEditModal } from '@/components/ConfigEditModal'
+import { QuestionnaireView, jsonEditor } from '@/components/configEditors'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the QuestionnaireProposal captured in
@@ -49,17 +51,25 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 export function QuestionnaireProposalCard({
   proposal,
   onApproved,
+  onEdited,
 }: {
   proposal: QuestionnaireProposal
   onApproved?: OnApproved
+  // WP-H (HARDENING-RESIDUALS-1): fired after the attorney edits the proposal in
+  // the pop-up editor, so the session records proposal → human edit → approval.
+  onEdited?: (note: string) => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  // WP-H: the card's CURRENT artifact — the proposal until the attorney edits it
+  // in the pop-up; Approve always captures this (the attorney's version).
+  const [current, setCurrent] = useState<QuestionnaireProposal>(proposal)
+  const [editing, setEditing] = useState(false)
 
-  const sections = proposal.schema?.sections ?? []
+  const sections = current.schema?.sections ?? []
   const fieldCount = sections.reduce((n, s) => n + (s.fields?.length ?? 0), 0)
   const missing = proposal.missingForTokens ?? []
 
@@ -82,9 +92,9 @@ export function QuestionnaireProposalCard({
           headers,
           credentials: 'same-origin',
           body: JSON.stringify({
-            schema: proposal.schema,
-            summary: proposal.summary,
-            confidence: proposal.confidence,
+            schema: current.schema,
+            summary: current.summary,
+            confidence: current.confidence,
           }),
         },
       )
@@ -123,9 +133,9 @@ export function QuestionnaireProposalCard({
         </span>
       </div>
 
-      {proposal.summary && (
+      {current.summary && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {proposal.summary}
+          {current.summary}
         </div>
       )}
 
@@ -165,6 +175,15 @@ export function QuestionnaireProposalCard({
       <div className="uac-doc-actions">
         <button
           type="button"
+          className="uac-reply-btn"
+          onClick={() => setEditing(true)}
+          disabled={approveState === 'approving' || approveState === 'approved'}
+          title="Edit the proposed questionnaire before approving"
+        >
+          <EditIcon size={12} /> Edit
+        </button>
+        <button
+          type="button"
           className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
           onClick={approve}
           disabled={approveState === 'approving' || approveState === 'approved'}
@@ -187,6 +206,26 @@ export function QuestionnaireProposalCard({
         <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
+      )}
+      {editing && (
+        <ConfigEditModal
+          artifactKind="questionnaire"
+          targetId={`proposal:${current.serviceKey}`}
+          title={`Edit proposed questionnaire — ${current.serviceKey}`}
+          initialContent={JSON.stringify(current.schema ?? { sections: [] }, null, 2)}
+          renderView={(content) => <QuestionnaireView content={content} />}
+          renderEdit={jsonEditor}
+          aiRegenerate={false}
+          saveLabel="Save"
+          onSave={async (content) => {
+            // Save updates the CARD (the attorney's version); nothing is written
+            // until they click Approve — the same human gate as the proposal.
+            const schema = JSON.parse(content) as ProposalSchema
+            setCurrent((c) => ({ ...c, schema }))
+            onEdited?.(`questionnaire for "${current.serviceKey}"`)
+          }}
+          onClose={() => setEditing(false)}
+        />
       )}
     </div>
   )

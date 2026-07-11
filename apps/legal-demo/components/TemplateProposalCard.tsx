@@ -2,8 +2,11 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { ConfigEditModal } from '@/components/ConfigEditModal'
+import { jsonEditor } from '@/components/configEditors'
+import { TemplatePreview } from '@/components/templates/TemplatePreview'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the TemplateProposal captured in
@@ -54,15 +57,22 @@ const PREVIEW_CHARS = 600
 export function TemplateProposalCard({
   proposal,
   onApproved,
+  onEdited,
 }: {
   proposal: TemplateProposal
   onApproved?: OnApproved
+  // WP-H: fired after the attorney edits the proposal in the pop-up editor.
+  onEdited?: (note: string) => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  // WP-H: the card's CURRENT body — the proposal until the attorney edits it in
+  // the pop-up; Approve always captures this (the attorney's version).
+  const [currentBody, setCurrentBody] = useState(proposal.body)
+  const [editing, setEditing] = useState(false)
 
   const orphans = new Set((proposal.orphanTokens ?? []).map((t) => t.toLowerCase()))
   const reusable = new Set((proposal.reusableFromFirm ?? []).map((t) => t.toLowerCase()))
@@ -78,9 +88,9 @@ export function TemplateProposalCard({
   // there is a genuinely-missing (non-reusable) token.
   const showOrphanError = proposal.hasQuestionnaire && missing.size > 0
   const preview =
-    proposal.body.length > PREVIEW_CHARS
-      ? `${proposal.body.slice(0, PREVIEW_CHARS).trimEnd()}…`
-      : proposal.body
+    currentBody.length > PREVIEW_CHARS
+      ? `${currentBody.slice(0, PREVIEW_CHARS).trimEnd()}…`
+      : currentBody
 
   async function approve() {
     setApproveState('approving')
@@ -102,7 +112,7 @@ export function TemplateProposalCard({
           credentials: 'same-origin',
           body: JSON.stringify({
             name: proposal.name,
-            body: proposal.body,
+            body: currentBody,
             docKind: proposal.docKind,
             summary: proposal.summary,
             confidence: proposal.confidence,
@@ -226,6 +236,15 @@ export function TemplateProposalCard({
       <div className="uac-doc-actions">
         <button
           type="button"
+          className="uac-reply-btn"
+          onClick={() => setEditing(true)}
+          disabled={approveState === 'approving' || approveState === 'approved'}
+          title="Edit the proposed template before approving"
+        >
+          <EditIcon size={12} /> Edit
+        </button>
+        <button
+          type="button"
           className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
           onClick={approve}
           disabled={approveState === 'approving' || approveState === 'approved'}
@@ -248,6 +267,24 @@ export function TemplateProposalCard({
         <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
+      )}
+      {editing && (
+        <ConfigEditModal
+          artifactKind="template"
+          targetId={`proposal:${proposal.serviceKey}`}
+          title={`Edit proposed template — ${proposal.name}`}
+          initialContent={currentBody}
+          renderView={(content) => <TemplatePreview body={content} />}
+          renderEdit={jsonEditor}
+          aiRegenerate={false}
+          saveLabel="Save"
+          onSave={async (content) => {
+            // Save updates the CARD; nothing is written until Approve.
+            setCurrentBody(content)
+            onEdited?.(`template "${proposal.name}" for "${proposal.serviceKey}"`)
+          }}
+          onClose={() => setEditing(false)}
+        />
       )}
     </div>
   )

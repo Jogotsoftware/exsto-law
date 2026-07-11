@@ -282,8 +282,27 @@ export async function aiEnhanceTemplate(
   return { body: reply.trim() }
 }
 
+// Retire a standalone template (HARDENING-RESIDUALS-1 WP-F): soft, through the
+// legal.template.retire action (migration 0150), mirroring legal.service.retire.
+// The handler BLOCKS while the template is attached to an active service or fed
+// by a questionnaire — the error names the holder ("in use by X") so the
+// attorney detaches there first. Document drafts already generated survive.
+export async function retireTemplate(
+  ctx: ActionContext,
+  templateEntityId: string,
+): Promise<{ templateEntityId: string; retired: true }> {
+  await submitAction(ctx, {
+    actionKindName: 'legal.template.retire',
+    intentKind: 'enforcement',
+    payload: { template_entity_id: templateEntityId },
+  })
+  return { templateEntityId, retired: true }
+}
+
 // Archive a standalone template through the core entity.archive action (status
 // 'archived' — kept as history, dropped from active listings). Append-only.
+// Prefer retireTemplate above (it refuses while the template is in use);
+// archive remains for callers that have already detached everything.
 export async function archiveTemplate(
   ctx: ActionContext,
   templateEntityId: string,

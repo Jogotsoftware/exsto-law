@@ -65,7 +65,7 @@ const PROPOSE_SERVICE_TOOL_DEF = {
       description: {
         type: 'string',
         description:
-          "The ATTORNEY-FACING description — jurisdiction-specific and process-detailed is CORRECT here (e.g. 'Reviews NC residential leases against Chapter 42; returns annotated lease + client letter.'). Clients never see this field (they see client_description); still never marketing fluff.",
+          "The ATTORNEY-FACING description. LEAD WITH THE OUTCOME in one sentence (what the service delivers); mechanics MAY follow after that. Jurisdiction-specific and process-detailed is CORRECT here (e.g. 'Reviews NC residential leases against Chapter 42; returns annotated lease + client letter.'). Clients never see this field (they see client_description); still never marketing fluff.",
       },
       client_display_name: {
         type: 'string',
@@ -75,7 +75,7 @@ const PROPOSE_SERVICE_TOOL_DEF = {
       client_description: {
         type: 'string',
         description:
-          "The CLIENT-FACING one-liner under the tile name: WHAT THE CLIENT RECEIVES, max 70 characters (hard server-side cap). Outcome only — e.g. 'A will that protects your family and your wishes'. NEVER the process, scope, jurisdiction, or how it is produced. REQUIRED.",
+          "The CLIENT-FACING one-liner under the tile name, max 70 characters (hard server-side cap). THE TWO-ENDS RULE governs ALL client-visible copy: describe only the two ends the client touches — what THEY PROVIDE ('upload your lease') and what THEY RECEIVE ('a plain-English review of your lease') — NEVER the machinery between the ends. Who or what does the work (AI, the attorney, a reviewer), where the work goes (a queue, a review step), or how it is produced is machinery even when paraphrased: 'AI reviews it and produces a memo the attorney approves' fails the rule however it is reworded. Good: 'A will that protects your family and your wishes'. REQUIRED.",
       },
       route: {
         type: 'string',
@@ -125,8 +125,20 @@ const STATE_NAME_RE =
 const STATE_CODE_RE =
   /\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/
 
+// HARDENING-RESIDUALS-1 (WP-A3) — a MODEST machinery backstop behind the
+// two-ends doctrine. The doctrine (stated affirmatively in the tool contract:
+// client copy covers only what the client PROVIDES and what they RECEIVE, never
+// the machinery between) is the fix — paraphrased mechanics always beat a word
+// list, so this regex is deliberately narrow: the unambiguous middle-machinery
+// tells (AI-as-actor, queues, automation/generation verbs, made-by attribution)
+// that should never survive in client copy under ANY phrasing. Do not grow it
+// into a whack-a-mole list; grow the doctrine instead.
+const MIDDLE_MACHINERY_RE =
+  /\bAI\b|artificial intelligence|\bqueue\b|\bautomat\w*|\bgenerat\w*|\b(reviewed|produced|prepared|drafted|written) by\b/i
+
 // Capture-time doctrine check for the client tile copy: no jurisdiction, hard
-// 70-char budget. Returns the rejection message (model rewrites and re-proposes)
+// 70-char budget, no middle machinery (the two-ends rule's backstop). Returns
+// the rejection message (model rewrites and re-proposes — the corrective loop)
 // or null when clean. The upsert handler's capClientCopy is the last-resort
 // truncate-and-flag; THIS check exists so the copy gets rewritten well, not chopped.
 export function clientCopyViolation(field: string, value: string): string | null {
@@ -136,6 +148,10 @@ export function clientCopyViolation(field: string, value: string): string | null
   const state = value.match(STATE_NAME_RE) ?? value.match(STATE_CODE_RE)
   if (state) {
     return `${field} must NEVER name a jurisdiction ("${state[0]}") — client tile copy is outcome-only ('Last Will & Testament', not 'NC Will Drafting'). Jurisdiction belongs in the attorney-facing display_name/description. Rewrite and call propose_service again.`
+  }
+  const machinery = value.match(MIDDLE_MACHINERY_RE)
+  if (machinery) {
+    return `${field} breaks the TWO-ENDS RULE ("${machinery[0]}"): client copy describes only what the client PROVIDES and what they RECEIVE — never who or what does the work in between, where it goes, or how it is produced. Rewrite it as the two ends only and call propose_service again.`
   }
   return null
 }

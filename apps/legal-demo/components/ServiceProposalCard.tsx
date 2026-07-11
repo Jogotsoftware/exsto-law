@@ -2,7 +2,9 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { ConfigEditModal } from '@/components/ConfigEditModal'
+import { jsonEditor } from '@/components/configEditors'
+import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 
 // CONSTRAINT (mirrors WorkflowProposalCard): no server-package imports. This shape
 // is a structural mirror of verticals/legal/src/api/serviceAuthoring.ts's
@@ -42,13 +44,20 @@ export type OnApproved = (info: {
 export function ServiceProposalCard({
   proposal,
   onApproved,
+  onEdited,
 }: {
   proposal: ServiceProposal
   onApproved?: OnApproved
+  // WP-H: fired after the attorney edits the proposal in the pop-up editor.
+  onEdited?: (note: string) => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
+  // WP-H: the card's CURRENT shell — the proposal until the attorney edits it;
+  // Approve always captures this (the attorney's version).
+  const [current, setCurrent] = useState<ServiceProposal>(proposal)
+  const [editing, setEditing] = useState(false)
   const [approveError, setApproveError] = useState<string | null>(null)
   const [serviceKey, setServiceKey] = useState<string | null>(null)
   // The link to the created service, returned by the approve route — shown as
@@ -72,17 +81,17 @@ export function ServiceProposalCard({
         headers,
         credentials: 'same-origin',
         body: JSON.stringify({
-          displayName: proposal.displayName,
-          description: proposal.description,
-          clientDisplayName: proposal.clientDisplayName ?? null,
-          clientDescription: proposal.clientDescription ?? null,
-          route: proposal.route,
-          generationMode: proposal.generationMode,
-          ...(typeof proposal.appointmentRequired === 'boolean'
-            ? { appointmentRequired: proposal.appointmentRequired }
+          displayName: current.displayName,
+          description: current.description,
+          clientDisplayName: current.clientDisplayName ?? null,
+          clientDescription: current.clientDescription ?? null,
+          route: current.route,
+          generationMode: current.generationMode,
+          ...(typeof current.appointmentRequired === 'boolean'
+            ? { appointmentRequired: current.appointmentRequired }
             : {}),
-          summary: proposal.summary,
-          confidence: proposal.confidence,
+          summary: current.summary,
+          confidence: current.confidence,
         }),
       })
       const data = (await res.json().catch(() => null)) as {
@@ -104,7 +113,7 @@ export function ServiceProposalCard({
           artifact: 'service',
           link: data.link,
           serviceKey: key,
-          label: data.label || `Service "${proposal.displayName}"`,
+          label: data.label || `Service "${current.displayName}"`,
         })
       }
     } catch (e) {
@@ -117,10 +126,10 @@ export function ServiceProposalCard({
     <div className="uac-doc-card">
       <div className="uac-doc-head">
         <span className="uac-doc-title">
-          <LayersIcon size={14} /> Proposed service — {proposal.displayName}
+          <LayersIcon size={14} /> Proposed service — {current.displayName}
         </span>
         <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-          key: {proposal.derivedKey}
+          key: {current.derivedKey}
         </span>
       </div>
 
@@ -129,26 +138,26 @@ export function ServiceProposalCard({
           footnote, not the headline: reasoning is context, not content. */}
       {/* The client tile copy leads — it's what shows on the public intake tile,
           which is what the attorney is actually approving (Phase 2). */}
-      {proposal.clientDisplayName && (
+      {current.clientDisplayName && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          <strong>Client tile:</strong> {proposal.clientDisplayName}
-          {proposal.clientDescription ? ` — ${proposal.clientDescription}` : ''}
+          <strong>Client tile:</strong> {current.clientDisplayName}
+          {current.clientDescription ? ` — ${current.clientDescription}` : ''}
         </div>
       )}
-      {proposal.description && (
+      {current.description && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {proposal.description}
+          {current.description}
         </div>
       )}
 
       <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         <div>
-          <strong>Route:</strong> {proposal.route} · <strong>Documents:</strong>{' '}
-          {proposal.generationMode === 'ai_draft' ? 'AI draft' : 'template merge'}
+          <strong>Route:</strong> {current.route} · <strong>Documents:</strong>{' '}
+          {current.generationMode === 'ai_draft' ? 'AI draft' : 'template merge'}
         </div>
-        {proposal.summary && (
+        {current.summary && (
           <div className="text-muted" style={{ marginTop: 4 }}>
-            {proposal.summary}
+            {current.summary}
           </div>
         )}
         {/* Set expectations: a created service starts disabled until it's completed. */}
@@ -156,6 +165,15 @@ export function ServiceProposalCard({
       </div>
 
       <div className="uac-doc-actions">
+        <button
+          type="button"
+          className="uac-reply-btn"
+          onClick={() => setEditing(true)}
+          disabled={approveState === 'approving' || approveState === 'approved'}
+          title="Edit the proposed service shell before approving"
+        >
+          <EditIcon size={12} /> Edit
+        </button>
         <button
           type="button"
           className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
@@ -182,6 +200,36 @@ export function ServiceProposalCard({
         <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
+      )}
+      {editing && (
+        <ConfigEditModal
+          artifactKind="workflow"
+          targetId={`proposal:${current.derivedKey}`}
+          title={`Edit proposed service — ${current.displayName}`}
+          initialContent={JSON.stringify(
+            {
+              displayName: current.displayName,
+              description: current.description,
+              clientDisplayName: current.clientDisplayName ?? null,
+              clientDescription: current.clientDescription ?? null,
+              route: current.route,
+              generationMode: current.generationMode,
+              appointmentRequired: current.appointmentRequired,
+            },
+            null,
+            2,
+          )}
+          renderView={(content) => <pre style={{ whiteSpace: 'pre-wrap' }}>{content}</pre>}
+          renderEdit={jsonEditor}
+          aiRegenerate={false}
+          saveLabel="Save"
+          onSave={async (content) => {
+            const next = JSON.parse(content) as Partial<ServiceProposal>
+            setCurrent((c) => ({ ...c, ...next }))
+            onEdited?.(`service shell "${current.displayName}"`)
+          }}
+          onClose={() => setEditing(false)}
+        />
       )}
     </div>
   )

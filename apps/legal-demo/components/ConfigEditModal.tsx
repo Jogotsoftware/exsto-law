@@ -29,6 +29,13 @@ export interface ConfigEditModalProps {
   // "Save & approve" and onSave IS the live write.
   onSave: (content: string) => Promise<void>
   onApprove?: (content: string) => Promise<void>
+  // WP-H: the AI-regenerate rail targets a SAVED artifact (config.regenerate by
+  // targetId); a wizard PROPOSAL has no saved target yet, so proposal editors
+  // pass false to hide the rail. Default true (the saved-artifact surfaces).
+  aiRegenerate?: boolean
+  // Label for the single-button save (default "Save & approve"). Proposal
+  // editors pass "Save" — saving updates the CARD; Approve stays on the card.
+  saveLabel?: string
   onClose: () => void
   // Fired after a successful save/approve so the surface can reload its list.
   onChanged?: () => void
@@ -178,14 +185,16 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
         >
           <EditIcon size={14} /> Edit
         </button>
-        <button
-          type="button"
-          className="button"
-          onClick={() => setAiOpen((v) => !v)}
-          aria-expanded={aiOpen}
-        >
-          <SparklesIcon size={14} /> AI regenerate
-        </button>
+        {props.aiRegenerate !== false && (
+          <button
+            type="button"
+            className="button"
+            onClick={() => setAiOpen((v) => !v)}
+            aria-expanded={aiOpen}
+          >
+            <SparklesIcon size={14} /> AI regenerate
+          </button>
+        )}
         <span style={{ flex: 1 }} />
         {savedFlash && (
           <span className="text-muted" role="status">
@@ -284,7 +293,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
             onClick={() => void persist('save')}
             disabled={busy !== null}
           >
-            {busy === 'save' ? 'Saving…' : 'Save & approve'}
+            {busy === 'save' ? 'Saving…' : (props.saveLabel ?? 'Save & approve')}
           </button>
         )}
       </div>

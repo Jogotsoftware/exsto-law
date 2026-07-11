@@ -220,7 +220,7 @@ export default function BookPage() {
   const [stagedUploads, setStagedUploads] = useState<Record<string, StagedFile[]>>({})
 
   const [slots, setSlots] = useState<CalendarSlot[] | null>(null)
-  const [slotsSource, setSlotsSource] = useState<'google' | 'stub' | null>(null)
+  const [slotsSource, setSlotsSource] = useState<'google' | 'unavailable' | null>(null)
   const [slotsLastUpdated, setSlotsLastUpdated] = useState<Date | null>(null)
   const [slotsRefreshing, setSlotsRefreshing] = useState(false)
   const [horizonDays, setHorizonDays] = useState(INITIAL_HORIZON_DAYS)
@@ -354,7 +354,7 @@ export default function BookPage() {
       try {
         const r = await callClientMcp<{
           slots: CalendarSlot[]
-          source: 'google' | 'stub'
+          source: 'google' | 'unavailable'
           reason?: string
         }>({
           toolName: 'legal.calendar.availability',
@@ -367,10 +367,11 @@ export default function BookPage() {
         setSlots(r.slots)
         setSlotsSource(r.source)
         setSlotsLastUpdated(new Date())
-        if (r.source === 'stub' && r.reason) {
-          // Surface server-side fallback reason in the browser console so we
-          // can diagnose without grepping function logs.
-          console.warn('[availability] Google fallback to stub:', r.reason)
+        if (r.source === 'unavailable' && r.reason) {
+          // Surface the server-side reason in the browser console so we can
+          // diagnose without grepping function logs. The UI shows the honest
+          // unavailable state — never fabricated slots.
+          console.warn('[availability] calendar unavailable:', r.reason)
         }
       } catch {
         // leave previous slots in place on transient failure
@@ -1122,8 +1123,9 @@ export default function BookPage() {
 
             {step === 'slot' && (
               <>
-                {slotsSource === 'stub' && <div className="bk-notice">{t('slot.stub_notice')}</div>}
-                {slots === null ? (
+                {slotsSource === 'unavailable' ? (
+                  <p className="bk-empty">{t('slot.unavailable')}</p>
+                ) : slots === null ? (
                   <div className="bk-loading">
                     <span className="bk-spinner" />
                     {t('slot.loading')}
@@ -1133,7 +1135,6 @@ export default function BookPage() {
                 ) : (
                   <AvailabilityCalendar
                     slots={slots}
-                    live={slotsSource !== 'stub'}
                     selectedStartIso={selectedSlot?.startIso ?? null}
                     onSelect={setSelectedSlot}
                     lastUpdated={slotsLastUpdated}

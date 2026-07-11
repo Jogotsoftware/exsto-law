@@ -41,6 +41,25 @@ function splitFragments(reply: string): string[] {
 
 const MAX_STUTTER_TOKENS = 40 // framing lines are short; never collapse real content
 
+// HARDENING-RESIDUALS-1 (WP-D4) — card turns speak ONE framing sentence.
+// collapseRoundStutter (below) is forward-only ordered-subset matching and
+// verifiably misses two prod shapes: the reasoning-paragraph-then-restate turn
+// and the verbatim tail repeat separated by other text. Rather than extending
+// it with similarity heuristics, wizard-mode turns that rendered a card are
+// collapsed DETERMINISTICALLY: the persisted reply is the first sentence of
+// the first text round (the pre-tool framing — "what the card is"), and every
+// post-tool text round is dropped. Reasoning narration belongs in the thinking
+// channel; the cards carry the substance.
+export function framingSentenceForCardTurn(roundTexts: string[]): string {
+  const first = roundTexts.map((t) => (t ?? '').trim()).find(Boolean)
+  if (!first) return ''
+  // First sentence of the first non-empty round. Sentence end = ./!/? followed
+  // by whitespace or end-of-text; markdown links and abbreviations survive
+  // because we only split on terminator+whitespace.
+  const m = first.match(/^[\s\S]*?[.!?](?=\s|$)/)
+  return (m ? m[0] : first.split(/\n/, 1)[0]!).trim()
+}
+
 export function collapseRoundStutter(reply: string): string {
   const trimmed = (reply ?? '').trim()
   if (!trimmed) return trimmed

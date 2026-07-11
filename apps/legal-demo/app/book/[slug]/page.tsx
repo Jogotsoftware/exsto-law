@@ -276,7 +276,6 @@ export default function PublicBookingPage(): React.JSX.Element {
                     setSelected({ startIso: s.startIso, endIso: s.endIso, label: s.label })
                     setError(null)
                   }}
-                  live
                 />
               ) : (
                 days.map(({ day, slots }) => (

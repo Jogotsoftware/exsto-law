@@ -6030,6 +6030,12 @@ button.danger.outline:hover:not(:disabled) {
   font-weight: 600;
   animation: uac-shimmer 1.6s ease-in-out infinite;
 }
+.uac-thinking-elapsed {
+  opacity: 0.55;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.15rem;
+}
 .uac-thinking-body {
   white-space: pre-wrap;
   opacity: 0.8;

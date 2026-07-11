@@ -59,7 +59,7 @@ interface QSchema {
   }>
 }
 
-function QuestionnaireView({ content }: { content: string }) {
+export function QuestionnaireView({ content }: { content: string }) {
   let schema: QSchema | null = null
   try {
     schema = JSON.parse(content) as QSchema
@@ -89,7 +89,7 @@ function QuestionnaireView({ content }: { content: string }) {
   )
 }
 
-function jsonEditor(content: string, onChange: (next: string) => void) {
+export function jsonEditor(content: string, onChange: (next: string) => void) {
   return (
     <textarea
       className="input"
@@ -143,7 +143,7 @@ interface WfStageLite {
   advances_to?: Array<{ gate?: string }>
 }
 
-function WorkflowView({ content }: { content: string }) {
+export function WorkflowView({ content }: { content: string }) {
   let graph: WfStageLite[] | null = null
   try {
     graph = JSON.parse(content) as WfStageLite[]
@@ -208,7 +208,7 @@ interface CostDoc {
   hours?: number | null
 }
 
-function BillingView({ content }: { content: string }) {
+export function BillingView({ content }: { content: string }) {
   let cost: CostDoc | null = null
   try {
     cost = JSON.parse(content) as CostDoc

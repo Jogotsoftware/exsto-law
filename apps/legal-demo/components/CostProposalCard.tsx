@@ -2,7 +2,9 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { ConfigEditModal } from '@/components/ConfigEditModal'
+import { BillingView, jsonEditor } from '@/components/configEditors'
+import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is a
@@ -28,21 +30,28 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 export function CostProposalCard({
   proposal,
   onApproved,
+  onEdited,
 }: {
   proposal: CostProposal
   onApproved?: OnApproved
+  // WP-H: fired after the attorney edits the proposal in the pop-up editor.
+  onEdited?: (note: string) => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  // WP-H: the card's CURRENT price — the proposal until the attorney edits it;
+  // Approve always captures this (the attorney's version).
+  const [current, setCurrent] = useState<CostProposal>(proposal)
+  const [editing, setEditing] = useState(false)
 
   // Human-readable price line, e.g. "$350.00 / hour (est. 6 hrs)" or "$1,500.00 flat".
   const priceLabel =
-    proposal.costType === 'hourly'
-      ? `$${proposal.amount} / hour${proposal.hours != null ? ` (est. ${proposal.hours} hrs)` : ''}`
-      : `$${proposal.amount} flat fee`
+    current.costType === 'hourly'
+      ? `$${current.amount} / hour${current.hours != null ? ` (est. ${current.hours} hrs)` : ''}`
+      : `$${current.amount} flat fee`
 
   async function approve() {
     setApproveState('approving')
@@ -63,12 +72,12 @@ export function CostProposalCard({
           headers,
           credentials: 'same-origin',
           body: JSON.stringify({
-            costType: proposal.costType,
-            amount: proposal.amount,
-            hours: proposal.hours,
-            ...(proposal.documentFees ? { documentFees: proposal.documentFees } : {}),
-            summary: proposal.summary,
-            confidence: proposal.confidence,
+            costType: current.costType,
+            amount: current.amount,
+            hours: current.hours,
+            ...(current.documentFees ? { documentFees: current.documentFees } : {}),
+            summary: current.summary,
+            confidence: current.confidence,
           }),
         },
       )
@@ -103,13 +112,13 @@ export function CostProposalCard({
           <LayersIcon size={14} /> Proposed billing — {proposal.serviceKey}
         </span>
         <span className="text-muted" style={{ fontSize: 12 }}>
-          {proposal.costType}
+          {current.costType}
         </span>
       </div>
 
-      {proposal.summary && (
+      {current.summary && (
         <div className="uac-doc-body" style={{ fontSize: 13 }}>
-          {proposal.summary}
+          {current.summary}
         </div>
       )}
 
@@ -118,6 +127,15 @@ export function CostProposalCard({
       </div>
 
       <div className="uac-doc-actions">
+        <button
+          type="button"
+          className="uac-reply-btn"
+          onClick={() => setEditing(true)}
+          disabled={approveState === 'approving' || approveState === 'approved'}
+          title="Edit the proposed billing before approving"
+        >
+          <EditIcon size={12} /> Edit
+        </button>
         <button
           type="button"
           className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
@@ -142,6 +160,33 @@ export function CostProposalCard({
         <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
           {approveError}
         </div>
+      )}
+      {editing && (
+        <ConfigEditModal
+          artifactKind="billing"
+          targetId={`proposal:${current.serviceKey}`}
+          title={`Edit proposed billing — ${current.serviceKey}`}
+          initialContent={JSON.stringify(
+            {
+              costType: current.costType,
+              amount: current.amount,
+              hours: current.hours,
+              ...(current.documentFees ? { documentFees: current.documentFees } : {}),
+            },
+            null,
+            2,
+          )}
+          renderView={(content) => <BillingView content={content} />}
+          renderEdit={jsonEditor}
+          aiRegenerate={false}
+          saveLabel="Save"
+          onSave={async (content) => {
+            const next = JSON.parse(content) as Partial<CostProposal>
+            setCurrent((c) => ({ ...c, ...next }))
+            onEdited?.(`billing for "${current.serviceKey}"`)
+          }}
+          onClose={() => setEditing(false)}
+        />
       )}
     </div>
   )
