@@ -41,16 +41,6 @@ export interface ClientDetail extends ClientSummary {
 }
 
 // Latest value of a set of attribute kinds for one tenant, keyed (entity, kind).
-const ATTRS_CTE = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-      a.entity_id, akd.kind_name, a.value
-    FROM attribute a
-    JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1
-    ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )`
-
 export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
@@ -63,12 +53,12 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
       matter_count: string
       created_at: Date
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id AS client_entity_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_name')          AS name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_billable_rate') AS billable_rate,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_billing_type')  AS billing_type,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_main_contact')  AS main_contact_id,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)          AS name,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_billable_rate' ORDER BY a.valid_from DESC LIMIT 1) AS billable_rate,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_billing_type' ORDER BY a.valid_from DESC LIMIT 1)  AS billing_type,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_main_contact' ORDER BY a.valid_from DESC LIMIT 1)  AS main_contact_id,
          (SELECT count(*) FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
             WHERE r.tenant_id = $1 AND r.target_entity_id = e.id AND rkd.kind_name = 'contact_of'
@@ -111,13 +101,13 @@ export async function getClient(
       portal_scheduling_billable: string | null
       created_at: Date
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_name')          AS name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_billable_rate') AS billable_rate,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_billing_type')  AS billing_type,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'client_main_contact')  AS main_contact_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'portal_scheduling_billable') AS portal_scheduling_billable,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)          AS name,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_billable_rate' ORDER BY a.valid_from DESC LIMIT 1) AS billable_rate,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_billing_type' ORDER BY a.valid_from DESC LIMIT 1)  AS billing_type,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_main_contact' ORDER BY a.valid_from DESC LIMIT 1)  AS main_contact_id,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'portal_scheduling_billable' ORDER BY a.valid_from DESC LIMIT 1) AS portal_scheduling_billable,
          e.created_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
@@ -135,11 +125,11 @@ export async function getClient(
       email: string | null
       phone: string | null
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id AS contact_entity_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'full_name') AS full_name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'email')     AS email,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'phone')     AS phone
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'full_name' ORDER BY a.valid_from DESC LIMIT 1) AS full_name,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'email' ORDER BY a.valid_from DESC LIMIT 1)     AS email,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'phone' ORDER BY a.valid_from DESC LIMIT 1)     AS phone
        FROM entity e
        JOIN relationship r ON r.source_entity_id = e.id
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
@@ -157,10 +147,10 @@ export async function getClient(
       status: string | null
       created_at: Date
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id AS matter_entity_id, e.name AS matter_number,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'service_key')   AS service_key,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'service_key' ORDER BY a.valid_from DESC LIMIT 1)   AS service_key,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_status' ORDER BY a.valid_from DESC LIMIT 1) AS status,
          e.created_at
        FROM entity e
        JOIN relationship r ON r.source_entity_id = e.id
