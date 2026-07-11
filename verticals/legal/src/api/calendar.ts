@@ -85,27 +85,26 @@ export async function listUpcomingBookings(
       has_draft: boolean
       category_key: string | null
     }>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT
+      `SELECT
          e.id AS matter_entity_id,
          e.name AS matter_number,
          (SELECT a2.value #>> '{}'
             FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'client_of'
-            JOIN attrs a2 ON a2.entity_id = r.source_entity_id AND a2.kind_name = 'full_name'
+            JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = r.source_entity_id
+            JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
             WHERE r.tenant_id = $1 AND r.target_entity_id = e.id
+            ORDER BY a2.valid_from DESC
             LIMIT 1) AS client_name,
          (e.metadata->>'service_key') AS service_key,
          (e.metadata->>'scheduled_at') AS scheduled_at,
          (e.metadata->>'scheduled_end') AS scheduled_end,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
+         (SELECT sa.value #>> '{}'
+            FROM attribute sa
+            JOIN attribute_kind_definition sakd ON sakd.id = sa.attribute_kind_id
+           WHERE sa.tenant_id = $1 AND sa.entity_id = e.id AND sakd.kind_name = 'matter_status'
+           ORDER BY sa.valid_from DESC
+           LIMIT 1) AS status,
          (SELECT a2.value #>> '{}' FROM attribute a2
             JOIN attribute_kind_definition k2 ON k2.id = a2.attribute_kind_id
            WHERE a2.tenant_id = $1 AND a2.entity_id = e.id
@@ -168,27 +167,26 @@ export async function listMatterConsultations(
       has_draft: boolean
       category_key: string | null
     }>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT
+      `SELECT
          e.id AS matter_entity_id,
          e.name AS matter_number,
          (SELECT a2.value #>> '{}'
             FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'client_of'
-            JOIN attrs a2 ON a2.entity_id = r.source_entity_id AND a2.kind_name = 'full_name'
+            JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = r.source_entity_id
+            JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
             WHERE r.tenant_id = $1 AND r.target_entity_id = e.id
+            ORDER BY a2.valid_from DESC
             LIMIT 1) AS client_name,
          (e.metadata->>'service_key') AS service_key,
          (e.metadata->>'scheduled_at') AS scheduled_at,
          (e.metadata->>'scheduled_end') AS scheduled_end,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
+         (SELECT sa.value #>> '{}'
+            FROM attribute sa
+            JOIN attribute_kind_definition sakd ON sakd.id = sa.attribute_kind_id
+           WHERE sa.tenant_id = $1 AND sa.entity_id = e.id AND sakd.kind_name = 'matter_status'
+           ORDER BY sa.valid_from DESC
+           LIMIT 1) AS status,
          (SELECT a2.value #>> '{}' FROM attribute a2
             JOIN attribute_kind_definition k2 ON k2.id = a2.attribute_kind_id
            WHERE a2.tenant_id = $1 AND a2.entity_id = e.id
@@ -250,26 +248,25 @@ export async function listRecentBookings(ctx: ActionContext, limit = 10): Promis
       status: string | null
       booked_at: Date
     }>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT
+      `SELECT
          e.id AS matter_entity_id,
          e.name AS matter_number,
          (SELECT a2.value #>> '{}'
             FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'client_of'
-            JOIN attrs a2 ON a2.entity_id = r.source_entity_id AND a2.kind_name = 'full_name'
+            JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = r.source_entity_id
+            JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
             WHERE r.tenant_id = $1 AND r.target_entity_id = e.id
+            ORDER BY a2.valid_from DESC
             LIMIT 1) AS client_name,
          (e.metadata->>'service_key') AS service_key,
          (e.metadata->>'scheduled_at') AS scheduled_at,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
+         (SELECT sa.value #>> '{}'
+            FROM attribute sa
+            JOIN attribute_kind_definition sakd ON sakd.id = sa.attribute_kind_id
+           WHERE sa.tenant_id = $1 AND sa.entity_id = e.id AND sakd.kind_name = 'matter_status'
+           ORDER BY sa.valid_from DESC
+           LIMIT 1) AS status,
          e.created_at AS booked_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
