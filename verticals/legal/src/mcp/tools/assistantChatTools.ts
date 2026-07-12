@@ -14,6 +14,10 @@ import {
   getAssistantSettings,
   setAssistantSettings,
   recordBuildArtifactEdited,
+  listBuildSessions,
+  listBuildSessionThread,
+  type BuildSessionSummary,
+  type BuildThreadEntry,
   type AssistantChatInput,
   type AssistantChatReply,
   type SubmitFeedbackInput,
@@ -174,6 +178,31 @@ registerTool({
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => ({ sessions: await listChatSessions(ctx) }),
 } satisfies Tool<Record<string, never>, { sessions: ChatSessionSummary[] }>)
+
+registerTool({
+  name: 'legal.assistant.build_sessions',
+  description:
+    "The attorney's guided service builds (service_build_session), most-recent-activity first — each titled for the service under construction ('Build: <service>'), with status and message count. Powers the assistant widget's Builds section; a build's transcript comes from legal.assistant.build_thread.",
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ sessions: await listBuildSessions(ctx) }),
+} satisfies Tool<Record<string, never>, { sessions: BuildSessionSummary[] }>)
+
+registerTool({
+  name: 'legal.assistant.build_thread',
+  description:
+    "One guided build's transcript — its user/assistant messages in order (machinery already stripped; synthetic driver turns omitted), so re-opening the build shows the real conversation read-only.",
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { buildSessionId: { type: 'string' } },
+    required: ['buildSessionId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    turns: await listBuildSessionThread(ctx, input.buildSessionId),
+  }),
+} satisfies Tool<{ buildSessionId: string }, { turns: BuildThreadEntry[] }>)
 
 registerTool({
   name: 'legal.assistant.chat_session_close',
