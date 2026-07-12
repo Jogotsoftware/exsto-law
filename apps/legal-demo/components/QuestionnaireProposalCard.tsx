@@ -139,38 +139,39 @@ export function QuestionnaireProposalCard({
         </div>
       )}
 
+      {/* BUILDER-UX-1 WP-2.1: each section is a bolded header with its fields as a
+          BULLETED list, never a comma-run. */}
       <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {sections.map((s, si) => (
-          <div key={s.id ?? si} style={{ marginBottom: 'var(--space-1)' }}>
+          <div key={s.id ?? si} style={{ marginBottom: 'var(--space-2)' }}>
             <strong>{s.title || s.id || `Section ${si + 1}`}</strong>
             {s.fields && s.fields.length > 0 && (
-              <span className="text-muted">
-                {' '}
-                —{' '}
-                {s.fields
-                  .map((f) =>
-                    f.internal ? `${fieldLabel(f)} (you fill in review)` : fieldLabel(f),
-                  )
-                  .join(', ')}
-              </span>
+              <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
+                {s.fields.map((f, fi) => (
+                  <li key={f.id ?? fi}>
+                    {fieldLabel(f)}
+                    {f.internal ? <span className="text-muted"> (you fill in review)</span> : null}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         ))}
       </div>
 
-      {/* The variable contract — the point of the wizard. A token with no field would
-          render [[MISSING]] in the document, so the attorney sees coverage first. */}
-      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-        {missing.length === 0 ? (
-          <div className="text-muted">Collects everything the documents need — no gaps.</div>
-        ) : (
+      {/* The variable contract — a token with no field renders [[MISSING]]. Only the
+          actionable GAP is shown; the positive "no gaps" outro (WP-2.2 redundant
+          second blurb) is removed — the section list above already says what it
+          collects. */}
+      {missing.length > 0 && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
           <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
             Doesn&rsquo;t yet collect {missing.length} thing{missing.length === 1 ? '' : 's'} the
             document needs: <strong>{missing.map((m) => fieldLabel({ id: m })).join(', ')}</strong>.
             The document would leave {missing.length === 1 ? 'it' : 'them'} blank until added.
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="uac-doc-actions">
         <button

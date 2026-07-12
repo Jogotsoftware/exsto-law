@@ -81,6 +81,9 @@ export interface ServiceProposalEvent {
   displayName: string
   derivedKey: string
   description: string | null
+  // BUILDER-UX-1 WP-1 — the client-facing copy (name + one-sentence description).
+  clientDisplayName: string | null
+  clientDescription: string | null
   route: 'auto' | 'manual'
   generationMode: 'template_merge' | 'ai_draft'
   // BUILDER-CERT-1 (WP3) — booking mode (true = consultation slot at booking;
@@ -174,6 +177,8 @@ export interface CostProposalEvent {
 export interface EnableProposalEvent {
   serviceKey: string
   summary: string
+  // BUILDER-UX-1 WP-2.1 — the completed service's steps, rendered as bullets.
+  completion?: string[]
 }
 
 export interface AssistantStreamHandlers {
@@ -306,6 +311,10 @@ export async function streamAssistant(
           displayName: String(evt.displayName ?? ''),
           derivedKey: String(evt.derivedKey ?? ''),
           description: typeof evt.description === 'string' ? evt.description : null,
+          clientDisplayName:
+            typeof evt.clientDisplayName === 'string' ? evt.clientDisplayName : null,
+          clientDescription:
+            typeof evt.clientDescription === 'string' ? evt.clientDescription : null,
           route: evt.route === 'auto' ? 'auto' : 'manual',
           generationMode: evt.generationMode === 'ai_draft' ? 'ai_draft' : 'template_merge',
           // BUILDER-CERT-1 (WP3) — booking mode rides the card to the approve route.
@@ -367,6 +376,7 @@ export async function streamAssistant(
         handlers.onEnableProposal?.({
           serviceKey: String(evt.serviceKey ?? ''),
           summary: String(evt.summary ?? ''),
+          completion: Array.isArray(evt.completion) ? (evt.completion as string[]) : undefined,
         })
         break
       case 'kind_proposal':
