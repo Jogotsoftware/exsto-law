@@ -909,13 +909,22 @@ export function UnifiedAssistantChat({
     }
   }
 
-  // WP-H1: the attorney hand-edited a proposed artifact in the pop-up editor —
-  // record it on the build session so the trail reads proposal → edit → approval.
+  // WP-H1 → BUILDER-UX-1 WP-4: the attorney hand-edited a proposed artifact in
+  // the pop-up editor — record it (service_build.artifact_edited) on the build
+  // session so the trail reads proposal → edit → approval. The artifact type is
+  // inferred from the note's leading word (each card prefixes it), and the
+  // service under construction rides along when known.
   const handleProposalEdited = useCallback((note: string) => {
+    const first = note.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? ''
+    const artifactType = (
+      ['service', 'questionnaire', 'template', 'workflow', 'billing'] as const
+    ).find((t) => first.startsWith(t))
     void callAttorneyMcp({
       toolName: 'legal.assistant.build_artifact_edited',
       input: {
         note,
+        ...(artifactType ? { artifactType } : {}),
+        ...(buildServiceKeyRef.current ? { serviceKey: buildServiceKeyRef.current } : {}),
         ...(buildSessionIdRef.current ? { buildSessionId: buildSessionIdRef.current } : {}),
       },
     }).catch(() => {

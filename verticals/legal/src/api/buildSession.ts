@@ -419,24 +419,34 @@ export async function isOpenBuildSession(
   })
 }
 
-// HARDENING-RESIDUALS-1 (WP-H1) — record that the attorney HAND-EDITED a
-// proposed artifact in the pop-up editor before approving it, so the build
-// session's trail honestly reads proposal → human edit → approval. An
-// observation event (core-seeded, no state change) through the action layer,
-// threaded on the build session when one is open.
+// HARDENING-RESIDUALS-1 (WP-H1) → BUILDER-UX-1 (WP-4) — record that the attorney
+// HAND-EDITED a proposed artifact in the pop-up editor before approving it, so
+// the build session's trail honestly reads proposal → human edit → approval.
+// Promoted from a generic `observation` (HR-1) to the dedicated
+// service_build.artifact_edited kind (migration 0160) so the edit trail is a
+// first-class queryable receipt. Threaded on the build session when one is open.
 export async function recordBuildArtifactEdited(
   ctx: ActionContext,
-  input: { buildSessionId?: string | null; note: string },
+  input: {
+    buildSessionId?: string | null
+    note: string
+    artifactType?: 'service' | 'questionnaire' | 'template' | 'workflow' | 'billing'
+    serviceKey?: string | null
+  },
 ): Promise<void> {
   await submitAction(ctx, {
     actionKindName: 'event.record',
     intentKind: 'adjustment',
     payload: {
-      event_kind_name: 'observation',
+      event_kind_name: 'service_build.artifact_edited',
       primary_entity_id: input.buildSessionId ?? null,
       source_type: 'human',
       source_ref: ctx.actorId,
-      data: { tag: 'build_artifact_human_edited', note: input.note },
+      data: {
+        artifact_type: input.artifactType ?? null,
+        service_key: input.serviceKey ?? null,
+        summary: input.note,
+      },
     },
   })
 }
