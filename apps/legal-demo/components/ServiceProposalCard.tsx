@@ -133,20 +133,26 @@ export function ServiceProposalCard({
         </span>
       </div>
 
-      {/* The CLIENT-FACING description leads — it's what the attorney is actually
-          approving onto their booking page. The AI's WHY (summary) is a muted
-          footnote, not the headline: reasoning is context, not content. */}
-      {/* The client tile copy leads — it's what shows on the public intake tile,
-          which is what the attorney is actually approving (Phase 2). */}
-      {current.clientDisplayName && (
+      {/* BUILDER-UX-1 WP-1.2: the two copies are LABELED, never two unlabeled
+          paragraphs — "Client sees" (the public booking tile) above "Internal"
+          (the attorney-facing description). */}
+      {(current.clientDisplayName || current.clientDescription) && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          <strong>Client tile:</strong> {current.clientDisplayName}
-          {current.clientDescription ? ` — ${current.clientDescription}` : ''}
+          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+            Client sees
+          </div>
+          <div>
+            {current.clientDisplayName}
+            {current.clientDescription ? ` — ${current.clientDescription}` : ''}
+          </div>
         </div>
       )}
       {current.description && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {current.description}
+          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+            Internal
+          </div>
+          <div>{current.description}</div>
         </div>
       )}
 
@@ -155,11 +161,6 @@ export function ServiceProposalCard({
           <strong>Route:</strong> {current.route} · <strong>Documents:</strong>{' '}
           {current.generationMode === 'ai_draft' ? 'AI draft' : 'template merge'}
         </div>
-        {current.summary && (
-          <div className="text-muted" style={{ marginTop: 4 }}>
-            {current.summary}
-          </div>
-        )}
         {/* Set expectations: a created service starts disabled until it's completed. */}
         <div className="text-muted">Created disabled — finish setting it up, then enable it.</div>
       </div>

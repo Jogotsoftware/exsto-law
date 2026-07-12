@@ -32,6 +32,9 @@ interface ServiceDefinition {
   serviceKey: string
   displayName: string
   description: string | null
+  // BUILDER-UX-1 WP-1.3 — client-facing copy (booking-tile name + description).
+  clientDisplayName: string | null
+  clientDescription: string | null
   route: 'auto' | 'manual'
   intakeFormId: string
   documents: string[]
@@ -46,6 +49,10 @@ interface ServiceDefinition {
 interface FormState {
   displayName: string
   description: string
+  // BUILDER-UX-1 WP-1.3 — the client-facing copy (what the public booking tile
+  // shows), edited here alongside the internal/attorney-facing fields.
+  clientDisplayName: string
+  clientDescription: string
   route: 'auto' | 'manual'
   generationMode: GenerationMode
   bookingEnabled: boolean
@@ -57,6 +64,8 @@ interface FormState {
 const EMPTY: FormState = {
   displayName: '',
   description: '',
+  clientDisplayName: '',
+  clientDescription: '',
   route: 'manual',
   generationMode: 'template_merge',
   bookingEnabled: false,
@@ -97,6 +106,8 @@ export default function ServiceSettingsPage() {
       setForm({
         displayName: r.service.displayName,
         description: r.service.description ?? '',
+        clientDisplayName: r.service.clientDisplayName ?? '',
+        clientDescription: r.service.clientDescription ?? '',
         route: r.service.route,
         generationMode: r.service.generationMode ?? 'template_merge',
         bookingEnabled: r.service.booking?.enabled ?? false,
@@ -151,7 +162,9 @@ export default function ServiceSettingsPage() {
         if (
           form.bookingEnabled ||
           form.generationMode !== 'template_merge' ||
-          !form.appointmentRequired
+          !form.appointmentRequired ||
+          form.clientDisplayName.trim() ||
+          form.clientDescription.trim()
         ) {
           await callAttorneyMcp({
             toolName: 'legal.service.update',
@@ -159,6 +172,8 @@ export default function ServiceSettingsPage() {
               serviceKey: newKey,
               displayName: form.displayName.trim(),
               description: form.description.trim() || null,
+              clientDisplayName: form.clientDisplayName.trim() || null,
+              clientDescription: form.clientDescription.trim() || null,
               route: form.route,
               generationMode: form.generationMode,
               booking,
@@ -178,6 +193,8 @@ export default function ServiceSettingsPage() {
           serviceKey,
           displayName: form.displayName.trim(),
           description: form.description.trim() || null,
+          clientDisplayName: form.clientDisplayName.trim() || null,
+          clientDescription: form.clientDescription.trim() || null,
           route: form.route,
           documents: meta?.documents ?? [],
           sortOrder: meta?.sortOrder,
@@ -236,14 +253,43 @@ export default function ServiceSettingsPage() {
               </select>
             </label>
           </div>
+          {/* BUILDER-UX-1 WP-1.3: the client-facing copy the booking tile shows,
+              edited here with helper text; kept distinct from the internal
+              description below. */}
           <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-            <span>Booking page description</span>
+            <span>Client-facing name</span>
+            <input
+              value={form.clientDisplayName}
+              onChange={(e) => update('clientDisplayName', e.target.value)}
+              placeholder="e.g. Last Will & Testament"
+            />
+            <small className="text-muted">
+              What the client sees on the booking page (outcome, no jurisdiction/jargon).
+            </small>
+          </label>
+          <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
+            <span>Client-facing description</span>
+            <textarea
+              value={form.clientDescription}
+              onChange={(e) => update('clientDescription', e.target.value)}
+              rows={2}
+              placeholder="e.g. Have an attorney review your NDA agreement."
+            />
+            <small className="text-muted">
+              What the client sees — one plain sentence in second person.
+            </small>
+          </label>
+          <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
+            <span>Internal description</span>
             <textarea
               value={form.description}
               onChange={(e) => update('description', e.target.value)}
               rows={2}
-              placeholder="The plain-language summary clients see when choosing this service on the booking page."
+              placeholder="Attorney-facing notes about this service (not shown to clients)."
             />
+            <small className="text-muted">
+              Attorney-facing; the booking page uses the client-facing copy above.
+            </small>
           </label>
 
           <fieldset className="svc-fieldset">

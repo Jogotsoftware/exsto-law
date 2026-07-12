@@ -221,6 +221,11 @@ export type AssistantChatStreamEvent =
       displayName: string
       derivedKey: string
       description: string | null
+      // BUILDER-UX-1 WP-1: the client-facing copy the wizard composed. It was
+      // captured server-side but dropped from this SSE event, so the card never
+      // received it and Approve persisted NULL client columns on every service.
+      clientDisplayName: string | null
+      clientDescription: string | null
       route: ServiceProposal['route']
       generationMode: ServiceProposal['generationMode']
       appointmentRequired: boolean
@@ -283,6 +288,7 @@ export type AssistantChatStreamEvent =
       type: 'enable_proposal'
       serviceKey: string
       summary: string
+      completion?: string[]
     }
   // The assistant ASKED a structured interview question (Build-Wizard Phase 7). The UI
   // renders it as a click-to-answer QuestionCard (choice buttons + optional text box);
@@ -1611,6 +1617,8 @@ export async function* assistantChatStream(
         displayName: p.displayName,
         derivedKey: p.derivedKey,
         description: p.description,
+        clientDisplayName: p.clientDisplayName,
+        clientDescription: p.clientDescription,
         route: p.route,
         generationMode: p.generationMode,
         appointmentRequired: p.appointmentRequired,
@@ -1671,6 +1679,7 @@ export async function* assistantChatStream(
         type: 'enable_proposal',
         serviceKey: p.serviceKey,
         summary: p.summary,
+        completion: p.completion,
       }
     }
     // Surface structured interview questions captured this turn (Phase 7) as click-to-

@@ -11,6 +11,9 @@ import type { OnApproved } from '@/components/ServiceProposalCard'
 export interface EnableProposal {
   serviceKey: string
   summary: string
+  // BUILDER-UX-1 WP-2.1 — the completed service's steps, rendered as a bulleted
+  // completion summary rather than a comma-run.
+  completion?: string[]
 }
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
@@ -98,6 +101,19 @@ export function EnableProposalCard({
       {proposal.summary && (
         <div className="uac-doc-body" style={{ fontSize: 13 }}>
           {proposal.summary}
+        </div>
+      )}
+
+      {/* BUILDER-UX-1 WP-2.1: the completion summary is a BULLETED list under a
+          bolded header — the service's steps — never a comma-run. */}
+      {proposal.completion && proposal.completion.length > 0 && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
+          <strong>This service is complete</strong>
+          <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
+            {proposal.completion.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
         </div>
       )}
 

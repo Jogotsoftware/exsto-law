@@ -18,6 +18,7 @@ import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import { validateProposedCost, SERVICE_COST_TYPES, type CostProposal } from './costAuthoring.js'
 import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
+import { getServiceLifecycle } from './serviceLifecycle.js'
 import type { ServiceCostType } from './services.js'
 
 // ─── propose_cost ───────────────────────────────────────────────────────────
@@ -146,6 +147,10 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
 export interface EnableProposal {
   serviceKey: string
   summary: string
+  // BUILDER-UX-1 WP-2.1 — the completed service's steps, so the card can render
+  // the completion summary as a bulleted list ("Review client intake", "AI
+  // first-pass review", "Attorney approves", …) instead of a comma-run.
+  completion?: string[]
 }
 
 const PROPOSE_ENABLE_TOOL_DEF = {
@@ -174,7 +179,6 @@ const PROPOSE_ENABLE_TOOL_DEF = {
 // re-checked server-side by the set_active handler on approve, so a not-yet-ready
 // enable is rejected at the write even if the model proposed it early.
 export function buildProposeEnableTool(ctx: ActionContext, captured: EnableProposal[]): ClientTool {
-  void ctx
   return {
     definition: PROPOSE_ENABLE_TOOL_DEF,
     name: 'propose_enable',
@@ -182,11 +186,23 @@ export function buildProposeEnableTool(ctx: ActionContext, captured: EnablePropo
       const args = (raw ?? {}) as { service_key?: string; summary?: string }
       const serviceKey = (args.service_key ?? '').trim()
       if (!serviceKey) return 'A service_key is required to propose enabling; nothing was captured.'
+      // WP-2.1: the completion summary is the service's own steps, rendered as
+      // bullets by the card. Best-effort — a lifecycle read failure just omits it.
+      let completion: string[] | undefined
+      try {
+        const lifecycle = await getServiceLifecycle(ctx, serviceKey)
+        const steps = (lifecycle?.graph ?? []) as Array<{ key?: string; label?: string }>
+        const items = steps.map((s) => s.label || s.key || '').filter(Boolean)
+        if (items.length) completion = items
+      } catch {
+        // omit the checklist rather than fail the proposal
+      }
       captured.push({
         serviceKey,
         summary:
           (args.summary ?? '').trim() ||
           `${serviceKey} is complete — approve to make it live and bookable.`,
+        completion,
       })
       return `The Enable step for "${serviceKey}" is shown to the attorney as the final approval card; the service goes live only when they approve. This is the LAST step — the build is complete. Reply with ONE short sentence telling them to approve it to go live. Do NOT start another step or claim it is live yet.`
     },

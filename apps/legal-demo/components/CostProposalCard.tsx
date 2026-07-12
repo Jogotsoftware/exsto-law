@@ -116,15 +116,25 @@ export function CostProposalCard({
         </span>
       </div>
 
-      {current.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
-          {current.summary}
-        </div>
-      )}
-
-      <div className="uac-doc-body" style={{ fontSize: 13 }}>
+      {/* BUILDER-UX-1 WP-2.3/WP-3: the fee value appears ONCE, prominently. The
+          model summary (which restated the fee) is dropped, and the card is
+          confirm-only — the fee was already captured by the final wizard
+          question; this is not a second entry, just a confirmation. */}
+      <div className="uac-doc-body" style={{ fontSize: 15 }}>
         <strong>{priceLabel}</strong>
       </div>
+      {current.documentFees && Object.keys(current.documentFees).length > 0 && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
+          <strong>Per-document fees</strong>
+          <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
+            {Object.entries(current.documentFees).map(([kind, amt]) => (
+              <li key={kind}>
+                {kind.replace(/_/g, ' ')}: ${amt}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="uac-doc-actions">
         <button
