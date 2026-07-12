@@ -206,6 +206,18 @@ interface ChatSessionSummary {
   turnCount: number
 }
 
+// BUILDER-UX-1 WP-5 — one guided build = one titled thread (from
+// legal.assistant.build_sessions), separate from App help + matter threads.
+interface BuildSessionSummary {
+  buildSessionId: string
+  title: string
+  serviceKey: string | null
+  status: 'open' | 'closed'
+  startedAt: string
+  lastMessageAt: string | null
+  messageCount: number
+}
+
 export interface UnifiedAssistantChatProps {
   matterEntityId?: string
   contactEntityId?: string
@@ -686,6 +698,8 @@ export function UnifiedAssistantChat({
   // connected per Contract A.
   const [research, setResearch] = useState(false)
   const [chatSessions, setChatSessions] = useState<ChatSessionSummary[] | null>(null)
+  // WP-5 — the attorney's guided builds, each its own titled thread.
+  const [buildSessions, setBuildSessions] = useState<BuildSessionSummary[] | null>(null)
   // WP-H2: an editor launch the assistant resolved this turn — renders the real
   // Config*Modal pre-loaded on the existing artifact. Cleared on close.
   const [editorLaunch, setEditorLaunch] = useState<EditorLaunchEvent | null>(null)
@@ -1020,7 +1034,51 @@ export function UnifiedAssistantChat({
       })
         .then((r) => setChatSessions(r.sessions))
         .catch(() => setChatSessions([]))
+      // WP-5: guided builds list as their own titled threads.
+      setBuildSessions(null)
+      callAttorneyMcp<{ sessions: BuildSessionSummary[] }>({
+        toolName: 'legal.assistant.build_sessions',
+      })
+        .then((r) => setBuildSessions(r.sessions))
+        .catch(() => setBuildSessions([]))
     }
+  }
+
+  // WP-5: open a guided build as a READ-ONLY thread — load its transcript and
+  // show it; a build's history is a record, not a live chat to resume (a new
+  // message starts a fresh conversation).
+  function selectBuildSession(sess: BuildSessionSummary) {
+    genRef.current++
+    setHistoryOpen(false)
+    setActiveScope({})
+    chatSessionIdRef.current = null
+    setBuildMode(false)
+    closeBuildSession('abandoned')
+    setStreaming(null)
+    setError(null)
+    retryRef.current = null
+    setInput('')
+    setBusy(false)
+    setTurns([])
+    const gen = genRef.current
+    void callAttorneyMcp<{ turns: Array<{ role: 'user' | 'assistant'; content: string }> }>({
+      toolName: 'legal.assistant.build_thread',
+      input: { buildSessionId: sess.buildSessionId },
+    })
+      .then((r) => {
+        if (genRef.current !== gen) return
+        setTurns(
+          r.turns.map((t) =>
+            t.role === 'user'
+              ? { role: 'user' as const, content: t.content }
+              : { role: 'assistant' as const, content: t.content },
+          ),
+        )
+      })
+      .catch(() => {
+        if (genRef.current === gen) setError('Could not load that build.')
+      })
+    setTimeout(() => composerRef.current?.focus(), 0)
   }
 
   // Reopen a SAVED conversation (WP-D2): re-ground scope from the session, load
@@ -2055,6 +2113,34 @@ export function UnifiedAssistantChat({
       {/* ── History popover (reopen a prior conversation) ─────────────────── */}
       {historyOpen && (
         <div className="uac-popover uac-history">
+          {/* WP-5: guided builds, each its own titled thread ("Build: <service>"),
+              separate from App help + matter threads. Read-only history. */}
+          {buildSessions !== null && buildSessions.length > 0 && (
+            <>
+              <div className="uac-history-head">Builds</div>
+              <ul className="uac-history-list">
+                {buildSessions.map((sess) => (
+                  <li key={sess.buildSessionId}>
+                    <button
+                      type="button"
+                      className="uac-history-item"
+                      onClick={() => selectBuildSession(sess)}
+                    >
+                      <span className="uac-history-row-top">
+                        <span className="uac-history-label">{sess.title}</span>
+                        <span
+                          className="uac-history-count"
+                          title={`${sess.messageCount} ${sess.messageCount === 1 ? 'message' : 'messages'}${sess.status === 'open' ? ' · in progress' : ''}`}
+                        >
+                          {sess.messageCount}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           {chatSessions !== null && chatSessions.length > 0 && (
             <>
               <div className="uac-history-head">Saved chats</div>

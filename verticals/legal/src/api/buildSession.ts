@@ -266,6 +266,133 @@ export async function closeStaleBuildSessionsForActor(
   }
 }
 
+// BUILDER-UX-1 WP-5 — the attorney's guided builds, each as its own titled
+// thread in the assistant widget (separate from App help + matter threads).
+// Titled for the service under construction ("Build: GA Mutual NDA"), most-
+// recent-activity first. The service display name is joined from the current
+// workflow_definition row for build_session_service_key (falls back to the raw
+// key, then to "new service" when the shell hasn't been approved yet). One
+// grouped pass over the message events for counts — no per-row correlated scan
+// and no tenant-wide attribute pivot (per-entity indexed attribute reads only).
+export interface BuildSessionSummary {
+  buildSessionId: string
+  title: string
+  serviceKey: string | null
+  status: 'open' | 'closed'
+  startedAt: string
+  lastMessageAt: string | null
+  messageCount: number
+}
+
+export async function listBuildSessions(ctx: ActionContext): Promise<BuildSessionSummary[]> {
+  return withActionContext(ctx, async (client) => {
+    const r = await client.query<{
+      id: string
+      started_at: string
+      status: string | null
+      service_key: string | null
+      display_name: string | null
+      msg_count: number
+      last_at: string | null
+    }>(
+      `WITH msgs AS (
+         SELECT ev.primary_entity_id AS sid,
+                count(*)::int AS msg_count,
+                max(ev.occurred_at) AS last_at
+         FROM event ev
+         JOIN event_kind_definition ek ON ek.id = ev.event_kind_id
+         WHERE ev.tenant_id = $1 AND ek.kind_name = 'service_build.message.appended'
+         GROUP BY 1
+       )
+       SELECT e.id,
+              to_char(e.created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS started_at,
+              (SELECT a.value #>> '{}' FROM attribute a
+                 JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+                WHERE a.tenant_id = e.tenant_id AND a.entity_id = e.id
+                  AND akd.kind_name = 'build_session_status'
+                ORDER BY a.valid_from DESC LIMIT 1) AS status,
+              (SELECT a.value #>> '{}' FROM attribute a
+                 JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+                WHERE a.tenant_id = e.tenant_id AND a.entity_id = e.id
+                  AND akd.kind_name = 'build_session_service_key'
+                ORDER BY a.valid_from DESC LIMIT 1) AS service_key,
+              wd.display_name,
+              COALESCE(m.msg_count, 0) AS msg_count,
+              to_char(m.last_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_at
+       FROM entity e
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+       LEFT JOIN msgs m ON m.sid = e.id
+       LEFT JOIN workflow_definition wd
+              ON wd.tenant_id = e.tenant_id AND wd.valid_to IS NULL
+             AND wd.kind_name = (
+               SELECT a.value #>> '{}' FROM attribute a
+                 JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+                WHERE a.tenant_id = e.tenant_id AND a.entity_id = e.id
+                  AND akd.kind_name = 'build_session_service_key'
+                ORDER BY a.valid_from DESC LIMIT 1
+             )
+       WHERE e.tenant_id = $1 AND ekd.kind_name = $2 AND e.status = 'active'
+       ORDER BY COALESCE(m.last_at, e.created_at) DESC
+       LIMIT 40`,
+      [ctx.tenantId, SESSION_KIND],
+    )
+    return r.rows.map((row) => {
+      const name = row.display_name || row.service_key || null
+      return {
+        buildSessionId: row.id,
+        title: name ? `Build: ${name}` : 'Build: new service',
+        serviceKey: row.service_key,
+        status: row.status === 'closed' ? 'closed' : 'open',
+        startedAt: row.started_at,
+        lastMessageAt: row.last_at,
+        messageCount: row.msg_count,
+      }
+    })
+  })
+}
+
+// One build session's transcript — its user/assistant messages in order, for
+// re-opening the build as a read-only thread in the widget. Machinery is already
+// stripped at persistence (WP-D6); synthetic-driver messages are omitted so the
+// re-opened build reads as the real conversation.
+export interface BuildThreadEntry {
+  role: 'user' | 'assistant'
+  content: string
+  recordedAt: string
+}
+
+export async function listBuildSessionThread(
+  ctx: ActionContext,
+  buildSessionId: string,
+): Promise<BuildThreadEntry[]> {
+  return withActionContext(ctx, async (client) => {
+    const r = await client.query<{
+      role: string | null
+      content: string | null
+      synthetic: boolean | null
+      occurred_at: string
+    }>(
+      `SELECT ev.payload->>'role' AS role,
+              ev.payload->>'content' AS content,
+              (ev.payload->>'synthetic_driver')::boolean AS synthetic,
+              to_char(ev.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
+       FROM event ev
+       JOIN event_kind_definition ek ON ek.id = ev.event_kind_id
+       WHERE ev.tenant_id = $1 AND ek.kind_name = 'service_build.message.appended'
+         AND ev.primary_entity_id = $2
+       ORDER BY ev.occurred_at ASC`,
+      [ctx.tenantId, buildSessionId],
+    )
+    return r.rows
+      .filter((row) => row.synthetic !== true && (row.content ?? '').trim())
+      .map((row) => ({
+        role: row.role === 'assistant' ? ('assistant' as const) : ('user' as const),
+        content: row.content ?? '',
+        recordedAt: row.occurred_at,
+      }))
+  })
+}
+
 // True when the id names an OPEN service_build_session in this tenant — the
 // chat's recording half calls this so a stale client-held id (closed session,
 // foreign row) starts a fresh session instead of appending to the wrong one.
