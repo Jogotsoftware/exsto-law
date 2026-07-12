@@ -7,6 +7,7 @@
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { DateField } from '@/components/DateField'
 import { formatDate } from '@/lib/datetime'
 import { humanizeKind } from '../shared'
 
@@ -221,12 +222,7 @@ export default function MatterTasksPage({ params }: { params: Promise<{ id: stri
             onChange={(e) => setTitle(e.target.value)}
             placeholder="What needs doing?"
           />
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            title="Due date (optional)"
-          />
+          <DateField value={dueDate} onValueChange={setDueDate} title="Due date (optional)" />
           <select
             value={billingMode}
             onChange={(e) => setBillingMode(e.target.value)}
