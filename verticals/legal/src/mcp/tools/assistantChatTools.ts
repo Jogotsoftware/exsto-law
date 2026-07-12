@@ -224,13 +224,22 @@ registerTool({
 registerTool({
   name: 'legal.assistant.build_artifact_edited',
   description:
-    'Record that the attorney hand-edited a proposed artifact in the wizard pop-up editor before approving it (an observation event threaded on the build session), so the build trail reads proposal → human edit → approval.',
+    'Record that the attorney hand-edited a proposed artifact in the wizard pop-up editor before approving it (a service_build.artifact_edited event threaded on the build session), so the build trail reads proposal → human edit → approval.',
   mode: 'write',
   inputSchema: {
     type: 'object',
     properties: {
       buildSessionId: { type: 'string', description: 'The open build session, when known.' },
       note: { type: 'string', description: 'What was edited, e.g. the artifact label.' },
+      artifactType: {
+        type: 'string',
+        enum: ['service', 'questionnaire', 'template', 'workflow', 'billing'],
+        description: 'Which artifact was edited.',
+      },
+      serviceKey: {
+        type: 'string',
+        description: 'The service the artifact belongs to, when known.',
+      },
     },
     required: ['note'],
     additionalProperties: false,
@@ -239,7 +248,15 @@ registerTool({
     await recordBuildArtifactEdited(ctx, input)
     return { recorded: true }
   },
-} satisfies Tool<{ buildSessionId?: string; note: string }, { recorded: boolean }>)
+} satisfies Tool<
+  {
+    buildSessionId?: string
+    note: string
+    artifactType?: 'service' | 'questionnaire' | 'template' | 'workflow' | 'billing'
+    serviceKey?: string
+  },
+  { recorded: boolean }
+>)
 
 registerTool({
   name: 'legal.assistant.settings_get',

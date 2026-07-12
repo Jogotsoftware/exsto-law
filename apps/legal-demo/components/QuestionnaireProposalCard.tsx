@@ -4,8 +4,7 @@ import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
-import { ConfigEditModal } from '@/components/ConfigEditModal'
-import { QuestionnaireView, jsonEditor } from '@/components/configEditors'
+import { QuestionnaireEditorModal } from '@/components/QuestionnaireEditorModal'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the QuestionnaireProposal captured in
@@ -209,19 +208,14 @@ export function QuestionnaireProposalCard({
         </div>
       )}
       {editing && (
-        <ConfigEditModal
-          artifactKind="questionnaire"
-          targetId={`proposal:${current.serviceKey}`}
+        // BUILDER-UX-1 WP-4: the REAL questionnaire builder in a pop-up (no JSON
+        // textarea). Save updates the CARD (the attorney's version); nothing is
+        // written until Approve — the same human gate as the proposal.
+        <QuestionnaireEditorModal
           title={`Edit proposed questionnaire — ${current.serviceKey}`}
-          initialContent={JSON.stringify(current.schema ?? { sections: [] }, null, 2)}
-          renderView={(content) => <QuestionnaireView content={content} />}
-          renderEdit={jsonEditor}
-          aiRegenerate={false}
-          saveLabel="Save"
-          onSave={async (content) => {
-            // Save updates the CARD (the attorney's version); nothing is written
-            // until they click Approve — the same human gate as the proposal.
-            const schema = JSON.parse(content) as ProposalSchema
+          initialSchema={(current.schema ?? { sections: [] }) as ProposalSchema}
+          name={(current.schema as ProposalSchema)?.title ?? current.serviceKey}
+          onSave={(schema) => {
             setCurrent((c) => ({ ...c, schema }))
             onEdited?.(`questionnaire for "${current.serviceKey}"`)
           }}
