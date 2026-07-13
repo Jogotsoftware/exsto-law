@@ -10356,3 +10356,57 @@ svg.lucide {
   vertical-align: middle;
   flex: 0 0 auto;
 }
+
+/* BUILDER-UX-3 (P9/P10) — /book fee-consent card + inline sign-in. Appended,
+   component-scoped: no existing rule above changes. */
+
+/* Fee consent card: deliberate spacing inside the bk-notice bar — title, fee
+   line, consent row. */
+.bk-fee-card {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 16px;
+}
+/* The consent label opts INTO the shared bk-checkbox row (exempt from the
+   global .bk-stage label rules) and modifies it for a wrapping sentence:
+   top-aligned box, normal-weight text — never a bold mini field label. */
+.bk-checkbox.bk-fee-accept {
+  align-items: flex-start;
+  margin: 0;
+  font-weight: 400;
+}
+.bk-checkbox.bk-fee-accept input {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.bk-checkbox.bk-fee-accept span {
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+/* Why a consent-gated submit is waiting (paired to the button via
+   aria-describedby). */
+.bk-fee-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: var(--bk-gold-700);
+}
+
+/* Link-styled button for in-place toggles (sign-in panel, account-mode swap). */
+.bk-linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Inline returning-client sign-in panel (flow-start notice + account step). */
+.bk-signin-inline {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  text-align: left;
+}

@@ -8,7 +8,7 @@
 // account exists yet).
 import { NextResponse } from 'next/server'
 import '@exsto/legal/mcp'
-import { stageIntakeLead, resolveServiceFeeQuote } from '@exsto/legal'
+import { stageIntakeLead, resolveServiceFeeQuote, resolvePortalActorId } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { verifyCaptchaIfConfigured } from '@/lib/captcha'
@@ -77,11 +77,22 @@ export async function POST(request: Request) {
     } catch {
       quote = null
     }
+    // Known-email detection: an active portal actor on the staged contact means
+    // this prospect already has an account, so the account step can lead with
+    // sign-in instead of a doomed create. Disclosure is bounded — finalize
+    // already returns accountExisted post-submit — and the copy stays neutral.
+    let hasPortalAccount = false
+    try {
+      hasPortalAccount = (await resolvePortalActorId(TENANT_ID, staged.clientEntityId)) != null
+    } catch {
+      hasPortalAccount = false
+    }
     return NextResponse.json({
       ok: true,
       staged: true,
       leadId: staged.questionnaireEntityId,
       quote,
+      hasPortalAccount,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
