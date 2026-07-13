@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { ConfigEditModal } from '@/components/ConfigEditModal'
-import { jsonEditor } from '@/components/configEditors'
+import { ServiceEditorModal } from '@/components/ServiceEditorModal'
 import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 
 // CONSTRAINT (mirrors WorkflowProposalCard): no server-package imports. This shape
@@ -203,30 +202,29 @@ export function ServiceProposalCard({
         </div>
       )}
       {editing && (
-        <ConfigEditModal
-          artifactKind="workflow"
-          targetId={`proposal:${current.derivedKey}`}
+        <ServiceEditorModal
           title={`Edit proposed service — ${current.displayName}`}
-          initialContent={JSON.stringify(
-            {
-              displayName: current.displayName,
-              description: current.description,
-              clientDisplayName: current.clientDisplayName ?? null,
-              clientDescription: current.clientDescription ?? null,
-              route: current.route,
-              generationMode: current.generationMode,
-              appointmentRequired: current.appointmentRequired,
-            },
-            null,
-            2,
-          )}
-          renderView={(content) => <pre style={{ whiteSpace: 'pre-wrap' }}>{content}</pre>}
-          renderEdit={jsonEditor}
-          aiRegenerate={false}
-          saveLabel="Save"
-          onSave={async (content) => {
-            const next = JSON.parse(content) as Partial<ServiceProposal>
-            setCurrent((c) => ({ ...c, ...next }))
+          initialValue={{
+            displayName: current.displayName,
+            route: current.route,
+            clientDisplayName: current.clientDisplayName ?? '',
+            clientDescription: current.clientDescription ?? '',
+            description: current.description ?? '',
+            generationMode: current.generationMode,
+            appointmentRequired: current.appointmentRequired ?? true,
+          }}
+          onSave={(next) => {
+            // Save updates the CARD (in-memory); nothing is written until Approve.
+            setCurrent((c) => ({
+              ...c,
+              displayName: next.displayName,
+              route: next.route,
+              clientDisplayName: next.clientDisplayName || null,
+              clientDescription: next.clientDescription || null,
+              description: next.description || null,
+              generationMode: next.generationMode,
+              appointmentRequired: next.appointmentRequired,
+            }))
             onEdited?.(`service shell "${current.displayName}"`)
           }}
           onClose={() => setEditing(false)}

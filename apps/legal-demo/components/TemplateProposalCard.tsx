@@ -4,8 +4,7 @@ import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
-import { ConfigEditModal } from '@/components/ConfigEditModal'
-import { jsonEditor } from '@/components/configEditors'
+import { TemplateEditorModal } from '@/components/TemplateEditorModal'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
@@ -253,18 +252,12 @@ export function TemplateProposalCard({
         </div>
       )}
       {editing && (
-        <ConfigEditModal
-          artifactKind="template"
-          targetId={`proposal:${proposal.serviceKey}`}
+        <TemplateEditorModal
           title={`Edit proposed template — ${proposal.name}`}
-          initialContent={currentBody}
-          renderView={(content) => <TemplatePreview body={content} />}
-          renderEdit={jsonEditor}
-          aiRegenerate={false}
-          saveLabel="Save"
-          onSave={async (content) => {
-            // Save updates the CARD; nothing is written until Approve.
-            setCurrentBody(content)
+          initialBody={currentBody}
+          onSave={(body) => {
+            // Save updates the CARD (in-memory); nothing is written until Approve.
+            setCurrentBody(body)
             onEdited?.(`template "${proposal.name}" for "${proposal.serviceKey}"`)
           }}
           onClose={() => setEditing(false)}

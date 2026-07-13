@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { ServiceSettingsFields } from '@/components/ServiceSettingsFields'
 
 type GenerationMode = 'template_merge' | 'ai_draft'
 type BookingDuration = 15 | 30 | 45 | 60
@@ -233,91 +234,36 @@ export default function ServiceSettingsPage() {
         </div>
       ) : (
         <section>
-          <div className="form-grid">
-            <label>
-              <span>Display name</span>
-              <input
-                value={form.displayName}
-                onChange={(e) => update('displayName', e.target.value)}
-                placeholder="e.g. NC LLC — Single-Member Formation"
-              />
-            </label>
-            <label>
-              <span>Workflow route</span>
-              <select
-                value={form.route}
-                onChange={(e) => update('route', e.target.value as 'auto' | 'manual')}
-              >
-                <option value="manual">Manual — attorney drafts</option>
-                <option value="auto">Attorney in the loop — auto-drafts on intake</option>
-              </select>
-            </label>
-          </div>
-          {/* BUILDER-UX-1 WP-1.3: the client-facing copy the booking tile shows,
-              edited here with helper text; kept distinct from the internal
-              description below. */}
-          <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-            <span>Client-facing name</span>
-            <input
-              value={form.clientDisplayName}
-              onChange={(e) => update('clientDisplayName', e.target.value)}
-              placeholder="e.g. Last Will & Testament"
-            />
-            <small className="text-muted">
-              What the client sees on the booking page (outcome, no jurisdiction/jargon).
-            </small>
-          </label>
-          <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-            <span>Client-facing description</span>
-            <textarea
-              value={form.clientDescription}
-              onChange={(e) => update('clientDescription', e.target.value)}
-              rows={2}
-              placeholder="e.g. Have an attorney review your NDA agreement."
-            />
-            <small className="text-muted">
-              What the client sees — one plain sentence in second person.
-            </small>
-          </label>
-          <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-            <span>Internal description</span>
-            <textarea
-              value={form.description}
-              onChange={(e) => update('description', e.target.value)}
-              rows={2}
-              placeholder="Attorney-facing notes about this service (not shown to clients)."
-            />
-            <small className="text-muted">
-              Attorney-facing; the booking page uses the client-facing copy above.
-            </small>
-          </label>
-
-          <fieldset className="svc-fieldset">
-            <legend>Document generation</legend>
-            <label>
-              <span>How documents are produced</span>
-              <select
-                value={form.generationMode}
-                onChange={(e) => update('generationMode', e.target.value as GenerationMode)}
-              >
-                <option value="template_merge">
-                  Template merge — fill the template from the answers (no AI)
-                </option>
-                <option value="ai_draft">AI draft — the assistant writes the document</option>
-              </select>
-            </label>
-            <p
-              style={{
-                color: 'var(--muted)',
-                fontSize: 'var(--text-sm)',
-                margin: 'var(--space-2) 0 0',
-              }}
-            >
-              {form.generationMode === 'ai_draft'
-                ? 'AI draft uses the per-document instructions on the Prompt tab.'
-                : 'Template merge fills the bodies on the Templates tab — no Prompt tab needed.'}
-            </p>
-          </fieldset>
+          {/* BUILDER-UX-2 WP-2: the identity + client-copy + generation fields are the
+              SHARED ServiceSettingsFields — the same form the wizard's ServiceEditorModal
+              renders (one editor, no fork). The booking-schedule fieldset below is
+              page-only. */}
+          <ServiceSettingsFields
+            value={{
+              displayName: form.displayName,
+              route: form.route,
+              clientDisplayName: form.clientDisplayName,
+              clientDescription: form.clientDescription,
+              description: form.description,
+              generationMode: form.generationMode,
+              appointmentRequired: form.appointmentRequired,
+            }}
+            onChange={(next) =>
+              setForm((f) =>
+                f
+                  ? {
+                      ...f,
+                      displayName: next.displayName,
+                      route: next.route,
+                      clientDisplayName: next.clientDisplayName,
+                      clientDescription: next.clientDescription,
+                      description: next.description,
+                      generationMode: next.generationMode,
+                    }
+                  : f,
+              )
+            }
+          />
 
           <fieldset className="svc-fieldset">
             <legend>Bookings</legend>
