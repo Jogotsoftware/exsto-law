@@ -7,6 +7,7 @@
 // for a service's fee model; the host decides what Save persists.
 import { useState } from 'react'
 import { Modal } from '@/components/Modal'
+import { EditorActionRow } from '@/components/EditorActionRow'
 import { AiRegenerateRail } from '@/components/AiRegenerateRail'
 import { BillingView } from '@/components/configEditors'
 
@@ -139,41 +140,28 @@ export function CostEditorModal({
 
   return (
     <Modal title={title} onClose={onClose} size="wide">
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 12,
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-        }}
-      >
-        <button type="button" className="button" onClick={onClose} disabled={busy}>
-          Cancel
-        </button>
-        <button type="button" className="button button-primary" onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-      {error && (
-        <div role="alert" className="alert alert-error" style={{ marginBottom: 10 }}>
-          {error}
-        </div>
-      )}
-      {regenerateTargetId && (
-        <AiRegenerateRail
-          artifactKind="billing"
-          targetId={regenerateTargetId}
-          current={() => JSON.stringify(value, null, 2)}
-          renderProposal={(proposed) => <BillingView content={proposed} />}
-          onUse={(proposed) => {
-            const next = JSON.parse(proposed) as Partial<CostValue>
-            if (!next || (next.costType !== 'fixed' && next.costType !== 'hourly'))
-              throw new Error('The AI proposal is not a billing config.')
-            setValue((v) => ({ ...v, ...next }))
-          }}
-        />
-      )}
+      <EditorActionRow
+        busy={busy}
+        error={error}
+        onCancel={onClose}
+        onSave={save}
+        ai={
+          regenerateTargetId ? (
+            <AiRegenerateRail
+              artifactKind="billing"
+              targetId={regenerateTargetId}
+              current={() => JSON.stringify(value, null, 2)}
+              renderProposal={(proposed) => <BillingView content={proposed} />}
+              onUse={(proposed) => {
+                const next = JSON.parse(proposed) as Partial<CostValue>
+                if (!next || (next.costType !== 'fixed' && next.costType !== 'hourly'))
+                  throw new Error('The AI proposal is not a billing config.')
+                setValue((v) => ({ ...v, ...next }))
+              }}
+            />
+          ) : undefined
+        }
+      />
       <CostForm value={value} onChange={setValue} />
     </Modal>
   )

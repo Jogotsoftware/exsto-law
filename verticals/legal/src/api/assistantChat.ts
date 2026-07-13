@@ -59,7 +59,7 @@ import {
 } from './buildSession.js'
 import { isOpenChatSession, startChatSession } from './chatSession.js'
 import { containsMachinery, stripMachinerySpans } from './assistantMachinery.js'
-import { collapseRoundStutter, framingSentenceForCardTurn } from './replyAssembly.js'
+import { collapseRoundStutter, framingSentenceForCards } from './replyAssembly.js'
 import {
   buildQuestionnaireContextTool,
   buildProposeQuestionnaireTool,
@@ -199,7 +199,9 @@ export type AssistantChatStreamEvent =
   // A non-fatal warning worth showing the attorney (e.g. the tool-round cap cut a
   // pending step off). Distinct from 'error' — the reply that streamed is still
   // good; the client must render the warning WITHOUT failing/retrying the turn.
-  | { type: 'notice'; message: string }
+  // `tone` (BUILDER-UX-3 P3) is optional and defaults to 'warning' (the amber box);
+  // 'status' is a muted, transient progress line (e.g. a compose retry underway).
+  | { type: 'notice'; message: string; tone?: 'status' | 'warning' }
   // The assistant produced a finished document — the UI shows it as a downloadable
   // card (PDF/Word + save to matter), separate from the prose reply.
   | { type: 'document'; title: string; markdown: string }
@@ -623,7 +625,14 @@ export function buildAttorneyClientTools(
   // gets propose_workflow for free without a second registration.
   tools.push(buildWorkflowContextTool(ctx))
   tools.push(
-    buildProposeWorkflowTool(ctx, capture.workflowProposals, capture.failedWorkflowAttempts),
+    // costProposals threaded in (BUILDER-UX-3 P4): a billing proposal captured
+    // earlier this turn satisfies the compose-time billing check and pre-gate.
+    buildProposeWorkflowTool(
+      ctx,
+      capture.workflowProposals,
+      capture.failedWorkflowAttempts,
+      capture.costProposals,
+    ),
   )
   // WP-H2: open a real editor on an EXISTING artifact from chat (unflagged —
   // editing what already exists is standalone, like workflow authoring above).
@@ -744,7 +753,7 @@ export function buildClaudeSystem(
     // non-negotiable behaviors as a safety net; the skill carries the full playbook,
     // the worked example, the build order, and the data-as-schema / capability rules.
     system +=
-      '\n\nBUILDING A WHOLE SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a whole new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service"), the firm-admin.build-service skill is your AUTHORITATIVE PLAYBOOK: load_skill it and FOLLOW IT — the doctrine, the process-first interview, the build order (shell → documents → questionnaire → workflow → billing → enable), when you may propose a new data kind vs. request a capability, and how to finish. Do not improvise the flow from memory. Three behaviors hold no matter what: ' +
+      '\n\nBUILDING A WHOLE SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a whole new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service"), the firm-admin.build-service skill is your AUTHORITATIVE PLAYBOOK: load_skill it and FOLLOW IT — the doctrine, the process-first interview, the build order (shell → documents → questionnaire → billing → workflow → enable), when you may propose a new data kind vs. request a capability, and how to finish. Do not improvise the flow from memory. Three behaviors hold no matter what: ' +
       '(1) EVERY interview question goes through the ask_build_question tool (a click-to-answer card), NEVER free-text prose. Open with the attorney describing their process in their own words; DERIVE the platform choices (how automated the service is, how documents are produced, the gates) from that walkthrough and present them as plain-language CONFIRMATIONS to click, never as open questions. Never silently default a derived choice — confirm it. ' +
       '(2) NEVER use platform vocabulary with the attorney — no "route", "generation_mode", "kind", "gate", "entity" in any question or confirmation; say it in attorney language ("the draft comes to you before the client sees it — right?") and translate to the schema silently inside the proposal. ' +
       '(3) DO NOT NARRATE your process — run reads/lookups silently, and keep your OWN prose to at most ONE short sentence per turn (the questions and proposals live in the cards, never duplicated in text). Before building from scratch, REUSE first: check the capability library (get_capability_context) and existing kinds (get_kind_context) so you wire in what the platform already does rather than reinventing it. ' +
@@ -1090,6 +1099,18 @@ async function recordToolCapObservation(ctx: ActionContext, pendingTools: string
   }
 }
 
+// BUILDER-UX-3 (P3) — what the ATTORNEY sees when a turn exhausts its
+// propose_workflow attempts. Plain English only: the raw validator text keeps
+// flowing to the MODEL (the corrective retry loop) and into the
+// workflow_proposal_failed observation (telemetry) — never into the transcript.
+// Both paths persist this same line so streamed and non-streamed transcripts match.
+const WORKFLOW_EXHAUST_NOTICE =
+  "I couldn't finish the workflow — want me to try a simpler structure?"
+
+// P3 — the muted, transient status line while the model takes its corrective pass
+// after the FIRST propose_workflow failure of a turn (tone 'status', never amber).
+const WORKFLOW_RETRY_NOTICE = 'Taking another pass at the workflow…'
+
 // WORKFLOW-AUTHORING-1 WP3 — queryable signal when a turn tried propose_workflow
 // and never landed a valid graph (honest-failure telemetry, mirrors
 // recordToolCapObservation). Never fails the turn.
@@ -1273,6 +1294,8 @@ export async function assistantChat(
     // WP-D4: a wizard card turn persists ONE framing sentence (the stream path
     // collapses per-round; here the rounds are already concatenated, so the
     // first sentence is the framing by construction — pre-tool text leads).
+    // P5 (BUILDER-UX-3): the sentence is kept only when it names a card this turn
+    // actually emitted; otherwise the card's own deterministic label replaces it.
     const cardCount =
       workflowProposals.length +
       serviceProposals.length +
@@ -1284,7 +1307,16 @@ export async function assistantChat(
       kindProposals.length
     reply =
       input.buildMode && cardCount > 0
-        ? framingSentenceForCardTurn([result.reply])
+        ? framingSentenceForCards([result.reply], {
+            question: buildQuestions.length,
+            kind: kindProposals.length,
+            service: serviceProposals.length,
+            template: templateProposals.length,
+            questionnaire: questionnaireProposals.length,
+            cost: costProposals.length,
+            workflow: workflowProposals.length,
+            enable: enableProposals.length,
+          })
         : collapseRoundStutter(result.reply)
     citations = result.citations
     usage = result.usage
@@ -1296,8 +1328,10 @@ export async function assistantChat(
     }
     // WORKFLOW-AUTHORING-1 WP3 — a workflow that never landed a valid proposal must
     // say so, never render as silent success or a bare apology (honest failure).
+    // P3 (BUILDER-UX-3): the attorney gets plain English only — the raw validator
+    // text lives in the workflow_proposal_failed observation, never the transcript.
     if (!workflowProposals.length && failedWorkflowAttempts.length) {
-      reply += `\n\n⚠️ I couldn't compose a valid workflow — here's what's blocking it:\n${failedWorkflowAttempts[failedWorkflowAttempts.length - 1]}`
+      reply += reply ? `\n\n${WORKFLOW_EXHAUST_NOTICE}` : WORKFLOW_EXHAUST_NOTICE
       await recordWorkflowProposalFailedObservation(ctx, failedWorkflowAttempts)
     }
     // WP9: if the reply parroted internal machinery, record it (measurable card-leak).
@@ -1467,6 +1501,10 @@ export async function* assistantChatStream(
   // pre-tool framing sentence deterministically (rounds are delimited by tool
   // calls; the framing sentence is round 0's text).
   const roundTexts: string[] = ['']
+  // P3 (BUILDER-UX-3) — one soft status line per turn while the model retries a
+  // failed propose_workflow; emitted from the NEXT chunk so it only shows when
+  // the model loop actually continued past the failure.
+  let workflowRetryNoticed = false
   const cardsCapturedSoFar = (): number =>
     workflowProposals.length +
     serviceProposals.length +
@@ -1539,6 +1577,12 @@ export async function* assistantChatStream(
         editorLaunches,
       }),
     })) {
+      // P3 — the first propose_workflow failure of the turn gets a muted status
+      // line while the corrective pass runs (tone 'status': not an amber warning).
+      if (!workflowRetryNoticed && !workflowProposals.length && failedWorkflowAttempts.length) {
+        workflowRetryNoticed = true
+        yield { type: 'notice', message: WORKFLOW_RETRY_NOTICE, tone: 'status' }
+      }
       // WP-D4: a tool call ends the current text round (only if it had text —
       // consecutive tool calls don't mint empty rounds).
       if (chunk.type === 'tool' && roundTexts[roundTexts.length - 1]!.trim()) {
@@ -1604,12 +1648,11 @@ export async function* assistantChatStream(
       }
     }
     // WORKFLOW-AUTHORING-1 WP3 — tried and never landed a valid workflow: an honest
-    // failure notice, never silent (mirrors the tool_cap notice above).
+    // failure notice, never silent (mirrors the tool_cap notice above). P3
+    // (BUILDER-UX-3): plain English only — the raw validator text lives in the
+    // workflow_proposal_failed observation, never in anything the attorney reads.
     if (!workflowProposals.length && failedWorkflowAttempts.length) {
-      yield {
-        type: 'notice',
-        message: `I couldn't compose a valid workflow — here's what's blocking it: ${failedWorkflowAttempts[failedWorkflowAttempts.length - 1]}`,
-      }
+      yield { type: 'notice', message: WORKFLOW_EXHAUST_NOTICE }
       await recordWorkflowProposalFailedObservation(ctx, failedWorkflowAttempts)
     }
     // Surface validated new-service proposals captured this turn (Build-Wizard
@@ -1735,9 +1778,20 @@ export async function* assistantChatStream(
   // WP-D4 (HARDENING-RESIDUALS-1): a wizard turn that rendered a card persists
   // exactly ONE framing sentence — the pre-tool framing wins, every post-tool
   // text round is dropped (deterministic; no similarity heuristics). Non-card
-  // turns keep the item-8 stutter collapse.
+  // turns keep the item-8 stutter collapse. P5 (BUILDER-UX-3): the sentence is
+  // kept only when it names a card this turn actually emitted; otherwise the
+  // card's own deterministic label replaces it.
   if (input.buildMode && cardsCapturedSoFar() > 0) {
-    reply = framingSentenceForCardTurn(roundTexts)
+    reply = framingSentenceForCards(roundTexts, {
+      question: buildQuestions.length,
+      kind: kindProposals.length,
+      service: serviceProposals.length,
+      template: templateProposals.length,
+      questionnaire: questionnaireProposals.length,
+      cost: costProposals.length,
+      workflow: workflowProposals.length,
+      enable: enableProposals.length,
+    })
   } else {
     // Item 8 (UI-BUILDER-FIX-1): a multi-round tool turn can restate its framing
     // sentence after the tool result ("Here's the pricing to approve." → tool →
@@ -1746,6 +1800,13 @@ export async function* assistantChatStream(
     // restatement wins. (The live stream already paragraph-breaks rounds; this
     // fixes the committed/persisted text, which is what re-renders from history.)
     reply = collapseRoundStutter(reply)
+  }
+
+  // P3 — persist the same soft exhaust line the non-streaming path bakes into its
+  // reply, so the two paths' transcripts stay consistent. AFTER the card-turn
+  // collapse above, which rebuilds `reply` from the text rounds.
+  if (!workflowProposals.length && failedWorkflowAttempts.length) {
+    reply += reply ? `\n\n${WORKFLOW_EXHAUST_NOTICE}` : WORKFLOW_EXHAUST_NOTICE
   }
 
   // WP9: if the streamed reply parroted internal machinery, record it (measurable).

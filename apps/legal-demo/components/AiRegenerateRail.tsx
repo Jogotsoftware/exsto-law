@@ -137,10 +137,10 @@ export function AiRegenerateRail({
   }
 
   return (
-    <div style={{ marginBottom: 10 }}>
+    <div>
       <button
         type="button"
-        className="button"
+        className="button editor-ai-trigger"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >

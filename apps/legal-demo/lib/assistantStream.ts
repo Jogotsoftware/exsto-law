@@ -195,7 +195,9 @@ export interface AssistantStreamHandlers {
   onSkill?: (skill: { slug: string; name: string }) => void
   // A non-fatal warning worth showing (e.g. the tool-round cap cut a step off).
   // Distinct from onError: the streamed reply is good and must not be retried.
-  onNotice?: (message: string) => void
+  // tone 'warning' (the default) is the amber box; 'status' is a muted, transient
+  // progress line (e.g. a workflow-compose retry underway).
+  onNotice?: (message: string, tone?: 'status' | 'warning') => void
   // The assistant produced a downloadable document (a deliverable, not the prose).
   onDocument?: (doc: { title: string; markdown: string }) => void
   // The assistant proposed a service workflow (PR5) — render an approval card.
@@ -293,7 +295,7 @@ export async function streamAssistant(
         handlers.onSkill?.({ slug: String(evt.slug ?? ''), name: String(evt.name ?? '') })
         break
       case 'notice':
-        handlers.onNotice?.(String(evt.message ?? ''))
+        handlers.onNotice?.(String(evt.message ?? ''), evt.tone === 'status' ? 'status' : 'warning')
         break
       case 'document':
         handlers.onDocument?.({

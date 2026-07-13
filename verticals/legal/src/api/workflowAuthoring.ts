@@ -37,6 +37,7 @@ import {
 } from '../lifecycle/index.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
 import { getService } from './services.js'
+import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 import { listStandaloneTemplates } from '../queries/templates.js'
 import { listWorkflowStepTemplates } from '../queries/workflowStepLibrary.js'
 import { listCapabilities, type Capability } from '../queries/capabilities.js'
@@ -187,7 +188,8 @@ export function collectReferencedTemplateIds(graph: Lifecycle): string[] {
 // Does this stage PRODUCE a document (and so bear a potential fee)? The two
 // document-producing step shapes: the legacy generate_document kind and an
 // invoke_capability stage running document_generation (CAPABILITY-UNIFY-1).
-function isDocumentProducingStage(s: Lifecycle[number]): boolean {
+// Exported for the propose tool's compose-ordering pre-gate (BUILDER-UX-3 P4).
+export function isDocumentProducingStage(s: Lifecycle[number]): boolean {
   if (s.action?.kind === 'generate_document') return true
   if (s.action?.kind === 'invoke_capability') {
     const cfg = (s.action.config ?? {}) as { capability_slug?: string }
@@ -238,10 +240,24 @@ function producingStageTemplateIds(s: Lifecycle[number]): string[] {
 //     validation (no service context) skips just the fee lookup, not the completion
 //     check. Authoring-only, like every check here: existing saved definitions keep
 //     validating and running.
+//
+// BUILDER-UX-3 (P4) — `pendingBilling` is a billing proposal captured EARLIER IN THE
+// SAME TURN (propose_cost is capture-only; nothing persists until the attorney
+// approves the cost card). Compose-time validation may accept it as the billing
+// declaration so the doctrine order billing-then-workflow works within one turn.
+// Every other caller omits it and stays strict — in particular setServiceLifecycleAI
+// (the approve write path) re-validates against PERSISTED state only, so a workflow
+// physically cannot persist before its cost approve has landed.
+export interface PendingBilling {
+  costType: 'fixed' | 'hourly'
+  documentFees?: Record<string, string>
+}
+
 export async function validateProposedLifecycle(
   ctx: ActionContext,
   graph: Lifecycle,
   serviceKey?: string,
+  pendingBilling?: PendingBilling,
 ): Promise<{ ok: boolean; errors: string[]; warnings: string[] }> {
   const errors: string[] = []
   const warnings: string[] = []
@@ -269,9 +285,17 @@ export async function validateProposedLifecycle(
     // completion (legal.service.complete). Only a producing workflow with NO fees,
     // NO invoice step, and NO flat fee produces work nobody ever bills. (Hourly
     // does not count here: nothing accrues unless time is recorded and invoiced,
-    // so hourly document-producing services still need an invoice step.)
-    const hasFixedFee = svc?.cost?.type === 'fixed'
-    if (producingStages.length > 0 && !hasInvoiceStep && feeKinds.length === 0 && !hasFixedFee) {
+    // so hourly document-producing services still need an invoice step.) A same-turn
+    // pending cost/fee proposal (P4) satisfies this check at COMPOSE time only.
+    const pendingFeeKinds = Object.keys(pendingBilling?.documentFees ?? {})
+    const hasFixedFee = svc?.cost?.type === 'fixed' || pendingBilling?.costType === 'fixed'
+    if (
+      producingStages.length > 0 &&
+      !hasInvoiceStep &&
+      feeKinds.length === 0 &&
+      pendingFeeKinds.length === 0 &&
+      !hasFixedFee
+    ) {
       errors.push(
         `the workflow produces a document (stage "${producingStages[0]!.key}") but declares no billing — set the service's per-document fees (transitions.document_fees, accrued when the document is approved), or a flat service fee (accrued at completion), or add an approve_send_invoice step to the graph.`,
       )
@@ -517,11 +541,30 @@ export async function setServiceLifecycleAI(
     throw new Error(`Invalid workflow lifecycle: ${validation.errors.join('; ')}`)
   }
 
+  // BUILDER-UX-3 (P6) — the reasoning-trace conclusion keeps the computed billing
+  // read-out (BUILDER-CERT-1 WP1's receipt) even though the card summary no longer
+  // restates it: re-appended HERE, in the core write path, so it is server-computed
+  // at approve time from the persisted billing — never model prose, never
+  // card-visible copy. Best-effort: a readout failure must not block the approve.
+  let tracedReasoning = reasoning
+  try {
+    const readout = await computeBillingReadout(ctx, serviceKey, { graph })
+    if (readout) {
+      const conclusion = reasoning.conclusion?.trim() || `Authored a workflow for ${serviceKey}.`
+      tracedReasoning = {
+        ...reasoning,
+        conclusion: `${conclusion} ${formatBillingReadout(readout)}`,
+      }
+    }
+  } catch {
+    // trace keeps the model's conclusion alone
+  }
+
   // The write is AS THE AGENT, not the attorney — the trace, the action source, and
   // the configuration_change all attribute the authoring to the Claude agent actor,
   // exactly like generateDraft.runDraftGeneration.
   const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
-  const reasoningTraceId = await persistReasoningTrace(agentCtx, serviceKey, graph, reasoning)
+  const reasoningTraceId = await persistReasoningTrace(agentCtx, serviceKey, graph, tracedReasoning)
 
   const res = await submitAction(agentCtx, {
     actionKindName: 'legal.service.set_lifecycle',

@@ -26,7 +26,7 @@ import type { ServiceCostType } from './services.js'
 const PROPOSE_COST_TOOL_DEF = {
   name: 'propose_cost',
   description:
-    "Propose the BILLING (fee model) for a service for the attorney to review and APPROVE. This does NOT save anything — it captures the proposal so the attorney sees it as an approval card; the cost is written only when they approve. Use this AFTER the workflow, once you've asked the attorney how they price the work: 'fixed' (a flat fee — amount is the total) or 'hourly' (amount is the rate; optionally include an estimate of hours). Money is a decimal string like '350.00'. Call this ONLY when you have the attorney's price; put the proposal ONLY in this tool call, not in your chat reply.",
+    "Propose the BILLING (fee model) for a service for the attorney to review and APPROVE. This does NOT save anything — it captures the proposal so the attorney sees it as an approval card; the cost is written only when they approve. Use this BEFORE proposing the workflow (a document-producing workflow validates against the declared billing, so the billing must be settled first), once you've asked the attorney how they price the work: 'fixed' (a flat fee — amount is the total) or 'hourly' (amount is the rate; optionally include an estimate of hours). Money is a decimal string like '350.00'. Call this ONLY when you have the attorney's price; put the proposal ONLY in this tool call, not in your chat reply.",
   input_schema: {
     type: 'object',
     properties: {

@@ -116,17 +116,19 @@ function orderStages(graph: WfLifecycle): WfStage[] {
   return ordered
 }
 
-// A simple diff of the proposed graph vs the current one: which step labels are
-// added, removed, or reordered. Keyed by label (the attorney-facing name) since the
-// proposal may slug fresh keys — labels are what the attorney recognises.
+// A simple diff of the proposed graph vs the current one: which step labels were
+// removed, and whether steps were reordered. Keyed by label (the attorney-facing
+// name) since the proposal may slug fresh keys — labels are what the attorney
+// recognises. Added steps are NOT surfaced (BUILDER-UX-3 P7): they are already
+// visible in the step list below, so the "Added:" comma-run only duplicated it;
+// removed steps are the one diff fact the list can't show.
 interface GraphDiff {
-  added: string[]
   removed: string[]
   reordered: boolean
 }
 function diffGraphs(current: WfLifecycle | null, proposed: WfLifecycle): GraphDiff {
+  if (!current) return { removed: [], reordered: false }
   const proposedLabels = orderStages(proposed).map((s) => s.label)
-  if (!current) return { added: proposedLabels, removed: [], reordered: false }
   const currentLabels = orderStages(current).map((s) => s.label)
   const curSet = new Set(currentLabels)
   const propSet = new Set(proposedLabels)
@@ -137,7 +139,7 @@ function diffGraphs(current: WfLifecycle | null, proposed: WfLifecycle): GraphDi
   const commonProp = proposedLabels.filter((l) => curSet.has(l))
   const reordered =
     added.length === 0 && removed.length === 0 && commonCur.join('|') !== commonProp.join('|')
-  return { added, removed, reordered }
+  return { removed, reordered }
 }
 
 // The inline approval card for an AI-proposed service workflow (PR5). It is the
@@ -276,7 +278,16 @@ export function WorkflowProposalCard({
       }
     } catch (e) {
       setApproveState('error')
-      setApproveError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      // BUILDER-UX-3 (P4): compose-time validation accepts a same-turn pending
+      // cost, so this card can render alongside a not-yet-approved pricing card —
+      // the write path stays strict. Approving out of order surfaces the
+      // validator's billing rejection; say what to do instead of leaking it.
+      setApproveError(
+        /declares no billing/i.test(msg)
+          ? 'Approve the pricing card first, then approve this workflow.'
+          : msg,
+      )
     }
   }
 
@@ -297,14 +308,11 @@ export function WorkflowProposalCard({
         </div>
       )}
 
-      {/* Diff vs the current workflow. */}
-      {(diff.added.length > 0 || diff.removed.length > 0 || diff.reordered) && (
+      {/* Diff vs the current workflow — removed/reordered only: removed steps
+          don't render in the step list below, so they must be said here; added
+          steps are the list itself (P7). */}
+      {(diff.removed.length > 0 || diff.reordered) && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-          {diff.added.length > 0 && (
-            <div>
-              <strong>Added:</strong> {diff.added.join(', ')}
-            </div>
-          )}
           {diff.removed.length > 0 && (
             <div>
               <strong>Removed:</strong> {diff.removed.join(', ')}

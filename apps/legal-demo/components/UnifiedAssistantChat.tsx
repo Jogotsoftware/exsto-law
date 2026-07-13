@@ -139,7 +139,15 @@ interface DisplayTurn {
   reasoning?: string
   // Non-fatal warnings surfaced on this turn (e.g. the tool-round cap cut a pending
   // step off) — rendered as a visible notice line, never as a turn failure (WP5.1).
-  notices?: string[]
+  notices?: TurnNotice[]
+}
+
+// A non-fatal notice on a turn (BUILDER-UX-3 P3). tone 'warning' (the default)
+// renders the amber box; 'status' is a muted progress line ("Taking another
+// pass…") — transient: shown live while streaming, dropped when the turn commits.
+interface TurnNotice {
+  message: string
+  tone: 'status' | 'warning'
 }
 
 // One legal skill (playbook) the attorney can pick from the /skills menu.
@@ -651,7 +659,7 @@ export function UnifiedAssistantChat({
     enableProposals: EnableProposal[]
     buildQuestions: BuildQuestionEvent[]
     kindProposals: KindProposal[]
-    notices: string[]
+    notices: TurnNotice[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -1447,7 +1455,7 @@ export function UnifiedAssistantChat({
       enableProposals: [] as EnableProposal[],
       buildQuestions: [] as BuildQuestionEvent[],
       kindProposals: [] as KindProposal[],
-      notices: [] as string[],
+      notices: [] as TurnNotice[],
     }
     setStreaming({ ...partial })
     let finished = false
@@ -1552,11 +1560,14 @@ export function UnifiedAssistantChat({
               if (s.slug && !partial.skills.some((x) => x.slug === s.slug)) partial.skills.push(s)
               setStreaming({ ...partial, skills: [...partial.skills] })
             },
-            onNotice: (m) => {
+            onNotice: (m, tone) => {
               if (!live()) return
               // A non-fatal warning (e.g. the tool-round cap) — shown on the turn,
               // never treated as a failure (that would trigger a full regenerate).
-              if (m) partial.notices.push(m)
+              // tone 'status' renders muted (a progress line), 'warning' amber.
+              if (m) {
+                partial.notices.push({ message: m, tone: tone === 'status' ? 'status' : 'warning' })
+              }
               setStreaming({ ...partial, notices: [...partial.notices] })
             },
             onDocument: (doc) => {
@@ -1648,7 +1659,11 @@ export function UnifiedAssistantChat({
                   // Relocate the reasoning the "Thinking…" indicator streamed live into
                   // the committed turn's expandable disclosure — not destroyed, moved.
                   reasoning: partial.thinking.trim() || undefined,
-                  historyContent: assistantHistoryContent(d.reply, partial),
+                  // notices carry tone objects now — history only counts them.
+                  historyContent: assistantHistoryContent(d.reply, {
+                    ...partial,
+                    notices: partial.notices.map((n) => n.message),
+                  }),
                   citations: d.citations,
                   model: d.model,
                   documents: partial.documents.length ? partial.documents : undefined,
@@ -1672,7 +1687,16 @@ export function UnifiedAssistantChat({
                     ? partial.buildQuestions
                     : undefined,
                   kindProposals: partial.kindProposals.length ? partial.kindProposals : undefined,
-                  notices: partial.notices.length ? partial.notices : undefined,
+                  // Status-tone notices are transient progress lines — dropped on
+                  // commit. A warning whose text the server also persisted into the
+                  // reply (the workflow-exhaust line) is dropped too: the committed
+                  // text already says it, and two renders of one line read as a bug.
+                  notices: (() => {
+                    const kept = partial.notices.filter(
+                      (n) => n.tone === 'warning' && !d.reply.includes(n.message),
+                    )
+                    return kept.length ? kept : undefined
+                  })(),
                 },
               ])
               setStreaming(null)
@@ -1759,7 +1783,10 @@ export function UnifiedAssistantChat({
         {
           role: 'assistant',
           content: partial.text || (hasCards ? '' : '(no response)'),
-          historyContent: assistantHistoryContent(partial.text, partial),
+          historyContent: assistantHistoryContent(partial.text, {
+            ...partial,
+            notices: partial.notices.map((n) => n.message),
+          }),
           model: modelId,
           documents: partial.documents.length ? partial.documents : undefined,
           workflowProposals: partial.workflowProposals.length
@@ -1776,7 +1803,12 @@ export function UnifiedAssistantChat({
           enableProposals: partial.enableProposals.length ? partial.enableProposals : undefined,
           buildQuestions: partial.buildQuestions.length ? partial.buildQuestions : undefined,
           kindProposals: partial.kindProposals.length ? partial.kindProposals : undefined,
-          notices: partial.notices.length ? partial.notices : undefined,
+          // Dropped stream: no server reply landed, so warnings keep their box;
+          // status-tone progress lines stay transient here too.
+          notices: (() => {
+            const kept = partial.notices.filter((n) => n.tone === 'warning')
+            return kept.length ? kept : undefined
+          })(),
         },
       ])
     }
@@ -2612,23 +2644,35 @@ export function UnifiedAssistantChat({
                     <QuestionBatch questions={t.buildQuestions} onAnswer={handleQuestionAnswer} />
                   )}
                   {/* Non-fatal warnings (e.g. the tool-round cap cut a step off) —
-                    visible on the turn, never rendered as a failure (WP5.1). */}
-                  {t.notices?.map((n, ni) => (
-                    <div
-                      key={ni}
-                      role="status"
-                      style={{
-                        marginTop: 8,
-                        padding: '6px 10px',
-                        borderRadius: 8,
-                        fontSize: 13,
-                        background: 'rgba(245, 158, 11, 0.12)',
-                        border: '1px solid rgba(245, 158, 11, 0.35)',
-                      }}
-                    >
-                      ⚠️ {n}
-                    </div>
-                  ))}
+                    visible on the turn, never rendered as a failure (WP5.1).
+                    tone 'status' renders muted (a progress line, no glyph). */}
+                  {t.notices?.map((n, ni) =>
+                    n.tone === 'status' ? (
+                      <div
+                        key={ni}
+                        role="status"
+                        className="text-muted"
+                        style={{ marginTop: 8, fontSize: 13 }}
+                      >
+                        {n.message}
+                      </div>
+                    ) : (
+                      <div
+                        key={ni}
+                        role="status"
+                        style={{
+                          marginTop: 8,
+                          padding: '6px 10px',
+                          borderRadius: 8,
+                          fontSize: 13,
+                          background: 'rgba(245, 158, 11, 0.12)',
+                          border: '1px solid rgba(245, 158, 11, 0.35)',
+                        }}
+                      >
+                        ⚠️ {n.message}
+                      </div>
+                    ),
+                  )}
                   {stripMachinery(t.content).trim() && (
                     <div className="uac-reply-actions">
                       <CopyButton text={stripMachinery(t.content)} />
@@ -2769,6 +2813,36 @@ export function UnifiedAssistantChat({
               <QuestionBatch questions={streaming.buildQuestions} onAnswer={handleQuestionAnswer} />
             )}
             {streaming.text && <StreamingMarkdown text={streaming.text} />}
+            {/* Live notices (BUILDER-UX-3 P3): status tone is the muted transient
+                progress line ("Taking another pass…") — it renders only here and is
+                dropped when the turn commits; warnings keep the amber box. */}
+            {streaming.notices.map((n, ni) =>
+              n.tone === 'status' ? (
+                <div
+                  key={ni}
+                  role="status"
+                  className="text-muted"
+                  style={{ marginTop: 8, fontSize: 13 }}
+                >
+                  {n.message}
+                </div>
+              ) : (
+                <div
+                  key={ni}
+                  role="status"
+                  style={{
+                    marginTop: 8,
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    fontSize: 13,
+                    background: 'rgba(245, 158, 11, 0.12)',
+                    border: '1px solid rgba(245, 158, 11, 0.35)',
+                  }}
+                >
+                  ⚠️ {n.message}
+                </div>
+              ),
+            )}
           </div>
         )}
 

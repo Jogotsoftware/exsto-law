@@ -8,23 +8,28 @@
 // service-library/lifecycle tools it is deliberately NOT in CLIENT_PORTAL_TOOLS
 // (clientPolicy.ts is default-deny, so leaving it out is sufficient).
 import { registerTool, type Tool } from '@exsto/mcp-tools'
-import { STEP_ACTION_CATALOG, GATE_KINDS } from '../../index.js'
+import { STEP_ACTION_CATALOG, GATE_KINDS, GATE_TRANSITION_VOCABULARY } from '../../index.js'
 import type { StepActionSpec, GateKind } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
 const catalogTool: Tool<
   Record<string, never>,
-  { actions: StepActionSpec[]; gates: readonly GateKind[] }
+  {
+    actions: StepActionSpec[]
+    gates: readonly GateKind[]
+    gateTransitions: typeof GATE_TRANSITION_VOCABULARY
+  }
 > = {
   name: 'legal.workflow.catalog',
   description:
-    'Get the workflow-builder palette: the closed catalog of step actions (kind, label, description, defaultGate, blocking) and the closed set of edge gates. The service-editor Workflow builder composes a service lifecycle from these; the catalog is the server-side guardrail (steps and gates are a closed set, not free-form).',
+    'Get the workflow-builder palette: the closed catalog of step actions (kind, label, description, defaultGate, blocking), the closed set of edge gates, and the per-gate transition vocabulary (the exact via/on tokens the runtime advances on, with plain-language labels). The service-editor Workflow builder composes a service lifecycle from these; the catalog is the server-side guardrail (steps, gates, and advance tokens are a closed set, not free-form).',
   mode: 'read',
   // Pure constant surface — no substrate read. ctx is accepted to match the Tool
   // signature; the catalog is identical for every tenant.
   handler: async (_ctx: ActionContext) => ({
     actions: STEP_ACTION_CATALOG,
     gates: GATE_KINDS,
+    gateTransitions: GATE_TRANSITION_VOCABULARY,
   }),
 }
 

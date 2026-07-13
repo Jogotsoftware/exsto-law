@@ -9,6 +9,7 @@
 // Save does: update the wizard card's in-memory body, or persist through legal.template.update.
 import { useRef, useState } from 'react'
 import { Modal } from '@/components/Modal'
+import { EditorActionRow } from '@/components/EditorActionRow'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { AiRegenerateRail } from '@/components/AiRegenerateRail'
@@ -58,44 +59,31 @@ export function TemplateEditorModal({
 
   return (
     <Modal title={title} onClose={onClose} size="wide">
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 12,
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-        }}
-      >
-        <button type="button" className="button" onClick={onClose} disabled={busy}>
-          Cancel
-        </button>
-        <button type="button" className="button button-primary" onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-      {error && (
-        <div role="alert" className="alert alert-error" style={{ marginBottom: 10 }}>
-          {error}
-        </div>
-      )}
-      {regenerateTargetId && (
-        <AiRegenerateRail
-          artifactKind="template"
-          targetId={regenerateTargetId}
-          current={() => htmlToMarkdown(editorRef.current?.getHTML() ?? htmlRef.current)}
-          renderProposal={(proposed) => <TemplatePreview body={proposed} />}
-          onUse={(proposed) => {
-            const html = markdownToHtml(proposed)
-            htmlRef.current = html
-            // Apply through the imperative handle — the prop-resync path no-ops when
-            // the proposal equals the last SEED even though the editor holds unsaved
-            // edits. setSeedHtml stays as the pre-mount fallback.
-            if (editorRef.current) editorRef.current.setContent(html)
-            else setSeedHtml(html)
-          }}
-        />
-      )}
+      <EditorActionRow
+        busy={busy}
+        error={error}
+        onCancel={onClose}
+        onSave={save}
+        ai={
+          regenerateTargetId ? (
+            <AiRegenerateRail
+              artifactKind="template"
+              targetId={regenerateTargetId}
+              current={() => htmlToMarkdown(editorRef.current?.getHTML() ?? htmlRef.current)}
+              renderProposal={(proposed) => <TemplatePreview body={proposed} />}
+              onUse={(proposed) => {
+                const html = markdownToHtml(proposed)
+                htmlRef.current = html
+                // Apply through the imperative handle — the prop-resync path no-ops when
+                // the proposal equals the last SEED even though the editor holds unsaved
+                // edits. setSeedHtml stays as the pre-mount fallback.
+                if (editorRef.current) editorRef.current.setContent(html)
+                else setSeedHtml(html)
+              }}
+            />
+          ) : undefined
+        }
+      />
       <TemplateEditor
         initialHtml={seedHtml}
         editorRef={editorRef}

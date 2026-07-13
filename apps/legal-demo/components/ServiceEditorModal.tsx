@@ -6,6 +6,7 @@
 // JSON textarea. Save/Cancel at the top.
 import { useState } from 'react'
 import { Modal } from '@/components/Modal'
+import { EditorActionRow } from '@/components/EditorActionRow'
 import {
   ServiceSettingsFields,
   AppointmentRequiredField,
@@ -47,32 +48,13 @@ export function ServiceEditorModal({
 
   return (
     <Modal title={title} onClose={onClose} size="wide">
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 12,
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-        }}
-      >
-        <button type="button" className="button" onClick={onClose} disabled={busy}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="button button-primary"
-          onClick={save}
-          disabled={busy || !canSave}
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-      {error && (
-        <div role="alert" className="alert alert-error" style={{ marginBottom: 10 }}>
-          {error}
-        </div>
-      )}
+      <EditorActionRow
+        busy={busy}
+        error={error}
+        canSave={canSave}
+        onCancel={onClose}
+        onSave={save}
+      />
       <ServiceSettingsFields value={value} onChange={setValue} />
       <fieldset className="svc-fieldset">
         <legend>Bookings</legend>

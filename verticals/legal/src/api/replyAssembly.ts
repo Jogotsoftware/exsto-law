@@ -60,6 +60,77 @@ export function framingSentenceForCardTurn(roundTexts: string[]): string {
   return (m ? m[0] : first.split(/\n/, 1)[0]!).trim()
 }
 
+// BUILDER-UX-3 (P5) — the framing sentence must MATCH the card the turn actually
+// emitted. The model speaks its framing BEFORE the tool call, so a failed compose
+// that recovers with a different card ("Here's the workflow to approve." → workflow
+// rejected → cost card captured) leaves a stale line above the wrong card. Derive
+// the framing from WHICH capture arrays are non-empty: keep the model's sentence
+// only when it plausibly names an emitted card kind; otherwise substitute the
+// card's own deterministic label. Pure — both collapse sites (stream + non-stream)
+// call it with their captured counts.
+export type WizardCardKind =
+  | 'question'
+  | 'kind'
+  | 'service'
+  | 'template'
+  | 'questionnaire'
+  | 'cost'
+  | 'workflow'
+  | 'enable'
+
+// Doctrine build order (shell → documents → questionnaire → billing → workflow →
+// enable), with interview questions and data-kind cards ahead of any proposal. A
+// multi-kind turn frames the doctrine-order-LAST card — the furthest step reached.
+const CARD_KIND_ORDER: WizardCardKind[] = [
+  'question',
+  'kind',
+  'service',
+  'template',
+  'questionnaire',
+  'cost',
+  'workflow',
+  'enable',
+]
+
+// Per-kind "plausibly names this card" checks — deliberately loose keyword hits,
+// not exact copy matching, so any honest model framing survives.
+const CARD_KIND_HINTS: Record<WizardCardKind, RegExp> = {
+  question: /question|confirm/i,
+  kind: /field|track/i,
+  service: /service|offering/i,
+  template: /template|document/i,
+  questionnaire: /questionnaire|intake|form/i,
+  cost: /pric|fee|billing|cost/i,
+  workflow: /workflow|steps/i,
+  enable: /enable|live|bookable|publish/i,
+}
+
+const CARD_KIND_LABELS: Record<WizardCardKind, string> = {
+  question: 'A few quick questions.',
+  kind: "Here's the new field to approve.",
+  service: "Here's the service to approve.",
+  template: "Here's the document template to approve.",
+  questionnaire: "Here's the questionnaire to approve.",
+  cost: "Here's the pricing to approve.",
+  workflow: "Here's the workflow to approve.",
+  enable: 'Approve to make the service live.',
+}
+
+export function framingSentenceForCards(
+  roundTexts: string[],
+  captured: Partial<Record<WizardCardKind, number>>,
+): string {
+  const kinds = CARD_KIND_ORDER.filter((k) => (captured[k] ?? 0) > 0)
+  const sentence = framingSentenceForCardTurn(roundTexts)
+  if (kinds.length === 0) return sentence
+  const last = kinds[kinds.length - 1]!
+  if (sentence && kinds.some((k) => CARD_KIND_HINTS[k].test(sentence))) return sentence
+  // A question-only turn is conversational — whatever the model wrote frames it
+  // ("Tell me how this works in your practice…"), so it is kept as-is.
+  if (sentence && last === 'question') return sentence
+  return CARD_KIND_LABELS[last]
+}
+
 export function collapseRoundStutter(reply: string): string {
   const trimmed = (reply ?? '').trim()
   if (!trimmed) return trimmed
