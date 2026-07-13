@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { ServiceEditorModal } from '@/components/ServiceEditorModal'
 import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 
@@ -169,8 +170,12 @@ export function ServiceProposalCard({
           type="button"
           className="uac-reply-btn"
           onClick={() => setEditing(true)}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Edit the proposed service shell before approving"
+          disabled={approveState === 'approving' || (approveState === 'approved' && !serviceKey)}
+          title={
+            approveState === 'approved'
+              ? 'Edit the created service — saves a new version'
+              : 'Edit the proposed service shell before approving'
+          }
         >
           <EditIcon size={12} /> Edit
         </button>
@@ -203,7 +208,11 @@ export function ServiceProposalCard({
       )}
       {editing && (
         <ServiceEditorModal
-          title={`Edit proposed service — ${current.displayName}`}
+          title={
+            approveState === 'approved'
+              ? `Edit service — ${current.displayName}`
+              : `Edit proposed service — ${current.displayName}`
+          }
           initialValue={{
             displayName: current.displayName,
             route: current.route,
@@ -213,8 +222,25 @@ export function ServiceProposalCard({
             generationMode: current.generationMode,
             appointmentRequired: current.appointmentRequired ?? true,
           }}
-          onSave={(next) => {
-            // Save updates the CARD (in-memory); nothing is written until Approve.
+          onSave={async (next) => {
+            if (approveState === 'approved' && serviceKey) {
+              // Post-approval: persist to the CREATED service (a new immutable version
+              // through legal.service.update — the same write the settings page does).
+              await callAttorneyMcp({
+                toolName: 'legal.service.update',
+                input: {
+                  serviceKey,
+                  displayName: next.displayName,
+                  description: next.description || null,
+                  clientDisplayName: next.clientDisplayName || null,
+                  clientDescription: next.clientDescription || null,
+                  route: next.route,
+                  generationMode: next.generationMode,
+                  appointmentRequired: next.appointmentRequired,
+                },
+              })
+            }
+            // Either way the card re-renders with the attorney's version.
             setCurrent((c) => ({
               ...c,
               displayName: next.displayName,
@@ -225,7 +251,11 @@ export function ServiceProposalCard({
               generationMode: next.generationMode,
               appointmentRequired: next.appointmentRequired,
             }))
-            onEdited?.(`service shell "${current.displayName}"`)
+            onEdited?.(
+              approveState === 'approved' && serviceKey
+                ? `service shell "${next.displayName}" (saved)`
+                : `service shell "${current.displayName}"`,
+            )
           }}
           onClose={() => setEditing(false)}
         />

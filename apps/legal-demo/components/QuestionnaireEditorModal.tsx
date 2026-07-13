@@ -8,6 +8,8 @@
 // wizard card's in-memory schema, or persist through the standalone save path).
 import { useState } from 'react'
 import { Modal } from '@/components/Modal'
+import { AiRegenerateRail } from '@/components/AiRegenerateRail'
+import { QuestionnaireView } from '@/components/configEditors'
 import {
   QuestionnaireBuilder,
   schemaToSections,
@@ -21,6 +23,7 @@ export function QuestionnaireEditorModal({
   title,
   initialSchema,
   name,
+  regenerateTargetId,
   onSave,
   onClose,
 }: {
@@ -29,6 +32,9 @@ export function QuestionnaireEditorModal({
   // Used for the schema id/title on rebuild; the wizard proposal has no separate
   // name, so the schema's own title (or a fallback) is passed.
   name: string
+  // Enables the "Edit with AI" rail ("proposal:<key>" for wizard proposals, the
+  // artifact id once saved). The worker revises the passed schema.
+  regenerateTargetId?: string
   onSave: (schema: ReturnType<typeof sectionsToSchema>) => Promise<void> | void
   onClose: () => void
 }): React.ReactElement {
@@ -81,6 +87,26 @@ export function QuestionnaireEditorModal({
         <div role="alert" className="alert alert-error" style={{ marginBottom: 10 }}>
           {error}
         </div>
+      )}
+      {regenerateTargetId && (
+        <AiRegenerateRail
+          artifactKind="questionnaire"
+          targetId={regenerateTargetId}
+          current={() =>
+            JSON.stringify(
+              sectionsToSchema(name || initialSchema.title || 'questionnaire', sections),
+              null,
+              2,
+            )
+          }
+          renderProposal={(proposed) => <QuestionnaireView content={proposed} />}
+          onUse={(proposed) => {
+            const schema = JSON.parse(proposed) as QuestionnaireSchema
+            if (!schema || !Array.isArray(schema.sections))
+              throw new Error('The AI proposal is not a questionnaire schema.')
+            setSections(schemaToSections(schema))
+          }}
+        />
       )}
       <QuestionnaireBuilder sections={sections} onChange={setSections} />
     </Modal>

@@ -10,27 +10,35 @@
 import { useRef, useState } from 'react'
 import { Modal } from '@/components/Modal'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
+import { TemplatePreview } from '@/components/templates/TemplatePreview'
+import { AiRegenerateRail } from '@/components/AiRegenerateRail'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
 
 export function TemplateEditorModal({
   title,
   initialBody,
+  regenerateTargetId,
   onSave,
   onClose,
 }: {
   title: string
   // Markdown (proposal body or persisted template body).
   initialBody: string
+  // Enables the "Edit with AI" rail ("proposal:<key>" for wizard proposals, the
+  // persisted template's entity id once saved). The worker revises the passed body.
+  regenerateTargetId?: string
   // Receives the edited body as MARKDOWN (the storage form).
   onSave: (body: string) => Promise<void> | void
   onClose: () => void
 }): React.ReactElement {
   const editorRef = useRef<TemplateEditorHandle | null>(null)
-  // Seed once: markdown → HTML with {{tokens}} rehydrated as chips.
-  const [initialHtml] = useState(() => markdownToHtml(initialBody))
+  // The editor's seed: markdown → HTML with {{tokens}} rehydrated as chips. State
+  // (not a one-shot) so "Use this" from the AI rail can reseed the live editor —
+  // TemplateEditor resyncs when its initialHtml prop changes.
+  const [seedHtml, setSeedHtml] = useState(() => markdownToHtml(initialBody))
   // Live HTML, updated on every keystroke so Save reads the latest even if the
   // imperative handle is momentarily null.
-  const htmlRef = useRef(initialHtml)
+  const htmlRef = useRef(seedHtml)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -71,8 +79,21 @@ export function TemplateEditorModal({
           {error}
         </div>
       )}
+      {regenerateTargetId && (
+        <AiRegenerateRail
+          artifactKind="template"
+          targetId={regenerateTargetId}
+          current={() => htmlToMarkdown(editorRef.current?.getHTML() ?? htmlRef.current)}
+          renderProposal={(proposed) => <TemplatePreview body={proposed} />}
+          onUse={(proposed) => {
+            const html = markdownToHtml(proposed)
+            htmlRef.current = html
+            setSeedHtml(html) // TemplateEditor resyncs on seed change
+          }}
+        />
+      )}
       <TemplateEditor
-        initialHtml={initialHtml}
+        initialHtml={seedHtml}
         editorRef={editorRef}
         onChange={(html) => {
           htmlRef.current = html

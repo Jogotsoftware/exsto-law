@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 import { TemplateEditorModal } from '@/components/TemplateEditorModal'
@@ -68,6 +69,10 @@ export function TemplateProposalCard({
   // the pop-up; Approve always captures this (the attorney's version).
   const [currentBody, setCurrentBody] = useState(proposal.body)
   const [editing, setEditing] = useState(false)
+  // BUILDER-UX-2 WP-2: the PERSISTED template's entity id, from the approve response.
+  // Post-approval Edit saves through legal.template.update against this id — the same
+  // write path the templates page uses — never a stale in-memory proposal.
+  const [templateEntityId, setTemplateEntityId] = useState<string | null>(null)
 
   const orphans = new Set((proposal.orphanTokens ?? []).map((t) => t.toLowerCase()))
   const reusable = new Set((proposal.reusableFromFirm ?? []).map((t) => t.toLowerCase()))
@@ -112,6 +117,7 @@ export function TemplateProposalCard({
         },
       )
       const data = (await res.json().catch(() => null)) as {
+        result?: { templateEntityId?: string }
         serviceKey?: string
         link?: string
         label?: string
@@ -119,6 +125,7 @@ export function TemplateProposalCard({
       } | null
       if (!res.ok) throw new Error(data?.error || `Approve failed (${res.status})`)
       setLink(data?.link ?? null)
+      setTemplateEntityId(data?.result?.templateEntityId ?? null)
       setApproveState('approved')
       // Continue the guided build to the next step (Phase 6).
       if (data?.link) {
@@ -221,8 +228,14 @@ export function TemplateProposalCard({
           type="button"
           className="uac-reply-btn"
           onClick={() => setEditing(true)}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Edit the proposed template before approving"
+          disabled={
+            approveState === 'approving' || (approveState === 'approved' && !templateEntityId)
+          }
+          title={
+            approveState === 'approved'
+              ? 'Edit the saved template — saves a new version'
+              : 'Edit the proposed template before approving'
+          }
         >
           <EditIcon size={12} /> Edit
         </button>
@@ -253,10 +266,30 @@ export function TemplateProposalCard({
       )}
       {editing && (
         <TemplateEditorModal
-          title={`Edit proposed template — ${proposal.name}`}
+          title={
+            approveState === 'approved'
+              ? `Edit template — ${proposal.name}`
+              : `Edit proposed template — ${proposal.name}`
+          }
           initialBody={currentBody}
-          onSave={(body) => {
-            // Save updates the CARD (in-memory); nothing is written until Approve.
+          regenerateTargetId={
+            approveState === 'approved' && templateEntityId
+              ? templateEntityId
+              : `proposal:${proposal.serviceKey}`
+          }
+          onSave={async (body) => {
+            if (approveState === 'approved' && templateEntityId) {
+              // Post-approval: persist to the SAVED template (a new immutable version
+              // through legal.template.update — the same write the templates page does).
+              await callAttorneyMcp({
+                toolName: 'legal.template.update',
+                input: { templateEntityId, body },
+              })
+              setCurrentBody(body)
+              onEdited?.(`template "${proposal.name}" for "${proposal.serviceKey}" (saved)`)
+              return
+            }
+            // Pre-approval: Save updates the CARD; nothing is written until Approve.
             setCurrentBody(body)
             onEdited?.(`template "${proposal.name}" for "${proposal.serviceKey}"`)
           }}

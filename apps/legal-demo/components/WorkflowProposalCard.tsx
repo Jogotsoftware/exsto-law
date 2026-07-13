@@ -5,9 +5,9 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
 import { CheckIcon, LayersIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
-import { ConfigEditModal } from '@/components/ConfigEditModal'
-import { WorkflowView, jsonEditor } from '@/components/configEditors'
+import { WorkflowEditorModal } from '@/components/WorkflowEditorModal'
 import { WorkflowStepList } from '@/components/WorkflowStepList'
+import type { WfLifecycle as LibWfLifecycle } from '@/lib/workflowBuilderModel'
 
 // CONSTRAINT (mirrors the workflow builder page): no server-package imports. These
 // shapes are a structural mirror of verticals/legal/src/lifecycle/types.ts — the
@@ -319,8 +319,12 @@ export function WorkflowProposalCard({
           type="button"
           className="uac-reply-btn"
           onClick={() => setEditing(true)}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Edit the proposed workflow before approving"
+          disabled={approveState === 'approving'}
+          title={
+            approveState === 'approved'
+              ? 'Edit the saved workflow — saves a new version'
+              : 'Edit the proposed workflow before approving'
+          }
         >
           <EditIcon size={12} /> Edit
         </button>
@@ -396,18 +400,36 @@ export function WorkflowProposalCard({
         </div>
       )}
       {editing && (
-        <ConfigEditModal
-          artifactKind="workflow"
-          targetId={`proposal:${proposal.serviceKey}`}
-          title={`Edit proposed workflow — ${proposal.serviceKey}`}
-          initialContent={JSON.stringify(liveGraph ?? [], null, 2)}
-          renderView={(content) => <WorkflowView content={content} />}
-          renderEdit={jsonEditor}
-          aiRegenerate={false}
-          saveLabel="Save"
-          onSave={async (content) => {
-            // Save updates the CARD; the validated live write is still Approve.
-            setEditedGraph(JSON.parse(content) as WorkflowProposal['graph'])
+        <WorkflowEditorModal
+          title={
+            approveState === 'approved'
+              ? `Edit workflow — ${proposal.serviceKey}`
+              : `Edit proposed workflow — ${proposal.serviceKey}`
+          }
+          serviceKey={proposal.serviceKey}
+          // The card's wire shape is a WIDE structural mirror of the builder model
+          // (SSE JSON: action.kind is string); the builder coerces unknown kinds on
+          // load and the approve/lifecycle.set routes validate on write.
+          initialGraph={(liveGraph ?? []) as unknown as LibWfLifecycle}
+          regenerateTargetId={
+            approveState === 'approved' ? proposal.serviceKey : `proposal:${proposal.serviceKey}`
+          }
+          onSave={async (graph) => {
+            if (approveState === 'approved') {
+              // Post-approval: the SAME edit persists to the saved lifecycle (a new
+              // immutable version through legal.service.lifecycle.set — identical to
+              // the Workflow tab's save), never a stale in-memory proposal.
+              const r = await callAttorneyMcp<{ version: number }>({
+                toolName: 'legal.service.lifecycle.set',
+                input: { serviceKey: proposal.serviceKey, graph },
+              })
+              setVersion(r.version)
+              setEditedGraph(graph)
+              onEdited?.(`workflow for "${proposal.serviceKey}" (saved v${r.version})`)
+              return
+            }
+            // Pre-approval: Save updates the CARD; the validated live write is Approve.
+            setEditedGraph(graph)
             onEdited?.(`workflow for "${proposal.serviceKey}"`)
           }}
           onClose={() => setEditing(false)}
