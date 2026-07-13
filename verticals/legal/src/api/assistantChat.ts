@@ -226,6 +226,9 @@ export type AssistantChatStreamEvent =
       // received it and Approve persisted NULL client columns on every service.
       clientDisplayName: string | null
       clientDescription: string | null
+      // WP-7: the wizard-authored Spanish tile copy rides the same event.
+      clientDisplayNameEs: string | null
+      clientDescriptionEs: string | null
       route: ServiceProposal['route']
       generationMode: ServiceProposal['generationMode']
       appointmentRequired: boolean
@@ -1620,6 +1623,8 @@ export async function* assistantChatStream(
         description: p.description,
         clientDisplayName: p.clientDisplayName,
         clientDescription: p.clientDescription,
+        clientDisplayNameEs: p.clientDisplayNameEs,
+        clientDescriptionEs: p.clientDescriptionEs,
         route: p.route,
         generationMode: p.generationMode,
         appointmentRequired: p.appointmentRequired,

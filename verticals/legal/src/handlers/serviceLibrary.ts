@@ -191,6 +191,34 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
   if (p.route !== undefined) merged.route = p.route
   if (p.documents !== undefined) merged.documents = p.documents
   if (p.sort_order !== undefined) merged.sort_order = p.sort_order
+
+  // BUILDER-UX-2 WP-7 — the locale variants of the client copy get the SAME
+  // last-resort discipline as the English columns: non-object garbage is dropped,
+  // non-string/empty entries are dropped, and over-long text is word-truncated
+  // (capClientCopy). English is capped at the column write below; without this the
+  // Spanish tile copy had no server-side cap at all.
+  if (merged.client_copy_i18n !== undefined && merged.client_copy_i18n !== null) {
+    const raw = merged.client_copy_i18n
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      delete merged.client_copy_i18n
+    } else {
+      const clean: Record<string, { displayName?: string; description?: string }> = {}
+      for (const [locale, copy] of Object.entries(raw as Record<string, unknown>)) {
+        if (!copy || typeof copy !== 'object' || Array.isArray(copy)) continue
+        const c = copy as Record<string, unknown>
+        const entry: { displayName?: string; description?: string } = {}
+        if (typeof c.displayName === 'string' && c.displayName.trim())
+          entry.displayName = capClientCopy(c.displayName).value ?? undefined
+        if (typeof c.description === 'string' && c.description.trim())
+          entry.description = capClientCopy(c.description).value ?? undefined
+        if (entry.displayName || entry.description) clean[locale] = entry
+      }
+      if (Object.keys(clean).length) merged.client_copy_i18n = clean
+      else delete merged.client_copy_i18n
+    }
+  } else if (merged.client_copy_i18n === null) {
+    delete merged.client_copy_i18n
+  }
   // A brand-new service has no intake form bound yet (deferred to a later PR);
   // default route to manual so it never auto-drafts before a form exists.
   if (!isUpdate && merged.route === undefined) merged.route = 'manual'

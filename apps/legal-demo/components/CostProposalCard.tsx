@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CostEditorModal } from '@/components/CostEditorModal'
 import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
@@ -45,6 +46,50 @@ export function CostProposalCard({
   // Approve always captures this (the attorney's version).
   const [current, setCurrent] = useState<CostProposal>(proposal)
   const [editing, setEditing] = useState(false)
+  const [editSeed, setEditSeed] = useState<{
+    costType: 'hourly' | 'fixed'
+    amount: string
+    hours: number | null
+    documentFees?: Record<string, string>
+  } | null>(null)
+  const [editLoading, setEditLoading] = useState(false)
+
+  // Post-approval Edit seeds from the SAVED cost + document fees, not the card's
+  // frozen snapshot — a fee set meanwhile on the Billing tab must show up here, not
+  // get silently cleared by Save (the update REPLACES the stored fee map).
+  async function openEditor() {
+    if (approveState !== 'approved') {
+      setEditSeed(null)
+      setEditing(true)
+      return
+    }
+    setEditLoading(true)
+    try {
+      const r = await callAttorneyMcp<{
+        service: {
+          cost: { type: 'hourly' | 'fixed'; amount: string; hours: number | null } | null
+          documentFees: Record<string, string>
+        } | null
+      }>({ toolName: 'legal.service.get', input: { serviceKey: current.serviceKey } })
+      if (r.service) {
+        setEditSeed({
+          costType: r.service.cost?.type ?? current.costType,
+          amount: r.service.cost?.amount ?? current.amount,
+          hours: r.service.cost?.hours ?? null,
+          documentFees: Object.keys(r.service.documentFees ?? {}).length
+            ? r.service.documentFees
+            : undefined,
+        })
+      } else {
+        setEditSeed(null)
+      }
+    } catch {
+      setEditSeed(null) // read failure: the card's copy is the best seed we have
+    } finally {
+      setEditLoading(false)
+    }
+    setEditing(true)
+  }
 
   // Human-readable price line, e.g. "$350.00 / hour (est. 6 hrs)" or "$1,500.00 flat".
   const priceLabel =
@@ -181,11 +226,15 @@ export function CostProposalCard({
         <button
           type="button"
           className="uac-reply-btn"
-          onClick={() => setEditing(true)}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Edit the proposed billing before approving"
+          onClick={() => void openEditor()}
+          disabled={approveState === 'approving' || editLoading}
+          title={
+            approveState === 'approved'
+              ? 'Edit the saved billing — saves a new version'
+              : 'Edit the proposed billing before approving'
+          }
         >
-          <EditIcon size={12} /> Edit
+          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
         </button>
         {/* WP-3.2: no Approve control while the card is incoherent — the attorney
             must reconcile the fee and the line items first. */}
@@ -218,15 +267,48 @@ export function CostProposalCard({
       )}
       {editing && (
         <CostEditorModal
-          title={`Edit proposed billing — ${current.serviceKey}`}
-          initialValue={{
-            costType: current.costType,
-            amount: current.amount,
-            hours: current.hours,
-            ...(current.documentFees ? { documentFees: current.documentFees } : {}),
-          }}
-          onSave={(next) => {
-            // Save updates the CARD (in-memory); nothing is written until Approve.
+          title={
+            approveState === 'approved'
+              ? `Edit billing — ${current.serviceKey}`
+              : `Edit proposed billing — ${current.serviceKey}`
+          }
+          initialValue={
+            editSeed ?? {
+              costType: current.costType,
+              amount: current.amount,
+              hours: current.hours,
+              ...(current.documentFees ? { documentFees: current.documentFees } : {}),
+            }
+          }
+          regenerateTargetId={current.serviceKey}
+          onSave={async (next) => {
+            if (approveState === 'approved') {
+              // Post-approval: persist to the SAVED service (a new immutable version
+              // through legal.service.update, resending the identity fields the update
+              // contract requires — read fresh so we never clobber them with staleness).
+              const r = await callAttorneyMcp<{
+                service: { displayName: string; description: string | null } | null
+              }>({ toolName: 'legal.service.get', input: { serviceKey: current.serviceKey } })
+              if (!r.service) throw new Error(`Service not found: ${current.serviceKey}`)
+              await callAttorneyMcp({
+                toolName: 'legal.service.update',
+                input: {
+                  serviceKey: current.serviceKey,
+                  displayName: r.service.displayName,
+                  description: r.service.description,
+                  cost: {
+                    type: next.costType,
+                    amount: next.amount.trim(),
+                    hours: next.costType === 'hourly' ? next.hours : null,
+                  },
+                  documentFees:
+                    next.documentFees && Object.keys(next.documentFees).length
+                      ? next.documentFees
+                      : null,
+                },
+              })
+            }
+            // Either way the card re-renders with the attorney's version.
             setCurrent((c) => ({
               ...c,
               costType: next.costType,
@@ -237,7 +319,11 @@ export function CostProposalCard({
                   ? next.documentFees
                   : undefined,
             }))
-            onEdited?.(`billing for "${current.serviceKey}"`)
+            onEdited?.(
+              approveState === 'approved'
+                ? `billing for "${current.serviceKey}" (saved)`
+                : `billing for "${current.serviceKey}"`,
+            )
           }}
           onClose={() => setEditing(false)}
         />

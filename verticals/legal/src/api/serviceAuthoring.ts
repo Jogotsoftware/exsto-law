@@ -193,6 +193,12 @@ export interface ServiceProposal {
   // attorney-facing (jurisdiction- and process-specific is CORRECT there).
   clientDisplayName: string | null
   clientDescription: string | null
+  // BUILDER-UX-2 WP-7 — the SPANISH client tile copy, authored by the wizard
+  // ALONGSIDE the English at proposal time (same two-ends doctrine). Stored on
+  // approve as transitions.client_copy_i18n.es; the Spanish intake renders it and
+  // falls back to English when absent.
+  clientDisplayNameEs: string | null
+  clientDescriptionEs: string | null
   route: WorkflowRoute
   generationMode: GenerationMode
   // BUILDER-CERT-1 (WP3) — does booking START with a consultation appointment
@@ -252,6 +258,9 @@ export interface CreateServiceAIInput {
   // server-side (truncate-and-flag) — never trust the prompt alone.
   clientDisplayName?: string | null
   clientDescription?: string | null
+  // Spanish variants (WP-7) — persisted into transitions.client_copy_i18n.es.
+  clientDisplayNameEs?: string | null
+  clientDescriptionEs?: string | null
   route?: WorkflowRoute
   generationMode?: GenerationMode
   // Explicit booking mode (BUILDER-CERT-1 WP3). Undefined = the platform default
@@ -353,11 +362,22 @@ export async function createServiceAI(
       route,
       // generation_mode isn't a top-level upsert field — it merges through the
       // transitions patch, the same path updateServiceMetadata uses for it (as does
-      // appointment_required, written explicitly whenever the wizard chose it).
+      // appointment_required, written explicitly whenever the wizard chose it, and
+      // the WP-7 Spanish client copy when the wizard authored it).
       transitions_patch: {
         generation_mode: generationMode,
         ...(typeof input.appointmentRequired === 'boolean'
           ? { appointment_required: input.appointmentRequired }
+          : {}),
+        ...(input.clientDisplayNameEs || input.clientDescriptionEs
+          ? {
+              client_copy_i18n: {
+                es: {
+                  ...(input.clientDisplayNameEs ? { displayName: input.clientDisplayNameEs } : {}),
+                  ...(input.clientDescriptionEs ? { description: input.clientDescriptionEs } : {}),
+                },
+              },
+            }
           : {}),
       },
     },

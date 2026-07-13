@@ -7,6 +7,8 @@
 // for a service's fee model; the host decides what Save persists.
 import { useState } from 'react'
 import { Modal } from '@/components/Modal'
+import { AiRegenerateRail } from '@/components/AiRegenerateRail'
+import { BillingView } from '@/components/configEditors'
 
 export type CostType = 'hourly' | 'fixed'
 
@@ -106,11 +108,15 @@ export function CostForm({
 export function CostEditorModal({
   title,
   initialValue,
+  regenerateTargetId,
   onSave,
   onClose,
 }: {
   title: string
   initialValue: CostValue
+  // Enables the "Edit with AI" rail ("proposal:<key>" for wizard proposals, the
+  // serviceKey once saved). The worker revises the passed cost JSON.
+  regenerateTargetId?: string
   onSave: (value: CostValue) => Promise<void> | void
   onClose: () => void
 }): React.ReactElement {
@@ -153,6 +159,20 @@ export function CostEditorModal({
         <div role="alert" className="alert alert-error" style={{ marginBottom: 10 }}>
           {error}
         </div>
+      )}
+      {regenerateTargetId && (
+        <AiRegenerateRail
+          artifactKind="billing"
+          targetId={regenerateTargetId}
+          current={() => JSON.stringify(value, null, 2)}
+          renderProposal={(proposed) => <BillingView content={proposed} />}
+          onUse={(proposed) => {
+            const next = JSON.parse(proposed) as Partial<CostValue>
+            if (!next || (next.costType !== 'fixed' && next.costType !== 'hourly'))
+              throw new Error('The AI proposal is not a billing config.')
+            setValue((v) => ({ ...v, ...next }))
+          }}
+        />
       )}
       <CostForm value={value} onChange={setValue} />
     </Modal>

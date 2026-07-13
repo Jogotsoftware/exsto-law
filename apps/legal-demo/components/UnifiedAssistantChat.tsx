@@ -8,9 +8,11 @@ import {
   type ContextDepth,
   type EditorLaunchEvent,
 } from '@/lib/assistantStream'
-import { TemplateConfigModal, WorkflowConfigModal } from '@/components/configEditors'
 import { QuestionnaireEditorModal } from '@/components/QuestionnaireEditorModal'
+import { TemplateEditorModal } from '@/components/TemplateEditorModal'
+import { WorkflowEditorModal } from '@/components/WorkflowEditorModal'
 import type { QuestionnaireSchema } from '@/components/QuestionnaireBuilder'
+import type { WfLifecycle } from '@/lib/workflowBuilderModel'
 import { assistantHistoryContent } from '@/lib/buildHistoryContent'
 import { stripMachinery, MACHINERY_OPEN } from '@/lib/assistantText'
 import { WorkingIndicator } from '@/components/WorkingIndicator'
@@ -2323,16 +2325,20 @@ export function UnifiedAssistantChat({
         </div>
       )}
 
-      {/* ── WP-H2: assistant-launched editor — the SAME Config*Modal the
-          standalone pages use, pre-loaded on the existing artifact; saves go
-          through the same core update paths. ─────────────────────────────── */}
+      {/* ── WP-H2 → BUILDER-UX-2 WP-2: assistant-launched editors — the REAL
+          per-artifact editors (the same modals the wizard cards mount), pre-loaded
+          on the existing artifact and opened DIRECTLY in edit mode; saves go
+          through the same core update paths. No View/Edit toggle. ──────────── */}
       {editorLaunch && editorLaunch.artifactType === 'template' && (
-        <TemplateConfigModal
-          template={{
-            templateEntityId: editorLaunch.id,
-            name: editorLaunch.name,
-            body: typeof editorLaunch.content === 'string' ? editorLaunch.content : '',
-            variables: editorLaunch.variables as never,
+        <TemplateEditorModal
+          title={`Edit template — ${editorLaunch.name}`}
+          initialBody={typeof editorLaunch.content === 'string' ? editorLaunch.content : ''}
+          regenerateTargetId={editorLaunch.id}
+          onSave={async (body) => {
+            await callAttorneyMcp({
+              toolName: 'legal.template.update',
+              input: { templateEntityId: editorLaunch.id, body },
+            })
           }}
           onClose={() => setEditorLaunch(null)}
         />
@@ -2345,6 +2351,7 @@ export function UnifiedAssistantChat({
           title={`Edit questionnaire — ${editorLaunch.name}`}
           initialSchema={(editorLaunch.content ?? { sections: [] }) as QuestionnaireSchema}
           name={editorLaunch.name}
+          regenerateTargetId={editorLaunch.id}
           onSave={async (schema) => {
             await callAttorneyMcp({
               toolName: 'legal.questionnaire_template.update',
@@ -2355,9 +2362,18 @@ export function UnifiedAssistantChat({
         />
       )}
       {editorLaunch && editorLaunch.artifactType === 'workflow' && (
-        <WorkflowConfigModal
+        <WorkflowEditorModal
+          title={`Edit workflow — ${editorLaunch.name}`}
           serviceKey={editorLaunch.id}
-          graph={Array.isArray(editorLaunch.content) ? editorLaunch.content : []}
+          initialGraph={
+            (Array.isArray(editorLaunch.content) ? editorLaunch.content : []) as WfLifecycle
+          }
+          onSave={async (graph) => {
+            await callAttorneyMcp({
+              toolName: 'legal.service.lifecycle.set',
+              input: { serviceKey: editorLaunch.id, graph },
+            })
+          }}
           onClose={() => setEditorLaunch(null)}
         />
       )}

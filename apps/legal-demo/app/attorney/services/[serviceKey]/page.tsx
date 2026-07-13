@@ -36,6 +36,8 @@ interface ServiceDefinition {
   // BUILDER-UX-1 WP-1.3 — client-facing copy (booking-tile name + description).
   clientDisplayName: string | null
   clientDescription: string | null
+  // BUILDER-UX-2 WP-7 — locale variants ({ es: { displayName, description } }).
+  clientCopyI18n: Record<string, { displayName?: string; description?: string }> | null
   route: 'auto' | 'manual'
   intakeFormId: string
   documents: string[]
@@ -54,6 +56,9 @@ interface FormState {
   // shows), edited here alongside the internal/attorney-facing fields.
   clientDisplayName: string
   clientDescription: string
+  // WP-7 — the Spanish client copy (empty = the Spanish intake falls back to English).
+  clientDisplayNameEs: string
+  clientDescriptionEs: string
   route: 'auto' | 'manual'
   generationMode: GenerationMode
   bookingEnabled: boolean
@@ -67,6 +72,8 @@ const EMPTY: FormState = {
   description: '',
   clientDisplayName: '',
   clientDescription: '',
+  clientDisplayNameEs: '',
+  clientDescriptionEs: '',
   route: 'manual',
   generationMode: 'template_merge',
   bookingEnabled: false,
@@ -109,6 +116,8 @@ export default function ServiceSettingsPage() {
         description: r.service.description ?? '',
         clientDisplayName: r.service.clientDisplayName ?? '',
         clientDescription: r.service.clientDescription ?? '',
+        clientDisplayNameEs: r.service.clientCopyI18n?.es?.displayName ?? '',
+        clientDescriptionEs: r.service.clientCopyI18n?.es?.description ?? '',
         route: r.service.route,
         generationMode: r.service.generationMode ?? 'template_merge',
         bookingEnabled: r.service.booking?.enabled ?? false,
@@ -130,6 +139,16 @@ export default function ServiceSettingsPage() {
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => (f ? { ...f, [key]: value } : f))
     setSaved(false)
+  }
+
+  // WP-7: clearing BOTH Spanish inputs removes the es entry (the Spanish intake
+  // falls back to English) while any OTHER locales carry forward untouched.
+  function dropEs(
+    map: Record<string, { displayName?: string; description?: string }> | null | undefined,
+  ): Record<string, { displayName?: string; description?: string }> | null {
+    if (!map) return null
+    const rest = Object.fromEntries(Object.entries(map).filter(([k]) => k !== 'es'))
+    return Object.keys(rest).length ? rest : null
   }
 
   async function save() {
@@ -165,7 +184,10 @@ export default function ServiceSettingsPage() {
           form.generationMode !== 'template_merge' ||
           !form.appointmentRequired ||
           form.clientDisplayName.trim() ||
-          form.clientDescription.trim()
+          form.clientDescription.trim() ||
+          // WP-7: Spanish-only client copy must also trigger the follow-up write.
+          form.clientDisplayNameEs.trim() ||
+          form.clientDescriptionEs.trim()
         ) {
           await callAttorneyMcp({
             toolName: 'legal.service.update',
@@ -175,6 +197,20 @@ export default function ServiceSettingsPage() {
               description: form.description.trim() || null,
               clientDisplayName: form.clientDisplayName.trim() || null,
               clientDescription: form.clientDescription.trim() || null,
+              clientCopyI18n:
+                form.clientDisplayNameEs.trim() || form.clientDescriptionEs.trim()
+                  ? {
+                      ...(meta?.clientCopyI18n ?? {}),
+                      es: {
+                        ...(form.clientDisplayNameEs.trim()
+                          ? { displayName: form.clientDisplayNameEs.trim() }
+                          : {}),
+                        ...(form.clientDescriptionEs.trim()
+                          ? { description: form.clientDescriptionEs.trim() }
+                          : {}),
+                      },
+                    }
+                  : (meta?.clientCopyI18n ?? null),
               route: form.route,
               generationMode: form.generationMode,
               booking,
@@ -196,6 +232,23 @@ export default function ServiceSettingsPage() {
           description: form.description.trim() || null,
           clientDisplayName: form.clientDisplayName.trim() || null,
           clientDescription: form.clientDescription.trim() || null,
+          // WP-7: the es inputs build the es entry, merged over the loaded locale
+          // map so any OTHER locales survive; clearing both es inputs drops the es
+          // entry (dropEs) so the Spanish intake falls back to English.
+          clientCopyI18n:
+            form.clientDisplayNameEs.trim() || form.clientDescriptionEs.trim()
+              ? {
+                  ...(meta?.clientCopyI18n ?? {}),
+                  es: {
+                    ...(form.clientDisplayNameEs.trim()
+                      ? { displayName: form.clientDisplayNameEs.trim() }
+                      : {}),
+                    ...(form.clientDescriptionEs.trim()
+                      ? { description: form.clientDescriptionEs.trim() }
+                      : {}),
+                  },
+                }
+              : dropEs(meta?.clientCopyI18n),
           route: form.route,
           documents: meta?.documents ?? [],
           sortOrder: meta?.sortOrder,
@@ -244,6 +297,8 @@ export default function ServiceSettingsPage() {
               route: form.route,
               clientDisplayName: form.clientDisplayName,
               clientDescription: form.clientDescription,
+              clientDisplayNameEs: form.clientDisplayNameEs,
+              clientDescriptionEs: form.clientDescriptionEs,
               description: form.description,
               generationMode: form.generationMode,
               appointmentRequired: form.appointmentRequired,
@@ -257,6 +312,8 @@ export default function ServiceSettingsPage() {
                       route: next.route,
                       clientDisplayName: next.clientDisplayName,
                       clientDescription: next.clientDescription,
+                      clientDisplayNameEs: next.clientDisplayNameEs,
+                      clientDescriptionEs: next.clientDescriptionEs,
                       description: next.description,
                       generationMode: next.generationMode,
                     }

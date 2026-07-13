@@ -18,6 +18,9 @@ export async function POST(request: Request) {
     description?: string | null
     clientDisplayName?: string | null
     clientDescription?: string | null
+    // WP-7 — the wizard-authored Spanish tile copy (stored as transitions.client_copy_i18n.es).
+    clientDisplayNameEs?: string | null
+    clientDescriptionEs?: string | null
     route?: WorkflowRoute
     generationMode?: GenerationMode
     appointmentRequired?: boolean
@@ -42,6 +45,8 @@ export async function POST(request: Request) {
         description: body?.description ?? null,
         clientDisplayName: body?.clientDisplayName ?? null,
         clientDescription: body?.clientDescription ?? null,
+        clientDisplayNameEs: body?.clientDisplayNameEs ?? null,
+        clientDescriptionEs: body?.clientDescriptionEs ?? null,
         route: body?.route,
         generationMode: body?.generationMode,
         ...(typeof body?.appointmentRequired === 'boolean'

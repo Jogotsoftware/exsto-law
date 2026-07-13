@@ -18,7 +18,7 @@ import {
   graphToSteps,
   stepsToGraph,
   type WfLifecycle,
-} from '../../apps/legal-demo/app/attorney/services/[serviceKey]/workflow/workflowBuilderModel'
+} from '../../apps/legal-demo/lib/workflowBuilderModel'
 
 // The live, valid graph from workflow_definition de68d039 v5 (NC Will Drafting): five
 // stages, generate_will→review_send_will on:document.generated (the automatic edge),

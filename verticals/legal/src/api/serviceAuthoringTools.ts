@@ -78,6 +78,16 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description:
           "The CLIENT-FACING one-liner under the tile name, max 70 characters (hard server-side cap). THE TWO-ENDS RULE governs ALL client-visible copy: describe only the two ends the client touches — what THEY PROVIDE ('upload your lease') and what THEY RECEIVE ('a plain-English review of your lease') — NEVER the machinery between the ends. Who or what does the work (AI, the attorney, a reviewer), where the work goes (a queue, a review step), or how it is produced is machinery even when paraphrased: 'AI reviews it and produces a memo the attorney approves' fails the rule however it is reworded. Good: 'A will that protects your family and your wishes'. REQUIRED.",
       },
+      client_display_name_es: {
+        type: 'string',
+        description:
+          "The SPANISH client-facing service name — a natural, native-quality Spanish rendering of client_display_name for the Spanish intake (e.g. 'Testamento' for 'Last Will & Testament'). Same doctrine: outcome-only, no jurisdiction, no jargon, max 70 characters. The Spanish intake shows this; when absent it falls back to English. REQUIRED — author it alongside the English.",
+      },
+      client_description_es: {
+        type: 'string',
+        description:
+          'The SPANISH client-facing one-liner — a natural Spanish rendering of client_description, same TWO-ENDS RULE (only what the client provides and receives, never the machinery), max 70 characters. REQUIRED — author it alongside the English.',
+      },
       route: {
         type: 'string',
         enum: SERVICE_ROUTES as unknown as string[],
@@ -109,6 +119,8 @@ const PROPOSE_SERVICE_TOOL_DEF = {
       'display_name',
       'client_display_name',
       'client_description',
+      'client_display_name_es',
+      'client_description_es',
       'route',
       'generation_mode',
       'appointment_required',
@@ -157,6 +169,33 @@ export function clientCopyViolation(field: string, value: string): string | null
   return null
 }
 
+// WP-7 — the SPANISH twin of clientCopyViolation. The English regexes misfire on
+// Spanish text two ways: STATE_CODE_RE false-positives on uppercase Spanish words
+// (JS \b is ASCII, so "SEÑOR" word-breaks around the Ñ and matches "OR"; "IA" —
+// Spanish for AI — matches Iowa), and the English machinery/state word lists are
+// no-ops. So Spanish copy gets: the same 70 cap, Spanish state NAMES (the ones a
+// Spanish sentence would actually use), and a Spanish middle-machinery backstop
+// (IA-as-actor, automation/generation verbs, made-by attribution, queues).
+const STATE_NAME_ES_RE =
+  /\b(carolina del norte|carolina del sur|nueva york|nueva jersey|nuevo m[eé]xico|virginia occidental|dakota del norte|dakota del sur|pensilvania|luisiana|misuri|misisipi)\b/i
+const MIDDLE_MACHINERY_ES_RE =
+  /\bIA\b|inteligencia artificial|\bautomatiz\w*|\bgenerad[oa]s?\b|\bredactad[oa] por\b|\b(revisad|preparad|elaborad|escrit)[oa] por\b|\bcola de\b/i
+
+export function clientCopyViolationEs(field: string, value: string): string | null {
+  if (value.length > 70) {
+    return `${field} is ${value.length} characters — the hard cap is 70 (it renders on a small tile). Shorten it and call propose_service again.`
+  }
+  const state = value.match(STATE_NAME_ES_RE) ?? value.match(STATE_NAME_RE)
+  if (state) {
+    return `${field} must NEVER name a jurisdiction ("${state[0]}") — client tile copy is outcome-only. Rewrite and call propose_service again.`
+  }
+  const machinery = value.match(MIDDLE_MACHINERY_ES_RE)
+  if (machinery) {
+    return `${field} breaks the TWO-ENDS RULE ("${machinery[0]}"): client copy describes only what the client PROVIDES and what they RECEIVE — never the machinery in between. Rewrite it and call propose_service again.`
+  }
+  return null
+}
+
 // Build the propose_service tool for this turn. Its run() validates the shell (the
 // SAME checks the write path applies) and, on success, CAPTURES it into `captured`
 // (read back by the caller to surface the approval card) — it never writes. On a
@@ -174,6 +213,8 @@ export function buildProposeServiceTool(
         description?: string
         client_display_name?: string
         client_description?: string
+        client_display_name_es?: string
+        client_description_es?: string
         route?: string
         generation_mode?: string
         appointment_required?: unknown
@@ -192,11 +233,28 @@ export function buildProposeServiceTool(
       if (!clientDisplayName || !clientDescription) {
         return 'client_display_name and client_description are REQUIRED — the outcome-only copy the public intake tile shows ("Last Will & Testament", not the attorney-facing name). Nothing was captured.'
       }
+      // WP-7: the Spanish tile copy is authored ALONGSIDE the English — same doctrine,
+      // same caps. The Spanish intake renders it; absence falls back to English, but
+      // the wizard must not produce that gap on a fresh build.
+      const clientDisplayNameEs = (args.client_display_name_es ?? '').trim()
+      const clientDescriptionEs = (args.client_description_es ?? '').trim()
+      if (!clientDisplayNameEs || !clientDescriptionEs) {
+        return 'client_display_name_es and client_description_es are REQUIRED — author the Spanish tile copy alongside the English (the Spanish intake shows it). Nothing was captured.'
+      }
       for (const [field, value] of [
         ['client_display_name', clientDisplayName],
         ['client_description', clientDescription],
       ] as const) {
         const violation = clientCopyViolation(field, value)
+        if (violation) return `The proposal was NOT captured: ${violation}`
+      }
+      // Spanish copy gets the es-aware check — the English regexes misfire on
+      // Spanish ("IA" is not Iowa; "SEÑOR" is not Oregon).
+      for (const [field, value] of [
+        ['client_display_name_es', clientDisplayNameEs],
+        ['client_description_es', clientDescriptionEs],
+      ] as const) {
+        const violation = clientCopyViolationEs(field, value)
         if (violation) return `The proposal was NOT captured: ${violation}`
       }
       // The description is CLIENT-FACING (it shows on the public booking page). The firm
@@ -247,6 +305,8 @@ export function buildProposeServiceTool(
         description: description || null,
         clientDisplayName,
         clientDescription,
+        clientDisplayNameEs,
+        clientDescriptionEs,
         route,
         generationMode,
         appointmentRequired: args.appointment_required,

@@ -15,6 +15,11 @@ export interface ServiceSettingsValue {
   route: ServiceRoute
   clientDisplayName: string
   clientDescription: string
+  // BUILDER-UX-2 WP-7 — the Spanish client copy (transitions.client_copy_i18n.es).
+  // Generated automatically by the wizard, editable here always; empty = the
+  // Spanish intake falls back to English.
+  clientDisplayNameEs: string
+  clientDescriptionEs: string
   description: string
   generationMode: ServiceGenerationMode
   appointmentRequired: boolean
@@ -77,6 +82,30 @@ export function ServiceSettingsFields({
           What the client sees — one plain sentence in second person.
         </small>
       </label>
+      {/* WP-7 — the Spanish client copy, edited beside the English. Empty is safe:
+          the Spanish intake falls back to the English copy above. */}
+      <div className="form-grid" style={{ marginTop: 'var(--space-3)' }}>
+        <label>
+          <span>Client-facing name (Español)</span>
+          <input
+            value={value.clientDisplayNameEs}
+            onChange={(e) => update('clientDisplayNameEs', e.target.value)}
+            placeholder="e.g. Testamento"
+          />
+          <small className="text-muted">
+            Shown when the client uses the intake in Spanish; empty falls back to English.
+          </small>
+        </label>
+        <label>
+          <span>Client-facing description (Español)</span>
+          <textarea
+            value={value.clientDescriptionEs}
+            onChange={(e) => update('clientDescriptionEs', e.target.value)}
+            rows={2}
+            placeholder="e.g. Cuéntenos su situación y reciba su carta lista para enviar."
+          />
+        </label>
+      </div>
       <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
         <span>Internal description</span>
         <textarea

@@ -51,10 +51,18 @@ export interface SchemaField {
   type?: string
   required?: boolean
   options?: string[]
+  // BUILDER-UX-2 WP-7 — locale variants of the client-facing text ('es', …).
+  // options_i18n is locale → parallel array (same order as options). The intake
+  // falls back to the English text when a locale/field is absent.
+  label_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
+  placeholder_i18n?: Record<string, string>
 }
 export interface SchemaSection {
   id?: string
   title?: string
+  // WP-7 — locale variants of the section title.
+  title_i18n?: Record<string, string>
   fields?: SchemaField[]
 }
 export interface QuestionnaireSchema {
@@ -74,9 +82,18 @@ export interface BField {
   // so it binds templates identically everywhere. Absent for hand-authored
   // fields — their id is slugged from the label on save.
   token?: string
+  // WP-7 — the FULL locale maps, carried losslessly (the builder edits only the
+  // 'es' entry; any other locale round-trips untouched). optionsEs mirrors the
+  // options one-per-line editing form.
+  labelI18n?: Record<string, string>
+  optionsI18n?: Record<string, string[]>
+  placeholderI18n?: Record<string, string>
+  optionsEs: string
 }
 export interface BSection {
   title: string
+  // WP-7 — full locale map for the title; the builder edits only 'es'.
+  titleI18n?: Record<string, string>
   fields: BField[]
 }
 
@@ -98,7 +115,13 @@ export function normToken(s: string): string {
     .slice(0, 60)
 }
 
-export const NEW_FIELD = (): BField => ({ label: '', type: 'text', required: true, options: '' })
+export const NEW_FIELD = (): BField => ({
+  label: '',
+  type: 'text',
+  required: true,
+  options: '',
+  optionsEs: '',
+})
 export const NEW_SECTION = (): BSection => ({ title: '', fields: [NEW_FIELD()] })
 
 // schema → builder sections (preserves each field id as its {{token}} so re-save
@@ -106,12 +129,17 @@ export const NEW_SECTION = (): BSection => ({ title: '', fields: [NEW_FIELD()] }
 export function schemaToSections(schema: QuestionnaireSchema | null | undefined): BSection[] {
   return (schema?.sections ?? []).map((s) => ({
     title: s.title ?? '',
+    titleI18n: s.title_i18n,
     fields: (s.fields ?? []).map((f) => ({
       label: f.label ?? f.id ?? '',
       type: (FIELD_TYPES.some((ft) => ft.value === f.type) ? f.type : 'text') as FieldType,
       required: f.required ?? false,
       options: (f.options ?? []).join('\n'),
       token: f.id,
+      labelI18n: f.label_i18n,
+      optionsI18n: f.options_i18n,
+      placeholderI18n: f.placeholder_i18n,
+      optionsEs: (f.options_i18n?.es ?? []).join('\n'),
     })),
   }))
 }
@@ -129,22 +157,60 @@ export function sectionsToSchema(
     sections: sections.map((s, i) => ({
       id: slug(s.title) || `section_${i + 1}`,
       title: s.title.trim() || `Section ${i + 1}`,
+      ...(() => {
+        // WP-7 — es title from the edited map; other locales carried untouched.
+        const titleI18n: Record<string, string> = { ...(s.titleI18n ?? {}) }
+        if (!(titleI18n.es ?? '').trim()) delete titleI18n.es
+        else titleI18n.es = titleI18n.es.trim()
+        return Object.keys(titleI18n).length ? { title_i18n: titleI18n } : {}
+      })(),
       fields: s.fields
-        .filter((f) => f.label.trim())
-        .map((f) => ({
-          id: f.token?.trim() || slug(f.label),
-          label: f.label.trim(),
-          type: f.type,
-          required: f.required,
-          ...(OPTION_TYPES.has(f.type)
-            ? {
-                options: f.options
-                  .split('\n')
-                  .map((o) => o.trim())
-                  .filter(Boolean),
-              }
-            : {}),
-        })),
+        // WP-7: a field with ONLY a Spanish label is kept (the typed text must not
+        // be silently dropped) — the Spanish text stands in as the label.
+        .filter((f) => f.label.trim() || (f.labelI18n?.es ?? '').trim())
+        .map((f) => {
+          const enLabel = f.label.trim() || (f.labelI18n?.es ?? '').trim()
+          // WP-7 — reassemble the locale maps: the es entry from the edited inputs,
+          // every other locale carried through untouched. An emptied es input drops
+          // the es entry (the intake then falls back to English).
+          const labelI18n: Record<string, string> = { ...(f.labelI18n ?? {}) }
+          delete labelI18n.es
+          if ((f.labelI18n?.es ?? '').trim()) labelI18n.es = f.labelI18n!.es.trim()
+          const optionsI18n: Record<string, string[]> = { ...(f.optionsI18n ?? {}) }
+          delete optionsI18n.es
+          const optsEn = f.options
+            .split('\n')
+            .map((o) => o.trim())
+            .filter(Boolean)
+          const optsEs = f.optionsEs
+            .split('\n')
+            .map((o) => o.trim())
+            .filter(Boolean)
+          // GUARD: Spanish options pair to English purely by index — persist them
+          // ONLY when the lengths match, else a deleted/added English option would
+          // silently mislabel every later Spanish choice. Dropped = English fallback.
+          if (optsEs.length && OPTION_TYPES.has(f.type) && optsEs.length === optsEn.length)
+            optionsI18n.es = optsEs
+          return {
+            id: f.token?.trim() || slug(enLabel),
+            label: enLabel,
+            type: f.type,
+            required: f.required,
+            ...(OPTION_TYPES.has(f.type)
+              ? {
+                  options: f.options
+                    .split('\n')
+                    .map((o) => o.trim())
+                    .filter(Boolean),
+                }
+              : {}),
+            ...(Object.keys(labelI18n).length ? { label_i18n: labelI18n } : {}),
+            ...(Object.keys(optionsI18n).length ? { options_i18n: optionsI18n } : {}),
+            ...(f.placeholderI18n && Object.keys(f.placeholderI18n).length
+              ? { placeholder_i18n: f.placeholderI18n }
+              : {}),
+          }
+        }),
     })),
   }
 }
@@ -169,6 +235,7 @@ function fieldFromLib(q: LibQuestion): BField {
     required: true,
     options: (q.options ?? []).join('\n'),
     token: q.token || undefined,
+    optionsEs: '',
   }
 }
 
@@ -286,6 +353,17 @@ export function QuestionnaireBuilder({
               onChange={(e) => patchSection(si, { title: e.target.value })}
               placeholder={`Section ${si + 1} title`}
             />
+            <input
+              className="qb-section-title"
+              value={section.titleI18n?.es ?? ''}
+              onChange={(e) =>
+                patchSection(si, {
+                  titleI18n: { ...(section.titleI18n ?? {}), es: e.target.value },
+                })
+              }
+              placeholder="Título (Español, opcional)"
+              aria-label="Section title in Spanish"
+            />
             {sections.length > 1 && (
               <button
                 type="button"
@@ -371,6 +449,29 @@ export function QuestionnaireBuilder({
                   onChange={(e) => patchField(si, fi, { options: e.target.value })}
                   rows={2}
                   placeholder="One option per line"
+                />
+              )}
+              {/* WP-7 — the Spanish client-facing text, edited beside the English.
+                  Empty is safe: the Spanish intake falls back to English. */}
+              <input
+                className="qb-field-label"
+                value={field.labelI18n?.es ?? ''}
+                onChange={(e) =>
+                  patchField(si, fi, {
+                    labelI18n: { ...(field.labelI18n ?? {}), es: e.target.value },
+                  })
+                }
+                placeholder="Pregunta (Español, opcional)"
+                aria-label="Question label in Spanish"
+              />
+              {OPTION_TYPES.has(field.type) && (
+                <textarea
+                  className="qb-options"
+                  value={field.optionsEs}
+                  onChange={(e) => patchField(si, fi, { optionsEs: e.target.value })}
+                  rows={2}
+                  placeholder="Opciones en Español, una por línea (mismo orden)"
+                  aria-label="Options in Spanish"
                 />
               )}
             </div>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 import { QuestionnaireEditorModal } from '@/components/QuestionnaireEditorModal'
@@ -67,6 +68,32 @@ export function QuestionnaireProposalCard({
   // in the pop-up; Approve always captures this (the attorney's version).
   const [current, setCurrent] = useState<QuestionnaireProposal>(proposal)
   const [editing, setEditing] = useState(false)
+  const [editSeedSchema, setEditSeedSchema] = useState<unknown | null>(null)
+  const [editLoading, setEditLoading] = useState(false)
+
+  // Post-approval Edit seeds from the SAVED intake questionnaire, not the card's
+  // frozen snapshot — an edit made meanwhile on the questionnaire tab must show up
+  // here, not get silently replaced by Save.
+  async function openEditor() {
+    if (approveState !== 'approved') {
+      setEditSeedSchema(null)
+      setEditing(true)
+      return
+    }
+    setEditLoading(true)
+    try {
+      const r = await callAttorneyMcp<{ questionnaire: { sections: unknown[] } | null }>({
+        toolName: 'legal.service.questionnaire.get',
+        input: { serviceKey: current.serviceKey },
+      })
+      setEditSeedSchema(r.questionnaire ?? current.schema)
+    } catch {
+      setEditSeedSchema(current.schema) // read failure: the card's copy is the best seed
+    } finally {
+      setEditLoading(false)
+    }
+    setEditing(true)
+  }
 
   const sections = current.schema?.sections ?? []
   const fieldCount = sections.reduce((n, s) => n + (s.fields?.length ?? 0), 0)
@@ -176,11 +203,15 @@ export function QuestionnaireProposalCard({
         <button
           type="button"
           className="uac-reply-btn"
-          onClick={() => setEditing(true)}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Edit the proposed questionnaire before approving"
+          onClick={() => void openEditor()}
+          disabled={approveState === 'approving' || editLoading}
+          title={
+            approveState === 'approved'
+              ? 'Edit the saved questionnaire — saves a new version'
+              : 'Edit the proposed questionnaire before approving'
+          }
         >
-          <EditIcon size={12} /> Edit
+          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
         </button>
         <button
           type="button"
@@ -209,15 +240,32 @@ export function QuestionnaireProposalCard({
       )}
       {editing && (
         // BUILDER-UX-1 WP-4: the REAL questionnaire builder in a pop-up (no JSON
-        // textarea). Save updates the CARD (the attorney's version); nothing is
-        // written until Approve — the same human gate as the proposal.
+        // textarea). Pre-approval, Save updates the CARD (the attorney's version) —
+        // nothing is written until Approve. POST-approval (BUILDER-UX-2 WP-2), the
+        // same editor persists to the service's saved intake questionnaire through
+        // legal.service.questionnaire.update — the questionnaire tab's write path.
         <QuestionnaireEditorModal
-          title={`Edit proposed questionnaire — ${current.serviceKey}`}
-          initialSchema={(current.schema ?? { sections: [] }) as ProposalSchema}
+          title={
+            approveState === 'approved'
+              ? `Edit questionnaire — ${current.serviceKey}`
+              : `Edit proposed questionnaire — ${current.serviceKey}`
+          }
+          initialSchema={(editSeedSchema ?? current.schema ?? { sections: [] }) as ProposalSchema}
           name={(current.schema as ProposalSchema)?.title ?? current.serviceKey}
-          onSave={(schema) => {
+          regenerateTargetId={current.serviceKey}
+          onSave={async (schema) => {
+            if (approveState === 'approved') {
+              await callAttorneyMcp({
+                toolName: 'legal.service.questionnaire.update',
+                input: { serviceKey: current.serviceKey, intakeSchema: schema },
+              })
+            }
             setCurrent((c) => ({ ...c, schema }))
-            onEdited?.(`questionnaire for "${current.serviceKey}"`)
+            onEdited?.(
+              approveState === 'approved'
+                ? `questionnaire for "${current.serviceKey}" (saved)`
+                : `questionnaire for "${current.serviceKey}"`,
+            )
           }}
           onClose={() => setEditing(false)}
         />

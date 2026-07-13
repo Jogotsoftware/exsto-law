@@ -43,6 +43,12 @@ interface ServiceField {
   required?: boolean
   allow_unknown?: boolean
   options?: string[]
+  // BUILDER-UX-2 WP-7 — locale variants of the client-facing text, keyed by locale
+  // ('es'). options_i18n is a locale → parallel-array map (same order as options).
+  // A missing locale/field ALWAYS falls back to the English text — never blank.
+  label_i18n?: Record<string, string>
+  placeholder_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
   // 1.1 WP5 — attorney-filled / system-filled field. Present in the schema so the
   // document's {{token}} is covered, but NEVER shown to the client on the booking
   // form and never asked of them. The client view filters these out.
@@ -52,6 +58,8 @@ interface ServiceField {
 interface ServiceSection {
   id: string
   title: string
+  // WP-7 — locale variants of the section title.
+  title_i18n?: Record<string, string>
   fields: ServiceField[]
 }
 
@@ -59,11 +67,55 @@ interface ServiceSection {
 // services whose client copy hasn't been authored/approved yet — the tile falls
 // back to the ATTORNEY-facing displayName/description (jurisdiction-heavy) so
 // nothing renders blank. Remove this note once all live services carry client copy.
-function tileTitle(s: Service, t: (k: string, v?: undefined, f?: string) => string): string {
+function tileTitle(
+  s: Service,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  // WP-7: the stored locale variant wins; then the English client copy; then the
+  // static translation map; then the attorney-facing name. Never blank, never a key.
+  const v = s.clientCopyI18n?.[lang]?.displayName
+  if (typeof v === 'string' && v.trim()) return v
   return s.clientDisplayName ?? t(`service.${s.serviceKey}.title`, undefined, s.displayName)
 }
-function tileDesc(s: Service, t: (k: string, v?: undefined, f?: string) => string): string {
+function tileDesc(
+  s: Service,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  const v = s.clientCopyI18n?.[lang]?.description
+  if (typeof v === 'string' && v.trim()) return v
   return s.clientDescription ?? t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')
+}
+
+// WP-7 — questionnaire text with stored locale variants (fall back to the static
+// translation map, then the English schema text).
+function fieldLabelOf(
+  field: ServiceField,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  const v = field.label_i18n?.[lang]
+  // '' or a non-string never wins — the fallback contract is English, never blank.
+  if (typeof v === 'string' && v.trim()) return v
+  return t(`field.${field.id}.label`, undefined, field.label)
+}
+function optionLabelOf(
+  field: ServiceField,
+  opt: string,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  const i = field.options?.indexOf(opt) ?? -1
+  const localized = field.options_i18n?.[lang]
+  // Index pairing is only trustworthy when the arrays are the SAME length — a
+  // mismatched map must fall back to English rather than mislabel choices.
+  const v =
+    i >= 0 && Array.isArray(localized) && localized.length === (field.options?.length ?? -1)
+      ? localized[i]
+      : undefined
+  if (typeof v === 'string' && v.trim()) return v
+  return t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))
 }
 
 interface Service {
@@ -73,6 +125,7 @@ interface Service {
   description: string | null
   clientDisplayName: string | null
   clientDescription: string | null
+  clientCopyI18n?: Record<string, { displayName?: string; description?: string }> | null
   intakeSchema: { sections: ServiceSection[] }
   // False = intake-only (document-review style): no slot step, submit happens
   // on the intake step, no consultation on the confirmation screen.
@@ -134,10 +187,12 @@ const SOMETHING_ELSE_TILE: Service = {
       {
         id: 'request',
         title: 'Your request',
+        title_i18n: { es: 'Su solicitud' },
         fields: [
           {
             id: 'request_text',
             label: 'What do you need help with?',
+            label_i18n: { es: '¿En qué necesita ayuda?' },
             type: 'textarea',
             required: true,
           },
@@ -446,7 +501,7 @@ export default function BookPage() {
           }
           continue
         }
-        const label = t(`field.${field.id}.label`, undefined, field.label)
+        const label = fieldLabelOf(field, lang, t)
         if (field.type === 'file_upload') {
           // The answer is the staged files themselves, not intakeResponses text.
           if ((stagedUploads[field.id] ?? []).length === 0) {
@@ -923,8 +978,8 @@ export default function BookPage() {
                             <ServiceIcon serviceKey={s.serviceKey} />
                           </span>
                           <span className="bk-service-text">
-                            <span className="bk-service-title">{tileTitle(s, t)}</span>
-                            <span className="bk-service-desc">{tileDesc(s, t)}</span>
+                            <span className="bk-service-title">{tileTitle(s, lang, t)}</span>
+                            <span className="bk-service-desc">{tileDesc(s, lang, t)}</span>
                           </span>
                           <span className="bk-service-tick" aria-hidden>
                             <CheckIcon size={14} />
@@ -1020,7 +1075,11 @@ export default function BookPage() {
                     .map((section) => (
                       <div key={section.id} className="bk-section">
                         <h3 className="bk-section-title">
-                          {t(`section.${section.id}.title`, undefined, section.title)}
+                          {(typeof section.title_i18n?.[lang] === 'string' &&
+                          section.title_i18n[lang].trim()
+                            ? section.title_i18n[lang]
+                            : undefined) ??
+                            t(`section.${section.id}.title`, undefined, section.title)}
                         </h3>
                         <div className="bk-fields">
                           {section.fields
@@ -1515,7 +1574,7 @@ function FieldRenderer({
   // add button hides on the submission-wide total, not this field's count.
   totalStaged: number
 }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const fieldId = useId()
   // file_upload transient UI state — declared unconditionally (hooks rule);
   // unused by every other field type.
@@ -1541,7 +1600,7 @@ function FieldRenderer({
       return { ...prev, [syncFieldId]: names }
     })
   }, [staged, syncFieldId, syncFieldType, setResponses])
-  const fieldLabel = t(`field.${field.id}.label`, undefined, field.label)
+  const fieldLabel = fieldLabelOf(field, lang, t)
   const isUnknown = value === UNKNOWN_ANSWER
   const unknownToggle = field.allow_unknown ? (
     <label className="bk-checkbox bk-unknown">
@@ -1775,7 +1834,7 @@ function FieldRenderer({
           <option value="">{t('select.choose')}</option>
           {field.options.map((opt) => (
             <option key={opt} value={opt}>
-              {t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))}
+              {optionLabelOf(field, opt, lang, t)}
             </option>
           ))}
         </select>
@@ -1806,7 +1865,9 @@ function FieldRenderer({
               disabled={isUnknown}
               onClick={() => set(current === opt ? '' : opt)}
             >
-              {opt}
+              {/* WP-7: translated LABEL; the stored VALUE stays the English word
+                  (it merges into documents). */}
+              {t(`choice.${opt.toLowerCase()}`, undefined, opt)}
             </button>
           ))}
         </div>
@@ -1836,7 +1897,7 @@ function FieldRenderer({
               disabled={isUnknown}
               onClick={() => toggle(opt)}
             >
-              {t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))}
+              {optionLabelOf(field, opt, lang, t)}
             </button>
           ))}
         </div>
