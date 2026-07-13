@@ -120,7 +120,15 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
       const warningText = readout?.splitWarning
         ? ` WARNING (non-blocking — the card shows it; relay it to the attorney in one short line): ${readout.splitWarning}`
         : ''
-      captured.push({
+      // WP-3.1 (BUILDER-UX-2) — a build produces EXACTLY ONE billing proposal per
+      // service; a re-proposal SUPERSEDES the prior one in place instead of appending
+      // a second card. The founder's cease-and-desist walk showed two "Proposed
+      // billing" cards for one service ($500 header and $0 header, both listing the
+      // same $500 line item) because the model called propose_cost twice in a turn and
+      // every captured element rendered its own card. Superseding by serviceKey means
+      // the attorney sees one current price, never a stale/contradictory duplicate to
+      // mis-approve.
+      const proposal: CostProposal = {
         serviceKey,
         costType,
         amount,
@@ -132,7 +140,10 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
           billingLine +
           (readout?.splitWarning ? ` ⚠ ${readout.splitWarning}` : ''),
         confidence,
-      })
+      }
+      const priorIdx = captured.findIndex((c) => c.serviceKey === serviceKey)
+      if (priorIdx >= 0) captured[priorIdx] = proposal
+      else captured.push(proposal)
       return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve.${billingLine}${warningText} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the price in prose.`
     },
   }
