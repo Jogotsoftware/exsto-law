@@ -165,8 +165,11 @@ export function sectionsToSchema(
         return Object.keys(titleI18n).length ? { title_i18n: titleI18n } : {}
       })(),
       fields: s.fields
-        .filter((f) => f.label.trim())
+        // WP-7: a field with ONLY a Spanish label is kept (the typed text must not
+        // be silently dropped) — the Spanish text stands in as the label.
+        .filter((f) => f.label.trim() || (f.labelI18n?.es ?? '').trim())
         .map((f) => {
+          const enLabel = f.label.trim() || (f.labelI18n?.es ?? '').trim()
           // WP-7 — reassemble the locale maps: the es entry from the edited inputs,
           // every other locale carried through untouched. An emptied es input drops
           // the es entry (the intake then falls back to English).
@@ -175,14 +178,22 @@ export function sectionsToSchema(
           if ((f.labelI18n?.es ?? '').trim()) labelI18n.es = f.labelI18n!.es.trim()
           const optionsI18n: Record<string, string[]> = { ...(f.optionsI18n ?? {}) }
           delete optionsI18n.es
+          const optsEn = f.options
+            .split('\n')
+            .map((o) => o.trim())
+            .filter(Boolean)
           const optsEs = f.optionsEs
             .split('\n')
             .map((o) => o.trim())
             .filter(Boolean)
-          if (optsEs.length && OPTION_TYPES.has(f.type)) optionsI18n.es = optsEs
+          // GUARD: Spanish options pair to English purely by index — persist them
+          // ONLY when the lengths match, else a deleted/added English option would
+          // silently mislabel every later Spanish choice. Dropped = English fallback.
+          if (optsEs.length && OPTION_TYPES.has(f.type) && optsEs.length === optsEn.length)
+            optionsI18n.es = optsEs
           return {
-            id: f.token?.trim() || slug(f.label),
-            label: f.label.trim(),
+            id: f.token?.trim() || slug(enLabel),
+            label: enLabel,
             type: f.type,
             required: f.required,
             ...(OPTION_TYPES.has(f.type)

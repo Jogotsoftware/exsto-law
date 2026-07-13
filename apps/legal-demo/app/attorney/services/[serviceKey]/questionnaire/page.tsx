@@ -59,11 +59,18 @@ interface EditorField {
   // members_repeater
   memberFields: EditorField[]
   minItems: number
+  // BUILDER-UX-2 WP-7 — locale maps carried OPAQUELY so a save on this tab never
+  // strips the wizard-authored Spanish (this tab has no es-editing UI; the shared
+  // QuestionnaireBuilder and the wizard own that).
+  label_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
+  placeholder_i18n?: Record<string, string>
 }
 
 interface EditorSection {
   id: string
   title: string
+  title_i18n?: Record<string, string>
   fields: EditorField[]
 }
 
@@ -87,10 +94,15 @@ interface WireField {
   options?: string[]
   memberFields?: WireField[]
   minItems?: number
+  // WP-7 — locale maps (pass-through; see EditorField).
+  label_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
+  placeholder_i18n?: Record<string, string>
 }
 interface WireSection {
   id: string
   title: string
+  title_i18n?: Record<string, string>
   fields: WireField[]
 }
 interface WireDoc {
@@ -147,6 +159,9 @@ function wireFieldToEditor(f: WireField): EditorField {
     options: Array.isArray(f.options) ? f.options : [],
     memberFields: Array.isArray(f.memberFields) ? f.memberFields.map(wireFieldToEditor) : [],
     minItems: typeof f.minItems === 'number' ? f.minItems : 1,
+    label_i18n: f.label_i18n,
+    options_i18n: f.options_i18n,
+    placeholder_i18n: f.placeholder_i18n,
   }
 }
 
@@ -159,6 +174,7 @@ function wireToEditor(doc: WireDoc): EditorDoc {
     sections: (doc.sections ?? []).map((s) => ({
       id: s.id,
       title: s.title,
+      title_i18n: s.title_i18n,
       fields: (s.fields ?? []).map(wireFieldToEditor),
     })),
   }
@@ -177,6 +193,18 @@ function editorFieldToWire(f: EditorField, used: Set<string>): WireField {
   if (f.allow_unknown) out.allow_unknown = true
   if (f.ask_attorney) out.ask_attorney = true
   if (OPTION_FIELD_TYPES.has(f.type)) out.options = f.options.map((o) => o.trim()).filter(Boolean)
+  // WP-7 — carry the locale maps back verbatim (lossless round-trip; drop the
+  // Spanish options if the English list length changed here, since index pairing
+  // would silently mistranslate — the intake then falls back to English).
+  if (f.label_i18n && Object.keys(f.label_i18n).length) out.label_i18n = f.label_i18n
+  if (f.options_i18n && out.options) {
+    const kept = Object.fromEntries(
+      Object.entries(f.options_i18n).filter(([, arr]) => arr.length === out.options!.length),
+    )
+    if (Object.keys(kept).length) out.options_i18n = kept
+  }
+  if (f.placeholder_i18n && Object.keys(f.placeholder_i18n).length)
+    out.placeholder_i18n = f.placeholder_i18n
   if (f.type === 'members_repeater') {
     const memberUsed = new Set<string>()
     out.memberFields = f.memberFields.map((mf) => editorFieldToWire(mf, memberUsed))
@@ -196,6 +224,7 @@ function editorToWire(doc: EditorDoc): WireDoc {
     sections: doc.sections.map((s) => ({
       id: uniqueId(s.id.trim(), slugify(s.title), sectionIds),
       title: s.title.trim(),
+      ...(s.title_i18n && Object.keys(s.title_i18n).length ? { title_i18n: s.title_i18n } : {}),
       fields: s.fields.map((f) => editorFieldToWire(f, fieldIds)),
     })),
   }

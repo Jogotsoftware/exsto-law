@@ -184,6 +184,21 @@ const en: Record<string, string> = {
 }
 
 const es: Record<string, string> = {
+  // WP-7 — intake controls that previously rendered English on the Spanish intake:
+  // the allow_unknown toggle, the yes/no + true/false pill LABELS (stored answer
+  // values stay English — they merge into documents), and the file-upload copy.
+  'field.unknown': 'No lo sé',
+  'choice.yes': 'Sí',
+  'choice.no': 'No',
+  'choice.true': 'Verdadero',
+  'choice.false': 'Falso',
+  'upload.attach': 'Adjuntar un documento',
+  'upload.add_another': 'Adjuntar otro documento',
+  'upload.uploading': 'Subiendo…',
+  'upload.remove': 'Quitar',
+  'upload.failed': 'Error al subir el archivo.',
+  'upload.hint': 'PDF, Word, imágenes o texto — hasta 25 MB cada uno.',
+
   // Stepper
   'step.service': '1. Servicio',
   'step.contact': '2. Contacto',

@@ -169,6 +169,33 @@ export function clientCopyViolation(field: string, value: string): string | null
   return null
 }
 
+// WP-7 — the SPANISH twin of clientCopyViolation. The English regexes misfire on
+// Spanish text two ways: STATE_CODE_RE false-positives on uppercase Spanish words
+// (JS \b is ASCII, so "SEÑOR" word-breaks around the Ñ and matches "OR"; "IA" —
+// Spanish for AI — matches Iowa), and the English machinery/state word lists are
+// no-ops. So Spanish copy gets: the same 70 cap, Spanish state NAMES (the ones a
+// Spanish sentence would actually use), and a Spanish middle-machinery backstop
+// (IA-as-actor, automation/generation verbs, made-by attribution, queues).
+const STATE_NAME_ES_RE =
+  /\b(carolina del norte|carolina del sur|nueva york|nueva jersey|nuevo m[eé]xico|virginia occidental|dakota del norte|dakota del sur|pensilvania|luisiana|misuri|misisipi)\b/i
+const MIDDLE_MACHINERY_ES_RE =
+  /\bIA\b|inteligencia artificial|\bautomatiz\w*|\bgenerad[oa]s?\b|\bredactad[oa] por\b|\b(revisad|preparad|elaborad|escrit)[oa] por\b|\bcola de\b/i
+
+export function clientCopyViolationEs(field: string, value: string): string | null {
+  if (value.length > 70) {
+    return `${field} is ${value.length} characters — the hard cap is 70 (it renders on a small tile). Shorten it and call propose_service again.`
+  }
+  const state = value.match(STATE_NAME_ES_RE) ?? value.match(STATE_NAME_RE)
+  if (state) {
+    return `${field} must NEVER name a jurisdiction ("${state[0]}") — client tile copy is outcome-only. Rewrite and call propose_service again.`
+  }
+  const machinery = value.match(MIDDLE_MACHINERY_ES_RE)
+  if (machinery) {
+    return `${field} breaks the TWO-ENDS RULE ("${machinery[0]}"): client copy describes only what the client PROVIDES and what they RECEIVE — never the machinery in between. Rewrite it and call propose_service again.`
+  }
+  return null
+}
+
 // Build the propose_service tool for this turn. Its run() validates the shell (the
 // SAME checks the write path applies) and, on success, CAPTURES it into `captured`
 // (read back by the caller to surface the approval card) — it never writes. On a
@@ -217,10 +244,17 @@ export function buildProposeServiceTool(
       for (const [field, value] of [
         ['client_display_name', clientDisplayName],
         ['client_description', clientDescription],
+      ] as const) {
+        const violation = clientCopyViolation(field, value)
+        if (violation) return `The proposal was NOT captured: ${violation}`
+      }
+      // Spanish copy gets the es-aware check — the English regexes misfire on
+      // Spanish ("IA" is not Iowa; "SEÑOR" is not Oregon).
+      for (const [field, value] of [
         ['client_display_name_es', clientDisplayNameEs],
         ['client_description_es', clientDescriptionEs],
       ] as const) {
-        const violation = clientCopyViolation(field, value)
+        const violation = clientCopyViolationEs(field, value)
         if (violation) return `The proposal was NOT captured: ${violation}`
       }
       // The description is CLIENT-FACING (it shows on the public booking page). The firm

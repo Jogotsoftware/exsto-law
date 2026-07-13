@@ -184,7 +184,10 @@ export default function ServiceSettingsPage() {
           form.generationMode !== 'template_merge' ||
           !form.appointmentRequired ||
           form.clientDisplayName.trim() ||
-          form.clientDescription.trim()
+          form.clientDescription.trim() ||
+          // WP-7: Spanish-only client copy must also trigger the follow-up write.
+          form.clientDisplayNameEs.trim() ||
+          form.clientDescriptionEs.trim()
         ) {
           await callAttorneyMcp({
             toolName: 'legal.service.update',

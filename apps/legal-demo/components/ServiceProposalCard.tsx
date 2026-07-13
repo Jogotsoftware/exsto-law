@@ -63,6 +63,12 @@ export function ServiceProposalCard({
   const [current, setCurrent] = useState<ServiceProposal>(proposal)
   const [editing, setEditing] = useState(false)
   const [editLoading, setEditLoading] = useState(false)
+  // WP-7 — the SAVED locale map from the freshest read, so a post-approval save
+  // merges the es entry over OTHER locales instead of wiping them.
+  const [savedI18n, setSavedI18n] = useState<Record<
+    string,
+    { displayName?: string; description?: string }
+  > | null>(null)
   const [approveError, setApproveError] = useState<string | null>(null)
   const [serviceKey, setServiceKey] = useState<string | null>(null)
   // The link to the created service, returned by the approve route — shown as
@@ -90,6 +96,7 @@ export function ServiceProposalCard({
         }>({ toolName: 'legal.service.get', input: { serviceKey } })
         if (r.service) {
           const svc = r.service
+          setSavedI18n(svc.clientCopyI18n ?? null)
           setCurrent((c) => ({
             ...c,
             displayName: svc.displayName,
@@ -303,19 +310,24 @@ export function ServiceProposalCard({
                   description: next.description || null,
                   clientDisplayName: next.clientDisplayName || null,
                   clientDescription: next.clientDescription || null,
-                  clientCopyI18n:
-                    next.clientDisplayNameEs || next.clientDescriptionEs
-                      ? {
-                          es: {
-                            ...(next.clientDisplayNameEs
-                              ? { displayName: next.clientDisplayNameEs }
-                              : {}),
-                            ...(next.clientDescriptionEs
-                              ? { description: next.clientDescriptionEs }
-                              : {}),
-                          },
-                        }
-                      : null,
+                  // WP-7: merge the es entry over the SAVED locale map (other
+                  // locales survive); clearing both es inputs drops only es.
+                  clientCopyI18n: (() => {
+                    const rest = Object.fromEntries(
+                      Object.entries(savedI18n ?? {}).filter(([k]) => k !== 'es'),
+                    )
+                    if (next.clientDisplayNameEs || next.clientDescriptionEs) {
+                      rest.es = {
+                        ...(next.clientDisplayNameEs
+                          ? { displayName: next.clientDisplayNameEs }
+                          : {}),
+                        ...(next.clientDescriptionEs
+                          ? { description: next.clientDescriptionEs }
+                          : {}),
+                      }
+                    }
+                    return Object.keys(rest).length ? rest : null
+                  })(),
                   route: next.route,
                   generationMode: next.generationMode,
                   appointmentRequired: next.appointmentRequired,

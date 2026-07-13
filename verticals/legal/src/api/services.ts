@@ -1037,11 +1037,55 @@ export function validateIntakeSchema(schema: unknown): QuestionnaireDoc {
     if (!Array.isArray(section.fields)) {
       throw new Error(`Section ${section.id} must have a fields array.`)
     }
+    normalizeI18nMap(section, 'title_i18n')
     for (const rawField of section.fields as unknown[]) {
       validateField(rawField, section.id)
     }
   }
   return schema as QuestionnaireDoc
+}
+
+// WP-7 — SANITIZE (never throw on) the questionnaire's locale maps at the write
+// chokepoint. A bad translation must never break the intake or the build; the
+// fallback contract is "English, never blank" — so empty/non-string entries are
+// dropped, and options_i18n arrays that don't pair 1:1 with options are dropped
+// (index pairing would silently mislabel choices). Mutates in place; the schema
+// object is what gets persisted.
+function normalizeI18nMap(obj: Record<string, unknown>, key: string): void {
+  const raw = obj[key]
+  if (raw === undefined) return
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    delete obj[key]
+    return
+  }
+  const clean: Record<string, string> = {}
+  for (const [locale, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.trim()) clean[locale] = v
+  }
+  if (Object.keys(clean).length) obj[key] = clean
+  else delete obj[key]
+}
+
+function normalizeOptionsI18n(field: Record<string, unknown>): void {
+  const raw = field.options_i18n
+  if (raw === undefined) return
+  const options = Array.isArray(field.options) ? (field.options as unknown[]) : []
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || options.length === 0) {
+    delete field.options_i18n
+    return
+  }
+  const clean: Record<string, string[]> = {}
+  for (const [locale, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (
+      Array.isArray(v) &&
+      v.length === options.length &&
+      v.every((o) => typeof o === 'string' && o.trim())
+    ) {
+      clean[locale] = v as string[]
+    }
+  }
+  if (Object.keys(clean).length) field.options_i18n = clean
+  else delete field.options_i18n
 }
 
 function validateField(rawField: unknown, sectionId: string): void {
@@ -1077,6 +1121,11 @@ function validateField(rawField: unknown, sectionId: string): void {
       validateField(sub, `${sectionId}.${field.id}`)
     }
   }
+  // WP-7 — sanitize the locale maps (drop empty/non-string entries; drop mispaired
+  // options_i18n). Fallback is English; a bad translation never breaks the write.
+  normalizeI18nMap(field, 'label_i18n')
+  normalizeI18nMap(field, 'placeholder_i18n')
+  normalizeOptionsI18n(field)
 }
 
 // Write a service's questionnaire as a new immutable version. Validates the shape

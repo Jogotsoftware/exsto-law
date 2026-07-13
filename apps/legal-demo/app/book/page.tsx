@@ -74,22 +74,18 @@ function tileTitle(
 ): string {
   // WP-7: the stored locale variant wins; then the English client copy; then the
   // static translation map; then the attorney-facing name. Never blank, never a key.
-  return (
-    s.clientCopyI18n?.[lang]?.displayName ??
-    s.clientDisplayName ??
-    t(`service.${s.serviceKey}.title`, undefined, s.displayName)
-  )
+  const v = s.clientCopyI18n?.[lang]?.displayName
+  if (typeof v === 'string' && v.trim()) return v
+  return s.clientDisplayName ?? t(`service.${s.serviceKey}.title`, undefined, s.displayName)
 }
 function tileDesc(
   s: Service,
   lang: string,
   t: (k: string, v?: undefined, f?: string) => string,
 ): string {
-  return (
-    s.clientCopyI18n?.[lang]?.description ??
-    s.clientDescription ??
-    t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')
-  )
+  const v = s.clientCopyI18n?.[lang]?.description
+  if (typeof v === 'string' && v.trim()) return v
+  return s.clientDescription ?? t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')
 }
 
 // WP-7 — questionnaire text with stored locale variants (fall back to the static
@@ -99,7 +95,10 @@ function fieldLabelOf(
   lang: string,
   t: (k: string, v?: undefined, f?: string) => string,
 ): string {
-  return field.label_i18n?.[lang] ?? t(`field.${field.id}.label`, undefined, field.label)
+  const v = field.label_i18n?.[lang]
+  // '' or a non-string never wins — the fallback contract is English, never blank.
+  if (typeof v === 'string' && v.trim()) return v
+  return t(`field.${field.id}.label`, undefined, field.label)
 }
 function optionLabelOf(
   field: ServiceField,
@@ -108,10 +107,15 @@ function optionLabelOf(
   t: (k: string, v?: undefined, f?: string) => string,
 ): string {
   const i = field.options?.indexOf(opt) ?? -1
-  return (
-    (i >= 0 ? field.options_i18n?.[lang]?.[i] : undefined) ??
-    t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))
-  )
+  const localized = field.options_i18n?.[lang]
+  // Index pairing is only trustworthy when the arrays are the SAME length — a
+  // mismatched map must fall back to English rather than mislabel choices.
+  const v =
+    i >= 0 && Array.isArray(localized) && localized.length === (field.options?.length ?? -1)
+      ? localized[i]
+      : undefined
+  if (typeof v === 'string' && v.trim()) return v
+  return t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))
 }
 
 interface Service {
@@ -183,10 +187,12 @@ const SOMETHING_ELSE_TILE: Service = {
       {
         id: 'request',
         title: 'Your request',
+        title_i18n: { es: 'Su solicitud' },
         fields: [
           {
             id: 'request_text',
             label: 'What do you need help with?',
+            label_i18n: { es: '¿En qué necesita ayuda?' },
             type: 'textarea',
             required: true,
           },
@@ -1069,7 +1075,10 @@ export default function BookPage() {
                     .map((section) => (
                       <div key={section.id} className="bk-section">
                         <h3 className="bk-section-title">
-                          {section.title_i18n?.[lang] ??
+                          {(typeof section.title_i18n?.[lang] === 'string' &&
+                          section.title_i18n[lang].trim()
+                            ? section.title_i18n[lang]
+                            : undefined) ??
                             t(`section.${section.id}.title`, undefined, section.title)}
                         </h3>
                         <div className="bk-fields">
@@ -1856,7 +1865,9 @@ function FieldRenderer({
               disabled={isUnknown}
               onClick={() => set(current === opt ? '' : opt)}
             >
-              {opt}
+              {/* WP-7: translated LABEL; the stored VALUE stays the English word
+                  (it merges into documents). */}
+              {t(`choice.${opt.toLowerCase()}`, undefined, opt)}
             </button>
           ))}
         </div>
