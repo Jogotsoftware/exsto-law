@@ -27,9 +27,14 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 export function EnableProposalCard({
   proposal,
   onApproved,
+  onDone,
 }: {
   proposal: EnableProposal
   onApproved?: OnApproved
+  // WP-5 (BUILDER-UX-2) — the explicit end of the one-build-one-thread lifecycle:
+  // "Done · Close setup" exits build mode, seals the build session, and returns to
+  // normal assistant chat. Shown once the service is live.
+  onDone?: () => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
@@ -104,22 +109,14 @@ export function EnableProposalCard({
         </div>
       )}
 
-      {/* BUILDER-UX-1 WP-2.1: the completion summary is a BULLETED list under a
-          bolded header — the service's steps — never a comma-run. */}
-      {proposal.completion && proposal.completion.length > 0 && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-          <strong>This service is complete</strong>
-          <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
-            {proposal.completion.map((item, i) => (
-              <li key={i}>{item}</li>
-            ))}
-          </ul>
+      {/* WP-5 (BUILDER-UX-2) — the "here's how it runs" step recap is GONE: the
+          completion card is a confirmation line + the two links, nothing more. Before
+          enabling, one line sets expectations; after, the summary + links speak. */}
+      {approveState !== 'approved' && (
+        <div className="uac-doc-body text-muted" style={{ fontSize: 12 }}>
+          Approving makes this service live and bookable. Until you approve, it stays a draft.
         </div>
       )}
-
-      <div className="uac-doc-body text-muted" style={{ fontSize: 12 }}>
-        Approving makes this service live and bookable. Until you approve, it stays a draft.
-      </div>
 
       <div className="uac-doc-actions">
         <button
@@ -174,6 +171,19 @@ export function EnableProposalCard({
               {copied ? <CheckIcon size={12} /> : null} {copied ? 'Copied' : 'Copy booking link'}
             </button>
           </>
+        )}
+        {/* WP-5: the formal end of the build. Sealing the session + leaving build mode
+            already happen on approve; this is the attorney's explicit "I'm done here"
+            that returns them to normal chat. */}
+        {approveState === 'approved' && onDone && (
+          <button
+            type="button"
+            className="uac-reply-btn uac-reply-btn-primary"
+            onClick={onDone}
+            title="Finish setup and return to the assistant"
+          >
+            <CheckIcon size={12} /> Done · Close setup
+          </button>
         )}
       </div>
       {approveError && (

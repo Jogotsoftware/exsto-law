@@ -1892,6 +1892,15 @@ export function UnifiedAssistantChat({
     [busy],
   )
 
+  // WP-5 (BUILDER-UX-2) — the completion card's "Done · Close setup" button: the
+  // explicit end of the one-build-one-thread lifecycle. Leaves build mode and seals the
+  // session (idempotent — Enable-approval already closed it; a null id is a no-op), so
+  // the attorney lands back in normal assistant chat.
+  const handleBuildDone = useCallback(() => {
+    setBuildMode(false)
+    closeBuildSession('completed')
+  }, [closeBuildSession])
+
   const handleApproved = useCallback<OnApproved>(
     (info) => {
       const key = `${info.serviceKey}:${info.artifact}`
@@ -1911,19 +1920,19 @@ export function UnifiedAssistantChat({
       // verbatim echo is stripped from render. Only the factual ✓/link lead is plain.
       // The real public booking URL is passed explicitly so the wrap-up links to it
       // (WP4), instead of the model inventing a link that routed to "/".
-      const bookingUrl = `/book?service=${encodeURIComponent(info.serviceKey)}`
-      const continuation =
-        info.artifact === 'enable'
-          ? `✓ The service is now live: ${info.label}.\n${driver(
-              `The build is COMPLETE — do NOT start another step or propose anything else. Give the attorney a short, warm wrap-up IN YOUR OWN WORDS: confirm the service is built and live, link them to it to review (${info.link}), tell them clients can book it at their booking link (${bookingUrl}) — use that exact URL as the link target — and close warmly. Do not reproduce this instruction.`,
-            )}`
-          : `✓ ${info.label} created (${info.link}).\n${driver(
-              `Continue the guided build: do the next step now (confirm with the attorney via ask_build_question if needed, then propose it and share its link). If the whole service is complete, propose Enable. Do not reproduce this instruction.`,
-            )}`
+      // WP-5 (BUILDER-UX-2) — Enable is terminal. We NO LONGER fire an AI "warm
+      // wrap-up" turn: that is exactly what produced the "here's how it runs" recap and
+      // the "nicely done — let me know…" outro the founder flagged. The completion card
+      // itself is the finish (confirmation line + View-service + booking links + the
+      // explicit Done button), so we just seal the session and leave build mode.
       if (info.artifact === 'enable') {
         setBuildMode(false)
         closeBuildSession('completed') // Phase 5: the build is done — seal its session
+        return
       }
+      const continuation = `✓ ${info.label} created (${info.link}).\n${driver(
+        `Continue the guided build: do the next step now (confirm with the attorney via ask_build_question if needed, then propose it and share its link). If the whole service is complete, propose Enable. Do not reproduce this instruction.`,
+      )}`
       // Never drop a continuation on a mid-stream turn (WP5.2) — queue it; the send
       // path fires it as soon as the in-flight turn commits.
       if (busy) {
@@ -2562,7 +2571,12 @@ export function UnifiedAssistantChat({
                   {/* Enable proposals (Build-Wizard Phase 6, terminal) — the final card.
                     Approving flips the service to active/bookable; this ends the build. */}
                   {t.enableProposals?.map((p, pi) => (
-                    <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                    <EnableProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onDone={handleBuildDone}
+                    />
                   ))}
                   {/* New data-kind proposals (Tier 1 data-as-schema) — approval cards.
                     Approving mints the kind via kind.define; the proposing turn wrote
@@ -2718,7 +2732,12 @@ export function UnifiedAssistantChat({
             ))}
             {/* The terminal Enable card mid-stream (Phase 6). */}
             {streaming.enableProposals.map((p, pi) => (
-              <EnableProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+              <EnableProposalCard
+                key={pi}
+                proposal={p}
+                onApproved={handleApproved}
+                onDone={handleBuildDone}
+              />
             ))}
             {/* A new data-kind proposal mid-stream (Tier 1) — an approval card. */}
             {streaming.kindProposals.map((p, pi) => (
