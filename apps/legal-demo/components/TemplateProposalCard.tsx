@@ -69,10 +69,36 @@ export function TemplateProposalCard({
   // the pop-up; Approve always captures this (the attorney's version).
   const [currentBody, setCurrentBody] = useState(proposal.body)
   const [editing, setEditing] = useState(false)
+  const [editSeedBody, setEditSeedBody] = useState<string | null>(null)
+  const [editLoading, setEditLoading] = useState(false)
   // BUILDER-UX-2 WP-2: the PERSISTED template's entity id, from the approve response.
-  // Post-approval Edit saves through legal.template.update against this id — the same
-  // write path the templates page uses — never a stale in-memory proposal.
+  // Post-approval Edit saves against the SAVED artifact — never a stale in-memory
+  // proposal.
   const [templateEntityId, setTemplateEntityId] = useState<string | null>(null)
+
+  // Post-approval Edit seeds from the SAVED service-bound body (the copy drafting
+  // reads), not the card's frozen snapshot — an edit made meanwhile on the service's
+  // Templates tab must show up here, not get silently reverted on Save.
+  async function openEditor() {
+    if (approveState !== 'approved') {
+      setEditSeedBody(null)
+      setEditing(true)
+      return
+    }
+    setEditLoading(true)
+    try {
+      const r = await callAttorneyMcp<{ template: { templateText: string | null } | null }>({
+        toolName: 'legal.service.template.get',
+        input: { serviceKey: proposal.serviceKey, documentKind: proposal.docKind },
+      })
+      setEditSeedBody(r.template?.templateText ?? currentBody)
+    } catch {
+      setEditSeedBody(currentBody) // read failure: the card's copy is the best seed we have
+    } finally {
+      setEditLoading(false)
+    }
+    setEditing(true)
+  }
 
   const orphans = new Set((proposal.orphanTokens ?? []).map((t) => t.toLowerCase()))
   const reusable = new Set((proposal.reusableFromFirm ?? []).map((t) => t.toLowerCase()))
@@ -227,9 +253,11 @@ export function TemplateProposalCard({
         <button
           type="button"
           className="uac-reply-btn"
-          onClick={() => setEditing(true)}
+          onClick={() => void openEditor()}
           disabled={
-            approveState === 'approving' || (approveState === 'approved' && !templateEntityId)
+            approveState === 'approving' ||
+            editLoading ||
+            (approveState === 'approved' && !templateEntityId)
           }
           title={
             approveState === 'approved'
@@ -237,7 +265,7 @@ export function TemplateProposalCard({
               : 'Edit the proposed template before approving'
           }
         >
-          <EditIcon size={12} /> Edit
+          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
         </button>
         <button
           type="button"
@@ -271,7 +299,7 @@ export function TemplateProposalCard({
               ? `Edit template — ${proposal.name}`
               : `Edit proposed template — ${proposal.name}`
           }
-          initialBody={currentBody}
+          initialBody={editSeedBody ?? currentBody}
           regenerateTargetId={
             approveState === 'approved' && templateEntityId
               ? templateEntityId
@@ -279,8 +307,18 @@ export function TemplateProposalCard({
           }
           onSave={async (body) => {
             if (approveState === 'approved' && templateEntityId) {
-              // Post-approval: persist to the SAVED template (a new immutable version
-              // through legal.template.update — the same write the templates page does).
+              // Post-approval: approve wrote TWO stores (createTemplateAI's dual
+              // write) — the SERVICE-BOUND body drafting + completeness read, and the
+              // firm-library twin. The edit must land in BOTH, or new matters draft
+              // the stale clause while the card claims the fix saved.
+              await callAttorneyMcp({
+                toolName: 'legal.service.template.update',
+                input: {
+                  serviceKey: proposal.serviceKey,
+                  documentKind: proposal.docKind,
+                  templateText: body,
+                },
+              })
               await callAttorneyMcp({
                 toolName: 'legal.template.update',
                 input: { templateEntityId, body },

@@ -52,6 +52,30 @@ export function AiRegenerateRail({
   const pollGen = useRef(0)
   useEffect(() => () => void pollGen.current++, []) // cancel polls on unmount
 
+  // Surface a PENDING regeneration for this artifact on mount (ConfigEditModal's
+  // Phase-10 behavior, kept through the extraction): a regeneration that completed
+  // while the editor was closed — or on another surface — is offered here instead
+  // of being orphaned. Best-effort read.
+  useEffect(() => {
+    let cancelled = false
+    fetch(
+      `/api/attorney/config/regenerate?artifactKind=${encodeURIComponent(artifactKind)}&targetId=${encodeURIComponent(targetId)}`,
+      { headers: devHeaders(), credentials: 'same-origin' },
+    )
+      .then((r) => r.json())
+      .then((body: { result?: { ok?: boolean; proposed?: string } | null }) => {
+        if (!cancelled && body?.result?.ok && typeof body.result.proposed === 'string') {
+          setProposal(body.result.proposed)
+        }
+      })
+      .catch(() => {
+        /* no pending proposal — nothing to surface */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [artifactKind, targetId])
+
   async function regenerate() {
     const p = prompt.trim()
     if (!p || busy) return
@@ -72,6 +96,7 @@ export function AiRegenerateRail({
       } | null
       if (!res.ok || !data?.requestId)
         throw new Error(data?.error || `Enqueue failed (${res.status})`)
+      let consecutiveHttpErrors = 0
       for (let i = 0; i < POLL_LIMIT; i++) {
         await new Promise((r) => setTimeout(r, POLL_MS))
         if (pollGen.current !== gen) return // superseded/unmounted
@@ -81,7 +106,22 @@ export function AiRegenerateRail({
         )
         const body = (await poll.json().catch(() => null)) as {
           result?: { ok: boolean; proposed?: string; errors?: string[] } | null
+          error?: string
         } | null
+        // A failing poll is an ERROR, not a pending state — surface it instead of
+        // silently retrying for five minutes and misreporting a timeout. Auth/
+        // not-found fail immediately; transient 5xx gets three tries.
+        if (!poll.ok) {
+          if (poll.status === 401 || poll.status === 403 || poll.status === 404) {
+            throw new Error(body?.error || `Regeneration status check failed (${poll.status}).`)
+          }
+          consecutiveHttpErrors += 1
+          if (consecutiveHttpErrors >= 3) {
+            throw new Error(body?.error || `Regeneration status check failed (${poll.status}).`)
+          }
+          continue
+        }
+        consecutiveHttpErrors = 0
         const result = body?.result
         if (!result) continue
         if (!result.ok) throw new Error(result.errors?.join('; ') || 'Regeneration failed.')

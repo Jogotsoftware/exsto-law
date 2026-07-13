@@ -32,6 +32,10 @@ export interface TemplateEditorHandle {
   getHTML: () => string
   insertVariable: (name: string) => void
   focus: () => void
+  // Replace the document content imperatively (e.g. applying an AI proposal) —
+  // works even when the incoming HTML equals the last SEED (the prop-resync path
+  // deliberately no-ops on that, which would silently keep unsaved edits).
+  setContent: (html: string) => void
 }
 
 interface Props {
@@ -155,6 +159,9 @@ export function TemplateEditor({
           .insertVariable(name)
           .run(),
       focus: () => editor.commands.focus(),
+      setContent: (html: string) => {
+        editor.commands.setContent(html || '<p></p>', { emitUpdate: false })
+      },
     }
     editorRef.current = handle
     return () => {

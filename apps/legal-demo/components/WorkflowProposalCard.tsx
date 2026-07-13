@@ -176,7 +176,32 @@ export function WorkflowProposalCard({
   // Approve captures this over the AI's proposal when set.
   const [editedGraph, setEditedGraph] = useState<WorkflowProposal['graph'] | null>(null)
   const [editing, setEditing] = useState(false)
+  const [editSeedGraph, setEditSeedGraph] = useState<WfLifecycle | null>(null)
+  const [editLoading, setEditLoading] = useState(false)
   const liveGraph = editedGraph ?? proposal.graph
+
+  // Post-approval Edit seeds from the SAVED lifecycle, not the card's frozen
+  // snapshot — an edit made meanwhile on the Workflow tab must show up here, not
+  // get silently reverted by Save (lifecycle.set is a full-graph replace).
+  async function openEditor() {
+    if (approveState !== 'approved') {
+      setEditSeedGraph(null)
+      setEditing(true)
+      return
+    }
+    setEditLoading(true)
+    try {
+      const r = await callAttorneyMcp<{
+        lifecycle: { graph: WfLifecycle; version: number } | null
+      }>({ toolName: 'legal.service.lifecycle.get', input: { serviceKey: proposal.serviceKey } })
+      setEditSeedGraph(r.lifecycle?.graph ?? liveGraph)
+    } catch {
+      setEditSeedGraph(liveGraph) // read failure: the card's copy is the best seed we have
+    } finally {
+      setEditLoading(false)
+    }
+    setEditing(true)
+  }
 
   const ordered = orderStages(liveGraph)
 
@@ -318,15 +343,15 @@ export function WorkflowProposalCard({
         <button
           type="button"
           className="uac-reply-btn"
-          onClick={() => setEditing(true)}
-          disabled={approveState === 'approving'}
+          onClick={() => void openEditor()}
+          disabled={approveState === 'approving' || editLoading}
           title={
             approveState === 'approved'
               ? 'Edit the saved workflow — saves a new version'
               : 'Edit the proposed workflow before approving'
           }
         >
-          <EditIcon size={12} /> Edit
+          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
         </button>
         <button
           type="button"
@@ -410,10 +435,12 @@ export function WorkflowProposalCard({
           // The card's wire shape is a WIDE structural mirror of the builder model
           // (SSE JSON: action.kind is string); the builder coerces unknown kinds on
           // load and the approve/lifecycle.set routes validate on write.
-          initialGraph={(liveGraph ?? []) as unknown as LibWfLifecycle}
-          regenerateTargetId={
-            approveState === 'approved' ? proposal.serviceKey : `proposal:${proposal.serviceKey}`
-          }
+          initialGraph={(editSeedGraph ?? liveGraph ?? []) as unknown as LibWfLifecycle}
+          // ALWAYS the real serviceKey: the service exists by the workflow phase of a
+          // build (shell first), and the regenerate worker VALIDATES the revised graph
+          // against this id (validateProposedLifecycle) — "proposal:<key>" made it
+          // validate against a nonexistent service and spuriously reject.
+          regenerateTargetId={proposal.serviceKey}
           onSave={async (graph) => {
             if (approveState === 'approved') {
               // Post-approval: the SAME edit persists to the saved lifecycle (a new

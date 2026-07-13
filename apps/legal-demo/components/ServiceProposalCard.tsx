@@ -62,11 +62,55 @@ export function ServiceProposalCard({
   // Approve always captures this (the attorney's version).
   const [current, setCurrent] = useState<ServiceProposal>(proposal)
   const [editing, setEditing] = useState(false)
+  const [editLoading, setEditLoading] = useState(false)
   const [approveError, setApproveError] = useState<string | null>(null)
   const [serviceKey, setServiceKey] = useState<string | null>(null)
   // The link to the created service, returned by the approve route — shown as
   // "View service →" and handed to onApproved for the auto-continuation.
   const [link, setLink] = useState<string | null>(null)
+
+  // Post-approval Edit seeds from the SAVED service, not the card's frozen snapshot —
+  // an edit made meanwhile on the Settings tab must show up here, not get silently
+  // reverted by Save. The fresh read lands in `current` so the card re-renders too.
+  async function openEditor() {
+    if (approveState === 'approved' && serviceKey) {
+      setEditLoading(true)
+      try {
+        const r = await callAttorneyMcp<{
+          service: {
+            displayName: string
+            description: string | null
+            clientDisplayName: string | null
+            clientDescription: string | null
+            clientCopyI18n: Record<string, { displayName?: string; description?: string }> | null
+            route: 'auto' | 'manual'
+            generationMode: 'template_merge' | 'ai_draft'
+            appointmentRequired: boolean
+          } | null
+        }>({ toolName: 'legal.service.get', input: { serviceKey } })
+        if (r.service) {
+          const svc = r.service
+          setCurrent((c) => ({
+            ...c,
+            displayName: svc.displayName,
+            description: svc.description,
+            clientDisplayName: svc.clientDisplayName,
+            clientDescription: svc.clientDescription,
+            clientDisplayNameEs: svc.clientCopyI18n?.es?.displayName ?? null,
+            clientDescriptionEs: svc.clientCopyI18n?.es?.description ?? null,
+            route: svc.route,
+            generationMode: svc.generationMode,
+            appointmentRequired: svc.appointmentRequired,
+          }))
+        }
+      } catch {
+        /* read failure: the card's copy is the best seed we have */
+      } finally {
+        setEditLoading(false)
+      }
+    }
+    setEditing(true)
+  }
 
   async function approve() {
     setApproveState('approving')
@@ -188,15 +232,19 @@ export function ServiceProposalCard({
         <button
           type="button"
           className="uac-reply-btn"
-          onClick={() => setEditing(true)}
-          disabled={approveState === 'approving' || (approveState === 'approved' && !serviceKey)}
+          onClick={() => void openEditor()}
+          disabled={
+            approveState === 'approving' ||
+            editLoading ||
+            (approveState === 'approved' && !serviceKey)
+          }
           title={
             approveState === 'approved'
               ? 'Edit the created service — saves a new version'
               : 'Edit the proposed service shell before approving'
           }
         >
-          <EditIcon size={12} /> Edit
+          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
         </button>
         <button
           type="button"

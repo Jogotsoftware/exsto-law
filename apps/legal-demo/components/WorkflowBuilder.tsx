@@ -67,7 +67,12 @@ export function stepToStage(s: BuilderStep): WfStepStage {
   const stage: WfStepStage = {
     label: s.label.trim() || 'Step',
     gate: s.gate,
-    action: { kind: s.actionKind },
+    // Carry action.config so a saved invoke_capability step keeps its capability
+    // slug + standing instructions in the library (stageToStep restores it).
+    action:
+      s.config && Object.keys(s.config).length
+        ? { kind: s.actionKind, config: s.config }
+        : { kind: s.actionKind },
   }
   if (s.clientLabel.trim()) stage.client_label = s.clientLabel.trim()
   if (!s.blocking) stage.blocking = false

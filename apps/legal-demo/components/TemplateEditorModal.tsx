@@ -88,7 +88,11 @@ export function TemplateEditorModal({
           onUse={(proposed) => {
             const html = markdownToHtml(proposed)
             htmlRef.current = html
-            setSeedHtml(html) // TemplateEditor resyncs on seed change
+            // Apply through the imperative handle — the prop-resync path no-ops when
+            // the proposal equals the last SEED even though the editor holds unsaved
+            // edits. setSeedHtml stays as the pre-mount fallback.
+            if (editorRef.current) editorRef.current.setContent(html)
+            else setSeedHtml(html)
           }}
         />
       )}
