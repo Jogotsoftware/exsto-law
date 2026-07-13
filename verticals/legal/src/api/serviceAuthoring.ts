@@ -373,12 +373,8 @@ export async function createServiceAI(
           ? {
               client_copy_i18n: {
                 es: {
-                  ...(input.clientDisplayNameEs
-                    ? { displayName: input.clientDisplayNameEs }
-                    : {}),
-                  ...(input.clientDescriptionEs
-                    ? { description: input.clientDescriptionEs }
-                    : {}),
+                  ...(input.clientDisplayNameEs ? { displayName: input.clientDisplayNameEs } : {}),
+                  ...(input.clientDescriptionEs ? { description: input.clientDescriptionEs } : {}),
                 },
               },
             }

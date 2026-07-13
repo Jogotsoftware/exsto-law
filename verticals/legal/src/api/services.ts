@@ -103,10 +103,7 @@ export interface ServiceBooking {
 // new columns. English stays the source of truth in client_display_name /
 // client_description; a missing locale/field ALWAYS falls back to English — never
 // blank, never a key.
-export type ServiceClientCopyI18n = Record<
-  string,
-  { displayName?: string; description?: string }
->
+export type ServiceClientCopyI18n = Record<string, { displayName?: string; description?: string }>
 
 export interface ServiceDefinition {
   id: string
@@ -370,10 +367,8 @@ function parseClientCopyI18n(v: unknown): ServiceClientCopyI18n | null {
     if (!copy || typeof copy !== 'object' || Array.isArray(copy)) continue
     const c = copy as Record<string, unknown>
     const entry: { displayName?: string; description?: string } = {}
-    if (typeof c.displayName === 'string' && c.displayName.trim())
-      entry.displayName = c.displayName
-    if (typeof c.description === 'string' && c.description.trim())
-      entry.description = c.description
+    if (typeof c.displayName === 'string' && c.displayName.trim()) entry.displayName = c.displayName
+    if (typeof c.description === 'string' && c.description.trim()) entry.description = c.description
     if (Object.keys(entry).length) out[locale] = entry
   }
   return Object.keys(out).length ? out : null
@@ -576,8 +571,7 @@ export async function updateServiceMetadata(
   if (input.documentFees !== undefined)
     transitionsPatch.document_fees = normalizeDocumentFees(input.documentFees)
   // Locale variants of the client copy (WP-7): the passed map replaces the stored one.
-  if (input.clientCopyI18n !== undefined)
-    transitionsPatch.client_copy_i18n = input.clientCopyI18n
+  if (input.clientCopyI18n !== undefined) transitionsPatch.client_copy_i18n = input.clientCopyI18n
   if (input.appointmentRequired !== undefined) {
     // Strict boolean only. The read side treats garbage as true (safe default),
     // so the write side must never coerce garbage ("true", 1, null) into a
