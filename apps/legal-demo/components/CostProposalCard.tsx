@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { ConfigEditModal } from '@/components/ConfigEditModal'
-import { BillingView, jsonEditor } from '@/components/configEditors'
+import { CostEditorModal } from '@/components/CostEditorModal'
 import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 
@@ -172,27 +171,26 @@ export function CostProposalCard({
         </div>
       )}
       {editing && (
-        <ConfigEditModal
-          artifactKind="billing"
-          targetId={`proposal:${current.serviceKey}`}
+        <CostEditorModal
           title={`Edit proposed billing — ${current.serviceKey}`}
-          initialContent={JSON.stringify(
-            {
-              costType: current.costType,
-              amount: current.amount,
-              hours: current.hours,
-              ...(current.documentFees ? { documentFees: current.documentFees } : {}),
-            },
-            null,
-            2,
-          )}
-          renderView={(content) => <BillingView content={content} />}
-          renderEdit={jsonEditor}
-          aiRegenerate={false}
-          saveLabel="Save"
-          onSave={async (content) => {
-            const next = JSON.parse(content) as Partial<CostProposal>
-            setCurrent((c) => ({ ...c, ...next }))
+          initialValue={{
+            costType: current.costType,
+            amount: current.amount,
+            hours: current.hours,
+            ...(current.documentFees ? { documentFees: current.documentFees } : {}),
+          }}
+          onSave={(next) => {
+            // Save updates the CARD (in-memory); nothing is written until Approve.
+            setCurrent((c) => ({
+              ...c,
+              costType: next.costType,
+              amount: next.amount,
+              hours: next.hours,
+              documentFees:
+                next.documentFees && Object.keys(next.documentFees).length
+                  ? next.documentFees
+                  : undefined,
+            }))
             onEdited?.(`billing for "${current.serviceKey}"`)
           }}
           onClose={() => setEditing(false)}

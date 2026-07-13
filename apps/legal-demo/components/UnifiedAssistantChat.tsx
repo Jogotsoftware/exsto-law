@@ -8,11 +8,9 @@ import {
   type ContextDepth,
   type EditorLaunchEvent,
 } from '@/lib/assistantStream'
-import {
-  TemplateConfigModal,
-  QuestionnaireConfigModal,
-  WorkflowConfigModal,
-} from '@/components/configEditors'
+import { TemplateConfigModal, WorkflowConfigModal } from '@/components/configEditors'
+import { QuestionnaireEditorModal } from '@/components/QuestionnaireEditorModal'
+import type { QuestionnaireSchema } from '@/components/QuestionnaireBuilder'
 import { assistantHistoryContent } from '@/lib/buildHistoryContent'
 import { stripMachinery, MACHINERY_OPEN } from '@/lib/assistantText'
 import { WorkingIndicator } from '@/components/WorkingIndicator'
@@ -2331,11 +2329,18 @@ export function UnifiedAssistantChat({
         />
       )}
       {editorLaunch && editorLaunch.artifactType === 'questionnaire' && (
-        <QuestionnaireConfigModal
-          questionnaire={{
-            questionnaireTemplateId: editorLaunch.id,
-            name: editorLaunch.name,
-            schema: editorLaunch.content,
+        // BUILDER-UX-2 WP-2: the general-chat / post-approval questionnaire launch opens
+        // the REAL field builder (the same QuestionnaireEditorModal the wizard card uses),
+        // not the prohibited JSON textarea; Save persists to the existing artifact.
+        <QuestionnaireEditorModal
+          title={`Edit questionnaire — ${editorLaunch.name}`}
+          initialSchema={(editorLaunch.content ?? { sections: [] }) as QuestionnaireSchema}
+          name={editorLaunch.name}
+          onSave={async (schema) => {
+            await callAttorneyMcp({
+              toolName: 'legal.questionnaire_template.update',
+              input: { questionnaireTemplateId: editorLaunch.id, schema },
+            })
           }}
           onClose={() => setEditorLaunch(null)}
         />
