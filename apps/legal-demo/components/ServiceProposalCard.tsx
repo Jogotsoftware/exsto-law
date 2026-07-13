@@ -16,6 +16,10 @@ export interface ServiceProposal {
   // Client-facing tile copy (UI-BUILDER-FIX-1 Phase 2): outcome-only, <=70 chars.
   clientDisplayName?: string | null
   clientDescription?: string | null
+  // BUILDER-UX-2 WP-7 — the wizard-authored Spanish tile copy (falls back to English
+  // on the Spanish intake when absent).
+  clientDisplayNameEs?: string | null
+  clientDescriptionEs?: string | null
   route: 'auto' | 'manual'
   generationMode: 'template_merge' | 'ai_draft'
   // BUILDER-CERT-1 (WP3) — booking mode: true = booking opens with a consultation
@@ -85,6 +89,8 @@ export function ServiceProposalCard({
           description: current.description,
           clientDisplayName: current.clientDisplayName ?? null,
           clientDescription: current.clientDescription ?? null,
+          clientDisplayNameEs: current.clientDisplayNameEs ?? null,
+          clientDescriptionEs: current.clientDescriptionEs ?? null,
           route: current.route,
           generationMode: current.generationMode,
           ...(typeof current.appointmentRequired === 'boolean'
@@ -144,6 +150,19 @@ export function ServiceProposalCard({
           <div>
             {current.clientDisplayName}
             {current.clientDescription ? ` — ${current.clientDescription}` : ''}
+          </div>
+        </div>
+      )}
+      {/* WP-7: the Spanish tile copy the wizard authored alongside the English —
+          shown labeled so the attorney reviews BOTH before approving. */}
+      {(current.clientDisplayNameEs || current.clientDescriptionEs) && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
+          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+            Client sees (Español)
+          </div>
+          <div>
+            {current.clientDisplayNameEs}
+            {current.clientDescriptionEs ? ` — ${current.clientDescriptionEs}` : ''}
           </div>
         </div>
       )}
@@ -218,6 +237,8 @@ export function ServiceProposalCard({
             route: current.route,
             clientDisplayName: current.clientDisplayName ?? '',
             clientDescription: current.clientDescription ?? '',
+            clientDisplayNameEs: current.clientDisplayNameEs ?? '',
+            clientDescriptionEs: current.clientDescriptionEs ?? '',
             description: current.description ?? '',
             generationMode: current.generationMode,
             appointmentRequired: current.appointmentRequired ?? true,
@@ -234,6 +255,19 @@ export function ServiceProposalCard({
                   description: next.description || null,
                   clientDisplayName: next.clientDisplayName || null,
                   clientDescription: next.clientDescription || null,
+                  clientCopyI18n:
+                    next.clientDisplayNameEs || next.clientDescriptionEs
+                      ? {
+                          es: {
+                            ...(next.clientDisplayNameEs
+                              ? { displayName: next.clientDisplayNameEs }
+                              : {}),
+                            ...(next.clientDescriptionEs
+                              ? { description: next.clientDescriptionEs }
+                              : {}),
+                          },
+                        }
+                      : null,
                   route: next.route,
                   generationMode: next.generationMode,
                   appointmentRequired: next.appointmentRequired,
@@ -247,6 +281,8 @@ export function ServiceProposalCard({
               route: next.route,
               clientDisplayName: next.clientDisplayName || null,
               clientDescription: next.clientDescription || null,
+              clientDisplayNameEs: next.clientDisplayNameEs || null,
+              clientDescriptionEs: next.clientDescriptionEs || null,
               description: next.description || null,
               generationMode: next.generationMode,
               appointmentRequired: next.appointmentRequired,

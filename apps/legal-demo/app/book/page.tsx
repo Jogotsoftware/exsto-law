@@ -43,6 +43,12 @@ interface ServiceField {
   required?: boolean
   allow_unknown?: boolean
   options?: string[]
+  // BUILDER-UX-2 WP-7 — locale variants of the client-facing text, keyed by locale
+  // ('es'). options_i18n is a locale → parallel-array map (same order as options).
+  // A missing locale/field ALWAYS falls back to the English text — never blank.
+  label_i18n?: Record<string, string>
+  placeholder_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
   // 1.1 WP5 — attorney-filled / system-filled field. Present in the schema so the
   // document's {{token}} is covered, but NEVER shown to the client on the booking
   // form and never asked of them. The client view filters these out.
@@ -52,6 +58,8 @@ interface ServiceField {
 interface ServiceSection {
   id: string
   title: string
+  // WP-7 — locale variants of the section title.
+  title_i18n?: Record<string, string>
   fields: ServiceField[]
 }
 
@@ -59,11 +67,51 @@ interface ServiceSection {
 // services whose client copy hasn't been authored/approved yet — the tile falls
 // back to the ATTORNEY-facing displayName/description (jurisdiction-heavy) so
 // nothing renders blank. Remove this note once all live services carry client copy.
-function tileTitle(s: Service, t: (k: string, v?: undefined, f?: string) => string): string {
-  return s.clientDisplayName ?? t(`service.${s.serviceKey}.title`, undefined, s.displayName)
+function tileTitle(
+  s: Service,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  // WP-7: the stored locale variant wins; then the English client copy; then the
+  // static translation map; then the attorney-facing name. Never blank, never a key.
+  return (
+    s.clientCopyI18n?.[lang]?.displayName ??
+    s.clientDisplayName ??
+    t(`service.${s.serviceKey}.title`, undefined, s.displayName)
+  )
 }
-function tileDesc(s: Service, t: (k: string, v?: undefined, f?: string) => string): string {
-  return s.clientDescription ?? t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')
+function tileDesc(
+  s: Service,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  return (
+    s.clientCopyI18n?.[lang]?.description ??
+    s.clientDescription ??
+    t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')
+  )
+}
+
+// WP-7 — questionnaire text with stored locale variants (fall back to the static
+// translation map, then the English schema text).
+function fieldLabelOf(
+  field: ServiceField,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  return field.label_i18n?.[lang] ?? t(`field.${field.id}.label`, undefined, field.label)
+}
+function optionLabelOf(
+  field: ServiceField,
+  opt: string,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  const i = field.options?.indexOf(opt) ?? -1
+  return (
+    (i >= 0 ? field.options_i18n?.[lang]?.[i] : undefined) ??
+    t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))
+  )
 }
 
 interface Service {
@@ -73,6 +121,7 @@ interface Service {
   description: string | null
   clientDisplayName: string | null
   clientDescription: string | null
+  clientCopyI18n?: Record<string, { displayName?: string; description?: string }> | null
   intakeSchema: { sections: ServiceSection[] }
   // False = intake-only (document-review style): no slot step, submit happens
   // on the intake step, no consultation on the confirmation screen.
@@ -446,7 +495,7 @@ export default function BookPage() {
           }
           continue
         }
-        const label = t(`field.${field.id}.label`, undefined, field.label)
+        const label = fieldLabelOf(field, lang, t)
         if (field.type === 'file_upload') {
           // The answer is the staged files themselves, not intakeResponses text.
           if ((stagedUploads[field.id] ?? []).length === 0) {
@@ -923,8 +972,8 @@ export default function BookPage() {
                             <ServiceIcon serviceKey={s.serviceKey} />
                           </span>
                           <span className="bk-service-text">
-                            <span className="bk-service-title">{tileTitle(s, t)}</span>
-                            <span className="bk-service-desc">{tileDesc(s, t)}</span>
+                            <span className="bk-service-title">{tileTitle(s, lang, t)}</span>
+                            <span className="bk-service-desc">{tileDesc(s, lang, t)}</span>
                           </span>
                           <span className="bk-service-tick" aria-hidden>
                             <CheckIcon size={14} />
@@ -1020,7 +1069,8 @@ export default function BookPage() {
                     .map((section) => (
                       <div key={section.id} className="bk-section">
                         <h3 className="bk-section-title">
-                          {t(`section.${section.id}.title`, undefined, section.title)}
+                          {section.title_i18n?.[lang] ??
+                            t(`section.${section.id}.title`, undefined, section.title)}
                         </h3>
                         <div className="bk-fields">
                           {section.fields
@@ -1515,7 +1565,7 @@ function FieldRenderer({
   // add button hides on the submission-wide total, not this field's count.
   totalStaged: number
 }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const fieldId = useId()
   // file_upload transient UI state — declared unconditionally (hooks rule);
   // unused by every other field type.
@@ -1541,7 +1591,7 @@ function FieldRenderer({
       return { ...prev, [syncFieldId]: names }
     })
   }, [staged, syncFieldId, syncFieldType, setResponses])
-  const fieldLabel = t(`field.${field.id}.label`, undefined, field.label)
+  const fieldLabel = fieldLabelOf(field, lang, t)
   const isUnknown = value === UNKNOWN_ANSWER
   const unknownToggle = field.allow_unknown ? (
     <label className="bk-checkbox bk-unknown">
@@ -1775,7 +1825,7 @@ function FieldRenderer({
           <option value="">{t('select.choose')}</option>
           {field.options.map((opt) => (
             <option key={opt} value={opt}>
-              {t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))}
+              {optionLabelOf(field, opt, lang, t)}
             </option>
           ))}
         </select>
@@ -1836,7 +1886,7 @@ function FieldRenderer({
               disabled={isUnknown}
               onClick={() => toggle(opt)}
             >
-              {t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))}
+              {optionLabelOf(field, opt, lang, t)}
             </button>
           ))}
         </div>

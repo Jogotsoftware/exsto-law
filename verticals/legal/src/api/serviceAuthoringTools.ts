@@ -78,6 +78,16 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description:
           "The CLIENT-FACING one-liner under the tile name, max 70 characters (hard server-side cap). THE TWO-ENDS RULE governs ALL client-visible copy: describe only the two ends the client touches — what THEY PROVIDE ('upload your lease') and what THEY RECEIVE ('a plain-English review of your lease') — NEVER the machinery between the ends. Who or what does the work (AI, the attorney, a reviewer), where the work goes (a queue, a review step), or how it is produced is machinery even when paraphrased: 'AI reviews it and produces a memo the attorney approves' fails the rule however it is reworded. Good: 'A will that protects your family and your wishes'. REQUIRED.",
       },
+      client_display_name_es: {
+        type: 'string',
+        description:
+          "The SPANISH client-facing service name — a natural, native-quality Spanish rendering of client_display_name for the Spanish intake (e.g. 'Testamento' for 'Last Will & Testament'). Same doctrine: outcome-only, no jurisdiction, no jargon, max 70 characters. The Spanish intake shows this; when absent it falls back to English. REQUIRED — author it alongside the English.",
+      },
+      client_description_es: {
+        type: 'string',
+        description:
+          'The SPANISH client-facing one-liner — a natural Spanish rendering of client_description, same TWO-ENDS RULE (only what the client provides and receives, never the machinery), max 70 characters. REQUIRED — author it alongside the English.',
+      },
       route: {
         type: 'string',
         enum: SERVICE_ROUTES as unknown as string[],
@@ -109,6 +119,8 @@ const PROPOSE_SERVICE_TOOL_DEF = {
       'display_name',
       'client_display_name',
       'client_description',
+      'client_display_name_es',
+      'client_description_es',
       'route',
       'generation_mode',
       'appointment_required',
@@ -174,6 +186,8 @@ export function buildProposeServiceTool(
         description?: string
         client_display_name?: string
         client_description?: string
+        client_display_name_es?: string
+        client_description_es?: string
         route?: string
         generation_mode?: string
         appointment_required?: unknown
@@ -192,9 +206,19 @@ export function buildProposeServiceTool(
       if (!clientDisplayName || !clientDescription) {
         return 'client_display_name and client_description are REQUIRED — the outcome-only copy the public intake tile shows ("Last Will & Testament", not the attorney-facing name). Nothing was captured.'
       }
+      // WP-7: the Spanish tile copy is authored ALONGSIDE the English — same doctrine,
+      // same caps. The Spanish intake renders it; absence falls back to English, but
+      // the wizard must not produce that gap on a fresh build.
+      const clientDisplayNameEs = (args.client_display_name_es ?? '').trim()
+      const clientDescriptionEs = (args.client_description_es ?? '').trim()
+      if (!clientDisplayNameEs || !clientDescriptionEs) {
+        return 'client_display_name_es and client_description_es are REQUIRED — author the Spanish tile copy alongside the English (the Spanish intake shows it). Nothing was captured.'
+      }
       for (const [field, value] of [
         ['client_display_name', clientDisplayName],
         ['client_description', clientDescription],
+        ['client_display_name_es', clientDisplayNameEs],
+        ['client_description_es', clientDescriptionEs],
       ] as const) {
         const violation = clientCopyViolation(field, value)
         if (violation) return `The proposal was NOT captured: ${violation}`
@@ -247,6 +271,8 @@ export function buildProposeServiceTool(
         description: description || null,
         clientDisplayName,
         clientDescription,
+        clientDisplayNameEs,
+        clientDescriptionEs,
         route,
         generationMode,
         appointmentRequired: args.appointment_required,

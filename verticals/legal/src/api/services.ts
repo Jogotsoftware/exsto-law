@@ -38,6 +38,12 @@ export interface ServiceField {
   // (WP2.4). Kept optional so legacy repo/config schemas still type-check on read.
   help?: string
   options?: string[]
+  // BUILDER-UX-2 WP-7 — locale variants of the client-facing question text
+  // ('es', …). options_i18n is locale → parallel array (same order as options).
+  // The intake renders the variant for its language and falls back to English.
+  label_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
+  placeholder_i18n?: Record<string, string>
   memberFields?: ServiceField[]
   minItems?: number
   // 1.1 WP5 — visibility boundary. A field the ATTORNEY fills during review (or a
@@ -51,6 +57,8 @@ export interface ServiceField {
 export interface ServiceSection {
   id: string
   title: string
+  // WP-7 — locale variants of the section title.
+  title_i18n?: Record<string, string>
   fields: ServiceField[]
 }
 
@@ -88,6 +96,18 @@ export interface ServiceBooking {
   duration_minutes: BookingDuration
 }
 
+// BUILDER-UX-2 WP-7 — locale variants of the client-facing copy, keyed by locale
+// code ('es', …): { es: { displayName, description } }. Lives in
+// transitions.client_copy_i18n (configuration-as-data — the upsert handler's open
+// merge carries it forward across versions like every other transitions key), NOT
+// new columns. English stays the source of truth in client_display_name /
+// client_description; a missing locale/field ALWAYS falls back to English — never
+// blank, never a key.
+export type ServiceClientCopyI18n = Record<
+  string,
+  { displayName?: string; description?: string }
+>
+
 export interface ServiceDefinition {
   id: string
   serviceKey: string
@@ -98,6 +118,8 @@ export interface ServiceDefinition {
   // the tile falls back to displayName/description so nothing renders blank.
   clientDisplayName: string | null
   clientDescription: string | null
+  // Locale variants of the client copy (WP-7). Null = none authored.
+  clientCopyI18n: ServiceClientCopyI18n | null
   route: WorkflowRoute
   intakeFormId: string
   intakeSchema: IntakeSchema
@@ -144,6 +166,7 @@ type WorkflowRow = {
     generation_mode?: string
     booking?: { enabled?: boolean; send_calendar_invite?: boolean; duration_minutes?: number }
     appointment_required?: boolean
+    client_copy_i18n?: ServiceClientCopyI18n
     [k: string]: unknown
   }
   status: string
@@ -320,6 +343,7 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     description: r.description,
     clientDisplayName: r.client_display_name,
     clientDescription: r.client_description,
+    clientCopyI18n: parseClientCopyI18n(r.transitions.client_copy_i18n),
     route: r.transitions.route === 'auto' ? 'auto' : 'manual',
     intakeFormId,
     intakeSchema,
@@ -334,6 +358,25 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     sortOrder: sortOrderOf(r),
     updatedAt: r.recorded_at,
   }
+}
+
+// Defensive parse of the stored locale map (WP-7): keep only locale entries whose
+// values are objects with string displayName/description — a malformed write must
+// never take the whole service read down, just fall back to English.
+function parseClientCopyI18n(v: unknown): ServiceClientCopyI18n | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const out: ServiceClientCopyI18n = {}
+  for (const [locale, copy] of Object.entries(v as Record<string, unknown>)) {
+    if (!copy || typeof copy !== 'object' || Array.isArray(copy)) continue
+    const c = copy as Record<string, unknown>
+    const entry: { displayName?: string; description?: string } = {}
+    if (typeof c.displayName === 'string' && c.displayName.trim())
+      entry.displayName = c.displayName
+    if (typeof c.description === 'string' && c.description.trim())
+      entry.description = c.description
+    if (Object.keys(entry).length) out[locale] = entry
+  }
+  return Object.keys(out).length ? out : null
 }
 
 function compareServices(a: ServiceDefinition, b: ServiceDefinition): number {
@@ -445,6 +488,8 @@ export interface CreateServiceInput {
   // Client-facing tile copy (Phase 1). Omit = none (new service starts null).
   clientDisplayName?: string | null
   clientDescription?: string | null
+  // Locale variants of the client copy (WP-7), e.g. { es: { displayName, description } }.
+  clientCopyI18n?: ServiceClientCopyI18n | null
   route?: WorkflowRoute
   documents?: string[]
   sortOrder?: number
@@ -458,6 +503,10 @@ export interface UpdateServiceMetadataInput {
   // forward untouched; explicit null clears it (tiles fall back to displayName).
   clientDisplayName?: string | null
   clientDescription?: string | null
+  // Locale variants (WP-7). OMIT to carry forward; the passed map REPLACES the
+  // stored one (pass null to clear all locales). Merging per-locale is the caller's
+  // job — the read side hands back the full map to edit.
+  clientCopyI18n?: ServiceClientCopyI18n | null
   route?: WorkflowRoute
   documents?: string[]
   sortOrder?: number
@@ -496,6 +545,10 @@ export async function createService(
       route: input.route,
       documents: input.documents,
       sort_order: input.sortOrder,
+      // Locale variants (WP-7) ride the transitions merge like generation_mode does.
+      ...(input.clientCopyI18n !== undefined
+        ? { transitions_patch: { client_copy_i18n: input.clientCopyI18n } }
+        : {}),
     },
   })
   const eff = res.effects[0] as { serviceKey: string }
@@ -522,6 +575,9 @@ export async function updateServiceMetadata(
   if (input.cost !== undefined) transitionsPatch.cost = normalizeCost(input.cost)
   if (input.documentFees !== undefined)
     transitionsPatch.document_fees = normalizeDocumentFees(input.documentFees)
+  // Locale variants of the client copy (WP-7): the passed map replaces the stored one.
+  if (input.clientCopyI18n !== undefined)
+    transitionsPatch.client_copy_i18n = input.clientCopyI18n
   if (input.appointmentRequired !== undefined) {
     // Strict boolean only. The read side treats garbage as true (safe default),
     // so the write side must never coerce garbage ("true", 1, null) into a

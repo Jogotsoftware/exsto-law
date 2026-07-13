@@ -84,6 +84,9 @@ export interface ServiceProposalEvent {
   // BUILDER-UX-1 WP-1 — the client-facing copy (name + one-sentence description).
   clientDisplayName: string | null
   clientDescription: string | null
+  // BUILDER-UX-2 WP-7 — the wizard-authored Spanish tile copy.
+  clientDisplayNameEs: string | null
+  clientDescriptionEs: string | null
   route: 'auto' | 'manual'
   generationMode: 'template_merge' | 'ai_draft'
   // BUILDER-CERT-1 (WP3) — booking mode (true = consultation slot at booking;
@@ -315,6 +318,10 @@ export async function streamAssistant(
             typeof evt.clientDisplayName === 'string' ? evt.clientDisplayName : null,
           clientDescription:
             typeof evt.clientDescription === 'string' ? evt.clientDescription : null,
+          clientDisplayNameEs:
+            typeof evt.clientDisplayNameEs === 'string' ? evt.clientDisplayNameEs : null,
+          clientDescriptionEs:
+            typeof evt.clientDescriptionEs === 'string' ? evt.clientDescriptionEs : null,
           route: evt.route === 'auto' ? 'auto' : 'manual',
           generationMode: evt.generationMode === 'ai_draft' ? 'ai_draft' : 'template_merge',
           // BUILDER-CERT-1 (WP3) — booking mode rides the card to the approve route.
