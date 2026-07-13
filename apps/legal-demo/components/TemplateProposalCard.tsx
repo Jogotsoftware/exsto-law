@@ -44,10 +44,6 @@ function humanKind(k: string): string {
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-// A short body preview — the first few lines, so the attorney sees the shape without
-// the card swallowing the chat. The full body is sent on approve.
-const PREVIEW_CHARS = 600
-
 // The inline approval card for an AI-proposed document TEMPLATE (Build-Wizard Phase
 // 3). It is the HUMAN GATE: the proposing chat turn wrote nothing; clicking Approve
 // POSTs the body to the templates approve-from-ai route, the only place the template
@@ -87,10 +83,6 @@ export function TemplateProposalCard({
   // Only paint tokens red / show the [[MISSING]] warning when a questionnaire exists AND
   // there is a genuinely-missing (non-reusable) token.
   const showOrphanError = proposal.hasQuestionnaire && missing.size > 0
-  const preview =
-    currentBody.length > PREVIEW_CHARS
-      ? `${currentBody.slice(0, PREVIEW_CHARS).trimEnd()}…`
-      : currentBody
 
   async function approve() {
     setApproveState('approving')
@@ -164,72 +156,64 @@ export function TemplateProposalCard({
         </div>
       )}
 
-      <div
-        className="uac-doc-body"
-        style={{
-          fontSize: 'var(--text-xs)',
-          whiteSpace: 'pre-wrap',
-          maxHeight: 200,
-          overflow: 'auto',
-        }}
-      >
-        {preview}
+      {/* WP-4 (BUILDER-UX-2) — render the FORMATTED preview (the SAME renderer the
+          pop-up View uses), not raw markdown source. Height-capped so the card never
+          swallows the chat. */}
+      <div className="uac-doc-body" style={{ maxHeight: 260, overflow: 'auto' }}>
+        <TemplatePreview body={currentBody} />
       </div>
 
-      {/* The variable contract — the {{tokens}} the body merges, orphans flagged. An
-          orphan has no question, so it would render [[MISSING]] in the document. */}
+      {/* WP-4 — the variable contract as CHIPS with a count, never a comma-run. An
+          orphan with no question (once a questionnaire exists) is flagged red because
+          it would render [[MISSING]] in the document. */}
       <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {proposal.tokens.length === 0 ? (
-          <div className="text-muted">No merge tokens — this is a static document.</div>
+          <div className="text-muted">No merge fields — this is a static document.</div>
         ) : (
-          <div>
-            <strong>Tokens:</strong>{' '}
-            {proposal.tokens.map((t, i) => (
-              <span key={t}>
-                {i > 0 && ', '}
-                <code
-                  style={
-                    showOrphanError && missing.has(t.toLowerCase())
-                      ? { color: 'var(--danger)' }
-                      : undefined
-                  }
-                >
-                  {`{{${t}}}`}
-                </code>
-              </span>
-            ))}
-          </div>
+          <>
+            <div className="text-muted" style={{ marginBottom: 4 }}>
+              {proposal.tokens.length} merge field{proposal.tokens.length === 1 ? '' : 's'}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {proposal.tokens.map((t) => {
+                const isMissing = showOrphanError && missing.has(t.toLowerCase())
+                const isReusable = reusable.has(t.toLowerCase())
+                return (
+                  <span
+                    key={t}
+                    className="uac-chip"
+                    title={
+                      isMissing
+                        ? 'No matching question yet — would render [[MISSING]]'
+                        : isReusable
+                          ? 'Already exists on another service — will be reused'
+                          : undefined
+                    }
+                    style={{
+                      display: 'inline-block',
+                      padding: '1px 7px',
+                      borderRadius: 10,
+                      fontSize: 'var(--text-xs)',
+                      border: '1px solid var(--border, rgba(127,127,127,0.35))',
+                      color: isMissing ? 'var(--danger)' : undefined,
+                      borderColor: isMissing ? 'var(--danger)' : undefined,
+                    }}
+                  >
+                    {t}
+                  </span>
+                )
+              })}
+            </div>
+          </>
         )}
       </div>
 
-      {/* FLOW-AWARE: before a questionnaire exists, the unmatched tokens are the fields
-          the questionnaire will collect NEXT — say so, neutral/forward-looking, never
-          "missing/broken". Only once a questionnaire exists is an orphan a real gap. */}
-      {showOrphanError ? (
+      {/* Only the HARD alert survives (no forward-looking / reuse outro paragraphs):
+          once a questionnaire exists, an unmatched token is a real gap. */}
+      {showOrphanError && (
         <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
-          {missing.size} token{missing.size === 1 ? '' : 's'} have NO matching question and would
-          render [[MISSING]]: <strong>{[...missing].join(', ')}</strong>. Add those questions to the
-          questionnaire before sending documents.
-        </div>
-      ) : (
-        missing.size > 0 && (
-          <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-            These {missing.size} field{missing.size === 1 ? '' : 's'} will become the
-            questionnaire’s questions in the next step: <strong>{[...missing].join(', ')}</strong>.
-          </div>
-        )
-      )}
-
-      {/* Reuse-aware: tokens that already exist as questions on other services — the
-          build should reuse those definitions, not re-invent them (and they're never
-          "missing"). */}
-      {reusable.size > 0 && (
-        <div
-          className="uac-doc-body"
-          style={{ fontSize: 'var(--text-xs)', color: 'var(--accent)' }}
-        >
-          {reusable.size} of these already exist on other services and will be reused:{' '}
-          <strong>{[...reusable].join(', ')}</strong>.
+          {missing.size} field{missing.size === 1 ? '' : 's'} have no matching question and would
+          render [[MISSING]]: <strong>{[...missing].join(', ')}</strong>.
         </div>
       )}
 

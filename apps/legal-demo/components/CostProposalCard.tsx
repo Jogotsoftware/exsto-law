@@ -53,6 +53,40 @@ export function CostProposalCard({
       ? `$${current.amount} / hour${current.hours != null ? ` (est. ${current.hours} hrs)` : ''}`
       : `$${current.amount} flat fee`
 
+  // WP-3.2 (BUILDER-UX-2) — the single-billing-card coherence invariant, stated in
+  // code, not prose. The founder's cease-and-desist walk produced a "$0.00" billing
+  // card that nonetheless listed a "$500.00" line item; an attorney approving it sets
+  // a $0 fee and mis-bills. RULE: a fixed-fee card that lists per-document line items
+  // must have a header amount EQUAL to the sum of those line items — the fee shown once
+  // is the same money the breakdown lists (confirm-only, one billing point per WP-3.3),
+  // never a separate additive charge and never a $0 header beside a paid line. When the
+  // amounts disagree (or any is unparseable), the card is INCOHERENT: it refuses to
+  // render an Approve control — a correction notice + Edit stands in — and logs, so no
+  // one approves a contradictory price. (Root cause of the *duplicate* card is fixed
+  // upstream in costEnableTools.buildProposeCostTool: one build → one billing proposal,
+  // superseded in place.)
+  const toCents = (s: string | number | null | undefined): number | null => {
+    if (s == null) return null
+    const n = Number.parseFloat(String(s).replace(/[^0-9.-]/g, ''))
+    return Number.isFinite(n) ? Math.round(n * 100) : null
+  }
+  const docFeeEntries = Object.entries(current.documentFees ?? {})
+  const lineCentsList = docFeeEntries.map(([k, v]) => [k, toCents(v)] as const)
+  const lineCentsSum = lineCentsList.reduce((a, [, c]) => a + (c ?? 0), 0)
+  const headerCents = toCents(current.amount)
+  const billingIncoherent =
+    current.costType === 'fixed' &&
+    docFeeEntries.length > 0 &&
+    (headerCents === null ||
+      lineCentsList.some(([, c]) => c === null) ||
+      headerCents !== lineCentsSum)
+  if (billingIncoherent && typeof console !== 'undefined') {
+    // Logged (not silent) so a mismatch is observable and the model can regenerate.
+    console.warn(
+      `[billing-card] incoherent proposal for ${current.serviceKey}: header $${current.amount} ≠ line items ${JSON.stringify(current.documentFees)} — Approve suppressed.`,
+    )
+  }
+
   async function approve() {
     setApproveState('approving')
     setApproveError(null)
@@ -136,6 +170,14 @@ export function CostProposalCard({
         </div>
       )}
 
+      {billingIncoherent && (
+        <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
+          This price is inconsistent — the fee (${current.amount}) does not match the per-document
+          amount{docFeeEntries.length === 1 ? '' : 's'} listed above. Edit it so the fee equals what
+          the document charges, then approve.
+        </div>
+      )}
+
       <div className="uac-doc-actions">
         <button
           type="button"
@@ -146,20 +188,24 @@ export function CostProposalCard({
         >
           <EditIcon size={12} /> Edit
         </button>
-        <button
-          type="button"
-          className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
-          onClick={approve}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Approve this billing — this writes the service's fee model"
-        >
-          {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-          {approveState === 'approving'
-            ? 'Saving…'
-            : approveState === 'approved'
-              ? 'Saved'
-              : 'Approve & set billing'}
-        </button>
+        {/* WP-3.2: no Approve control while the card is incoherent — the attorney
+            must reconcile the fee and the line items first. */}
+        {!billingIncoherent && (
+          <button
+            type="button"
+            className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
+            onClick={approve}
+            disabled={approveState === 'approving' || approveState === 'approved'}
+            title="Approve this billing — this writes the service's fee model"
+          >
+            {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
+            {approveState === 'approving'
+              ? 'Saving…'
+              : approveState === 'approved'
+                ? 'Saved'
+                : 'Approve & set billing'}
+          </button>
+        )}
         {link && (
           <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
             View billing →

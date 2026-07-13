@@ -60,7 +60,8 @@ const PROPOSE_SERVICE_TOOL_DEF = {
     properties: {
       display_name: {
         type: 'string',
-        description: "The attorney-facing service name, e.g. 'NC Single-Member LLC Formation'.",
+        description:
+          "The attorney-facing service name, e.g. 'Single-Member LLC Formation', 'Residential Lease Review'. Name it for WHAT the service does. Do NOT prefix a state or jurisdiction ('NC', 'North Carolina', 'Georgia', …) UNLESS the attorney's request explicitly named one — the firm being a North Carolina firm is NOT a reason to stamp 'NC' onto every service. The service KEY is derived from this name and is PERMANENT, so a stray jurisdiction prefix is forever. Jurisdiction belongs in the legal CONTENT (governing-law clauses in templates), not the name.",
       },
       description: {
         type: 'string',
