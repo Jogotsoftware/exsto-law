@@ -43,6 +43,7 @@ import {
   type QuestionnaireDoc,
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
+import { isSystemToken } from './tokenClasses.js'
 import { listStandaloneTemplates, type TemplateSignature } from '../queries/templates.js'
 import { createTemplate, updateTemplate } from './standaloneTemplates.js'
 
@@ -318,7 +319,10 @@ export function validateProposedTemplate(
   }
   const tokens = extractRenderedTokens(validated)
   const known = new Set(fieldIds.map((f) => f.toLowerCase()))
-  const orphanTokens = tokens.filter((t) => !known.has(t.toLowerCase()))
+  // System tokens (firm/attorney identity, dates, matter facts — tokenClasses.ts)
+  // are platform-resolved: they never become questionnaire questions, so listing
+  // them as orphans would misleadingly pitch them to the attorney as gaps.
+  const orphanTokens = tokens.filter((t) => !known.has(t.toLowerCase()) && !isSystemToken(t))
   const reusableFromFirm = orphanTokens.filter((t) => firmKnown.has(t.toLowerCase()))
   return {
     ok: errors.length === 0,
@@ -404,7 +408,7 @@ async function persistReasoningTrace(
 function defaultDraftingPrompt(docKind: string): string {
   const label = docKind.replace(/_/g, ' ')
   return [
-    `You are drafting a ${label} under North Carolina law (and applicable U.S. federal law). Complete the firm's template below using the client's intake answers; fill every field the answers provide and follow the template's structure exactly. Where a required value is genuinely missing, leave a clearly marked placeholder for the attorney rather than inventing it. Output the final document only — no commentary. This is the BASE guidance: if the attorney adds specific instructions for this draft (appended below these inputs), FOLLOW THEM — attorney instructions always take precedence over this base prompt wherever they conflict.`,
+    `You are drafting a ${label} under North Carolina law (and applicable U.S. federal law). Complete the firm's template below using the client's intake answers; fill every field the answers provide and follow the template's structure exactly. Where a required value is genuinely missing, LEAVE ITS {{token}} IN PLACE UNCHANGED — never invent a value and never write bracketed filler like "[X — TO INSERT]"; the platform renders unresolved tokens as visible markers and resolves them at review. Never write draft banners, watermarks, or review notices into the document — review state is rendered by the platform from the document's status, not written into its text. Output the final document only — no commentary. This is the BASE guidance: if the attorney adds specific instructions for this draft (appended below these inputs), FOLLOW THEM — attorney instructions always take precedence over this base prompt wherever they conflict.`,
     ``,
     `The client's intake answers (use these to fill the document):`,
     `{{questionnaire_responses_json}}`,

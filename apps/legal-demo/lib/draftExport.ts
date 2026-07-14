@@ -108,6 +108,60 @@ export function renderMarkdown(md: string): string {
   return out.join('\n')
 }
 
+// P13 — the DRAFT watermark is RENDER STATE keyed off the version status, never
+// text baked into a template or draft body. Mirrors the vertical's rule in
+// verticals/legal/src/render/draftPdf.ts (server-rendered mail attachments);
+// duplicated here because this module ships in the client bundle.
+export const DRAFT_WATERMARK_TEXT = 'DRAFT — pending attorney approval'
+
+// The watermark text for a version status, or null when the document is final
+// (approved / executed) or the caller has no status to key off.
+export function watermarkForStatus(status: string | null | undefined): string | null {
+  if (!status) return null
+  return status === 'approved' || status === 'executed' ? null : DRAFT_WATERMARK_TEXT
+}
+
+// Watermark markup for the export windows: a bordered banner (also survives the
+// Word export, where positioned elements don't) + a repeating diagonal stamp
+// (position:fixed prints on every page).
+function watermarkHtml(watermark: string, withOverlay: boolean): string {
+  const wm = escapeHtml(watermark)
+  return (
+    `<div class="doc-wm-banner">${wm}</div>` +
+    (withOverlay ? `<div class="doc-wm-overlay" aria-hidden="true">${wm}</div>` : '')
+  )
+}
+
+const WATERMARK_PRINT_STYLES = `
+  .doc-wm-banner {
+    text-align: center;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9.5pt;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #b45309;
+    border: 1.5pt solid #b45309;
+    padding: 6pt 10pt;
+    margin: 0 0 18pt;
+  }
+  .doc-wm-overlay {
+    position: fixed;
+    top: 42%;
+    left: 0;
+    right: 0;
+    text-align: center;
+    transform: rotate(-24deg);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 40pt;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(180, 83, 9, 0.12);
+    pointer-events: none;
+  }
+`
+
 // Print-friendly stylesheet shared between the in-page preview and the
 // new-window print/PDF view.
 const PRINT_STYLES = `
@@ -141,24 +195,40 @@ const PRINT_STYLES = `
   }
 `
 
-export function downloadAsPdf(markdown: string, title: string): void {
+// `opts.status` (the document_version status) keys the draft watermark: a
+// version that is not approved/executed exports with the watermark. Callers with
+// no version status (e.g. chat-generated markdown) omit it — no watermark.
+export function downloadAsPdf(
+  markdown: string,
+  title: string,
+  opts?: { status?: string | null },
+): void {
   const html = renderDocumentHtml(markdown)
+  const wm = watermarkForStatus(opts?.status)
+  const body = wm ? `${watermarkHtml(wm, true)}${html}` : html
   const w = window.open('', '_blank')
   if (!w) {
     alert('Pop-up blocked. Allow pop-ups for this site to export PDF.')
     return
   }
   w.document.write(
-    `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${PRINT_STYLES}</style></head><body>${html}<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script></body></html>`,
+    `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${PRINT_STYLES}${WATERMARK_PRINT_STYLES}</style></head><body>${body}<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script></body></html>`,
   )
   w.document.close()
 }
 
-export function downloadAsWord(markdown: string, filename: string): void {
+export function downloadAsWord(
+  markdown: string,
+  filename: string,
+  opts?: { status?: string | null },
+): void {
   const html = renderDocumentHtml(markdown)
+  const wm = watermarkForStatus(opts?.status)
+  // Word ignores position:fixed — the banner alone marks every Word export.
+  const body = wm ? `${watermarkHtml(wm, false)}${html}` : html
   const fullHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-<head><meta charset="utf-8"><title>${escapeHtml(filename)}</title><style>${PRINT_STYLES}</style></head>
-<body>${html}</body>
+<head><meta charset="utf-8"><title>${escapeHtml(filename)}</title><style>${PRINT_STYLES}${WATERMARK_PRINT_STYLES}</style></head>
+<body>${body}</body>
 </html>`
   // BOM + msword mime so Word picks it up cleanly.
   const blob = new Blob(['﻿', fullHtml], { type: 'application/msword' })

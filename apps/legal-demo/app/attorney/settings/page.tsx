@@ -7,6 +7,7 @@ import { formatDateTime } from '@/lib/datetime'
 import { fetchSession } from '@/lib/auth'
 import { CollapsibleSection } from '@/components/CollapsibleSection'
 import { MailComposer } from '@/components/MailComposer'
+import { SignatureCapture } from '@/components/SignatureCapture'
 import { PageHead } from '@/components/PageHead'
 import { UsersRolesSection } from './UsersRolesSection'
 import { AiUsageSection } from './AiUsageSection'
@@ -323,16 +324,20 @@ export default function SettingsPage() {
     setBusy('settings')
     setError(null)
     try {
+      // P13 — firm identity persists as substrate config on the firm_profile
+      // record (legal.settings.firm_profile.set); the old legal.settings.update
+      // path never saved. Values reload via legal.settings.get, which reads the
+      // profile first. Empty string clears a field.
       await callAttorneyMcp({
-        toolName: 'legal.settings.update',
+        toolName: 'legal.settings.firm_profile.set',
         input: {
-          firmName: settings.firmName,
-          attorneyName: settings.attorneyName,
-          firmEmail: settings.firmEmail,
-          firmPhone: settings.firmPhone,
-          firmAddress: settings.firmAddress,
+          firmName: settings.firmName ?? '',
+          firmEmail: settings.firmEmail ?? '',
+          firmPhone: settings.firmPhone ?? '',
+          firmAddress: settings.firmAddress ?? '',
         },
       })
+      await refreshSettings()
       setEditingFirm(false)
       setSavedSettings(true)
       setTimeout(() => setSavedSettings(false), 2000)
@@ -530,13 +535,6 @@ export default function SettingsPage() {
                     />
                   </label>
                   <label>
-                    <span>Lead attorney</span>
-                    <input
-                      value={settings.attorneyName ?? ''}
-                      onChange={(e) => updateField('attorneyName', e.target.value || null)}
-                    />
-                  </label>
-                  <label>
                     <span>Firm email</span>
                     <input
                       type="email"
@@ -561,6 +559,11 @@ export default function SettingsPage() {
                     rows={2}
                   />
                 </label>
+                <p className="text-muted text-sm" style={{ margin: 'var(--space-2) 0 0' }}>
+                  These fields fill the firm identity on generated documents and letterheads. The
+                  attorney name on documents comes from the approving attorney&apos;s account, so
+                  there is nothing to set here.
+                </p>
               </>
             ) : (
               <div className="kv-grid">
@@ -667,6 +670,10 @@ export default function SettingsPage() {
             </div>
           </>
         )}
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Signature">
+        <SignatureCapture />
       </CollapsibleSection>
 
       <CollapsibleSection title="Booking rules">

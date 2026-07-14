@@ -5,7 +5,7 @@
 // (modal) to view/download what it produced (questionnaire, transcript, document)
 // and to advance it (record the call, generate documents). Status, title,
 // Actions menu and Back live in the layout header.
-import { use, useCallback, useEffect, useState } from 'react'
+import { use, useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
@@ -555,6 +555,76 @@ function ExtractToNotesButton({ matterEntityId }: { matterEntityId: string }) {
   )
 }
 
+// ── P11: "Upload transcript" fallback ───────────────────────────────────────
+// For a consultation step whose transcript never arrived on its own: a plain
+// text-file picker (.txt/.md/.vtt) that records the call through the SAME door as
+// the transcript-tab paste (legal.call.record_manual → call.ingest) — never
+// document.upload, which is the matter-DOCUMENT lane. Capture (notes extraction)
+// then fires off the arrival automatically, like any other transcript.
+const MAX_TRANSCRIPT_UPLOAD_BYTES = 1_000_000
+
+function UploadTranscriptControl({
+  matterEntityId,
+  onChanged,
+}: {
+  matterEntityId: string
+  onChanged?: () => Promise<void>
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function handleFile(file: File | null) {
+    if (!file || busy) return
+    setErr(null)
+    if (file.size > MAX_TRANSCRIPT_UPLOAD_BYTES) {
+      setErr('That file is too large — transcript uploads are capped at 1 MB of plain text.')
+      return
+    }
+    setBusy(true)
+    try {
+      const text = (await file.text()).trim()
+      if (!text) throw new Error('That file is empty — nothing to record.')
+      await callAttorneyMcp({
+        toolName: 'legal.call.record_manual',
+        input: { matterEntityId, transcriptText: text },
+      })
+      await onChanged?.()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      {err && <div className="alert alert-error">{err}</div>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".txt,.md,.vtt,text/plain,text/markdown,text/vtt"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0] ?? null
+          e.target.value = ''
+          void handleFile(f)
+        }}
+      />
+      <div>
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}>
+          {busy && <span className="spinner" />}
+          {busy ? 'Recording…' : 'Upload transcript'}
+        </button>
+      </div>
+      <p className="text-muted text-sm" style={{ marginTop: 'var(--space-2)' }}>
+        Plain-text transcript files (.txt, .md, .vtt). Once recorded, the consultation is captured
+        into notes on the matter automatically.
+      </p>
+    </div>
+  )
+}
+
 function labelForState(state: StepState): string {
   if (state === 'done') return 'Done'
   if (state === 'current') return 'Current'
@@ -762,7 +832,7 @@ function WorkflowStepWindow({
   //    manual_task): a Modal with the matching body + advance footer ───────────
   return (
     <Modal title={stage.label} onClose={onClose} footer={advanceFooter}>
-      <WorkflowStepBody stage={stage} matter={matter} />
+      <WorkflowStepBody stage={stage} matter={matter} onChanged={onChanged} />
       {waitsNote}
     </Modal>
   )
@@ -879,7 +949,15 @@ function WaitingNote() {
 }
 
 // Body for the simple step-action kinds, reusing the existing view components.
-function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDetail }) {
+function WorkflowStepBody({
+  stage,
+  matter,
+  onChanged,
+}: {
+  stage: WfStage
+  matter: MatterDetail
+  onChanged?: () => Promise<void>
+}) {
   const kind = stage.action?.kind
   if (kind === 'view_intake') {
     return matter.questionnaireResponses ? (
@@ -897,7 +975,13 @@ function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDet
         <ExtractToNotesButton matterEntityId={matter.matterEntityId} />
       </>
     ) : (
-      <p className="text-muted text-sm">No consultation transcript on this matter yet.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <p className="text-muted text-sm">
+          No consultation transcript on this matter yet. It arrives on its own from a recorded
+          meeting — or upload the transcript file here.
+        </p>
+        <UploadTranscriptControl matterEntityId={matter.matterEntityId} onChanged={onChanged} />
+      </div>
     )
   }
   if (kind === 'await_payment') {
@@ -986,8 +1070,15 @@ function DocumentStep({
   const footer =
     versionId && draft ? (
       <>
-        <button onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}>Download Word</button>
-        <button className="primary" onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>
+        <button
+          onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase, { status: draft.status })}
+        >
+          Download Word
+        </button>
+        <button
+          className="primary"
+          onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase, { status: draft.status })}
+        >
           Download PDF
         </button>
       </>

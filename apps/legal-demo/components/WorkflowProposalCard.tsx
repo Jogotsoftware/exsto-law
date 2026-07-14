@@ -75,6 +75,15 @@ const GATE_LABELS: Record<WfGate, string> = {
   automatic: 'automatic',
   system: 'automatic (on payment/signature)',
 }
+// P14 — human labels for the known capability slugs (mirror-map idiom, same as
+// ACTION_LABELS above: the card is SSE-fed and does no catalog fetch). Unknown
+// slugs keep the de-slug fallback so nothing ever renders raw snake_case.
+const CAPABILITY_LABELS: Record<string, string> = {
+  esignature: 'Request e-signature',
+  document_generation: 'Generate document',
+  transcript_extraction: 'Capture consultation notes',
+  email_generation: 'Draft client email',
+}
 function humanize(slug: string): string {
   return slug.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
@@ -82,12 +91,12 @@ function actionLabel(kind: string | undefined): string {
   if (!kind) return ''
   return ACTION_LABELS[kind] ?? humanize(kind)
 }
-// ADR 0046 — an invoke_capability step shows the CAPABILITY's name (de-slugged from
-// its config), never the raw "invoke_capability" kind or the slug.
+// ADR 0046 — an invoke_capability step shows the CAPABILITY's name (mapped, else
+// de-slugged from its config), never the raw "invoke_capability" kind or the slug.
 function stageActionLabel(stage: WfStage): string {
   if (stage.action?.kind === 'invoke_capability') {
     const slug = (stage.action.config?.capability_slug as string | undefined) ?? ''
-    return slug ? humanize(slug) : 'Run a platform capability'
+    return slug ? (CAPABILITY_LABELS[slug] ?? humanize(slug)) : 'Run a platform capability'
   }
   return actionLabel(stage.action?.kind)
 }

@@ -484,6 +484,21 @@ async function reviewDecision(
     args.versionId,
   ])
 
+  if (args.versionStatus === 'approved') {
+    // Approving a version supersedes every SIBLING version of the same document
+    // still pending_review — without this, approving the token-resolved n+1 the
+    // approve path mints (api/reviewDraft.ts) leaves version n zombie-listed in
+    // the review queue forever, and re-approving it would mint n+2 (and re-send a
+    // communication draft). Same transaction as the approval; 'superseded' is
+    // already in document_version's status CHECK vocabulary (migration 0005).
+    await client.query(
+      `UPDATE document_version SET status = 'superseded'
+        WHERE tenant_id = $1 AND document_entity_id = $2
+          AND id <> $3 AND status = 'pending_review'`,
+      [args.tenantId, documentEntityId, args.versionId],
+    )
+  }
+
   const statusAttrId = await lookupKindId(
     client,
     'attribute_kind_definition',

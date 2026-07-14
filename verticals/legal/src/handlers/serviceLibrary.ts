@@ -24,7 +24,12 @@ import type { DbClient } from '@exsto/shared'
 import { completenessFromTransitions } from '../api/services.js'
 // Pure lifecycle validator + the graph type (ADR 0045). The lifecycle module is
 // substrate-free (no DB, no handlers), so importing it here introduces no cycle.
-import { validateLifecycle, validateLinearLifecycle, type Lifecycle } from '../lifecycle/index.js'
+import {
+  validateLifecycle,
+  validateLinearLifecycle,
+  diagnoseEdgeTransition,
+  type Lifecycle,
+} from '../lifecycle/index.js'
 // The pure id-collector the AI proposal validator uses — shared so the manual save
 // path rejects dangling template refs the SAME way the AI path does (no drift).
 import { collectReferencedTemplateIds } from '../api/workflowAuthoring.js'
@@ -413,6 +418,33 @@ registerActionHandler('legal.service.retire', async (ctx, client, payload, actio
   return { serviceKey: p.service_key, retired: true }
 })
 
+// The "<description>" filler the AI-authoring step template seeds config values
+// with. It is non-empty, so diagnoseCapabilityStepConfig's required-value check
+// passes it — but at runtime it is a literal placeholder (a template id of
+// "<the template to draft>" dead-letters the matter). The palette blanks these on
+// read (workflowCatalogTools); this guard is the write-side backstop, so a
+// placeholder that reaches a save — pasted, AI-left-verbatim, or from an old
+// client — is rejected with the field named instead of stored.
+const PLACEHOLDER_VALUE_RE = /^<.*>$/
+
+// Collect the (leaf) config keys whose string value is still placeholder filler,
+// walking nested objects/arrays (capability_config included). The leaf key is what
+// the builder's config editor labels the field with, so it is the name the
+// attorney can act on. Exported for the pure doctrine tests (capClientCopy idiom).
+export function collectPlaceholderKeys(value: unknown, key: string, out: string[]): void {
+  if (typeof value === 'string') {
+    if (PLACEHOLDER_VALUE_RE.test(value) && !out.includes(key)) out.push(key)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) collectPlaceholderKeys(v, key, out)
+    return
+  }
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) collectPlaceholderKeys(v, k, out)
+  }
+}
+
 // Reject any stage.documents[].templateEntityId that is not a real DOCUMENT template
 // entity in the firm library. The AI authoring path already enforces this
 // (workflowAuthoring.validateProposedLifecycle); a graph saved via the MCP tool /
@@ -473,6 +505,35 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
   const linear = validateLinearLifecycle(p.graph)
   if (!linear.ok) {
     throw new Error(`Invalid workflow lifecycle: ${linear.errors.join('; ')}`)
+  }
+  // P12 — the advance-token vocabulary check now guards the MANUAL save path too
+  // (it was AI-authoring-only): the visual builder re-threads edges on reorder, and
+  // a dead via/on token — e.g. the old 'event' default still stored on a legacy
+  // graph — must be rejected with a message the attorney can act on, not saved as a
+  // workflow that never advances. Joined with NEWLINES: the builder surfaces split
+  // the message into one line per edge.
+  const tokenErrors: string[] = []
+  for (const stage of p.graph) {
+    for (const edge of stage.advances_to ?? []) {
+      const err = diagnoseEdgeTransition(stage.key, edge.to, edge.gate, edge.via, edge.on)
+      if (err) tokenErrors.push(err)
+    }
+  }
+  // Placeholder filler in an invoke_capability config is rejected here, not at
+  // runtime: see PLACEHOLDER_VALUE_RE above. Newline-joined like the token errors
+  // (the builder surfaces itemize the message on newlines).
+  for (const stage of p.graph) {
+    if (stage.action?.kind !== 'invoke_capability') continue
+    const keys: string[] = []
+    collectPlaceholderKeys(stage.action.config ?? {}, '', keys)
+    for (const key of keys) {
+      tokenErrors.push(
+        `Step "${stage.label}": fill in its configuration — placeholder text is still in ${key}.`,
+      )
+    }
+  }
+  if (tokenErrors.length > 0) {
+    throw new Error(`Invalid workflow lifecycle:\n${tokenErrors.join('\n')}`)
   }
   // Document refs must resolve to real library templates (same rule the AI path
   // enforces) — a dangling templateEntityId must never reach workflow_definition.states.

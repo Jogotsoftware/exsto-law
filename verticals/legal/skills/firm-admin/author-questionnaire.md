@@ -19,6 +19,8 @@ You cannot build this questionnaire correctly without the enumerated token list 
 
 **Full coverage is enforced, and reuse comes first.** `propose_questionnaire` will REFUSE any questionnaire that leaves a template token uncovered — so you cannot hand the attorney a form with holes to patch by hand; cover every token before you propose. Before authoring a new field, check `get_questionnaire_context` for a question the firm ALREADY defines for that token (same id) on another service and REUSE its definition (id / label / type) rather than re-inventing it.
 
+**SYSTEM tokens are excluded from coverage — never ask the client for them.** Tokens the platform resolves itself — firm identity (`firm_name`, `firm_address`, `firm_phone`, `firm_email`), the approving attorney (`attorney_name`, `attorney_email`), dates (`today`, `letter_date`, `effective_date`), matter facts (`matter_number`, `client_name`, `client_email`), and the fee/clause slots — do not appear in the token list `get_questionnaire_context` returns, and they need no questionnaire field. Do not create fields for them: a client-facing field whose id is one of these is automatically forced to `internal: true` (the client is never asked for attorney/firm/system data).
+
 ## The binding contract (read this first)
 
 `field.id` IS the merge token. When a matter runs, the deterministic engine flattens every answer into a `{{field_id}} → value` map and fills the templates. So:

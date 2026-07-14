@@ -73,26 +73,30 @@ export interface BuilderStep {
 export function triggerField(gate: WfGate): 'via' | 'on' {
   return gate === 'attorney' || gate === 'client' ? 'via' : 'on'
 }
-// The default trigger per gate. attorney/client always have a real advance token;
-// system defaults by action kind (invoice steps wait on payment; an e-signature
-// capability waits on envelope completion) and otherwise stays EMPTY — the runtime
-// never dispatches on made-up tokens like the old 'event'/'condition' defaults, so an
-// empty default forces the attorney to pick a real one (the validator rejects a
-// system/automatic edge with no 'on'). automatic `on` is free-form/descriptive.
+// The default trigger for a step's INCOMING edge (P12 target-anchoring, below): what
+// completes the PRECEDING step is what moves the matter to this one, so the default
+// keys off the preceding step's action kind — a preceding invoice step is completed
+// by payment, a preceding e-signature capability by envelope completion, a preceding
+// review step by the attorney's approval. attorney/client gates always have a real
+// advance token; system otherwise stays EMPTY — the runtime never dispatches on
+// made-up tokens like the old 'event'/'condition' defaults, so an empty default
+// forces the attorney to pick a real one (the validator rejects a system/automatic
+// edge with no 'on'). automatic `on` is free-form/descriptive.
 export function defaultTrigger(
   gate: WfGate,
-  actionKind: WfActionKind,
-  config?: Record<string, unknown>,
+  precedingActionKind?: WfActionKind,
+  precedingConfig?: Record<string, unknown>,
 ): string {
-  if (gate === 'attorney') return 'legal.matter.advance'
+  if (gate === 'attorney')
+    return precedingActionKind === 'review_send_document' ? 'draft.approve' : 'legal.matter.advance'
   if (gate === 'client') return 'booking.create'
   if (gate === 'system') {
-    if (actionKind === 'approve_send_invoice' || actionKind === 'await_payment')
+    if (precedingActionKind === 'approve_send_invoice' || precedingActionKind === 'await_payment')
       return 'invoice.paid'
     if (
-      actionKind === 'invoke_capability' &&
-      typeof config?.capability_slug === 'string' &&
-      config.capability_slug.trim() === 'esignature'
+      precedingActionKind === 'invoke_capability' &&
+      typeof precedingConfig?.capability_slug === 'string' &&
+      precedingConfig.capability_slug.trim() === 'esignature'
     )
       return 'esign.completed'
     return ''
@@ -124,6 +128,17 @@ export function slugKey(label: string, taken: Set<string>): string {
   return key
 }
 
+// P12 TARGET-ANCHORING — the builder stores each stage's INCOMING edge's
+// (gate, via|on) on the step that edge leads INTO, not on the step it leaves. The
+// WIRE format is unchanged (stage i's advances_to[0] still carries the pair for the
+// edge i→i+1); only the builder's anchor flips. Why: move() is a pure array swap, so
+// under the old source-anchoring a moved step dragged its trigger along as the
+// SOURCE of a different edge, and a step moved to last silently LOST its gate/
+// trigger (terminals write no outgoing edge). Anchored to the target, a swap takes
+// each step's "how I am reached" pair WITH it and `to` is re-pointed by
+// construction; the only pair never written is the entry step's, which has no
+// incoming edge and is inert while the step stays first.
+//
 // Map a loaded lifecycle graph (run order by edges) into the linear builder model.
 // We walk from the entry stage by following the single outgoing edge so display order
 // == run order even if the stored array order drifted, carrying each stage's config.
@@ -145,8 +160,13 @@ export function graphToSteps(graph: WfLifecycle): BuilderStep[] {
   // Include any stages the walk didn't reach (defensive) so nothing disappears on load.
   for (const s of graph) if (!seen.has(s.key)) ordered.push(s)
 
-  return ordered.map((s) => {
-    const edge = s.advances_to[0]
+  return ordered.map((s, i) => {
+    // The step's pair is its INCOMING edge's — the previous ordered stage's outgoing
+    // edge when it really points here. The entry step (i === 0) and any defensively
+    // appended unreachable stage have no incoming edge: they get the inert/sane
+    // default (attorney, '') — save derives a real token from the preceding step.
+    const prevEdge = i > 0 ? ordered[i - 1].advances_to[0] : undefined
+    const edge = prevEdge && prevEdge.to === s.key ? prevEdge : undefined
     return {
       uid: nextUid(),
       key: s.key,
@@ -163,8 +183,10 @@ export function graphToSteps(graph: WfLifecycle): BuilderStep[] {
 }
 
 // Assemble the linear Lifecycle to save: first step is the entry, last is terminal,
-// every other step → the next via one edge carrying the step's gate + trigger. Keys
-// are stabilized/uniquified from labels. The step's action.config is written back
+// and the edge i→i+1 carries the TARGET step's (gate, trigger) pair — the inverse of
+// graphToSteps' target-anchoring above, so a linear graph round-trips losslessly and
+// a reorder re-threads edges without dropping or re-homing any pair. Keys are
+// stabilized/uniquified from labels. The step's action.config is written back
 // verbatim so a preserved config survives the round-trip.
 export function stepsToGraph(steps: BuilderStep[]): WfLifecycle {
   const taken = new Set<string>()
@@ -192,12 +214,15 @@ export function stepsToGraph(steps: BuilderStep[]): WfLifecycle {
     if (!s.blocking) stage.blocking = false
     if (s.documents.length) stage.documents = s.documents
     if (!isLast) {
-      const edge: WfEdge = { to: keys[i + 1], gate: s.gate }
+      // Target-anchored: the NEXT step owns this edge's pair ("how step i+1 is
+      // reached"); the default keys off THIS step's kind (what completes step i).
+      const target = steps[i + 1]
+      const edge: WfEdge = { to: keys[i + 1], gate: target.gate }
       // An empty trigger with no default is left OFF the edge (never written as ''),
       // so the server validator's "names no 'on'/'via'" check fires instead of a
       // dead-token edge slipping through.
-      const trig = s.trigger.trim() || defaultTrigger(s.gate, s.actionKind, s.config)
-      if (trig) edge[triggerField(s.gate)] = trig
+      const trig = target.trigger.trim() || defaultTrigger(target.gate, s.actionKind, s.config)
+      if (trig) edge[triggerField(target.gate)] = trig
       stage.advances_to = [edge]
     }
     return stage
