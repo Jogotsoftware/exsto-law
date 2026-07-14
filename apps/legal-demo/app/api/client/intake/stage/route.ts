@@ -4,11 +4,18 @@
 // account" step, BEFORE they choose a password — so a balk leaves a
 // recoverable, queryable lead (client_contact + questionnaire_response via the
 // existing intake.submit vocabulary; no matter). Public, rate-limited,
-// CAPTCHA-gated when configured, attributed to the public-intake actor (no
-// account exists yet).
+// attributed to the public-intake actor (no account exists yet). The WRITE
+// (lead staging) is CAPTCHA-gated when configured; without a valid token the
+// route degrades to a read-only probe (fee quote + known-account detection)
+// because its only caller fires before any captcha widget has rendered.
 import { NextResponse } from 'next/server'
 import '@exsto/legal/mcp'
-import { stageIntakeLead, resolveServiceFeeQuote } from '@exsto/legal'
+import {
+  stageIntakeLead,
+  resolveServiceFeeQuote,
+  resolvePortalActorId,
+  findClientContactIdByEmail,
+} from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { verifyCaptchaIfConfigured } from '@/lib/captcha'
@@ -43,11 +50,34 @@ export async function POST(request: Request) {
     typeof body.captchaToken === 'string' ? body.captchaToken : undefined,
     clientIpFrom(request),
   )
-  if (!captcha.ok) {
-    return NextResponse.json({ error: captcha.reason ?? 'Captcha required.' }, { status: 403 })
-  }
-
   const ctx: ActionContext = { tenantId: TENANT_ID, actorId: ACTOR_ID }
+  if (!captcha.ok) {
+    // Probe-degrade: the funnel calls this on entry to the account step, where no
+    // captcha token can exist yet (the widget mounts on that step). Without a
+    // token nothing is WRITTEN — no staged lead — but the reads the step needs
+    // (fee quote + known-account detection, rate-limited above) still ride back,
+    // so the returning-client default works in captcha-guarded deployments too.
+    let quote = null
+    let hasPortalAccount = false
+    try {
+      const contactId = await findClientContactIdByEmail(ctx, str(body.clientEmail))
+      hasPortalAccount =
+        contactId != null && (await resolvePortalActorId(TENANT_ID, contactId)) != null
+      const q = await resolveServiceFeeQuote(ctx, str(body.serviceKey), contactId)
+      if (q) {
+        quote = {
+          basis: q.basis,
+          amount: q.amount,
+          rate: q.rate,
+          currency: q.currency,
+          description: q.description,
+        }
+      }
+    } catch {
+      quote = null
+    }
+    return NextResponse.json({ ok: true, staged: false, quote, hasPortalAccount })
+  }
   try {
     const staged = await stageIntakeLead(ctx, {
       clientFullName: typeof body.clientFullName === 'string' ? body.clientFullName : '',
@@ -77,11 +107,22 @@ export async function POST(request: Request) {
     } catch {
       quote = null
     }
+    // Known-email detection: an active portal actor on the staged contact means
+    // this prospect already has an account, so the account step can lead with
+    // sign-in instead of a doomed create. Disclosure is bounded — finalize
+    // already returns accountExisted post-submit — and the copy stays neutral.
+    let hasPortalAccount = false
+    try {
+      hasPortalAccount = (await resolvePortalActorId(TENANT_ID, staged.clientEntityId)) != null
+    } catch {
+      hasPortalAccount = false
+    }
     return NextResponse.json({
       ok: true,
       staged: true,
       leadId: staged.questionnaireEntityId,
       quote,
+      hasPortalAccount,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

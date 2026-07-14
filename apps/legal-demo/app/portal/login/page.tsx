@@ -5,11 +5,15 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
+import { bridgeSupabaseSession, signInWithPasswordAndBridge } from '@/components/PortalSignInInline'
 
 // The client-portal sign-in page — email + password (Supabase Auth). On sign in
 // or a confirmed sign-up we POST the verified token to /api/client/auth/supabase,
 // which maps the verified email to the firm's client_contact and mints our own
-// httpOnly portal session (the substrate-side authorization is unchanged).
+// httpOnly portal session (the substrate-side authorization is unchanged). The
+// password + bridge leg is shared with the /book inline panel
+// (components/PortalSignInInline.tsx); the ?code= confirmation return below is
+// this page's alone.
 
 type Phase = 'form' | 'working' | 'error' | 'check-email'
 
@@ -23,20 +27,11 @@ export default function ClientPortalLoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const [continueParam, setContinueParam] = useState('/portal')
 
-  // Exchange a verified Supabase access token for our portal session cookie,
-  // then sign the Supabase session out (we only needed the email proof).
+  // Exchange a verified Supabase access token for our portal session cookie
+  // (shared bridge), then navigate — this page's job, not the shared leg's.
   async function bridge(accessToken: string, cont: string) {
-    const sb = getSupabaseBrowser()
-    const res = await fetch('/api/client/auth/supabase', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ accessToken, continue: cont }),
-    })
-    const data = (await res.json().catch(() => null)) as { error?: string; path?: string } | null
-    await sb?.auth.signOut().catch(() => {})
-    if (!res.ok) throw new Error(data?.error ?? 'We could not sign you in.')
-    router.replace(safeInternalPath(data?.path, '/portal'))
+    const { path } = await bridgeSupabaseSession(accessToken, cont)
+    router.replace(safeInternalPath(path, '/portal'))
   }
 
   // On mount: handle an email-confirmation return (?code=) and pre-fill ?email=.
@@ -92,13 +87,12 @@ export default function ClientPortalLoginPage() {
         setSubmitting(false)
         setPhase('check-email')
       } else {
-        const { data, error: inErr } = await sb.auth.signInWithPassword({
-          email: email.trim(),
+        const { path } = await signInWithPasswordAndBridge({
+          email,
           password,
+          continuePath: continueParam,
         })
-        if (inErr) throw inErr
-        if (!data.session) throw new Error('We could not sign you in.')
-        await bridge(data.session.access_token, continueParam)
+        router.replace(safeInternalPath(path, '/portal'))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

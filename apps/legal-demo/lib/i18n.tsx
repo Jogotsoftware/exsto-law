@@ -181,6 +181,53 @@ const en: Record<string, string> = {
   'cal.all_taken': 'All taken',
   'cal.times_open_one': '{n} time open',
   'cal.times_open_many': '{n} times open',
+
+  // Fee consent card + waiting-on-consent hint
+  'fee.title': 'Fee for this service',
+  'fee.hourly_note': '(billed for time actually worked)',
+  'fee.accept_fixed': 'I accept this fee. It will be billed on my invoice for this service.',
+  'fee.accept_hourly': 'I accept this hourly rate for work on this service.',
+  'fee.hint': 'Accept the fee above to continue.',
+
+  // Returning-client notice (flow start)
+  'funnel.existing': 'Already working with us?',
+  'funnel.signin': 'Sign in to your client portal',
+  'funnel.existing_tail':
+    'to book with your details prefilled — or continue below if you are new here.',
+  'funnel.signedin': 'Booking as',
+  'funnel.portal': 'Go to your portal',
+
+  // Inline sign-in panel
+  'signin.email': 'Email',
+  'signin.password': 'Password',
+  'signin.submit': 'Sign in',
+  'signin.working': 'Signing you in…',
+  'signin.failed': 'We could not sign you in.',
+  'signin.unavailable': 'Sign-in is not available right now — you can continue without it.',
+
+  // Account gate
+  'account.heading': 'Create your account',
+  'account.heading_signin': 'Sign in to your account',
+  'account.subtitle': 'Everything about your matter will live in your secure portal.',
+  'account.subtitle_signin': 'Your request will be linked to your existing portal account.',
+  'account.blurb':
+    'One last step: create your secure client portal account. You will use it to track your matter, read and sign documents, message the firm, and pay invoices.',
+  'account.password': 'Choose a password',
+  'account.password2': 'Confirm password',
+  'account.submit': 'Create account & submit',
+  'account.password_short': 'Choose a password of at least 8 characters.',
+  'account.password_mismatch': 'The passwords do not match.',
+  'account.fee_required': 'Please review and accept the fee to continue.',
+  'account.known': 'It looks like you already have an account — sign in to link this request.',
+  'account.signin_toggle': 'Already have a portal account? Sign in instead',
+  'account.create_toggle': 'New here, or can’t sign in? Create your account instead',
+
+  // Confirmation — portal account outcomes
+  'confirm.account_created':
+    'Your client portal account is ready — check your email for a confirmation link, then sign in to track this matter, read documents, and pay invoices.',
+  'confirm.account_existed':
+    'This booking is linked to your existing portal account — sign in with your usual password.',
+  'confirm.portal': 'Open your client portal',
 }
 
 const es: Record<string, string> = {
@@ -372,6 +419,54 @@ const es: Record<string, string> = {
   'cal.all_taken': 'Todo ocupado',
   'cal.times_open_one': '{n} horario disponible',
   'cal.times_open_many': '{n} horarios disponibles',
+
+  // Tarjeta de consentimiento de honorarios + aviso de espera
+  'fee.title': 'Honorarios por este servicio',
+  'fee.hourly_note': '(se factura por el tiempo realmente trabajado)',
+  'fee.accept_fixed': 'Acepto estos honorarios. Se incluirán en mi factura por este servicio.',
+  'fee.accept_hourly': 'Acepto esta tarifa por hora por el trabajo en este servicio.',
+  'fee.hint': 'Acepta los honorarios de arriba para continuar.',
+
+  // Aviso para clientes existentes (inicio del flujo)
+  'funnel.existing': '¿Ya trabajas con nosotros?',
+  'funnel.signin': 'Inicia sesión en tu portal de cliente',
+  'funnel.existing_tail':
+    'para reservar con tus datos precargados — o continúa abajo si eres nuevo aquí.',
+  'funnel.signedin': 'Reservando como',
+  'funnel.portal': 'Ir a tu portal',
+
+  // Panel de inicio de sesión integrado
+  'signin.email': 'Correo electrónico',
+  'signin.password': 'Contraseña',
+  'signin.submit': 'Iniciar sesión',
+  'signin.working': 'Iniciando tu sesión…',
+  'signin.failed': 'No pudimos iniciar tu sesión.',
+  'signin.unavailable':
+    'Iniciar sesión no está disponible por el momento — puedes continuar sin hacerlo.',
+
+  // Paso de cuenta
+  'account.heading': 'Crea tu cuenta',
+  'account.heading_signin': 'Inicia sesión en tu cuenta',
+  'account.subtitle': 'Todo sobre tu asunto vivirá en tu portal seguro.',
+  'account.subtitle_signin': 'Tu solicitud quedará vinculada a tu cuenta del portal existente.',
+  'account.blurb':
+    'Un último paso: crea tu cuenta segura del portal de cliente. La usarás para seguir tu asunto, leer y firmar documentos, escribir al despacho y pagar facturas.',
+  'account.password': 'Elige una contraseña',
+  'account.password2': 'Confirma la contraseña',
+  'account.submit': 'Crear cuenta y enviar',
+  'account.password_short': 'Elige una contraseña de al menos 8 caracteres.',
+  'account.password_mismatch': 'Las contraseñas no coinciden.',
+  'account.fee_required': 'Por favor revisa y acepta los honorarios para continuar.',
+  'account.known': 'Parece que ya tienes una cuenta — inicia sesión para vincular esta solicitud.',
+  'account.signin_toggle': '¿Ya tienes una cuenta del portal? Inicia sesión',
+  'account.create_toggle': '¿Nuevo aquí o no puedes iniciar sesión? Crea tu cuenta',
+
+  // Confirmación — resultados de la cuenta del portal
+  'confirm.account_created':
+    'Tu cuenta del portal de cliente está lista — revisa tu correo para el enlace de confirmación y luego inicia sesión para seguir este asunto, leer documentos y pagar facturas.',
+  'confirm.account_existed':
+    'Esta reserva quedó vinculada a tu cuenta del portal existente — inicia sesión con tu contraseña habitual.',
+  'confirm.portal': 'Abre tu portal de cliente',
 }
 
 const dict: Record<Lang, Record<string, string>> = { en, es }
