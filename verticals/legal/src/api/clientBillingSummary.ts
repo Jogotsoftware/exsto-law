@@ -216,7 +216,7 @@ export async function listClientTodos(
   const { withActionContext } = await import('@exsto/substrate')
   const { getWorkflowInstanceForMatter, resolveBoundWorkflowById } =
     await import('../lifecycle/binding.js')
-  const { stageByKey, allowedTransitions, clientLabel } = await import('../lifecycle/resolve.js')
+  const { stageByKey, allowedTransitions } = await import('../lifecycle/resolve.js')
   await withActionContext(ctx, async (client) => {
     for (const matterId of matterIds) {
       const instance = await getWorkflowInstanceForMatter(client, ctx.tenantId, matterId)
@@ -235,9 +235,12 @@ export async function listClientTodos(
       const clientEdges = allowedTransitions(graph, instance.currentState, ['client'])
       if (clientEdges.length === 0) continue
       const stage = stageByKey(graph, instance.currentState)
+      // WP-5: only an explicitly-authored client_label may render to the client
+      // — the internal stage label is attorney vocabulary and never leaks here.
+      const clientPhrase = stage?.client_label?.trim()
       todos.push({
         kind: 'materials',
-        label: `Waiting on you: ${stage ? clientLabel(stage) : 'the firm requested something'}`,
+        label: `Waiting on you: ${clientPhrase || 'the firm requested something'}`,
         matterEntityId: matterId,
         ref: matterId,
       })

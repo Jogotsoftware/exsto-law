@@ -2,7 +2,7 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { signBookingManageToken } from '../api/bookingManageToken.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
-import { stageByKey, clientLabel } from '../lifecycle/resolve.js'
+import { stageByKey } from '../lifecycle/resolve.js'
 
 // Client-portal READ projection. This is DELIBERATELY a separate, narrow surface
 // from queries/history.ts (getMatterHistory): that one exposes internal actions,
@@ -49,10 +49,12 @@ function statusLabel(statusKey: string): string {
   return STATUS_LABELS.get(statusKey) ?? 'In progress'
 }
 
-// PORTAL-1 (WP2): the composed workflow's CLIENT-SAFE stage label, never the
-// internal stage key. Resolves the matter's workflow instance and reads the
-// current stage's client_label (falling back to the stage label, then to the
-// STATUS_LABELS map, then to a generic 'In progress' — raw keys never leak).
+// PORTAL-1 (WP2) / CLIENT-PORTAL-UI-1 (WP-5): the composed workflow's
+// CLIENT-SAFE stage label. ONLY an explicitly-authored client_label may render
+// to the client — the internal stage label is attorney vocabulary ("Review &
+// send engagement letter" leaked as a portal chip through the old
+// clientLabel() fallback). No client_label ⇒ the static client-phrase map ⇒
+// a generic 'In progress'. Raw keys and internal step names never leak.
 async function resolveClientStageLabel(
   client: DbClient,
   tenantId: string,
@@ -73,7 +75,7 @@ async function resolveClientStageLabel(
         graph = bound?.graph ?? []
       }
       const stage = stageByKey(graph, instance.currentState)
-      if (stage) return clientLabel(stage)
+      if (stage?.client_label?.trim()) return stage.client_label
     }
   } catch {
     // fall through to the static map
