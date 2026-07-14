@@ -269,11 +269,41 @@ interface EsignSignPayload {
   signer_ip?: string | null
 }
 
+// signature_data is capped like the attorney's standing signature
+// (handlers/attorneySignature.ts MAX_SIGNATURE_IMAGE_BYTES): the attribute table is
+// append-only, and the executed render inlines the image into the document body.
+const MAX_SIGNATURE_IMAGE_BYTES = 500_000
+
+// Decoded byte length of a base64 payload (¾ of the char count, minus padding) —
+// the same decode math attorneySignature.ts applies to its writes.
+function base64DecodedBytes(b64: string): number {
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0
+  return Math.floor((b64.length * 3) / 4) - padding
+}
+
 registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as EsignSignPayload
   const tenantId = ctx.tenantId
   const signedAt = p.signed_at ?? new Date().toISOString()
   const sourceRef = `signature_request:${p.request_entity_id}`
+
+  // signature_data arrives through the PUBLIC token door (/api/sign/submit) and the
+  // portal door; this handler is the one choke point both funnel into, so it is
+  // where the value is validated. Anything that is not the typed name verbatim must
+  // be a real PNG/JPEG data URL within the standing-signature cap — otherwise any
+  // token holder could append arbitrary multi-MB strings into append-only storage
+  // and blow the executed document past the render/mail size cap.
+  if (p.signature_data && p.signature_data !== p.signature_name) {
+    const valid =
+      isSignatureImageDataUrl(p.signature_data) &&
+      base64DecodedBytes(p.signature_data.slice(p.signature_data.indexOf(',') + 1)) <=
+        MAX_SIGNATURE_IMAGE_BYTES
+    if (!valid) {
+      throw new Error(
+        'The signature image is invalid or too large — draw or upload a PNG/JPEG under 500KB.',
+      )
+    }
+  }
 
   await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
 
@@ -816,7 +846,16 @@ async function loadEnvelopeSigners(
   }))
 }
 
-function fieldValue(field: EsignField, signer: FullSigner | undefined): string {
+function fieldValue(
+  field: EsignField,
+  signer: FullSigner | undefined,
+  // Per-render: signer keys whose image signature is already inlined. A document
+  // can carry many {{sign:key}} tags for one signer; inlining the data URL at
+  // every one multiplies the executed body's size (the 500 KB cap bounds ONE
+  // copy, renderDraftPdf's mail cap bounds the whole body), so only the FIRST
+  // sign field per signer gets the image — repeats render the /s/ glyph alone.
+  inlinedImageSigners: Set<string>,
+): string {
   const v = signer?.field_values?.[field.id]
   switch (field.type) {
     case 'name':
@@ -833,7 +872,10 @@ function fieldValue(field: EsignField, signer: FullSigner | undefined): string {
       // (or the legacy typed-name fallback in signature_data) stay glyph-only.
       const sig = signer?.signature_data
       const name = v ?? signer?.name ?? ''
-      if (sig && isSignatureImageDataUrl(sig)) return renderImageSignature(sig, name)
+      if (sig && isSignatureImageDataUrl(sig) && !inlinedImageSigners.has(field.signerKey)) {
+        inlinedImageSigners.add(field.signerKey)
+        return renderImageSignature(sig, name)
+      }
       return renderTypedSignature(name)
     }
     case 'check':
@@ -862,7 +904,11 @@ async function writeExecutedVersion(
   const signerByKey = new Map<string, FullSigner>()
   for (const s of signers) if (s.key) signerByKey.set(s.key, s)
   const valuesById: Record<string, string> = {}
-  for (const f of fields) valuesById[f.id] = fieldValue(f, signerByKey.get(f.signerKey))
+  // Fields resolve in appearance order (loadEnvelopeFields preserves the parse
+  // order), so "first sign field per signer" is the first tag in the document.
+  const inlinedImageSigners = new Set<string>()
+  for (const f of fields)
+    valuesById[f.id] = fieldValue(f, signerByKey.get(f.signerKey), inlinedImageSigners)
   const filledBody = fields.length ? resolveExecutedMarkdown(original, valuesById) : original
 
   const cert = [

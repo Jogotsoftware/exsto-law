@@ -108,7 +108,10 @@ async function resolveSystemTokensBeforeApprove(
   const resolved: string[] = []
   for (const [token, value] of Object.entries(values)) {
     if (!value?.trim()) continue // no honest value → the token stays visible
-    const next = resolvedBody.replace(unresolvedTokenRe(token), value)
+    // Replacer FUNCTION, never the bare string: a value containing `$&`/`$'`/`$$`
+    // (e.g. a firm named "Smith $& Co") would otherwise be treated as a JS
+    // replacement pattern and corrupt the approved document.
+    const next = resolvedBody.replace(unresolvedTokenRe(token), () => value)
     if (next !== resolvedBody) {
       resolvedBody = next
       resolved.push(token)
@@ -129,10 +132,18 @@ async function resolveSystemTokensBeforeApprove(
   return effects.documentVersionId ?? documentVersionId
 }
 
+export interface ApproveDraftResult extends ActionResult {
+  // The version id that was actually APPROVED — differs from the input when the
+  // approve-time system-token resolver minted a resolved version n+1. Every
+  // follow-on consumer (review page, send / e-sign / share surfaces) must hold
+  // THIS id, never the stale input id.
+  approvedDocumentVersionId: string
+}
+
 export async function approveDraft(
   ctx: ActionContext,
   input: DraftReviewInput,
-): Promise<ActionResult> {
+): Promise<ApproveDraftResult> {
   // P13: resolve remaining system tokens FIRST (append-only version n+1), then
   // approve the RESOLVED version — in sequence within this same request, so the
   // unresolved body never becomes an approved version.
@@ -163,7 +174,7 @@ export async function approveDraft(
       )
     }
   }
-  return res
+  return { ...res, approvedDocumentVersionId: finalVersionId }
 }
 
 export interface ApproveDocumentResult {
@@ -189,8 +200,7 @@ export async function approveDocument(
   // P13: approve-time token resolution may have approved a NEW version (n+1 with
   // the system tokens filled). Everything downstream — the share link, the send —
   // must reference the version that was actually approved, never the stale input.
-  const approveEffects = (res.effects[0] ?? {}) as { documentVersionId?: string }
-  const approvedVersionId = approveEffects.documentVersionId ?? input.documentVersionId
+  const approvedVersionId = res.approvedDocumentVersionId
   const draft = await getDraftVersion(ctx, approvedVersionId)
   // A communication draft was ALREADY sent by approveDraft (approve = send);
   // never follow with a /d draft-link email — there is no client-facing document.

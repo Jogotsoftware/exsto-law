@@ -16,6 +16,7 @@ import { loadTranscriptExtractionPrompt } from '../templates/loader.js'
 import { getMatter } from '../queries/matters.js'
 import { createNote } from './notes.js'
 import { resolveTenantSystemActorId } from './capabilityRuntime.js'
+import { transcriptAlreadyExtracted } from '../handlers/call.js'
 
 export interface RunTranscriptExtractionInput {
   matterEntityId: string
@@ -24,6 +25,11 @@ export interface RunTranscriptExtractionInput {
   transcriptEntityId?: string
   // Optional attorney focus ("pull out everything about the lease terms").
   instructions?: string
+  // Re-run an already-extracted transcript. Only the attorney's explicit
+  // re-extract button passes it (legal.transcript.extract); the auto-capture and
+  // staged doors leave it unset, so a transcript is extracted at most once no
+  // matter how many doors it arrives through.
+  force?: boolean
 }
 
 export interface TranscriptExtractionResult {
@@ -32,6 +38,9 @@ export interface TranscriptExtractionResult {
   extractedNoteIds: string[]
   factCount: number
   actionItemCount: number
+  // True when the run no-opped because the transcript was already extracted (and
+  // force was not set) — no model call, no notes written, the count fields are 0.
+  skipped?: boolean
 }
 
 // Pure parser for the output contract (exported for tests): summary markdown,
@@ -128,6 +137,21 @@ export async function runTranscriptExtraction(
     throw new Error(
       'No transcript with text found on this matter — record or import a consultation transcript first.',
     )
+  }
+  // Force-aware RUN-time guard (the enqueue-time check in call.ingest is only the
+  // cheap first line): every door — auto-capture, a composed workflow stage, the
+  // ad-hoc tool — passes through here, so an already-extracted transcript is a
+  // deliberate no-op (each extraction is a real model call and duplicate notes
+  // poison client memory) unless the attorney explicitly forces a re-run.
+  if (!input.force && (await transcriptAlreadyExtracted(agentCtx, transcript.transcriptEntityId))) {
+    return {
+      transcriptEntityId: transcript.transcriptEntityId,
+      summaryNoteId: '',
+      extractedNoteIds: [],
+      factCount: 0,
+      actionItemCount: 0,
+      skipped: true,
+    }
   }
   let transcriptText = transcript.transcriptText
   if (transcriptText.length > MAX_TRANSCRIPT_CHARS) {

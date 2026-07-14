@@ -43,6 +43,7 @@ import {
   type QuestionnaireDoc,
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
+import { isSystemToken } from './tokenClasses.js'
 import { listStandaloneTemplates, type TemplateSignature } from '../queries/templates.js'
 import { createTemplate, updateTemplate } from './standaloneTemplates.js'
 
@@ -318,7 +319,10 @@ export function validateProposedTemplate(
   }
   const tokens = extractRenderedTokens(validated)
   const known = new Set(fieldIds.map((f) => f.toLowerCase()))
-  const orphanTokens = tokens.filter((t) => !known.has(t.toLowerCase()))
+  // System tokens (firm/attorney identity, dates, matter facts — tokenClasses.ts)
+  // are platform-resolved: they never become questionnaire questions, so listing
+  // them as orphans would misleadingly pitch them to the attorney as gaps.
+  const orphanTokens = tokens.filter((t) => !known.has(t.toLowerCase()) && !isSystemToken(t))
   const reusableFromFirm = orphanTokens.filter((t) => firmKnown.has(t.toLowerCase()))
   return {
     ok: errors.length === 0,

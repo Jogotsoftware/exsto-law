@@ -12,6 +12,10 @@ import {
   allowedTransitionTokens,
   diagnoseEdgeTransition,
 } from '@exsto/legal'
+// Source-path imports (client-copy-doctrine idiom): these two pure helpers back
+// the BUILDER-UX-3 placeholder seam tested at the bottom of this file.
+import { paletteSeedAction } from '../../verticals/legal/src/mcp/tools/workflowCatalogTools.js'
+import { collectPlaceholderKeys } from '../../verticals/legal/src/handlers/serviceLibrary.js'
 
 const RUBRIC_SCHEMA = {
   rubric: { type: 'string', required: true, description: 'what to check for' },
@@ -217,5 +221,87 @@ describe('diagnoseEdgeTransition — names the offending token + the allowed set
 
   it('leaves an ABSENT token to validateLifecycle (no double error)', () => {
     expect(diagnoseEdgeTransition('a', 'b', 'client', undefined, undefined)).toBeNull()
+  })
+})
+
+// ── BUILDER-UX-3 review fix 1 — the placeholder seam, both ends (pure, no DB) ──
+// buildInvokeCapabilityStepTemplate fills every config key with "<description>"
+// filler for the AI path. Two guards keep that filler out of a saved workflow:
+// READ — paletteSeedAction (legal.workflow.catalog) blanks it so a human palette
+// pick starts from EMPTY values (empty required values park honestly at runtime);
+// WRITE — collectPlaceholderKeys backs the set_lifecycle rejection, so filler that
+// reaches a save anyway is named and refused instead of dead-lettering the matter.
+describe('paletteSeedAction — the palette seeds EMPTY config values, never filler', () => {
+  it('blanks every "<…>" string in the seeded capability_config', () => {
+    const action = paletteSeedAction({
+      slug: 'document_generation',
+      spec: {
+        name: 'Document generation',
+        config_schema: {
+          template_entity_id: {
+            type: 'string',
+            required: true,
+            description: 'the template to draft',
+          },
+          generation_mode: { type: 'string', description: 'ai_draft|template_merge' },
+        },
+      },
+    })
+    expect(action.kind).toBe('invoke_capability')
+    const cfg = action.config as {
+      capability_slug: string
+      capability_config: Record<string, unknown>
+    }
+    expect(cfg.capability_slug).toBe('document_generation')
+    expect(cfg.capability_config).toEqual({ template_entity_id: '', generation_mode: '' })
+  })
+
+  it('keeps non-placeholder values untouched', () => {
+    const action = paletteSeedAction({
+      slug: 'esignature',
+      spec: { name: 'E-signature', config_schema: {} },
+    })
+    expect((action.config as { capability_slug: string }).capability_slug).toBe('esignature')
+  })
+})
+
+describe('collectPlaceholderKeys — the set_lifecycle write-side backstop', () => {
+  it('finds "<…>" filler nested inside capability_config and names the leaf key', () => {
+    const out: string[] = []
+    collectPlaceholderKeys(
+      {
+        capability_slug: 'document_generation',
+        capability_config: {
+          template_entity_id: '<the template to draft>',
+          generation_mode: 'template_merge',
+        },
+      },
+      '',
+      out,
+    )
+    expect(out).toEqual(['template_entity_id'])
+  })
+
+  it('reports each offending key once; a filled or empty value is not flagged', () => {
+    const out: string[] = []
+    collectPlaceholderKeys(
+      {
+        capability_config: {
+          rubric: '<what to check for>',
+          nested: { rubric: '<what to check for>' },
+          message: 'Please upload your lease.',
+          empty: '',
+        },
+      },
+      '',
+      out,
+    )
+    expect(out).toEqual(['rubric'])
+  })
+
+  it('walks arrays too', () => {
+    const out: string[] = []
+    collectPlaceholderKeys({ items: ['fine', '<replace me>'] }, '', out)
+    expect(out).toEqual(['items'])
   })
 })

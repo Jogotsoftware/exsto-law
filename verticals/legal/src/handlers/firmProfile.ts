@@ -19,6 +19,10 @@ async function getOrCreateFirmProfile(
   tenantId: string,
   actionId: string,
 ): Promise<string> {
+  // Serialize concurrent first-writes: two parallel saves would both see no
+  // profile and mint two singletons (one save's attributes land on the row no
+  // reader picks). Xact-scoped, so the lock releases at the action's commit.
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`${tenantId}:firm_profile`])
   const kindId = await lookupKindId(
     client,
     'entity_kind_definition',

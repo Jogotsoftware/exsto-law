@@ -1070,8 +1070,15 @@ function DocumentStep({
   const footer =
     versionId && draft ? (
       <>
-        <button onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}>Download Word</button>
-        <button className="primary" onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>
+        <button
+          onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase, { status: draft.status })}
+        >
+          Download Word
+        </button>
+        <button
+          className="primary"
+          onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase, { status: draft.status })}
+        >
           Download PDF
         </button>
       </>

@@ -40,6 +40,13 @@ async function getOrCreateAttorneyProfile(
   actionId: string,
   actorId: string,
 ): Promise<string> {
+  // Serialize concurrent first-writes for one actor: two parallel saves would both
+  // see no profile and mint two singletons, silently stranding one signature on
+  // the row no reader picks. The xact-scoped lock is held on the action's own
+  // transaction, so it releases at commit with no unlock bookkeeping.
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+    `${tenantId}:attorney_profile:${actorId}`,
+  ])
   const existing = await client.query<{ id: string }>(
     `SELECT e.id
        FROM entity e

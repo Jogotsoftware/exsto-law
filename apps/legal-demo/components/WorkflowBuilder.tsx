@@ -176,23 +176,31 @@ export function WorkflowBuilder({
   const [adding, setAdding] = useState(false)
   const [savingToLib, setSavingToLib] = useState<string | null>(null) // step uid
 
-  // P12 — the incoming pair for a step APPENDED after the current last step. When
-  // that step is a capability with a known completion event (e-signature →
-  // esign.completed), seed the new step's pair from the capability's
-  // defaultGate/suggestedTrigger so the completion actually gates the advance; else
-  // the caller's fallback gate + the save-time default apply.
-  function incomingPairAfter(fallbackGate: WfGate): { gate: WfGate; trigger: string } {
+  // P12 — the incoming pair for a step APPENDED after the current last step. Under
+  // target-anchoring the pair describes how the NEW step is REACHED, so it derives
+  // entirely from what completes the PRECEDING step — never from the added action's
+  // own defaultGate (appending a system-gated action like "Complete matter" after a
+  // review step used to seed (system, '') and the validator rejected the save).
+  // Mirrors defaultTrigger's preceding-kind table, with the capability catalog
+  // supplying the completion pair for a preceding capability step.
+  function incomingPairAfter(): { gate: WfGate; trigger: string } {
     const prev = steps[steps.length - 1]
+    if (prev?.actionKind === 'approve_send_invoice' || prev?.actionKind === 'await_payment') {
+      return { gate: 'system', trigger: 'invoice.paid' }
+    }
     if (prev?.actionKind === 'invoke_capability') {
       const slug = stepCapabilitySlug(prev)
       const cap = slug ? catalog?.capabilities?.find((c) => c.slug === slug) : undefined
       if (cap?.suggestedTrigger) return { gate: cap.defaultGate, trigger: cap.suggestedTrigger }
     }
-    return { gate: fallbackGate, trigger: '' }
+    if (prev?.actionKind === 'review_send_document') {
+      return { gate: 'attorney', trigger: 'draft.approve' }
+    }
+    return { gate: 'attorney', trigger: 'legal.matter.advance' }
   }
 
   function addStep(action: CatalogAction) {
-    const pair = incomingPairAfter(action.defaultGate)
+    const pair = incomingPairAfter()
     const step: BuilderStep = {
       uid: nextUid(),
       key: '',
@@ -213,7 +221,7 @@ export function WorkflowBuilder({
   // wires its edges on save, exactly like a catalog add).
   function addFromLibrary(t: WorkflowStepTemplate) {
     const step = stageToStep(t)
-    const pair = incomingPairAfter(step.gate)
+    const pair = incomingPairAfter()
     onChange([...steps, { ...step, ...pair }])
     setAdding(false)
     setEditing(step.uid)
@@ -225,7 +233,7 @@ export function WorkflowBuilder({
   // other appended step — the capability's completion pair (defaultGate +
   // suggestedTrigger) seeds the step that FOLLOWS it, via incomingPairAfter.
   function addCapabilityStep(c: CatalogCapability) {
-    const pair = incomingPairAfter('attorney')
+    const pair = incomingPairAfter()
     const step: BuilderStep = {
       uid: nextUid(),
       key: '',

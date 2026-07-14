@@ -706,6 +706,11 @@ async function runTranscriptExtractionCapability(
       transcriptEntityId:
         String((h.config.transcript_entity_id as string | undefined) ?? '').trim() || undefined,
       instructions: String((h.config.instructions as string | undefined) ?? '').trim() || undefined,
+      // Only the attorney's explicit re-extract sets force (commsTools); composed
+      // stages and the auto-capture door never do, so an in-flight matter whose
+      // graph still carries an extraction stage cannot re-extract a transcript the
+      // auto path already captured.
+      force: h.config.force === true,
     })
   } catch (err) {
     // "No transcript yet" is a missing REQUIRED input — park honestly, re-invocable.
@@ -713,6 +718,14 @@ async function runTranscriptExtractionCapability(
       throw new CapabilityInputMissingError(err.message)
     }
     throw err
+  }
+  if (extraction.skipped) {
+    return {
+      outputs: [],
+      summary:
+        'This transcript was already extracted — skipped (no duplicate notes). ' +
+        'Re-run it from the matter page to force a fresh extraction.',
+    }
   }
   return {
     outputs: [
@@ -744,7 +757,13 @@ export async function enqueueAdHocCapabilityJob(
   input: { capabilitySlug: string; matterEntityId: string; config?: Record<string, unknown> },
 ): Promise<string> {
   const { enqueueJob } = await import('@exsto/worker-runtime')
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  // THIS tenant's agent/system actor (RUNTIME-AUTORUN-2 class of fix): the
+  // hardcoded tenant-zero id would record a second firm's observations as an
+  // actor that tenant does not have.
+  const agentCtx: ActionContext = {
+    tenantId: ctx.tenantId,
+    actorId: await resolveTenantSystemActorId(ctx),
+  }
   const jobId = await enqueueJob({
     tenantId: ctx.tenantId,
     jobKind: CAPABILITY_ADHOC_JOB_KIND,
@@ -767,7 +786,11 @@ export async function runAdHocCapability(
   input: { capabilitySlug: string; matterEntityId: string; config?: Record<string, unknown> },
   deps?: CapabilityRuntimeDeps,
 ): Promise<InvokeCapabilityResult> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  // Per-tenant agent/system actor, same reason as enqueueAdHocCapabilityJob above.
+  const agentCtx: ActionContext = {
+    tenantId: ctx.tenantId,
+    actorId: await resolveTenantSystemActorId(ctx),
+  }
   const slug = input.capabilitySlug.trim()
 
   const registry = await listCapabilities(ctx)

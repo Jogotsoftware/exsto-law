@@ -306,7 +306,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     setNotice(null)
     setRevisionNudge(false)
     try {
-      await callAttorneyMcp({
+      const res = await callAttorneyMcp<{ approvedDocumentVersionId?: string }>({
         toolName,
         input: { documentVersionId: versionId, reviewNotes: notes.trim() || undefined },
       })
@@ -324,6 +324,15 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           window.sessionStorage.removeItem(REVIEW_SESSION_KEY)
           router.push('/attorney/review')
         }
+        return
+      }
+      // Approving may have minted + approved a token-resolved version n+1 (the
+      // input version is now superseded). Swap the page to the APPROVED id so the
+      // status badge and every follow-on action (send, e-sign, client view) hold
+      // the approved body, never the stale unresolved version.
+      const approvedId = res?.approvedDocumentVersionId
+      if (approvedId && approvedId !== versionId) {
+        router.replace(`/attorney/review/${approvedId}`)
         return
       }
       await load()

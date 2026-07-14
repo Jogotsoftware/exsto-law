@@ -85,6 +85,10 @@ const extractTranscriptTool: Tool<
       config: {
         ...(input.transcriptEntityId ? { transcript_entity_id: input.transcriptEntityId } : {}),
         ...(input.instructions ? { instructions: input.instructions } : {}),
+        // An attorney explicitly re-running the extraction wants a re-run: bypass
+        // the run-time already-extracted guard that keeps the auto-capture and
+        // composed-stage doors idempotent.
+        force: true,
       },
     })
     return { jobId, queued: true as const }

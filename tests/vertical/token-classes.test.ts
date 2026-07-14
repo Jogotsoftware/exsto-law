@@ -160,4 +160,39 @@ describe('buildMergeData (P13 firm/attorney/date slots)', () => {
     const { markdown } = renderTemplate('{{firm_address}} / {{attorney_email}}', data)
     expect(markdown).toBe('[[MISSING: firm_address]] / [[MISSING: attorney_email]]')
   })
+
+  // Answer-wins slots: client_name / letter_date ONLY. A field the attorney
+  // designed and the client (or attorney, internal) actually answered beats the
+  // platform's derived value; identity slots stay curated-wins.
+  it('a questionnaire client_name answer wins over the matter contact name', () => {
+    const data = buildMergeData(
+      { ...baseMatter, questionnaireResponses: { client_name: 'María de los Ángeles Gómez' } },
+      { effectiveDateIso: '2026-06-18T00:00:00Z' },
+    )
+    expect(data.client_name).toBe('María de los Ángeles Gómez')
+  })
+
+  it('client_name answer-wins also via the pick aliases (primary_client_name)', () => {
+    const data = buildMergeData(
+      { ...baseMatter, questionnaireResponses: { primary_client_name: 'Maria G. Gomez-Ruiz' } },
+      { effectiveDateIso: '2026-06-18T00:00:00Z' },
+    )
+    expect(data.client_name).toBe('Maria G. Gomez-Ruiz')
+  })
+
+  it('a letter_date answer wins over the generation date (long-date formatted)', () => {
+    const data = buildMergeData(
+      { ...baseMatter, questionnaireResponses: { letter_date: '2026-07-01' } },
+      { effectiveDateIso: '2026-06-18T00:00:00Z', todayIso: '2026-07-10T00:00:00Z' },
+    )
+    expect(data.letter_date).toBe('July 1, 2026')
+  })
+
+  it('identity slots keep curated-wins — a firm_name answer never overrides the firm profile', () => {
+    const data = buildMergeData(
+      { ...baseMatter, questionnaireResponses: { firm_name: 'Client Typed Firm' } },
+      { effectiveDateIso: '2026-06-18T00:00:00Z', firmName: 'Pacheco Law Firm' },
+    )
+    expect(data.firm_name).toBe('Pacheco Law Firm')
+  })
 })

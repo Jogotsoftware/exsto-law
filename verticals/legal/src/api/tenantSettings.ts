@@ -46,9 +46,23 @@ export interface FirmProfileFields {
 
 const PROFILE_ATTR_KINDS = ['firm_name', 'firm_address', 'firm_phone', 'firm_email'] as const
 
-// Latest firm-identity attributes off the firm_profile singleton (all null when
-// no singleton / no values yet). Mirrors api/firmSignature.readStored.
-async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileFields> {
+// Tri-state per field, read off the firm_profile singleton:
+//   string    — set to a value;
+//   null      — an attribute row EXISTS with an empty value: the attorney
+//               explicitly cleared it (legal.firm.set_profile stores '' on
+//               clear). A cleared field must resolve to null — NEVER fall back
+//               to the legacy table or a default, or the clear can never take;
+//   undefined — no attribute row at all (never set) → fallback allowed.
+interface FirmProfileAttrReads {
+  firmName: string | null | undefined
+  firmAddress: string | null | undefined
+  firmPhone: string | null | undefined
+  firmEmail: string | null | undefined
+}
+
+// Latest firm-identity attributes off the firm_profile singleton (all undefined
+// when no singleton / no rows yet). Mirrors api/firmSignature.readStored.
+async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttrReads> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{ kind_name: string; value: string | null }>(
       `WITH fp AS (
@@ -69,9 +83,10 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileFiel
       [ctx.tenantId, [...PROFILE_ATTR_KINDS]],
     )
     const byKind = new Map(res.rows.map((r) => [r.kind_name, r.value]))
-    const val = (kind: string): string | null => {
+    const val = (kind: string): string | null | undefined => {
+      if (!byKind.has(kind)) return undefined // never set → fallback allowed
       const v = byKind.get(kind)
-      return typeof v === 'string' && v.trim() ? v : null
+      return typeof v === 'string' && v.trim() ? v : null // row with '' = explicit clear
     }
     return {
       firmName: val('firm_name'),
@@ -82,15 +97,18 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileFiel
   })
 }
 
-// Substrate profile value wins; a legacy table value survives only where the
+// Substrate profile value wins; an EXPLICIT CLEAR stays cleared (resolves null,
+// no legacy/default resurrection); a legacy table value survives only where the
 // profile has never been set (append-only history stays on the substrate side).
-function overlayProfile(base: TenantSettings, profile: FirmProfileFields): TenantSettings {
+function overlayProfile(base: TenantSettings, profile: FirmProfileAttrReads): TenantSettings {
+  const field = (p: string | null | undefined, b: string | null): string | null =>
+    p === undefined ? b : p
   return {
     ...base,
-    firmName: profile.firmName ?? base.firmName,
-    firmAddress: profile.firmAddress ?? base.firmAddress,
-    firmPhone: profile.firmPhone ?? base.firmPhone,
-    firmEmail: profile.firmEmail ?? base.firmEmail,
+    firmName: field(profile.firmName, base.firmName),
+    firmAddress: field(profile.firmAddress, base.firmAddress),
+    firmPhone: field(profile.firmPhone, base.firmPhone),
+    firmEmail: field(profile.firmEmail, base.firmEmail),
   }
 }
 

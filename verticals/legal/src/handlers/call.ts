@@ -268,8 +268,11 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
 // capability path deliberately bypasses the per-(matter, stage) capability.invoked
 // guard. Two signals count as done: a transcript.extracted event referencing the
 // transcript, or (in case the event write failed after the notes landed) an
-// ai_summary note pointing at it via note_about.
-async function transcriptAlreadyExtracted(
+// ai_summary note pointing at it via note_about. Exported: the enqueue above is the
+// cheap first line, but runTranscriptExtraction consults the same check at RUN time
+// (its force-aware guard), so the staged and re-paste doors share ONE definition of
+// "already extracted".
+export async function transcriptAlreadyExtracted(
   ctx: ActionContext,
   transcriptEntityId: string,
 ): Promise<boolean> {

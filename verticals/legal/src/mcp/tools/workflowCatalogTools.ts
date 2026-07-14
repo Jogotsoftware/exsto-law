@@ -28,6 +28,28 @@ const CAPABILITY_COMPLETION_TOKENS: Record<string, string> = {
   esignature: 'esign.completed',
 }
 
+// buildInvokeCapabilityStepTemplate fills every config key with "<description>"
+// filler for the AI authoring path (the model is told to replace it). A HUMAN
+// palette pick must start from EMPTY values instead: "<…>" is non-empty, so it
+// slides past the required-value diagnostic and the matter later dead-letters on a
+// literal placeholder (e.g. a template id of "<the template to draft>"). Empty
+// required values park honestly at runtime instead. Same regex serviceLibrary's
+// set_lifecycle guard rejects, so a placeholder can neither be seeded nor saved.
+function blankPlaceholders(value: unknown): unknown {
+  if (typeof value === 'string') return /^<.*>$/.test(value) ? '' : value
+  if (Array.isArray(value)) return value.map(blankPlaceholders)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blankPlaceholders(v)]))
+  }
+  return value
+}
+
+// Exported for the pure doctrine tests.
+export function paletteSeedAction(cap: { slug: string; spec: CapabilitySpec }): StepAction {
+  const action = buildInvokeCapabilityStepTemplate({ slug: cap.slug, spec: cap.spec }).action
+  return { ...action, config: blankPlaceholders(action.config) as Record<string, unknown> }
+}
+
 // A capability as a palette entry: everything the visual builder needs to seed a
 // working invoke_capability step, generated from the capability's own spec (ONE
 // config_schema — the same one the AI authoring path and the validator read).
@@ -69,7 +91,7 @@ const catalogTool: Tool<
         label: c.spec.name,
         description: c.spec.purpose ?? '',
         defaultGate: (c.spec.default_gate ?? 'attorney') as GateKind,
-        seedAction: buildInvokeCapabilityStepTemplate({ slug: c.slug, spec: c.spec }).action,
+        seedAction: paletteSeedAction(c),
         suggestedTrigger: CAPABILITY_COMPLETION_TOKENS[c.slug] ?? '',
       }))
     return {
