@@ -234,10 +234,15 @@ export function workflowSummaryViolation(summary: string, graph: Lifecycle): str
   if (/\$\s?\d/.test(summary) || /total per matter|billing read-?out/i.test(summary)) {
     return 'the summary restates pricing/billing — the billing card owns every dollar amount and the billing read-out.'
   }
-  const lower = summary.toLowerCase()
+  // Only multi-word labels matched on word boundaries count as "restated": bare
+  // substring hits on single common words ("Intake", "Review", "Complete") flag
+  // honest WHY prose that merely mentions the process — a mention, not an
+  // enumeration.
   const restated = graph.filter((s) => {
-    const label = (s.label ?? '').trim().toLowerCase()
-    return label.length > 0 && lower.includes(label)
+    const label = (s.label ?? '').trim()
+    if (!label || !/\s/.test(label)) return false
+    const re = new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+    return re.test(summary)
   })
   if (restated.length >= 3) {
     return 'the summary enumerates the workflow steps — the card already lists them below.'
@@ -269,7 +274,15 @@ export function buildProposeWorkflowTool(
   // exactly like failedAttempts), so a same-turn propose_cost satisfies the compose-
   // time billing check and the ordering pre-gate below.
   costProposals: CostProposal[] = [],
+  // The ordering pre-gate redirects the model to propose_cost / the service shell —
+  // tools that only exist when the build wizard is on. Flag-off callers pass false
+  // and keep the pre-P4 behavior (the validator speaks for itself).
+  wizardToolsAvailable = true,
 ): ClientTool {
+  // P6 cap — a model that keeps restating billing/steps in its summary must not
+  // burn the whole turn on copy rejections: after two, capture with the summary
+  // dropped (the card renders fine without it) rather than looping.
+  let summaryRejections = 0
   return {
     definition: PROPOSE_WORKFLOW_TOOL_DEF,
     name: 'propose_workflow',
@@ -296,13 +309,17 @@ export function buildProposeWorkflowTool(
       // ordering nudge would eat the model's real correction budget.
       const pendingCost = costProposals.find((c) => c.serviceKey === serviceKey)
       if (
+        wizardToolsAvailable &&
         graph.some(isDocumentProducingStage) &&
         !graph.some((s) => s.action?.kind === 'approve_send_invoice') &&
         !pendingCost
       ) {
         const svc = await getService(ctx, serviceKey)
+        if (!svc) {
+          return `Nothing was captured (this does not count as a failed attempt): no service "${serviceKey}" exists yet. Create the service shell first, then set its billing, then propose the workflow.`
+        }
         const hasPersistedBilling =
-          svc?.cost != null || Object.keys(svc?.documentFees ?? {}).length > 0
+          svc.cost != null || Object.keys(svc.documentFees ?? {}).length > 0
         if (!hasPersistedBilling) {
           return `Nothing was captured (this does not count as a failed attempt): this workflow produces documents but "${serviceKey}" has no billing set yet, and the workflow validates against the declared billing. Run the billing step FIRST — ask the attorney when the client is charged, call propose_cost — then call propose_workflow again with this graph.`
         }
@@ -311,9 +328,14 @@ export function buildProposeWorkflowTool(
       // copy problem, not a graph problem, so it does NOT consume
       // MAX_FAILED_PROPOSE_ATTEMPTS (that budget exists for graphs that keep
       // failing validation).
-      const summaryViolation = workflowSummaryViolation(args.summary ?? '', graph)
+      let summaryText = (args.summary ?? '').trim()
+      const summaryViolation = workflowSummaryViolation(summaryText, graph)
       if (summaryViolation) {
-        return `The workflow was NOT captured (this does not count as a failed attempt): ${summaryViolation} Rewrite the summary as WHY this workflow only, then call propose_workflow again with the SAME graph.`
+        summaryRejections += 1
+        if (summaryRejections <= 2) {
+          return `The workflow was NOT captured (this does not count as a failed attempt): ${summaryViolation} Rewrite the summary as WHY this workflow only, then call propose_workflow again with the SAME graph.`
+        }
+        summaryText = ''
       }
       const validation = await validateProposedLifecycle(
         ctx,
@@ -378,7 +400,7 @@ export function buildProposeWorkflowTool(
         serviceKey,
         graph,
         summary:
-          ((args.summary ?? '').trim() || `Proposed workflow for ${serviceKey}.`) +
+          (summaryText || `Proposed workflow for ${serviceKey}.`) +
           (validation.warnings.length ? ` ⚠ ${validation.warnings.join(' ⚠ ')}` : ''),
         confidence,
       })

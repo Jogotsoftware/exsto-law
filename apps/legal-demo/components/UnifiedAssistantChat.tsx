@@ -2566,6 +2566,17 @@ export function UnifiedAssistantChat({
                   {t.documents?.map((doc, di) => (
                     <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
                   ))}
+                  {/* Billing proposals — rendered ABOVE the workflow card so a
+                    same-turn pair reads in approve order (pricing first: the
+                    workflow's approve validates against the approved billing). */}
+                  {t.costProposals?.map((p, pi) => (
+                    <CostProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onEdited={handleProposalEdited}
+                    />
+                  ))}
                   {/* Workflow proposals (PR5) — inline approval cards. Approving is the
                     live write; nothing was saved by the turn that proposed them. */}
                   {t.workflowProposals?.map((p, pi) => (
@@ -2604,17 +2615,6 @@ export function UnifiedAssistantChat({
                     template; nothing was saved by the proposing turn. */}
                   {t.templateProposals?.map((p, pi) => (
                     <TemplateProposalCard
-                      key={pi}
-                      proposal={p}
-                      onApproved={handleApproved}
-                      onEdited={handleProposalEdited}
-                    />
-                  ))}
-                  {/* Billing proposals (Build-Wizard Phase 6) — inline approval cards.
-                    Approving writes the service's fee model; nothing was saved by the
-                    proposing turn. */}
-                  {t.costProposals?.map((p, pi) => (
-                    <CostProposalCard
                       key={pi}
                       proposal={p}
                       onApproved={handleApproved}
@@ -2749,6 +2749,16 @@ export function UnifiedAssistantChat({
             {streaming.documents.map((doc, di) => (
               <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
             ))}
+            {/* A billing proposal mid-stream — above the workflow card so a same-turn
+              pair reads in approve order (pricing first). */}
+            {streaming.costProposals.map((p, pi) => (
+              <CostProposalCard
+                key={pi}
+                proposal={p}
+                onApproved={handleApproved}
+                onEdited={handleProposalEdited}
+              />
+            ))}
             {/* A workflow proposed mid-stream appears as an approval card right away. */}
             {streaming.workflowProposals.map((p, pi) => (
               <WorkflowProposalCard
@@ -2780,15 +2790,6 @@ export function UnifiedAssistantChat({
             {/* A template proposed mid-stream appears as an approval card. */}
             {streaming.templateProposals.map((p, pi) => (
               <TemplateProposalCard
-                key={pi}
-                proposal={p}
-                onApproved={handleApproved}
-                onEdited={handleProposalEdited}
-              />
-            ))}
-            {/* A billing proposal mid-stream appears as an approval card (Phase 6). */}
-            {streaming.costProposals.map((p, pi) => (
-              <CostProposalCard
                 key={pi}
                 proposal={p}
                 onApproved={handleApproved}

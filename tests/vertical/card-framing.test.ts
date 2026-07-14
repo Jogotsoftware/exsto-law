@@ -104,3 +104,31 @@ describe('workflowSummaryViolation (P6)', () => {
     expect(workflowSummaryViolation('', graph)).toBeNull()
   })
 })
+
+describe('BUILDER-UX-3 review fixes', () => {
+  it('replaces a stale card-naming sentence on a question-only turn', () => {
+    const out = framingSentenceForCards(["Here's the workflow to approve."], { question: 1 })
+    expect(out).toBe('A few quick questions.')
+  })
+
+  it('does not count single-word step labels as enumeration', () => {
+    const graph = [
+      { key: 'a', label: 'Intake' },
+      { key: 'b', label: 'Review' },
+      { key: 'c', label: 'Complete' },
+    ] as never
+    const summary =
+      'Mirrors how you work: after intake you review everything before the matter is complete.'
+    expect(workflowSummaryViolation(summary, graph)).toBeNull()
+  })
+
+  it('still rejects a real multi-word enumeration', () => {
+    const graph = [
+      { key: 'a', label: 'Client intake' },
+      { key: 'b', label: 'Client consultation' },
+      { key: 'c', label: 'Draft letter review' },
+    ] as never
+    const summary = 'Added Client intake, Client consultation, and Draft letter review in order.'
+    expect(workflowSummaryViolation(summary, graph)).not.toBeNull()
+  })
+})

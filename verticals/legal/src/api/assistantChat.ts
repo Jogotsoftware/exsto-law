@@ -632,6 +632,9 @@ export function buildAttorneyClientTools(
       capture.workflowProposals,
       capture.failedWorkflowAttempts,
       capture.costProposals,
+      // The P4 ordering pre-gate redirects to propose_cost / the service shell,
+      // which only exist when the wizard is on; flag-off keeps validator behavior.
+      buildWizardEnabled(),
     ),
   )
   // WP-H2: open a real editor on an EXISTING artifact from chat (unflagged —

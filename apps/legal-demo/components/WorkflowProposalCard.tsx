@@ -284,9 +284,7 @@ export function WorkflowProposalCard({
       // the write path stays strict. Approving out of order surfaces the
       // validator's billing rejection; say what to do instead of leaking it.
       setApproveError(
-        /declares no billing/i.test(msg)
-          ? 'Approve the pricing card first, then approve this workflow.'
-          : msg,
+        /billing/i.test(msg) ? 'Approve the pricing card first, then approve this workflow.' : msg,
       )
     }
   }

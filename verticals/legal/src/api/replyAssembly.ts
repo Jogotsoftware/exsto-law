@@ -126,8 +126,16 @@ export function framingSentenceForCards(
   const last = kinds[kinds.length - 1]!
   if (sentence && kinds.some((k) => CARD_KIND_HINTS[k].test(sentence))) return sentence
   // A question-only turn is conversational — whatever the model wrote frames it
-  // ("Tell me how this works in your practice…"), so it is kept as-is.
-  if (sentence && last === 'question') return sentence
+  // ("Tell me how this works in your practice…") — unless the sentence names a
+  // DIFFERENT card kind: a stale "Here's the workflow to approve." left over from
+  // a redirected compose must not sit above a question card.
+  if (
+    sentence &&
+    last === 'question' &&
+    !CARD_KIND_ORDER.some((k) => k !== 'question' && CARD_KIND_HINTS[k].test(sentence))
+  ) {
+    return sentence
+  }
   return CARD_KIND_LABELS[last]
 }
 

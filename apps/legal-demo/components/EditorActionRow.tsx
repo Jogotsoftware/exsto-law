@@ -3,8 +3,9 @@
 // The shared header action row for the editor pop-ups: the "Edit with AI" rail
 // (when present) grows in the left slot — its prompt form and proposal panel
 // expand inside it — while Cancel/Save stay pinned top-right. The error alert
-// renders below the row, itemized when the message carries several joined
-// validation failures.
+// renders below the row, itemized only on newlines: a single server message can
+// legally contain "; " (e.g. "use one of: a; b"), so splitting on it would shred
+// one error into nonsense fragments.
 import type { ReactNode } from 'react'
 
 export function EditorActionRow({
@@ -26,7 +27,7 @@ export function EditorActionRow({
 }): React.ReactElement {
   const errorItems = error
     ? error
-        .split(/\r?\n|; /)
+        .split(/\r?\n/)
         .map((s) => s.trim())
         .filter(Boolean)
     : []
