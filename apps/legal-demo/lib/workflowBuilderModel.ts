@@ -73,12 +73,31 @@ export interface BuilderStep {
 export function triggerField(gate: WfGate): 'via' | 'on' {
   return gate === 'attorney' || gate === 'client' ? 'via' : 'on'
 }
-// A sensible default trigger so a saved edge is never empty-but-meaningful.
-export function defaultTrigger(gate: WfGate, actionKind: WfActionKind): string {
+// The default trigger per gate. attorney/client always have a real advance token;
+// system defaults by action kind (invoice steps wait on payment; an e-signature
+// capability waits on envelope completion) and otherwise stays EMPTY — the runtime
+// never dispatches on made-up tokens like the old 'event'/'condition' defaults, so an
+// empty default forces the attorney to pick a real one (the validator rejects a
+// system/automatic edge with no 'on'). automatic `on` is free-form/descriptive.
+export function defaultTrigger(
+  gate: WfGate,
+  actionKind: WfActionKind,
+  config?: Record<string, unknown>,
+): string {
   if (gate === 'attorney') return 'legal.matter.advance'
   if (gate === 'client') return 'booking.create'
-  if (gate === 'system') return actionKind === 'approve_send_invoice' ? 'invoice.paid' : 'event'
-  return 'condition' // automatic
+  if (gate === 'system') {
+    if (actionKind === 'approve_send_invoice' || actionKind === 'await_payment')
+      return 'invoice.paid'
+    if (
+      actionKind === 'invoke_capability' &&
+      typeof config?.capability_slug === 'string' &&
+      config.capability_slug.trim() === 'esignature'
+    )
+      return 'esign.completed'
+    return ''
+  }
+  return '' // automatic
 }
 
 let uidSeq = 0
@@ -174,8 +193,11 @@ export function stepsToGraph(steps: BuilderStep[]): WfLifecycle {
     if (s.documents.length) stage.documents = s.documents
     if (!isLast) {
       const edge: WfEdge = { to: keys[i + 1], gate: s.gate }
-      const trig = s.trigger.trim() || defaultTrigger(s.gate, s.actionKind)
-      edge[triggerField(s.gate)] = trig
+      // An empty trigger with no default is left OFF the edge (never written as ''),
+      // so the server validator's "names no 'on'/'via'" check fires instead of a
+      // dead-token edge slipping through.
+      const trig = s.trigger.trim() || defaultTrigger(s.gate, s.actionKind, s.config)
+      if (trig) edge[triggerField(s.gate)] = trig
       stage.advances_to = [edge]
     }
     return stage

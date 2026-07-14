@@ -88,14 +88,14 @@ An e-signature step is an `invoke_capability` stage running the `esignature` cap
 
 ## Step 5b: Declare billing and completion — every workflow states both
 
-The validator REJECTS a workflow that produces documents but declares no billing, and a workflow whose terminal stage is not a completion step. Ask the attorney and declare both:
+The validator REJECTS a workflow that produces documents but declares no billing, and a workflow whose terminal stage is not a completion step. In the guided build, billing is settled BEFORE the workflow step — so normally you VERIFY the declared billing matches this graph (adding `approve_send_invoice`/`await_payment` only if the attorney chose a mid-matter billing point) rather than re-interviewing. Only if nothing is declared yet do you ask:
 
 - **Billing is a forced CHOICE — default ONE billing point.** Ask "when does the client get charged?" and declare exactly the model the attorney picks:
   - *Per-document fees, accrued on approval* — the fee for each document accrues the moment the attorney approves it in the review queue. Declare them on the billing card (`propose_cost` with `document_fees`, one amount per document kind); the workflow itself needs no extra step.
   - *One invoice mid-matter* — add `approve_send_invoice` (and usually `await_payment`) to the graph where the invoice goes out. The invoice collects the fees accrued so far; it is a billing point, not an extra charge.
   - *At completion* — the service's flat fee (`propose_cost`, fixed) accrues when the matter completes; no document fees, no invoice step. For a document-producing service, get this billing approved BEFORE proposing the workflow — the validator requires a visible declaration (fees, an invoice step, or an already-set flat fee). An HOURLY service that produces documents still needs an invoice step: hourly time accrues nothing by itself.
   - *A deliberate split* — more than one of the above ONLY when the attorney explicitly chooses it. Declaring both a per-document fee and a flat service fee charges the matter TWICE; the validator surfaces a split-billing WARNING on the card — relay it and confirm intent, never let a double-bill emerge silently.
-  A document-producing workflow with NO billing declaration is invalid — the matter would produce work nobody ever bills. **Every workflow/cost card states the total per-matter charge the composed billing produces** (platform-computed); read it back to the attorney if it isn't what they said.
+  A document-producing workflow with NO billing declaration is invalid — the matter would produce work nobody ever bills. **The billing card states the total per-matter charge, and every successful `propose_workflow` ack reads the composed total back to you** (platform-computed) — relay it to the attorney if it isn't what they said. The workflow card itself stays WHY-only: never restate fees or the step list in its summary.
 - **Completion** — the terminal stage MUST be a `complete_matter` step. Completing the matter accrues the service's completion fee (if the service declares one) and archives the matter (archived, never deleted).
 
 ## Step 6: Propose — never write live
