@@ -1,12 +1,12 @@
 -- =============================================================================
--- Vertical migration 0162: paralegal scope — exclude legal.firm.set_profile
+-- Vertical migration 0164: paralegal scope — exclude legal.firm.set_profile
 --
 -- BUILDER-UX-3 review fix (policy, precedent-based). The RBAC role ladder
 -- (0078, re-pinned in 0079) gives firm.paralegal action_kinds of
 -- '["*", …!-exclusions]', and '!legal.firm.set_default_rate' is the standing
 -- precedent: firm-level authority is withheld from support staff even though
 -- they keep full practice access. The firm identity that lands on generated
--- legal documents (legal.firm.set_profile, migration 0161 — firm name/address/
+-- legal documents (legal.firm.set_profile, migration 0163 — firm name/address/
 -- phone/email) is the same class of firm-level setting as the default rate, so
 -- it gets the same exclusion.
 --
@@ -133,7 +133,7 @@ BEGIN
     INSERT INTO action (id, tenant_id, actor_id, action_kind_id, intent_kind, autonomy_tier,
                         hlc_physical_time, hlc_logical_counter, hlc_source_id, payload)
     SELECT gen_random_uuid(), t.tenant_id, a.id, akd.id, 'enforcement', 'autonomous',
-           now(), 0, a.id, '{"reason": "0162_paralegal_scope_firm_profile"}'::jsonb
+           now(), 0, a.id, '{"reason": "0164_paralegal_scope_firm_profile"}'::jsonb
     FROM actor a
     JOIN action_kind_definition akd
       ON akd.tenant_id = t.tenant_id AND akd.kind_name = 'config.change'

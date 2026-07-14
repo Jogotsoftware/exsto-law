@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0161: firm profile fields + attorney signature — config-as-data
+-- Vertical migration 0163: firm profile fields + attorney signature — config-as-data
 --
 -- BUILDER-UX-3 (P13 + P15).
 --
@@ -26,7 +26,7 @@
 --
 -- Ids: fresh 0x1900 sub-band, verified free against live pilot
 -- jfcarzprfpoztxuqykoe across all four definition tables AND origin/main
--- (entity max 0a01, attribute max 1803, action max 1801). Lease 0161.
+-- (entity max 0a01, attribute max 1803, action max 1801). Lease 0163.
 -- =============================================================================
 
 SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', false);
