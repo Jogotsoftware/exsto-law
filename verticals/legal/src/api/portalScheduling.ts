@@ -9,6 +9,7 @@ import { getLatestAttributeValue } from '../handlers/common.js'
 import { loadClientContactEmail } from './clientIdentity.js'
 import { queueNotification } from './notifications.js'
 import { presentFeeQuote, decideFeeQuote, findFeeConsent } from './feeConsent.js'
+import { assertEngagementAccepted } from './engagement.js'
 
 // PORTAL-1 (WP4) — schedule time from inside the portal: consultations and
 // appointments on the firm's REAL availability (rules ∩ live Google free/busy —
@@ -171,6 +172,12 @@ export async function scheduleClientTime(
     throw new Error('That time slot is invalid — please pick another.')
   }
   if (start.getTime() <= Date.now()) throw new Error('That time has passed — please pick another.')
+
+  // WP-6: client-initiated booking proceeds only past an accepted firm
+  // engagement (the one-time agreement), enforced at the core. The PER-BOOKING
+  // fee consent below is unchanged and additional when the time is billable.
+  await assertEngagementAccepted(ctx, input.clientContactId)
+
   const durationMinutes =
     input.durationMinutes ?? Math.round((end.getTime() - start.getTime()) / 60000)
 

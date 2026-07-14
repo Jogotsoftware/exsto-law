@@ -116,3 +116,4 @@ export type { AvailabilitySlot, CreatedEvent, BusyInterval } from '../adapters/g
 // this barrel's declarations are re-emitted. Pin the canonical source explicitly
 // (TS's own resolution hint); an explicit named re-export wins over the stars.
 export type { GenerationMode } from './generateDraft.js'
+export * from './engagement.js'

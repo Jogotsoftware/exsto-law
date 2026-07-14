@@ -528,8 +528,15 @@ export async function listClientSignatures(p: ClientPrincipal): Promise<PendingS
   const ctx = signingCtx(p.tenantId)
   if (p.matterIds.length === 0) return []
   return withActionContext(ctx, async (client) => {
-    const res = await client.query<{ request_id: string; envelope_id: string; status: string }>(
+    const res = await client.query<{
+      request_id: string
+      envelope_id: string
+      status: string
+      matter_id: string | null
+      matter_number: string | null
+    }>(
       `SELECT req.source_entity_id AS request_id, env.id AS envelope_id,
+              m.id AS matter_id, m.name AS matter_number,
               (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
                  ON akd.id=a.attribute_kind_id AND akd.kind_name='signer_status'
                  WHERE a.entity_id=req.source_entity_id AND a.tenant_id=$1
@@ -543,6 +550,7 @@ export async function listClientSignatures(p: ClientPrincipal): Promise<PendingS
        JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
        JOIN attribute em ON em.entity_id=req.source_entity_id AND em.tenant_id=$1
        JOIN attribute_kind_definition emk ON emk.id=em.attribute_kind_id AND emk.kind_name='signer_email'
+       LEFT JOIN entity m ON m.id=df.target_entity_id
        WHERE req.tenant_id=$1 AND df.target_entity_id = ANY($2)
          AND lower(em.value #>> '{}') = lower($3)
          AND (em.valid_to IS NULL OR em.valid_to > now())
@@ -570,6 +578,9 @@ export interface ClientDocument {
   requestId: string
   envelopeId: string
   documentTitle: string | null
+  /** The matter the signed document belongs to (the client's own). */
+  matterEntityId: string | null
+  matterNumber: string | null
   /** Client-facing state derived from signer_status (never the raw key). */
   state: 'awaiting_you' | 'signed' | 'declined' | 'in_progress'
   /** Raw signer_status (for the portal to pick the right action link). */
@@ -586,8 +597,15 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
   const ctx = signingCtx(p.tenantId)
   if (p.matterIds.length === 0) return []
   return withActionContext(ctx, async (client) => {
-    const res = await client.query<{ request_id: string; envelope_id: string; status: string }>(
+    const res = await client.query<{
+      request_id: string
+      envelope_id: string
+      status: string
+      matter_id: string | null
+      matter_number: string | null
+    }>(
       `SELECT req.source_entity_id AS request_id, env.id AS envelope_id,
+              m.id AS matter_id, m.name AS matter_number,
               (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
                  ON akd.id=a.attribute_kind_id AND akd.kind_name='signer_status'
                  WHERE a.entity_id=req.source_entity_id AND a.tenant_id=$1
@@ -601,6 +619,7 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
        JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
        JOIN attribute em ON em.entity_id=req.source_entity_id AND em.tenant_id=$1
        JOIN attribute_kind_definition emk ON emk.id=em.attribute_kind_id AND emk.kind_name='signer_email'
+       LEFT JOIN entity m ON m.id=df.target_entity_id
        WHERE req.tenant_id=$1 AND df.target_entity_id = ANY($2)
          AND lower(em.value #>> '{}') = lower($3)
          AND (em.valid_to IS NULL OR em.valid_to > now())
@@ -625,6 +644,8 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
         requestId: row.request_id,
         envelopeId: row.envelope_id,
         documentTitle: title,
+        matterEntityId: row.matter_id,
+        matterNumber: row.matter_number,
         state,
         rawStatus: raw,
       })

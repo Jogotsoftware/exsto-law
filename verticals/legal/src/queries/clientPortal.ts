@@ -81,21 +81,32 @@ async function resolveClientStageLabel(
   return statusLabel(statusKey)
 }
 
-// The service's client-facing name: client_display_name when the column exists
-// (UI-BUILDER-FIX-1 adds it), else display_name — read via to_jsonb so this
-// works before AND after that migration lands.
+// The portal's rendering locale. English is the base copy; other locales come
+// from the canonical i18n store (transitions.client_copy_i18n, BUILDER-UX-2)
+// with English fallback — the same fallback rule the public intake tiles use.
+export type PortalLocale = 'en' | 'es'
+
+// The service's client-facing name from the CANONICAL client-copy store:
+// locale override (client_copy_i18n) → client_display_name → display_name.
+// Read via to_jsonb so this works before AND after the column migration lands.
 async function resolveServiceClientName(
   client: DbClient,
   tenantId: string,
   serviceKey: string | null,
+  locale: PortalLocale = 'en',
 ): Promise<string | null> {
   if (!serviceKey) return null
   const res = await client.query<{ name: string | null }>(
-    `SELECT COALESCE(to_jsonb(wd) ->> 'client_display_name', wd.display_name) AS name
+    `SELECT COALESCE(
+       CASE WHEN $3 <> 'en'
+            THEN wd.transitions -> 'client_copy_i18n' -> $3 ->> 'displayName' END,
+       to_jsonb(wd) ->> 'client_display_name',
+       wd.display_name
+     ) AS name
      FROM workflow_definition wd
      WHERE wd.tenant_id = $1 AND wd.kind_name = $2 AND wd.status = 'active'
      ORDER BY wd.version DESC LIMIT 1`,
-    [tenantId, serviceKey],
+    [tenantId, serviceKey, locale],
   )
   return res.rows[0]?.name ?? null
 }
@@ -126,6 +137,8 @@ export interface ClientMatterListItem {
   statusKey: string
   statusLabel: string
   serviceLabel: string | null
+  /** When the matter was opened (entity created_at, ISO) — the home row's MM/YYYY. */
+  openedAt: string
   /** Archived history is shown, marked — not hidden. */
   archived: boolean
 }
@@ -246,16 +259,19 @@ export async function getClientMatterTimeline(
 export async function listClientMatters(
   ctx: ActionContext,
   clientContactId: string,
+  locale: PortalLocale = 'en',
 ): Promise<ClientMatterListItem[]> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       matter_id: string
       matter_number: string
       entity_status: string
+      opened_at: string
       status: string | null
       service_key: string | null
     }>(
       `SELECT m.id AS matter_id, m.name AS matter_number, m.status AS entity_status,
+              to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS opened_at,
               (SELECT a.value #>> '{}'
                  FROM attribute a
                  JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
@@ -289,7 +305,8 @@ export async function listClientMatters(
         matterNumber: row.matter_number,
         statusKey,
         statusLabel: await resolveClientStageLabel(client, ctx.tenantId, row.matter_id, statusKey),
-        serviceLabel: await resolveServiceClientName(client, ctx.tenantId, row.service_key),
+        serviceLabel: await resolveServiceClientName(client, ctx.tenantId, row.service_key, locale),
+        openedAt: row.opened_at,
         archived: row.entity_status === 'archived',
       })
     }

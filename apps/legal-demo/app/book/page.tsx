@@ -11,6 +11,7 @@ import { AddressAutocomplete, type StructuredAddress } from '@/components/Addres
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { LanguageToggle } from '@/components/LanguageToggle'
 import { PortalSignInInline } from '@/components/PortalSignInInline'
+import { FeeConsentCard } from '@/components/FeeConsentCard'
 import { Turnstile } from '@/components/Turnstile'
 import { useI18n } from '@/lib/i18n'
 import {
@@ -1637,64 +1638,6 @@ function ContactField({
           onChange={(e) => onChange(e.target.value)}
         />
       </div>
-    </div>
-  )
-}
-
-// PORTAL-1 (WP3) — the fee consent card: the exact cost, shown BEFORE anything
-// billable proceeds, with an explicit acceptance. The server enforces the gate;
-// this card is only the honest presentation of it.
-function FeeConsentCard({
-  quote,
-  accepted,
-  onAccept,
-  t,
-}: {
-  quote: {
-    basis: string
-    amount: string | null
-    rate: string | null
-    currency: string
-    description: string
-  }
-  accepted: boolean
-  onAccept: (v: boolean) => void
-  t: (key: string, vars?: Record<string, string | number>, fallback?: string) => string
-}) {
-  const price =
-    quote.basis === 'fixed' && quote.amount
-      ? `$${quote.amount}`
-      : quote.rate
-        ? `$${quote.rate}/hr`
-        : ''
-  return (
-    <div className="bk-notice bk-fee-card" role="note">
-      <strong>{t('fee.title', undefined, 'Fee for this service')}</strong>
-      <div>
-        {quote.description} — <strong>{price}</strong>
-        {quote.basis === 'hourly-rate' && (
-          <> {t('fee.hourly_note', undefined, '(billed for time actually worked)')}</>
-        )}
-      </div>
-      {/* bk-checkbox exempts this label from the global .bk-stage label rules
-          (which stacked the box above bold mini-label text); bk-fee-accept makes
-          it a top-aligned row whose sentence wraps at normal weight. */}
-      <label className="bk-checkbox bk-fee-accept">
-        <input type="checkbox" checked={accepted} onChange={(e) => onAccept(e.target.checked)} />
-        <span>
-          {quote.basis === 'fixed'
-            ? t(
-                'fee.accept_fixed',
-                undefined,
-                'I accept this fee. It will be billed on my invoice for this service.',
-              )
-            : t(
-                'fee.accept_hourly',
-                undefined,
-                'I accept this hourly rate for work on this service.',
-              )}
-        </span>
-      </label>
     </div>
   )
 }

@@ -44,6 +44,22 @@ import {
   type ScheduledTimeResult,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
+import {
+  getPortalHomeSummary,
+  listClientNotifications,
+  markClientNotificationsRead,
+  type PortalHomeSummary,
+  type PortalNotificationFeed,
+  type PortalLocale,
+} from '../../index.js'
+import {
+  acceptEngagement,
+  declineEngagement,
+  getEngagementConfig,
+  getEngagementStatus,
+  type EngagementConfig,
+  type EngagementStatus,
+} from '../../api/engagement.js'
 
 // AUTHENTICATED client-portal tools. These are reachable ONLY through the authed
 // route (/api/client/portal/mcp) — they are in CLIENT_PORTAL_AUTHED_TOOLS, NOT
@@ -444,6 +460,91 @@ const intakePrefillTool: Tool<
   }),
 }
 
+// ── CLIENT-PORTAL-UI-1 — home summary, notifications, engagement gate ────────
+// clientContactId is stamped by the authed route from the session cookie on all
+// of these; locale is client-chosen presentation state ('en' | 'es'), nothing
+// more — it selects copy from the canonical i18n store, never data.
+
+interface HomeInput {
+  clientContactId: string
+  locale?: string
+}
+
+const homeSummaryTool: Tool<HomeInput, { home: PortalHomeSummary }> = {
+  name: 'legal.client.home_summary',
+  description:
+    "The portal home in one read: the signed-in client's matters, attention items, message/billing previews, unread badge, and engagement-gate state.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    home: await getPortalHomeSummary(
+      ctx,
+      input.clientContactId,
+      input.locale === 'es' ? 'es' : ('en' as PortalLocale),
+    ),
+  }),
+}
+
+interface ContactOnlyInput {
+  clientContactId: string
+}
+
+const notificationsTool: Tool<ContactOnlyInput, { feed: PortalNotificationFeed }> = {
+  name: 'legal.client.notifications',
+  description:
+    "The signed-in client's notifications feed (what happened, newest first) with the unread watermark applied.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    feed: await listClientNotifications(ctx, input.clientContactId),
+  }),
+}
+
+const notificationsReadTool: Tool<ContactOnlyInput, { readAt: string }> = {
+  name: 'legal.client.notifications_read',
+  description:
+    'Mark the signed-in client’s notifications as read (append-only watermark — no fact row is updated).',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    markClientNotificationsRead(ctx, input.clientContactId),
+}
+
+const engagementTool: Tool<
+  ContactOnlyInput,
+  { status: EngagementStatus; config: EngagementConfig }
+> = {
+  name: 'legal.client.engagement',
+  description:
+    'The signed-in client’s engagement-agreement state (accepted?) plus the current firm rate and terms for the gate card.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    status: await getEngagementStatus(ctx, input.clientContactId),
+    config: await getEngagementConfig(ctx),
+  }),
+}
+
+const engagementAcceptTool: Tool<
+  ContactOnlyInput,
+  { consentEventId: string; rate: string | null; termsVersion: number | null }
+> = {
+  name: 'legal.client.engagement_accept',
+  description:
+    'The client’s own actor accepts the firm-level engagement agreement (rate + terms version bound server-side). One-time: messaging and booking unlock.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => acceptEngagement(ctx, input.clientContactId),
+}
+
+const engagementDeclineTool: Tool<ContactOnlyInput, { consentEventId: string }> = {
+  name: 'legal.client.engagement_decline',
+  description: 'The client’s own actor declines the firm-level engagement agreement.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => declineEngagement(ctx, input.clientContactId),
+}
+
+registerTool(homeSummaryTool)
+registerTool(notificationsTool)
+registerTool(notificationsReadTool)
+registerTool(engagementTool)
+registerTool(engagementAcceptTool)
+registerTool(engagementDeclineTool)
 registerTool(scheduleAvailabilityTool)
 registerTool(scheduleQuoteTool)
 registerTool(scheduleTimeTool)

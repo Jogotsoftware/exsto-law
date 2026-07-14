@@ -6,6 +6,7 @@ import {
 } from '@exsto/substrate'
 import { queueNotification } from './notifications.js'
 import { assertCanSendOnMatter } from './matterAccess.js'
+import { assertEngagementAccepted } from './engagement.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Client Portal PR2 — two-way client↔attorney messaging API.
@@ -83,6 +84,11 @@ export async function postClientMessage(
 ): Promise<ActionResult> {
   const body = (input.body ?? '').trim()
   if (!body) throw new Error('Message body is required.')
+
+  // WP-6 (review-queue law): a client-initiated message proceeds only past an
+  // accepted firm engagement. Enforced HERE at the operation core — the portal's
+  // locked Messages card is presentation, not the gate.
+  await assertEngagementAccepted(ctx, input.clientContactId)
 
   const result = await submitAction(ctx, {
     actionKindName: 'client.message.post',
