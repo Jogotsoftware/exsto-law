@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pacheco Law — Client Portal (Home mockup)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        /* palette mapped to apps/legal-demo/app/globals.css platform tokens */
+        --ink: #0b1b3a; /* --navy-900 — headings, wordmark */
+        --ink-soft: #14306b; /* --navy-700 */
+        --navy: #1e3a8a; /* --navy — primary interactive */
+        --paper: #f8fafc; /* --bg-client */
+        --card: #ffffff; /* --surface */
+        --line: #e2e8f0; /* --border */
+        --line-soft: #eef2f7; /* --border-soft */
+        --text: #0f172a; /* --fg */
+        --muted: #475569; /* --muted (AA) */
+        --accent: #b45309; /* --gold — attention only */
+        --accent-deep: #92400e; /* --gold-700 — hover / warm text */
+        --accent-bg: #fbefdd; /* --gold-100 */
+        --ok: #15803d; /* --ok */
+        --ok-bg: #dcfce7; /* --ok-soft */
+        --neutral-bg: #f1f5f9; /* --surface-2 */
+        --radius: 14px;
+        --shadow: 0 1px 2px rgba(11, 27, 58, 0.05), 0 8px 24px rgba(11, 27, 58, 0.05);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--text);
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+        line-height: 1.5;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      .serif {
+        font-family: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+      }
+
+      /* mockup control bar — not part of product */
+      .mock-bar {
+        background: #0b1b3a;
+        color: #c9d2e2;
+        font-size: 12.5px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 8px 20px;
+        letter-spacing: 0.02em;
+      }
+      .mock-bar b {
+        color: #fff;
+        font-weight: 600;
+      }
+      .mock-toggle {
+        display: inline-flex;
+        border: 1px solid #2d4da0;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-left: auto;
+      }
+      .mock-toggle button {
+        background: transparent;
+        color: #c9d2e2;
+        border: 0;
+        padding: 5px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .mock-toggle button.active {
+        background: #14306b;
+        color: #fff;
+      }
+
+      /* top bar — no nav tabs; wordmark is the home link */
+      header.top {
+        background: var(--card);
+        border-bottom: 1px solid var(--line);
+      }
+      .top-inner {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 20px 24px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+      }
+      .mark {
+        width: 44px;
+        height: 44px;
+        border-radius: 11px;
+        background: var(--ink);
+        display: grid;
+        place-items: center;
+        flex: none;
+      }
+      .brand .name {
+        line-height: 1.15;
+      }
+      .brand .name .firm {
+        font-size: 19px;
+        font-weight: 600;
+        color: var(--ink);
+        letter-spacing: 0.01em;
+      }
+      .brand .name .sub {
+        font-size: 10.5px;
+        letter-spacing: 0.18em;
+        color: var(--muted);
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      .who {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .who .uname {
+        font-weight: 600;
+        color: var(--ink);
+        font-size: 15px;
+      }
+      .btn-ghost {
+        border: 1px solid var(--line);
+        background: var(--card);
+        border-radius: 9px;
+        padding: 8px 14px;
+        font-size: 13.5px;
+        color: var(--text);
+        cursor: pointer;
+        font-family: inherit;
+        font-weight: 500;
+      }
+      .btn-ghost:hover {
+        border-color: #cbd5e1;
+      }
+
+      /* slim nav — global lenses only (Home / Documents / Notifications) */
+      nav.tabs {
+        background: var(--card);
+        border-bottom: 1px solid var(--line);
+      }
+      .tabs-inner {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 0 24px;
+        display: flex;
+        gap: 28px;
+      }
+      .tabs a {
+        position: relative;
+        padding: 14px 2px;
+        font-size: 14.5px;
+        font-weight: 500;
+        color: var(--muted);
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .tabs a:hover {
+        color: var(--navy);
+      }
+      .tabs a.active {
+        color: var(--navy);
+        font-weight: 600;
+        border-bottom-color: var(--navy);
+      }
+      .badge {
+        background: var(--accent);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 999px;
+        display: inline-grid;
+        place-items: center;
+      }
+
+      /* layout */
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 36px 24px 90px;
+      }
+      .greeting {
+        margin: 0 0 24px;
+      }
+      .greeting h1 {
+        font-size: 30px;
+        font-weight: 500;
+        color: var(--ink);
+        margin: 0;
+        letter-spacing: -0.01em;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 350px;
+        gap: 22px;
+        align-items: start;
+      }
+
+      .section-label {
+        font-size: 11.5px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 600;
+        margin: 0 0 12px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+
+      /* attention band */
+      .attention {
+        border-left: 3px solid var(--accent);
+        overflow: hidden;
+        margin-bottom: 26px;
+      }
+      .attn-row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 18px 22px;
+      }
+      .attn-row + .attn-row {
+        border-top: 1px solid var(--line-soft);
+      }
+      .attn-ico {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        background: var(--accent-bg);
+        color: var(--accent);
+        display: grid;
+        place-items: center;
+        flex: none;
+      }
+      .attn-txt {
+        flex: 1;
+        min-width: 0;
+      }
+      .attn-txt .k {
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .attn-txt .v {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--ink);
+        margin-top: 2px;
+      }
+      .attn-txt .m {
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+      .btn-dark {
+        background: var(--navy);
+        color: #fff;
+        border: 0;
+        border-radius: 9px;
+        padding: 10px 16px;
+        font-size: 13.5px;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: inherit;
+        flex: none;
+      }
+      .btn-dark:hover {
+        background: var(--ink-soft);
+      }
+      .btn-accent {
+        background: var(--accent);
+      }
+      .btn-accent:hover {
+        background: var(--accent-deep);
+      }
+
+      /* matters */
+      .matter {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 18px 22px;
+        cursor: pointer;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .matter:last-child {
+        border-bottom: 0;
+      }
+      .matter:hover {
+        background: #f2f5fc;
+      }
+      .m-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .m-title {
+        font-size: 15.5px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .m-meta {
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 3px;
+        font-variant-numeric: tabular-nums;
+      }
+      .chip {
+        font-size: 12px;
+        font-weight: 600;
+        padding: 5px 11px;
+        border-radius: 999px;
+        white-space: nowrap;
+        background: var(--neutral-bg);
+        color: var(--ink-soft);
+      }
+      .chip.ok {
+        background: var(--ok-bg);
+        color: var(--ok);
+      }
+      .chip.warn {
+        background: var(--accent-bg);
+        color: var(--accent-deep);
+      }
+      .chev {
+        color: #cbd5e1;
+        flex: none;
+      }
+      .matter:hover .chev {
+        color: var(--navy);
+      }
+
+      /* rail */
+      .rail {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+      .cta {
+        padding: 22px;
+      }
+      .cta h3 {
+        margin: 0 0 6px;
+        font-size: 16.5px;
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .cta p {
+        margin: 0 0 16px;
+        font-size: 13.5px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .cta .btn-dark {
+        width: 100%;
+        padding: 12px;
+        font-size: 14.5px;
+      }
+
+      .mini {
+        padding: 20px 22px;
+      }
+      .mini h3 {
+        margin: 0 0 14px;
+        font-size: 14px;
+        color: var(--ink);
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        display: inline-block;
+      }
+      .msg {
+        display: flex;
+        gap: 11px;
+        padding: 11px 0;
+        border-top: 1px solid var(--line-soft);
+      }
+      .msg:first-of-type {
+        border-top: 0;
+        padding-top: 0;
+      }
+      .msg .av {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        background: var(--ink);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        display: grid;
+        place-items: center;
+        flex: none;
+      }
+      .msg .body .from {
+        font-size: 13.5px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .msg .body .snip {
+        font-size: 12.5px;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+      .link {
+        display: inline-block;
+        margin-top: 12px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--navy);
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 1px;
+      }
+
+      .bill-amt {
+        font-size: 26px;
+        font-weight: 600;
+        color: var(--ink);
+        font-family: 'Fraunces', serif;
+        margin: 2px 0 2px;
+      }
+      .bill-sub {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 14px;
+      }
+
+      /* gated (new client) */
+      .gate {
+        padding: 22px;
+        border: 1px dashed #ecd5ae;
+        background: var(--accent-bg);
+      }
+      .gate .lock {
+        width: 34px;
+        height: 34px;
+        border-radius: 9px;
+        background: #fff;
+        color: var(--accent);
+        display: grid;
+        place-items: center;
+        margin-bottom: 12px;
+        border: 1px solid #f0ddba;
+      }
+      .gate h3 {
+        margin: 0 0 6px;
+        font-size: 16px;
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .gate p {
+        margin: 0 0 8px;
+        font-size: 13.5px;
+        color: var(--accent-deep);
+        line-height: 1.5;
+      }
+      .gate .rate {
+        font-size: 13.5px;
+        color: var(--ink);
+        font-weight: 600;
+        margin-bottom: 16px;
+      }
+      .gate .btn-dark {
+        width: 100%;
+      }
+      .locked-note {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 10px;
+        text-align: center;
+      }
+
+      /* assistant — floating, gated per client */
+      .assistant {
+        position: fixed;
+        right: 26px;
+        bottom: 26px;
+        z-index: 40;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .assistant .tag {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--ink);
+        box-shadow: var(--shadow);
+      }
+      .assistant .bubble {
+        width: 54px;
+        height: 54px;
+        border-radius: 50%;
+        background: var(--navy);
+        color: #fff;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 8px 24px rgba(11, 27, 58, 0.25);
+        cursor: pointer;
+        flex: none;
+      }
+      .assistant .bubble:hover {
+        background: var(--ink-soft);
+      }
+
+      .hidden {
+        display: none !important;
+      }
+      @media (max-width: 860px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .attn-row {
+          flex-wrap: wrap;
+        }
+        .assistant .tag {
+          display: none;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+      :focus-visible {
+        outline: 2px solid var(--navy);
+        outline-offset: 2px;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mock-bar">
+      <span><b>Mockup</b> · Home page concept · not live UI</span>
+      <div class="mock-toggle" role="group" aria-label="Preview client state">
+        <button id="btn-returning" class="active" onclick="setState('returning')">
+          Returning client
+        </button>
+        <button id="btn-new" onclick="setState('new')">New client (no agreement)</button>
+      </div>
+    </div>
+
+    <header class="top">
+      <div class="top-inner">
+        <div class="brand" title="Home">
+          <div class="mark" aria-hidden="true">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#fff"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 3v18" />
+              <path d="M6 21h12" />
+              <path d="M4 6h16" />
+              <path d="M4 6l-2.4 5a2.6 2.6 0 0 0 4.8 0L4 6z" />
+              <path d="M20 6l-2.4 5a2.6 2.6 0 0 0 4.8 0L20 6z" />
+            </svg>
+          </div>
+          <div class="name">
+            <div class="firm serif">Pacheco Law</div>
+            <div class="sub">Client Portal</div>
+          </div>
+        </div>
+        <div class="who">
+          <span class="uname">Joseph A. Pacheco</span>
+          <button class="btn-ghost">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <div class="tabs-inner">
+        <a href="#" class="active">Home</a>
+        <a href="#">Documents</a>
+        <a href="#">Notifications <span class="badge">3</span></a>
+      </div>
+    </nav>
+
+    <main>
+      <div class="greeting"><h1 class="serif">Good afternoon, Joseph.</h1></div>
+
+      <!-- NEEDS YOUR ATTENTION -->
+      <section class="card attention" aria-label="Needs your attention">
+        <div class="attn-row">
+          <div class="attn-ico" aria-hidden="true">
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="17" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18" />
+            </svg>
+          </div>
+          <div class="attn-txt">
+            <div class="k">Upcoming consultation</div>
+            <div class="v">Tuesday, July 14, 2026 · 3:00 PM</div>
+            <div class="m">30 minutes · video call</div>
+          </div>
+          <button class="btn-ghost">Reschedule or cancel</button>
+        </div>
+        <div class="attn-row">
+          <div class="attn-ico" aria-hidden="true">
+            <svg
+              width="19"
+              height="19"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </div>
+          <div class="attn-txt">
+            <div class="k">Waiting on your signature</div>
+            <div class="v">Operating Agreement</div>
+            <div class="m">LLC Formation · M-MRECN4QR</div>
+          </div>
+          <button class="btn-dark btn-accent">Review &amp; sign</button>
+        </div>
+      </section>
+
+      <div class="grid">
+        <section aria-label="Your matters">
+          <p class="section-label">Your matters</p>
+          <div class="card">
+            <div class="matter">
+              <div class="m-main">
+                <div class="m-title">LLC Formation</div>
+                <div class="m-meta">07/2026 · M-MRECN4QR</div>
+              </div>
+              <span class="chip warn">Awaiting your signature</span>
+              <span class="chev" aria-hidden="true"
+                ><svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M9 18l6-6-6-6" /></svg
+              ></span>
+            </div>
+            <div class="matter">
+              <div class="m-main">
+                <div class="m-title">Custom Attorney Letter</div>
+                <div class="m-meta">07/2026 · M-MRJHEC8X</div>
+              </div>
+              <span class="chip ok">Consultation scheduled</span>
+              <span class="chev" aria-hidden="true"
+                ><svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M9 18l6-6-6-6" /></svg
+              ></span>
+            </div>
+            <div class="matter">
+              <div class="m-main">
+                <div class="m-title">Contract Review</div>
+                <div class="m-meta">06/2026 · M-MRECIYEX</div>
+              </div>
+              <span class="chip">In progress</span>
+              <span class="chev" aria-hidden="true"
+                ><svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M9 18l6-6-6-6" /></svg
+              ></span>
+            </div>
+          </div>
+        </section>
+
+        <aside class="rail">
+          <div class="card cta" id="cta-book">
+            <h3>Need something else?</h3>
+            <p>
+              Book time with the firm or request a new service. We'll confirm before any work
+              begins.
+            </p>
+            <button class="btn-dark">Book or request a service</button>
+          </div>
+
+          <div class="card gate hidden" id="cta-gate">
+            <div class="lock" aria-hidden="true">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="4" y="10" width="16" height="11" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+            </div>
+            <h3>One quick step first</h3>
+            <p>To book time or message the firm, review and accept the engagement terms.</p>
+            <div class="rate">Standard rate: $300 / hour</div>
+            <button class="btn-dark">Review &amp; accept terms</button>
+            <div class="locked-note">Booking and messages unlock right after.</div>
+          </div>
+
+          <div class="card mini" id="mini-msg">
+            <h3><span class="dot"></span> Messages</h3>
+            <div class="msg">
+              <div class="av">PL</div>
+              <div class="body">
+                <div class="from">Pacheco Law</div>
+                <div class="snip">Your draft is ready — take a look when you have a moment.</div>
+              </div>
+            </div>
+            <div class="msg">
+              <div class="av">PL</div>
+              <div class="body">
+                <div class="from">Pacheco Law</div>
+                <div class="snip">Thanks for booking. See you Tuesday at 3.</div>
+              </div>
+            </div>
+            <a href="#" class="link">Open messages</a>
+          </div>
+
+          <div class="card mini">
+            <h3>Billing</h3>
+            <div class="bill-amt">$450.00</div>
+            <div class="bill-sub">1 invoice due · Aug 1, 2026</div>
+            <button class="btn-dark" style="width: 100%">View &amp; pay</button>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <!-- Assistant: floating, only shown to clients who have access -->
+    <div class="assistant" id="assistant" title="Assistant — available to enabled clients">
+      <span class="tag">Ask a question</span>
+      <div class="bubble" aria-label="Open assistant">
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#fff"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path
+            d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.7 8.7 0 0 1-3.9-.9L3 21l1.9-5.6A8.5 8.5 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z"
+          />
+        </svg>
+      </div>
+    </div>
+
+    <script>
+      function setState(mode) {
+        var isNew = mode === 'new'
+        document.getElementById('cta-book').classList.toggle('hidden', isNew)
+        document.getElementById('cta-gate').classList.toggle('hidden', !isNew)
+        var m = document.getElementById('mini-msg')
+        m.style.opacity = isNew ? 0.45 : 1
+        m.style.pointerEvents = isNew ? 'none' : 'auto'
+        document.getElementById('btn-new').classList.toggle('active', isNew)
+        document.getElementById('btn-returning').classList.toggle('active', !isNew)
+      }
+    </script>
+  </body>
+</html>

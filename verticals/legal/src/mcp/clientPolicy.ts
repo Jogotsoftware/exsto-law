@@ -41,6 +41,12 @@ export function isClientPortalTool(toolName: string): boolean {
 // only governs WHICH tools are reachable at all. Keep it MINIMAL — every entry
 // must return a client-safe projection. All entries are read-mode.
 export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
+  'legal.client.home_summary', // the portal home in one read (matters, attention, previews, badge, gate state)
+  'legal.client.notifications', // the notifications feed + unread watermark
+  'legal.client.notifications_read', // mark notifications read (append-only watermark)
+  'legal.client.engagement', // engagement-gate state + current firm rate/terms
+  'legal.client.engagement_accept', // accept the firm-level engagement agreement (the client's own actor)
+  'legal.client.engagement_decline', // decline it
   'legal.client.matters', // matter switcher: the signed-in client's own matters
   'legal.client.matter_timeline', // status + whitelisted milestone timeline for one matter
   'legal.client.thread_get', // read the client↔attorney portal thread for one matter

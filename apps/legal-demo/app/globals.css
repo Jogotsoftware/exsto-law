@@ -10437,6 +10437,510 @@ svg.lucide {
   text-align: left;
 }
 
+/* ── CLIENT-PORTAL-UI-1 — portal home redesign (WP-1/2/3/4/6/7/8) ────────────
+   Pacheco theme for tenant-zero, expressed as PORTAL TOKENS so a future
+   per-tenant config (FIRM-PROVISIONING) can populate them without touching
+   the components. Navy is founder-confirmed; the gold accent is directional
+   pending final direction — swap --portal-accent* when it lands. */
+:root {
+  --portal-brand: var(--navy-900);
+  --portal-primary: var(--navy);
+  --portal-primary-hover: var(--navy-700);
+  --portal-accent: var(--gold);
+  --portal-accent-deep: var(--gold-700);
+  --portal-accent-soft: var(--gold-100);
+}
+
+.cp-brand-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.cp-tab-bell {
+  margin-left: auto;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cph-badge {
+  background: var(--portal-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  display: inline-grid;
+  place-items: center;
+}
+
+.cph-greeting {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-medium);
+  color: var(--portal-brand);
+  margin: 0 0 var(--space-5);
+  letter-spacing: -0.01em;
+}
+
+.cph-back {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: var(--space-3);
+}
+.cph-back:hover {
+  color: var(--portal-brand);
+}
+
+/* attention band */
+.cph-attention {
+  border-left: 3px solid var(--portal-accent);
+  padding: 0;
+  overflow: hidden;
+  margin-bottom: var(--space-5);
+}
+.cph-attn-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+}
+.cph-attn-row + .cph-attn-row {
+  border-top: 1px solid var(--border-soft);
+}
+.cph-attn-ico {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--portal-accent-soft);
+  color: var(--portal-accent);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.cph-attn-txt {
+  flex: 1;
+  min-width: 0;
+}
+.cph-attn-k {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--portal-accent-deep);
+  font-weight: var(--weight-semibold);
+}
+.cph-attn-v {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--portal-brand);
+  margin-top: 2px;
+}
+.cph-attn-m {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+.cph-btn-accent {
+  background: var(--portal-accent) !important;
+  border-color: var(--portal-accent) !important;
+  color: #fff !important;
+}
+.cph-btn-accent:hover {
+  background: var(--portal-accent-deep) !important;
+  border-color: var(--portal-accent-deep) !important;
+}
+
+/* layout */
+.cph-grid {
+  display: grid;
+  grid-template-columns: 1fr 350px;
+  gap: var(--space-5);
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .cph-grid {
+    grid-template-columns: 1fr;
+  }
+  .cph-attn-row {
+    flex-wrap: wrap;
+  }
+}
+.cph-section-label {
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: var(--weight-semibold);
+  margin: 0 0 var(--space-3);
+}
+
+/* matters */
+.cph-matters {
+  padding: 0;
+  overflow: hidden;
+}
+.cph-matter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  border-bottom: 1px solid var(--border-soft);
+}
+.cph-matter:last-child {
+  border-bottom: 0;
+}
+.cph-matter:hover {
+  background: var(--navy-50);
+}
+.cph-matter-main {
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+.cph-matter-title {
+  font-size: 15.5px;
+  font-weight: var(--weight-semibold);
+  color: var(--portal-brand);
+  display: block;
+}
+.cph-matter-meta {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+  display: block;
+}
+.cph-chip {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  padding: 5px 11px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--navy-700);
+}
+.cph-chip-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.cph-chip-warn {
+  background: var(--portal-accent-soft);
+  color: var(--portal-accent-deep);
+}
+.cph-chev {
+  color: var(--border-strong);
+  flex: none;
+  font-size: 18px;
+}
+.cph-matter:hover .cph-chev {
+  color: var(--portal-primary);
+}
+
+/* rail */
+.cph-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.cph-cta h3,
+.cph-mini h3,
+.cph-gate h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  color: var(--portal-brand);
+  font-weight: var(--weight-semibold);
+}
+.cph-cta p,
+.cph-gate p {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  line-height: 1.5;
+}
+.cph-msg {
+  display: flex;
+  gap: 11px;
+  padding: 11px 0;
+  border-top: 1px solid var(--border-soft);
+  width: 100%;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.cph-msg:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.cph-msg-av {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--portal-brand);
+  color: #fff;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.cph-msg-body {
+  min-width: 0;
+  display: block;
+}
+.cph-msg-from {
+  font-size: 13.5px;
+  font-weight: var(--weight-semibold);
+  color: var(--portal-brand);
+  display: block;
+}
+.cph-msg-snip {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 1px;
+  display: block;
+}
+.cph-link {
+  display: inline-block;
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--portal-primary);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  padding: 0 0 1px;
+  font-family: inherit;
+}
+.cph-bill-amt {
+  font-size: 26px;
+  font-weight: var(--weight-semibold);
+  color: var(--portal-brand);
+  margin: 2px 0;
+}
+.cph-bill-sub {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  margin-bottom: var(--space-3);
+}
+
+/* engagement gate card (locked state) */
+.cph-gate {
+  border: 1px dashed var(--gold-400);
+  background: var(--portal-accent-soft);
+}
+.cph-gate-lock {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--portal-accent);
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--gold-100);
+}
+.cph-gate-rate {
+  font-size: 13.5px;
+  color: var(--portal-brand);
+  font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-4);
+}
+.cph-gate-note {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  margin-top: var(--space-2);
+  text-align: center;
+}
+.cph-gate .pdash-btn {
+  width: 100%;
+}
+
+/* gate modal */
+.cph-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 27, 58, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+  padding: var(--space-4);
+}
+.cph-modal {
+  background: var(--surface);
+  border-radius: var(--radius-xl);
+  padding: var(--space-5);
+  width: min(560px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(11, 27, 58, 0.3);
+}
+.cph-modal h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+  color: var(--portal-brand);
+}
+.cph-terms {
+  white-space: pre-wrap;
+  font-size: var(--text-sm);
+  color: var(--fg);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  max-height: 40vh;
+  overflow-y: auto;
+  margin-bottom: var(--space-3);
+}
+.cph-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+/* notifications */
+.cph-notifs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cph-notif {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.cph-notifs li:last-child .cph-notif {
+  border-bottom: 0;
+}
+.cph-notif:hover {
+  background: var(--navy-50);
+}
+.cph-notif-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--portal-accent);
+  flex: none;
+}
+.cph-notif-body {
+  display: block;
+  min-width: 0;
+}
+.cph-notif-label {
+  display: block;
+  font-weight: var(--weight-medium);
+  color: var(--portal-brand);
+}
+.cph-notif-meta {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* documents */
+.cph-docgroup {
+  margin-bottom: var(--space-4);
+}
+.cph-docgroup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.cph-docgroup-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.cph-doc-search {
+  min-width: 220px;
+}
+
+/* assistant — floating, gated per client */
+.cph-assistant {
+  position: fixed;
+  right: 26px;
+  bottom: 26px;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.cph-assistant-tag {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 8px 14px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--portal-brand);
+  box-shadow:
+    0 1px 2px rgba(11, 27, 58, 0.05),
+    0 8px 24px rgba(11, 27, 58, 0.05);
+  align-self: center;
+}
+.cph-assistant-bubble {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--portal-primary);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 8px 24px rgba(11, 27, 58, 0.25);
+  cursor: pointer;
+  flex: none;
+}
+.cph-assistant-bubble:hover {
+  background: var(--portal-primary-hover);
+}
+.cph-assistant-panel {
+  width: min(400px, calc(100vw - 52px));
+  max-height: min(560px, calc(100vh - 120px));
+  overflow-y: auto;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 20px 60px rgba(11, 27, 58, 0.25);
+}
+@media (max-width: 860px) {
+  .cph-assistant-tag {
+    display: none;
+  }
+}
 /* ── P13: DRAFT watermark — render state, never template text ─────────────────
    Applied to the .doc-paper surfaces (review page, runner modal, /d share view)
    when the version status is not approved/executed. The stamp text rides in a

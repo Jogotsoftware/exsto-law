@@ -2,7 +2,7 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { signBookingManageToken } from '../api/bookingManageToken.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
-import { stageByKey, clientLabel } from '../lifecycle/resolve.js'
+import { stageByKey } from '../lifecycle/resolve.js'
 
 // Client-portal READ projection. This is DELIBERATELY a separate, narrow surface
 // from queries/history.ts (getMatterHistory): that one exposes internal actions,
@@ -49,10 +49,12 @@ function statusLabel(statusKey: string): string {
   return STATUS_LABELS.get(statusKey) ?? 'In progress'
 }
 
-// PORTAL-1 (WP2): the composed workflow's CLIENT-SAFE stage label, never the
-// internal stage key. Resolves the matter's workflow instance and reads the
-// current stage's client_label (falling back to the stage label, then to the
-// STATUS_LABELS map, then to a generic 'In progress' — raw keys never leak).
+// PORTAL-1 (WP2) / CLIENT-PORTAL-UI-1 (WP-5): the composed workflow's
+// CLIENT-SAFE stage label. ONLY an explicitly-authored client_label may render
+// to the client — the internal stage label is attorney vocabulary ("Review &
+// send engagement letter" leaked as a portal chip through the old
+// clientLabel() fallback). No client_label ⇒ the static client-phrase map ⇒
+// a generic 'In progress'. Raw keys and internal step names never leak.
 async function resolveClientStageLabel(
   client: DbClient,
   tenantId: string,
@@ -73,7 +75,7 @@ async function resolveClientStageLabel(
         graph = bound?.graph ?? []
       }
       const stage = stageByKey(graph, instance.currentState)
-      if (stage) return clientLabel(stage)
+      if (stage?.client_label?.trim()) return stage.client_label
     }
   } catch {
     // fall through to the static map
@@ -81,21 +83,32 @@ async function resolveClientStageLabel(
   return statusLabel(statusKey)
 }
 
-// The service's client-facing name: client_display_name when the column exists
-// (UI-BUILDER-FIX-1 adds it), else display_name — read via to_jsonb so this
-// works before AND after that migration lands.
+// The portal's rendering locale. English is the base copy; other locales come
+// from the canonical i18n store (transitions.client_copy_i18n, BUILDER-UX-2)
+// with English fallback — the same fallback rule the public intake tiles use.
+export type PortalLocale = 'en' | 'es'
+
+// The service's client-facing name from the CANONICAL client-copy store:
+// locale override (client_copy_i18n) → client_display_name → display_name.
+// Read via to_jsonb so this works before AND after the column migration lands.
 async function resolveServiceClientName(
   client: DbClient,
   tenantId: string,
   serviceKey: string | null,
+  locale: PortalLocale = 'en',
 ): Promise<string | null> {
   if (!serviceKey) return null
   const res = await client.query<{ name: string | null }>(
-    `SELECT COALESCE(to_jsonb(wd) ->> 'client_display_name', wd.display_name) AS name
+    `SELECT COALESCE(
+       CASE WHEN $3 <> 'en'
+            THEN wd.transitions -> 'client_copy_i18n' -> $3 ->> 'displayName' END,
+       to_jsonb(wd) ->> 'client_display_name',
+       wd.display_name
+     ) AS name
      FROM workflow_definition wd
      WHERE wd.tenant_id = $1 AND wd.kind_name = $2 AND wd.status = 'active'
      ORDER BY wd.version DESC LIMIT 1`,
-    [tenantId, serviceKey],
+    [tenantId, serviceKey, locale],
   )
   return res.rows[0]?.name ?? null
 }
@@ -126,6 +139,8 @@ export interface ClientMatterListItem {
   statusKey: string
   statusLabel: string
   serviceLabel: string | null
+  /** When the matter was opened (entity created_at, ISO) — the home row's MM/YYYY. */
+  openedAt: string
   /** Archived history is shown, marked — not hidden. */
   archived: boolean
 }
@@ -246,16 +261,19 @@ export async function getClientMatterTimeline(
 export async function listClientMatters(
   ctx: ActionContext,
   clientContactId: string,
+  locale: PortalLocale = 'en',
 ): Promise<ClientMatterListItem[]> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       matter_id: string
       matter_number: string
       entity_status: string
+      opened_at: string
       status: string | null
       service_key: string | null
     }>(
       `SELECT m.id AS matter_id, m.name AS matter_number, m.status AS entity_status,
+              to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS opened_at,
               (SELECT a.value #>> '{}'
                  FROM attribute a
                  JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
@@ -289,7 +307,8 @@ export async function listClientMatters(
         matterNumber: row.matter_number,
         statusKey,
         statusLabel: await resolveClientStageLabel(client, ctx.tenantId, row.matter_id, statusKey),
-        serviceLabel: await resolveServiceClientName(client, ctx.tenantId, row.service_key),
+        serviceLabel: await resolveServiceClientName(client, ctx.tenantId, row.service_key, locale),
+        openedAt: row.opened_at,
         archived: row.entity_status === 'archived',
       })
     }
