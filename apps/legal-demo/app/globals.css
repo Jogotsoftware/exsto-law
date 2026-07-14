@@ -10939,6 +10939,8 @@ svg.lucide {
 @media (max-width: 860px) {
   .cph-assistant-tag {
     display: none;
+  }
+}
 /* ── P13: DRAFT watermark — render state, never template text ─────────────────
    Applied to the .doc-paper surfaces (review page, runner modal, /d share view)
    when the version status is not approved/executed. The stamp text rides in a
