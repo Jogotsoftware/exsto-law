@@ -10,6 +10,7 @@ import { callClientPortalMcp } from '@/lib/mcpClientPortal'
 import { AddressAutocomplete, type StructuredAddress } from '@/components/AddressAutocomplete'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { LanguageToggle } from '@/components/LanguageToggle'
+import { PortalSignInInline } from '@/components/PortalSignInInline'
 import { Turnstile } from '@/components/Turnstile'
 import { useI18n } from '@/lib/i18n'
 import {
@@ -290,25 +291,43 @@ export default function BookPage() {
   // identity comes from the session; the submit runs through the authed portal
   // endpoint attributed to their own actor. undefined = still checking.
   const [portalMe, setPortalMe] = useState<PortalMe | null | undefined>(undefined)
-  useEffect(() => {
-    fetch('/api/client/auth/me')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((me) =>
-        setPortalMe(
-          me && typeof me.email === 'string'
-            ? { email: me.email, displayName: me.displayName ?? me.email }
-            : null,
-        ),
+  const refreshPortalMe = useCallback(async () => {
+    try {
+      const r = await fetch('/api/client/auth/me')
+      const me = r.ok ? await r.json() : null
+      setPortalMe(
+        me && typeof me.email === 'string'
+          ? { email: me.email, displayName: me.displayName ?? me.email }
+          : null,
       )
-      .catch(() => setPortalMe(null))
+    } catch {
+      setPortalMe(null)
+    }
   }, [])
+  useEffect(() => {
+    void refreshPortalMe()
+  }, [refreshPortalMe])
   const signedIn = Boolean(portalMe)
+  // Returning-client sign-in, IN PLACE: the flow-start notice expands this panel
+  // and the account step can swap to it — no navigation, so every wizard answer
+  // survives the sign-in.
+  const [showSignInPanel, setShowSignInPanel] = useState(false)
 
-  // The account gate (anonymous flow): password + the fee card.
+  // The account gate (anonymous flow): password + the fee card. accountMode
+  // swaps the create-account fields for the inline sign-in panel; the stage
+  // response's hasPortalAccount defaults it for known emails.
   const [password, setPassword] = useState('')
   const [password2, setPassword2] = useState('')
+  const [accountMode, setAccountMode] = useState<'create' | 'signin'>('create')
+  // Once the user has interacted with the account step (toggled modes, typed a
+  // password, or submitted), a late stage response must not yank the form —
+  // the hasPortalAccount default only applies to a pristine step.
+  const accountTouchedRef = useRef(false)
+  const [hasPortalAccount, setHasPortalAccount] = useState(false)
   const [feeQuote, setFeeQuote] = useState<FeeQuote | null>(null)
   const [feeAccepted, setFeeAccepted] = useState(false)
+  // One hint at a time (steps are exclusive): explains a consent-gated submit.
+  const feeHintId = useId()
 
   // CAPTCHA token + a reset handle the widget hands back. Both stay null when
   // the site key is unset (the widget never renders), and the submit flow below
@@ -316,13 +335,15 @@ export default function BookPage() {
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const resetCaptchaRef = useRef<(() => void) | null>(null)
   // A token belongs to the widget instance on the step that hosts it. Any step
-  // change unmounts that widget (its expired-callback dies with it), so a
-  // retained token would enable submit against a visibly-unsolved widget —
-  // drop it and require a fresh solve on the hosting step.
+  // change unmounts that widget (its expired-callback dies with it) — and so
+  // does an accountMode flip, which swaps the create block (the widget's host)
+  // for the sign-in panel within the same step. Either way a retained token
+  // would enable submit against a visibly-unsolved widget — drop it and
+  // require a fresh solve.
   useEffect(() => {
     setCaptchaToken(null)
     resetCaptchaRef.current = null
-  }, [step])
+  }, [step, accountMode])
   const [confirmation, setConfirmation] = useState<{
     matterNumber: string
     // Null for intake-only services — the confirmation renders "request
@@ -599,6 +620,9 @@ export default function BookPage() {
   async function goToAccountGate() {
     setStep('account')
     setFeeAccepted(false)
+    setAccountMode('create')
+    setHasPortalAccount(false)
+    accountTouchedRef.current = false
     try {
       const res = await fetch('/api/client/intake/stage', {
         method: 'POST',
@@ -612,11 +636,30 @@ export default function BookPage() {
           intakeResponses,
         }),
       })
-      const data = (await res.json().catch(() => null)) as { quote?: FeeQuote | null } | null
+      const data = (await res.json().catch(() => null)) as {
+        quote?: FeeQuote | null
+        hasPortalAccount?: boolean
+      } | null
       setFeeQuote(data?.quote ?? null)
+      // Known email with a portal account: default the step to sign-in (neutral
+      // copy) — the create path stays one toggle away as the fallback.
+      if (data?.hasPortalAccount === true) {
+        setHasPortalAccount(true)
+        if (!accountTouchedRef.current && busy === null) setAccountMode('signin')
+      }
     } catch {
       setFeeQuote(null)
     }
+  }
+
+  // Inline sign-in from the account step: the user must not be stranded on the
+  // (now skipped) account step — resume on a real step and submit through the
+  // authed portal door. An unaccepted fee re-arms via the 409 the submit
+  // already handles, rendering the consent card on the resumed step.
+  async function signedInFromAccountStep() {
+    await refreshPortalMe()
+    setStep(needsSlot ? 'slot' : 'intake')
+    await submitBooking()
   }
 
   // The intake answers + staged upload tokens the submit sends, shared by both
@@ -885,7 +928,9 @@ export default function BookPage() {
         : step === 'intake'
           ? t('intake.heading')
           : step === 'account'
-            ? t('account.heading', undefined, 'Create your account')
+            ? accountMode === 'signin'
+              ? t('account.heading_signin', undefined, 'Sign in to your account')
+              : t('account.heading', undefined, 'Create your account')
             : t('slot.heading')
   const stepSubtitle =
     step === 'service'
@@ -895,11 +940,17 @@ export default function BookPage() {
         : step === 'intake'
           ? t('intake.subtitle')
           : step === 'account'
-            ? t(
-                'account.subtitle',
-                undefined,
-                'Everything about your matter will live in your secure portal.',
-              )
+            ? accountMode === 'signin'
+              ? t(
+                  'account.subtitle_signin',
+                  undefined,
+                  'Your request will be linked to your existing portal account.',
+                )
+              : t(
+                  'account.subtitle',
+                  undefined,
+                  'Everything about your matter will live in your secure portal.',
+                )
             : t('slot.subtitle')
 
   return (
@@ -938,13 +989,30 @@ export default function BookPage() {
                 {portalMe === null && (
                   <div className="bk-notice" role="note">
                     {t('funnel.existing', undefined, 'Already working with us?')}{' '}
-                    <a href="/portal/login?next=%2Fbook" style={{ fontWeight: 600 }}>
+                    <button
+                      type="button"
+                      className="bk-linklike"
+                      aria-expanded={showSignInPanel}
+                      onClick={() => setShowSignInPanel((v) => !v)}
+                    >
                       {t('funnel.signin', undefined, 'Sign in to your client portal')}
-                    </a>{' '}
+                    </button>{' '}
                     {t(
                       'funnel.existing_tail',
                       undefined,
                       'to book with your details prefilled — or continue below if you are new here.',
+                    )}
+                    {showSignInPanel && (
+                      <PortalSignInInline
+                        continuePath="/book"
+                        onSignedIn={async () => {
+                          // The panel never unmounts the wizard — refreshing the
+                          // session flips the signed-in machinery (step skips,
+                          // prefill, authed submit) with every answer intact.
+                          await refreshPortalMe()
+                          setShowSignInPanel(false)
+                        }}
+                      />
                     )}
                   </div>
                 )}
@@ -1165,6 +1233,9 @@ export default function BookPage() {
                           Boolean(TURNSTILE_SITE_KEY) &&
                           !captchaToken)
                       }
+                      aria-describedby={
+                        !needsSlot && signedIn && feeQuote && !feeAccepted ? feeHintId : undefined
+                      }
                       onClick={advanceFromIntake}
                     >
                       {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
@@ -1177,6 +1248,11 @@ export default function BookPage() {
                     </button>
                   )}
                 </div>
+                {!needsSlot && signedIn && feeQuote && !feeAccepted && (
+                  <p className="bk-fee-hint" id={feeHintId} aria-live="polite">
+                    {t('fee.hint', undefined, 'Accept the fee above to continue.')}
+                  </p>
+                )}
               </>
             )}
 
@@ -1258,6 +1334,7 @@ export default function BookPage() {
                   <button
                     className="bk-btn bk-btn-primary bk-btn-grow"
                     disabled={!selectedSlot || busy === 'submit'}
+                    aria-describedby={signedIn && feeQuote && !feeAccepted ? feeHintId : undefined}
                     onClick={() => {
                       if (signedIn) void submitBooking()
                       else void goToAccountGate()
@@ -1272,10 +1349,70 @@ export default function BookPage() {
                     {busy !== 'submit' && <CheckIcon size={18} />}
                   </button>
                 </div>
+                {signedIn && feeQuote && !feeAccepted && (
+                  <p className="bk-fee-hint" id={feeHintId} aria-live="polite">
+                    {t('fee.hint', undefined, 'Accept the fee above to continue.')}
+                  </p>
+                )}
               </>
             )}
 
-            {step === 'account' && (
+            {step === 'account' && accountMode === 'signin' && (
+              <>
+                {hasPortalAccount && (
+                  <div className="bk-notice" role="note">
+                    {t(
+                      'account.known',
+                      undefined,
+                      'It looks like you already have an account — sign in to link this request.',
+                    )}
+                  </div>
+                )}
+                {feeQuote && (
+                  <FeeConsentCard
+                    quote={feeQuote}
+                    accepted={feeAccepted}
+                    onAccept={setFeeAccepted}
+                    t={t}
+                  />
+                )}
+                {/* No captcha here: the panel signs in, then submits through the
+                    session-gated portal route. */}
+                <PortalSignInInline
+                  initialEmail={contact.email}
+                  continuePath="/book"
+                  onSignedIn={signedInFromAccountStep}
+                />
+                <div className="bk-actions">
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    disabled={busy === 'submit'}
+                    onClick={() => setStep(needsSlot ? 'slot' : 'intake')}
+                  >
+                    <ChevronLeftIcon size={18} />
+                    {t('common.back')}
+                  </button>
+                </div>
+                <p className="bk-secure" style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="bk-linklike"
+                    onClick={() => {
+                      accountTouchedRef.current = true
+                      setAccountMode('create')
+                    }}
+                  >
+                    {t(
+                      'account.create_toggle',
+                      undefined,
+                      'New here, or can’t sign in? Create your account instead',
+                    )}
+                  </button>
+                </p>
+              </>
+            )}
+
+            {step === 'account' && accountMode === 'create' && (
               <>
                 <p className="bk-sub" style={{ marginTop: 0 }}>
                   {t(
@@ -1298,7 +1435,10 @@ export default function BookPage() {
                     icon={<LockIcon size={18} />}
                     type="password"
                     value={password}
-                    onChange={setPassword}
+                    onChange={(v) => {
+                      accountTouchedRef.current = true
+                      setPassword(v)
+                    }}
                     autoComplete="new-password"
                   />
                   <ContactField
@@ -1318,7 +1458,7 @@ export default function BookPage() {
                     t={t}
                   />
                 )}
-                {TURNSTILE_SITE_KEY && (
+                {!signedIn && TURNSTILE_SITE_KEY && (
                   <div className="bk-captcha" aria-live="polite">
                     <Turnstile
                       siteKey={TURNSTILE_SITE_KEY}
@@ -1345,6 +1485,7 @@ export default function BookPage() {
                       (Boolean(TURNSTILE_SITE_KEY) && !captchaToken) ||
                       (Boolean(feeQuote) && !feeAccepted)
                     }
+                    aria-describedby={feeQuote && !feeAccepted ? feeHintId : undefined}
                     onClick={submitWithAccount}
                   >
                     {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
@@ -1354,12 +1495,26 @@ export default function BookPage() {
                     {busy !== 'submit' && <CheckIcon size={18} />}
                   </button>
                 </div>
+                {feeQuote && !feeAccepted && (
+                  <p className="bk-fee-hint" id={feeHintId} aria-live="polite">
+                    {t('fee.hint', undefined, 'Accept the fee above to continue.')}
+                  </p>
+                )}
                 <p className="bk-secure" style={{ marginTop: 12 }}>
-                  {t(
-                    'account.signin_hint',
-                    undefined,
-                    'Already have a portal account? Your booking will be linked to it — use your existing password after submitting.',
-                  )}
+                  <button
+                    type="button"
+                    className="bk-linklike"
+                    onClick={() => {
+                      accountTouchedRef.current = true
+                      setAccountMode('signin')
+                    }}
+                  >
+                    {t(
+                      'account.signin_toggle',
+                      undefined,
+                      'Already have a portal account? Sign in instead',
+                    )}
+                  </button>
                 </p>
               </>
             )}
@@ -1513,21 +1668,19 @@ function FeeConsentCard({
         ? `$${quote.rate}/hr`
         : ''
   return (
-    <div className="bk-notice" role="note" style={{ marginTop: 16 }}>
+    <div className="bk-notice bk-fee-card" role="note">
       <strong>{t('fee.title', undefined, 'Fee for this service')}</strong>
-      <div style={{ margin: '6px 0' }}>
+      <div>
         {quote.description} — <strong>{price}</strong>
         {quote.basis === 'hourly-rate' && (
           <> {t('fee.hourly_note', undefined, '(billed for time actually worked)')}</>
         )}
       </div>
-      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
-        <input
-          type="checkbox"
-          checked={accepted}
-          onChange={(e) => onAccept(e.target.checked)}
-          style={{ marginTop: 3 }}
-        />
+      {/* bk-checkbox exempts this label from the global .bk-stage label rules
+          (which stacked the box above bold mini-label text); bk-fee-accept makes
+          it a top-aligned row whose sentence wraps at normal weight. */}
+      <label className="bk-checkbox bk-fee-accept">
+        <input type="checkbox" checked={accepted} onChange={(e) => onAccept(e.target.checked)} />
         <span>
           {quote.basis === 'fixed'
             ? t(
