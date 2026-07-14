@@ -117,3 +117,4 @@ export type { AvailabilitySlot, CreatedEvent, BusyInterval } from '../adapters/g
 // (TS's own resolution hint); an explicit named re-export wins over the stars.
 export type { GenerationMode } from './generateDraft.js'
 export * from './engagement.js'
+export * from './permissionScope.js'

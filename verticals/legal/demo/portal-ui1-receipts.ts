@@ -18,7 +18,10 @@ const CONTACT = process.argv[2]
 if (!CONTACT) throw new Error('usage: portal-ui1-receipts.ts <clientContactId>')
 
 async function main(): Promise<void> {
-  const sysCtx: ActionContext = { tenantId: TENANT, actorId: '00000000-0000-0000-0001-000000000002' }
+  const sysCtx: ActionContext = {
+    tenantId: TENANT,
+    actorId: '00000000-0000-0000-0001-000000000002',
+  }
 
   // Resolve the contact's portal actor (the session would mint this).
   const actorId = await withActionContext(sysCtx, async (c) => {
@@ -56,9 +59,13 @@ async function main(): Promise<void> {
   const ledger = ledgerMatters.map((m) => `${m.name}|${m.id}`).sort()
   const diffA = rendered.filter((x) => !ledger.includes(x))
   const diffB = ledger.filter((x) => !rendered.includes(x))
-  console.log(`R1 rendered=${rendered.length} ledger=${ledger.length} diff=${diffA.length + diffB.length}`)
+  console.log(
+    `R1 rendered=${rendered.length} ledger=${ledger.length} diff=${diffA.length + diffB.length}`,
+  )
   for (const m of home.matters) {
-    console.log(`  row: ${m.serviceLabel ?? '(no label)'} · ${m.openedAt.slice(0, 7)} · ${m.matterNumber} · chip="${m.statusLabel}"`)
+    console.log(
+      `  row: ${m.serviceLabel ?? '(no label)'} · ${m.openedAt.slice(0, 7)} · ${m.matterNumber} · chip="${m.statusLabel}"`,
+    )
   }
   if (diffA.length || diffB.length) console.log('  DIFF', { diffA, diffB })
 
@@ -111,10 +118,14 @@ async function main(): Promise<void> {
 
   // ── R3: WP-3 watermark cycle ────────────────────────────────────────────────
   const feed1 = await listClientNotifications(clientCtx, CONTACT)
-  console.log(`R3 unread before=${feed1.unreadCount} (items=${feed1.items.length}, lastReadAt=${feed1.lastReadAt})`)
+  console.log(
+    `R3 unread before=${feed1.unreadCount} (items=${feed1.items.length}, lastReadAt=${feed1.lastReadAt})`,
+  )
   const { readAt } = await markClientNotificationsRead(clientCtx, CONTACT)
   const feed2 = await listClientNotifications(clientCtx, CONTACT)
-  console.log(`R3 watermark=${readAt} unread after=${feed2.unreadCount} (items=${feed2.items.length})`)
+  console.log(
+    `R3 watermark=${readAt} unread after=${feed2.unreadCount} (items=${feed2.items.length})`,
+  )
   process.exit(0)
 }
 
