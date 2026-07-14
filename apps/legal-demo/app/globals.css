@@ -10357,6 +10357,32 @@ svg.lucide {
   flex: 0 0 auto;
 }
 
+/* Shared editor-modal action row: the AI rail grows in the left slot while
+   Cancel/Save stay pinned top-right. */
+.editor-action-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.editor-action-row-ai {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Soft-gold accent for the "Edit with AI" trigger — the firm-gold AI convention,
+   quieter than the solid .tpl-ai-btn fill. */
+.editor-ai-trigger {
+  background: var(--gold-100);
+  border-color: var(--gold-400);
+  color: var(--gold-700);
+}
+.editor-ai-trigger:hover:not(:disabled) {
+  background: var(--gold-100);
+  border-color: var(--gold);
+  color: var(--gold-700);
+}
+
 /* BUILDER-UX-3 (P9/P10) — /book fee-consent card + inline sign-in. Appended,
    component-scoped: no existing rule above changes. */
 

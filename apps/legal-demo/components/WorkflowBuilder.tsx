@@ -31,10 +31,20 @@ export interface CatalogAction {
   description: string
   defaultGate: WfGate
   blocking: boolean
+  // A deprecated kind stays renderable on existing steps but is never offered for
+  // NEW picks (AddPalette + the step-kind select filter it out).
+  deprecated?: boolean
+}
+export interface GateTransitionOption {
+  token: string
+  label: string
 }
 export interface WorkflowCatalog {
   actions: CatalogAction[]
   gates: WfGate[]
+  // Optional: an older server may not return it — the trigger editor falls back to
+  // free text when absent. Mirrors GATE_TRANSITION_VOCABULARY.
+  gateTransitions?: Record<WfGate, { field: 'via' | 'on' | null; options: GateTransitionOption[] }>
 }
 
 // A saved step's STAGE is a LifecycleStage WITHOUT edges — mirrors
@@ -309,24 +319,26 @@ function AddPalette({
         </button>
       </div>
       <div style={{ display: 'grid', gap: '0.4rem' }}>
-        {catalog.actions.map((a) => (
-          <button
-            key={a.kind}
-            type="button"
-            onClick={() => onPick(a)}
-            style={{
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              borderRadius: 6,
-              padding: '0.55rem 0.7rem',
-              background: 'var(--bg, #fff)',
-              cursor: 'pointer',
-            }}
-          >
-            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{a.label}</div>
-            <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>{a.description}</div>
-          </button>
-        ))}
+        {catalog.actions
+          .filter((a) => !a.deprecated)
+          .map((a) => (
+            <button
+              key={a.kind}
+              type="button"
+              onClick={() => onPick(a)}
+              style={{
+                textAlign: 'left',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                padding: '0.55rem 0.7rem',
+                background: 'var(--bg, #fff)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{a.label}</div>
+              <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>{a.description}</div>
+            </button>
+          ))}
       </div>
 
       {library.length > 0 && (
@@ -611,16 +623,18 @@ function StepEditor({
       </div>
 
       <label>
-        <span>Action</span>
+        <span>What this step does</span>
         <select
           value={step.actionKind}
           onChange={(e) => onChange({ actionKind: e.target.value as WfActionKind })}
         >
-          {(catalog?.actions ?? []).map((a) => (
-            <option key={a.kind} value={a.kind}>
-              {a.label}
-            </option>
-          ))}
+          {(catalog?.actions ?? [])
+            .filter((a) => !a.deprecated || a.kind === step.actionKind)
+            .map((a) => (
+              <option key={a.kind} value={a.kind}>
+                {a.deprecated ? `${a.label} (legacy)` : a.label}
+              </option>
+            ))}
         </select>
         {catalog && (
           <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
@@ -654,18 +668,7 @@ function StepEditor({
               ))}
             </select>
           </label>
-          <label style={{ display: 'block', marginTop: '0.5rem' }}>
-            <span>
-              {triggerField(step.gate) === 'via'
-                ? 'Action that fires it (via) — optional'
-                : 'Event/condition it waits for (on) — optional'}
-            </span>
-            <input
-              value={step.trigger}
-              onChange={(e) => onChange({ trigger: e.target.value })}
-              placeholder={defaultTrigger(step.gate, step.actionKind)}
-            />
-          </label>
+          <TriggerEditor step={step} catalog={catalog} onChange={onChange} />
         </fieldset>
       )}
       {isLast && (
@@ -684,6 +687,68 @@ function StepEditor({
         <DraftingInstructionsEditor serviceKey={serviceKey} documents={step.documents} />
       )}
     </div>
+  )
+}
+
+// The step's advance trigger. attorney/client/system gates advance on EXACT via/on
+// tokens the runtime matches, so the editor offers the catalog's transition
+// vocabulary as a select of plain-language descriptions — the raw token rides below
+// as a muted hint. A loaded off-vocabulary trigger stays selectable as "Current: …"
+// so opening and saving an old workflow never silently rewrites it. An automatic
+// `on` is free-form (descriptive), and an older server without gateTransitions
+// falls back to free text.
+function TriggerEditor({
+  step,
+  catalog,
+  onChange,
+}: {
+  step: BuilderStep
+  catalog: WorkflowCatalog | null
+  onChange: (patch: Partial<BuilderStep>) => void
+}) {
+  const isVia = triggerField(step.gate) === 'via'
+  const label = isVia ? 'What moves the matter forward' : 'What it waits for'
+  const fallback = defaultTrigger(step.gate, step.actionKind, step.config)
+  const options =
+    step.gate === 'automatic' ? [] : (catalog?.gateTransitions?.[step.gate]?.options ?? [])
+
+  if (options.length === 0) {
+    return (
+      <label style={{ display: 'block', marginTop: '0.5rem' }}>
+        <span>{label}</span>
+        <input
+          value={step.trigger}
+          onChange={(e) => onChange({ trigger: e.target.value })}
+          placeholder={step.gate === 'automatic' ? 'e.g. document.generated' : fallback}
+        />
+      </label>
+    )
+  }
+
+  const selected = step.trigger || fallback
+  const offVocabulary = step.trigger !== '' && !options.some((o) => o.token === step.trigger)
+  return (
+    <label style={{ display: 'block', marginTop: '0.5rem' }}>
+      <span>{label}</span>
+      <select value={selected} onChange={(e) => onChange({ trigger: e.target.value })}>
+        {selected === '' && (
+          <option value="">
+            {isVia ? 'Choose what moves it forward…' : 'Choose what it waits for…'}
+          </option>
+        )}
+        {offVocabulary && (
+          <option value={step.trigger}>Current: {step.trigger} (not a standard trigger)</option>
+        )}
+        {options.map((o) => (
+          <option key={o.token} value={o.token}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {selected !== '' && (
+        <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>Saved as {selected}</span>
+      )}
+    </label>
   )
 }
 

@@ -8,6 +8,7 @@
 // wizard card's in-memory schema, or persist through the standalone save path).
 import { useState } from 'react'
 import { Modal } from '@/components/Modal'
+import { EditorActionRow } from '@/components/EditorActionRow'
 import { AiRegenerateRail } from '@/components/AiRegenerateRail'
 import { QuestionnaireView } from '@/components/configEditors'
 import {
@@ -62,52 +63,35 @@ export function QuestionnaireEditorModal({
 
   return (
     <Modal title={title} onClose={onClose} size="wide">
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 12,
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-        }}
-      >
-        <button type="button" className="button" onClick={onClose} disabled={busy}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="button button-primary"
-          onClick={save}
-          disabled={busy || !canSave}
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-      {error && (
-        <div role="alert" className="alert alert-error" style={{ marginBottom: 10 }}>
-          {error}
-        </div>
-      )}
-      {regenerateTargetId && (
-        <AiRegenerateRail
-          artifactKind="questionnaire"
-          targetId={regenerateTargetId}
-          current={() =>
-            JSON.stringify(
-              sectionsToSchema(name || initialSchema.title || 'questionnaire', sections),
-              null,
-              2,
-            )
-          }
-          renderProposal={(proposed) => <QuestionnaireView content={proposed} />}
-          onUse={(proposed) => {
-            const schema = JSON.parse(proposed) as QuestionnaireSchema
-            if (!schema || !Array.isArray(schema.sections))
-              throw new Error('The AI proposal is not a questionnaire schema.')
-            setSections(schemaToSections(schema))
-          }}
-        />
-      )}
+      <EditorActionRow
+        busy={busy}
+        error={error}
+        canSave={canSave}
+        onCancel={onClose}
+        onSave={save}
+        ai={
+          regenerateTargetId ? (
+            <AiRegenerateRail
+              artifactKind="questionnaire"
+              targetId={regenerateTargetId}
+              current={() =>
+                JSON.stringify(
+                  sectionsToSchema(name || initialSchema.title || 'questionnaire', sections),
+                  null,
+                  2,
+                )
+              }
+              renderProposal={(proposed) => <QuestionnaireView content={proposed} />}
+              onUse={(proposed) => {
+                const schema = JSON.parse(proposed) as QuestionnaireSchema
+                if (!schema || !Array.isArray(schema.sections))
+                  throw new Error('The AI proposal is not a questionnaire schema.')
+                setSections(schemaToSections(schema))
+              }}
+            />
+          ) : undefined
+        }
+      />
       <QuestionnaireBuilder sections={sections} onChange={setSections} />
     </Modal>
   )

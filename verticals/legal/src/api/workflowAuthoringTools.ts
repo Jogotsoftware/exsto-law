@@ -18,9 +18,15 @@
 import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import { AUTHORABLE_STEP_ACTION_KINDS, GATE_KINDS, type Lifecycle } from '../lifecycle/index.js'
-import { loadWorkflowAuthoringContext, validateProposedLifecycle } from './workflowAuthoring.js'
+import {
+  loadWorkflowAuthoringContext,
+  validateProposedLifecycle,
+  isDocumentProducingStage,
+} from './workflowAuthoring.js'
 import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
+import { getService } from './services.js'
+import type { CostProposal } from './costAuthoring.js'
 
 // Key-order-stable stringify so two semantically identical stages never read as
 // "changed" just because the model emitted their keys in a different order.
@@ -206,7 +212,7 @@ const PROPOSE_WORKFLOW_TOOL_DEF = {
       summary: {
         type: 'string',
         description:
-          'A one-paragraph plain-language summary of WHY this workflow — what changed vs the current one and the reasoning. Shown to the attorney and recorded as the reasoning trace on approve.',
+          'A one-paragraph plain-language summary of WHY this workflow — what changed vs the current one and the reasoning. Shown to the attorney and recorded as the reasoning trace on approve. WHY only: NEVER restate fees, prices, or the billing read-out (the billing card owns that), and NEVER enumerate the steps (the card lists them below). Step-by-step recaps and dollar amounts belong in your private reasoning, never in this summary.',
       },
       confidence: {
         type: 'number',
@@ -216,6 +222,32 @@ const PROPOSE_WORKFLOW_TOOL_DEF = {
     required: ['service_key', 'graph', 'summary'],
     additionalProperties: false,
   },
+}
+
+// BUILDER-UX-3 (P6) — the card owns its artifact: the summary is WHY only, never a
+// restate of the billing (the billing card's job) or the step list (the card renders
+// it). Mirrors clientCopyViolation's narrow-regex doctrine (serviceAuthoringTools):
+// only the unambiguous tells — money tokens, the billing read-out's own phrasing,
+// or three-plus proposed step labels verbatim (an enumeration, not a mention).
+// Do not grow it into a whack-a-mole list; grow the tool-contract doctrine instead.
+export function workflowSummaryViolation(summary: string, graph: Lifecycle): string | null {
+  if (/\$\s?\d/.test(summary) || /total per matter|billing read-?out/i.test(summary)) {
+    return 'the summary restates pricing/billing — the billing card owns every dollar amount and the billing read-out.'
+  }
+  // Only multi-word labels matched on word boundaries count as "restated": bare
+  // substring hits on single common words ("Intake", "Review", "Complete") flag
+  // honest WHY prose that merely mentions the process — a mention, not an
+  // enumeration.
+  const restated = graph.filter((s) => {
+    const label = (s.label ?? '').trim()
+    if (!label || !/\s/.test(label)) return false
+    const re = new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+    return re.test(summary)
+  })
+  if (restated.length >= 3) {
+    return 'the summary enumerates the workflow steps — the card already lists them below.'
+  }
+  return null
 }
 
 // WP3 (WORKFLOW-AUTHORING-1) — a proposal that keeps failing validation must STOP,
@@ -238,13 +270,25 @@ export function buildProposeWorkflowTool(
   ctx: ActionContext,
   captured: WorkflowProposal[],
   failedAttempts: string[] = [],
+  // BUILDER-UX-3 (P4) — the billing proposals captured earlier THIS TURN (threaded
+  // exactly like failedAttempts), so a same-turn propose_cost satisfies the compose-
+  // time billing check and the ordering pre-gate below.
+  costProposals: CostProposal[] = [],
+  // The ordering pre-gate redirects the model to propose_cost / the service shell —
+  // tools that only exist when the build wizard is on. Flag-off callers pass false
+  // and keep the pre-P4 behavior (the validator speaks for itself).
+  wizardToolsAvailable = true,
 ): ClientTool {
+  // P6 cap — a model that keeps restating billing/steps in its summary must not
+  // burn the whole turn on copy rejections: after two, capture with the summary
+  // dropped (the card renders fine without it) rather than looping.
+  let summaryRejections = 0
   return {
     definition: PROPOSE_WORKFLOW_TOOL_DEF,
     name: 'propose_workflow',
     run: async (raw) => {
       if (failedAttempts.length >= MAX_FAILED_PROPOSE_ATTEMPTS) {
-        return `propose_workflow has already failed ${failedAttempts.length} times this turn — STOP calling it again. Tell the attorney plainly that you could not compose a valid workflow and summarize what was blocking it (from the errors above); do not apologize repeatedly or claim a workflow exists.`
+        return `propose_workflow has already failed ${failedAttempts.length} times this turn — STOP calling it again. Tell the attorney plainly, in ONE short sentence with no validator text and no graph jargon, that you couldn't finish the workflow, and offer to try a simpler structure; do not apologize repeatedly or claim a workflow exists.`
       }
       const args = (raw ?? {}) as {
         service_key?: string
@@ -257,7 +301,53 @@ export function buildProposeWorkflowTool(
       if (!serviceKey || !graph) {
         return 'A service_key and a graph are both required to propose a workflow; nothing was captured.'
       }
-      const validation = await validateProposedLifecycle(ctx, graph, serviceKey)
+      // P4 — deterministic ordering pre-gate. A document-producing graph needs a
+      // billing declaration to validate, and propose_cost is capture-only, so the
+      // billing step must have RUN (persisted on the service, or captured earlier
+      // this turn) before composing. This is a redirect, not a compose failure —
+      // it deliberately does NOT consume MAX_FAILED_PROPOSE_ATTEMPTS, or the
+      // ordering nudge would eat the model's real correction budget.
+      const pendingCost = costProposals.find((c) => c.serviceKey === serviceKey)
+      if (
+        wizardToolsAvailable &&
+        graph.some(isDocumentProducingStage) &&
+        !graph.some((s) => s.action?.kind === 'approve_send_invoice') &&
+        !pendingCost
+      ) {
+        const svc = await getService(ctx, serviceKey)
+        if (!svc) {
+          return `Nothing was captured (this does not count as a failed attempt): no service "${serviceKey}" exists yet. Create the service shell first, then set its billing, then propose the workflow.`
+        }
+        const hasPersistedBilling =
+          svc.cost != null || Object.keys(svc.documentFees ?? {}).length > 0
+        if (!hasPersistedBilling) {
+          return `Nothing was captured (this does not count as a failed attempt): this workflow produces documents but "${serviceKey}" has no billing set yet, and the workflow validates against the declared billing. Run the billing step FIRST — ask the attorney when the client is charged, call propose_cost — then call propose_workflow again with this graph.`
+        }
+      }
+      // P6 — the summary is WHY only; a restate of billing or the step list is a
+      // copy problem, not a graph problem, so it does NOT consume
+      // MAX_FAILED_PROPOSE_ATTEMPTS (that budget exists for graphs that keep
+      // failing validation).
+      let summaryText = (args.summary ?? '').trim()
+      const summaryViolation = workflowSummaryViolation(summaryText, graph)
+      if (summaryViolation) {
+        summaryRejections += 1
+        if (summaryRejections <= 2) {
+          return `The workflow was NOT captured (this does not count as a failed attempt): ${summaryViolation} Rewrite the summary as WHY this workflow only, then call propose_workflow again with the SAME graph.`
+        }
+        summaryText = ''
+      }
+      const validation = await validateProposedLifecycle(
+        ctx,
+        graph,
+        serviceKey,
+        pendingCost
+          ? {
+              costType: pendingCost.costType,
+              ...(pendingCost.documentFees ? { documentFees: pendingCost.documentFees } : {}),
+            }
+          : undefined,
+      )
       if (!validation.ok) {
         const errorText = validation.errors.join('; ')
         failedAttempts.push(errorText)
@@ -272,26 +362,45 @@ export function buildProposeWorkflowTool(
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
           : 0.7
-      // BUILDER-CERT-1 (WP1) — every workflow card STATES the total per-matter charge
-      // the composed billing produces (computed from the service's declared fees, not
-      // trusted from the model), so a double-bill is deliberate and visible.
-      const readout = await computeBillingReadout(ctx, serviceKey, { graph })
+      // BUILDER-CERT-1 (WP1) — the composed-billing read-out, stated to the MODEL in
+      // the ack (the honesty check: it must relay a total that isn't what the
+      // attorney said). A same-turn pending cost proposal (P4) rides the existing
+      // proposedCost seam so the read-out states the pending amount, not "no charge
+      // is declared yet". BUILDER-UX-3 (P6): the read-out no longer rides the card
+      // summary — the billing card owns the price; the approve write path re-appends
+      // the readout to the reasoning-trace conclusion server-side.
+      const readout = await computeBillingReadout(ctx, serviceKey, {
+        graph,
+        ...(pendingCost
+          ? {
+              proposedCost: {
+                costType: pendingCost.costType,
+                amount: pendingCost.amount,
+                hours: pendingCost.hours,
+              },
+              ...(pendingCost.documentFees
+                ? { proposedDocumentFees: pendingCost.documentFees }
+                : {}),
+            }
+          : {}),
+      })
       const billingLine = readout ? ` ${formatBillingReadout(readout)}` : ''
       const warningText = validation.warnings.length
         ? ` WARNINGS (non-blocking — the card shows them; relay them to the attorney in one short line): ${validation.warnings.join('; ')}`
         : ''
-      // WP3 — computed change read-out vs the LIVE workflow: the card states what a
-      // revision actually changes; a false "only X changed" summary can't survive it.
+      // WP3 — computed change read-out vs the LIVE workflow, for the ACK only (P6):
+      // the model's reply can't misstate the diff; the card's own Removed/reordered
+      // render covers the attorney-visible side.
       const currentGraph = (await getServiceLifecycle(ctx, serviceKey))?.graph ?? null
       const changeLine = describeGraphChanges(currentGraph, graph)
       const changeText = changeLine ? ` ${changeLine}` : ''
+      // P6 — the captured card summary is the model's WHY alone; the ⚠ warnings stay
+      // appended because this summary is the card's only warning surface.
       captured.push({
         serviceKey,
         graph,
         summary:
-          ((args.summary ?? '').trim() || `Proposed workflow for ${serviceKey}.`) +
-          billingLine +
-          changeText +
+          (summaryText || `Proposed workflow for ${serviceKey}.`) +
           (validation.warnings.length ? ` ⚠ ${validation.warnings.join(' ⚠ ')}` : ''),
         confidence,
       })

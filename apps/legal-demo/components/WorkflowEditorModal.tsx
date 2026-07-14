@@ -8,6 +8,7 @@
 // per-step "Save to library" is standalone-only chrome and is NOT offered here.
 import { useEffect, useState } from 'react'
 import { Modal } from '@/components/Modal'
+import { EditorActionRow } from '@/components/EditorActionRow'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { AiRegenerateRail } from '@/components/AiRegenerateRail'
 import { WorkflowView } from '@/components/configEditors'
@@ -93,42 +94,25 @@ export function WorkflowEditorModal({
 
   return (
     <Modal title={title} onClose={onClose} size="wide">
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 12,
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-        }}
-      >
-        <button type="button" className="button" onClick={onClose} disabled={busy}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="button button-primary"
-          onClick={save}
-          disabled={busy || !canSave}
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-      {error && (
-        <div role="alert" className="alert alert-error" style={{ marginBottom: 10 }}>
-          {error}
-        </div>
-      )}
-      <AiRegenerateRail
-        artifactKind="workflow"
-        targetId={regenerateTargetId ?? serviceKey}
-        current={() => JSON.stringify(stepsToGraph(steps), null, 2)}
-        renderProposal={(proposed) => <WorkflowView content={proposed} />}
-        onUse={(proposed) => {
-          const graph = JSON.parse(proposed) as WfLifecycle
-          if (!Array.isArray(graph)) throw new Error('The AI proposal is not a workflow graph.')
-          setSteps(graphToSteps(graph))
-        }}
+      <EditorActionRow
+        busy={busy}
+        error={error}
+        canSave={canSave}
+        onCancel={onClose}
+        onSave={save}
+        ai={
+          <AiRegenerateRail
+            artifactKind="workflow"
+            targetId={regenerateTargetId ?? serviceKey}
+            current={() => JSON.stringify(stepsToGraph(steps), null, 2)}
+            renderProposal={(proposed) => <WorkflowView content={proposed} />}
+            onUse={(proposed) => {
+              const graph = JSON.parse(proposed) as WfLifecycle
+              if (!Array.isArray(graph)) throw new Error('The AI proposal is not a workflow graph.')
+              setSteps(graphToSteps(graph))
+            }}
+          />
+        }
       />
       <WorkflowBuilder
         steps={steps}

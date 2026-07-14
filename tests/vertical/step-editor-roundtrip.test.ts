@@ -17,6 +17,9 @@ import {
 import {
   graphToSteps,
   stepsToGraph,
+  defaultTrigger,
+  type WfGate,
+  type WfActionKind,
   type WfLifecycle,
 } from '../../apps/legal-demo/lib/workflowBuilderModel'
 
@@ -177,6 +180,96 @@ describe('NEW-E — service editor round-trips losslessly (acceptance A/D)', () 
         message: expect.stringContaining('Your draft will is ready'),
       },
     })
+  })
+})
+
+describe('P8 — off-vocabulary triggers round-trip losslessly (the "Current:" pathway is UI-only)', () => {
+  // A legacy graph whose edges carry tokens OUTSIDE the gate-transition vocabulary —
+  // including the old dead 'event' default — must survive load+save byte-identically:
+  // the builder model never rewrites a trigger it didn't edit.
+  const LEGACY: WfLifecycle = [
+    {
+      key: 'client_intake',
+      entry: true,
+      label: 'Client intake',
+      action: { kind: 'view_intake' },
+      advances_to: [{ to: 'hold_for_filing', via: 'client.submits.paperwork', gate: 'client' }],
+    },
+    {
+      key: 'hold_for_filing',
+      label: 'Hold for filing',
+      action: { kind: 'manual_task' },
+      advances_to: [{ to: 'complete', on: 'event', gate: 'system' }],
+    },
+    {
+      key: 'complete',
+      label: 'Complete matter',
+      action: { kind: 'complete_matter' },
+      terminal: true,
+      advances_to: [],
+    },
+  ]
+
+  it('an off-vocabulary via/on survives graphToSteps → stepsToGraph byte-identically', () => {
+    const rt = stepsToGraph(graphToSteps(LEGACY))
+    expect(valid(rt).errors).toEqual([])
+    expect(rt).toEqual(LEGACY)
+  })
+})
+
+describe('P8 — defaultTrigger never emits a dead token', () => {
+  const gates: WfGate[] = ['automatic', 'attorney', 'client', 'system']
+  const kinds: WfActionKind[] = [
+    'view_intake',
+    'view_consultation',
+    'generate_document',
+    'review_send_document',
+    'approve_send_invoice',
+    'await_payment',
+    'manual_task',
+    'complete_matter',
+    'invoke_capability',
+  ]
+
+  it("never returns 'event' or 'condition' for any gate × kind", () => {
+    for (const g of gates) {
+      for (const k of kinds) {
+        const t = defaultTrigger(g, k)
+        expect(t).not.toBe('event')
+        expect(t).not.toBe('condition')
+      }
+    }
+  })
+
+  it('system gates default by action kind, else empty (attorney must pick)', () => {
+    expect(defaultTrigger('system', 'approve_send_invoice')).toBe('invoice.paid')
+    expect(defaultTrigger('system', 'await_payment')).toBe('invoice.paid')
+    expect(defaultTrigger('system', 'invoke_capability', { capability_slug: 'esignature' })).toBe(
+      'esign.completed',
+    )
+    expect(
+      defaultTrigger('system', 'invoke_capability', {
+        capability_slug: 'request_client_materials',
+      }),
+    ).toBe('')
+    expect(defaultTrigger('system', 'invoke_capability')).toBe('')
+    expect(defaultTrigger('system', 'manual_task')).toBe('')
+    expect(defaultTrigger('automatic', 'generate_document')).toBe('')
+  })
+
+  it('an empty default is left OFF the saved edge, never written as ""', () => {
+    const steps = graphToSteps(V5)
+    // Blank out the system-style trigger on a middle step and regate it to system:
+    // the saved edge must OMIT `on` (so the validator's missing-'on' check fires)
+    // rather than carry a dead or empty token.
+    const edited = steps.map((s) =>
+      s.key === 'generate_will' ? { ...s, gate: 'system' as WfGate, trigger: '' } : s,
+    )
+    const out = stepsToGraph(edited)
+    const edge = out.find((s) => s.key === 'generate_will')!.advances_to[0]
+    expect(edge.on).toBeUndefined()
+    expect(edge.via).toBeUndefined()
+    expect(valid(out).ok).toBe(false)
   })
 })
 

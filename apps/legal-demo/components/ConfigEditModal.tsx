@@ -279,7 +279,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
             </button>
             <button
               type="button"
-              className="button button-primary"
+              className="primary"
               onClick={() => void persist('approve')}
               disabled={busy !== null}
             >
@@ -289,7 +289,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
         ) : (
           <button
             type="button"
-            className="button button-primary"
+            className="primary"
             onClick={() => void persist('save')}
             disabled={busy !== null}
           >
