@@ -319,6 +319,10 @@ export default function BookPage() {
   const [password, setPassword] = useState('')
   const [password2, setPassword2] = useState('')
   const [accountMode, setAccountMode] = useState<'create' | 'signin'>('create')
+  // Once the user has interacted with the account step (toggled modes, typed a
+  // password, or submitted), a late stage response must not yank the form —
+  // the hasPortalAccount default only applies to a pristine step.
+  const accountTouchedRef = useRef(false)
   const [hasPortalAccount, setHasPortalAccount] = useState(false)
   const [feeQuote, setFeeQuote] = useState<FeeQuote | null>(null)
   const [feeAccepted, setFeeAccepted] = useState(false)
@@ -331,13 +335,15 @@ export default function BookPage() {
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const resetCaptchaRef = useRef<(() => void) | null>(null)
   // A token belongs to the widget instance on the step that hosts it. Any step
-  // change unmounts that widget (its expired-callback dies with it), so a
-  // retained token would enable submit against a visibly-unsolved widget —
-  // drop it and require a fresh solve on the hosting step.
+  // change unmounts that widget (its expired-callback dies with it) — and so
+  // does an accountMode flip, which swaps the create block (the widget's host)
+  // for the sign-in panel within the same step. Either way a retained token
+  // would enable submit against a visibly-unsolved widget — drop it and
+  // require a fresh solve.
   useEffect(() => {
     setCaptchaToken(null)
     resetCaptchaRef.current = null
-  }, [step])
+  }, [step, accountMode])
   const [confirmation, setConfirmation] = useState<{
     matterNumber: string
     // Null for intake-only services — the confirmation renders "request
@@ -616,6 +622,7 @@ export default function BookPage() {
     setFeeAccepted(false)
     setAccountMode('create')
     setHasPortalAccount(false)
+    accountTouchedRef.current = false
     try {
       const res = await fetch('/api/client/intake/stage', {
         method: 'POST',
@@ -638,7 +645,7 @@ export default function BookPage() {
       // copy) — the create path stays one toggle away as the fallback.
       if (data?.hasPortalAccount === true) {
         setHasPortalAccount(true)
-        setAccountMode('signin')
+        if (!accountTouchedRef.current && busy === null) setAccountMode('signin')
       }
     } catch {
       setFeeQuote(null)
@@ -1390,7 +1397,10 @@ export default function BookPage() {
                   <button
                     type="button"
                     className="bk-linklike"
-                    onClick={() => setAccountMode('create')}
+                    onClick={() => {
+                      accountTouchedRef.current = true
+                      setAccountMode('create')
+                    }}
                   >
                     {t(
                       'account.create_toggle',
@@ -1425,7 +1435,10 @@ export default function BookPage() {
                     icon={<LockIcon size={18} />}
                     type="password"
                     value={password}
-                    onChange={setPassword}
+                    onChange={(v) => {
+                      accountTouchedRef.current = true
+                      setPassword(v)
+                    }}
                     autoComplete="new-password"
                   />
                   <ContactField
@@ -1491,7 +1504,10 @@ export default function BookPage() {
                   <button
                     type="button"
                     className="bk-linklike"
-                    onClick={() => setAccountMode('signin')}
+                    onClick={() => {
+                      accountTouchedRef.current = true
+                      setAccountMode('signin')
+                    }}
                   >
                     {t(
                       'account.signin_toggle',
