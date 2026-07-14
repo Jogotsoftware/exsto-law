@@ -15,8 +15,7 @@ import { callClaudeDrafter, type ClaudeDraftResult } from '../adapters/claude.js
 import { loadTranscriptExtractionPrompt } from '../templates/loader.js'
 import { getMatter } from '../queries/matters.js'
 import { createNote } from './notes.js'
-
-const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
+import { resolveTenantSystemActorId } from './capabilityRuntime.js'
 
 export interface RunTranscriptExtractionInput {
   matterEntityId: string
@@ -112,7 +111,10 @@ export async function runTranscriptExtraction(
   ctx: ActionContext,
   input: RunTranscriptExtractionInput,
 ): Promise<TranscriptExtractionResult> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  // THIS tenant's agent/system actor (RUNTIME-AUTORUN-2 class of fix): a hardcoded
+  // tenant-zero agent id would write a second firm's notes/events as the wrong actor.
+  const agentActorId = await resolveTenantSystemActorId(ctx)
+  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: agentActorId }
 
   const matter = await getMatter(agentCtx, input.matterEntityId)
   if (!matter) throw new Error(`Matter not found: ${input.matterEntityId}`)
@@ -204,7 +206,7 @@ export async function runTranscriptExtraction(
         reasoning_trace_id: reasoningTraceId,
       },
       source_type: 'agent',
-      source_ref: CLAUDE_AGENT_ACTOR_ID,
+      source_ref: agentActorId,
     },
   })
 
@@ -231,7 +233,9 @@ async function persistExtractionTrace(
       [
         id,
         ctx.tenantId,
-        CLAUDE_AGENT_ACTOR_ID,
+        // The agent context's actor — persistExtractionTrace is only called with
+        // agentCtx, so this is the tenant's resolved agent/system actor.
+        ctx.actorId,
         args.prompt,
         JSON.stringify(args.result.reasoningTrace.evidence ?? []),
         JSON.stringify(args.result.reasoningTrace.alternatives_considered ?? []),

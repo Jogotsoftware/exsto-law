@@ -10382,3 +10382,48 @@ svg.lucide {
   border-color: var(--gold);
   color: var(--gold-700);
 }
+
+/* ── P13: DRAFT watermark — render state, never template text ─────────────────
+   Applied to the .doc-paper surfaces (review page, runner modal, /d share view)
+   when the version status is not approved/executed. The stamp text rides in a
+   data-watermark attribute so the copy lives in ONE place (lib/draftExport). */
+.doc-watermark {
+  position: relative;
+}
+.doc-watermark::before {
+  content: attr(data-watermark);
+  position: absolute;
+  top: 9rem;
+  left: 0;
+  right: 0;
+  text-align: center;
+  transform: rotate(-24deg);
+  font-family: var(--font-sans, Arial, sans-serif);
+  font-size: clamp(1.5rem, 4.5vw, 2.75rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold-700);
+  opacity: 0.12;
+  pointer-events: none;
+}
+.doc-watermark-banner {
+  max-width: 8.5in;
+  margin: 0 auto var(--space-3);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--gold-700);
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+}
+@media print {
+  .doc-watermark::before {
+    position: fixed;
+    top: 42%;
+  }
+}

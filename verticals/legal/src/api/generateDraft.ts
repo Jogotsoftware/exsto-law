@@ -201,6 +201,12 @@ export async function runDraftGeneration(
         feeStructureHuman: service.feeStructureHuman,
         firmName: settings.firmName ?? undefined,
         attorneyName: settings.attorneyName ?? undefined,
+        // P13 — the rest of the firm identity block (firm_profile singleton,
+        // legacy-table fallback). Unknown stays undefined → honest MISSING;
+        // the approve-time resolver is the safety net.
+        firmEmail: settings.firmEmail ?? undefined,
+        firmPhone: settings.firmPhone ?? undefined,
+        firmAddress: settings.firmAddress ?? undefined,
       }),
     )
 

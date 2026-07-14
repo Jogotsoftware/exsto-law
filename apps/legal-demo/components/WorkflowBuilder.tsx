@@ -39,12 +39,58 @@ export interface GateTransitionOption {
   token: string
   label: string
 }
+// P14 — a step-invocable platform capability, served as a palette entry beside the
+// step library. seedAction is the server-generated invoke_capability action (slug +
+// config skeleton from the capability's own config_schema) taken verbatim;
+// defaultGate/suggestedTrigger describe how the matter LEAVES the capability's stage
+// (e.g. system/esign.completed) — under target-anchoring that pair seeds the NEXT
+// step's incoming edge, never this step's own.
+export interface CatalogCapability {
+  slug: string
+  label: string
+  description: string
+  defaultGate: WfGate
+  seedAction: { kind: WfActionKind; config?: Record<string, unknown> }
+  suggestedTrigger: string
+}
 export interface WorkflowCatalog {
   actions: CatalogAction[]
   gates: WfGate[]
   // Optional: an older server may not return it — the trigger editor falls back to
   // free text when absent. Mirrors GATE_TRANSITION_VOCABULARY.
   gateTransitions?: Record<WfGate, { field: 'via' | 'on' | null; options: GateTransitionOption[] }>
+  // Optional for the same reason; absent/empty hides the capabilities palette group.
+  capabilities?: CatalogCapability[]
+}
+
+// P14 — display names for capability slugs. The registry's spec.name is the
+// fallback, but the palette/step chrome prefers these action-shaped labels; the
+// capability itself is never renamed. Mirror-map idiom (like the proposal card's
+// ACTION_LABELS): this is a no-server-import client component.
+const CAPABILITY_LABELS: Record<string, string> = {
+  esignature: 'Request e-signature',
+  document_generation: 'Generate document',
+  transcript_extraction: 'Capture consultation notes',
+  email_generation: 'Draft client email',
+}
+// Constraints worth saying at pick time (appended to the palette description).
+const CAPABILITY_NOTES: Record<string, string> = {
+  esignature:
+    'Sends the latest APPROVED document for signature — approve the document before this step runs.',
+}
+function deSlug(slug: string): string {
+  return slug.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
+}
+export function capabilityLabel(slug: string, catalog: WorkflowCatalog | null): string {
+  return (
+    CAPABILITY_LABELS[slug] ??
+    catalog?.capabilities?.find((c) => c.slug === slug)?.label ??
+    deSlug(slug)
+  )
+}
+function stepCapabilitySlug(step: BuilderStep): string {
+  const slug = step.config?.capability_slug
+  return typeof slug === 'string' ? slug.trim() : ''
 }
 
 // A saved step's STAGE is a LifecycleStage WITHOUT edges — mirrors
@@ -64,11 +110,13 @@ export interface WorkflowStepTemplate {
   stage: WfStepStage
 }
 
+// P12 — a step's gate/trigger now describe its INCOMING edge ("How this step is
+// reached"), so the gate copy says who brings the matter HERE, not who advances it.
 export const GATE_LABELS: Record<WfGate, string> = {
-  automatic: 'Automatic — the system advances it',
-  attorney: 'Attorney — an attorney action advances it',
-  client: 'Client — a client action advances it',
-  system: 'System — an external event advances it',
+  automatic: 'Automatic — the system moves the matter here on its own',
+  attorney: 'Attorney — an attorney action brings the matter here',
+  client: 'Client — a client action brings the matter here',
+  system: 'System — an external event brings the matter here',
 }
 
 // One builder step → a saved-step STAGE (no edges/key/entry/terminal). The free-text
@@ -128,15 +176,31 @@ export function WorkflowBuilder({
   const [adding, setAdding] = useState(false)
   const [savingToLib, setSavingToLib] = useState<string | null>(null) // step uid
 
+  // P12 — the incoming pair for a step APPENDED after the current last step. When
+  // that step is a capability with a known completion event (e-signature →
+  // esign.completed), seed the new step's pair from the capability's
+  // defaultGate/suggestedTrigger so the completion actually gates the advance; else
+  // the caller's fallback gate + the save-time default apply.
+  function incomingPairAfter(fallbackGate: WfGate): { gate: WfGate; trigger: string } {
+    const prev = steps[steps.length - 1]
+    if (prev?.actionKind === 'invoke_capability') {
+      const slug = stepCapabilitySlug(prev)
+      const cap = slug ? catalog?.capabilities?.find((c) => c.slug === slug) : undefined
+      if (cap?.suggestedTrigger) return { gate: cap.defaultGate, trigger: cap.suggestedTrigger }
+    }
+    return { gate: fallbackGate, trigger: '' }
+  }
+
   function addStep(action: CatalogAction) {
+    const pair = incomingPairAfter(action.defaultGate)
     const step: BuilderStep = {
       uid: nextUid(),
       key: '',
       label: action.label,
       clientLabel: '',
       actionKind: action.kind,
-      gate: action.defaultGate,
-      trigger: '',
+      gate: pair.gate,
+      trigger: pair.trigger,
       blocking: action.blocking,
       documents: [],
     }
@@ -146,9 +210,37 @@ export function WorkflowBuilder({
   }
 
   // Drop a saved library step in as a new step (a fresh, editable copy — the builder
-  // wires its outgoing edge on save, exactly like a catalog add).
+  // wires its edges on save, exactly like a catalog add).
   function addFromLibrary(t: WorkflowStepTemplate) {
     const step = stageToStep(t)
+    const pair = incomingPairAfter(step.gate)
+    onChange([...steps, { ...step, ...pair }])
+    setAdding(false)
+    setEditing(step.uid)
+  }
+
+  // P14 — a capability palette pick seeds a real invoke_capability step: the
+  // server-generated action (slug + config skeleton) verbatim. Its OWN gate/trigger
+  // describe how the step is REACHED (target-anchoring), so they default like any
+  // other appended step — the capability's completion pair (defaultGate +
+  // suggestedTrigger) seeds the step that FOLLOWS it, via incomingPairAfter.
+  function addCapabilityStep(c: CatalogCapability) {
+    const pair = incomingPairAfter('attorney')
+    const step: BuilderStep = {
+      uid: nextUid(),
+      key: '',
+      label: capabilityLabel(c.slug, catalog),
+      clientLabel: '',
+      actionKind: 'invoke_capability',
+      gate: pair.gate,
+      trigger: pair.trigger,
+      blocking: catalog?.actions.find((a) => a.kind === 'invoke_capability')?.blocking ?? true,
+      documents: [],
+      // Deep-copy so two picks of the same capability never share a config object.
+      config: c.seedAction.config
+        ? (JSON.parse(JSON.stringify(c.seedAction.config)) as Record<string, unknown>)
+        : undefined,
+    }
     onChange([...steps, step])
     setAdding(false)
     setEditing(step.uid)
@@ -190,6 +282,7 @@ export function WorkflowBuilder({
               library={library}
               onPick={addStep}
               onPickLibrary={addFromLibrary}
+              onPickCapability={addCapabilityStep}
               onCancel={() => setAdding(false)}
             />
           ) : (
@@ -211,6 +304,7 @@ export function WorkflowBuilder({
             <li key={s.uid}>
               <StepCard
                 step={s}
+                prevStep={i > 0 ? steps[i - 1] : undefined}
                 index={i}
                 total={steps.length}
                 catalog={catalog}
@@ -244,6 +338,7 @@ export function WorkflowBuilder({
               library={library}
               onPick={addStep}
               onPickLibrary={addFromLibrary}
+              onPickCapability={addCapabilityStep}
               onCancel={() => setAdding(false)}
             />
           ) : (
@@ -280,23 +375,44 @@ function Connector() {
   )
 }
 
+function PaletteGroupHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: '0.78rem',
+        fontWeight: 600,
+        color: 'var(--muted)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.03em',
+        margin: '0.8rem 0 0.4rem',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
 // A palette of catalog actions; picking one appends a step seeded with that action's
-// label + defaultGate. It also lists the firm's SAVED step library — picking one
-// appends an editable copy of that saved step.
+// label + defaultGate. It also lists the platform's step-invocable CAPABILITIES
+// (picking one seeds a ready-to-configure invoke_capability step) and the firm's
+// SAVED step library — picking one appends an editable copy of that saved step.
 function AddPalette({
   catalog,
   library,
   onPick,
   onPickLibrary,
+  onPickCapability,
   onCancel,
 }: {
   catalog: WorkflowCatalog | null
   library: WorkflowStepTemplate[]
   onPick: (a: CatalogAction) => void
   onPickLibrary: (t: WorkflowStepTemplate) => void
+  onPickCapability: (c: CatalogCapability) => void
   onCancel: () => void
 }) {
   if (!catalog) return null
+  const capabilities = catalog.capabilities ?? []
   return (
     <div
       style={{
@@ -341,20 +457,39 @@ function AddPalette({
           ))}
       </div>
 
+      {capabilities.length > 0 && (
+        <>
+          <PaletteGroupHeading>Platform capabilities</PaletteGroupHeading>
+          <div style={{ display: 'grid', gap: '0.4rem' }}>
+            {capabilities.map((c) => (
+              <button
+                key={c.slug}
+                type="button"
+                onClick={() => onPickCapability(c)}
+                style={{
+                  textAlign: 'left',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  padding: '0.55rem 0.7rem',
+                  background: 'var(--bg, #fff)',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+                  {capabilityLabel(c.slug, catalog)}
+                </div>
+                <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
+                  {[c.description, CAPABILITY_NOTES[c.slug]].filter(Boolean).join(' ')}
+                </div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       {library.length > 0 && (
         <>
-          <div
-            style={{
-              fontSize: '0.78rem',
-              fontWeight: 600,
-              color: 'var(--muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.03em',
-              margin: '0.8rem 0 0.4rem',
-            }}
-          >
-            From your step library
-          </div>
+          <PaletteGroupHeading>From your step library</PaletteGroupHeading>
           <div style={{ display: 'grid', gap: '0.4rem' }}>
             {library.map((t) => {
               const actionLabel =
@@ -390,6 +525,7 @@ function AddPalette({
 
 function StepCard({
   step,
+  prevStep,
   index,
   total,
   catalog,
@@ -407,6 +543,7 @@ function StepCard({
   onSaveToLib,
 }: {
   step: BuilderStep
+  prevStep?: BuilderStep
   index: number
   total: number
   catalog: WorkflowCatalog | null
@@ -424,8 +561,10 @@ function StepCard({
   onSaveToLib: (name: string) => void
 }) {
   const isLast = index === total - 1
-  const actionLabel =
-    catalog?.actions.find((a) => a.kind === step.actionKind)?.label ?? step.actionKind
+  const capSlug = step.actionKind === 'invoke_capability' ? stepCapabilitySlug(step) : ''
+  const actionLabel = capSlug
+    ? capabilityLabel(capSlug, catalog)
+    : (catalog?.actions.find((a) => a.kind === step.actionKind)?.label ?? step.actionKind)
 
   return (
     <div
@@ -459,7 +598,10 @@ function StepCard({
           <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
             {actionLabel}
             {' · '}
-            {isLast ? 'terminal' : `gate: ${step.gate}`}
+            {/* P12: gate describes the step's INCOMING edge, so the first step shows
+                'entry' (nothing precedes it) and the last shows its gate + terminal. */}
+            {index === 0 ? 'entry' : `gate: ${step.gate}`}
+            {isLast && ' · terminal'}
             {step.documents.length > 0 &&
               ` · ${step.documents.length} doc${step.documents.length > 1 ? 's' : ''}`}
             {!step.blocking && ' · non-blocking'}
@@ -529,6 +671,8 @@ function StepCard({
       {open && (
         <StepEditor
           step={step}
+          prevStep={prevStep}
+          isFirst={index === 0}
           isLast={isLast}
           catalog={catalog}
           serviceKey={serviceKey}
@@ -593,18 +737,23 @@ function SaveToLibraryRow({
 
 function StepEditor({
   step,
+  prevStep,
+  isFirst,
   isLast,
   catalog,
   serviceKey,
   onChange,
 }: {
   step: BuilderStep
+  prevStep?: BuilderStep
+  isFirst: boolean
   isLast: boolean
   catalog: WorkflowCatalog | null
   serviceKey: string
   onChange: (patch: Partial<BuilderStep>) => void
 }) {
   const gates = catalog?.gates ?? (['automatic', 'attorney', 'client', 'system'] as WfGate[])
+  const capSlug = step.actionKind === 'invoke_capability' ? stepCapabilitySlug(step) : ''
   return (
     <div style={{ marginTop: '0.7rem', display: 'grid', gap: '0.6rem' }}>
       <div className="form-grid">
@@ -632,13 +781,20 @@ function StepEditor({
             .filter((a) => !a.deprecated || a.kind === step.actionKind)
             .map((a) => (
               <option key={a.kind} value={a.kind}>
-                {a.deprecated ? `${a.label} (legacy)` : a.label}
+                {/* P14: an invoke_capability step reads as ITS capability, never as
+                    the raw generic kind. */}
+                {a.kind === 'invoke_capability' && capSlug
+                  ? capabilityLabel(capSlug, catalog)
+                  : a.deprecated
+                    ? `${a.label} (legacy)`
+                    : a.label}
               </option>
             ))}
         </select>
         {catalog && (
           <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
-            {catalog.actions.find((a) => a.kind === step.actionKind)?.description}
+            {(capSlug && catalog.capabilities?.find((c) => c.slug === capSlug)?.description) ||
+              catalog.actions.find((a) => a.kind === step.actionKind)?.description}
           </span>
         )}
       </label>
@@ -652,11 +808,13 @@ function StepEditor({
         <span>Blocking — this step holds the matter until it&apos;s done</span>
       </label>
 
-      {!isLast && (
+      {/* P12: the pair edits the step's INCOMING edge, so it is hidden on the FIRST
+          step (nothing precedes the entry) rather than on the last. */}
+      {!isFirst && (
         <fieldset className="svc-fieldset">
-          <legend>Advance to the next step</legend>
+          <legend>How this step is reached</legend>
           <label>
-            <span>Gate — who or what advances it</span>
+            <span>Gate — who or what moves the matter to this step</span>
             <select
               value={step.gate}
               onChange={(e) => onChange({ gate: e.target.value as WfGate })}
@@ -668,8 +826,13 @@ function StepEditor({
               ))}
             </select>
           </label>
-          <TriggerEditor step={step} catalog={catalog} onChange={onChange} />
+          <TriggerEditor step={step} prevStep={prevStep} catalog={catalog} onChange={onChange} />
         </fieldset>
+      )}
+      {isFirst && (
+        <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: 0 }}>
+          This is the first step — the matter starts here, so nothing precedes it.
+        </p>
       )}
       {isLast && (
         <p style={{ color: 'var(--muted)', fontSize: '0.82rem', margin: 0 }}>
@@ -690,25 +853,28 @@ function StepEditor({
   )
 }
 
-// The step's advance trigger. attorney/client/system gates advance on EXACT via/on
-// tokens the runtime matches, so the editor offers the catalog's transition
-// vocabulary as a select of plain-language descriptions — the raw token rides below
-// as a muted hint. A loaded off-vocabulary trigger stays selectable as "Current: …"
-// so opening and saving an old workflow never silently rewrites it. An automatic
-// `on` is free-form (descriptive), and an older server without gateTransitions
-// falls back to free text.
+// The step's INCOMING trigger (P12): the exact via/on token whose firing moves the
+// matter from the PRECEDING step to this one, so the default keys off what completes
+// that preceding step. attorney/client/system gates advance on EXACT tokens the
+// runtime matches, so the editor offers the catalog's transition vocabulary as a
+// select of plain-language descriptions — the raw token rides below as a muted hint.
+// A loaded off-vocabulary trigger stays selectable as "Current: …" so opening and
+// saving an old workflow never silently rewrites it. An automatic `on` is free-form
+// (descriptive), and an older server without gateTransitions falls back to free text.
 function TriggerEditor({
   step,
+  prevStep,
   catalog,
   onChange,
 }: {
   step: BuilderStep
+  prevStep?: BuilderStep
   catalog: WorkflowCatalog | null
   onChange: (patch: Partial<BuilderStep>) => void
 }) {
   const isVia = triggerField(step.gate) === 'via'
-  const label = isVia ? 'What moves the matter forward' : 'What it waits for'
-  const fallback = defaultTrigger(step.gate, step.actionKind, step.config)
+  const label = isVia ? 'What moves the matter to this step' : 'What it waits for to get here'
+  const fallback = defaultTrigger(step.gate, prevStep?.actionKind, prevStep?.config)
   const options =
     step.gate === 'automatic' ? [] : (catalog?.gateTransitions?.[step.gate]?.options ?? [])
 
@@ -733,7 +899,7 @@ function TriggerEditor({
       <select value={selected} onChange={(e) => onChange({ trigger: e.target.value })}>
         {selected === '' && (
           <option value="">
-            {isVia ? 'Choose what moves it forward…' : 'Choose what it waits for…'}
+            {isVia ? 'Choose what moves the matter here…' : 'Choose what it waits for…'}
           </option>
         )}
         {offVocabulary && (

@@ -1,4 +1,4 @@
-import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 
 export interface TenantSettings {
   firmName: string | null
@@ -32,13 +32,76 @@ const FIRM_DEFAULTS: TenantSettings = {
   attorneyName: 'Juan Carlos Pacheco',
 }
 
+// P13 — firm identity now lives the substrate-native way: firm_name /
+// firm_address / firm_phone / firm_email attributes on the per-tenant
+// firm_profile singleton (migration 0161), written through legal.firm.set_profile
+// (handlers/firmProfile.ts). Reads here overlay the substrate value FIRST, then
+// fall back to the wedge-era tenant_settings table for anything unset.
+export interface FirmProfileFields {
+  firmName: string | null
+  firmAddress: string | null
+  firmPhone: string | null
+  firmEmail: string | null
+}
+
+const PROFILE_ATTR_KINDS = ['firm_name', 'firm_address', 'firm_phone', 'firm_email'] as const
+
+// Latest firm-identity attributes off the firm_profile singleton (all null when
+// no singleton / no values yet). Mirrors api/firmSignature.readStored.
+async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileFields> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ kind_name: string; value: string | null }>(
+      `WITH fp AS (
+         SELECT e.id
+           FROM entity e
+           JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+          WHERE e.tenant_id = $1 AND ekd.kind_name = 'firm_profile' AND e.status = 'active'
+          ORDER BY e.recorded_at ASC
+          LIMIT 1
+       )
+       SELECT DISTINCT ON (akd.kind_name) akd.kind_name, a.value #>> '{}' AS value
+         FROM attribute a
+         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+        WHERE a.tenant_id = $1 AND a.entity_id = (SELECT id FROM fp)
+          AND akd.kind_name = ANY($2)
+          AND (a.valid_to IS NULL OR a.valid_to > now())
+        ORDER BY akd.kind_name, a.valid_from DESC`,
+      [ctx.tenantId, [...PROFILE_ATTR_KINDS]],
+    )
+    const byKind = new Map(res.rows.map((r) => [r.kind_name, r.value]))
+    const val = (kind: string): string | null => {
+      const v = byKind.get(kind)
+      return typeof v === 'string' && v.trim() ? v : null
+    }
+    return {
+      firmName: val('firm_name'),
+      firmAddress: val('firm_address'),
+      firmPhone: val('firm_phone'),
+      firmEmail: val('firm_email'),
+    }
+  })
+}
+
+// Substrate profile value wins; a legacy table value survives only where the
+// profile has never been set (append-only history stays on the substrate side).
+function overlayProfile(base: TenantSettings, profile: FirmProfileFields): TenantSettings {
+  return {
+    ...base,
+    firmName: profile.firmName ?? base.firmName,
+    firmAddress: profile.firmAddress ?? base.firmAddress,
+    firmPhone: profile.firmPhone ?? base.firmPhone,
+    firmEmail: profile.firmEmail ?? base.firmEmail,
+  }
+}
+
 export async function getTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
+  const profile = await readFirmProfileAttrs(ctx)
   try {
-    return await readTenantSettings(ctx)
+    return overlayProfile(await readTenantSettings(ctx), profile)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('tenant_settings') || msg.includes('does not exist')) {
-      return FIRM_DEFAULTS
+      return overlayProfile(FIRM_DEFAULTS, profile)
     }
     throw err
   }
@@ -50,16 +113,61 @@ export async function getTenantSettings(ctx: ActionContext): Promise<TenantSetti
 // demo firm's identity for some OTHER tenant is a forgery the reviewing attorney
 // gets no [[MISSING]] warning about. Unknown must render as MISSING — the
 // substrate distinguishes "we don't know" from "we know a default".
+// P13 NOTE: the firm_profile overlay above applies here too, but the anti-forgery
+// guard MUST survive — when neither the substrate singleton nor the legacy table
+// has a value, the answer is EMPTY (honest MISSING), never a demo-firm default.
 export async function getTenantSettingsForMerge(ctx: ActionContext): Promise<TenantSettings> {
+  const profile = await readFirmProfileAttrs(ctx)
   try {
-    return await readTenantSettings(ctx)
+    return overlayProfile(await readTenantSettings(ctx), profile)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('tenant_settings') || msg.includes('does not exist')) {
-      return EMPTY
+      return overlayProfile(EMPTY, profile)
     }
     throw err
   }
+}
+
+// The resolved firm profile for the Settings editor / MCP get tool: substrate
+// singleton first, legacy tenant_settings fallback. Same values getTenantSettings
+// reports for these four fields.
+export async function getFirmProfile(ctx: ActionContext): Promise<FirmProfileFields> {
+  const s = await getTenantSettings(ctx)
+  return {
+    firmName: s.firmName,
+    firmAddress: s.firmAddress,
+    firmPhone: s.firmPhone,
+    firmEmail: s.firmEmail,
+  }
+}
+
+export interface SetFirmProfileInput {
+  // undefined leaves a field unchanged; ''/null clears it.
+  firmName?: string | null
+  firmAddress?: string | null
+  firmPhone?: string | null
+  firmEmail?: string | null
+}
+
+// Write the firm profile through the core (legal.firm.set_profile — append-only
+// attribute supersede on the firm_profile singleton). Returns the fresh resolved
+// profile so the editor can re-render without a second read.
+export async function setFirmProfile(
+  ctx: ActionContext,
+  input: SetFirmProfileInput,
+): Promise<FirmProfileFields> {
+  await submitAction(ctx, {
+    actionKindName: 'legal.firm.set_profile',
+    intentKind: 'adjustment',
+    payload: {
+      ...(input.firmName !== undefined ? { firm_name: input.firmName } : {}),
+      ...(input.firmAddress !== undefined ? { firm_address: input.firmAddress } : {}),
+      ...(input.firmPhone !== undefined ? { firm_phone: input.firmPhone } : {}),
+      ...(input.firmEmail !== undefined ? { firm_email: input.firmEmail } : {}),
+    },
+  })
+  return getFirmProfile(ctx)
 }
 
 async function readTenantSettings(ctx: ActionContext): Promise<TenantSettings> {

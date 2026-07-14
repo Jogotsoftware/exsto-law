@@ -285,6 +285,9 @@ export const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
   },
   {
     // MACHINE-COMMS-1 (WP3) — memory intake: transcripts stop being stored-but-mute.
+    // P11 — capture became AUTOMATIC: call.ingest enqueues this capability the moment
+    // a matched transcript with text arrives, so composing it as a step is retired
+    // (authorable: false in INVOCABLE_CONTRACTS keeps it runnable but un-offerable).
     slug: 'transcript_extraction',
     spec: {
       name: 'Transcript extraction',
@@ -292,7 +295,7 @@ export const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
       purpose:
         'Distill a consultation/meeting transcript into matter memory: a summary note plus extracted facts and action items as notes, attached to the matter and feeding the client’s assembled context. Extracted facts are AI output — they land for attorney review.',
       when_to_use:
-        'Compose it as a post-consultation step, or run it ad hoc on any transcript (Granola-imported or pasted on the matter page). Gate: attorney.',
+        'Runs AUTOMATICALLY when a transcript arrives on a matter (recorded, imported, or pasted) — never composed as a workflow step (composition retired). Also runnable ad hoc on any transcript from the matter page.',
       backed_by: ['note entities + note_about', 'getClientContext'],
     },
   },
@@ -339,7 +342,16 @@ export const CAPABILITIES: Array<Omit<UpsertCapabilityInput, 'status'>> = [
 // registry raises a clear "not yet executable" error when invoked — never a silent
 // no-op or simulated output. (esignature joined the REAL handlers in ESIGN-BLOCK-1.)
 // The full T/F classification + one-line rationale lives in the decision log.
-export const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['spec']>> = {
+// `authorable: false` (P11) is the AUTHORING-VISIBILITY flag: the capability stays
+// step_invocable (existing graphs keep validating and running — flipping
+// step_invocable would make the propose-time validator reject them) but
+// get_workflow_context stops offering it, so no NEW workflow composes it. The flag
+// rides the spec jsonb; it intersects the type here rather than widening
+// CapabilitySpec, since this seed and the authoring filter are its only readers.
+export const INVOCABLE_CONTRACTS: Record<
+  string,
+  Partial<UpsertCapabilityInput['spec']> & { authorable?: boolean }
+> = {
   // CAPABILITY-UNIFY-1 (WP1) — document generation is the first fully-migrated LEGO
   // block: ONE capability, reused across services, drafting a DIFFERENT document per
   // step via per-step config. The template is named by EXACT firm-library entity id
@@ -570,8 +582,11 @@ export const INVOCABLE_CONTRACTS: Record<string, Partial<UpsertCapabilityInput['
   },
   // MACHINE-COMMS-1 (WP3) — transcript_extraction: distills the matter's transcript
   // into notes; parks at the ATTORNEY gate for review (extracted facts are AI output).
+  // P11: still step_invocable (existing composed stages keep running) but no longer
+  // authorable — capture fires automatically from call.ingest on transcript arrival.
   transcript_extraction: {
     step_invocable: true,
+    authorable: false,
     handler_key: 'legal.capability.transcript_extraction.run',
     inputs: [
       {

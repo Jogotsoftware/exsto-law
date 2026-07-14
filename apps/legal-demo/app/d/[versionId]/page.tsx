@@ -4,7 +4,7 @@ import { use, useEffect, useState } from 'react'
 import { callClientMcp } from '@/lib/mcpClient'
 import { callClientPortalMcp } from '@/lib/mcpClientPortal'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord, watermarkForStatus } from '@/lib/draftExport'
 import { formatDate } from '@/lib/datetime'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 
@@ -84,6 +84,9 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
 
   const title = humanizeKind(draft.documentKind)
   const filename = `${title.replace(/\s+/g, '-').toLowerCase()}-${draft.matterNumber}`
+  // P13 — the watermark is render state keyed off the version status (the
+  // payload always carried `status`; a pending draft must never read as final).
+  const watermark = watermarkForStatus(draft.status)
 
   return (
     <div className="public-draft">
@@ -97,8 +100,14 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
           </div>
         </div>
         <div className="public-draft-actions">
-          <button onClick={() => downloadAsPdf(draft.bodyMarkdown, filename)}>Download PDF</button>
-          <button onClick={() => downloadAsWord(draft.bodyMarkdown, filename)}>
+          <button
+            onClick={() => downloadAsPdf(draft.bodyMarkdown, filename, { status: draft.status })}
+          >
+            Download PDF
+          </button>
+          <button
+            onClick={() => downloadAsWord(draft.bodyMarkdown, filename, { status: draft.status })}
+          >
             Download Word
           </button>
         </div>
@@ -106,8 +115,10 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
       {/* Same page treatment as the attorney review screen, so the client sees
           exactly the document that was approved (same renderer + .doc-paper page). */}
       <div className="doc-canvas">
+        {watermark && <div className="doc-watermark-banner">{watermark}</div>}
         <article
-          className="doc-rendered doc-paper"
+          className={`doc-rendered doc-paper${watermark ? ' doc-watermark' : ''}`}
+          data-watermark={watermark ?? undefined}
           dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
         />
       </div>

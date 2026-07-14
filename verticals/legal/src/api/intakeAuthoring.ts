@@ -39,6 +39,7 @@ import {
   type ServiceField,
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
+import { isSystemToken, isAutoInternalToken } from './tokenClasses.js'
 import {
   listQuestionnaireTemplates,
   type QuestionnaireSchema,
@@ -105,6 +106,10 @@ export interface QuestionnaireAuthoringContext {
 
 // All distinct flat {{tokens}} referenced by a service's configured document
 // templates, first-seen order, de-duplicated. The TARGET the questionnaire covers.
+// SYSTEM tokens (tokenClasses.ts) are excluded everywhere here: the platform
+// resolves them (merge slots, approve-time resolver, e-sign), so they are never
+// part of the coverage contract the model is asked to satisfy — this is what
+// stops the wizard from ever asking the client for attorney/firm/system data.
 export async function loadServiceTemplateTokens(
   ctx: ActionContext,
   serviceKey: string,
@@ -112,7 +117,7 @@ export async function loadServiceTemplateTokens(
   const docs = await listServiceDocumentTemplates(ctx, serviceKey)
   const templates = docs.map((d) => ({
     documentKind: d.documentKind,
-    tokens: extractRenderedTokens(d.body),
+    tokens: extractRenderedTokens(d.body).filter((t) => !isSystemToken(t)),
   }))
   const seen = new Set<string>()
   const tokens: string[] = []
@@ -241,11 +246,51 @@ export function validateProposedQuestionnaire(
   }
   const fieldIds = collectFieldIds(validated)
   const wanted = templateTokens.map((t) => t.toLowerCase())
-  const missingForTokens = templateTokens.filter((t) => !fieldIds.has(t.toLowerCase()))
+  // SYSTEM tokens never count as coverage gaps: the platform resolves them
+  // (merge slots / approve-time resolver), so a questionnaire must never be
+  // forced to add a client question for them (belt-and-braces — callers already
+  // pass system-filtered token lists from loadServiceTemplateTokens).
+  const missingForTokens = templateTokens.filter(
+    (t) => !isSystemToken(t) && !fieldIds.has(t.toLowerCase()),
+  )
   const unusedFields = [...fieldIds].filter((id) => !wanted.includes(id))
   // A coverage gap is NOT a hard error — the attorney may approve a partial form and
   // fill the rest later — so `ok` reflects only the shape. The gaps ride on the card.
   return { ok: errors.length === 0, errors, missingForTokens, unusedFields }
+}
+
+// ─── P13: system-token fields can never face the client ─────────────────────
+// CODE-ENFORCED (not prose): a proposed CLIENT-FACING field whose id IS a
+// system token the platform resolves without client input (attorney/firm
+// identity, dates, matter facts, fee/clause slots) is auto-coerced to
+// internal:true + required:false before capture. The token stays covered (the
+// variable contract holds) but the client is never asked for it. Returns a
+// DEEP COPY — the caller's proposal object is not mutated — plus the ids that
+// were coerced (surfaced in the tool ack). Top-level fields only: repeater
+// memberFields are per-member client facts, never system slots.
+export function coerceSystemFieldsInternal(schema: unknown): {
+  schema: unknown
+  coerced: string[]
+} {
+  if (!schema || typeof schema !== 'object') return { schema, coerced: [] }
+  const copy = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>
+  const coerced: string[] = []
+  const sections = Array.isArray(copy.sections) ? copy.sections : []
+  for (const rawSection of sections) {
+    if (!rawSection || typeof rawSection !== 'object') continue
+    const fields = (rawSection as Record<string, unknown>).fields
+    if (!Array.isArray(fields)) continue
+    for (const rawField of fields) {
+      if (!rawField || typeof rawField !== 'object') continue
+      const field = rawField as Record<string, unknown>
+      const id = typeof field.id === 'string' ? field.id : ''
+      if (!id || field.internal === true || !isAutoInternalToken(id)) continue
+      field.internal = true
+      field.required = false
+      coerced.push(id)
+    }
+  }
+  return { schema: copy, coerced }
 }
 
 // Reasoning summary the approve route carries from the chat turn that produced the

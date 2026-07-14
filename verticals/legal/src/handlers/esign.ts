@@ -28,7 +28,13 @@ import {
   insertRelationship,
   lookupKindId,
 } from './common.js'
-import { renderTypedSignature, resolveExecutedMarkdown, type EsignField } from '../esign/fields.js'
+import {
+  isSignatureImageDataUrl,
+  renderImageSignature,
+  renderTypedSignature,
+  resolveExecutedMarkdown,
+  type EsignField,
+} from '../esign/fields.js'
 import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
 
 interface SendSigner {
@@ -764,6 +770,9 @@ interface FullSigner {
   title: string | null
   signed_at: string | null
   consent: string | null
+  // Typed name (legacy/typed adoption) OR a data-URL image (P15 standing
+  // signature) — fieldValue's 'sign' branch distinguishes the two.
+  signature_data: string | null
   field_values: Record<string, string> | null
 }
 
@@ -780,6 +789,7 @@ async function loadEnvelopeSigners(
   const res = await client.query<FullSigner & { field_values_json: string | null }>(
     `SELECT ${a('signer_key')} AS key, ${a('signer_name')} AS name, ${a('signer_email')} AS email,
             ${a('signer_title')} AS title, ${a('signed_at')} AS signed_at, ${a('signer_consent')} AS consent,
+            ${a('signature_data')} AS signature_data,
             (SELECT a.value::text FROM attribute a JOIN attribute_kind_definition akd
                ON akd.id = a.attribute_kind_id AND akd.kind_name = 'field_values'
                WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
@@ -799,6 +809,7 @@ async function loadEnvelopeSigners(
     title: row.title,
     signed_at: row.signed_at,
     consent: row.consent,
+    signature_data: row.signature_data,
     field_values: row.field_values_json
       ? (JSON.parse(row.field_values_json) as Record<string, string>)
       : null,
@@ -814,8 +825,17 @@ function fieldValue(field: EsignField, signer: FullSigner | undefined): string {
       return (signer?.signed_at ?? '').slice(0, 10)
     case 'title':
       return v ?? signer?.title ?? ''
-    case 'sign':
-      return renderTypedSignature(v ?? signer?.name ?? '')
+    case 'sign': {
+      // P15: a drawn/uploaded standing signature arrives as a data-URL image in
+      // signature_data — render it as a markdown image with the /s/ glyph beside
+      // it (the display sanitizer strips <img>, so the glyph is what shows
+      // there; the image survives in the stored markdown). Typed signatures
+      // (or the legacy typed-name fallback in signature_data) stay glyph-only.
+      const sig = signer?.signature_data
+      const name = v ?? signer?.name ?? ''
+      if (sig && isSignatureImageDataUrl(sig)) return renderImageSignature(sig, name)
+      return renderTypedSignature(name)
+    }
     case 'check':
       return v ? '☑' : '☐'
     default:

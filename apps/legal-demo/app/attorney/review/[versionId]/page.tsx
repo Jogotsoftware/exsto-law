@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord, shareUrlFor, watermarkForStatus } from '@/lib/draftExport'
 import { formatDateTime } from '@/lib/datetime'
 import { lineDiff, diffStats, type DiffOp } from '@/lib/lineDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
@@ -595,10 +595,18 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             no sense for an email draft — the email IS the delivery. */}
         {!isEmail && (
           <>
-            <button onClick={() => downloadAsPdf(draft.bodyMarkdown, docFileBase)}>
+            <button
+              onClick={() =>
+                downloadAsPdf(draft.bodyMarkdown, docFileBase, { status: draft.status })
+              }
+            >
               Download PDF
             </button>
-            <button onClick={() => downloadAsWord(draft.bodyMarkdown, docFileBase)}>
+            <button
+              onClick={() =>
+                downloadAsWord(draft.bodyMarkdown, docFileBase, { status: draft.status })
+              }
+            >
               Download Word
             </button>
             {/* Contract J: auto-discovered document actions (Send via email; the
@@ -746,8 +754,11 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             </div>
           </div>
         ) : (
+          // P13 — a not-yet-approved version renders with the draft watermark
+          // (render state; never text inside the template/draft body).
           <article
-            className="doc-rendered doc-paper"
+            className={`doc-rendered doc-paper${watermarkForStatus(draft.status) ? ' doc-watermark' : ''}`}
+            data-watermark={watermarkForStatus(draft.status) ?? undefined}
             dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
           />
         )}

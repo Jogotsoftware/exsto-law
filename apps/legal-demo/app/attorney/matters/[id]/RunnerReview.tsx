@@ -14,7 +14,7 @@ import { Modal } from '@/components/Modal'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
-import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord, watermarkForStatus } from '@/lib/draftExport'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import {
   acceptClientStep,
@@ -493,11 +493,15 @@ export function RunnerReview({
             </button>
             <button
               className="runner-toolbar-end"
-              onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}
+              onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase, { status: draft.status })}
             >
               Word
             </button>
-            <button onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>PDF</button>
+            <button
+              onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase, { status: draft.status })}
+            >
+              PDF
+            </button>
           </div>
 
           {phase === 'running' && (
@@ -514,8 +518,10 @@ export function RunnerReview({
           )}
 
           <div className="runner-doc">
+            {/* P13 — pending versions carry the draft watermark (render state). */}
             <article
-              className="doc-rendered doc-paper"
+              className={`doc-rendered doc-paper${watermarkForStatus(draft.status) ? ' doc-watermark' : ''}`}
+              data-watermark={watermarkForStatus(draft.status) ?? undefined}
               dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
             />
           </div>

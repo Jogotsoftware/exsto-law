@@ -173,13 +173,15 @@ export default function ServiceWorkflowPage() {
   function startFromSmllc() {
     // The shape of NC_SMLLC_AUTHORED, mirrored locally (no server import). Gives the
     // attorney a known-good 5-step starting point to tweak rather than a blank page.
+    // Each step's (gate, trigger) is HOW IT IS REACHED (target-anchored,
+    // BUILDER-UX-3 P12) — the first step's pair is inert (nothing precedes it).
     const tmpl: BuilderStep[] = [
-      mk('Client Intake', 'view_intake', 'client', 'booking.create', true, 'Intake'),
+      mk('Client Intake', 'view_intake', 'attorney', '', true, 'Intake'),
       mk(
         'Client Consultation',
         'view_consultation',
-        'attorney',
-        'legal.matter.advance',
+        'client',
+        'booking.create',
         false,
         'Consultation',
       ),
@@ -187,7 +189,7 @@ export default function ServiceWorkflowPage() {
         'Review & Send document',
         'review_send_document',
         'attorney',
-        'draft.approve',
+        'legal.matter.advance',
         true,
         'Document review',
         [{ docKind: 'operating_agreement', label: 'Operating Agreement' }],
@@ -195,12 +197,19 @@ export default function ServiceWorkflowPage() {
       mk(
         'Approve & Send invoice',
         'approve_send_invoice',
-        'system',
-        'invoice.paid',
+        'attorney',
+        'draft.approve',
         true,
         'Invoice',
       ),
-      mk('Invoice paid — Matter complete', 'complete_matter', 'system', '', false, 'Complete'),
+      mk(
+        'Invoice paid — Matter complete',
+        'complete_matter',
+        'system',
+        'invoice.paid',
+        false,
+        'Complete',
+      ),
     ]
     mutate(tmpl)
   }

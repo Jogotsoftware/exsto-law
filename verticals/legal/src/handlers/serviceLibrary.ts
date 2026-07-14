@@ -24,7 +24,12 @@ import type { DbClient } from '@exsto/shared'
 import { completenessFromTransitions } from '../api/services.js'
 // Pure lifecycle validator + the graph type (ADR 0045). The lifecycle module is
 // substrate-free (no DB, no handlers), so importing it here introduces no cycle.
-import { validateLifecycle, validateLinearLifecycle, type Lifecycle } from '../lifecycle/index.js'
+import {
+  validateLifecycle,
+  validateLinearLifecycle,
+  diagnoseEdgeTransition,
+  type Lifecycle,
+} from '../lifecycle/index.js'
 // The pure id-collector the AI proposal validator uses — shared so the manual save
 // path rejects dangling template refs the SAME way the AI path does (no drift).
 import { collectReferencedTemplateIds } from '../api/workflowAuthoring.js'
@@ -473,6 +478,22 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
   const linear = validateLinearLifecycle(p.graph)
   if (!linear.ok) {
     throw new Error(`Invalid workflow lifecycle: ${linear.errors.join('; ')}`)
+  }
+  // P12 — the advance-token vocabulary check now guards the MANUAL save path too
+  // (it was AI-authoring-only): the visual builder re-threads edges on reorder, and
+  // a dead via/on token — e.g. the old 'event' default still stored on a legacy
+  // graph — must be rejected with a message the attorney can act on, not saved as a
+  // workflow that never advances. Joined with NEWLINES: the builder surfaces split
+  // the message into one line per edge.
+  const tokenErrors: string[] = []
+  for (const stage of p.graph) {
+    for (const edge of stage.advances_to ?? []) {
+      const err = diagnoseEdgeTransition(stage.key, edge.to, edge.gate, edge.via, edge.on)
+      if (err) tokenErrors.push(err)
+    }
+  }
+  if (tokenErrors.length > 0) {
+    throw new Error(`Invalid workflow lifecycle:\n${tokenErrors.join('\n')}`)
   }
   // Document refs must resolve to real library templates (same rule the AI path
   // enforces) — a dangling templateEntityId must never reach workflow_definition.states.

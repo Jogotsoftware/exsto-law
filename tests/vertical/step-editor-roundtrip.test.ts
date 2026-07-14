@@ -9,7 +9,7 @@
 // preserving the saved structure. These tests run the REAL validator (@exsto/legal)
 // against the REAL NC Will Drafting v5 graph.
 import { describe, it, expect } from 'vitest'
-import { validateLifecycle, validateLinearLifecycle } from '@exsto/legal'
+import { validateLifecycle, validateLinearLifecycle, diagnoseEdgeTransition } from '@exsto/legal'
 import {
   buildMatterGraph,
   type CatalogGate,
@@ -183,33 +183,34 @@ describe('NEW-E — service editor round-trips losslessly (acceptance A/D)', () 
   })
 })
 
-describe('P8 — off-vocabulary triggers round-trip losslessly (the "Current:" pathway is UI-only)', () => {
-  // A legacy graph whose edges carry tokens OUTSIDE the gate-transition vocabulary —
-  // including the old dead 'event' default — must survive load+save byte-identically:
-  // the builder model never rewrites a trigger it didn't edit.
-  const LEGACY: WfLifecycle = [
-    {
-      key: 'client_intake',
-      entry: true,
-      label: 'Client intake',
-      action: { kind: 'view_intake' },
-      advances_to: [{ to: 'hold_for_filing', via: 'client.submits.paperwork', gate: 'client' }],
-    },
-    {
-      key: 'hold_for_filing',
-      label: 'Hold for filing',
-      action: { kind: 'manual_task' },
-      advances_to: [{ to: 'complete', on: 'event', gate: 'system' }],
-    },
-    {
-      key: 'complete',
-      label: 'Complete matter',
-      action: { kind: 'complete_matter' },
-      terminal: true,
-      advances_to: [],
-    },
-  ]
+// A legacy graph whose edges carry tokens OUTSIDE the gate-transition vocabulary —
+// including the old dead 'event' default — must survive load+save byte-identically:
+// the builder model never rewrites a trigger it didn't edit. (Saving it is the
+// SERVER's call to reject — see the P12 save-guard test.)
+const LEGACY: WfLifecycle = [
+  {
+    key: 'client_intake',
+    entry: true,
+    label: 'Client intake',
+    action: { kind: 'view_intake' },
+    advances_to: [{ to: 'hold_for_filing', via: 'client.submits.paperwork', gate: 'client' }],
+  },
+  {
+    key: 'hold_for_filing',
+    label: 'Hold for filing',
+    action: { kind: 'manual_task' },
+    advances_to: [{ to: 'complete', on: 'event', gate: 'system' }],
+  },
+  {
+    key: 'complete',
+    label: 'Complete matter',
+    action: { kind: 'complete_matter' },
+    terminal: true,
+    advances_to: [],
+  },
+]
 
+describe('P8 — off-vocabulary triggers round-trip losslessly (the "Current:" pathway is UI-only)', () => {
   it('an off-vocabulary via/on survives graphToSteps → stepsToGraph byte-identically', () => {
     const rt = stepsToGraph(graphToSteps(LEGACY))
     expect(valid(rt).errors).toEqual([])
@@ -217,7 +218,7 @@ describe('P8 — off-vocabulary triggers round-trip losslessly (the "Current:" p
   })
 })
 
-describe('P8 — defaultTrigger never emits a dead token', () => {
+describe('P8/P12 — defaultTrigger never emits a dead token (keyed off the PRECEDING step)', () => {
   const gates: WfGate[] = ['automatic', 'attorney', 'client', 'system']
   const kinds: WfActionKind[] = [
     'view_intake',
@@ -231,7 +232,7 @@ describe('P8 — defaultTrigger never emits a dead token', () => {
     'invoke_capability',
   ]
 
-  it("never returns 'event' or 'condition' for any gate × kind", () => {
+  it("never returns 'event' or 'condition' for any gate × preceding kind", () => {
     for (const g of gates) {
       for (const k of kinds) {
         const t = defaultTrigger(g, k)
@@ -241,9 +242,11 @@ describe('P8 — defaultTrigger never emits a dead token', () => {
     }
   })
 
-  it('system gates default by action kind, else empty (attorney must pick)', () => {
+  it('the incoming default derives from what completes the PRECEDING step, else empty', () => {
+    // A step after an invoice step is reached when the invoice is paid.
     expect(defaultTrigger('system', 'approve_send_invoice')).toBe('invoice.paid')
     expect(defaultTrigger('system', 'await_payment')).toBe('invoice.paid')
+    // A step after the e-signature capability is reached when the envelope completes.
     expect(defaultTrigger('system', 'invoke_capability', { capability_slug: 'esignature' })).toBe(
       'esign.completed',
     )
@@ -255,21 +258,155 @@ describe('P8 — defaultTrigger never emits a dead token', () => {
     expect(defaultTrigger('system', 'invoke_capability')).toBe('')
     expect(defaultTrigger('system', 'manual_task')).toBe('')
     expect(defaultTrigger('automatic', 'generate_document')).toBe('')
+    // A step after a review step is reached by the attorney's approval; any other
+    // attorney gate defaults to the generic Continue action.
+    expect(defaultTrigger('attorney', 'review_send_document')).toBe('draft.approve')
+    expect(defaultTrigger('attorney', 'manual_task')).toBe('legal.matter.advance')
+    expect(defaultTrigger('attorney')).toBe('legal.matter.advance')
   })
 
   it('an empty default is left OFF the saved edge, never written as ""', () => {
     const steps = graphToSteps(V5)
-    // Blank out the system-style trigger on a middle step and regate it to system:
-    // the saved edge must OMIT `on` (so the validator's missing-'on' check fires)
-    // rather than carry a dead or empty token.
+    // Regate a middle step's INCOMING edge to system with a blank trigger, where the
+    // preceding step (generate_document) yields no default: the saved edge must OMIT
+    // `on` (so the validator's missing-'on' check fires) rather than carry a dead or
+    // empty token.
     const edited = steps.map((s) =>
-      s.key === 'generate_will' ? { ...s, gate: 'system' as WfGate, trigger: '' } : s,
+      s.key === 'review_send_will' ? { ...s, gate: 'system' as WfGate, trigger: '' } : s,
     )
     const out = stepsToGraph(edited)
     const edge = out.find((s) => s.key === 'generate_will')!.advances_to[0]
+    expect(edge.to).toBe('review_send_will')
     expect(edge.on).toBeUndefined()
     expect(edge.via).toBeUndefined()
     expect(valid(out).ok).toBe(false)
+  })
+})
+
+describe('P12 — reorder is an edge re-thread: (gate, trigger) travels with its TARGET step', () => {
+  it("swapping two middle steps keeps each step's INCOMING trigger and re-points `to`", () => {
+    const steps = graphToSteps(V5)
+    // move() is a pure adjacent swap; swap generate_will ↔ review_send_will.
+    const swapped = [steps[0], steps[2], steps[1], steps[3], steps[4]]
+    const out = stepsToGraph(swapped)
+    expect(valid(out).errors).toEqual([])
+    // review_send_will is still reached on document.generated (its pair moved with it)…
+    expect(out[0].advances_to[0]).toEqual({
+      to: 'review_send_will',
+      gate: 'automatic',
+      on: 'document.generated',
+    })
+    // …and generate_will is still reached via the client's upload.
+    expect(out[1].advances_to[0]).toEqual({
+      to: 'generate_will',
+      gate: 'client',
+      via: 'document.upload',
+    })
+    // The rest of the chain keeps its incoming pairs, `to` re-pointed by position.
+    expect(out[2].advances_to[0]).toEqual({
+      to: 'client_response',
+      gate: 'attorney',
+      via: 'draft.approve',
+    })
+    expect(out[3].advances_to[0]).toEqual({
+      to: 'complete',
+      gate: 'client',
+      via: 'client.message.post',
+    })
+  })
+
+  it('a step moved to LAST keeps its (gate, trigger) — nothing is silently dropped', () => {
+    const steps = graphToSteps(V5)
+    // Move client_response to the end (complete slides up). Under the old
+    // source-anchoring this dropped client_response's pair entirely (a terminal
+    // writes no outgoing edge) and invented a default for the former terminal.
+    const moved = [steps[0], steps[1], steps[2], steps[4], steps[3]]
+    const out = stepsToGraph(moved)
+    expect(valid(out).errors).toEqual([])
+    // complete is reached exactly as before…
+    expect(out[2].advances_to[0]).toEqual({
+      to: 'complete',
+      gate: 'client',
+      via: 'client.message.post',
+    })
+    // …and client_response KEEPS its attorney/draft.approve pair as the incoming
+    // edge of the new terminal.
+    expect(out[3].advances_to[0]).toEqual({
+      to: 'client_response',
+      gate: 'attorney',
+      via: 'draft.approve',
+    })
+    expect(out[4].key).toBe('client_response')
+    expect(out[4].terminal).toBe(true)
+    expect(out[4].advances_to).toEqual([])
+  })
+
+  it('an unreachable stage appends defensively with a sane default pair and saves valid', () => {
+    const withOrphan: WfLifecycle = [
+      ...V5,
+      // Not referenced by any edge — the load walk can't reach it.
+      {
+        key: 'paralegal_check',
+        label: 'Paralegal check',
+        action: { kind: 'manual_task' },
+        advances_to: [],
+      },
+    ]
+    const steps = graphToSteps(withOrphan)
+    expect(steps).toHaveLength(6)
+    const orphan = steps[5]
+    expect(orphan.key).toBe('paralegal_check')
+    expect(orphan.gate).toBe('attorney')
+    expect(orphan.trigger).toBe('')
+    const out = stepsToGraph(steps)
+    // The former terminal now advances into the appended stage via the attorney
+    // default (a REAL token, preceding complete_matter yields the generic advance).
+    expect(out[4].advances_to[0]).toEqual({
+      to: 'paralegal_check',
+      gate: 'attorney',
+      via: 'legal.matter.advance',
+    })
+    expect(out[5].terminal).toBe(true)
+    expect(valid(out).errors).toEqual([])
+  })
+
+  it('a system step AFTER an e-signature capability defaults its incoming `on` to esign.completed', () => {
+    const steps = graphToSteps(V5).map((s) => {
+      if (s.key === 'client_response')
+        return { ...s, config: { capability_slug: 'esignature', capability_config: {} } }
+      if (s.key === 'complete') return { ...s, gate: 'system' as WfGate, trigger: '' }
+      return s
+    })
+    const out = stepsToGraph(steps)
+    expect(out.find((s) => s.key === 'client_response')!.advances_to[0]).toEqual({
+      to: 'complete',
+      gate: 'system',
+      on: 'esign.completed',
+    })
+    expect(valid(out).errors).toEqual([])
+  })
+
+  it('the save guard rejects the legacy dead tokens the model faithfully preserved', () => {
+    // Mirrors the legal.service.set_lifecycle handler's new vocabulary check: the
+    // builder never rewrites an off-vocabulary trigger (see the P8 LEGACY test), but
+    // saving one is now rejected with an actionable, per-edge message.
+    const rt = stepsToGraph(graphToSteps(LEGACY))
+    const errors = rt.flatMap((s) =>
+      s.advances_to.flatMap((e) => {
+        const msg = diagnoseEdgeTransition(
+          s.key,
+          e.to,
+          e.gate as Parameters<typeof diagnoseEdgeTransition>[2],
+          e.via,
+          e.on,
+        )
+        return msg ? [msg] : []
+      }),
+    )
+    expect(errors).toHaveLength(2)
+    expect(errors[0]).toContain('"client.submits.paperwork"')
+    expect(errors[1]).toContain('"event"')
+    expect(errors[1]).toContain('not a real advance token')
   })
 })
 

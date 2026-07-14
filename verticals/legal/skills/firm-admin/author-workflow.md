@@ -33,7 +33,7 @@ Use ONLY these step-action kinds (the closed `STEP_ACTION_KINDS` catalog). Each 
 |---|---|---|---|
 | `view_intake` | client fills the intake questionnaire; attorney reads answers | `client` | yes |
 | `view_consultation` | shows the consultation (Granola) summary; informational | `attorney` | no |
-| `invoke_capability` | runs a registered platform capability as a step — **drafting is authored this way** (the `document_generation` capability), as are AI review (`ai_document_review`), client materials (`request_client_materials`), the portal-account invite (`send_portal_invite` — parks at the client gate until the client creates their account; skipped honestly when one exists), e-signature (`esignature`), client emails (`email_generation`), and transcript extraction (`transcript_extraction`) | the capability's `default_gate` | yes |
+| `invoke_capability` | runs a registered platform capability as a step — **drafting is authored this way** (the `document_generation` capability), as are AI review (`ai_document_review`), client materials (`request_client_materials`), the portal-account invite (`send_portal_invite` — parks at the client gate until the client creates their account; skipped honestly when one exists), e-signature (`esignature`), and client emails (`email_generation`) | the capability's `default_gate` | yes |
 | `review_send_document` | attorney reviews → approves → sends the document to the client | `attorney` | yes |
 | `approve_send_invoice` | attorney approves the invoice; it auto-sends to the client | `attorney` | yes |
 | `await_payment` | holds the matter until the invoice is marked paid | `system` | yes |
@@ -81,10 +81,10 @@ An e-signature step is an `invoke_capability` stage running the `esignature` cap
 - If the attorney wants a signature on a document whose template does not declare it, fix the TEMPLATE first (`signature: { required: true, signer_roles: ['client', ...] }`), then compose the step.
 - If the matter produces several documents, pin which one with `capability_config.document_kind`.
 
-## Step 5a-bis: Email and transcript-extraction steps — the comms blocks
+## Step 5a-bis: Email steps — the comms block
 
 - **Client email** — an `invoke_capability` stage running the `email_generation` capability: the machine drafts the email from the matter facts, the client's FULL history (including archived matters), and the attorney's `capability_config.purpose` (what the email should say); the draft lands in the review queue and **approving it is what sends it** — so the stage's edge is gate `attorney`, advancing `via: draft.approve`. Optional config: `mode: 'template'` + `template_entity_id` (exact firm-library id) for a deterministic canned send; `recipient_role` defaults to `client`. Compose it wherever a service should TELL the client something (documents ready, what happens next, a request explained). Nothing reaches the client unapproved.
-- **Transcript extraction** — an `invoke_capability` stage running the `transcript_extraction` capability: distills the matter's consultation transcript into notes (a summary + extracted facts/action items) that feed the client's assembled memory. Extracted facts are AI output, so the stage parks at the `attorney` gate — the attorney reviews the notes and advances `via: legal.matter.advance`. Optional `capability_config.instructions` focuses the extraction. Compose it right after a consultation step.
+- **Transcript extraction is NOT a step — never compose one.** Consultations are captured into the matter AUTOMATICALLY: when a transcript arrives (recorded, imported, or pasted), the platform runs the extraction on its own and the notes (a summary + extracted facts/action items, AI output for attorney review) land on the matter, feeding the client's assembled memory. NEVER compose a `transcript_extraction` stage and NEVER ask the attorney whether a consultation should be captured — capture is an effect of the transcript arriving, not a workflow step.
 
 ## Step 5b: Declare billing and completion — every workflow states both
 

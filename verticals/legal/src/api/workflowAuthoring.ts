@@ -137,8 +137,17 @@ export async function loadWorkflowAuthoringContext(
   }))
   // ADR 0046 — the runnable capabilities (available + step_invocable), summarized for
   // the builder: what each does, who provides each input, and the config to capture.
+  // P11 — `authorable: false` hides a capability from NEW authoring only (e.g.
+  // transcript_extraction, which now fires automatically on transcript arrival).
+  // Deliberately NOT enforced in validateProposedLifecycle: existing graphs that
+  // already carry such a stage must keep validating and running.
   const invocableCapabilities: InvocableCapabilitySummary[] = (await listCapabilities(ctx))
-    .filter((c) => c.status === 'available' && c.spec.step_invocable === true)
+    .filter(
+      (c) =>
+        c.status === 'available' &&
+        c.spec.step_invocable === true &&
+        (c.spec as { authorable?: boolean }).authorable !== false,
+    )
     .map((c) => {
       const inputsByProvidedBy: Record<string, string[]> = {}
       for (const inp of c.spec.inputs ?? []) {
@@ -326,8 +335,11 @@ export async function validateProposedLifecycle(
   }
 
   // WORKFLOW-AUTHORING-1 — every attorney/client/system edge must name a REAL advance
-  // token (the runtime matches on it verbatim), not prose. Authoring-only (not in
-  // validateLifecycle) so legacy/manual graphs with other tokens are never rejected.
+  // token (the runtime matches on it verbatim), not prose. Not part of structural
+  // validateLifecycle; since BUILDER-UX-3 P12 the manual save handler
+  // (legal.service.set_lifecycle) runs the same diagnoseEdgeTransition check, so
+  // dead tokens are rejected on BOTH the authoring and manual paths — the editor's
+  // trigger select carries legacy off-vocabulary values losslessly until edited.
   for (const s of graph) {
     for (const e of s.advances_to) {
       const err = diagnoseEdgeTransition(s.key, e.to, e.gate, e.via, e.on)

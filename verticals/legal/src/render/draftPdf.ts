@@ -91,6 +91,32 @@ const styles = StyleSheet.create({
   strong: { fontFamily: 'Helvetica-Bold' },
   em: { fontFamily: 'Helvetica-Oblique' },
   codespan: { fontFamily: 'Courier', fontSize: 10, color: '#374151' },
+  // P13 — draft watermark (render state, never template text): a diagonal stamp
+  // repeated on every page (fixed) plus a bordered banner line at the top.
+  wmOverlay: {
+    position: 'absolute',
+    top: 320,
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    transform: 'rotate(-24deg)',
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 34,
+    color: '#b45309',
+    opacity: 0.12,
+  },
+  wmBanner: {
+    textAlign: 'center',
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 9,
+    letterSpacing: 1.5,
+    color: '#b45309',
+    borderWidth: 1,
+    borderColor: '#b45309',
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    marginBottom: 14,
+  },
 })
 
 const HEADING_STYLE = [styles.h1, styles.h2, styles.h3, styles.h4, styles.h5, styles.h6]
@@ -219,7 +245,20 @@ function renderBlock(token: Token, key: string): React.ReactNode {
 // covers any real legal draft.
 const MAX_DRAFT_MARKDOWN_BYTES = 1_000_000
 
-export async function renderDraftPdf(markdown: string, opts?: { title?: string }): Promise<Buffer> {
+// P13 — watermark as RENDER STATE (never text baked into a template/draft body).
+// The status→watermark rule for server-rendered PDFs; the client-side exports
+// (apps/legal-demo/lib/draftExport.ts) apply the same rule for print/Word.
+export const DRAFT_WATERMARK_TEXT = 'DRAFT — pending attorney approval'
+
+export function draftWatermarkText(status: string | null | undefined): string | null {
+  if (!status) return null
+  return status === 'approved' || status === 'executed' ? null : DRAFT_WATERMARK_TEXT
+}
+
+export async function renderDraftPdf(
+  markdown: string,
+  opts?: { title?: string; watermark?: string | null },
+): Promise<Buffer> {
   const md = markdown ?? ''
   if (md.length > MAX_DRAFT_MARKDOWN_BYTES) {
     throw new Error('Draft is too large to render as a PDF attachment.')
@@ -228,13 +267,24 @@ export async function renderDraftPdf(markdown: string, opts?: { title?: string }
 
   const body = tokens.map((tok, i) => renderBlock(tok, `b-${i}`)).filter(Boolean)
 
+  const watermark = opts?.watermark?.trim() || null
   const title = opts?.title?.trim()
-  const head = title
-    ? [
-        h(Text, { key: 'title', style: styles.title }, title),
-        h(View, { key: 'titleRule', style: styles.titleRule }),
-      ]
-    : []
+  const head = [
+    // The diagonal stamp renders FIRST (content draws over it) and `fixed`
+    // repeats it on every page of a long draft.
+    ...(watermark
+      ? [
+          h(Text, { key: 'wm', fixed: true, style: styles.wmOverlay }, watermark),
+          h(Text, { key: 'wmBanner', style: styles.wmBanner }, watermark.toUpperCase()),
+        ]
+      : []),
+    ...(title
+      ? [
+          h(Text, { key: 'title', style: styles.title }, title),
+          h(View, { key: 'titleRule', style: styles.titleRule }),
+        ]
+      : []),
+  ]
 
   const doc = h(
     Document,
