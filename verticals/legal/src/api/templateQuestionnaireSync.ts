@@ -14,29 +14,19 @@ import {
 } from '../queries/questionnaireLibrary.js'
 import { setQuestionnaireTemplates } from './questionnaireLibrary.js'
 import { enqueueConfigRegenerate } from './configRegenerate.js'
+// P13 — the shared token classification (was a local set here; now the one
+// module every consumer reads, pinned to MERGE_SLOT_FIELDS by test).
+import { isSystemToken } from './tokenClasses.js'
 
 const TOKEN_RE = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
 
-// Standard merge tokens filled by the system/matter, never by a questionnaire —
+// System tokens are filled by the platform/matter, never by a questionnaire —
 // their absence from a questionnaire is not a gap.
-const SYSTEM_TOKENS = new Set([
-  'client_name',
-  'client_email',
-  'client_address',
-  'matter_number',
-  'firm_name',
-  'attorney_name',
-  'effective_date',
-  'today',
-  'signature',
-  'citation',
-])
-
 export function templateTokens(body: string): string[] {
   const seen = new Set<string>()
   for (const m of body.matchAll(TOKEN_RE)) {
     const t = m[1]?.toLowerCase()
-    if (t && !SYSTEM_TOKENS.has(t)) seen.add(t)
+    if (t && !isSystemToken(t)) seen.add(t)
   }
   return [...seen]
 }

@@ -30,7 +30,7 @@ import {
   type UploadedDocItem,
 } from './documentUpload.js'
 import { assertCanSendOnMatter } from './matterAccess.js'
-import { renderDraftPdf } from '../render/draftPdf.js'
+import { renderDraftPdf, draftWatermarkText } from '../render/draftPdf.js'
 
 export interface AttachmentRef {
   kind: 'draft' | 'upload'
@@ -128,10 +128,14 @@ export async function resolveMatterAttachments(
         )
       }
       // renderDraftPdf caps its source markdown; name the draft if it still fails so
-      // one bad draft doesn't opaquely fail the whole send.
+      // one bad draft doesn't opaquely fail the whole send. A not-yet-approved
+      // version carries the draft watermark (P13 — render state, never body text).
       let pdf: Buffer
       try {
-        pdf = await renderDraftPdf(draft.bodyMarkdown, { title: humanizeKind(draft.documentKind) })
+        pdf = await renderDraftPdf(draft.bodyMarkdown, {
+          title: humanizeKind(draft.documentKind),
+          watermark: draftWatermarkText(draft.status),
+        })
       } catch (e) {
         throw new Error(
           `Could not render the "${humanizeKind(draft.documentKind)}" draft to PDF: ${

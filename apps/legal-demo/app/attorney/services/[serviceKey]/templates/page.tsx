@@ -23,17 +23,25 @@ import { EyeIcon } from '@/components/icons'
 import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
 
 // Standard merge tokens available in every document (filled at generation time
-// from the client/matter), so the `{{` autocomplete and chip coloring recognize
-// them even when they aren't bound to a questionnaire field.
+// from the client/matter/firm profile), so the `{{` autocomplete and chip
+// coloring recognize them even when they aren't bound to a questionnaire field.
+// Source of truth: the server's system-token set (verticals/legal/src/api/
+// tokenClasses.ts) — keep this list in step with it. client_address is
+// deliberately absent: it is CLIENT data, so a template using it correctly
+// triggers a questionnaire proposal.
 const STANDARD_TOKENS = [
   'client_name',
   'client_email',
-  'client_address',
   'matter_number',
   'firm_name',
+  'firm_address',
+  'firm_phone',
+  'firm_email',
   'attorney_name',
+  'attorney_email',
   'effective_date',
   'today',
+  'letter_date',
 ]
 
 interface ServiceDefinition {

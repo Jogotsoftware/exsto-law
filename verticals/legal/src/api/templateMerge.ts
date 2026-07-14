@@ -69,6 +69,14 @@ export interface MergeDataOptions {
   // were offered by the editors long before they merged, so they must fill.
   firmName?: string
   attorneyName?: string
+  // P13 — the rest of the firm/attorney identity block. Absent → honest MISSING
+  // at merge; the approve-time resolver (api/reviewDraft.ts) is the safety net
+  // that fills any still-unresolved system token from the approving attorney +
+  // firm profile before the version is approved.
+  attorneyEmail?: string
+  firmEmail?: string
+  firmPhone?: string
+  firmAddress?: string
   // ISO date for {{today}} (the generation date). Defaults to effectiveDateIso —
   // today the caller passes "now" for both, but effective_date is a legal fact
   // that may diverge from the generation date, so they stay separate slots.
@@ -122,9 +130,11 @@ function firstName(fullName: string | null | undefined): string | undefined {
   return n.split(/\s+/)[0]
 }
 
-function longDate(iso: string): string {
+export function longDate(iso: string): string {
   // Deterministic long-form date (e.g. "June 18, 2026"), locale-fixed so the
   // same matter always renders the same string regardless of server locale.
+  // Exported so the approve-time system-token resolver (api/reviewDraft.ts)
+  // stamps letter_date/today with the exact format the merge engine uses.
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleDateString('en-US', {
@@ -152,8 +162,16 @@ export function buildMergeData(
 ): Record<string, string | undefined> {
   const q = matter.questionnaireResponses ?? {}
   const companyName = pick(q, ['company_name', 'proposed_company_name', 'llc_name'])
-  const clientName =
-    matter.clientName?.trim() || pick(q, ['primary_client_name', 'client_name', 'member_name'])
+  const clientNameAnswer = pick(q, ['primary_client_name', 'client_name', 'member_name'])
+  const clientName = matter.clientName?.trim() || clientNameAnswer
+  // Answer-wins slots — client_name and letter_date ONLY: when the questionnaire
+  // actually collected the value (under the slot id itself or a pick alias), that
+  // answer fills the token and the platform-derived value is only the fallback —
+  // a "full legal name" field or an internal letter_date field the attorney
+  // designed must not be silently ignored. Identity slots (attorney_*, firm_*)
+  // stay curated-wins. letter_date answers pass through longDate, which formats
+  // a parseable date and returns anything else verbatim.
+  const letterDateAnswer = pick(q, ['letter_date'])
 
   // Curated/derived slots — matter facts, fee block, deterministic clauses.
   const curated: Record<string, string | undefined> = {
@@ -161,16 +179,30 @@ export function buildMergeData(
     company_name: companyName,
     matter_number: matter.matterNumber,
     primary_client_name: clientName,
+    // {{client_name}} is the same fact under the older token name templates
+    // commonly use (the sync path has always classed it system-resolved). A
+    // questionnaire answer wins here (see answer-wins note above).
+    client_name: clientNameAnswer ?? clientName,
     primary_client_salutation: firstName(clientName) ?? clientName,
     client_email: matter.clientEmail ?? undefined,
     effective_date: longDate(options.effectiveDateIso),
     today: longDate(options.todayIso ?? options.effectiveDateIso),
+    // {{letter_date}} = the generation date at merge time — unless the intake
+    // collected one (answer-wins, above); if the token is still unresolved at
+    // approval, the approve-time resolver re-stamps it with the approval date.
+    letter_date: letterDateAnswer
+      ? longDate(letterDateAnswer)
+      : longDate(options.todayIso ?? options.effectiveDateIso),
     business_description: pick(q, ['business_description', 'business_purpose']),
 
     // Firm identity (tenant settings) — undefined when the firm hasn't set them,
     // which renders an honest MISSING rather than a guessed name.
     firm_name: options.firmName,
     attorney_name: options.attorneyName,
+    attorney_email: options.attorneyEmail,
+    firm_email: options.firmEmail,
+    firm_phone: options.firmPhone,
+    firm_address: options.firmAddress,
 
     // Fee block (from service cost config when available)
     fee_amount_formatted: options.feeAmountFormatted,
@@ -203,13 +235,19 @@ export const MERGE_SLOT_FIELDS: readonly string[] = [
   'company_name',
   'matter_number',
   'primary_client_name',
+  'client_name',
   'primary_client_salutation',
   'client_email',
   'effective_date',
   'today',
+  'letter_date',
   'business_description',
   'firm_name',
   'attorney_name',
+  'attorney_email',
+  'firm_email',
+  'firm_phone',
+  'firm_address',
   'fee_amount_formatted',
   'fee_structure_human',
   'scope_notes_clause',

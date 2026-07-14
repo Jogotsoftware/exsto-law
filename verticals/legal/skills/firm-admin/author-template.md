@@ -30,6 +30,8 @@ Do NOT draft from generic memory. LOAD the firm's matching legal-domain skill fo
 
 Use the loaded skill for the real provisions, the right statutory hooks, and the jurisdiction-specific formalities — so the result is something the attorney would actually send, defaulted to NC + federal. All of the accuracy and citation discipline still applies: never invent a statute number, code section, or case cite; name the governing law generally and flag it for verification when you are not certain of the exact section. A confident wrong citation is worse than none.
 
+**Do NOT copy a legal skill's draft banners or bracket filler into the template body.** Lines like "[DRAFT — FOR ATTORNEY REVIEW]" and placeholders like "[X — TO INSERT]" are RENDER STATE: the platform stamps a draft watermark on every not-yet-approved version and renders unresolved values as visible markers, keyed off the document's status. A template body contains only the document's real text and its `{{tokens}}` — a value you cannot bind stays a `{{token}}`, never bracketed filler.
+
 The document is a **deliverable**, not chat prose. Draft the COMPLETE document.
 
 ## Step 2: Write the merge fields as {{tokens}}

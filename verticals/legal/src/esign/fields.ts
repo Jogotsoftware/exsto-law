@@ -83,3 +83,23 @@ export function resolveExecutedMarkdown(
 export function renderTypedSignature(name: string): string {
   return `*/s/ ${name}*`
 }
+
+// A signature captured as an image (the attorney's standing drawn/uploaded
+// signature, P15): a PNG or JPEG base64 data URL. Anything else stored in
+// signature_data is treated as a typed name. Kept strict — one MIME of two,
+// base64 payload only — because this same guard validates writes.
+export const SIGNATURE_IMAGE_DATA_URL_RE = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/
+
+export function isSignatureImageDataUrl(value: string): boolean {
+  return SIGNATURE_IMAGE_DATA_URL_RE.test(value)
+}
+
+// How an image signature renders in the executed markdown: the image plus the
+// typed /s/ glyph beside it. The glyph is not decorative — the display
+// sanitizer (renderDocumentHtml) strips <img> tags entirely, so the glyph is
+// what readers see there, while the image survives in the stored markdown for
+// render pipelines that accept it.
+export function renderImageSignature(dataUrl: string, name: string): string {
+  const glyph = name.trim() ? ` ${renderTypedSignature(name)}` : ''
+  return `![Signature](${dataUrl})${glyph}`
+}

@@ -228,10 +228,18 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
               </span>
             </div>
             <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-              <button onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>
+              <button
+                onClick={() =>
+                  downloadAsPdf(draft.bodyMarkdown, fileBase, { status: draft.status })
+                }
+              >
                 Download PDF
               </button>
-              <button onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}>
+              <button
+                onClick={() =>
+                  downloadAsWord(draft.bodyMarkdown, fileBase, { status: draft.status })
+                }
+              >
                 Download Word
               </button>
               <button

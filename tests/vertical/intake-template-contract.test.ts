@@ -130,6 +130,22 @@ describe('validateProposedTemplate — orphan tokens (pure)', () => {
     expect(res.errors.length).toBeGreaterThan(0)
     expect(res.tokens).toEqual([])
   })
+
+  it('never lists SYSTEM tokens as orphans — they resolve platform-side, not via questions', () => {
+    const res = validateProposedTemplate(
+      '{{letter_date}} {{attorney_email}} {{firm_address}} {{registered_agent}}',
+      [],
+    )
+    // Still extracted as tokens (the body does reference them)…
+    expect(res.tokens).toEqual([
+      'letter_date',
+      'attorney_email',
+      'firm_address',
+      'registered_agent',
+    ])
+    // …but only the genuine client token is an orphan (would need a question).
+    expect(res.orphanTokens).toEqual(['registered_agent'])
+  })
 })
 
 describe('validateProposedTemplate — flow-aware + reuse-aware orphans (Phase 7, pure)', () => {

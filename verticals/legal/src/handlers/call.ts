@@ -1,4 +1,4 @@
-import { registerActionHandler } from '@exsto/substrate'
+import { registerActionHandler, withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import {
   getRelatedEntityIds,
@@ -227,6 +227,34 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
     await dispatchLifecycleEvent(client, ctx, p.matter_entity_id, 'transcript.received', actionId)
   }
 
+  // P11 — consultation capture is AUTOMATIC. A matched transcript with text enqueues
+  // the transcript_extraction capability POST-COMMIT (the ad-hoc path — the model call
+  // runs on the worker, never in this transaction). Hooking here covers every arrival
+  // with one seam: webhook, folder import, manual paste/upload. Unmatched transcripts
+  // go to the review queue and must NOT enqueue (no matter to extract onto). The
+  // per-TRANSCRIPT guard below is the idempotency AND cost control — each capture is
+  // a real model call, and the ad-hoc path has no (matter, stage) guard of its own.
+  if (p.matter_entity_id && p.transcript_text.trim()) {
+    const matterEntityId = p.matter_entity_id
+    const base: ActionContext = { tenantId: ctx.tenantId, actorId: ctx.actorId }
+    ctx.afterCommit?.push(async () => {
+      try {
+        if (await transcriptAlreadyExtracted(base, transcriptEntityId)) return
+        const { enqueueAdHocCapabilityJob } = await import('../api/capabilityRuntime.js')
+        await enqueueAdHocCapabilityJob(base, {
+          capabilitySlug: 'transcript_extraction',
+          matterEntityId,
+          config: { transcript_entity_id: transcriptEntityId },
+        })
+      } catch (err) {
+        console.error(
+          `[call.ingest] auto-capture enqueue failed for transcript ${transcriptEntityId} (transcript is stored; extract from the matter page):`,
+          err instanceof Error ? err.message : err,
+        )
+      }
+    })
+  }
+
   return {
     callEntityId,
     transcriptEntityId,
@@ -234,6 +262,45 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
     deduplicated: false,
   }
 })
+
+// P11 — has THIS transcript already been extracted? Keyed on the transcript ENTITY,
+// never the call id: a manual re-paste mints a new call id per paste, and the ad-hoc
+// capability path deliberately bypasses the per-(matter, stage) capability.invoked
+// guard. Two signals count as done: a transcript.extracted event referencing the
+// transcript, or (in case the event write failed after the notes landed) an
+// ai_summary note pointing at it via note_about. Exported: the enqueue above is the
+// cheap first line, but runTranscriptExtraction consults the same check at RUN time
+// (its force-aware guard), so the staged and re-paste doors share ONE definition of
+// "already extracted".
+export async function transcriptAlreadyExtracted(
+  ctx: ActionContext,
+  transcriptEntityId: string,
+): Promise<boolean> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ done: boolean }>(
+      `SELECT (
+         EXISTS (
+           SELECT 1 FROM event e
+             JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
+            WHERE e.tenant_id = $1 AND ekd.kind_name = 'transcript.extracted'
+              AND ($2::uuid = ANY(e.secondary_entity_ids)
+                   OR e.payload->>'transcript_entity_id' = $2::text)
+         ) OR EXISTS (
+           SELECT 1 FROM relationship r
+             JOIN relationship_kind_definition rkd
+                  ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'note_about'
+             JOIN attribute a ON a.tenant_id = r.tenant_id AND a.entity_id = r.source_entity_id
+             JOIN attribute_kind_definition akd
+                  ON akd.id = a.attribute_kind_id AND akd.kind_name = 'note_source'
+            WHERE r.tenant_id = $1 AND r.target_entity_id = $2::uuid
+              AND a.value #>> '{}' = 'ai_summary'
+         )
+       ) AS done`,
+      [ctx.tenantId, transcriptEntityId],
+    )
+    return res.rows[0]?.done === true
+  })
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 // legal.call.assign — route a call from the review queue to a matter (beta

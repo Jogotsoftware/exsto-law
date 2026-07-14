@@ -84,15 +84,23 @@ const EMPTY_DRAFT: Draft = {
 
 // Standard merge fields offered in every template, click-to-insert. Authors can
 // also type any {{token}} by hand; tokens already in the body are surfaced too.
+// Source of truth: the server's system-token set (verticals/legal/src/api/
+// tokenClasses.ts) — keep this list in step with it. client_address is
+// deliberately absent: it is CLIENT data, so a template using it correctly
+// triggers a questionnaire proposal.
 const STANDARD_TOKENS: { id: string; label: string }[] = [
   { id: 'client_name', label: 'Client name' },
   { id: 'client_email', label: 'Client email' },
-  { id: 'client_address', label: 'Client address' },
   { id: 'matter_number', label: 'Matter number' },
   { id: 'firm_name', label: 'Firm name' },
+  { id: 'firm_address', label: 'Firm address' },
+  { id: 'firm_phone', label: 'Firm phone' },
+  { id: 'firm_email', label: 'Firm email' },
   { id: 'attorney_name', label: 'Attorney name' },
+  { id: 'attorney_email', label: 'Attorney email' },
   { id: 'effective_date', label: 'Effective date' },
   { id: 'today', label: "Today's date" },
+  { id: 'letter_date', label: 'Letter date' },
 ]
 
 // The font-scale options offered in the Font size select. loadPageSetup whitelists

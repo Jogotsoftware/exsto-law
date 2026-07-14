@@ -42,10 +42,10 @@ export default function PortalSignPage({ params }: { params: Promise<{ requestId
     <div className="page">
       <SignDocument
         doc={doc}
-        onSign={async ({ signatureName, fieldValues, consent }) => {
+        onSign={async ({ signatureName, signatureData, fieldValues, consent }) => {
           const r = await callClientPortalMcp<{ completed: boolean }>({
             toolName: 'legal.esign.portal.sign',
-            input: { requestId, signatureName, fieldValues, consent },
+            input: { requestId, signatureName, signatureData, fieldValues, consent },
           })
           return { completed: Boolean(r.completed) }
         }}

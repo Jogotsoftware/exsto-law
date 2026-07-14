@@ -15,8 +15,8 @@ import { callClaudeDrafter, type ClaudeDraftResult } from '../adapters/claude.js
 import { loadTranscriptExtractionPrompt } from '../templates/loader.js'
 import { getMatter } from '../queries/matters.js'
 import { createNote } from './notes.js'
-
-const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
+import { resolveTenantSystemActorId } from './capabilityRuntime.js'
+import { transcriptAlreadyExtracted } from '../handlers/call.js'
 
 export interface RunTranscriptExtractionInput {
   matterEntityId: string
@@ -25,6 +25,11 @@ export interface RunTranscriptExtractionInput {
   transcriptEntityId?: string
   // Optional attorney focus ("pull out everything about the lease terms").
   instructions?: string
+  // Re-run an already-extracted transcript. Only the attorney's explicit
+  // re-extract button passes it (legal.transcript.extract); the auto-capture and
+  // staged doors leave it unset, so a transcript is extracted at most once no
+  // matter how many doors it arrives through.
+  force?: boolean
 }
 
 export interface TranscriptExtractionResult {
@@ -33,6 +38,9 @@ export interface TranscriptExtractionResult {
   extractedNoteIds: string[]
   factCount: number
   actionItemCount: number
+  // True when the run no-opped because the transcript was already extracted (and
+  // force was not set) — no model call, no notes written, the count fields are 0.
+  skipped?: boolean
 }
 
 // Pure parser for the output contract (exported for tests): summary markdown,
@@ -112,7 +120,10 @@ export async function runTranscriptExtraction(
   ctx: ActionContext,
   input: RunTranscriptExtractionInput,
 ): Promise<TranscriptExtractionResult> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  // THIS tenant's agent/system actor (RUNTIME-AUTORUN-2 class of fix): a hardcoded
+  // tenant-zero agent id would write a second firm's notes/events as the wrong actor.
+  const agentActorId = await resolveTenantSystemActorId(ctx)
+  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: agentActorId }
 
   const matter = await getMatter(agentCtx, input.matterEntityId)
   if (!matter) throw new Error(`Matter not found: ${input.matterEntityId}`)
@@ -126,6 +137,21 @@ export async function runTranscriptExtraction(
     throw new Error(
       'No transcript with text found on this matter — record or import a consultation transcript first.',
     )
+  }
+  // Force-aware RUN-time guard (the enqueue-time check in call.ingest is only the
+  // cheap first line): every door — auto-capture, a composed workflow stage, the
+  // ad-hoc tool — passes through here, so an already-extracted transcript is a
+  // deliberate no-op (each extraction is a real model call and duplicate notes
+  // poison client memory) unless the attorney explicitly forces a re-run.
+  if (!input.force && (await transcriptAlreadyExtracted(agentCtx, transcript.transcriptEntityId))) {
+    return {
+      transcriptEntityId: transcript.transcriptEntityId,
+      summaryNoteId: '',
+      extractedNoteIds: [],
+      factCount: 0,
+      actionItemCount: 0,
+      skipped: true,
+    }
   }
   let transcriptText = transcript.transcriptText
   if (transcriptText.length > MAX_TRANSCRIPT_CHARS) {
@@ -204,7 +230,7 @@ export async function runTranscriptExtraction(
         reasoning_trace_id: reasoningTraceId,
       },
       source_type: 'agent',
-      source_ref: CLAUDE_AGENT_ACTOR_ID,
+      source_ref: agentActorId,
     },
   })
 
@@ -231,7 +257,9 @@ async function persistExtractionTrace(
       [
         id,
         ctx.tenantId,
-        CLAUDE_AGENT_ACTOR_ID,
+        // The agent context's actor — persistExtractionTrace is only called with
+        // agentCtx, so this is the tenant's resolved agent/system actor.
+        ctx.actorId,
         args.prompt,
         JSON.stringify(args.result.reasoningTrace.evidence ?? []),
         JSON.stringify(args.result.reasoningTrace.alternatives_considered ?? []),
