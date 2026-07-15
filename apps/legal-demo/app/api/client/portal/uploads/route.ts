@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import '@exsto/legal/mcp'
 import {
   listClientUploadedDocuments,
-  getClientUploadedDocumentObject,
+  listClientUploadObjectKeys,
   isClientContactActive,
 } from '@exsto/legal'
 import { readClientSessionFromCookieHeader } from '@/lib/clientSession'
@@ -34,15 +34,18 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   const ctx = { tenantId, actorId: clientActorId }
-  const docs = await listClientUploadedDocuments(ctx, clientContactId)
+  // Constant DB cost: the metadata list + a single object-key lookup (both scoped
+  // to this client's own matters). Availability is then a pure Storage check per
+  // key — the pg pool is never fanned out per document. object_key stays server-
+  // side; the browser only ever sees the `available` boolean.
+  const [docs, keyMap] = await Promise.all([
+    listClientUploadedDocuments(ctx, clientContactId),
+    listClientUploadObjectKeys(ctx, clientContactId),
+  ])
   const documents = await Promise.all(
     docs.map(async (d) => {
-      const obj = await getClientUploadedDocumentObject(
-        ctx,
-        clientContactId,
-        d.documentVersionId,
-      ).catch(() => null)
-      const available = obj ? await objectExists(obj.objectKey) : false
+      const key = keyMap.get(d.documentVersionId)
+      const available = key ? await objectExists(key) : false
       return { ...d, available }
     }),
   )

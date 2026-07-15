@@ -192,3 +192,35 @@ export async function getClientUploadedDocumentObject(
     }
   })
 }
+
+// S1 — SERVER-ONLY: documentVersionId → recorded object_key for every one of THIS
+// client's uploads, in a single round-trip. The app-layer availability check
+// consumes this to compute an `available` boolean per upload; the object key must
+// never be sent to the browser. Batching here keeps the availability route at a
+// constant DB cost instead of re-resolving per document.
+export async function listClientUploadObjectKeys(
+  ctx: ActionContext,
+  clientContactId: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const matterIds = await resolveClientMatterIds(ctx.tenantId, clientContactId)
+  if (matterIds.length === 0) return out
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ version_id: string; object_key: string | null }>(
+      `SELECT dv.id AS version_id, dv.metadata->>'object_key' AS object_key
+         FROM document_version dv
+         JOIN relationship r ON r.source_entity_id = dv.document_entity_id
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+        WHERE dv.tenant_id = $1
+          AND rkd.kind_name = 'document_of'
+          AND r.target_entity_id = ANY($2::uuid[])
+          AND dv.metadata->>'document_source' = 'client_uploaded'
+          AND (r.valid_to IS NULL OR r.valid_to > now())`,
+      [ctx.tenantId, matterIds],
+    )
+    for (const row of res.rows) {
+      if (row.object_key) out.set(row.version_id, row.object_key)
+    }
+    return out
+  })
+}
