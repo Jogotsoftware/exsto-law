@@ -114,6 +114,25 @@ export async function listIntakeStagingObjects(
     }))
 }
 
+// S1: does the recorded object actually exist in the bucket? Some document
+// entities carry a recorded object_key whose bytes were never uploaded (e.g.
+// seeded fixtures) — the portal must surface those as "no longer available"
+// instead of a dead View/Download. Returns false on any error (fail-closed).
+export async function objectExists(objectKey: string): Promise<boolean> {
+  const slash = objectKey.lastIndexOf('/')
+  const dir = slash >= 0 ? objectKey.slice(0, slash) : ''
+  const name = slash >= 0 ? objectKey.slice(slash + 1) : objectKey
+  try {
+    const { data, error } = await storageClient()
+      .storage.from(DOCUMENTS_BUCKET)
+      .list(dir, { limit: 100, search: name })
+    if (error || !data) return false
+    return data.some((o) => o.name === name)
+  } catch {
+    return false
+  }
+}
+
 // Server-side fetch of the bytes for the proxy-stream download. No signed URL is
 // ever issued to the browser.
 export async function downloadObject(objectKey: string): Promise<Buffer> {
