@@ -24,8 +24,31 @@ import { getGoogleStatus } from './google.js'
 
 // The public-intake SYSTEM actor (ADR 0035): every public write is attributed to it,
 // never an authenticated human. Client identity lives in the created contact row.
-const PUBLIC_INTAKE_ACTOR =
+// Resolve the RESOLVED firm's OWN system actor per booking: a single global const
+// (tenant zero's …0005) FK-fails booking.create/client.create for ANY other tenant,
+// whose …0005 does not exist. Falls back to the historical env/const so tenant-zero
+// behavior is unchanged.
+const PUBLIC_INTAKE_ACTOR_FALLBACK =
   process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
+
+// The tenant's own public-intake actor: the historical …0005 when it exists in this
+// tenant (tenant zero), else the tenant's system/agent actor. Uses withAppRole (no
+// tenant ctx yet, mirroring resolvePublicFirm) so the lookup runs before any tenant
+// context is set.
+async function resolvePublicIntakeActor(tenantId: string): Promise<string> {
+  return withAppRole(async (client) => {
+    const res = await client.query<{ id: string }>(
+      `SELECT id FROM actor
+        WHERE tenant_id = $1 AND status = 'active'
+          AND (id = $2 OR actor_type IN ('system', 'agent'))
+        ORDER BY (id = $2) DESC,
+                 CASE actor_type WHEN 'system' THEN 0 ELSE 1 END, created_at
+        LIMIT 1`,
+      [tenantId, PUBLIC_INTAKE_ACTOR_FALLBACK],
+    )
+    return res.rows[0]?.id ?? PUBLIC_INTAKE_ACTOR_FALLBACK
+  })
+}
 
 const MAX_DAYS_OUT = 60
 
@@ -82,9 +105,9 @@ export interface PublicAvailability {
   configured: boolean
 }
 
-// Firm ctx for a resolved public booking (always the public-intake actor).
-function firmCtx(tenantId: string): ActionContext {
-  return { tenantId, actorId: PUBLIC_INTAKE_ACTOR }
+// Firm ctx for a resolved public booking (the tenant's own public-intake system actor).
+async function firmCtx(tenantId: string): Promise<ActionContext> {
+  return { tenantId, actorId: await resolvePublicIntakeActor(tenantId) }
 }
 
 // Pick the duration to compute against: the requested one IF the firm offers it,
@@ -101,7 +124,7 @@ export async function getPublicAvailability(
 ): Promise<PublicAvailability | null> {
   const firm = await resolvePublicFirm(slug)
   if (!firm) return null
-  const ctx = firmCtx(firm.tenantId)
+  const ctx = await firmCtx(firm.tenantId)
   const rules = await getFirmBookingRules(ctx)
   const durationMinutes = pickDuration(rules, opts.durationMinutes)
   const daysOut = Math.min(MAX_DAYS_OUT, Math.max(1, opts.daysOut ?? 21))
@@ -220,7 +243,7 @@ export interface PublicBookingResult {
 export async function submitPublicBooking(input: PublicBookingInput): Promise<PublicBookingResult> {
   const firm = await resolvePublicFirm(input.slug)
   if (!firm) throw new Error('This booking link is not valid.')
-  const ctx = firmCtx(firm.tenantId)
+  const ctx = await firmCtx(firm.tenantId)
 
   const name = (input.clientName ?? '').trim()
   const email = (input.clientEmail ?? '').trim()
