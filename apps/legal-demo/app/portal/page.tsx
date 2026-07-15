@@ -25,6 +25,7 @@ interface MatterListItem {
   matterNumber: string
   statusKey: string
   statusLabel: string
+  statusChip: 'in_progress' | 'completed'
   serviceLabel: string | null
   openedAt: string
   archived: boolean
@@ -38,6 +39,7 @@ interface Timeline {
   matterNumber: string
   statusKey: string
   statusLabel: string
+  statusChip: 'in_progress' | 'completed'
   serviceLabel?: string | null
   scheduledAt: string | null
   canManageEvent: boolean
@@ -69,6 +71,8 @@ interface UploadedDocument {
   matterEntityId: string
   matterNumber: string
   uploadedAt: string
+  /** S1: false when the recorded object no longer resolves to bytes in storage. */
+  available: boolean
 }
 interface PortalMessage {
   author: 'client' | 'attorney'
@@ -154,6 +158,7 @@ interface NotificationItem {
   occurredAt: string
   matterEntityId: string | null
   matterNumber: string | null
+  matterLabel: string | null
   ref: string | null
   unread: boolean
 }
@@ -532,30 +537,29 @@ function HomeView({
                 >
                   <span className="cph-matter-main">
                     <span className="cph-matter-title">
-                      {m.serviceLabel ?? m.matterNumber}
-                      {m.archived && (
-                        <span
-                          className="pdash-badge-sm pdash-badge-muted"
-                          style={{ marginLeft: 8 }}
-                        >
-                          {t('portal.matters.archived')}
-                        </span>
-                      )}
+                      {m.serviceLabel ?? t('portal.matter.generic')}
                     </span>
                     <span className="cph-matter-meta">
                       {formatOpened(m.openedAt)} · {m.matterNumber}
                     </span>
                   </span>
+                  {/* S2: exactly ONE status chip, driven by live entity status
+                      (statusChip). The old build rendered this pill from the
+                      workflow stage AND a separate "Closed" badge — an archived
+                      matter showed "In progress" next to "Closed". Active matters
+                      keep the signature/consultation accent; completed is neutral. */}
                   <span
                     className={`cph-chip ${
-                      signatureMatters.has(m.matterNumber)
-                        ? 'cph-chip-warn'
-                        : consultationMatters.has(m.matterNumber)
-                          ? 'cph-chip-ok'
-                          : ''
+                      m.statusChip === 'completed'
+                        ? ''
+                        : signatureMatters.has(m.matterNumber)
+                          ? 'cph-chip-warn'
+                          : consultationMatters.has(m.matterNumber)
+                            ? 'cph-chip-ok'
+                            : ''
                     }`}
                   >
-                    {m.statusLabel}
+                    {t(`portal.matter.status.${m.statusChip}`)}
                   </span>
                   <span className="cph-chev" aria-hidden>
                     ›
@@ -870,7 +874,8 @@ function NotificationsView({
                     {t(`portal.notif.${item.type}`, { ref: item.ref ?? '' })}
                   </span>
                   <span className="cph-notif-meta">
-                    {item.matterNumber ? `${item.matterNumber} · ` : ''}
+                    {/* S6: human matter name, never the raw M-… id. */}
+                    {item.matterLabel ? `${item.matterLabel} · ` : ''}
                     {formatDateTime(item.occurredAt)}
                   </span>
                 </span>
@@ -898,8 +903,12 @@ function DocumentsView({ matters }: { matters: MatterListItem[] }) {
   const [uploadErr, setUploadErr] = useState<string | null>(null)
 
   const loadUploads = useCallback(() => {
-    callClientPortalMcp<{ documents: UploadedDocument[] }>({ toolName: 'legal.client.uploads' })
-      .then((r) => setUploads(r.documents))
+    // S1: fetch from the app route that annotates each upload with `available`
+    // (object-existence). legal.client.uploads deliberately omits the object key,
+    // so availability is resolved server-side in the app layer, not the browser.
+    fetch('/api/client/portal/uploads', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : { documents: [] }))
+      .then((r: { documents: UploadedDocument[] }) => setUploads(r.documents))
       .catch(() => setUploads([]))
   }, [])
 
@@ -1097,24 +1106,33 @@ function DocumentsView({ matters }: { matters: MatterListItem[] }) {
                                   {formatBytes(u.sizeBytes)} · {formatDate(u.uploadedAt)}
                                 </span>
                               </div>
-                              <div style={{ display: 'flex', gap: 8 }}>
-                                {canInline && (
+                              {/* S1: only resolvable uploads get live View/Download.
+                                  An upload whose bytes no longer exist shows an
+                                  honest message instead of a dead button. */}
+                              {u.available ? (
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  {canInline && (
+                                    <a
+                                      className="pdash-btn pdash-btn-sm"
+                                      href={`/api/client/portal/documents/${u.documentVersionId}/content`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {t('portal.docs.view')}
+                                    </a>
+                                  )}
                                   <a
                                     className="pdash-btn pdash-btn-sm"
-                                    href={`/api/client/portal/documents/${u.documentVersionId}/content`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                    href={`/api/client/portal/documents/${u.documentVersionId}/content?download=1`}
                                   >
-                                    {t('portal.docs.view')}
+                                    {t('portal.docs.download')}
                                   </a>
-                                )}
-                                <a
-                                  className="pdash-btn pdash-btn-sm"
-                                  href={`/api/client/portal/documents/${u.documentVersionId}/content?download=1`}
-                                >
-                                  {t('portal.docs.download')}
-                                </a>
-                              </div>
+                                </div>
+                              ) : (
+                                <span className="text-sm text-muted">
+                                  {t('portal.docs.unavailable')}
+                                </span>
+                              )}
                             </li>
                           )
                         })}
@@ -1175,9 +1193,12 @@ function MatterView({
               <h2>
                 {matter?.serviceLabel
                   ? `${matter.serviceLabel} · ${timeline.matterNumber}`
-                  : timeline.matterNumber}
+                  : t('portal.matter.generic')}
               </h2>
-              <span className="pdash-badge">{timeline.statusLabel}</span>
+              {/* S2: single status chip from live entity status (see home list). */}
+              <span className="pdash-badge">
+                {t(`portal.matter.status.${timeline.statusChip}`)}
+              </span>
             </div>
             {timeline.milestones.length === 0 ? (
               <p className="text-muted">{t('portal.notif.empty')}</p>

@@ -205,6 +205,10 @@ const en: Record<string, string> = {
   'portal.matters.empty':
     "You don't have any matters with the firm yet. Once you book a consultation, it'll appear here.",
   'portal.matters.archived': 'Closed',
+  // S2 (single status truth) + S3 (human title fallback)
+  'portal.matter.status.in_progress': 'In progress',
+  'portal.matter.status.completed': 'Completed',
+  'portal.matter.generic': 'Legal matter',
   'portal.rail.book.title': 'Need something else?',
   'portal.rail.book.body':
     "Book time with the firm or request a new service. We'll confirm before any work begins.",
@@ -236,6 +240,9 @@ const en: Record<string, string> = {
   'portal.docs.uploaded': "You've uploaded",
   'portal.docs.view': 'View',
   'portal.docs.download': 'Download',
+  // S1: an upload whose stored file can no longer be resolved (never rendered as
+  // a live View/Download).
+  'portal.docs.unavailable': 'This file is no longer available — contact the firm.',
   'portal.docs.upload': 'Upload a document',
   'portal.docs.uploading': 'Uploading…',
   'portal.docs.upload_hint': 'PDF, Word, images, or text · up to 25 MB',
@@ -511,6 +518,10 @@ const es: Record<string, string> = {
   'portal.matters.empty':
     'Aún no tiene asuntos con la firma. Cuando reserve una consulta, aparecerá aquí.',
   'portal.matters.archived': 'Cerrado',
+  // S2 (una sola verdad de estado) + S3 (título humano por defecto)
+  'portal.matter.status.in_progress': 'En curso',
+  'portal.matter.status.completed': 'Completado',
+  'portal.matter.generic': 'Asunto legal',
   'portal.rail.book.title': '¿Necesita algo más?',
   'portal.rail.book.body':
     'Reserve tiempo con la firma o solicite un nuevo servicio. Confirmaremos antes de comenzar cualquier trabajo.',
@@ -543,6 +554,8 @@ const es: Record<string, string> = {
   'portal.docs.uploaded': 'Subidos por usted',
   'portal.docs.view': 'Ver',
   'portal.docs.download': 'Descargar',
+  // S1: una subida cuyo archivo almacenado ya no se puede resolver.
+  'portal.docs.unavailable': 'Este archivo ya no está disponible — comuníquese con la firma.',
   'portal.docs.upload': 'Subir un documento',
   'portal.docs.uploading': 'Subiendo…',
   'portal.docs.upload_hint': 'PDF, Word, imágenes o texto · hasta 25 MB',

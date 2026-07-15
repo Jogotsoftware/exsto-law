@@ -2,6 +2,7 @@ import { submitAction, withActionContext, type ActionContext } from '@exsto/subs
 import { resolveClientMatterIds } from '../api/clientIdentity.js'
 import { listApprovedClientDocuments } from './clientDocuments.js'
 import { listClientInvoices } from './clientBilling.js'
+import { resolveMatterServiceLabels } from './clientPortal.js'
 
 // CLIENT-PORTAL-UI-1 (WP-3) — the notifications feed: things that HAPPENED for
 // this client, as a READ PROJECTION over the existing ledgers. No parallel
@@ -34,6 +35,12 @@ export interface PortalNotification {
   occurredAt: string
   matterEntityId: string | null
   matterNumber: string | null
+  /**
+   * S6: the HUMAN matter name (service display name) for this item, so the feed
+   * reads "Operating Agreement" — not the raw M-… id or a service_key. Null for
+   * items with no matter (standalone bookings, issued invoices).
+   */
+  matterLabel: string | null
   /** Client-safe reference for the link target (invoice number, version id…). */
   ref: string | null
   unread: boolean
@@ -184,8 +191,26 @@ export async function listClientNotifications(
 
   items.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt))
   const capped = items.slice(0, FEED_LIMIT)
+
+  // S6: resolve the human matter name for the visible items (one round-trip),
+  // so the feed shows "Operating Agreement", never the raw M-… id. Base ('en')
+  // copy — the notification *text* itself is bilingual via the UI i18n layer.
+  const labelIds = [
+    ...new Set(capped.map((it) => it.matterEntityId).filter((x): x is string => !!x)),
+  ]
+  const labels =
+    labelIds.length > 0
+      ? await withActionContext(ctx, (client) =>
+          resolveMatterServiceLabels(client, ctx.tenantId, labelIds),
+        )
+      : new Map<string, string>()
+
   const readMs = lastReadAt ? Date.parse(lastReadAt) : 0
-  const withRead = capped.map((it) => ({ ...it, unread: Date.parse(it.occurredAt) > readMs }))
+  const withRead = capped.map((it) => ({
+    ...it,
+    matterLabel: it.matterEntityId ? (labels.get(it.matterEntityId) ?? null) : null,
+    unread: Date.parse(it.occurredAt) > readMs,
+  }))
   return {
     items: withRead,
     unreadCount: withRead.filter((it) => it.unread).length,
