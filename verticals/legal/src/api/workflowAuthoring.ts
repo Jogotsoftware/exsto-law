@@ -23,6 +23,7 @@ import {
   GATE_KINDS,
   validateLifecycle,
   validateLinearLifecycle,
+  validateBlockingReachability,
   buildInvokeCapabilityStepTemplate,
   capabilityConfigSchemaProps,
   diagnoseCapabilityStepConfig,
@@ -272,6 +273,9 @@ export async function validateProposedLifecycle(
   const warnings: string[] = []
   errors.push(...validateLifecycle(graph).errors)
   errors.push(...validateLinearLifecycle(graph).errors)
+  // HOTFIX-P17 (L1) — reject a proposal that lets a blocking step be skipped on the
+  // way to completion (a shortcut edge around a required step).
+  errors.push(...validateBlockingReachability(graph).errors)
 
   // WP2 — completion declaration: the workflow must END in a completion step. Same
   // diagnostic style as the template_entity_id check: name the exact fix.

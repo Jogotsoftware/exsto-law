@@ -51,14 +51,30 @@ export async function completeMatter(
   })
 
   let finalState = info?.currentState ?? ''
+  // Whether the matter is (or was moved) ONTO its terminal stage. When false at a
+  // matter that runs a workflow, the completion is "off-workflow" and gets noted — but
+  // only AFTER legal.service.complete actually SUCCEEDS (below), never before its
+  // integrity gate has had its say (HOTFIX-P17: a refused completion must leave no
+  // stray "completed off-workflow" observation).
+  let landedTerminal = false
   if (info && info.graph.length > 0) {
     const current = stageByKey(info.graph, info.currentState)
-    if (current && !current.terminal) {
+    if (current?.terminal) {
+      landedTerminal = true
+    } else if (current) {
       // Best-effort: the attorney edge from the CURRENT stage to a terminal stage
-      // (the declared completion step). Absent one, we do NOT force the graph — the
-      // completion is recorded as off-workflow below.
+      // (the declared completion step).
+      //
+      // HOTFIX-P17 (L1): only a genuine "Continue" edge (via legal.matter.advance) may
+      // be auto-fired here. A terminal edge finished by its own action — e.g.
+      // `draft.approve` (review → approve → SEND → bill) — must NOT be crossed by
+      // completion: doing so would archive the matter without the document ever being
+      // sent or billed (the M-MRJHEC8X defect). When the terminal step is a
+      // draft.approve step, we leave the matter parked; legal.service.complete's
+      // integrity gate then refuses with what's unfinished.
       const edge = allowedTransitions(info.graph, info.currentState, ['attorney']).find(
-        (e) => stageByKey(info.graph, e.to)?.terminal,
+        (e) =>
+          stageByKey(info.graph, e.to)?.terminal && (!e.via || e.via === 'legal.matter.advance'),
       )
       if (edge) {
         await submitAction(ctx, {
@@ -72,27 +88,33 @@ export async function completeMatter(
           },
         })
         finalState = edge.to
-      } else {
-        // Completing a matter that is NOT at (or one attorney-step from) its
-        // completion stage is allowed — the attorney is the authority — but the
-        // fact is recorded on the timeline, never silently smoothed over.
-        await submitAction(ctx, {
-          actionKindName: 'event.record',
-          intentKind: 'adjustment',
-          payload: {
-            event_kind_name: 'observation',
-            primary_entity_id: matterEntityId,
-            data: { kind: 'matter_completed_off_workflow', at_stage: info.currentState },
-            source_type: 'human',
-            source_ref: ctx.actorId,
-          },
-        })
+        landedTerminal = true
       }
     }
   }
 
-  // Accrue the service completion fee (idempotent — handlers/fee.ts).
+  // Accrue the service completion fee — AND run the integrity gate (handlers/fee.ts):
+  // refuses (before any accrual/archive) if a blocking step is unfinished or a declared
+  // fee was silently dropped. A throw here propagates: nothing is archived, and no
+  // off-workflow observation is recorded.
   const completion = await completeService(ctx, matterEntityId)
+
+  // The completion SUCCEEDED. If the matter ran a workflow but did not finish on its
+  // terminal stage (the gate allowed it — no blocking step remained), record that fact
+  // on the timeline; never silently smoothed over.
+  if (info && info.graph.length > 0 && !landedTerminal) {
+    await submitAction(ctx, {
+      actionKindName: 'event.record',
+      intentKind: 'adjustment',
+      payload: {
+        event_kind_name: 'observation',
+        primary_entity_id: matterEntityId,
+        data: { kind: 'matter_completed_off_workflow', at_stage: finalState },
+        source_type: 'human',
+        source_ref: ctx.actorId,
+      },
+    })
+  }
 
   let archived = false
   if (opts.archive) {

@@ -27,6 +27,7 @@ import { completenessFromTransitions } from '../api/services.js'
 import {
   validateLifecycle,
   validateLinearLifecycle,
+  validateBlockingReachability,
   diagnoseEdgeTransition,
   type Lifecycle,
 } from '../lifecycle/index.js'
@@ -505,6 +506,13 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
   const linear = validateLinearLifecycle(p.graph)
   if (!linear.ok) {
     throw new Error(`Invalid workflow lifecycle: ${linear.errors.join('; ')}`)
+  }
+  // HOTFIX-P17 (L1) — a blocking step must be unskippable: no shortcut may reach a
+  // terminal while bypassing a required step. A linear graph passes trivially; this
+  // rejects a branch that jumps around a blocking step to completion.
+  const blocking = validateBlockingReachability(p.graph)
+  if (!blocking.ok) {
+    throw new Error(`Invalid workflow lifecycle: ${blocking.errors.join('; ')}`)
   }
   // P12 — the advance-token vocabulary check now guards the MANUAL save path too
   // (it was AI-authoring-only): the visual builder re-threads edges on reorder, and
