@@ -94,6 +94,11 @@ export async function skipClientStage(
       to_state: clientEdge.to,
       gate: 'client',
       trigger: 'attorney.skip',
+      // HOTFIX-P17 (L1): the advance handler rejects moving across an edge whose `via`
+      // is a client action the client never took — UNLESS this sanctioned skip flag is
+      // set. Only ever set here, and only for a client edge; a blocking attorney step
+      // (draft.approve) is never reachable this way.
+      skip: true,
     },
   })
 

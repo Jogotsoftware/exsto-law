@@ -162,13 +162,15 @@ export async function listUnbilled(
     }>(
       `WITH
        -- A ledger entry leaves the unbilled feed when it is billed onto an invoice
-       -- (*.billed) OR voided by the attorney (billing_entry.voided) — both name the
-       -- source ledger event, so one NOT EXISTS handles both.
+       -- (*.billed), voided by the attorney (billing_entry.voided), or WAIVED by the
+       -- attorney (fee.waived, HOTFIX-P17) — each names the source ledger event, so one
+       -- NOT EXISTS handles them all. (A fee.waived that names no source_event_id is a
+       -- waive of an ORPHANED fee that never accrued — it was never on this feed.)
        billed AS (
          SELECT e.payload->>'source_event_id' AS sid
          FROM event e JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
          WHERE e.tenant_id = $1
-           AND ekd.kind_name IN ('time.billed','expense.billed','service_fee.billed','document_fee.billed','billing_entry.voided')
+           AND ekd.kind_name IN ('time.billed','expense.billed','service_fee.billed','document_fee.billed','billing_entry.voided','fee.waived')
            AND e.payload->>'source_event_id' IS NOT NULL
        ),
        matter_of AS (

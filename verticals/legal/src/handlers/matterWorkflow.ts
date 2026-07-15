@@ -27,6 +27,7 @@ import { createWorkflowInstance } from '../lifecycle/instance.js'
 import {
   validateLifecycle,
   validateLinearLifecycle,
+  validateBlockingReachability,
   stageByKey,
   entryStage,
 } from '../lifecycle/resolve.js'
@@ -125,7 +126,10 @@ registerActionHandler('legal.matter.set_workflow', async (ctx, client, payload, 
   // linear-only constraint (one step leads to one next step). Reject before any write.
   const structural = validateLifecycle(graph)
   const linear = validateLinearLifecycle(graph)
-  const errors = [...structural.errors, ...linear.errors]
+  // HOTFIX-P17 (L1): a per-matter customization may not add a shortcut that skips a
+  // blocking step on the way to completion.
+  const blocking = validateBlockingReachability(graph)
+  const errors = [...structural.errors, ...linear.errors, ...blocking.errors]
   if (errors.length > 0) {
     throw new Error(`legal.matter.set_workflow: invalid workflow graph: ${errors.join('; ')}`)
   }
