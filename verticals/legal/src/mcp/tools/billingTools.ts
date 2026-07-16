@@ -13,6 +13,9 @@ import {
   completeService,
   addMatterFee,
   voidMatterFee,
+  waiveFee,
+  type WaiveFeeInput,
+  type WaiveFeeResult,
   getInvoiceTemplate,
   setInvoiceTemplate,
   renderInvoicePdfBase64,
@@ -38,6 +41,8 @@ import {
   dismissPaymentReport,
   type ManualPaymentMethods,
   type PaymentReport,
+  listFeeConsentTrail,
+  type FeeConsentTrailEntry,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -54,6 +59,22 @@ registerTool({
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => await listUnbilled(ctx),
 } satisfies Tool<Record<string, never>, { clients: UnbilledClient[]; currency: string }>)
+
+registerTool({
+  name: 'legal.matter.fee_consents',
+  description:
+    'PORTAL-1 (WP3): the client fee-consent trail for one matter — every fee.quoted / fee.accepted / fee.declined event, newest first — rendered next to the fees it authorized.',
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { matterEntityId: { type: 'string' } },
+    required: ['matterEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({
+    consents: await listFeeConsentTrail(ctx, input.matterEntityId),
+  }),
+} satisfies Tool<{ matterEntityId: string }, { consents: FeeConsentTrailEntry[] }>)
 
 registerTool({
   name: 'legal.billing.matter_invoiced',
@@ -243,6 +264,27 @@ registerTool({
   { sourceEventId: string },
   { eventId: string; sourceEventId: string; voided: boolean }
 >)
+
+registerTool({
+  name: 'legal.fee.waive',
+  description:
+    "Waive a fee — the firm's DELIBERATE, recorded decision not to charge, with a MANDATORY reason. Either name an accrued fee's ledger event id (sourceEventId — it then leaves the Unbilled list), or waive an ORPHANED fee a matter never accrued (matterEntityId + feeType + amount, plus documentKind for a document fee — this is what lets a matter with a dropped fee finish completing). Distinct from void (a correction) and the client's fee decline.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      sourceEventId: { type: 'string', description: 'An accrued fee ledger event id (mode 1).' },
+      matterEntityId: { type: 'string', description: 'The matter (mode 2, orphaned fee).' },
+      feeType: { type: 'string', enum: ['service', 'document'] },
+      amount: { type: 'string', description: 'Decimal string, e.g. "250.00" (mode 2).' },
+      documentKind: { type: 'string', description: 'For a document fee: the document kind.' },
+      reason: { type: 'string', description: 'Why the fee is forgone — required.' },
+    },
+    required: ['reason'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => await waiveFee(ctx, input),
+} satisfies Tool<WaiveFeeInput, WaiveFeeResult>)
 
 // ── Invoice PDF + template (Phase 3) ──────────────────────────────────────────
 // One renderer (billing/invoicePdf.ts) feeds the view, download, email attachment,

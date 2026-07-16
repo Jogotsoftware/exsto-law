@@ -30,8 +30,8 @@ export interface DocumentAction {
   label: string
   // Lower sorts first; defaults to 100.
   order?: number
-  // When set and it returns a string, the bar shows window.confirm(message)
-  // before running and aborts if the user cancels.
+  // When set and it returns a string, the bar asks via the in-app ConfirmModal
+  // (native dialogs are banned) before running and aborts if the user cancels.
   confirm?: (ctx: DocumentActionContext) => string | null
   // Perform the action. Throwing or returning ok:false surfaces the message.
   run: (ctx: DocumentActionContext) => Promise<DocumentActionResult>

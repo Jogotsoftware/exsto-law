@@ -42,15 +42,15 @@ const disconnectTool: Tool<Record<string, never>, { disconnected: true }> = {
   },
 }
 
-// Override the existing calendar.availability tool to use the real Google
-// path when connected (falls back to stub).
+// Real Google free/busy only — when the calendar integration is unavailable
+// the result is honestly empty (source 'unavailable'), never fabricated slots.
 const availabilityTool: Tool<
   { daysOut?: number; serviceKey?: string },
-  { slots: AvailabilitySlot[]; source: 'google' | 'stub' }
+  { slots: AvailabilitySlot[]; source: 'google' | 'unavailable'; reason?: string }
 > = {
   name: 'legal.calendar.availability',
   description:
-    'Return upcoming availability slots, sliced to the firm booking rules (bookable days/hours, buffer, lead time) and the service duration. Pass serviceKey to size slots to that service; omit for the firm default. Real Google Calendar when connected; stub otherwise.',
+    "Return upcoming availability slots, sliced to the firm booking rules (bookable days/hours, buffer, lead time) and the service duration. Pass serviceKey to size slots to that service; omit for the firm default. Real Google Calendar free/busy only — when the calendar isn't connected the result is empty with source 'unavailable' (never sample data).",
   mode: 'read',
   handler: async (ctx: ActionContext, input) =>
     fetchAvailability(ctx, input?.daysOut ?? 14, { serviceKey: input?.serviceKey }),

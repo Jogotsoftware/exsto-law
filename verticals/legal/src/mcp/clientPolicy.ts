@@ -14,8 +14,10 @@
 // convenience. Everything the public booking page + shared-draft view need:
 export const CLIENT_PORTAL_TOOLS: ReadonlySet<string> = new Set([
   'legal.service.list', // booking page: list bookable services
+  'legal.public.firm_branding', // booking page: resolved firm's name + attorney (branding, client-safe)
   'legal.calendar.availability', // booking page: open consultation slots
   'legal.booking.submit', // booking page: book a consultation (public intake)
+  'legal.intake.something_else', // "Something else" tile: free-text client_request for attorney triage
   'legal.draft.get_shared', // /d/[versionId]: client-safe shared-draft view (body only; no reasoning/model/notes)
 ])
 
@@ -40,10 +42,22 @@ export function isClientPortalTool(toolName: string): boolean {
 // only governs WHICH tools are reachable at all. Keep it MINIMAL — every entry
 // must return a client-safe projection. All entries are read-mode.
 export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
+  'legal.client.home_summary', // the portal home in one read (matters, attention, previews, badge, gate state)
+  'legal.client.notifications', // the notifications feed + unread watermark
+  'legal.client.notifications_read', // mark notifications read (append-only watermark)
+  'legal.client.engagement', // engagement-gate state + current firm rate/terms
+  'legal.client.engagement_accept', // accept the firm-level engagement agreement (the client's own actor)
+  'legal.client.engagement_decline', // decline it
   'legal.client.matters', // matter switcher: the signed-in client's own matters
   'legal.client.matter_timeline', // status + whitelisted milestone timeline for one matter
   'legal.client.thread_get', // read the client↔attorney portal thread for one matter
   'legal.client.message_post', // post a message to the attorney on one of the client's matters
+  'legal.client.billing_summary', // invoices + accrued fees + running total (one truth with the attorney panel)
+  'legal.client.schedule_availability', // open slots on the firm's live calendar
+  'legal.client.schedule_quote', // the fee for billable portal-scheduled time (null = free)
+  'legal.client.schedule_time', // book a slot as the client (consent-gated when billable)
+  'legal.client.intake_prefill', // most recent intake answers for prefilled repeat booking
+  'legal.client.todos', // sign / pay / materials-requested, in one list
   'legal.client.invoices', // list the signed-in client's own invoices (client-safe fields)
   'legal.client.invoice_get', // one of the client's own invoices by number, with line items
   'legal.client.invoice_pdf', // branded PDF of the client's own invoice (no rates/notes/source events)
@@ -56,6 +70,7 @@ export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.client.feedback_submit', // the portal chat widget: client feedback about the portal
   'legal.client.payment_methods', // the firm's Zelle/crypto payment options for the pay page (read)
   'legal.client.report_payment', // report a Zelle/crypto payment made on the client's own invoice
+  'legal.draft.get_shared', // the portal door of the shared-draft view (scoped in-tool to the client's matters)
   'legal.esign.portal.list', // the client's documents awaiting their signature
   'legal.esign.portal.documents', // ALL of the client's documents (to-sign + signed)
   'legal.esign.portal.load', // load one of the client's signing requests (+ their fields)

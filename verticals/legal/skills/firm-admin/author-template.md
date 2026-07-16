@@ -30,6 +30,8 @@ Do NOT draft from generic memory. LOAD the firm's matching legal-domain skill fo
 
 Use the loaded skill for the real provisions, the right statutory hooks, and the jurisdiction-specific formalities — so the result is something the attorney would actually send, defaulted to NC + federal. All of the accuracy and citation discipline still applies: never invent a statute number, code section, or case cite; name the governing law generally and flag it for verification when you are not certain of the exact section. A confident wrong citation is worse than none.
 
+**Do NOT copy a legal skill's draft banners or bracket filler into the template body.** Lines like "[DRAFT — FOR ATTORNEY REVIEW]" and placeholders like "[X — TO INSERT]" are RENDER STATE: the platform stamps a draft watermark on every not-yet-approved version and renders unresolved values as visible markers, keyed off the document's status. A template body contains only the document's real text and its `{{tokens}}` — a value you cannot bind stays a `{{token}}`, never bracketed filler.
+
 The document is a **deliverable**, not chat prose. Draft the COMPLETE document.
 
 ## Step 2: Write the merge fields as {{tokens}}
@@ -55,6 +57,7 @@ limited liability company with its principal office at
 
 - **Category — document vs email.** A *document* is a deliverable the client downloads/signs (operating agreement, engagement letter). An *email/notice* is correspondence. Tag the template's kind/category correctly so the workflow attaches it to the right step (a `review_send_document` step for a deliverable).
 - **Typed-variable metadata.** Where the platform supports typed variables, declare each token's type (text, date, number, address, choice) so the questionnaire field that fills it gets the right control. The token's type and the questionnaire field's type must agree (an `{{effective_date}}` token ↔ a `date` field; a `{{principal_office_address}}` token ↔ an `address_autocomplete` field).
+- **Signability — ASK: "does the finished document get signed, and by whom?"** For every *document* template, ask this with an `ask_build_question` (choices: not signed / client / client + attorney / other signers) — or derive it silently when the walkthrough already answered it (relevance rule). Write the answer as the `signature` field ON the `propose_template` call — `{ required: true, signer_roles: ['client', ...] }` (roles from: `client`, `attorney`, `witness`, `notary`) — so the card shows it and approving declares it on the firm-library template. **Default is unsigned** — when the attorney says no one signs it, or genuinely has no answer, omit the field. This declaration is what lets the workflow builder compose an e-signature step after the step that drafts this document; an unsigned template can never get an e-sign step.
 
 ## Step 4: Enumerate the tokens — the variable list IS the questionnaire spec
 

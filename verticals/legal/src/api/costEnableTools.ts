@@ -17,6 +17,8 @@
 import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import { validateProposedCost, SERVICE_COST_TYPES, type CostProposal } from './costAuthoring.js'
+import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
+import { getServiceLifecycle } from './serviceLifecycle.js'
 import type { ServiceCostType } from './services.js'
 
 // ─── propose_cost ───────────────────────────────────────────────────────────
@@ -24,7 +26,7 @@ import type { ServiceCostType } from './services.js'
 const PROPOSE_COST_TOOL_DEF = {
   name: 'propose_cost',
   description:
-    "Propose the BILLING (fee model) for a service for the attorney to review and APPROVE. This does NOT save anything — it captures the proposal so the attorney sees it as an approval card; the cost is written only when they approve. Use this AFTER the workflow, once you've asked the attorney how they price the work: 'fixed' (a flat fee — amount is the total) or 'hourly' (amount is the rate; optionally include an estimate of hours). Money is a decimal string like '350.00'. Call this ONLY when you have the attorney's price; put the proposal ONLY in this tool call, not in your chat reply.",
+    "Propose the BILLING (fee model) for a service for the attorney to review and APPROVE. This does NOT save anything — it captures the proposal so the attorney sees it as an approval card; the cost is written only when they approve. Use this BEFORE proposing the workflow (a document-producing workflow validates against the declared billing, so the billing must be settled first), once you've asked the attorney how they price the work: 'fixed' (a flat fee — amount is the total) or 'hourly' (amount is the rate; optionally include an estimate of hours). Money is a decimal string like '350.00'. Call this ONLY when you have the attorney's price; put the proposal ONLY in this tool call, not in your chat reply.",
   input_schema: {
     type: 'object',
     properties: {
@@ -47,6 +49,12 @@ const PROPOSE_COST_TOOL_DEF = {
         type: 'number',
         description: "For 'hourly' only: the estimated number of hours (optional).",
       },
+      document_fees: {
+        type: 'object',
+        description:
+          'For the PER-DOCUMENT billing model: one decimal-string fee per document kind (e.g. {"engagement_letter": "150.00"}), each accrued once per matter the moment the attorney approves that document. Combine with cost_type/amount ONLY for a deliberate split the attorney confirmed — the card will state the combined total and a split warning.',
+        additionalProperties: { type: 'string' },
+      },
       summary: {
         type: 'string',
         description:
@@ -64,12 +72,11 @@ const PROPOSE_COST_TOOL_DEF = {
 
 // Build the propose_cost tool for this turn. Its run() validates the price (the SAME
 // money contract the write path applies) and, on success, CAPTURES it into `captured`
-// (read back by the caller to surface the approval card) — it never writes.
+// (read back by the caller to surface the approval card) — it never writes. It READS
+// the service (BUILDER-CERT-1 WP1) to compute the composed-billing read-out the card
+// states: the total per-matter charge this cost + the service's declared document
+// fees produce, so a double-bill is deliberate and visible.
 export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[]): ClientTool {
-  // ctx is unused in run() (capture-only) but kept in the signature for symmetry with
-  // the other propose tools and so a future read (e.g. a service-exists check) needs no
-  // signature change.
-  void ctx
   return {
     definition: PROPOSE_COST_TOOL_DEF,
     name: 'propose_cost',
@@ -79,6 +86,7 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
         cost_type?: string
         amount?: string
         hours?: number
+        document_fees?: Record<string, string>
         summary?: string
         confidence?: number
       }
@@ -87,7 +95,13 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
       const costType = (args.cost_type ?? '') as ServiceCostType
       const amount = (args.amount ?? '').trim()
       const hours = costType === 'hourly' && typeof args.hours === 'number' ? args.hours : null
-      const validation = validateProposedCost({ costType, amount, hours })
+      const documentFees =
+        args.document_fees &&
+        typeof args.document_fees === 'object' &&
+        Object.keys(args.document_fees).length
+          ? args.document_fees
+          : undefined
+      const validation = validateProposedCost({ costType, amount, hours, documentFees })
       if (!validation.ok) {
         return `The proposed billing is not valid and was NOT captured. Fix these and call propose_cost AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
@@ -95,17 +109,42 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
           : 0.6 // matches costAuthoring.clampConfidence / serviceAuthoring (humble default)
-      captured.push({
+      // BUILDER-CERT-1 (WP1) — the cost card STATES the total per-matter charge the
+      // composed billing produces (this proposed cost + the service's declared
+      // per-document fees), computed from the real service row, never model prose.
+      const readout = await computeBillingReadout(ctx, serviceKey, {
+        proposedCost: { costType, amount, hours },
+        ...(documentFees ? { proposedDocumentFees: documentFees } : {}),
+      })
+      const billingLine = readout ? ` ${formatBillingReadout(readout)}` : ''
+      const warningText = readout?.splitWarning
+        ? ` WARNING (non-blocking — the card shows it; relay it to the attorney in one short line): ${readout.splitWarning}`
+        : ''
+      // WP-3.1 (BUILDER-UX-2) — a build produces EXACTLY ONE billing proposal per
+      // service; a re-proposal SUPERSEDES the prior one in place instead of appending
+      // a second card. The founder's cease-and-desist walk showed two "Proposed
+      // billing" cards for one service ($500 header and $0 header, both listing the
+      // same $500 line item) because the model called propose_cost twice in a turn and
+      // every captured element rendered its own card. Superseding by serviceKey means
+      // the attorney sees one current price, never a stale/contradictory duplicate to
+      // mis-approve.
+      const proposal: CostProposal = {
         serviceKey,
         costType,
         amount,
         hours,
+        ...(documentFees ? { documentFees } : {}),
         summary:
-          (args.summary ?? '').trim() ||
-          `Proposed ${costType} billing of ${amount} for ${serviceKey}.`,
+          ((args.summary ?? '').trim() ||
+            `Proposed ${costType} billing of ${amount} for ${serviceKey}.`) +
+          billingLine +
+          (readout?.splitWarning ? ` ⚠ ${readout.splitWarning}` : ''),
         confidence,
-      })
-      return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve. The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the price in prose.`
+      }
+      const priorIdx = captured.findIndex((c) => c.serviceKey === serviceKey)
+      if (priorIdx >= 0) captured[priorIdx] = proposal
+      else captured.push(proposal)
+      return `The proposed ${costType} fee (${amount}) is shown to the attorney as an approval card; it is NOT saved until they approve.${billingLine}${warningText} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence; NEVER repeat the price in prose.`
     },
   }
 }
@@ -119,6 +158,10 @@ export function buildProposeCostTool(ctx: ActionContext, captured: CostProposal[
 export interface EnableProposal {
   serviceKey: string
   summary: string
+  // BUILDER-UX-1 WP-2.1 — the completed service's steps, so the card can render
+  // the completion summary as a bulleted list ("Review client intake", "AI
+  // first-pass review", "Attorney approves", …) instead of a comma-run.
+  completion?: string[]
 }
 
 const PROPOSE_ENABLE_TOOL_DEF = {
@@ -147,7 +190,6 @@ const PROPOSE_ENABLE_TOOL_DEF = {
 // re-checked server-side by the set_active handler on approve, so a not-yet-ready
 // enable is rejected at the write even if the model proposed it early.
 export function buildProposeEnableTool(ctx: ActionContext, captured: EnableProposal[]): ClientTool {
-  void ctx
   return {
     definition: PROPOSE_ENABLE_TOOL_DEF,
     name: 'propose_enable',
@@ -155,11 +197,23 @@ export function buildProposeEnableTool(ctx: ActionContext, captured: EnablePropo
       const args = (raw ?? {}) as { service_key?: string; summary?: string }
       const serviceKey = (args.service_key ?? '').trim()
       if (!serviceKey) return 'A service_key is required to propose enabling; nothing was captured.'
+      // WP-2.1: the completion summary is the service's own steps, rendered as
+      // bullets by the card. Best-effort — a lifecycle read failure just omits it.
+      let completion: string[] | undefined
+      try {
+        const lifecycle = await getServiceLifecycle(ctx, serviceKey)
+        const steps = (lifecycle?.graph ?? []) as Array<{ key?: string; label?: string }>
+        const items = steps.map((s) => s.label || s.key || '').filter(Boolean)
+        if (items.length) completion = items
+      } catch {
+        // omit the checklist rather than fail the proposal
+      }
       captured.push({
         serviceKey,
         summary:
           (args.summary ?? '').trim() ||
           `${serviceKey} is complete — approve to make it live and bookable.`,
+        completion,
       })
       return `The Enable step for "${serviceKey}" is shown to the attorney as the final approval card; the service goes live only when they approve. This is the LAST step — the build is complete. Reply with ONE short sentence telling them to approve it to go live. Do NOT start another step or claim it is live yet.`
     },

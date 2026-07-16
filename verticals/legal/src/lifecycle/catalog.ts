@@ -13,6 +13,11 @@ export interface StepActionSpec {
   description: string
   defaultGate: GateKind
   blocking: boolean
+  // CAPABILITY-UNIFY-1 (WP5): a deprecated kind stays RUNNABLE (existing definitions
+  // keep working) but is NOT offered for NEW authoring — the builder composes its
+  // replacement instead. `generate_document` is deprecated in favor of the
+  // `document_generation` capability wired as an invoke_capability step.
+  deprecated?: boolean
 }
 
 export const STEP_ACTION_CATALOG: StepActionSpec[] = [
@@ -36,9 +41,10 @@ export const STEP_ACTION_CATALOG: StepActionSpec[] = [
     kind: 'generate_document',
     label: 'Generate document',
     description:
-      "Produce a document draft from the step's document template(s) + the intake answers.",
+      "DEPRECATED for new authoring — produce a document draft from the step's document template(s) + the intake answers. New drafting steps are authored as an invoke_capability stage running the `document_generation` capability (one block, per-step template). Kept runnable so existing definitions keep working.",
     defaultGate: 'automatic',
     blocking: true,
+    deprecated: true,
   },
   {
     kind: 'review_send_document',
@@ -97,4 +103,21 @@ export const STEP_ACTION_KINDS: StepActionKind[] = STEP_ACTION_CATALOG.map((s) =
 
 export function stepActionSpec(kind: StepActionKind): StepActionSpec | undefined {
   return STEP_ACTION_CATALOG.find((s) => s.kind === kind)
+}
+
+// CAPABILITY-UNIFY-1 (WP5) — the AUTHORABLE subset: the catalog minus deprecated
+// kinds. The full STEP_ACTION_KINDS stays the runtime/validation vocabulary (existing
+// definitions with a deprecated kind keep validating and running); the authoring
+// surface (get_workflow_context's offered catalog + propose_workflow's action.kind
+// enum) offers only these, so NEW workflows can't be authored with a deprecated step.
+export const AUTHORABLE_STEP_ACTION_CATALOG: StepActionSpec[] = STEP_ACTION_CATALOG.filter(
+  (s) => !s.deprecated,
+)
+
+export const AUTHORABLE_STEP_ACTION_KINDS: StepActionKind[] = AUTHORABLE_STEP_ACTION_CATALOG.map(
+  (s) => s.kind,
+)
+
+export function isDeprecatedStepActionKind(kind: StepActionKind): boolean {
+  return STEP_ACTION_CATALOG.find((s) => s.kind === kind)?.deprecated === true
 }

@@ -40,12 +40,25 @@ export interface GenerateDraftInput {
   // Legal-skill slugs (claude-for-legal playbooks) to force-apply to this draft,
   // selected by the attorney. Their bodies are injected into the drafting prompt.
   skillSlugs?: string[]
+  // CAPABILITY-UNIFY-1: an EXPLICIT template override. The document_generation
+  // capability loads the firm template BY ENTITY ID (config_schema.template_entity_id)
+  // and hands the body + a template id in here, so the producer draws its document
+  // body from the exact template the step names — never resolving by (serviceKey,
+  // docKind) convention. When set, it supersedes the config/repo template lookup for
+  // both generation modes; everything downstream (persist, trace, notify) is identical.
+  templateOverride?: { templateText: string; templateId: string }
+  // BACKHALF-BLOCKS-1 (WP4) — regenerate SUPERSEDES: write the produced draft as
+  // version n+1 on this existing document_draft entity (prior versions retained)
+  // instead of a fresh entity at v1. Set by the regenerate runtime only.
+  supersedesDocumentEntityId?: string
 }
 
 // ───────────────────────────────────────────────────────────────────────────
 // requestDraft — ASYNC ALWAYS (binding Lesson #2, REQ-PERF-02). Enqueues the
 // drafting job and records draft.requested; the worker runs the model call.
-// Auto-generation is single-member only in Phase 0 (REQ-DRAFT-05).
+// Valid for ANY matter route: drafting is capability-routed (CAPABILITY-UNIFY-1),
+// so the Phase 0 auto-only guard is gone (RUNNER-FIXES-1 WP5 — it predated the
+// capability engine and 500'd regenerate on manual-route matters).
 // ───────────────────────────────────────────────────────────────────────────
 
 export async function requestDraft(
@@ -54,11 +67,6 @@ export async function requestDraft(
 ): Promise<{ jobId: string }> {
   const matter = await getMatter(ctx, input.matterEntityId)
   if (!matter) throw new Error(`Matter not found: ${input.matterEntityId}`)
-  if (matter.workflowRoute !== 'auto') {
-    throw new Error(
-      `Matter ${matter.matterNumber} follows the manual workflow (${matter.serviceKey}); Phase 0 auto-drafting covers single-member formations only.`,
-    )
-  }
 
   const jobId = await enqueueJob({
     tenantId: ctx.tenantId,
@@ -132,9 +140,18 @@ export async function runDraftGeneration(
   // no document to draft — a non-retryable precondition. The completeness gate
   // normally blocks enabling such a service, so this is defense in depth. This
   // fills the {{operating_agreement_template}} slot below.
-  const templateDoc = m.serviceKey
-    ? await getDocumentTemplate(agentCtx, m.serviceKey, input.documentKind)
-    : resolveDocumentTemplateDoc(undefined, '', input.documentKind)
+  // CAPABILITY-UNIFY-1: an explicit template override (the document_generation
+  // capability, loading the template by entity id) wins over the config/repo lookup.
+  // Otherwise resolve config-first with a bundled repo fallback (the bespoke path).
+  const templateDoc = input.templateOverride
+    ? {
+        templateText: input.templateOverride.templateText,
+        source: 'capability',
+        templateVersion: null,
+      }
+    : m.serviceKey
+      ? await getDocumentTemplate(agentCtx, m.serviceKey, input.documentKind)
+      : resolveDocumentTemplateDoc(undefined, '', input.documentKind)
   const template = templateDoc?.templateText ?? null
   if (!template) {
     await submitAction(agentCtx, {
@@ -155,8 +172,9 @@ export async function runDraftGeneration(
   }
   const templateSource = templateDoc?.source ?? 'none'
   const templateVersion = templateDoc?.templateVersion ?? null
-  const templateId =
-    templateSource === 'config' && templateVersion != null
+  const templateId = input.templateOverride
+    ? input.templateOverride.templateId
+    : templateSource === 'config' && templateVersion != null
       ? `${m.serviceKey}/${input.documentKind}@template-v${templateVersion}`
       : `${input.documentKind}@template-repo`
 
@@ -183,6 +201,12 @@ export async function runDraftGeneration(
         feeStructureHuman: service.feeStructureHuman,
         firmName: settings.firmName ?? undefined,
         attorneyName: settings.attorneyName ?? undefined,
+        // P13 — the rest of the firm identity block (firm_profile singleton,
+        // legacy-table fallback). Unknown stays undefined → honest MISSING;
+        // the approve-time resolver is the safety net.
+        firmEmail: settings.firmEmail ?? undefined,
+        firmPhone: settings.firmPhone ?? undefined,
+        firmAddress: settings.firmAddress ?? undefined,
       }),
     )
 
@@ -196,6 +220,7 @@ export async function runDraftGeneration(
         jurisdiction: 'NC',
         template_id: templateId,
         missing_fields: missingFields,
+        supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
       },
     })
 
@@ -295,6 +320,7 @@ export async function runDraftGeneration(
       reasoning_trace_id: reasoningTraceId,
       jurisdiction: 'NC',
       confidence: clampConfidence(result.reasoningTrace.confidence),
+      supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
       // Token usage (snake_case, same shape recordAssistantTurn writes on
       // assistant.turn) so the AI usage & cost view counts drafting spend. Read
       // back by getAiUsageSummary; model is read from model_identity above.

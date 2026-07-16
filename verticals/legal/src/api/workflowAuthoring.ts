@@ -18,11 +18,14 @@
 import { randomUUID } from 'node:crypto'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import {
-  STEP_ACTION_CATALOG,
+  AUTHORABLE_STEP_ACTION_CATALOG,
+  isDeprecatedStepActionKind,
   GATE_KINDS,
   validateLifecycle,
   validateLinearLifecycle,
+  validateBlockingReachability,
   buildInvokeCapabilityStepTemplate,
+  capabilityConfigSchemaProps,
   diagnoseCapabilityStepConfig,
   diagnoseMissingCapabilitySlug,
   diagnoseEdgeTransition,
@@ -34,6 +37,8 @@ import {
   type StepAction,
 } from '../lifecycle/index.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
+import { getService } from './services.js'
+import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 import { listStandaloneTemplates } from '../queries/templates.js'
 import { listWorkflowStepTemplates } from '../queries/workflowStepLibrary.js'
 import { listCapabilities, type Capability } from '../queries/capabilities.js'
@@ -133,8 +138,17 @@ export async function loadWorkflowAuthoringContext(
   }))
   // ADR 0046 — the runnable capabilities (available + step_invocable), summarized for
   // the builder: what each does, who provides each input, and the config to capture.
+  // P11 — `authorable: false` hides a capability from NEW authoring only (e.g.
+  // transcript_extraction, which now fires automatically on transcript arrival).
+  // Deliberately NOT enforced in validateProposedLifecycle: existing graphs that
+  // already carry such a stage must keep validating and running.
   const invocableCapabilities: InvocableCapabilitySummary[] = (await listCapabilities(ctx))
-    .filter((c) => c.status === 'available' && c.spec.step_invocable === true)
+    .filter(
+      (c) =>
+        c.status === 'available' &&
+        c.spec.step_invocable === true &&
+        (c.spec as { authorable?: boolean }).authorable !== false,
+    )
     .map((c) => {
       const inputsByProvidedBy: Record<string, string[]> = {}
       for (const inp of c.spec.inputs ?? []) {
@@ -154,7 +168,9 @@ export async function loadWorkflowAuthoringContext(
     })
   return {
     serviceKey,
-    actions: STEP_ACTION_CATALOG,
+    // WP5 — offer only the AUTHORABLE catalog (deprecated kinds like generate_document
+    // are excluded; new drafting steps are authored as invoke_capability{document_generation}).
+    actions: AUTHORABLE_STEP_ACTION_CATALOG,
     gates: GATE_KINDS,
     currentGraph: current?.graph ?? null,
     currentVersion: current?.version ?? null,
@@ -179,23 +195,155 @@ export function collectReferencedTemplateIds(graph: Lifecycle): string[] {
   return [...ids]
 }
 
+// Does this stage PRODUCE a document (and so bear a potential fee)? The two
+// document-producing step shapes: the legacy generate_document kind and an
+// invoke_capability stage running document_generation (CAPABILITY-UNIFY-1).
+// Exported for the propose tool's compose-ordering pre-gate (BUILDER-UX-3 P4).
+export function isDocumentProducingStage(s: Lifecycle[number]): boolean {
+  if (s.action?.kind === 'generate_document') return true
+  if (s.action?.kind === 'invoke_capability') {
+    const cfg = (s.action.config ?? {}) as { capability_slug?: string }
+    return (cfg.capability_slug ?? '').trim() === 'document_generation'
+  }
+  return false
+}
+
+// ESIGN-BLOCK-1 (WP3) — the template id(s) a DOCUMENT-PRODUCING stage binds, in both
+// shapes: an invoke_capability{document_generation} stage's capability_config.
+// template_entity_id, and the legacy generate_document stage's documents[]. Used to
+// decide whether the stage's output is SIGNABLE (its template declares
+// signature.required).
+function producingStageTemplateIds(s: Lifecycle[number]): string[] {
+  const ids: string[] = []
+  if (s.action?.kind === 'invoke_capability') {
+    const cfg = (s.action.config ?? {}) as {
+      capability_config?: { template_entity_id?: unknown }
+    }
+    const id = String(cfg.capability_config?.template_entity_id ?? '').trim()
+    if (id) ids.push(id)
+  }
+  for (const d of s.documents ?? []) {
+    if (d.templateEntityId) ids.push(d.templateEntityId)
+  }
+  return ids
+}
+
 // Validate a PROPOSED graph the way the authoring path will write it: structural
 // validity (incl. the closed action-kind vocabulary), linear-only, every referenced
 // templateEntityId real, and — ADR 0046 — every invoke_capability stage names a
 // capability that is LIVE and step-invocable, with a config that satisfies its
 // config_schema. Returns the same shape as validateLifecycle so the propose tool can
-// surface the combined errors verbatim.
+// surface the combined errors verbatim — plus `warnings` (BUILDER-CERT-1 WP1):
+// non-blocking diagnostics the propose tool surfaces on the card. Today's one
+// warning: the service declares BOTH per-document fees AND a fixed service fee, so
+// the composed billing charges twice per matter — legitimate only when deliberate
+// (a split), so it warns rather than rejects.
+//
+// BACKHALF-BLOCKS-1 (WP2) — a service's workflow must also DECLARE how it completes
+// and when it bills:
+//   • completion: the graph must end in a `complete_matter` terminal stage (the step
+//     Contract W's complete endpoint executes: legal.service.complete + archive).
+//   • billing: a graph that PRODUCES documents must carry a billing declaration —
+//     per-document fees on the service (transitions.document_fees, accrued on
+//     draft.approve — WP1) and/or an explicit approve_send_invoice step. Checked
+//     only when the caller passes `serviceKey` (both write paths do); a bare graph
+//     validation (no service context) skips just the fee lookup, not the completion
+//     check. Authoring-only, like every check here: existing saved definitions keep
+//     validating and running.
+//
+// BUILDER-UX-3 (P4) — `pendingBilling` is a billing proposal captured EARLIER IN THE
+// SAME TURN (propose_cost is capture-only; nothing persists until the attorney
+// approves the cost card). Compose-time validation may accept it as the billing
+// declaration so the doctrine order billing-then-workflow works within one turn.
+// Every other caller omits it and stays strict — in particular setServiceLifecycleAI
+// (the approve write path) re-validates against PERSISTED state only, so a workflow
+// physically cannot persist before its cost approve has landed.
+export interface PendingBilling {
+  costType: 'fixed' | 'hourly'
+  documentFees?: Record<string, string>
+}
+
 export async function validateProposedLifecycle(
   ctx: ActionContext,
   graph: Lifecycle,
-): Promise<{ ok: boolean; errors: string[] }> {
+  serviceKey?: string,
+  pendingBilling?: PendingBilling,
+): Promise<{ ok: boolean; errors: string[]; warnings: string[] }> {
   const errors: string[] = []
+  const warnings: string[] = []
   errors.push(...validateLifecycle(graph).errors)
   errors.push(...validateLinearLifecycle(graph).errors)
+  // HOTFIX-P17 (L1) — reject a proposal that lets a blocking step be skipped on the
+  // way to completion (a shortcut edge around a required step).
+  errors.push(...validateBlockingReachability(graph).errors)
+
+  // WP2 — completion declaration: the workflow must END in a completion step. Same
+  // diagnostic style as the template_entity_id check: name the exact fix.
+  const terminals = graph.filter((s) => s.terminal)
+  if (terminals.length > 0 && !terminals.some((s) => s.action?.kind === 'complete_matter')) {
+    errors.push(
+      `the workflow has no completion step — its terminal stage "${terminals[0]!.key}" must be a complete_matter step (set action.kind to "complete_matter") so completing the matter accrues the service fee and archives it.`,
+    )
+  }
+
+  // WP2 — billing declaration: a workflow that produces documents must state when it
+  // bills. Either the service declares per-document fees (accrued on approve) or the
+  // graph carries an explicit invoice step.
+  const producingStages = graph.filter(isDocumentProducingStage)
+  const hasInvoiceStep = graph.some((s) => s.action?.kind === 'approve_send_invoice')
+  if (serviceKey) {
+    const svc = await getService(ctx, serviceKey)
+    const feeKinds = Object.keys(svc?.documentFees ?? {})
+    // A FIXED service cost is a real billing declaration too — it auto-accrues at
+    // completion (legal.service.complete). Only a producing workflow with NO fees,
+    // NO invoice step, and NO flat fee produces work nobody ever bills. (Hourly
+    // does not count here: nothing accrues unless time is recorded and invoiced,
+    // so hourly document-producing services still need an invoice step.) A same-turn
+    // pending cost/fee proposal (P4) satisfies this check at COMPOSE time only.
+    const pendingFeeKinds = Object.keys(pendingBilling?.documentFees ?? {})
+    const hasFixedFee = svc?.cost?.type === 'fixed' || pendingBilling?.costType === 'fixed'
+    if (
+      producingStages.length > 0 &&
+      !hasInvoiceStep &&
+      feeKinds.length === 0 &&
+      pendingFeeKinds.length === 0 &&
+      !hasFixedFee
+    ) {
+      errors.push(
+        `the workflow produces a document (stage "${producingStages[0]!.key}") but declares no billing — set the service's per-document fees (transitions.document_fees, accrued when the document is approved), or a flat service fee (accrued at completion), or add an approve_send_invoice step to the graph.`,
+      )
+    }
+    // BUILDER-CERT-1 (WP1) — split billing is a WARNING, never a rejection: per-
+    // document fees PLUS a service cost (fixed doubles the total; hourly stacks
+    // time-billing on top) charge the matter twice. Legitimate only when the
+    // attorney chose it deliberately; the card must say it out loud.
+    if (feeKinds.length > 0 && svc?.cost) {
+      const feeTotal = feeKinds.reduce((sum, k) => sum + Number(svc.documentFees[k] ?? 0), 0)
+      warnings.push(
+        svc.cost.type === 'fixed'
+          ? `split billing: this service charges per-document fee(s) totaling $${feeTotal.toFixed(2)} on approval AND a $${svc.cost.amount} service fee at completion — two charges per matter (total $${(feeTotal + Number(svc.cost.amount)).toFixed(2)}). Keep both ONLY if the attorney deliberately chose a split; otherwise remove one so the service has ONE billing point.`
+          : `split billing: this service charges per-document fee(s) totaling $${feeTotal.toFixed(2)} on approval AND hourly billing at $${svc.cost.amount}/hour — two charge declarations per matter. Keep both ONLY if the attorney deliberately chose a split; otherwise remove one so the service has ONE billing point.`,
+      )
+    }
+  }
+
+  // CAPABILITY-UNIFY-1 (WP5) — a NEW proposal must not author a deprecated step kind.
+  // Authoring-only (not in validateLifecycle) so EXISTING definitions with the kind
+  // keep validating + running; only fresh proposals are steered to the replacement.
+  for (const s of graph) {
+    if (s.action && isDeprecatedStepActionKind(s.action.kind)) {
+      errors.push(
+        `stage "${s.key}" uses the deprecated step kind "${s.action.kind}". Author a drafting step as an invoke_capability stage running the "document_generation" capability instead (set action.config.capability_config.template_entity_id to the firm template it drafts and generation_mode to "ai_draft" or "template_merge").`,
+      )
+    }
+  }
 
   // WORKFLOW-AUTHORING-1 — every attorney/client/system edge must name a REAL advance
-  // token (the runtime matches on it verbatim), not prose. Authoring-only (not in
-  // validateLifecycle) so legacy/manual graphs with other tokens are never rejected.
+  // token (the runtime matches on it verbatim), not prose. Not part of structural
+  // validateLifecycle; since BUILDER-UX-3 P12 the manual save handler
+  // (legal.service.set_lifecycle) runs the same diagnoseEdgeTransition check, so
+  // dead tokens are rejected on BOTH the authoring and manual paths — the editor's
+  // trigger select carries legacy off-vocabulary values losslessly until edited.
   for (const s of graph) {
     for (const e of s.advances_to) {
       const err = diagnoseEdgeTransition(s.key, e.to, e.gate, e.via, e.on)
@@ -203,14 +351,27 @@ export async function validateProposedLifecycle(
     }
   }
 
+  // The firm's active document templates, loaded at most ONCE and shared by the
+  // documents[] check, the capability template_entity_id check, and the e-sign
+  // signability check below (a document_generation step names its template the same
+  // way, by exact entity id).
+  let docTemplateLibrary: Awaited<ReturnType<typeof listStandaloneTemplates>> | null = null
+  const loadDocTemplates = async (): Promise<NonNullable<typeof docTemplateLibrary>> => {
+    if (docTemplateLibrary) return docTemplateLibrary
+    docTemplateLibrary = (await listStandaloneTemplates(ctx)).filter(
+      (t) => t.category === 'document',
+    )
+    return docTemplateLibrary
+  }
+  const loadKnownDocTemplateIds = async (): Promise<Set<string>> => {
+    return new Set((await loadDocTemplates()).map((t) => t.templateEntityId))
+  }
+
   // Referenced template ids must exist in the firm's document library. Collect the
   // ids the graph references, then check them against the real library in one read.
   const referencedIds = new Set<string>(collectReferencedTemplateIds(graph))
   if (referencedIds.size > 0) {
-    const library = await listStandaloneTemplates(ctx)
-    const known = new Set(
-      library.filter((t) => t.category === 'document').map((t) => t.templateEntityId),
-    )
+    const known = await loadKnownDocTemplateIds()
     for (const id of referencedIds) {
       if (!known.has(id))
         errors.push(`referenced document template "${id}" is not in the firm library`)
@@ -247,10 +408,89 @@ export async function validateProposedLifecycle(
         )
       }
       errors.push(...diagnoseCapabilityStepConfig(s.key, slug, rawConfig, cap.spec.config_schema))
+      // CAPABILITY-UNIFY-1 (WP4) — a capability that drafts from a firm template (its
+      // config_schema declares `template_entity_id`, e.g. document_generation) must
+      // name a REAL active firm document template by exact id — the same class of check
+      // as documents[] templateEntityId. Keyed off the schema (not a hardcoded slug) so
+      // any future template-drafting capability inherits it. Only runs when the required
+      // key is present (its absence is diagnoseCapabilityStepConfig's job).
+      const schemaProps = capabilityConfigSchemaProps(cap.spec.config_schema)
+      if ('template_entity_id' in schemaProps) {
+        const capabilityConfig = (cfg.capability_config ?? {}) as Record<string, unknown>
+        const templateId = String((capabilityConfig.template_entity_id as string) ?? '').trim()
+        if (templateId) {
+          const known = await loadKnownDocTemplateIds()
+          if (!known.has(templateId)) {
+            errors.push(
+              `stage "${s.key}" runs capability "${slug}" but its action.config.capability_config.template_entity_id "${templateId}" is not an active firm document template — use an exact templateEntityId from get_workflow_context's availableTemplates.`,
+            )
+          }
+        }
+      }
     }
   }
 
-  return { ok: errors.length === 0, errors }
+  // ESIGN-BLOCK-1 (WP3) — e-sign composes ONLY where a document is signable: an
+  // invoke_capability{esignature} stage must IMMEDIATELY follow a document-producing
+  // stage whose bound template declares signature.required. Authoring-only, same
+  // style as the deprecated-kind and billing checks: existing saved definitions keep
+  // validating and running.
+  const esignStages = graph.filter((s) => {
+    if (s.action?.kind !== 'invoke_capability') return false
+    const cfg = (s.action.config ?? {}) as { capability_slug?: string }
+    return (cfg.capability_slug ?? '').trim() === 'esignature'
+  })
+  for (const s of esignStages) {
+    // Walk BACK to the document-producing stage this e-sign step signs. Linear graph
+    // → at most one predecessor per stage. The e-sign step sends the latest APPROVED
+    // version, and approval happens on the review step — so the canonical chain is
+    // draft → review_send_document → esign; the walk skips over the produced
+    // document's review stage(s), nothing else.
+    let producer: Lifecycle[number] | null = null
+    let cursor: Lifecycle[number] | undefined = s
+    while (cursor) {
+      const predecessor: Lifecycle[number] | undefined = graph.find((p) =>
+        p.advances_to.some((e) => e.to === cursor!.key),
+      )
+      if (!predecessor) break
+      if (isDocumentProducingStage(predecessor)) {
+        producer = predecessor
+        break
+      }
+      if (predecessor.action?.kind !== 'review_send_document') break
+      cursor = predecessor
+    }
+    if (!producer) {
+      errors.push(
+        `stage "${s.key}" runs the esignature capability but does not follow a document-producing step — an e-sign step goes right after the step that drafts (and reviews) the signable document: invoke_capability{document_generation}, optionally followed by its review_send_document step. Remove the e-sign step, or move it there.`,
+      )
+      continue
+    }
+    const predecessor = producer
+    const templateIds = producingStageTemplateIds(predecessor)
+    if (templateIds.length === 0) {
+      errors.push(
+        `stage "${s.key}" runs the esignature capability after stage "${predecessor.key}", but that stage binds no document template — bind the drafting stage's template (action.config.capability_config.template_entity_id) and declare signature.required on it before composing an e-sign step.`,
+      )
+      continue
+    }
+    const library = await loadDocTemplates()
+    const byId = new Map(library.map((t) => [t.templateEntityId, t]))
+    const signable = templateIds.some((id) => byId.get(id)?.signature.required === true)
+    if (!signable) {
+      const named = templateIds
+        .map((id) => {
+          const t = byId.get(id)
+          return t ? `"${t.name}" (${id})` : `"${id}"`
+        })
+        .join(', ')
+      errors.push(
+        `stage "${s.key}" runs the esignature capability, but the preceding stage "${predecessor.key}" drafts from ${named}, which does not declare signature.required — this document is unsigned, so an e-sign step cannot follow it. Either declare the signature block on the template (signature: { required: true, signer_roles: [...] } via legal.template.update) or remove the e-sign step.`,
+      )
+    }
+  }
+
+  return { ok: errors.length === 0, errors, warnings }
 }
 
 // Reasoning summary the approve route carries from the chat turn that produced the
@@ -312,16 +552,35 @@ export async function setServiceLifecycleAI(
 ): Promise<{ workflowDefinitionId: string; serviceKey: string; version: number }> {
   // Validate BEFORE any write (incl. the trace) so an invalid proposal leaves no
   // trace row behind. The handler re-validates, but failing fast here is cleaner.
-  const validation = await validateProposedLifecycle(ctx, graph)
+  const validation = await validateProposedLifecycle(ctx, graph, serviceKey)
   if (!validation.ok) {
     throw new Error(`Invalid workflow lifecycle: ${validation.errors.join('; ')}`)
+  }
+
+  // BUILDER-UX-3 (P6) — the reasoning-trace conclusion keeps the computed billing
+  // read-out (BUILDER-CERT-1 WP1's receipt) even though the card summary no longer
+  // restates it: re-appended HERE, in the core write path, so it is server-computed
+  // at approve time from the persisted billing — never model prose, never
+  // card-visible copy. Best-effort: a readout failure must not block the approve.
+  let tracedReasoning = reasoning
+  try {
+    const readout = await computeBillingReadout(ctx, serviceKey, { graph })
+    if (readout) {
+      const conclusion = reasoning.conclusion?.trim() || `Authored a workflow for ${serviceKey}.`
+      tracedReasoning = {
+        ...reasoning,
+        conclusion: `${conclusion} ${formatBillingReadout(readout)}`,
+      }
+    }
+  } catch {
+    // trace keeps the model's conclusion alone
   }
 
   // The write is AS THE AGENT, not the attorney — the trace, the action source, and
   // the configuration_change all attribute the authoring to the Claude agent actor,
   // exactly like generateDraft.runDraftGeneration.
   const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
-  const reasoningTraceId = await persistReasoningTrace(agentCtx, serviceKey, graph, reasoning)
+  const reasoningTraceId = await persistReasoningTrace(agentCtx, serviceKey, graph, tracedReasoning)
 
   const res = await submitAction(agentCtx, {
     actionKindName: 'legal.service.set_lifecycle',

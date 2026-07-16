@@ -28,6 +28,11 @@ export interface AssistantStreamInput {
   // The service under construction in the active build — the server injects the
   // live BUILD BRIEF for it into the model's context (WP4.2).
   buildServiceKey?: string
+  buildSessionId?: string
+  // The saved conversation this GENERAL (non-build) turn continues (WP-D2).
+  // Absent on a conversation's first turn; the server mints one and returns it
+  // on `done`.
+  chatSessionId?: string
 }
 
 export interface StreamMeta {
@@ -38,11 +43,27 @@ export interface StreamMeta {
   webSearch: boolean
 }
 
+// WP-H2: an editor launch resolved server-side (open_artifact_editor) — the
+// chat opens the matching Config*Modal pre-loaded with `content`.
+export interface EditorLaunchEvent {
+  artifactType: 'template' | 'questionnaire' | 'workflow'
+  id: string
+  name: string
+  content: unknown
+  variables?: unknown
+}
+
 export interface StreamDone {
   eventId: string
   reply: string
   citations: string[]
   model: string
+  // Phase 5 (UI-BUILDER-FIX-1): the service_build_session this BUILD turn wrote
+  // to — resent on subsequent build turns; absent on non-build turns.
+  buildSessionId?: string | null
+  // WP-D2: the assistant_chat_session this GENERAL turn wrote to — resent on
+  // subsequent turns of the same conversation; null on build turns.
+  chatSessionId?: string | null
 }
 
 // A workflow lifecycle the assistant proposed this turn (PR5) — surfaced as an
@@ -60,8 +81,17 @@ export interface ServiceProposalEvent {
   displayName: string
   derivedKey: string
   description: string | null
+  // BUILDER-UX-1 WP-1 — the client-facing copy (name + one-sentence description).
+  clientDisplayName: string | null
+  clientDescription: string | null
+  // BUILDER-UX-2 WP-7 — the wizard-authored Spanish tile copy.
+  clientDisplayNameEs: string | null
+  clientDescriptionEs: string | null
   route: 'auto' | 'manual'
   generationMode: 'template_merge' | 'ai_draft'
+  // BUILDER-CERT-1 (WP3) — booking mode (true = consultation slot at booking;
+  // false = intake-only); forwarded to the approve route.
+  appointmentRequired?: boolean
   summary: string
   confidence: number
 }
@@ -103,6 +133,8 @@ export interface TemplateProposalEvent {
   docKind: string
   summary: string
   confidence: number
+  // BUILDER-CERT-1 (WP3) — signability declaration; forwarded to the approve route.
+  signature?: { required: boolean; signer_roles: string[] }
   tokens: string[]
   orphanTokens: string[]
   // Phase 7 — flow-aware framing: whether a questionnaire exists yet (so orphans read
@@ -135,6 +167,9 @@ export interface CostProposalEvent {
   costType: 'hourly' | 'fixed'
   amount: string
   hours: number | null
+  // BUILDER-CERT-1 (WP1) — per-document fees declared alongside the cost; forwarded
+  // to the approve route.
+  documentFees?: Record<string, string>
   summary: string
   confidence: number
 }
@@ -145,6 +180,8 @@ export interface CostProposalEvent {
 export interface EnableProposalEvent {
   serviceKey: string
   summary: string
+  // BUILDER-UX-1 WP-2.1 — the completed service's steps, rendered as bullets.
+  completion?: string[]
 }
 
 export interface AssistantStreamHandlers {
@@ -158,7 +195,9 @@ export interface AssistantStreamHandlers {
   onSkill?: (skill: { slug: string; name: string }) => void
   // A non-fatal warning worth showing (e.g. the tool-round cap cut a step off).
   // Distinct from onError: the streamed reply is good and must not be retried.
-  onNotice?: (message: string) => void
+  // tone 'warning' (the default) is the amber box; 'status' is a muted, transient
+  // progress line (e.g. a workflow-compose retry underway).
+  onNotice?: (message: string, tone?: 'status' | 'warning') => void
   // The assistant produced a downloadable document (a deliverable, not the prose).
   onDocument?: (doc: { title: string; markdown: string }) => void
   // The assistant proposed a service workflow (PR5) — render an approval card.
@@ -176,6 +215,8 @@ export interface AssistantStreamHandlers {
   onEnableProposal?: (proposal: EnableProposalEvent) => void
   // The assistant asked a structured interview question (Build-Wizard Phase 7).
   onBuildQuestion?: (question: BuildQuestionEvent) => void
+  // WP-H2: the assistant resolved an existing artifact — open its real editor.
+  onEditorLaunch?: (launch: EditorLaunchEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -254,7 +295,7 @@ export async function streamAssistant(
         handlers.onSkill?.({ slug: String(evt.slug ?? ''), name: String(evt.name ?? '') })
         break
       case 'notice':
-        handlers.onNotice?.(String(evt.message ?? ''))
+        handlers.onNotice?.(String(evt.message ?? ''), evt.tone === 'status' ? 'status' : 'warning')
         break
       case 'document':
         handlers.onDocument?.({
@@ -275,8 +316,20 @@ export async function streamAssistant(
           displayName: String(evt.displayName ?? ''),
           derivedKey: String(evt.derivedKey ?? ''),
           description: typeof evt.description === 'string' ? evt.description : null,
+          clientDisplayName:
+            typeof evt.clientDisplayName === 'string' ? evt.clientDisplayName : null,
+          clientDescription:
+            typeof evt.clientDescription === 'string' ? evt.clientDescription : null,
+          clientDisplayNameEs:
+            typeof evt.clientDisplayNameEs === 'string' ? evt.clientDisplayNameEs : null,
+          clientDescriptionEs:
+            typeof evt.clientDescriptionEs === 'string' ? evt.clientDescriptionEs : null,
           route: evt.route === 'auto' ? 'auto' : 'manual',
           generationMode: evt.generationMode === 'ai_draft' ? 'ai_draft' : 'template_merge',
+          // BUILDER-CERT-1 (WP3) — booking mode rides the card to the approve route.
+          ...(typeof evt.appointmentRequired === 'boolean'
+            ? { appointmentRequired: evt.appointmentRequired }
+            : {}),
           summary: String(evt.summary ?? ''),
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
         })
@@ -301,6 +354,11 @@ export async function streamAssistant(
           docKind: String(evt.docKind ?? ''),
           summary: String(evt.summary ?? ''),
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
+          // BUILDER-CERT-1 (WP3) — signability rides the card to the approve route
+          // (what declares signature.required on the firm-library template).
+          ...(evt.signature && typeof evt.signature === 'object'
+            ? { signature: evt.signature as { required: boolean; signer_roles: string[] } }
+            : {}),
           tokens: Array.isArray(evt.tokens) ? (evt.tokens as string[]) : [],
           orphanTokens: Array.isArray(evt.orphanTokens) ? (evt.orphanTokens as string[]) : [],
           hasQuestionnaire: evt.hasQuestionnaire === true,
@@ -315,6 +373,10 @@ export async function streamAssistant(
           costType: evt.costType === 'hourly' ? 'hourly' : 'fixed',
           amount: String(evt.amount ?? ''),
           hours: typeof evt.hours === 'number' ? evt.hours : null,
+          // BUILDER-CERT-1 (WP1) — per-document fees ride the card to the approve route.
+          ...(evt.documentFees && typeof evt.documentFees === 'object'
+            ? { documentFees: evt.documentFees as Record<string, string> }
+            : {}),
           summary: String(evt.summary ?? ''),
           confidence: typeof evt.confidence === 'number' ? evt.confidence : 0.7,
         })
@@ -323,6 +385,7 @@ export async function streamAssistant(
         handlers.onEnableProposal?.({
           serviceKey: String(evt.serviceKey ?? ''),
           summary: String(evt.summary ?? ''),
+          completion: Array.isArray(evt.completion) ? (evt.completion as string[]) : undefined,
         })
         break
       case 'kind_proposal':
@@ -355,6 +418,18 @@ export async function streamAssistant(
             : [],
           allowFreeText: evt.allowFreeText === true,
           multiSelect: evt.multiSelect === true,
+        })
+        break
+      case 'editor_launch':
+        handlers.onEditorLaunch?.({
+          artifactType:
+            evt.artifactType === 'questionnaire' || evt.artifactType === 'workflow'
+              ? evt.artifactType
+              : 'template',
+          id: String(evt.id ?? ''),
+          name: String(evt.name ?? ''),
+          content: evt.content,
+          variables: evt.variables,
         })
         break
       case 'done':

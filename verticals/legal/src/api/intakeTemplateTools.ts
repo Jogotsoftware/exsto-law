@@ -28,6 +28,7 @@
 import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
 import {
+  coerceSystemFieldsInternal,
   loadQuestionnaireContext,
   loadServiceTemplateTokens,
   validateProposedQuestionnaire,
@@ -67,6 +68,11 @@ export interface TemplateProposal {
   docKind: string
   summary: string
   confidence: number
+  // BUILDER-CERT-1 (WP3) — the signability declaration from the attorney's answer to
+  // "does the finished document get signed, and by whom?" (author-template Step 3).
+  // Undefined = unsigned. Approving the card writes it onto the firm-library twin,
+  // where the e-sign composition validator reads it.
+  signature?: { required: boolean; signer_roles: string[] }
   // The {{tokens}} the body references, and the orphans (no matching question on THIS
   // service). With the documents→variables→questionnaire flow, orphans before the
   // questionnaire exists are NOT broken — they're the fields the questionnaire will
@@ -131,7 +137,7 @@ const PROPOSE_QUESTIONNAIRE_TOOL_DEF = {
       schema: {
         type: 'object',
         description:
-          'The intake schema: { title?, sections: [{ id, title, fields: [{ id, label, type, required?, options?, memberFields?, internal? }] }] }. Field ids should match the template tokens you want to cover. Use ONLY the field types from get_questionnaire_context. VISIBILITY: a document token the CLIENT does not provide — one the ATTORNEY fills during review, or a system/AI-review output (e.g. a review summary, findings, requested changes, the attorney name) — MUST be marked `internal: true` (and required:false). Internal fields still cover their {{token}} (the variable contract is satisfied) but are HIDDEN from the client booking form and never asked of the client. Group internal fields in their own section. Only fields the CLIENT actually fills at intake are left client-facing.',
+          'The intake schema: { title?, sections: [{ id, title, title_i18n?, fields: [{ id, label, type, required?, options?, memberFields?, internal?, label_i18n?, options_i18n? }] }] }. Field ids should match the template tokens you want to cover. Use ONLY the field types from get_questionnaire_context. VISIBILITY: a document token the CLIENT does not provide — one the ATTORNEY fills during review, or a system/AI-review output (e.g. a review summary, findings, requested changes, the attorney name) — MUST be marked `internal: true` (and required:false). Internal fields still cover their {{token}} (the variable contract is satisfied) but are HIDDEN from the client booking form and never asked of the client. Group internal fields in their own section. SYSTEM tokens (firm/attorney identity, letter_date/today, matter_number, fee slots) are platform-resolved and already excluded from the coverage target — do NOT create fields for them; a client-facing field with a system-token id is coerced to internal automatically. Only fields the CLIENT actually fills at intake are left client-facing. SPANISH (REQUIRED for client-facing text): the firm serves Spanish-speaking clients — for EVERY client-facing (non-internal) field include `label_i18n: { "es": "<natural Spanish label>" }`, for every select/checkbox include `options_i18n: { "es": [<Spanish options, SAME order/length as options>] }`, and every section gets `title_i18n: { "es": "<Spanish title>" }`. Answers/ids stay English (they merge into documents); only the QUESTION text the client reads is translated. Internal fields need no Spanish.',
       },
       summary: {
         type: 'string',
@@ -175,10 +181,15 @@ export function buildProposeQuestionnaireTool(
       if (!args.schema || typeof args.schema !== 'object') {
         return 'A schema object is required to propose a questionnaire; nothing was captured.'
       }
+      // P13 CODE-ENFORCEMENT: a client-facing field whose id is a system token
+      // (attorney/firm identity, dates, matter facts) is coerced to internal:true
+      // BEFORE validation/capture — the client can never be asked for system data.
+      const { schema: safeSchema, coerced } = coerceSystemFieldsInternal(args.schema)
       // The template tokens are the contract target — one read, shared with the
-      // validation (and carried onto the card as the coverage line).
+      // validation (and carried onto the card as the coverage line). System
+      // tokens are already excluded (loadServiceTemplateTokens).
       const { tokens: templateTokens } = await loadServiceTemplateTokens(ctx, serviceKey)
-      const validation = validateProposedQuestionnaire(args.schema, templateTokens)
+      const validation = validateProposedQuestionnaire(safeSchema, templateTokens)
       if (!validation.ok) {
         return `The proposed questionnaire is not valid and was NOT captured. Fix these and call propose_questionnaire AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
       }
@@ -197,7 +208,7 @@ export function buildProposeQuestionnaireTool(
           : 0.7
       captured.push({
         serviceKey,
-        schema: args.schema,
+        schema: safeSchema,
         summary:
           (args.summary ?? '').trim() || `Proposed an intake questionnaire for ${serviceKey}.`,
         confidence,
@@ -209,7 +220,10 @@ export function buildProposeQuestionnaireTool(
           ? `It covers ${templateTokens.length - validation.missingForTokens.length}/${templateTokens.length} template tokens — these are NOT yet collected: ${validation.missingForTokens.join(', ')}.`
           : `It covers all ${templateTokens.length} template tokens.`
         : 'The service has no document templates yet, so there are no tokens to cover.'
-      return `The proposed questionnaire is shown to the attorney as an approval card; it is NOT saved until they approve. ${coverage} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence (mention the coverage if any tokens are uncovered); NEVER repeat the fields in prose.`
+      const coercedNote = coerced.length
+        ? ` NOTE: ${coerced.join(', ')} ${coerced.length === 1 ? 'is a system-resolved field' : 'are system-resolved fields'} (attorney/firm identity, dates, matter facts) — ${coerced.length === 1 ? 'it was' : 'they were'} set internal:true automatically; the platform fills these and the client is never asked for them.`
+        : ''
+      return `The proposed questionnaire is shown to the attorney as an approval card; it is NOT saved until they approve. ${coverage}${coercedNote} The card renders BELOW your reply (never say "above"). If you already wrote a framing sentence this turn, reply with an EMPTY message — otherwise ONE short sentence (mention the coverage if any tokens are uncovered); NEVER repeat the fields in prose.`
     },
   }
 }
@@ -284,6 +298,21 @@ const PROPOSE_TEMPLATE_TOOL_DEF = {
         type: 'number',
         description: 'Your honest confidence in this proposal, 0–1 (never 1.0).',
       },
+      signature: {
+        type: 'object',
+        description:
+          'The document\'s signability, from the attorney\'s answer to "does the finished document get signed, and by whom?" (ask it for every document template — or derive it when the walkthrough already answered it). Omit entirely when unsigned. Approving the card declares it on the firm-library template, which is what lets an e-signature step compose after the step that drafts this document.',
+        properties: {
+          required: { type: 'boolean' },
+          signer_roles: {
+            type: 'array',
+            items: { type: 'string', enum: ['client', 'attorney', 'witness', 'notary'] },
+            description: 'Who signs, in signing order.',
+          },
+        },
+        required: ['required', 'signer_roles'],
+        additionalProperties: false,
+      },
     },
     required: ['service_key', 'name', 'body', 'doc_kind'],
     additionalProperties: false,
@@ -310,6 +339,7 @@ export function buildProposeTemplateTool(
         doc_kind?: string
         summary?: string
         confidence?: number
+        signature?: { required?: unknown; signer_roles?: unknown }
       }
       const serviceKey = (args.service_key ?? '').trim()
       const docKind = (args.doc_kind ?? '').trim()
@@ -351,6 +381,23 @@ export function buildProposeTemplateTool(
         typeof args.confidence === 'number' && Number.isFinite(args.confidence)
           ? Math.min(0.99, Math.max(0, args.confidence))
           : 0.7
+      // Signability (BUILDER-CERT-1 WP3): capture only a well-formed declaration —
+      // required:true with at least one valid role, or an explicit required:false.
+      // Anything malformed is dropped (reads as unsigned) rather than guessed.
+      const VALID_ROLES = ['client', 'attorney', 'witness', 'notary']
+      let signature: TemplateProposal['signature']
+      if (args.signature && typeof args.signature === 'object') {
+        const roles = Array.isArray(args.signature.signer_roles)
+          ? (args.signature.signer_roles as unknown[]).filter(
+              (r): r is string => typeof r === 'string' && VALID_ROLES.includes(r),
+            )
+          : []
+        if (args.signature.required === true && roles.length > 0) {
+          signature = { required: true, signer_roles: roles }
+        } else if (args.signature.required === false) {
+          signature = { required: false, signer_roles: [] }
+        }
+      }
       captured.push({
         serviceKey,
         name: name || docKind,
@@ -359,6 +406,7 @@ export function buildProposeTemplateTool(
         summary:
           (args.summary ?? '').trim() || `Proposed a "${docKind}" template for ${serviceKey}.`,
         confidence,
+        ...(signature ? { signature } : {}),
         tokens: validation.tokens,
         orphanTokens: validation.orphanTokens,
         hasQuestionnaire,

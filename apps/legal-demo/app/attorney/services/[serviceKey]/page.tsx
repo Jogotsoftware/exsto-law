@@ -13,6 +13,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
+import { ServiceSettingsFields } from '@/components/ServiceSettingsFields'
 
 type GenerationMode = 'template_merge' | 'ai_draft'
 type BookingDuration = 15 | 30 | 45 | 60
@@ -32,6 +34,11 @@ interface ServiceDefinition {
   serviceKey: string
   displayName: string
   description: string | null
+  // BUILDER-UX-1 WP-1.3 — client-facing copy (booking-tile name + description).
+  clientDisplayName: string | null
+  clientDescription: string | null
+  // BUILDER-UX-2 WP-7 — locale variants ({ es: { displayName, description } }).
+  clientCopyI18n: Record<string, { displayName?: string; description?: string }> | null
   route: 'auto' | 'manual'
   intakeFormId: string
   documents: string[]
@@ -46,6 +53,13 @@ interface ServiceDefinition {
 interface FormState {
   displayName: string
   description: string
+  // BUILDER-UX-1 WP-1.3 — the client-facing copy (what the public booking tile
+  // shows), edited here alongside the internal/attorney-facing fields.
+  clientDisplayName: string
+  clientDescription: string
+  // WP-7 — the Spanish client copy (empty = the Spanish intake falls back to English).
+  clientDisplayNameEs: string
+  clientDescriptionEs: string
   route: 'auto' | 'manual'
   generationMode: GenerationMode
   bookingEnabled: boolean
@@ -57,6 +71,10 @@ interface FormState {
 const EMPTY: FormState = {
   displayName: '',
   description: '',
+  clientDisplayName: '',
+  clientDescription: '',
+  clientDisplayNameEs: '',
+  clientDescriptionEs: '',
   route: 'manual',
   generationMode: 'template_merge',
   bookingEnabled: false,
@@ -79,6 +97,8 @@ export default function ServiceSettingsPage() {
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [origin, setOrigin] = useState('')
+  // MULTI-TENANT-1: the firm's slug so the shareable service link resolves to THIS firm.
+  const publicSlug = useFirmPublicSlug()
 
   useEffect(() => setOrigin(window.location.origin), [])
 
@@ -97,6 +117,10 @@ export default function ServiceSettingsPage() {
       setForm({
         displayName: r.service.displayName,
         description: r.service.description ?? '',
+        clientDisplayName: r.service.clientDisplayName ?? '',
+        clientDescription: r.service.clientDescription ?? '',
+        clientDisplayNameEs: r.service.clientCopyI18n?.es?.displayName ?? '',
+        clientDescriptionEs: r.service.clientCopyI18n?.es?.description ?? '',
         route: r.service.route,
         generationMode: r.service.generationMode ?? 'template_merge',
         bookingEnabled: r.service.booking?.enabled ?? false,
@@ -118,6 +142,16 @@ export default function ServiceSettingsPage() {
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => (f ? { ...f, [key]: value } : f))
     setSaved(false)
+  }
+
+  // WP-7: clearing BOTH Spanish inputs removes the es entry (the Spanish intake
+  // falls back to English) while any OTHER locales carry forward untouched.
+  function dropEs(
+    map: Record<string, { displayName?: string; description?: string }> | null | undefined,
+  ): Record<string, { displayName?: string; description?: string }> | null {
+    if (!map) return null
+    const rest = Object.fromEntries(Object.entries(map).filter(([k]) => k !== 'es'))
+    return Object.keys(rest).length ? rest : null
   }
 
   async function save() {
@@ -151,7 +185,12 @@ export default function ServiceSettingsPage() {
         if (
           form.bookingEnabled ||
           form.generationMode !== 'template_merge' ||
-          !form.appointmentRequired
+          !form.appointmentRequired ||
+          form.clientDisplayName.trim() ||
+          form.clientDescription.trim() ||
+          // WP-7: Spanish-only client copy must also trigger the follow-up write.
+          form.clientDisplayNameEs.trim() ||
+          form.clientDescriptionEs.trim()
         ) {
           await callAttorneyMcp({
             toolName: 'legal.service.update',
@@ -159,6 +198,22 @@ export default function ServiceSettingsPage() {
               serviceKey: newKey,
               displayName: form.displayName.trim(),
               description: form.description.trim() || null,
+              clientDisplayName: form.clientDisplayName.trim() || null,
+              clientDescription: form.clientDescription.trim() || null,
+              clientCopyI18n:
+                form.clientDisplayNameEs.trim() || form.clientDescriptionEs.trim()
+                  ? {
+                      ...(meta?.clientCopyI18n ?? {}),
+                      es: {
+                        ...(form.clientDisplayNameEs.trim()
+                          ? { displayName: form.clientDisplayNameEs.trim() }
+                          : {}),
+                        ...(form.clientDescriptionEs.trim()
+                          ? { description: form.clientDescriptionEs.trim() }
+                          : {}),
+                      },
+                    }
+                  : (meta?.clientCopyI18n ?? null),
               route: form.route,
               generationMode: form.generationMode,
               booking,
@@ -178,6 +233,25 @@ export default function ServiceSettingsPage() {
           serviceKey,
           displayName: form.displayName.trim(),
           description: form.description.trim() || null,
+          clientDisplayName: form.clientDisplayName.trim() || null,
+          clientDescription: form.clientDescription.trim() || null,
+          // WP-7: the es inputs build the es entry, merged over the loaded locale
+          // map so any OTHER locales survive; clearing both es inputs drops the es
+          // entry (dropEs) so the Spanish intake falls back to English.
+          clientCopyI18n:
+            form.clientDisplayNameEs.trim() || form.clientDescriptionEs.trim()
+              ? {
+                  ...(meta?.clientCopyI18n ?? {}),
+                  es: {
+                    ...(form.clientDisplayNameEs.trim()
+                      ? { displayName: form.clientDisplayNameEs.trim() }
+                      : {}),
+                    ...(form.clientDescriptionEs.trim()
+                      ? { description: form.clientDescriptionEs.trim() }
+                      : {}),
+                  },
+                }
+              : dropEs(meta?.clientCopyI18n),
           route: form.route,
           documents: meta?.documents ?? [],
           sortOrder: meta?.sortOrder,
@@ -196,7 +270,7 @@ export default function ServiceSettingsPage() {
     }
   }
 
-  const bookingUrl = origin ? `${origin}/book?service=${serviceKey}` : ''
+  const bookingUrl = origin ? buildFirmBookingUrl(origin, publicSlug, { serviceKey }) : ''
 
   return (
     <>
@@ -216,62 +290,40 @@ export default function ServiceSettingsPage() {
         </div>
       ) : (
         <section>
-          <div className="form-grid">
-            <label>
-              <span>Display name</span>
-              <input
-                value={form.displayName}
-                onChange={(e) => update('displayName', e.target.value)}
-                placeholder="e.g. NC LLC — Single-Member Formation"
-              />
-            </label>
-            <label>
-              <span>Workflow route</span>
-              <select
-                value={form.route}
-                onChange={(e) => update('route', e.target.value as 'auto' | 'manual')}
-              >
-                <option value="manual">Manual — attorney drafts</option>
-                <option value="auto">Attorney in the loop — auto-drafts on intake</option>
-              </select>
-            </label>
-          </div>
-          <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-            <span>Booking page description</span>
-            <textarea
-              value={form.description}
-              onChange={(e) => update('description', e.target.value)}
-              rows={2}
-              placeholder="The plain-language summary clients see when choosing this service on the booking page."
-            />
-          </label>
-
-          <fieldset className="svc-fieldset">
-            <legend>Document generation</legend>
-            <label>
-              <span>How documents are produced</span>
-              <select
-                value={form.generationMode}
-                onChange={(e) => update('generationMode', e.target.value as GenerationMode)}
-              >
-                <option value="template_merge">
-                  Template merge — fill the template from the answers (no AI)
-                </option>
-                <option value="ai_draft">AI draft — the assistant writes the document</option>
-              </select>
-            </label>
-            <p
-              style={{
-                color: 'var(--muted)',
-                fontSize: 'var(--text-sm)',
-                margin: 'var(--space-2) 0 0',
-              }}
-            >
-              {form.generationMode === 'ai_draft'
-                ? 'AI draft uses the per-document instructions on the Prompt tab.'
-                : 'Template merge fills the bodies on the Templates tab — no Prompt tab needed.'}
-            </p>
-          </fieldset>
+          {/* BUILDER-UX-2 WP-2: the identity + client-copy + generation fields are the
+              SHARED ServiceSettingsFields — the same form the wizard's ServiceEditorModal
+              renders (one editor, no fork). The booking-schedule fieldset below is
+              page-only. */}
+          <ServiceSettingsFields
+            value={{
+              displayName: form.displayName,
+              route: form.route,
+              clientDisplayName: form.clientDisplayName,
+              clientDescription: form.clientDescription,
+              clientDisplayNameEs: form.clientDisplayNameEs,
+              clientDescriptionEs: form.clientDescriptionEs,
+              description: form.description,
+              generationMode: form.generationMode,
+              appointmentRequired: form.appointmentRequired,
+            }}
+            onChange={(next) =>
+              setForm((f) =>
+                f
+                  ? {
+                      ...f,
+                      displayName: next.displayName,
+                      route: next.route,
+                      clientDisplayName: next.clientDisplayName,
+                      clientDescription: next.clientDescription,
+                      clientDisplayNameEs: next.clientDisplayNameEs,
+                      clientDescriptionEs: next.clientDescriptionEs,
+                      description: next.description,
+                      generationMode: next.generationMode,
+                    }
+                  : f,
+              )
+            }
+          />
 
           <fieldset className="svc-fieldset">
             <legend>Bookings</legend>

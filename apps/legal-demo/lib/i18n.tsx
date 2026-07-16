@@ -41,8 +41,8 @@ const en: Record<string, string> = {
   'slot.none': 'No availability found. Please email us.',
   'slot.booking': 'Booking…',
   'slot.confirm': 'Confirm booking',
-  'slot.stub_notice':
-    'Showing sample times — Juan Carlos’s live calendar isn’t connected right now, so these slots may need to be reconfirmed.',
+  'slot.unavailable':
+    'Online scheduling is temporarily unavailable. Please email us and we’ll set up a time.',
   'slot.conflict':
     'That time was just booked by someone else. Please pick another from the refreshed calendar below.',
 
@@ -95,7 +95,7 @@ const en: Record<string, string> = {
     'Set up your North Carolina LLC and get a tailored operating agreement for you and your co-owners.',
   'service.something_else.title': 'Something else',
   'service.something_else.desc':
-    "Not sure what you need? Book a general consultation and we'll point you the right way.",
+    "Not sure what you need? Tell us and we'll point you the right way.",
   'service.llc_formation.title': 'Start a business (LLC)',
   'service.llc_formation.desc':
     'Set up your North Carolina LLC and get a tailored operating agreement.',
@@ -117,6 +117,7 @@ const en: Record<string, string> = {
   'progress.contact': 'Contact',
   'progress.intake': 'About you',
   'progress.time': 'Time',
+  'progress.account': 'Account',
   'progress.step_of': 'Step {n} of {total}',
   'book.secure': 'Your information is encrypted and kept confidential.',
   'common.optional': 'Optional',
@@ -129,6 +130,7 @@ const en: Record<string, string> = {
   'section.engagement.title': 'Engagement terms',
 
   // Field labels
+  'field.request_text.label': 'What do you need help with?',
   'field.company_name.label': 'Proposed LLC name',
   'field.company_purpose.label': 'Purpose of the LLC (one sentence)',
   'field.registered_agent_name.label': 'Registered agent name',
@@ -170,7 +172,6 @@ const en: Record<string, string> = {
   'cal.next_week': 'Next week',
   'cal.local_time': 'All times in your local time ({tz})',
   'cal.live': 'Live availability',
-  'cal.sample': 'Sample times',
   'cal.updated': 'updated {time}',
   'cal.refresh': 'Refresh availability',
   'cal.taken': 'Taken',
@@ -180,9 +181,146 @@ const en: Record<string, string> = {
   'cal.all_taken': 'All taken',
   'cal.times_open_one': '{n} time open',
   'cal.times_open_many': '{n} times open',
+
+  // Fee consent card + waiting-on-consent hint
+  'fee.title': 'Fee for this service',
+  'fee.hourly_note': '(billed for time actually worked)',
+  'fee.accept_fixed': 'I accept this fee. It will be billed on my invoice for this service.',
+  'fee.accept_hourly': 'I accept this hourly rate for work on this service.',
+
+  // Client portal (CLIENT-PORTAL-UI-1) — simple, plain client copy only.
+  'portal.nav.home': 'Home',
+  'portal.nav.documents': 'Documents',
+  'portal.nav.notifications': 'Notifications',
+  'portal.signout': 'Sign out',
+  'portal.greeting.morning': 'Good morning{name}.',
+  'portal.greeting.afternoon': 'Good afternoon{name}.',
+  'portal.greeting.evening': 'Good evening{name}.',
+  'portal.attention.label': 'Needs your attention',
+  'portal.attention.consultation': 'Upcoming consultation',
+  'portal.attention.signature': 'Waiting on your signature',
+  'portal.attention.manage': 'Reschedule or cancel',
+  'portal.attention.sign': 'Review & sign',
+  'portal.matters.label': 'Your matters',
+  'portal.matters.empty':
+    "You don't have any matters with the firm yet. Once you book a consultation, it'll appear here.",
+  'portal.matters.archived': 'Closed',
+  // S2 (single status truth) + S3 (human title fallback)
+  'portal.matter.status.in_progress': 'In progress',
+  'portal.matter.status.completed': 'Completed',
+  'portal.matter.generic': 'Legal matter',
+  'portal.rail.book.title': 'Need something else?',
+  'portal.rail.book.body':
+    "Book time with the firm or request a new service. We'll confirm before any work begins.",
+  'portal.rail.book.cta': 'Book or request a service',
+  'portal.gate.title': 'One quick step first',
+  'portal.gate.body': 'To book time or message the firm, review and accept the engagement terms.',
+  'portal.gate.rate': 'Standard rate: ${rate} / hour',
+  'portal.gate.cta': 'Review & accept terms',
+  'portal.gate.note': 'Booking and messages unlock right after.',
+  'portal.gate.terms_title': 'Engagement terms',
+  'portal.gate.confirm': 'Accept & continue',
+  'portal.gate.cancel': 'Not now',
+  'portal.gate.unavailable':
+    "The firm hasn't published its engagement terms yet — check back soon or reach out directly.",
+  'portal.gate.desc': 'Standard hourly rate for messages and booked time',
+  'portal.messages.label': 'Messages',
+  'portal.messages.open': 'Open messages',
+  'portal.messages.empty': 'No messages yet.',
+  'portal.messages.you': 'You',
+  'portal.billing.label': 'Billing',
+  'portal.billing.due_one': '1 invoice due{date}',
+  'portal.billing.due_many': '{count} invoices due{date}',
+  'portal.billing.cta': 'View & pay',
+  'portal.billing.clear': "You're all set — nothing due right now.",
+  'portal.docs.title': 'Documents',
+  'portal.docs.search': 'Search documents in this matter…',
+  'portal.docs.from_attorney': 'From your attorney',
+  'portal.docs.to_sign': 'To sign & signed',
+  'portal.docs.uploaded': "You've uploaded",
+  'portal.docs.view': 'View',
+  'portal.docs.download': 'Download',
+  // S1: an upload whose stored file can no longer be resolved (never rendered as
+  // a live View/Download).
+  'portal.docs.unavailable': 'This file is no longer available — contact the firm.',
+  'portal.docs.upload': 'Upload a document',
+  'portal.docs.uploading': 'Uploading…',
+  'portal.docs.upload_hint': 'PDF, Word, images, or text · up to 25 MB',
+  'portal.docs.empty': "No documents yet. We'll post documents here when they're ready.",
+  'portal.docs.none_match': 'Nothing matches your search in this matter.',
+  'portal.notif.title': 'Notifications',
+  'portal.notif.empty': "You're all caught up.",
+  'portal.notif.message': 'New message from your attorney',
+  'portal.notif.document': 'A document is ready for you',
+  'portal.notif.esign_request': 'A document is ready for your signature',
+  'portal.notif.invoice': 'Invoice {ref} was sent to you',
+  'portal.notif.booking_confirmed': 'Your consultation is booked',
+  'portal.notif.booking_changed': 'Your consultation was updated',
+  'portal.notif.booking_cancelled': 'Your consultation was cancelled',
+  'portal.notif.mark_read': 'Mark all as read',
+  'portal.back_home': 'Back to home',
+  'portal.assistant.tag': 'Ask a question',
+  'portal.assistant.title': 'Assistant',
+  'portal.loading': 'Loading…',
+  'fee.hint': 'Accept the fee above to continue.',
+
+  // Returning-client notice (flow start)
+  'funnel.existing': 'Already working with us?',
+  'funnel.signin': 'Sign in to your client portal',
+  'funnel.existing_tail':
+    'to book with your details prefilled — or continue below if you are new here.',
+  'funnel.signedin': 'Booking as',
+  'funnel.portal': 'Go to your portal',
+
+  // Inline sign-in panel
+  'signin.email': 'Email',
+  'signin.password': 'Password',
+  'signin.submit': 'Sign in',
+  'signin.working': 'Signing you in…',
+  'signin.failed': 'We could not sign you in.',
+  'signin.unavailable': 'Sign-in is not available right now — you can continue without it.',
+
+  // Account gate
+  'account.heading': 'Create your account',
+  'account.heading_signin': 'Sign in to your account',
+  'account.subtitle': 'Everything about your matter will live in your secure portal.',
+  'account.subtitle_signin': 'Your request will be linked to your existing portal account.',
+  'account.blurb':
+    'One last step: create your secure client portal account. You will use it to track your matter, read and sign documents, message the firm, and pay invoices.',
+  'account.password': 'Choose a password',
+  'account.password2': 'Confirm password',
+  'account.submit': 'Create account & submit',
+  'account.password_short': 'Choose a password of at least 8 characters.',
+  'account.password_mismatch': 'The passwords do not match.',
+  'account.fee_required': 'Please review and accept the fee to continue.',
+  'account.known': 'It looks like you already have an account — sign in to link this request.',
+  'account.signin_toggle': 'Already have a portal account? Sign in instead',
+  'account.create_toggle': 'New here, or can’t sign in? Create your account instead',
+
+  // Confirmation — portal account outcomes
+  'confirm.account_created':
+    'Your client portal account is ready — check your email for a confirmation link, then sign in to track this matter, read documents, and pay invoices.',
+  'confirm.account_existed':
+    'This booking is linked to your existing portal account — sign in with your usual password.',
+  'confirm.portal': 'Open your client portal',
 }
 
 const es: Record<string, string> = {
+  // WP-7 — intake controls that previously rendered English on the Spanish intake:
+  // the allow_unknown toggle, the yes/no + true/false pill LABELS (stored answer
+  // values stay English — they merge into documents), and the file-upload copy.
+  'field.unknown': 'No lo sé',
+  'choice.yes': 'Sí',
+  'choice.no': 'No',
+  'choice.true': 'Verdadero',
+  'choice.false': 'Falso',
+  'upload.attach': 'Adjuntar un documento',
+  'upload.add_another': 'Adjuntar otro documento',
+  'upload.uploading': 'Subiendo…',
+  'upload.remove': 'Quitar',
+  'upload.failed': 'Error al subir el archivo.',
+  'upload.hint': 'PDF, Word, imágenes o texto — hasta 25 MB cada uno.',
+
   // Stepper
   'step.service': '1. Servicio',
   'step.contact': '2. Contacto',
@@ -217,8 +355,8 @@ const es: Record<string, string> = {
   'slot.none': 'No hay disponibilidad. Por favor envíanos un correo.',
   'slot.booking': 'Reservando…',
   'slot.confirm': 'Confirmar reserva',
-  'slot.stub_notice':
-    'Mostrando horarios de muestra — el calendario en vivo de Juan Carlos no está conectado, así que estos horarios podrían necesitar confirmación.',
+  'slot.unavailable':
+    'La programación en línea no está disponible por el momento. Escríbenos por correo y coordinamos una hora.',
   'slot.conflict':
     'Ese horario acaba de reservarse por otra persona. Por favor elige otro del calendario actualizado.',
 
@@ -270,8 +408,8 @@ const es: Record<string, string> = {
   'service.nc_llc_multi_member.desc':
     'Constituye tu LLC en Carolina del Norte y obtén un acuerdo operativo a tu medida para ti y tus socios.',
   'service.something_else.title': 'Otra cosa',
-  'service.something_else.desc':
-    '¿No sabes qué necesitas? Agenda una consulta general y te orientamos.',
+  'service.something_else.desc': '¿No sabes qué necesitas? Cuéntanos y te orientamos.',
+  'field.request_text.label': '¿En qué necesitas ayuda?',
   'service.llc_formation.title': 'Inicia un negocio (LLC)',
   'service.llc_formation.desc':
     'Constituye tu LLC en Carolina del Norte y obtén un acuerdo operativo a tu medida.',
@@ -292,6 +430,7 @@ const es: Record<string, string> = {
   'progress.contact': 'Contacto',
   'progress.intake': 'Sobre ti',
   'progress.time': 'Horario',
+  'progress.account': 'Cuenta',
   'progress.step_of': 'Paso {n} de {total}',
   'book.secure': 'Tu información está cifrada y se mantiene confidencial.',
   'common.optional': 'Opcional',
@@ -346,7 +485,6 @@ const es: Record<string, string> = {
   'cal.next_week': 'Semana siguiente',
   'cal.local_time': 'Horarios en tu zona local ({tz})',
   'cal.live': 'Disponibilidad en vivo',
-  'cal.sample': 'Horarios de muestra',
   'cal.updated': 'actualizado {time}',
   'cal.refresh': 'Actualizar disponibilidad',
   'cal.taken': 'Ocupado',
@@ -356,6 +494,129 @@ const es: Record<string, string> = {
   'cal.all_taken': 'Todo ocupado',
   'cal.times_open_one': '{n} horario disponible',
   'cal.times_open_many': '{n} horarios disponibles',
+
+  // Tarjeta de consentimiento de honorarios + aviso de espera
+  'fee.title': 'Honorarios por este servicio',
+  'fee.hourly_note': '(se factura por el tiempo realmente trabajado)',
+  'fee.accept_fixed': 'Acepto estos honorarios. Se incluirán en mi factura por este servicio.',
+  'fee.accept_hourly': 'Acepto esta tarifa por hora por el trabajo en este servicio.',
+
+  // Portal del cliente (CLIENT-PORTAL-UI-1)
+  'portal.nav.home': 'Inicio',
+  'portal.nav.documents': 'Documentos',
+  'portal.nav.notifications': 'Notificaciones',
+  'portal.signout': 'Cerrar sesión',
+  'portal.greeting.morning': 'Buenos días{name}.',
+  'portal.greeting.afternoon': 'Buenas tardes{name}.',
+  'portal.greeting.evening': 'Buenas noches{name}.',
+  'portal.attention.label': 'Requiere su atención',
+  'portal.attention.consultation': 'Próxima consulta',
+  'portal.attention.signature': 'Esperando su firma',
+  'portal.attention.manage': 'Reprogramar o cancelar',
+  'portal.attention.sign': 'Revisar y firmar',
+  'portal.matters.label': 'Sus asuntos',
+  'portal.matters.empty':
+    'Aún no tiene asuntos con la firma. Cuando reserve una consulta, aparecerá aquí.',
+  'portal.matters.archived': 'Cerrado',
+  // S2 (una sola verdad de estado) + S3 (título humano por defecto)
+  'portal.matter.status.in_progress': 'En curso',
+  'portal.matter.status.completed': 'Completado',
+  'portal.matter.generic': 'Asunto legal',
+  'portal.rail.book.title': '¿Necesita algo más?',
+  'portal.rail.book.body':
+    'Reserve tiempo con la firma o solicite un nuevo servicio. Confirmaremos antes de comenzar cualquier trabajo.',
+  'portal.rail.book.cta': 'Reservar o solicitar un servicio',
+  'portal.gate.title': 'Un paso rápido primero',
+  'portal.gate.body':
+    'Para reservar tiempo o enviar mensajes a la firma, revise y acepte los términos del acuerdo.',
+  'portal.gate.rate': 'Tarifa estándar: ${rate} / hora',
+  'portal.gate.cta': 'Revisar y aceptar términos',
+  'portal.gate.note': 'Las reservas y los mensajes se desbloquean de inmediato.',
+  'portal.gate.terms_title': 'Términos del acuerdo',
+  'portal.gate.confirm': 'Aceptar y continuar',
+  'portal.gate.cancel': 'Ahora no',
+  'portal.gate.unavailable':
+    'La firma aún no ha publicado sus términos del acuerdo. Vuelva pronto o comuníquese directamente.',
+  'portal.gate.desc': 'Tarifa estándar por hora para mensajes y tiempo reservado',
+  'portal.messages.label': 'Mensajes',
+  'portal.messages.open': 'Abrir mensajes',
+  'portal.messages.empty': 'Aún no hay mensajes.',
+  'portal.messages.you': 'Usted',
+  'portal.billing.label': 'Facturación',
+  'portal.billing.due_one': '1 factura pendiente{date}',
+  'portal.billing.due_many': '{count} facturas pendientes{date}',
+  'portal.billing.cta': 'Ver y pagar',
+  'portal.billing.clear': 'Todo en orden — no hay nada pendiente.',
+  'portal.docs.title': 'Documentos',
+  'portal.docs.search': 'Buscar documentos en este asunto…',
+  'portal.docs.from_attorney': 'De su abogado',
+  'portal.docs.to_sign': 'Para firmar y firmados',
+  'portal.docs.uploaded': 'Subidos por usted',
+  'portal.docs.view': 'Ver',
+  'portal.docs.download': 'Descargar',
+  // S1: una subida cuyo archivo almacenado ya no se puede resolver.
+  'portal.docs.unavailable': 'Este archivo ya no está disponible — comuníquese con la firma.',
+  'portal.docs.upload': 'Subir un documento',
+  'portal.docs.uploading': 'Subiendo…',
+  'portal.docs.upload_hint': 'PDF, Word, imágenes o texto · hasta 25 MB',
+  'portal.docs.empty': 'Aún no hay documentos. Los publicaremos aquí cuando estén listos.',
+  'portal.docs.none_match': 'Nada coincide con su búsqueda en este asunto.',
+  'portal.notif.title': 'Notificaciones',
+  'portal.notif.empty': 'Está al día.',
+  'portal.notif.message': 'Nuevo mensaje de su abogado',
+  'portal.notif.document': 'Un documento está listo para usted',
+  'portal.notif.esign_request': 'Un documento está listo para su firma',
+  'portal.notif.invoice': 'Se le envió la factura {ref}',
+  'portal.notif.booking_confirmed': 'Su consulta está reservada',
+  'portal.notif.booking_changed': 'Su consulta fue actualizada',
+  'portal.notif.booking_cancelled': 'Su consulta fue cancelada',
+  'portal.notif.mark_read': 'Marcar todo como leído',
+  'portal.back_home': 'Volver al inicio',
+  'portal.assistant.tag': 'Haga una pregunta',
+  'portal.assistant.title': 'Asistente',
+  'portal.loading': 'Cargando…',
+  'fee.hint': 'Acepta los honorarios de arriba para continuar.',
+
+  // Aviso para clientes existentes (inicio del flujo)
+  'funnel.existing': '¿Ya trabajas con nosotros?',
+  'funnel.signin': 'Inicia sesión en tu portal de cliente',
+  'funnel.existing_tail':
+    'para reservar con tus datos precargados — o continúa abajo si eres nuevo aquí.',
+  'funnel.signedin': 'Reservando como',
+  'funnel.portal': 'Ir a tu portal',
+
+  // Panel de inicio de sesión integrado
+  'signin.email': 'Correo electrónico',
+  'signin.password': 'Contraseña',
+  'signin.submit': 'Iniciar sesión',
+  'signin.working': 'Iniciando tu sesión…',
+  'signin.failed': 'No pudimos iniciar tu sesión.',
+  'signin.unavailable':
+    'Iniciar sesión no está disponible por el momento — puedes continuar sin hacerlo.',
+
+  // Paso de cuenta
+  'account.heading': 'Crea tu cuenta',
+  'account.heading_signin': 'Inicia sesión en tu cuenta',
+  'account.subtitle': 'Todo sobre tu asunto vivirá en tu portal seguro.',
+  'account.subtitle_signin': 'Tu solicitud quedará vinculada a tu cuenta del portal existente.',
+  'account.blurb':
+    'Un último paso: crea tu cuenta segura del portal de cliente. La usarás para seguir tu asunto, leer y firmar documentos, escribir al despacho y pagar facturas.',
+  'account.password': 'Elige una contraseña',
+  'account.password2': 'Confirma la contraseña',
+  'account.submit': 'Crear cuenta y enviar',
+  'account.password_short': 'Elige una contraseña de al menos 8 caracteres.',
+  'account.password_mismatch': 'Las contraseñas no coinciden.',
+  'account.fee_required': 'Por favor revisa y acepta los honorarios para continuar.',
+  'account.known': 'Parece que ya tienes una cuenta — inicia sesión para vincular esta solicitud.',
+  'account.signin_toggle': '¿Ya tienes una cuenta del portal? Inicia sesión',
+  'account.create_toggle': '¿Nuevo aquí o no puedes iniciar sesión? Crea tu cuenta',
+
+  // Confirmación — resultados de la cuenta del portal
+  'confirm.account_created':
+    'Tu cuenta del portal de cliente está lista — revisa tu correo para el enlace de confirmación y luego inicia sesión para seguir este asunto, leer documentos y pagar facturas.',
+  'confirm.account_existed':
+    'Esta reserva quedó vinculada a tu cuenta del portal existente — inicia sesión con tu contraseña habitual.',
+  'confirm.portal': 'Abre tu portal de cliente',
 }
 
 const dict: Record<Lang, Record<string, string>> = { en, es }

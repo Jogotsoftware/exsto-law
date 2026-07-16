@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm } from '@/components/ConfirmModal'
 import { streamTemplateAi } from '@/lib/templateAiStream'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
@@ -22,17 +23,25 @@ import { EyeIcon } from '@/components/icons'
 import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
 
 // Standard merge tokens available in every document (filled at generation time
-// from the client/matter), so the `{{` autocomplete and chip coloring recognize
-// them even when they aren't bound to a questionnaire field.
+// from the client/matter/firm profile), so the `{{` autocomplete and chip
+// coloring recognize them even when they aren't bound to a questionnaire field.
+// Source of truth: the server's system-token set (verticals/legal/src/api/
+// tokenClasses.ts) — keep this list in step with it. client_address is
+// deliberately absent: it is CLIENT data, so a template using it correctly
+// triggers a questionnaire proposal.
 const STANDARD_TOKENS = [
   'client_name',
   'client_email',
-  'client_address',
   'matter_number',
   'firm_name',
+  'firm_address',
+  'firm_phone',
+  'firm_email',
   'attorney_name',
+  'attorney_email',
   'effective_date',
   'today',
+  'letter_date',
 ]
 
 interface ServiceDefinition {
@@ -638,6 +647,7 @@ function KindEditor({
   onAddFields: (f: { id: string; label: string }[]) => Promise<void>
   onSavedToLibrary: () => Promise<void>
 }) {
+  const { confirm, confirmElement } = useConfirm()
   const [text, setText] = useState(template.templateText ?? '')
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -746,6 +756,7 @@ function KindEditor({
 
   return (
     <section style={{ borderLeft: '3px solid var(--border)' }}>
+      {confirmElement}
       <div
         style={{
           display: 'flex',
@@ -810,15 +821,21 @@ function KindEditor({
             onChange={(e) => {
               const pick = library.find((l) => l.docKind === e.target.value)
               if (!pick) return
-              if (
-                text.trim() &&
-                !window.confirm('Replace this document body with the library template?')
-              )
-                return
-              setText(pick.body)
-              setSeedHtml(markdownToHtml(pick.body))
-              setEditorKey((k) => k + 1)
-              setSaved(false)
+              const apply = () => {
+                setText(pick.body)
+                setSeedHtml(markdownToHtml(pick.body))
+                setEditorKey((k) => k + 1)
+                setSaved(false)
+              }
+              if (!text.trim()) return apply()
+              void confirm({
+                title: 'Replace this document body?',
+                body: `Replaces the current body with the “${pick.name}” library template. Unsaved edits to the body are lost.`,
+                confirmLabel: 'Replace',
+                danger: true,
+              }).then((ok) => {
+                if (ok) apply()
+              })
             }}
           >
             <option value="">Start from a library template…</option>

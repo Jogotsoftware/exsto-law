@@ -80,7 +80,9 @@ async function resolveCurrentStage(
 
 // The document kind this generate_document stage produces: the stage's own document
 // ref wins; else the service's first registered document kind (transitions.documents).
-async function resolveStageDocumentKind(
+// Exported for the WP4 regenerate runtime (regenerateStage.ts), which re-drafts the
+// document a generate_document stage produces.
+export async function resolveStageDocumentKind(
   ctx: ActionContext,
   matterEntityId: string,
   stage: LifecycleStage,
@@ -103,8 +105,10 @@ async function resolveStageDocumentKind(
 
 // Has a draft for this document kind already been produced on this matter? (draft_of,
 // matching document_kind). The idempotency guard so an autorun + a manual generate — or
-// two autoruns — never double-draft.
-async function draftAlreadyExists(
+// two autoruns — never double-draft. Exported so the document_generation CAPABILITY
+// handler (capabilityRuntime.ts) reuses the SAME guard rather than a second copy
+// (CAPABILITY-UNIFY-1 WP2: the existing draft-exists idempotency stays).
+export async function draftAlreadyExists(
   ctx: ActionContext,
   matterEntityId: string,
   documentKind: string,

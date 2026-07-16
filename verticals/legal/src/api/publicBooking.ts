@@ -10,7 +10,7 @@
 // NO-SIMULATE: availability is REAL Google free/busy only (getGoogleAvailability,
 // never getAvailability's stub fallback). A firm with no connected calendar shows
 // honestly-empty availability, never fabricated slots.
-import { withAppRole } from '@exsto/shared'
+import { withAppRole, withTenant } from '@exsto/shared'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { getFirmBookingRules, type FirmBookingRules } from './firmBookingRules.js'
 import { getGoogleAvailability, createCalendarEvent } from '../adapters/googleCalendar.js'
@@ -24,8 +24,38 @@ import { getGoogleStatus } from './google.js'
 
 // The public-intake SYSTEM actor (ADR 0035): every public write is attributed to it,
 // never an authenticated human. Client identity lives in the created contact row.
-const PUBLIC_INTAKE_ACTOR =
+// Resolve the RESOLVED firm's OWN system actor per booking: a single global const
+// (tenant zero's …0005) FK-fails booking.create/client.create for ANY other tenant,
+// whose …0005 does not exist. Falls back to the historical env/const so tenant-zero
+// behavior is unchanged.
+const PUBLIC_INTAKE_ACTOR_FALLBACK =
   process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
+
+// The tenant's own public-intake actor: the historical …0005 when it exists in this
+// tenant (tenant zero), else the tenant's system/agent actor. Reads the `actor` table
+// UNDER THE TENANT'S OWN CONTEXT (withTenant): the tenant id is already known, and the
+// actor RLS policy casts app.tenant_id::uuid — under an RLS-engaged role (ADR 0037
+// SUBSTRATE_DB_ROLE=authenticated) withAppRole leaves app.tenant_id unset (''), which
+// blows up as "invalid input syntax for type uuid". withTenant binds it, so the lookup
+// is RLS-safe whether the connection logs in as owner or authenticator. (This is why it
+// differs from resolvePublicFirm, which is a genuinely cross-tenant slug→tenant lookup
+// via a SECURITY DEFINER function.) Exported (MULTI-TENANT-1): the app-layer public
+// funnel resolves the per-tenant intake actor the same way the /book/{slug} front door
+// does, so a write under a resolved firm is attributed to THAT firm's actor.
+export async function resolvePublicIntakeActor(tenantId: string): Promise<string> {
+  return withTenant(tenantId, async (client) => {
+    const res = await client.query<{ id: string }>(
+      `SELECT id FROM actor
+        WHERE tenant_id = $1 AND status = 'active'
+          AND (id = $2 OR actor_type IN ('system', 'agent'))
+        ORDER BY (id = $2) DESC,
+                 CASE actor_type WHEN 'system' THEN 0 ELSE 1 END, created_at
+        LIMIT 1`,
+      [tenantId, PUBLIC_INTAKE_ACTOR_FALLBACK],
+    )
+    return res.rows[0]?.id ?? PUBLIC_INTAKE_ACTOR_FALLBACK
+  })
+}
 
 const MAX_DAYS_OUT = 60
 
@@ -82,9 +112,9 @@ export interface PublicAvailability {
   configured: boolean
 }
 
-// Firm ctx for a resolved public booking (always the public-intake actor).
-function firmCtx(tenantId: string): ActionContext {
-  return { tenantId, actorId: PUBLIC_INTAKE_ACTOR }
+// Firm ctx for a resolved public booking (the tenant's own public-intake system actor).
+async function firmCtx(tenantId: string): Promise<ActionContext> {
+  return { tenantId, actorId: await resolvePublicIntakeActor(tenantId) }
 }
 
 // Pick the duration to compute against: the requested one IF the firm offers it,
@@ -101,7 +131,7 @@ export async function getPublicAvailability(
 ): Promise<PublicAvailability | null> {
   const firm = await resolvePublicFirm(slug)
   if (!firm) return null
-  const ctx = firmCtx(firm.tenantId)
+  const ctx = await firmCtx(firm.tenantId)
   const rules = await getFirmBookingRules(ctx)
   const durationMinutes = pickDuration(rules, opts.durationMinutes)
   const daysOut = Math.min(MAX_DAYS_OUT, Math.max(1, opts.daysOut ?? 21))
@@ -158,7 +188,7 @@ export async function getPublicAvailability(
 // prospect is the sole guest). Matter-LESS (createCalendarEvent, not the in-service
 // createBookingEvent). Returns the event id/link, or null if Google isn't connected
 // or the write fails — the booking is still recorded either way.
-async function tryCreateStandaloneEvent(
+export async function tryCreateStandaloneEvent(
   ctx: ActionContext,
   args: {
     firmName: string
@@ -220,7 +250,7 @@ export interface PublicBookingResult {
 export async function submitPublicBooking(input: PublicBookingInput): Promise<PublicBookingResult> {
   const firm = await resolvePublicFirm(input.slug)
   if (!firm) throw new Error('This booking link is not valid.')
-  const ctx = firmCtx(firm.tenantId)
+  const ctx = await firmCtx(firm.tenantId)
 
   const name = (input.clientName ?? '').trim()
   const email = (input.clientEmail ?? '').trim()

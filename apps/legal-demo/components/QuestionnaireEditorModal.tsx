@@ -1,0 +1,98 @@
+'use client'
+
+// BUILDER-UX-1 WP-4 — the questionnaire editor pop-up: the REAL field-editing
+// builder (shared QuestionnaireBuilder) mounted in a modal, opened DIRECTLY in
+// edit mode and seeded from an in-memory schema (a wizard proposal or a
+// persisted questionnaire). No intermediate View/Edit toggle, no JSON textarea.
+// Save/Cancel live at the top; the host decides what Save does (update the
+// wizard card's in-memory schema, or persist through the standalone save path).
+import { useState } from 'react'
+import { Modal } from '@/components/Modal'
+import { EditorActionRow } from '@/components/EditorActionRow'
+import { AiRegenerateRail } from '@/components/AiRegenerateRail'
+import { QuestionnaireView } from '@/components/configEditors'
+import {
+  QuestionnaireBuilder,
+  schemaToSections,
+  sectionsToSchema,
+  schemaFieldCount,
+  type BSection,
+  type QuestionnaireSchema,
+} from '@/components/QuestionnaireBuilder'
+
+export function QuestionnaireEditorModal({
+  title,
+  initialSchema,
+  name,
+  regenerateTargetId,
+  onSave,
+  onClose,
+}: {
+  title: string
+  initialSchema: QuestionnaireSchema
+  // Used for the schema id/title on rebuild; the wizard proposal has no separate
+  // name, so the schema's own title (or a fallback) is passed.
+  name: string
+  // Enables the "Edit with AI" rail ("proposal:<key>" for wizard proposals, the
+  // artifact id once saved). The worker revises the passed schema.
+  regenerateTargetId?: string
+  onSave: (schema: ReturnType<typeof sectionsToSchema>) => Promise<void> | void
+  onClose: () => void
+}): React.ReactElement {
+  const [sections, setSections] = useState<BSection[]>(() => schemaToSections(initialSchema))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const canSave = schemaFieldCount(sections) > 0
+
+  async function save() {
+    if (!canSave) {
+      setError('Add at least one field with a label.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await onSave(sectionsToSchema(name || initialSchema.title || 'questionnaire', sections))
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={title} onClose={onClose} size="wide">
+      <EditorActionRow
+        busy={busy}
+        error={error}
+        canSave={canSave}
+        onCancel={onClose}
+        onSave={save}
+        ai={
+          regenerateTargetId ? (
+            <AiRegenerateRail
+              artifactKind="questionnaire"
+              targetId={regenerateTargetId}
+              current={() =>
+                JSON.stringify(
+                  sectionsToSchema(name || initialSchema.title || 'questionnaire', sections),
+                  null,
+                  2,
+                )
+              }
+              renderProposal={(proposed) => <QuestionnaireView content={proposed} />}
+              onUse={(proposed) => {
+                const schema = JSON.parse(proposed) as QuestionnaireSchema
+                if (!schema || !Array.isArray(schema.sections))
+                  throw new Error('The AI proposal is not a questionnaire schema.')
+                setSections(schemaToSections(schema))
+              }}
+            />
+          ) : undefined
+        }
+      />
+      <QuestionnaireBuilder sections={sections} onChange={setSections} />
+    </Modal>
+  )
+}

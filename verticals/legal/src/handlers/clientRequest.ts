@@ -8,6 +8,8 @@ import {
   lookupKindId,
   getLatestAttributeValue,
 } from './common.js'
+import { dispatchClientDelivery } from './clientDelivery.js'
+import { findContactByEmail } from './intake.js'
 
 const REQUEST_TYPE_LABEL: Record<string, string> = {
   meeting: 'Meeting',
@@ -27,7 +29,9 @@ const REQUEST_TYPE_LABEL: Record<string, string> = {
 // ───────────────────────────────────────────────────────────────────────────
 
 const REQUEST_ENTITY_KIND = 'client_request'
-const REQUEST_TYPES = new Set(['meeting', 'document', 'review'])
+// 'something_else' (UI-BUILDER-FIX-1 Phase 3) is the PUBLIC intake ask — the
+// "Something else" tile: free text, no matter, no price, triaged by the attorney.
+const REQUEST_TYPES = new Set(['meeting', 'document', 'review', 'something_else'])
 const MONEY_RE = /^\d+(\.\d{1,2})?$/
 
 async function setAttr(
@@ -67,14 +71,134 @@ interface CreatePayload {
   accepted_at: string
 }
 
+// Second payload form (UI-BUILDER-FIX-1 Phase 3), mirroring accept's dual form:
+// the PUBLIC "Something else" intake tile. No matter, no price — just the
+// visitor's contact details + free text. The handler find-or-creates the
+// client_contact by email (same dedupe rule as intake.submit), then records the
+// request flagged for attorney triage ('requested' — the attorney inbox reads
+// active statuses). Nothing else starts: no workflow, no matter, no routing.
+interface PublicCreatePayload {
+  request_type: 'something_else'
+  description: string
+  client_full_name: string
+  client_email: string
+  client_phone?: string | null
+}
+
+async function createPublicSomethingElse(
+  ctx: { tenantId: string; actorId: string },
+  client: DbClient,
+  p: PublicCreatePayload,
+  actionId: string,
+): Promise<{ requestId: string; clientContactId: string }> {
+  const fullName = (p.client_full_name ?? '').trim()
+  const email = (p.client_email ?? '').trim()
+  const description = (p.description ?? '').trim()
+  if (!fullName) throw new Error('client_full_name is required.')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('A valid email is required.')
+  if (!description) throw new Error('A description of what you need is required.')
+
+  const contactKindId = await lookupKindId(
+    client,
+    'entity_kind_definition',
+    ctx.tenantId,
+    'client_contact',
+  )
+  const existingContactId = await findContactByEmail(client, ctx.tenantId, email)
+  const contactId =
+    existingContactId ??
+    (await insertEntity(client, ctx.tenantId, actionId, contactKindId, fullName))
+  const contactAttrs: Array<{ kind: string; value: unknown }> = [
+    { kind: 'full_name', value: fullName },
+    { kind: 'email', value: email },
+  ]
+  if (p.client_phone) contactAttrs.push({ kind: 'phone', value: p.client_phone })
+  for (const a of contactAttrs) {
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: contactId,
+      ...a,
+    })
+  }
+
+  const requestKindId = await lookupKindId(
+    client,
+    'entity_kind_definition',
+    ctx.tenantId,
+    REQUEST_ENTITY_KIND,
+  )
+  const requestId = await insertEntity(
+    client,
+    ctx.tenantId,
+    actionId,
+    requestKindId,
+    'something_else request',
+    {},
+  )
+  const fromKindId = await lookupKindId(
+    client,
+    'relationship_kind_definition',
+    ctx.tenantId,
+    'client_request_from',
+  )
+  await insertRelationship(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    sourceEntityId: requestId,
+    targetEntityId: contactId,
+    relationshipKindId: fromKindId,
+  })
+
+  const attrs: Array<{ kind: string; value: unknown }> = [
+    { kind: 'request_type', value: 'something_else' },
+    { kind: 'request_status', value: 'requested' },
+    { kind: 'request_description', value: description },
+  ]
+  for (const a of attrs) {
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: requestId,
+      ...a,
+    })
+  }
+
+  await insertEvent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    eventKindName: 'client_request.created',
+    primaryEntityId: requestId,
+    secondaryEntityIds: [contactId],
+    sourceType: 'human',
+    sourceRef: ctx.actorId,
+    data: { request_type: 'something_else', source: 'public_intake' },
+  })
+
+  return { requestId, clientContactId: contactId }
+}
+
 registerActionHandler('legal.client_request.create', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as CreatePayload
+  if (!REQUEST_TYPES.has(p.request_type))
+    throw new Error(`Unknown request type "${p.request_type}".`)
+
+  // Public form: the "Something else" tile (no matter, no price).
+  if (p.request_type === 'something_else') {
+    return createPublicSomethingElse(
+      ctx,
+      client,
+      payload as unknown as PublicCreatePayload,
+      actionId,
+    )
+  }
+
   const matterId = (p.matter_entity_id ?? '').trim()
   const contactId = (p.client_contact_id ?? '').trim()
   if (!matterId) throw new Error('matter_entity_id is required.')
   if (!contactId) throw new Error('client_contact_id is required.')
-  if (!REQUEST_TYPES.has(p.request_type))
-    throw new Error(`Unknown request type "${p.request_type}".`)
   const amount = (p.price_amount ?? '').trim()
   if (!MONEY_RE.test(amount)) throw new Error('A request must carry a valid accepted price.')
 
@@ -317,12 +441,78 @@ async function getStatus(
   return res.rows[0]?.value ?? null
 }
 
-registerTransition(
-  'legal.client_request.accept',
-  'accepted',
-  'client_request.accepted',
-  new Set(['requested']),
-)
+// BACKHALF-BLOCKS-1 (WP3) — legal.client_request.accept now has TWO payload forms:
+//   • { request_id }        — the original client_request-entity transition (the
+//     attorney accepts a portal ask). Unchanged.
+//   • { matter_entity_id }  — the CLIENT accepts the current client-gated stage
+//     (e.g. "Accept the draft" on the portal's client-review step). This is the
+//     dormant path wired live: the accept IS the client's delivery, so it advances
+//     the matter's client gate via the same dispatchClientDelivery every other
+//     client action (upload / reply / booking) uses — the edge's `via` must name
+//     'legal.client_request.accept' (now in the client gate vocabulary).
+registerActionHandler('legal.client_request.accept', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as {
+    request_id?: string
+    matter_entity_id?: string
+    client_contact_id?: string
+    note?: string
+  }
+  const requestId = (p.request_id ?? '').trim()
+  const matterEntityId = (p.matter_entity_id ?? '').trim()
+
+  if (requestId) {
+    // Original form: move the client_request entity requested → accepted.
+    const current = await getStatus(client, ctx.tenantId, requestId)
+    if (current === null) throw new Error('Request not found.')
+    if (current !== 'requested') {
+      throw new Error(`A ${current} request cannot be moved to accepted.`)
+    }
+    await setAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: requestId,
+      kind: 'request_status',
+      value: 'accepted',
+    })
+    await insertEvent(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      eventKindName: 'client_request.accepted',
+      primaryEntityId: requestId,
+      secondaryEntityIds: [],
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+    return { requestId, status: 'accepted' }
+  }
+
+  if (!matterEntityId) throw new Error('request_id or matter_entity_id is required.')
+
+  // Matter form: the client's acceptance is recorded on the matter and advances
+  // its client gate (no-op when the current stage has no matching client edge —
+  // same idempotent contract as every dispatchClientDelivery caller).
+  const clientRef = (p.client_contact_id ?? '').trim()
+  await insertEvent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    eventKindName: 'client_request.accepted',
+    primaryEntityId: matterEntityId,
+    secondaryEntityIds: [],
+    sourceType: 'human',
+    sourceRef: clientRef ? `client_contact:${clientRef}` : ctx.actorId,
+    data: { accepted: 'client_review', note: (p.note ?? '').trim() || null },
+  })
+  const advanced = await dispatchClientDelivery(
+    client,
+    ctx,
+    matterEntityId,
+    'legal.client_request.accept',
+    actionId,
+    clientRef ? `client_contact:${clientRef}` : null,
+  )
+  return { matterEntityId, accepted: true, advancedTo: advanced?.to ?? null }
+})
 registerTransition(
   'legal.client_request.start',
   'in_progress',

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { useConfirm, usePrompt } from '@/components/ConfirmModal'
 import { CopyIcon, LayersIcon, PlusIcon, SearchIcon, UsersIcon, XIcon } from '@/components/icons'
 
 // The exact field types the public booking page (apps/legal-demo/app/book)
@@ -58,11 +59,18 @@ interface EditorField {
   // members_repeater
   memberFields: EditorField[]
   minItems: number
+  // BUILDER-UX-2 WP-7 — locale maps carried OPAQUELY so a save on this tab never
+  // strips the wizard-authored Spanish (this tab has no es-editing UI; the shared
+  // QuestionnaireBuilder and the wizard own that).
+  label_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
+  placeholder_i18n?: Record<string, string>
 }
 
 interface EditorSection {
   id: string
   title: string
+  title_i18n?: Record<string, string>
   fields: EditorField[]
 }
 
@@ -86,10 +94,15 @@ interface WireField {
   options?: string[]
   memberFields?: WireField[]
   minItems?: number
+  // WP-7 — locale maps (pass-through; see EditorField).
+  label_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
+  placeholder_i18n?: Record<string, string>
 }
 interface WireSection {
   id: string
   title: string
+  title_i18n?: Record<string, string>
   fields: WireField[]
 }
 interface WireDoc {
@@ -146,6 +159,9 @@ function wireFieldToEditor(f: WireField): EditorField {
     options: Array.isArray(f.options) ? f.options : [],
     memberFields: Array.isArray(f.memberFields) ? f.memberFields.map(wireFieldToEditor) : [],
     minItems: typeof f.minItems === 'number' ? f.minItems : 1,
+    label_i18n: f.label_i18n,
+    options_i18n: f.options_i18n,
+    placeholder_i18n: f.placeholder_i18n,
   }
 }
 
@@ -158,6 +174,7 @@ function wireToEditor(doc: WireDoc): EditorDoc {
     sections: (doc.sections ?? []).map((s) => ({
       id: s.id,
       title: s.title,
+      title_i18n: s.title_i18n,
       fields: (s.fields ?? []).map(wireFieldToEditor),
     })),
   }
@@ -176,6 +193,18 @@ function editorFieldToWire(f: EditorField, used: Set<string>): WireField {
   if (f.allow_unknown) out.allow_unknown = true
   if (f.ask_attorney) out.ask_attorney = true
   if (OPTION_FIELD_TYPES.has(f.type)) out.options = f.options.map((o) => o.trim()).filter(Boolean)
+  // WP-7 — carry the locale maps back verbatim (lossless round-trip; drop the
+  // Spanish options if the English list length changed here, since index pairing
+  // would silently mistranslate — the intake then falls back to English).
+  if (f.label_i18n && Object.keys(f.label_i18n).length) out.label_i18n = f.label_i18n
+  if (f.options_i18n && out.options) {
+    const kept = Object.fromEntries(
+      Object.entries(f.options_i18n).filter(([, arr]) => arr.length === out.options!.length),
+    )
+    if (Object.keys(kept).length) out.options_i18n = kept
+  }
+  if (f.placeholder_i18n && Object.keys(f.placeholder_i18n).length)
+    out.placeholder_i18n = f.placeholder_i18n
   if (f.type === 'members_repeater') {
     const memberUsed = new Set<string>()
     out.memberFields = f.memberFields.map((mf) => editorFieldToWire(mf, memberUsed))
@@ -195,6 +224,7 @@ function editorToWire(doc: EditorDoc): WireDoc {
     sections: doc.sections.map((s) => ({
       id: uniqueId(s.id.trim(), slugify(s.title), sectionIds),
       title: s.title.trim(),
+      ...(s.title_i18n && Object.keys(s.title_i18n).length ? { title_i18n: s.title_i18n } : {}),
       fields: s.fields.map((f) => editorFieldToWire(f, fieldIds)),
     })),
   }
@@ -231,6 +261,7 @@ function moveTo<T>(arr: T[], from: number, to: number): T[] {
 // service's form, or jump to the library builder. Applying loads the chosen
 // schema into the editor (in memory) — the attorney reviews and Saves a version.
 function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
+  const { confirm, confirmElement } = useConfirm()
   const [items, setItems] = useState<
     { questionnaireTemplateId: string; name: string; schema: WireDoc }[]
   >([])
@@ -251,6 +282,7 @@ function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
         margin: '0 0 var(--space-4)',
       }}
     >
+      {confirmElement}
       {items.length > 0 && (
         <select
           value=""
@@ -258,14 +290,14 @@ function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
           onChange={(e) => {
             const it = items.find((i) => i.questionnaireTemplateId === e.target.value)
             e.target.value = ''
-            if (
-              it &&
-              window.confirm(
-                `Replace this service's questionnaire with "${it.name}" from the library? You can edit it before saving.`,
-              )
-            ) {
-              onApply(it.schema)
-            }
+            if (!it) return
+            void confirm({
+              title: 'Replace this questionnaire?',
+              body: `Replaces this service’s questionnaire with “${it.name}” from the library. You can edit it before saving.`,
+              confirmLabel: 'Replace',
+            }).then((ok) => {
+              if (ok) onApply(it.schema)
+            })
           }}
         >
           <option value="">Start from a library questionnaire…</option>
@@ -281,6 +313,7 @@ function StartFromLibrary({ onApply }: { onApply: (schema: WireDoc) => void }) {
 }
 
 export default function QuestionnaireEditorPage() {
+  const { prompt, promptElement } = usePrompt()
   const params = useParams<{ serviceKey: string }>()
   const serviceKey = params.serviceKey
 
@@ -389,11 +422,14 @@ export default function QuestionnaireEditorPage() {
   // can seed other services (a copy outward — this service is untouched).
   async function saveToLibrary() {
     if (!doc) return
-    const name = window.prompt(
-      'Save this questionnaire to the library as:',
-      'Untitled questionnaire',
-    )
-    if (!name || !name.trim()) return
+    const name = await prompt({
+      title: 'Save to the library',
+      body: 'Adds a copy of this questionnaire to the firm library so it can seed other services.',
+      label: 'Name in the library',
+      defaultValue: 'Untitled questionnaire',
+      confirmLabel: 'Save to library',
+    })
+    if (!name) return
     setBusy(true)
     setError(null)
     try {
@@ -412,6 +448,7 @@ export default function QuestionnaireEditorPage() {
 
   return (
     <>
+      {promptElement}
       <div
         style={{
           display: 'flex',

@@ -31,6 +31,7 @@ import './tools/reviewDraft.js'
 import './tools/getIntakeQuestionnaire.js'
 import './tools/bookingTools.js'
 import './tools/serviceLibraryTools.js'
+import './tools/buildSessionTools.js'
 // AI document review: manual (re)run of the review pipeline for one uploaded
 // matter document. Attorney-only.
 import './tools/documentReviewTools.js'
@@ -102,6 +103,10 @@ import './tools/adminPaymentsTools.js'
 // Firm-facing module read (legal.module.enabled) — attorney nav gating. NOT an
 // admin tool; reads only the caller's own tenant.
 import './tools/moduleTools.js'
+// MACHINE-COMMS-1 — memory (notes + assembled client context) and voice (ad-hoc
+// email drafting, transcript extraction into notes).
+import './tools/notesTools.js'
+import './tools/commsTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

@@ -9,6 +9,7 @@ import { resolveClientMatterIds } from '../api/clientIdentity.js'
 export interface ApprovedClientDocument {
   documentVersionId: string
   documentKind: string
+  matterEntityId: string
   matterNumber: string
   versionNumber: number
   approvedAt: string
@@ -19,6 +20,7 @@ export interface ClientUploadedDocument {
   originalFilename: string
   contentType: string
   sizeBytes: number
+  matterEntityId: string
   matterNumber: string
   uploadedAt: string
 }
@@ -44,6 +46,7 @@ export async function listApprovedClientDocuments(
     const res = await client.query<{
       version_id: string
       document_kind: string
+      matter_id: string
       matter_number: string
       version_number: number
       approved_at: string
@@ -51,6 +54,7 @@ export async function listApprovedClientDocuments(
       `SELECT DISTINCT ON (dv.document_entity_id)
          dv.id AS version_id,
          coalesce(e_doc.metadata->>'document_kind', 'document') AS document_kind,
+         e_matter.id AS matter_id,
          e_matter.name AS matter_number,
          dv.version_number,
          to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS approved_at
@@ -84,6 +88,7 @@ export async function listApprovedClientDocuments(
       .map((row) => ({
         documentVersionId: row.version_id,
         documentKind: row.document_kind,
+        matterEntityId: row.matter_id,
         matterNumber: row.matter_number,
         versionNumber: row.version_number,
         approvedAt: row.approved_at,
@@ -107,6 +112,7 @@ export async function listClientUploadedDocuments(
       original_filename: string | null
       content_type: string | null
       size_bytes: string | null
+      matter_id: string
       matter_number: string
       uploaded_at: string
     }>(
@@ -114,6 +120,7 @@ export async function listClientUploadedDocuments(
               dv.metadata->>'original_filename' AS original_filename,
               dv.metadata->>'content_type'      AS content_type,
               dv.metadata->>'size_bytes'        AS size_bytes,
+              e_matter.id AS matter_id,
               e_matter.name AS matter_number,
               to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS uploaded_at
          FROM document_version dv
@@ -134,8 +141,86 @@ export async function listClientUploadedDocuments(
       originalFilename: row.original_filename ?? 'document',
       contentType: row.content_type ?? 'application/octet-stream',
       sizeBytes: row.size_bytes ? Number(row.size_bytes) : 0,
+      matterEntityId: row.matter_id,
       matterNumber: row.matter_number,
       uploadedAt: row.uploaded_at,
     }))
+  })
+}
+
+// In-browser open of a client upload (WP-4): resolve the storage object for a
+// version ONLY when it is a client-visible upload on one of THIS client's own
+// matters. A version from any other matter — same tenant included — returns
+// null → the route 404s (no oracle).
+export async function getClientUploadedDocumentObject(
+  ctx: ActionContext,
+  clientContactId: string,
+  documentVersionId: string,
+): Promise<{ objectKey: string; contentType: string; filename: string; sizeBytes: number } | null> {
+  const matterIds = await resolveClientMatterIds(ctx.tenantId, clientContactId)
+  if (matterIds.length === 0) return null
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      object_key: string | null
+      content_type: string | null
+      original_filename: string | null
+      size_bytes: string | null
+    }>(
+      `SELECT dv.metadata->>'object_key'        AS object_key,
+              dv.metadata->>'content_type'      AS content_type,
+              dv.metadata->>'original_filename' AS original_filename,
+              dv.metadata->>'size_bytes'        AS size_bytes
+         FROM document_version dv
+         JOIN relationship r ON r.source_entity_id = dv.document_entity_id
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+        WHERE dv.tenant_id = $1
+          AND dv.id = $2
+          AND rkd.kind_name = 'document_of'
+          AND r.target_entity_id = ANY($3::uuid[])
+          AND dv.metadata->>'document_source' = 'client_uploaded'
+          AND (r.valid_to IS NULL OR r.valid_to > now())
+        LIMIT 1`,
+      [ctx.tenantId, documentVersionId, matterIds],
+    )
+    const row = res.rows[0]
+    if (!row?.object_key) return null
+    return {
+      objectKey: row.object_key,
+      contentType: row.content_type ?? 'application/octet-stream',
+      filename: row.original_filename ?? 'document',
+      sizeBytes: row.size_bytes ? Number(row.size_bytes) : 0,
+    }
+  })
+}
+
+// S1 — SERVER-ONLY: documentVersionId → recorded object_key for every one of THIS
+// client's uploads, in a single round-trip. The app-layer availability check
+// consumes this to compute an `available` boolean per upload; the object key must
+// never be sent to the browser. Batching here keeps the availability route at a
+// constant DB cost instead of re-resolving per document.
+export async function listClientUploadObjectKeys(
+  ctx: ActionContext,
+  clientContactId: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const matterIds = await resolveClientMatterIds(ctx.tenantId, clientContactId)
+  if (matterIds.length === 0) return out
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ version_id: string; object_key: string | null }>(
+      `SELECT dv.id AS version_id, dv.metadata->>'object_key' AS object_key
+         FROM document_version dv
+         JOIN relationship r ON r.source_entity_id = dv.document_entity_id
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+        WHERE dv.tenant_id = $1
+          AND rkd.kind_name = 'document_of'
+          AND r.target_entity_id = ANY($2::uuid[])
+          AND dv.metadata->>'document_source' = 'client_uploaded'
+          AND (r.valid_to IS NULL OR r.valid_to > now())`,
+      [ctx.tenantId, matterIds],
+    )
+    for (const row of res.rows) {
+      if (row.object_key) out.set(row.version_id, row.object_key)
+    }
+    return out
   })
 }

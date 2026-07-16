@@ -35,6 +35,12 @@ interface MatterAdvancePayload {
   // Optional label for what triggered this advance (event kind, action, "continue"),
   // recorded on the workflow.advanced event for the audit trail.
   trigger?: string
+  // HOTFIX-P17 (L1): set ONLY by the sanctioned client-step skip (api/clientGate.ts
+  // skipClientStage), which separately records a skip decision. It permits this
+  // advance to traverse a CLIENT edge whose `via` is a client action (booking.create,
+  // document.upload, …) that the client never took. It NEVER permits skipping a
+  // blocking attorney step (a draft.approve edge) — see the mechanism guard below.
+  skip?: boolean
 }
 
 registerActionHandler('legal.matter.advance', async (ctx, client, payload, actionId) => {
@@ -72,16 +78,38 @@ registerActionHandler('legal.matter.advance', async (ctx, client, payload, actio
     graph = bound?.graph ?? []
   }
 
-  // GUARD: the to_state must be reachable from the current state via an edge of
-  // this gate. The graph decides legality, not the caller.
-  const legal = allowedTransitions(graph, rawCurrentState, [p.gate]).some(
+  // GUARD 1 (reachability): the to_state must be reachable from the current state
+  // via an edge of this gate. The graph decides legality, not the caller.
+  const matchedEdge = allowedTransitions(graph, rawCurrentState, [p.gate]).find(
     (e) => e.to === p.to_state,
   )
-  if (!legal) {
+  if (!matchedEdge) {
     throw new Error(
       `legal.matter.advance: illegal transition ${rawCurrentState} → ${p.to_state} ` +
         `via gate '${p.gate}' (no matching edge in the bound lifecycle).`,
     )
+  }
+
+  // GUARD 2 (mechanism) — HOTFIX-P17 L1: gate + destination is NOT enough. An edge
+  // names in `via` the ACTION that legitimately completes the step it leaves.
+  // `legal.matter.advance` is the "Continue" token; an edge whose `via` is a DIFFERENT
+  // action (e.g. `draft.approve`, which reviews → approves → SENDS → bills the
+  // document) is finished by THAT action's own handler, not by a bare Continue. Moving
+  // the matter across such an edge with Continue would skip the real step — the
+  // M-MRJHEC8X defect: a Continue silently traversed the review/send edge, so the
+  // letter was never sent, no fee was invoiced, and the history falsely recorded
+  // draft.approve. The ONLY sanctioned exception is the attorney explicitly SKIPPING a
+  // CLIENT-gated step (skipClientStage sets skip:true and records the skip separately);
+  // a blocking attorney step (a draft.approve edge) is never skippable this way.
+  if (matchedEdge.via && matchedEdge.via !== 'legal.matter.advance') {
+    const sanctionedClientSkip = p.skip === true && matchedEdge.gate === 'client'
+    if (!sanctionedClientSkip) {
+      throw new Error(
+        `This step isn't finished by clicking Continue — it has its own action to complete it ` +
+          `(for a review step, open it and approve/send the document). ` +
+          `Finish that step to move the matter forward.`,
+      )
+    }
   }
 
   // Provenance is the ACTOR's, never the caller-asserted gate (hard rule 4): a
@@ -104,9 +132,7 @@ registerActionHandler('legal.matter.advance', async (ctx, client, payload, actio
   const sourceRef = isSystemActor ? 'system:workflow_engine' : ctx.actorId
 
   const toStage = stageByKey(graph, p.to_state)
-  const via = allowedTransitions(graph, rawCurrentState, [p.gate]).find(
-    (e) => e.to === p.to_state,
-  )?.via
+  const via = matchedEdge.via
 
   await advanceWorkflowInstance(client, ctx, {
     instanceId: instance.id,

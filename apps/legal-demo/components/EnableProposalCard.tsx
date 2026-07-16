@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
+import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
 import { LayersIcon, CheckIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 
@@ -11,6 +12,9 @@ import type { OnApproved } from '@/components/ServiceProposalCard'
 export interface EnableProposal {
   serviceKey: string
   summary: string
+  // BUILDER-UX-1 WP-2.1 — the completed service's steps, rendered as a bulleted
+  // completion summary rather than a comma-run.
+  completion?: string[]
 }
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
@@ -24,9 +28,14 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 export function EnableProposalCard({
   proposal,
   onApproved,
+  onDone,
 }: {
   proposal: EnableProposal
   onApproved?: OnApproved
+  // WP-5 (BUILDER-UX-2) — the explicit end of the one-build-one-thread lifecycle:
+  // "Done · Close setup" exits build mode, seals the build session, and returns to
+  // normal assistant chat. Shown once the service is live.
+  onDone?: () => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
@@ -37,6 +46,9 @@ export function EnableProposalCard({
   // model-typed link). Rendered as a real button + copy action once the service is live.
   const [bookingLink, setBookingLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  // MULTI-TENANT-1: firm slug for the firm-scoped fallback link (the server value is
+  // preferred; this only applies if the enable response omitted bookingLink).
+  const publicSlug = useFirmPublicSlug()
 
   async function approve() {
     setApproveState('approving')
@@ -65,7 +77,8 @@ export function EnableProposalCard({
       if (!res.ok) throw new Error(data?.error || `Enable failed (${res.status})`)
       setLink(data?.link ?? null)
       setBookingLink(
-        data?.bookingLink ?? `/book?service=${encodeURIComponent(proposal.serviceKey)}`,
+        data?.bookingLink ??
+          buildFirmBookingUrl('', publicSlug, { serviceKey: proposal.serviceKey }),
       )
       setApproveState('approved')
       // This is the TERMINAL step — onApproved tells the chat the service is live (with
@@ -101,9 +114,14 @@ export function EnableProposalCard({
         </div>
       )}
 
-      <div className="uac-doc-body text-muted" style={{ fontSize: 12 }}>
-        Approving makes this service live and bookable. Until you approve, it stays a draft.
-      </div>
+      {/* WP-5 (BUILDER-UX-2) — the "here's how it runs" step recap is GONE: the
+          completion card is a confirmation line + the two links, nothing more. Before
+          enabling, one line sets expectations; after, the summary + links speak. */}
+      {approveState !== 'approved' && (
+        <div className="uac-doc-body text-muted" style={{ fontSize: 12 }}>
+          Approving makes this service live and bookable. Until you approve, it stays a draft.
+        </div>
+      )}
 
       <div className="uac-doc-actions">
         <button
@@ -158,6 +176,19 @@ export function EnableProposalCard({
               {copied ? <CheckIcon size={12} /> : null} {copied ? 'Copied' : 'Copy booking link'}
             </button>
           </>
+        )}
+        {/* WP-5: the formal end of the build. Sealing the session + leaving build mode
+            already happen on approve; this is the attorney's explicit "I'm done here"
+            that returns them to normal chat. */}
+        {approveState === 'approved' && onDone && (
+          <button
+            type="button"
+            className="uac-reply-btn uac-reply-btn-primary"
+            onClick={onDone}
+            title="Finish setup and return to the assistant"
+          >
+            <CheckIcon size={12} /> Done · Close setup
+          </button>
         )}
       </div>
       {approveError && (

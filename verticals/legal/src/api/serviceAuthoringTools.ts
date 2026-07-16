@@ -60,12 +60,33 @@ const PROPOSE_SERVICE_TOOL_DEF = {
     properties: {
       display_name: {
         type: 'string',
-        description: "The attorney-facing service name, e.g. 'NC Single-Member LLC Formation'.",
+        description:
+          "The attorney-facing service name, e.g. 'Single-Member LLC Formation', 'Residential Lease Review'. Name it for WHAT the service does. Do NOT prefix a state or jurisdiction ('NC', 'North Carolina', 'Georgia', …) UNLESS the attorney's request explicitly named one — the firm being a North Carolina firm is NOT a reason to stamp 'NC' onto every service. The service KEY is derived from this name and is PERMANENT, so a stray jurisdiction prefix is forever. Jurisdiction belongs in the legal CONTENT (governing-law clauses in templates), not the name.",
       },
       description: {
         type: 'string',
         description:
-          "The CLIENT-FACING blurb shown on the public booking page. Write it for the CLIENT in plain language about WHAT they get and the value (e.g. 'A mutual non-disclosure agreement to protect confidential information shared between two parties, prepared under North Carolina law.'). NEVER describe HOW it is produced internally — no mention of the workflow, the system, automation, 'auto-generated', 'template merge', intake mechanics, or attorney review steps. Describe the deliverable, not the assembly line.",
+          "The ATTORNEY-FACING description. LEAD WITH THE OUTCOME in one sentence (what the service delivers); mechanics MAY follow after that. Jurisdiction-specific and process-detailed is CORRECT here (e.g. 'Reviews NC residential leases against Chapter 42; returns annotated lease + client letter.'). Clients never see this field (they see client_description); still never marketing fluff.",
+      },
+      client_display_name: {
+        type: 'string',
+        description:
+          "The CLIENT-FACING service name shown on the public intake tiles. OUTCOME-ONLY, in words a client would actually say: 'Last Will & Testament', NOT 'NC Will Drafting'. NEVER include a jurisdiction/state (no 'NC', 'Georgia', …), never legal-industry jargon, never process words. Max 70 characters. REQUIRED.",
+      },
+      client_description: {
+        type: 'string',
+        description:
+          "The CLIENT-FACING one-liner under the tile name, max 70 characters (hard server-side cap). THE TWO-ENDS RULE governs ALL client-visible copy: describe only the two ends the client touches — what THEY PROVIDE ('upload your lease') and what THEY RECEIVE ('a plain-English review of your lease') — NEVER the machinery between the ends. Who or what does the work (AI, the attorney, a reviewer), where the work goes (a queue, a review step), or how it is produced is machinery even when paraphrased: 'AI reviews it and produces a memo the attorney approves' fails the rule however it is reworded. Good: 'A will that protects your family and your wishes'. REQUIRED.",
+      },
+      client_display_name_es: {
+        type: 'string',
+        description:
+          "The SPANISH client-facing service name — a natural, native-quality Spanish rendering of client_display_name for the Spanish intake (e.g. 'Testamento' for 'Last Will & Testament'). Same doctrine: outcome-only, no jurisdiction, no jargon, max 70 characters. The Spanish intake shows this; when absent it falls back to English. REQUIRED — author it alongside the English.",
+      },
+      client_description_es: {
+        type: 'string',
+        description:
+          'The SPANISH client-facing one-liner — a natural Spanish rendering of client_description, same TWO-ENDS RULE (only what the client provides and receives, never the machinery), max 70 characters. REQUIRED — author it alongside the English.',
       },
       route: {
         type: 'string',
@@ -79,6 +100,11 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description:
           "How documents are produced: 'template_merge' (deterministic merge, no AI) or 'ai_draft' (AI drafting). REQUIRED and NEVER assumed — DERIVE it from the walkthrough, then CONFIRM in plain attorney language via ask_build_question (e.g. \"Should the documents fill a fixed template word-for-word, or should AI adapt the wording to each client?\"). Never say 'generation mode' to the attorney; translate silently here.",
       },
+      appointment_required: {
+        type: 'boolean',
+        description:
+          "Does booking this service START with a consultation appointment? true = the client picks a time slot when they book (services that open with a meeting); false = intake-only — the work starts straight from the client's answers/upload with no slot (document-review services, most pure document-production). REQUIRED and NEVER assumed — DERIVE it from the walkthrough (a process that opens with a consult → true; \"they upload the lease and I review it\" → false) and confirm in plain language only when genuinely ambiguous. Never say 'appointment_required' to the attorney.",
+      },
       summary: {
         type: 'string',
         description:
@@ -89,9 +115,85 @@ const PROPOSE_SERVICE_TOOL_DEF = {
         description: 'Your honest confidence in this proposal, 0–1 (never 1.0).',
       },
     },
-    required: ['display_name', 'route', 'generation_mode'],
+    required: [
+      'display_name',
+      'client_display_name',
+      'client_description',
+      'client_display_name_es',
+      'client_description_es',
+      'route',
+      'generation_mode',
+      'appointment_required',
+    ],
     additionalProperties: false,
   },
+}
+
+// US state names + standalone UPPERCASE two-letter codes — the client tile copy
+// doctrine forbids jurisdiction entirely (Phase 2). Case-insensitive on the full
+// names; the two-letter codes only match as uppercase standalone words so 'in',
+// 'me', 'or' in normal prose never false-positive.
+const STATE_NAME_RE =
+  /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)\b/i
+const STATE_CODE_RE =
+  /\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/
+
+// HARDENING-RESIDUALS-1 (WP-A3) — a MODEST machinery backstop behind the
+// two-ends doctrine. The doctrine (stated affirmatively in the tool contract:
+// client copy covers only what the client PROVIDES and what they RECEIVE, never
+// the machinery between) is the fix — paraphrased mechanics always beat a word
+// list, so this regex is deliberately narrow: the unambiguous middle-machinery
+// tells (AI-as-actor, queues, automation/generation verbs, made-by attribution)
+// that should never survive in client copy under ANY phrasing. Do not grow it
+// into a whack-a-mole list; grow the doctrine instead.
+const MIDDLE_MACHINERY_RE =
+  /\bAI\b|artificial intelligence|\bqueue\b|\bautomat\w*|\bgenerat\w*|\b(reviewed|produced|prepared|drafted|written) by\b/i
+
+// Capture-time doctrine check for the client tile copy: no jurisdiction, hard
+// 70-char budget, no middle machinery (the two-ends rule's backstop). Returns
+// the rejection message (model rewrites and re-proposes — the corrective loop)
+// or null when clean. The upsert handler's capClientCopy is the last-resort
+// truncate-and-flag; THIS check exists so the copy gets rewritten well, not chopped.
+export function clientCopyViolation(field: string, value: string): string | null {
+  if (value.length > 70) {
+    return `${field} is ${value.length} characters — the hard cap is 70 (it renders on a small tile). Shorten it and call propose_service again.`
+  }
+  const state = value.match(STATE_NAME_RE) ?? value.match(STATE_CODE_RE)
+  if (state) {
+    return `${field} must NEVER name a jurisdiction ("${state[0]}") — client tile copy is outcome-only ('Last Will & Testament', not 'NC Will Drafting'). Jurisdiction belongs in the attorney-facing display_name/description. Rewrite and call propose_service again.`
+  }
+  const machinery = value.match(MIDDLE_MACHINERY_RE)
+  if (machinery) {
+    return `${field} breaks the TWO-ENDS RULE ("${machinery[0]}"): client copy describes only what the client PROVIDES and what they RECEIVE — never who or what does the work in between, where it goes, or how it is produced. Rewrite it as the two ends only and call propose_service again.`
+  }
+  return null
+}
+
+// WP-7 — the SPANISH twin of clientCopyViolation. The English regexes misfire on
+// Spanish text two ways: STATE_CODE_RE false-positives on uppercase Spanish words
+// (JS \b is ASCII, so "SEÑOR" word-breaks around the Ñ and matches "OR"; "IA" —
+// Spanish for AI — matches Iowa), and the English machinery/state word lists are
+// no-ops. So Spanish copy gets: the same 70 cap, Spanish state NAMES (the ones a
+// Spanish sentence would actually use), and a Spanish middle-machinery backstop
+// (IA-as-actor, automation/generation verbs, made-by attribution, queues).
+const STATE_NAME_ES_RE =
+  /\b(carolina del norte|carolina del sur|nueva york|nueva jersey|nuevo m[eé]xico|virginia occidental|dakota del norte|dakota del sur|pensilvania|luisiana|misuri|misisipi)\b/i
+const MIDDLE_MACHINERY_ES_RE =
+  /\bIA\b|inteligencia artificial|\bautomatiz\w*|\bgenerad[oa]s?\b|\bredactad[oa] por\b|\b(revisad|preparad|elaborad|escrit)[oa] por\b|\bcola de\b/i
+
+export function clientCopyViolationEs(field: string, value: string): string | null {
+  if (value.length > 70) {
+    return `${field} is ${value.length} characters — the hard cap is 70 (it renders on a small tile). Shorten it and call propose_service again.`
+  }
+  const state = value.match(STATE_NAME_ES_RE) ?? value.match(STATE_NAME_RE)
+  if (state) {
+    return `${field} must NEVER name a jurisdiction ("${state[0]}") — client tile copy is outcome-only. Rewrite and call propose_service again.`
+  }
+  const machinery = value.match(MIDDLE_MACHINERY_ES_RE)
+  if (machinery) {
+    return `${field} breaks the TWO-ENDS RULE ("${machinery[0]}"): client copy describes only what the client PROVIDES and what they RECEIVE — never the machinery in between. Rewrite it and call propose_service again.`
+  }
+  return null
 }
 
 // Build the propose_service tool for this turn. Its run() validates the shell (the
@@ -109,14 +211,51 @@ export function buildProposeServiceTool(
       const args = (raw ?? {}) as {
         display_name?: string
         description?: string
+        client_display_name?: string
+        client_description?: string
+        client_display_name_es?: string
+        client_description_es?: string
         route?: string
         generation_mode?: string
+        appointment_required?: unknown
         summary?: string
         confidence?: number
       }
       const displayName = (args.display_name ?? '').trim()
       if (!displayName) {
         return 'A display_name is required to propose a service; nothing was captured.'
+      }
+      // Client tile copy (Phase 2): required, outcome-only, no jurisdiction, <=70
+      // chars. Rejected here so the MODEL rewrites it well; the upsert handler's
+      // truncate-and-flag cap stays as the last line if something slips through.
+      const clientDisplayName = (args.client_display_name ?? '').trim()
+      const clientDescription = (args.client_description ?? '').trim()
+      if (!clientDisplayName || !clientDescription) {
+        return 'client_display_name and client_description are REQUIRED — the outcome-only copy the public intake tile shows ("Last Will & Testament", not the attorney-facing name). Nothing was captured.'
+      }
+      // WP-7: the Spanish tile copy is authored ALONGSIDE the English — same doctrine,
+      // same caps. The Spanish intake renders it; absence falls back to English, but
+      // the wizard must not produce that gap on a fresh build.
+      const clientDisplayNameEs = (args.client_display_name_es ?? '').trim()
+      const clientDescriptionEs = (args.client_description_es ?? '').trim()
+      if (!clientDisplayNameEs || !clientDescriptionEs) {
+        return 'client_display_name_es and client_description_es are REQUIRED — author the Spanish tile copy alongside the English (the Spanish intake shows it). Nothing was captured.'
+      }
+      for (const [field, value] of [
+        ['client_display_name', clientDisplayName],
+        ['client_description', clientDescription],
+      ] as const) {
+        const violation = clientCopyViolation(field, value)
+        if (violation) return `The proposal was NOT captured: ${violation}`
+      }
+      // Spanish copy gets the es-aware check — the English regexes misfire on
+      // Spanish ("IA" is not Iowa; "SEÑOR" is not Oregon).
+      for (const [field, value] of [
+        ['client_display_name_es', clientDisplayNameEs],
+        ['client_description_es', clientDescriptionEs],
+      ] as const) {
+        const violation = clientCopyViolationEs(field, value)
+        if (violation) return `The proposal was NOT captured: ${violation}`
       }
       // The description is CLIENT-FACING (it shows on the public booking page). The firm
       // rule: it must never expose internal mechanics. Reject the most unambiguous
@@ -139,6 +278,12 @@ export function buildProposeServiceTool(
       if (!route || !generationMode) {
         return 'route and generation_mode are REQUIRED and must NOT be assumed — derive them from the attorney\'s process walkthrough and CONFIRM each in plain language via ask_build_question (no platform vocabulary: describe who drives the matter and how documents are produced, not "route"/"generation_mode") before proposing. Nothing was captured.'
       }
+      // Booking mode is the same class of choice as route/mode: explicit, never
+      // defaulted (BUILDER-CERT-1 WP3 — the drive found document-review services
+      // silently demanding a consultation slot because nothing could say otherwise).
+      if (typeof args.appointment_required !== 'boolean') {
+        return 'appointment_required is REQUIRED and must NOT be assumed — derive from the walkthrough whether booking starts with a consultation appointment (true) or the work starts straight from intake (false, e.g. document-review), and confirm in plain language only if genuinely ambiguous. Nothing was captured.'
+      }
 
       // Uniqueness needs the existing keys — one read, shared with the validation.
       const context = await loadServiceAuthoringContext(ctx)
@@ -158,8 +303,13 @@ export function buildProposeServiceTool(
         displayName,
         derivedKey,
         description: description || null,
+        clientDisplayName,
+        clientDescription,
+        clientDisplayNameEs,
+        clientDescriptionEs,
         route,
         generationMode,
+        appointmentRequired: args.appointment_required,
         summary: (args.summary ?? '').trim() || `Proposed new service "${displayName}".`,
         confidence,
       })

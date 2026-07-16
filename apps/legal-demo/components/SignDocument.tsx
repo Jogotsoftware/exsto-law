@@ -5,6 +5,7 @@
 // the adopted-signature input + ESIGN/UETA consent, and Sign / Decline. The
 // caller supplies onSign/onDecline (portal MCP vs /api/sign routes).
 import { useState } from 'react'
+import { useConfirm } from '@/components/ConfirmModal'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 
 export interface SignField {
@@ -12,6 +13,16 @@ export interface SignField {
   type: string
   label: string
   prefill?: string
+}
+// The signer's standing signature (P15), when the caller resolved one — today
+// that's a signed-in attorney opening their OWN signature request. Typed
+// prefills the name field; drawn/uploaded offers the saved image, passed
+// through onSign as signatureData. Callers that pass nothing (anonymous /
+// client signers) see the surface unchanged.
+export interface SavedSignature {
+  mode: 'typed' | 'drawn' | 'uploaded'
+  name: string
+  data: string | null
 }
 export interface SignableDoc {
   documentTitle: string
@@ -32,23 +43,37 @@ export const CONSENT_TEXT =
 
 export function SignDocument({
   doc,
+  savedSignature,
   onSign,
   onDecline,
 }: {
   doc: SignableDoc
+  savedSignature?: SavedSignature | null
   onSign: (a: {
     signatureName: string
+    signatureData: string | null
     fieldValues: Record<string, string>
     consent: string
   }) => Promise<{ completed: boolean }>
   onDecline: () => Promise<void>
 }) {
-  const [signatureName, setSignatureName] = useState(doc.signerName ?? '')
+  // A saved image signature (drawn/uploaded) the signer can apply as-is.
+  const savedImage =
+    savedSignature && savedSignature.mode !== 'typed' && savedSignature.data
+      ? savedSignature.data
+      : null
+  const [signatureName, setSignatureName] = useState(
+    savedSignature?.mode === 'typed' && savedSignature.name.trim()
+      ? savedSignature.name
+      : (doc.signerName ?? ''),
+  )
+  const [useSavedImage, setUseSavedImage] = useState(true)
   const [consent, setConsent] = useState(false)
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(doc.fields.filter((f) => f.prefill).map((f) => [f.id, f.prefill!])),
   )
   const [busy, setBusy] = useState<null | 'sign' | 'decline'>(null)
+  const { confirm, confirmElement } = useConfirm()
   const [done, setDone] = useState<null | 'signed' | 'completed' | 'declined'>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -115,7 +140,12 @@ export function SignDocument({
     setBusy('sign')
     setError(null)
     try {
-      const r = await onSign({ signatureName, fieldValues, consent: CONSENT_TEXT })
+      const r = await onSign({
+        signatureName,
+        signatureData: savedImage && useSavedImage ? savedImage : null,
+        fieldValues,
+        consent: CONSENT_TEXT,
+      })
       setDone(r.completed ? 'completed' : 'signed')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -124,7 +154,13 @@ export function SignDocument({
     }
   }
   async function decline() {
-    if (typeof window !== 'undefined' && !window.confirm('Decline to sign this document?')) return
+    const ok = await confirm({
+      title: 'Decline to sign?',
+      body: 'Records that you decline to sign this document. The sender is notified.',
+      confirmLabel: 'Decline to sign',
+      danger: true,
+    })
+    if (!ok) return
     setBusy('decline')
     setError(null)
     try {
@@ -139,6 +175,7 @@ export function SignDocument({
 
   return (
     <div className="public-draft">
+      {confirmElement}
       {head()}
       <div className="text-sm text-muted">
         For signature{doc.signerName ? ` by ${doc.signerName}` : ''}
@@ -189,6 +226,39 @@ export function SignDocument({
           placeholder="Your full name"
           style={{ display: 'block', width: '100%', marginTop: 'var(--space-1)' }}
         />
+        {savedImage && (
+          <div style={{ marginTop: 'var(--space-2)' }}>
+            <label
+              className="text-sm"
+              style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}
+            >
+              <input
+                type="checkbox"
+                checked={useSavedImage}
+                onChange={(e) => setUseSavedImage(e.target.checked)}
+                style={{ width: 'auto' }}
+              />
+              <span>Use my saved signature</span>
+            </label>
+            {useSavedImage && (
+              // Data-URL preview of the standing signature being applied.
+              <img
+                src={savedImage}
+                alt="Your saved signature"
+                style={{
+                  display: 'block',
+                  marginTop: 'var(--space-1)',
+                  maxWidth: 220,
+                  maxHeight: 80,
+                  background: '#fff',
+                  border: '1px solid var(--border-soft)',
+                  borderRadius: 4,
+                  padding: 4,
+                }}
+              />
+            )}
+          </div>
+        )}
         <label
           className="text-sm"
           style={{ display: 'flex', gap: 'var(--space-1)', marginTop: 'var(--space-2)' }}

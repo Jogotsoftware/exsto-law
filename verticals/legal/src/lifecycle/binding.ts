@@ -27,11 +27,52 @@ export interface BoundWorkflowVersion {
   status: string
 }
 
-// The latest active (valid_to IS NULL) workflow_definition for a service key, with
-// its parsed graph. Returns null when there is no such row OR the row's states
-// parse to an empty graph (a service with no authored lifecycle — the day-one
-// state for every service until one is set in PR4).
+// The latest ACTIVE (status='active', valid_to IS NULL) workflow_definition for a
+// service key, with its parsed graph. Returns null when there is no such row OR
+// the row's states parse to an empty graph (a service with no authored lifecycle).
+//
+// MACHINE-COMMS-1 (WP0): this now filters status='active'. It always claimed to
+// resolve the ACTIVE version but ignored status, so a DISABLED service (status
+// 'deprecated', valid_to NULL) would still bind new matters to a lifecycle the
+// firm had turned off. A disabled/retired/lifecycle-less service does not bind —
+// and matter.open now fails LOUDLY on null instead of silently skipping.
 export async function resolveActiveServiceVersion(
+  client: DbClient,
+  tenantId: string,
+  serviceKey: string,
+): Promise<BoundWorkflowVersion | null> {
+  const res = await client.query<{
+    id: string
+    version: number
+    states: unknown
+    status: string
+  }>(
+    `SELECT id, version, states, status
+       FROM workflow_definition
+      WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL AND status = 'active'
+      ORDER BY version DESC
+      LIMIT 1`,
+    [tenantId, serviceKey],
+  )
+  const row = res.rows[0]
+  if (!row) return null
+  const graph = parseStatesToGraph(row.states)
+  if (graph.length === 0) return null
+  return {
+    workflowDefinitionId: row.id,
+    version: row.version,
+    graph,
+    status: row.status,
+  }
+}
+
+// The service's CURRENT definition regardless of status — the REPAIR resolver
+// (WP0). An attorney repairing a matter that was opened without an instance is
+// explicitly choosing to run the lifecycle that was approved for its service,
+// even if the service has since been disabled; new bookings still go through
+// resolveActiveServiceVersion above. Null only when there is no current row or
+// no authored graph at all.
+export async function resolveCurrentServiceVersion(
   client: DbClient,
   tenantId: string,
   serviceKey: string,

@@ -6,6 +6,7 @@ import {
   INTAKE_STAGING_SEGMENT,
 } from '@exsto/legal'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
+import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
 import {
   MAX_UPLOAD_BYTES,
   sniffMime,
@@ -36,10 +37,10 @@ import {
 // booking flow.
 export const runtime = 'nodejs'
 
-// Tenant + system actor resolved SERVER-SIDE only (hard rule 9) — same env as
-// the client MCP route; never from the request.
-const TENANT_ID = process.env.LEGAL_CLIENT_TENANT_ID ?? '00000000-0000-0000-0000-000000000001'
-const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
+// MULTI-TENANT-1: tenant + system actor resolved SERVER-SIDE per request from the
+// firm the funnel is on (hard rule 9 — never from the request body). The staged
+// object key and its token bind to THAT tenant, and finalize verifies the token
+// under the same resolved tenant. See lib/publicTenant.ts.
 
 // ---- Staging orphan sweep (amortized GC) -----------------------------------
 // Every staged object is either claimed by a booking (its key lands on a
@@ -54,19 +55,23 @@ const SWEEP_INTERVAL_MS = 10 * 60_000
 const SWEEP_MIN_AGE_MS = 48 * 60 * 60 * 1000
 let lastSweepMs = 0
 
-function maybeSweepStagingOrphans(): void {
+// Sweeps the RESOLVED tenant's staging (the tenant that just uploaded), so orphan
+// GC follows the firm rather than a single hardcoded tenant. The throttle is
+// process-global (best-effort GC); under multi-tenant load a given window sweeps
+// whichever tenant's upload won the throttle — acceptable for opportunistic GC.
+function maybeSweepStagingOrphans(tenantId: string, actorId: string): void {
   const now = Date.now()
   if (now - lastSweepMs < SWEEP_INTERVAL_MS) return
   lastSweepMs = now
   void (async () => {
     try {
-      const objects = await listIntakeStagingObjects(TENANT_ID)
+      const objects = await listIntakeStagingObjects(tenantId)
       const stale = objects.filter(
         (o) => o.createdAt && now - new Date(o.createdAt).getTime() > SWEEP_MIN_AGE_MS,
       )
       if (stale.length === 0) return
       const referenced = await filterReferencedObjectKeys(
-        { tenantId: TENANT_ID, actorId: ACTOR_ID },
+        { tenantId, actorId },
         stale.map((o) => o.objectKey),
       )
       for (const o of stale) {
@@ -87,6 +92,19 @@ export async function POST(request: Request) {
       { error: 'Too many requests. Please slow down and try again shortly.' },
       { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
     )
+  }
+
+  let tenantId: string
+  let actorId: string
+  try {
+    const pub = await resolvePublicTenant(request)
+    tenantId = pub.tenantId
+    actorId = pub.actorId
+  } catch (e) {
+    if (e instanceof FirmNotFoundError) {
+      return NextResponse.json({ error: 'This firm could not be found.' }, { status: 404 })
+    }
+    throw e
   }
 
   const form = await request.formData().catch(() => null)
@@ -112,7 +130,7 @@ export async function POST(request: Request) {
   }
   const filename = safeFilename(file.name || 'document')
   const sha256Hex = createHash('sha256').update(buffer).digest('hex')
-  const objectKey = `${TENANT_ID}/${INTAKE_STAGING_SEGMENT}/${randomUUID()}-${filename}`
+  const objectKey = `${tenantId}/${INTAKE_STAGING_SEGMENT}/${randomUUID()}-${filename}`
 
   try {
     await uploadObject(objectKey, buffer, mime)
@@ -122,14 +140,14 @@ export async function POST(request: Request) {
       { status: 500 },
     )
   }
-  maybeSweepStagingOrphans()
+  maybeSweepStagingOrphans(tenantId, actorId)
 
   // The token is minted AFTER the bytes land so it always names a real object.
   // If signing fails (secret unset), remove the now-unreachable object — the
   // client sees a clear error instead of a dead token.
   try {
     const token = signStagedUploadToken({
-      tenantId: TENANT_ID,
+      tenantId,
       objectKey,
       originalFilename: filename,
       contentType: mime,

@@ -24,17 +24,12 @@ type SavedViewRow = {
 }
 
 const VIEW_SELECT = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
-    FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1 ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )
   SELECT
     e.id AS saved_view_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'view_name')    AS name,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'view_surface') AS surface,
-    (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'view_config')           AS config,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'view_owner')   AS owner,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'view_name' ORDER BY a.valid_from DESC LIMIT 1)    AS name,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'view_surface' ORDER BY a.valid_from DESC LIMIT 1) AS surface,
+    (SELECT a.value FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'view_config' ORDER BY a.valid_from DESC LIMIT 1)           AS config,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'view_owner' ORDER BY a.valid_from DESC LIMIT 1)   AS owner,
     e.created_at AS updated_at
   FROM entity e
   JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'saved_view'

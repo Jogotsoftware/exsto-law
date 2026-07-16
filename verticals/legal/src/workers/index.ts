@@ -59,6 +59,54 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
   })
 })
 
+// CAPABILITY-UNIFY-1 (WP3) — runs one invoke_capability step OFF the request. Enqueued
+// by the producing auto-run's post-commit callback (lifecycle/autoRun.ts) or the manual
+// /workflow/invoke route; the worker claims it here and runs invokeCapabilityForMatter,
+// which re-resolves the matter's current invoke_capability stage, runs the capability's
+// real handler (document_generation, ai_document_review, request_client_materials, …),
+// records capability.invoked (its own idempotency guard), and applies the capability's
+// gate. This is the single off-request path for ALL capabilities — no LLM/handler work
+// ever rides the request or an advance transaction. Transient errors throw → runtime
+// backoff → dead-letter; on failure the matter stays parked + re-invocable.
+registerWorkerHandler('legal.capability.run', async (ctx, payload) => {
+  const p = payload as {
+    matter_entity_id: string
+    stage_key?: string
+    // BACKHALF-BLOCKS-1 (WP4): a deliberate REGENERATE of the named stage's document
+    // — bypasses the capability.invoked and draft-exists guards, produces version
+    // n+1 with the attorney's change notes riding the producer's guidance input.
+    regenerate?: boolean
+    change_notes?: string
+  }
+  if (p.regenerate) {
+    const { regenerateStageDocument } = await import('../api/regenerateStage.js')
+    await regenerateStageDocument(ctx, p.matter_entity_id, p.stage_key ?? '', p.change_notes ?? '')
+    return
+  }
+  const { invokeCapabilityForMatter } = await import('../api/capabilityRuntime.js')
+  await invokeCapabilityForMatter(ctx, p.matter_entity_id)
+})
+
+// MACHINE-COMMS-1 (WP2.3/WP3.3) — runs one AD-HOC capability (email_generation,
+// transcript_extraction, …) on a matter with NO workflow stage involved: same
+// registered handlers, no gate/park (for these the review queue is the gate), no
+// (matter, stage) idempotency (repeated ad-hoc runs are legitimate). Enqueued by
+// enqueueAdHocCapabilityJob (matter page / assistant); transient errors throw →
+// runtime backoff → dead-letter.
+registerWorkerHandler('legal.capability.adhoc', async (ctx, payload) => {
+  const { runAdHocCapability } = await import('../api/capabilityRuntime.js')
+  const p = payload as {
+    capability_slug: string
+    matter_entity_id: string
+    config?: Record<string, unknown>
+  }
+  await runAdHocCapability(ctx, {
+    capabilitySlug: p.capability_slug,
+    matterEntityId: p.matter_entity_id,
+    config: p.config ?? {},
+  })
+})
+
 // Runs one AI document-review job (one per uploaded document). Storage access
 // is the vertical's read-only adapter, injected HERE so the pipeline stays
 // testable with fakes. Transient model/Storage errors throw → runtime backoff;
@@ -198,3 +246,13 @@ export async function ensureStaleDraftReconcileScheduled(tenantId: string): Prom
   if (pending > 0) return
   await enqueueJob({ tenantId, jobKind: 'legal.draft.reconcile', runAt: new Date() })
 }
+
+// UI-BUILDER-FIX-1 Phase 9 — AI-regenerate of CONFIG artifacts (template /
+// questionnaire / workflow / billing) runs OFF-REQUEST here. The edit modal
+// enqueues; this generates a validated PROPOSAL and records it as a
+// config.regenerate.completed/.failed event; the modal polls that read. Nothing
+// auto-applies — the attorney saves/approves through the type's write action.
+registerWorkerHandler('legal.config.regenerate', async (ctx, payload) => {
+  const { runConfigRegenerateJob } = await import('../api/configRegenerate.js')
+  await runConfigRegenerateJob(ctx, payload as Record<string, unknown>)
+})

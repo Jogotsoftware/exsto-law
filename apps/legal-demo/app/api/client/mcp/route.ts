@@ -7,15 +7,13 @@ import { isClientPortalTool } from '@exsto/legal/mcp'
 import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { verifyCaptchaIfConfigured } from '@/lib/captcha'
+import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
 
 export const runtime = 'nodejs'
 
-const TENANT_ID = process.env.LEGAL_CLIENT_TENANT_ID ?? '00000000-0000-0000-0000-000000000001'
-// The public-intake system actor seeded by 0001_pacheco_law_vertical_seed.sql.
-// MUST match a real actor row — the prior default (…0000-000000000004) was never
-// seeded, so every booking action.insert FK-failed (action_actor_id_fkey) and the
-// whole booking rolled back. The other client routes already use …0001-…0005.
-const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
+// MULTI-TENANT-1: tenant + public-intake actor are resolved PER REQUEST from the
+// firm the funnel is on (middleware → x-firm-slug → resolvePublicTenant), not a
+// module-level hardcoded const. See lib/publicTenant.ts.
 
 // Client portal writes always come from the public-intake system actor; client
 // identity (Marcus, Priya) is captured in the client_contact entity and is
@@ -55,9 +53,26 @@ export async function POST(request: Request) {
     }
   }
 
-  const ctx: ActionContext = { tenantId: TENANT_ID, actorId: ACTOR_ID }
+  let ctx: ActionContext
   try {
-    const result = await tool.handler(ctx, body.input ?? {})
+    const pub = await resolvePublicTenant(request)
+    ctx = { tenantId: pub.tenantId, actorId: pub.actorId }
+  } catch (e) {
+    // A named firm that doesn't resolve fails closed — never a dev-tenant write.
+    if (e instanceof FirmNotFoundError) {
+      return NextResponse.json({ error: 'This firm could not be found.' }, { status: 404 })
+    }
+    throw e
+  }
+  // Strip reserved identity keys — on this UNAUTHENTICATED route the body must
+  // never be able to impersonate a signed-in client or a verified attorney
+  // (the authed routes stamp these from their sessions).
+  const input: Record<string, unknown> = { ...(body.input ?? {}) }
+  delete input.clientContactId
+  delete input.clientIp
+  delete input.__attorneySession
+  try {
+    const result = await tool.handler(ctx, input)
     return NextResponse.json({ result })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

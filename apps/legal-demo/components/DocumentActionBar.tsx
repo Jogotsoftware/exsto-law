@@ -6,6 +6,7 @@
 // action, and surfaces its result. A sibling session adds an action file and it
 // appears here with no change to this component.
 import { useMemo, useState } from 'react'
+import { useConfirm } from '@/components/ConfirmModal'
 import { getDocumentActions, type DocumentActionContext } from '@/lib/documentActions/registry'
 // Bundled action — explicit import guarantees registration even if the webpack
 // require.context discovery is unavailable (e.g. a non-webpack test runner).
@@ -15,12 +16,20 @@ export function DocumentActionBar({ context }: { context: DocumentActionContext 
   const actions = useMemo(() => getDocumentActions(), [])
   const [busy, setBusy] = useState<string | null>(null)
   const [status, setStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+  const { confirm, confirmElement } = useConfirm()
 
   async function run(actionId: string) {
     const action = actions.find((a) => a.id === actionId)
     if (!action) return
     const confirmMsg = action.confirm?.(context) ?? null
-    if (confirmMsg && typeof window !== 'undefined' && !window.confirm(confirmMsg)) return
+    if (confirmMsg) {
+      const ok = await confirm({
+        title: action.label,
+        body: confirmMsg,
+        confirmLabel: action.label,
+      })
+      if (!ok) return
+    }
     setBusy(actionId)
     setStatus(null)
     try {
@@ -38,6 +47,7 @@ export function DocumentActionBar({ context }: { context: DocumentActionContext 
 
   return (
     <>
+      {confirmElement}
       {actions.map((action) => (
         <button key={action.id} onClick={() => run(action.id)} disabled={busy !== null}>
           {busy === action.id && <span className="spinner" />}

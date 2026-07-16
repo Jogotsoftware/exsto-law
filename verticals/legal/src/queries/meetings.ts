@@ -38,31 +38,18 @@ type MeetingRow = {
 }
 
 // Shared projection over calendar_event entities + the OPEN meeting_of link.
-// attrs CTE scoped to calendar_event entities (Soft rule 7 / 50ms budget).
 function meetingSelect(whereClause: string): string {
   return `
-    WITH attrs AS (
-      SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
-      FROM attribute a
-      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-      WHERE a.tenant_id = $1
-        AND a.entity_id IN (
-          SELECT e2.id FROM entity e2
-          JOIN entity_kind_definition k2 ON k2.id = e2.entity_kind_id AND k2.kind_name = 'calendar_event'
-          WHERE e2.tenant_id = $1
-        )
-      ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-    )
     SELECT
       e.id AS calendar_event_id,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'meeting_google_event_id') AS google_event_id,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'meeting_title')           AS title,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'meeting_started_at')      AS started_at,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'meeting_ended_at')        AS ended_at,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'meeting_all_day')         AS all_day,
-      (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'meeting_attendee_emails')          AS attendee_emails,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'meeting_html_link')       AS html_link,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'meeting_event_status')    AS event_status,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'meeting_google_event_id' ORDER BY a.valid_from DESC LIMIT 1) AS google_event_id,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'meeting_title' ORDER BY a.valid_from DESC LIMIT 1)           AS title,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'meeting_started_at' ORDER BY a.valid_from DESC LIMIT 1)      AS started_at,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'meeting_ended_at' ORDER BY a.valid_from DESC LIMIT 1)        AS ended_at,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'meeting_all_day' ORDER BY a.valid_from DESC LIMIT 1)         AS all_day,
+      (SELECT a.value FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'meeting_attendee_emails' ORDER BY a.valid_from DESC LIMIT 1)          AS attendee_emails,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'meeting_html_link' ORDER BY a.valid_from DESC LIMIT 1)       AS html_link,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'meeting_event_status' ORDER BY a.valid_from DESC LIMIT 1)    AS event_status,
       m.id   AS matter_entity_id,
       m.name AS matter_number,
       e.created_at AS captured_at

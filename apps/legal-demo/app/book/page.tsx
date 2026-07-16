@@ -6,9 +6,12 @@ import { X } from 'lucide-react'
 import PhoneInput, { isValidPhoneNumber } from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
 import { callClientMcp } from '@/lib/mcpClient'
+import { callClientPortalMcp } from '@/lib/mcpClientPortal'
 import { AddressAutocomplete, type StructuredAddress } from '@/components/AddressAutocomplete'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { LanguageToggle } from '@/components/LanguageToggle'
+import { PortalSignInInline } from '@/components/PortalSignInInline'
+import { FeeConsentCard } from '@/components/FeeConsentCard'
 import { Turnstile } from '@/components/Turnstile'
 import { useI18n } from '@/lib/i18n'
 import {
@@ -42,6 +45,12 @@ interface ServiceField {
   required?: boolean
   allow_unknown?: boolean
   options?: string[]
+  // BUILDER-UX-2 WP-7 — locale variants of the client-facing text, keyed by locale
+  // ('es'). options_i18n is a locale → parallel-array map (same order as options).
+  // A missing locale/field ALWAYS falls back to the English text — never blank.
+  label_i18n?: Record<string, string>
+  placeholder_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
   // 1.1 WP5 — attorney-filled / system-filled field. Present in the schema so the
   // document's {{token}} is covered, but NEVER shown to the client on the booking
   // form and never asked of them. The client view filters these out.
@@ -51,7 +60,64 @@ interface ServiceField {
 interface ServiceSection {
   id: string
   title: string
+  // WP-7 — locale variants of the section title.
+  title_i18n?: Record<string, string>
   fields: ServiceField[]
+}
+
+// TODO(UI-BUILDER-FIX-1 Phase 1): clientDisplayName/clientDescription are null for
+// services whose client copy hasn't been authored/approved yet — the tile falls
+// back to the ATTORNEY-facing displayName/description (jurisdiction-heavy) so
+// nothing renders blank. Remove this note once all live services carry client copy.
+function tileTitle(
+  s: Service,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  // WP-7: the stored locale variant wins; then the English client copy; then the
+  // static translation map; then the attorney-facing name. Never blank, never a key.
+  const v = s.clientCopyI18n?.[lang]?.displayName
+  if (typeof v === 'string' && v.trim()) return v
+  return s.clientDisplayName ?? t(`service.${s.serviceKey}.title`, undefined, s.displayName)
+}
+function tileDesc(
+  s: Service,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  const v = s.clientCopyI18n?.[lang]?.description
+  if (typeof v === 'string' && v.trim()) return v
+  return s.clientDescription ?? t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')
+}
+
+// WP-7 — questionnaire text with stored locale variants (fall back to the static
+// translation map, then the English schema text).
+function fieldLabelOf(
+  field: ServiceField,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  const v = field.label_i18n?.[lang]
+  // '' or a non-string never wins — the fallback contract is English, never blank.
+  if (typeof v === 'string' && v.trim()) return v
+  return t(`field.${field.id}.label`, undefined, field.label)
+}
+function optionLabelOf(
+  field: ServiceField,
+  opt: string,
+  lang: string,
+  t: (k: string, v?: undefined, f?: string) => string,
+): string {
+  const i = field.options?.indexOf(opt) ?? -1
+  const localized = field.options_i18n?.[lang]
+  // Index pairing is only trustworthy when the arrays are the SAME length — a
+  // mismatched map must fall back to English rather than mislabel choices.
+  const v =
+    i >= 0 && Array.isArray(localized) && localized.length === (field.options?.length ?? -1)
+      ? localized[i]
+      : undefined
+  if (typeof v === 'string' && v.trim()) return v
+  return t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))
 }
 
 interface Service {
@@ -59,13 +125,19 @@ interface Service {
   serviceKey: string
   displayName: string
   description: string | null
+  clientDisplayName: string | null
+  clientDescription: string | null
+  clientCopyI18n?: Record<string, { displayName?: string; description?: string }> | null
   intakeSchema: { sections: ServiceSection[] }
   // False = intake-only (document-review style): no slot step, submit happens
   // on the intake step, no consultation on the confirmation screen.
   appointmentRequired: boolean
+  // MACHINE-COMMS-1: true only when the service is active AND has an authored
+  // lifecycle. Non-bookable services are never offered on this page.
+  bookable: boolean
 }
 
-type Step = 'service' | 'contact' | 'intake' | 'slot' | 'done'
+type Step = 'service' | 'contact' | 'intake' | 'slot' | 'account' | 'done'
 
 interface MemberRow {
   // Client-only stable identity for React keys. Stripped before sending to
@@ -97,11 +169,63 @@ const PROGRESS_STEPS: ReadonlyArray<{ key: Exclude<Step, 'done'>; labelKey: stri
   { key: 'contact', labelKey: 'progress.contact' },
   { key: 'intake', labelKey: 'progress.intake' },
   { key: 'slot', labelKey: 'progress.time' },
+  { key: 'account', labelKey: 'progress.account' },
 ]
+
+// "Something else" (UI-BUILDER-FIX-1 Phase 3): a SYNTHETIC picker tile tied to NO
+// workflow_definition. Selecting it runs the same wizard (contact → one free-text
+// question) but submits legal.intake.something_else — a client_request for
+// attorney triage. No matter opens, no workflow starts.
+const SOMETHING_ELSE_KEY = 'something_else'
+const SOMETHING_ELSE_TILE: Service = {
+  id: SOMETHING_ELSE_KEY,
+  serviceKey: SOMETHING_ELSE_KEY,
+  displayName: 'Something else',
+  description: "Not sure what you need? Tell us and we'll point you the right way.",
+  clientDisplayName: null,
+  clientDescription: null,
+  intakeSchema: {
+    sections: [
+      {
+        id: 'request',
+        title: 'Your request',
+        title_i18n: { es: 'Su solicitud' },
+        fields: [
+          {
+            id: 'request_text',
+            label: 'What do you need help with?',
+            label_i18n: { es: '¿En qué necesita ayuda?' },
+            type: 'textarea',
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
+  // Intake-only shape: no slot step, submit fires from the intake step.
+  appointmentRequired: false,
+  bookable: true,
+}
+
+// PORTAL-1: the signed-in portal identity, when a client session cookie exists.
+interface PortalMe {
+  email: string
+  displayName: string
+}
+
+// The fee quote the server computed for the selected service (PORTAL-1 WP3).
+interface FeeQuote {
+  basis: 'fixed' | 'hourly-rate'
+  amount: string | null
+  rate: string | null
+  currency: string
+  description: string
+}
 
 // Plain-language services map to a friendly icon; anything unknown gets a doc icon.
 function ServiceIcon({ serviceKey, size = 22 }: { serviceKey: string; size?: number }) {
-  if (serviceKey === 'other') return <HelpCircleIcon size={size} />
+  if (serviceKey === 'other' || serviceKey === SOMETHING_ELSE_KEY)
+    return <HelpCircleIcon size={size} />
   if (serviceKey.includes('amendment')) return <FileTextIcon size={size} />
   if (
     serviceKey.includes('llc') ||
@@ -146,6 +270,14 @@ export default function BookPage() {
     attributionSource: '',
   })
   const [services, setServices] = useState<Service[] | null>(null)
+  // MULTI-TENANT-1: the resolved firm's identity for branding — never a literal.
+  // Comes from legal.public.firm_branding, which runs under the tenant the public
+  // route resolved (host subdomain / ?firm= selector). attorneyName may be null
+  // (a firm that hasn't set one) → the confirmation falls back to the firm name.
+  const [firmBranding, setFirmBranding] = useState<{
+    firmName: string | null
+    attorneyName: string | null
+  } | null>(null)
   const [selectedServiceKey, setSelectedServiceKey] = useState<string | null>(null)
   const [intakeResponses, setIntakeResponses] = useState<Record<string, unknown>>({})
   const [members, setMembers] = useState<MemberRow[]>([emptyMember()])
@@ -153,7 +285,7 @@ export default function BookPage() {
   const [stagedUploads, setStagedUploads] = useState<Record<string, StagedFile[]>>({})
 
   const [slots, setSlots] = useState<CalendarSlot[] | null>(null)
-  const [slotsSource, setSlotsSource] = useState<'google' | 'stub' | null>(null)
+  const [slotsSource, setSlotsSource] = useState<'google' | 'unavailable' | null>(null)
   const [slotsLastUpdated, setSlotsLastUpdated] = useState<Date | null>(null)
   const [slotsRefreshing, setSlotsRefreshing] = useState(false)
   const [horizonDays, setHorizonDays] = useState(INITIAL_HORIZON_DAYS)
@@ -164,24 +296,72 @@ export default function BookPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // PORTAL-1: signed-in clients skip the contact step AND the account gate —
+  // identity comes from the session; the submit runs through the authed portal
+  // endpoint attributed to their own actor. undefined = still checking.
+  const [portalMe, setPortalMe] = useState<PortalMe | null | undefined>(undefined)
+  const refreshPortalMe = useCallback(async () => {
+    try {
+      const r = await fetch('/api/client/auth/me')
+      const me = r.ok ? await r.json() : null
+      setPortalMe(
+        me && typeof me.email === 'string'
+          ? { email: me.email, displayName: me.displayName ?? me.email }
+          : null,
+      )
+    } catch {
+      setPortalMe(null)
+    }
+  }, [])
+  useEffect(() => {
+    void refreshPortalMe()
+  }, [refreshPortalMe])
+  const signedIn = Boolean(portalMe)
+  // Returning-client sign-in, IN PLACE: the flow-start notice expands this panel
+  // and the account step can swap to it — no navigation, so every wizard answer
+  // survives the sign-in.
+  const [showSignInPanel, setShowSignInPanel] = useState(false)
+
+  // The account gate (anonymous flow): password + the fee card. accountMode
+  // swaps the create-account fields for the inline sign-in panel; the stage
+  // response's hasPortalAccount defaults it for known emails.
+  const [password, setPassword] = useState('')
+  const [password2, setPassword2] = useState('')
+  const [accountMode, setAccountMode] = useState<'create' | 'signin'>('create')
+  // Once the user has interacted with the account step (toggled modes, typed a
+  // password, or submitted), a late stage response must not yank the form —
+  // the hasPortalAccount default only applies to a pristine step.
+  const accountTouchedRef = useRef(false)
+  const [hasPortalAccount, setHasPortalAccount] = useState(false)
+  const [feeQuote, setFeeQuote] = useState<FeeQuote | null>(null)
+  const [feeAccepted, setFeeAccepted] = useState(false)
+  // One hint at a time (steps are exclusive): explains a consent-gated submit.
+  const feeHintId = useId()
+
   // CAPTCHA token + a reset handle the widget hands back. Both stay null when
   // the site key is unset (the widget never renders), and the submit flow below
   // only requires/sends a token in that case.
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const resetCaptchaRef = useRef<(() => void) | null>(null)
   // A token belongs to the widget instance on the step that hosts it. Any step
-  // change unmounts that widget (its expired-callback dies with it), so a
-  // retained token would enable submit against a visibly-unsolved widget —
-  // drop it and require a fresh solve on the hosting step.
+  // change unmounts that widget (its expired-callback dies with it) — and so
+  // does an accountMode flip, which swaps the create block (the widget's host)
+  // for the sign-in panel within the same step. Either way a retained token
+  // would enable submit against a visibly-unsolved widget — drop it and
+  // require a fresh solve.
   useEffect(() => {
     setCaptchaToken(null)
     resetCaptchaRef.current = null
-  }, [step])
+  }, [step, accountMode])
   const [confirmation, setConfirmation] = useState<{
     matterNumber: string
     // Null for intake-only services — the confirmation renders "request
     // received" copy instead of a consultation time.
     scheduledAt: string | null
+    // PORTAL-1: true when the intake gate just created their portal account —
+    // the confirmation tells them to confirm their email and sign in.
+    accountCreated?: boolean
+    accountExisted?: boolean
   } | null>(null)
 
   // Honor ?service=… (presets pick the service up-front and skip the picker)
@@ -196,11 +376,53 @@ export default function BookPage() {
     }
   }, [])
 
+  // Resolve the firm's branding once on mount (topbar name + confirmation attorney).
+  useEffect(() => {
+    callClientMcp<{ firmName: string | null; attorneyName: string | null }>({
+      toolName: 'legal.public.firm_branding',
+    })
+      .then(setFirmBranding)
+      .catch(() => setFirmBranding(null))
+  }, [])
+
   useEffect(() => {
     callClientMcp<{ services: Service[] }>({ toolName: 'legal.service.list' })
-      .then((r) => setServices(r.services))
+      // Only bookable services (active + authored lifecycle) are offered; a
+      // non-bookable one is simply excluded, never rendered disabled. A stale
+      // ?service= preset pointing at one falls back to the picker via the
+      // preset-validation effect below.
+      // The "Something else" tile is client-side (tied to no workflow_definition)
+      // and always renders LAST, whatever the firm's live services are.
+      .then((r) =>
+        setServices([...r.services.filter((s) => s.bookable === true), SOMETHING_ELSE_TILE]),
+      )
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [])
+
+  // A signed-in client never sees the contact step (the ?service preset jumps
+  // there before the session check resolves).
+  useEffect(() => {
+    if (step === 'contact' && signedIn) setStep('intake')
+  }, [step, signedIn])
+
+  // PORTAL-1 (WP4): signed-in intake prefill from what the firm already knows —
+  // the client's most recent answers for this service. Merged only into fields
+  // the client hasn't touched this session; they edit and confirm before submit.
+  const prefilledFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!signedIn || step !== 'intake' || !selectedServiceKey) return
+    if (prefilledFor.current === selectedServiceKey) return
+    prefilledFor.current = selectedServiceKey
+    callClientPortalMcp<{ responses: Record<string, unknown> | null }>({
+      toolName: 'legal.client.intake_prefill',
+      input: { serviceKey: selectedServiceKey },
+    })
+      .then((r) => {
+        if (!r.responses) return
+        setIntakeResponses((prev) => ({ ...r.responses, ...prev }))
+      })
+      .catch(() => undefined)
+  }, [signedIn, step, selectedServiceKey])
 
   // A ?service= preset jumps straight to the contact step before services have
   // loaded. Once they do, validate the preset: if it doesn't resolve to a real
@@ -226,7 +448,7 @@ export default function BookPage() {
       try {
         const r = await callClientMcp<{
           slots: CalendarSlot[]
-          source: 'google' | 'stub'
+          source: 'google' | 'unavailable'
           reason?: string
         }>({
           toolName: 'legal.calendar.availability',
@@ -239,10 +461,11 @@ export default function BookPage() {
         setSlots(r.slots)
         setSlotsSource(r.source)
         setSlotsLastUpdated(new Date())
-        if (r.source === 'stub' && r.reason) {
-          // Surface server-side fallback reason in the browser console so we
-          // can diagnose without grepping function logs.
-          console.warn('[availability] Google fallback to stub:', r.reason)
+        if (r.source === 'unavailable' && r.reason) {
+          // Surface the server-side reason in the browser console so we can
+          // diagnose without grepping function logs. The UI shows the honest
+          // unavailable state — never fabricated slots.
+          console.warn('[availability] calendar unavailable:', r.reason)
         }
       } catch {
         // leave previous slots in place on transient failure
@@ -287,7 +510,9 @@ export default function BookPage() {
       setError(t('error.pick_service'))
       return
     }
-    setStep('contact')
+    // Signed-in clients skip the contact step — the firm already knows them;
+    // the server resolves name/email from the session at submit.
+    setStep(signedIn ? 'intake' : 'contact')
   }
 
   function advanceFromContact() {
@@ -315,7 +540,7 @@ export default function BookPage() {
           }
           continue
         }
-        const label = t(`field.${field.id}.label`, undefined, field.label)
+        const label = fieldLabelOf(field, lang, t)
         if (field.type === 'file_upload') {
           // The answer is the staged files themselves, not intakeResponses text.
           if ((stagedUploads[field.id] ?? []).length === 0) {
@@ -350,21 +575,28 @@ export default function BookPage() {
       return
     }
     setError(null)
-    // Intake-only services submit straight from this step — there is no slot
-    // to pick (the submit button hosting this handler renders the captcha).
+    // "Something else" (UI-BUILDER-FIX-1 item 3) is a TRIAGE REQUEST, not a
+    // booking: no matter, no workflow — and no account gate (there is nothing
+    // to put in a portal yet). It submits straight from this step, captcha-
+    // gated by the widget this step hosts for it.
+    if (selectedServiceKey === SOMETHING_ELSE_KEY) {
+      void submitSomethingElse()
+      return
+    }
+    // Intake-only services have no slot to pick: signed-in clients submit here;
+    // new clients go to the account gate (the FINAL step of intake).
     if (!needsSlot) {
-      void submitBooking()
+      if (signedIn) void submitBooking()
+      else void goToAccountGate()
       return
     }
     setStep('slot')
   }
 
-  async function submitBooking() {
-    if (!selectedService) return
-    if (needsSlot && !selectedSlot) return
-    // When the CAPTCHA is enabled, a verified token is mandatory before we hit
-    // the server (which would otherwise 403). When it's disabled the widget
-    // never renders, captchaToken stays null, and this guard is skipped.
+  // "Something else" submit (UI-BUILDER-FIX-1 item 3): a client_request for
+  // attorney triage via the public legal.intake.something_else tool. Same
+  // captcha discipline as the booking submit; single-use token resets on error.
+  async function submitSomethingElse() {
     if (TURNSTILE_SITE_KEY && !captchaToken) {
       setError(t('error.captcha'))
       return
@@ -372,75 +604,250 @@ export default function BookPage() {
     setBusy('submit')
     setError(null)
     try {
-      const responsesToSubmit = selectedService.intakeSchema.sections.some((s) =>
-        s.fields.some((f) => f.type === 'members_repeater'),
-      )
-        ? { ...intakeResponses, members: members.map(({ id: _id, ...rest }) => rest) }
-        : intakeResponses
-
-      // Staged file tokens for the SELECTED service's file_upload fields only —
-      // a file attached while browsing a different service (then abandoned via
-      // Back) must never bind to this booking's matter. The server verifies
-      // each token and binds the objects to the new matter.
-      const fileFieldIds = new Set(
-        selectedService.intakeSchema.sections.flatMap((s) =>
-          s.fields.filter((f) => f.type === 'file_upload').map((f) => f.id),
-        ),
-      )
-      const stagedTokens = Object.entries(stagedUploads)
-        .filter(([fieldId]) => fileFieldIds.has(fieldId))
-        .flatMap(([, files]) => files.map((f) => f.token))
-
-      const result = await callClientMcp<{
-        actionId: string
-        // matter.open's effect (intake-only) has no scheduledAt; booking.create's does.
-        effects: Array<{ matterEntityId: string; matterNumber: string; scheduledAt?: string }>
-      }>({
-        toolName: 'legal.booking.submit',
+      // Signed-in clients skipped the contact step — their portal identity is
+      // the requester; the handler dedupes the contact by email either way.
+      await callClientMcp<{ requestId: string }>({
+        toolName: 'legal.intake.something_else',
         input: {
-          clientFullName: contact.fullName.trim(),
-          clientEmail: contact.email.trim(),
-          clientPhone: contact.phone,
-          clientCompanyName: contact.companyName.trim() || undefined,
-          attributionSource: contact.attributionSource.trim(),
-          serviceKey: selectedService.serviceKey,
-          intakeResponses: responsesToSubmit,
-          // The server REJECTS a slot on an intake-only service — omit both.
-          ...(needsSlot && selectedSlot
-            ? { scheduledAtIso: selectedSlot.startIso, scheduledEndIso: selectedSlot.endIso }
-            : {}),
-          stagedUploads: stagedTokens.length > 0 ? stagedTokens : undefined,
+          clientFullName: (signedIn ? portalMe?.displayName : contact.fullName)?.trim() ?? '',
+          clientEmail: (signedIn ? portalMe?.email : contact.email)?.trim() ?? '',
+          clientPhone: contact.phone || undefined,
+          requestText: String(intakeResponses['request_text'] ?? '').trim(),
         },
-        // undefined when CAPTCHA is disabled → callClientMcp omits the field.
         captchaToken: captchaToken ?? undefined,
       })
-
-      const effect = result.effects[0]
-      if (!effect) throw new Error('Booking response missing matter id.')
-      setConfirmation({
-        matterNumber: effect.matterNumber,
-        scheduledAt: effect.scheduledAt ?? null,
-      })
+      // No matter exists — the confirmation renders the "request received" copy
+      // and hides the matter reference + portal link.
+      setConfirmation({ matterNumber: '', scheduledAt: null })
       setStep('done')
     } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err)
-      // A Turnstile token is single-use; any failed submit consumed it, so
-      // reset the widget and require a fresh solve before the next attempt.
       if (TURNSTILE_SITE_KEY) {
         setCaptchaToken(null)
         resetCaptchaRef.current?.()
       }
-      if (raw.includes('SLOT_TAKEN')) {
-        // Someone else grabbed this slot between when the calendar was last
-        // refreshed and when we hit submit. Translate the error, force a
-        // fresh availability fetch, and clear the now-invalid selection so
-        // the user has to pick again.
-        setError(t('slot.conflict'))
-        setSelectedSlot(null)
-        void fetchSlots(horizonDays, { serviceKey: selectedServiceKey ?? undefined })
-      } else {
-        setError(raw)
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // PORTAL-1 (WP1): entering the account gate STAGES the intake as a lead first
+  // — a client who balks at the password step stays recoverable and queryable.
+  // Fire-and-forget: staging failure must not block the funnel (finalize
+  // self-heals), and the response's fee quote drives the consent card.
+  async function goToAccountGate() {
+    setStep('account')
+    setFeeAccepted(false)
+    setAccountMode('create')
+    setHasPortalAccount(false)
+    accountTouchedRef.current = false
+    try {
+      const res = await fetch('/api/client/intake/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientFullName: contact.fullName.trim(),
+          clientEmail: contact.email.trim(),
+          clientPhone: contact.phone || null,
+          clientCompanyName: contact.companyName.trim() || null,
+          serviceKey: selectedServiceKey,
+          intakeResponses,
+        }),
+      })
+      const data = (await res.json().catch(() => null)) as {
+        quote?: FeeQuote | null
+        hasPortalAccount?: boolean
+      } | null
+      setFeeQuote(data?.quote ?? null)
+      // Known email with a portal account: default the step to sign-in (neutral
+      // copy) — the create path stays one toggle away as the fallback.
+      if (data?.hasPortalAccount === true) {
+        setHasPortalAccount(true)
+        if (!accountTouchedRef.current && busy === null) setAccountMode('signin')
       }
+    } catch {
+      setFeeQuote(null)
+    }
+  }
+
+  // Inline sign-in from the account step: the user must not be stranded on the
+  // (now skipped) account step — resume on a real step and submit through the
+  // authed portal door. An unaccepted fee re-arms via the 409 the submit
+  // already handles, rendering the consent card on the resumed step.
+  async function signedInFromAccountStep() {
+    await refreshPortalMe()
+    setStep(needsSlot ? 'slot' : 'intake')
+    await submitBooking()
+  }
+
+  // The intake answers + staged upload tokens the submit sends, shared by both
+  // doors (signed-in portal submit and the anonymous intake-gate finalize).
+  function buildSubmitPayload() {
+    if (!selectedService) return null
+    const responsesToSubmit = selectedService.intakeSchema.sections.some((s) =>
+      s.fields.some((f) => f.type === 'members_repeater'),
+    )
+      ? { ...intakeResponses, members: members.map(({ id: _id, ...rest }) => rest) }
+      : intakeResponses
+
+    // Staged file tokens for the SELECTED service's file_upload fields only —
+    // a file attached while browsing a different service (then abandoned via
+    // Back) must never bind to this booking's matter. The server verifies
+    // each token and binds the objects to the new matter.
+    const fileFieldIds = new Set(
+      selectedService.intakeSchema.sections.flatMap((s) =>
+        s.fields.filter((f) => f.type === 'file_upload').map((f) => f.id),
+      ),
+    )
+    const stagedTokens = Object.entries(stagedUploads)
+      .filter(([fieldId]) => fileFieldIds.has(fieldId))
+      .flatMap(([, files]) => files.map((f) => f.token))
+
+    return {
+      serviceKey: selectedService.serviceKey,
+      intakeResponses: responsesToSubmit,
+      // The server REJECTS a slot on an intake-only service — omit both.
+      ...(needsSlot && selectedSlot
+        ? { scheduledAtIso: selectedSlot.startIso, scheduledEndIso: selectedSlot.endIso }
+        : {}),
+      stagedUploads: stagedTokens.length > 0 ? stagedTokens : undefined,
+    }
+  }
+
+  function handleSubmitFailure(raw: string) {
+    // A Turnstile token is single-use; any failed submit consumed it, so
+    // reset the widget and require a fresh solve before the next attempt.
+    if (TURNSTILE_SITE_KEY) {
+      setCaptchaToken(null)
+      resetCaptchaRef.current?.()
+    }
+    if (raw.includes('SLOT_TAKEN') || raw.includes('another booking')) {
+      // Someone else grabbed this slot between when the calendar was last
+      // refreshed and when we hit submit. Translate the error, force a
+      // fresh availability fetch, and clear the now-invalid selection so
+      // the user has to pick again.
+      setError(t('slot.conflict'))
+      setSelectedSlot(null)
+      setStep('slot')
+      void fetchSlots(horizonDays, { serviceKey: selectedServiceKey ?? undefined })
+    } else {
+      setError(raw)
+    }
+  }
+
+  // SIGNED-IN submit (PORTAL-1 WP4): the authed portal endpoint books as the
+  // client's own actor — no contact step, no account gate, no captcha. A costed
+  // service answers 409 FEE_CONSENT_REQUIRED first; the fee card renders and
+  // the accepted resubmit records the consent server-side.
+  async function submitBooking() {
+    if (!selectedService) return
+    if (needsSlot && !selectedSlot) return
+    const payload = buildSubmitPayload()
+    if (!payload) return
+    setBusy('submit')
+    setError(null)
+    try {
+      const res = await fetch('/api/client/portal/book', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, feeAccepted: feeAccepted || undefined }),
+      })
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean
+        error?: string
+        code?: string
+        quote?: FeeQuote
+        matterNumber?: string | null
+        scheduledAt?: string | null
+      } | null
+      if (res.status === 409 && data?.code === 'FEE_CONSENT_REQUIRED' && data.quote) {
+        // Show the exact cost; nothing proceeds until they accept (law 2).
+        setFeeQuote(data.quote)
+        setFeeAccepted(false)
+        return
+      }
+      if (!res.ok || !data?.ok) throw new Error(data?.error ?? 'Booking failed.')
+      setConfirmation({
+        matterNumber: data.matterNumber ?? '—',
+        scheduledAt: data.scheduledAt ?? null,
+      })
+      setStep('done')
+    } catch (err) {
+      handleSubmitFailure(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // ANONYMOUS submit (PORTAL-1 WP1): the account gate finalize — account
+  // creation + booking are atomic on success; the staged lead survives a balk.
+  async function submitWithAccount() {
+    if (!selectedService) return
+    if (password.length < 8) {
+      setError(
+        t('account.password_short', undefined, 'Choose a password of at least 8 characters.'),
+      )
+      return
+    }
+    if (password !== password2) {
+      setError(t('account.password_mismatch', undefined, 'The passwords do not match.'))
+      return
+    }
+    if (feeQuote && !feeAccepted) {
+      setError(
+        t('account.fee_required', undefined, 'Please review and accept the fee to continue.'),
+      )
+      return
+    }
+    if (TURNSTILE_SITE_KEY && !captchaToken) {
+      setError(t('error.captcha'))
+      return
+    }
+    const payload = buildSubmitPayload()
+    if (!payload) return
+    setBusy('submit')
+    setError(null)
+    try {
+      const res = await fetch('/api/client/intake/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientFullName: contact.fullName.trim(),
+          clientEmail: contact.email.trim(),
+          clientPhone: contact.phone || undefined,
+          clientCompanyName: contact.companyName.trim() || undefined,
+          attributionSource: contact.attributionSource.trim(),
+          ...payload,
+          password,
+          feeAccepted: feeQuote ? feeAccepted : undefined,
+          captchaToken: captchaToken ?? undefined,
+        }),
+      })
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean
+        error?: string
+        code?: string
+        quote?: FeeQuote
+        matterNumber?: string | null
+        scheduledAt?: string | null
+        accountCreated?: boolean
+        accountExisted?: boolean
+      } | null
+      if (res.status === 409 && data?.code === 'FEE_CONSENT_REQUIRED' && data.quote) {
+        setFeeQuote(data.quote)
+        setFeeAccepted(false)
+        return
+      }
+      if (!res.ok || !data?.ok) throw new Error(data?.error ?? 'Booking failed.')
+      setConfirmation({
+        matterNumber: data.matterNumber ?? '—',
+        scheduledAt: data.scheduledAt ?? null,
+        accountCreated: data.accountCreated,
+        accountExisted: data.accountExisted,
+      })
+      setStep('done')
+    } catch (err) {
+      handleSubmitFailure(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(null)
     }
@@ -469,7 +876,7 @@ export default function BookPage() {
       <main className="bk-shell">
         <div className="bk-aurora" aria-hidden />
         <div className="bk-frame">
-          <BookTopbar />
+          <BookTopbar firmName={firmBranding?.firmName ?? null} />
           <section className="bk-card bk-confirm" key="done">
             <div className="bk-success">
               <span className="bk-success-ring" aria-hidden />
@@ -480,7 +887,7 @@ export default function BookPage() {
             <h1 className="bk-h1">{hasSlot ? t('confirm.title') : t('confirm.title_intake')}</h1>
             <p className="bk-confirm-line">
               {scheduledBefore}
-              <strong>Juan Carlos Pacheco</strong>
+              <strong>{firmBranding?.attorneyName ?? firmBranding?.firmName ?? ''}</strong>
               {scheduledMiddle}
               {hasSlot && <strong>{whenStr}</strong>}
               {scheduledAfter}
@@ -490,9 +897,38 @@ export default function BookPage() {
               <strong>{contact.email}</strong>
               {emailAfter}
             </p>
-            <div className="bk-matter-ref">
-              {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
-            </div>
+            {/* No matter reference on a "Something else" triage request (item 3):
+                nothing was booked, so an empty matterNumber hides the block. */}
+            {confirmation.matterNumber && (
+              <div className="bk-matter-ref">
+                {t('confirm.matter_ref')} <code>{confirmation.matterNumber}</code>
+              </div>
+            )}
+            {confirmation.accountCreated && (
+              <p className="bk-sub">
+                {t(
+                  'confirm.account_created',
+                  undefined,
+                  'Your client portal account is ready — check your email for a confirmation link, then sign in to track this matter, read documents, and pay invoices.',
+                )}
+              </p>
+            )}
+            {confirmation.accountExisted && (
+              <p className="bk-sub">
+                {t(
+                  'confirm.account_existed',
+                  undefined,
+                  'This booking is linked to your existing portal account — sign in with your usual password.',
+                )}
+              </p>
+            )}
+            {/* A triage request creates no matter/portal — only link the portal
+                when something was actually booked. */}
+            {confirmation.matterNumber && (
+              <Link href="/portal" className="bk-btn bk-btn-primary bk-btn-wide">
+                {t('confirm.portal', undefined, 'Open your client portal')}
+              </Link>
+            )}
             <Link href="/" className="bk-btn bk-btn-ghost bk-btn-wide">
               {t('confirm.back')}
             </Link>
@@ -509,7 +945,11 @@ export default function BookPage() {
         ? t('contact.heading')
         : step === 'intake'
           ? t('intake.heading')
-          : t('slot.heading')
+          : step === 'account'
+            ? accountMode === 'signin'
+              ? t('account.heading_signin', undefined, 'Sign in to your account')
+              : t('account.heading', undefined, 'Create your account')
+            : t('slot.heading')
   const stepSubtitle =
     step === 'service'
       ? t('service.subtitle')
@@ -517,16 +957,35 @@ export default function BookPage() {
         ? t('contact.subtitle')
         : step === 'intake'
           ? t('intake.subtitle')
-          : t('slot.subtitle')
+          : step === 'account'
+            ? accountMode === 'signin'
+              ? t(
+                  'account.subtitle_signin',
+                  undefined,
+                  'Your request will be linked to your existing portal account.',
+                )
+              : t(
+                  'account.subtitle',
+                  undefined,
+                  'Everything about your matter will live in your secure portal.',
+                )
+            : t('slot.subtitle')
 
   return (
     <main className="bk-shell">
       <div className="bk-aurora" aria-hidden />
       <div className="bk-frame">
-        <BookTopbar />
+        <BookTopbar firmName={firmBranding?.firmName ?? null} />
         <BookProgress
           step={step}
-          steps={needsSlot ? PROGRESS_STEPS : PROGRESS_STEPS.filter((s) => s.key !== 'slot')}
+          steps={PROGRESS_STEPS.filter(
+            (s) =>
+              (needsSlot || s.key !== 'slot') &&
+              // Signed-in clients skip the contact step and the account gate.
+              (!signedIn || (s.key !== 'contact' && s.key !== 'account')) &&
+              // "Something else" (item 3) is a triage request — no account gate.
+              (selectedServiceKey !== SOMETHING_ELSE_KEY || s.key !== 'account'),
+          )}
         />
 
         <section className="bk-card">
@@ -545,6 +1004,45 @@ export default function BookPage() {
 
             {step === 'service' && (
               <>
+                {portalMe === null && (
+                  <div className="bk-notice" role="note">
+                    {t('funnel.existing', undefined, 'Already working with us?')}{' '}
+                    <button
+                      type="button"
+                      className="bk-linklike"
+                      aria-expanded={showSignInPanel}
+                      onClick={() => setShowSignInPanel((v) => !v)}
+                    >
+                      {t('funnel.signin', undefined, 'Sign in to your client portal')}
+                    </button>{' '}
+                    {t(
+                      'funnel.existing_tail',
+                      undefined,
+                      'to book with your details prefilled — or continue below if you are new here.',
+                    )}
+                    {showSignInPanel && (
+                      <PortalSignInInline
+                        continuePath="/book"
+                        onSignedIn={async () => {
+                          // The panel never unmounts the wizard — refreshing the
+                          // session flips the signed-in machinery (step skips,
+                          // prefill, authed submit) with every answer intact.
+                          await refreshPortalMe()
+                          setShowSignInPanel(false)
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
+                {portalMe && (
+                  <div className="bk-notice" role="note">
+                    {t('funnel.signedin', undefined, 'Booking as')}{' '}
+                    <strong>{portalMe.displayName}</strong> ({portalMe.email}) ·{' '}
+                    <a href="/portal" style={{ fontWeight: 600 }}>
+                      {t('funnel.portal', undefined, 'Go to your portal')}
+                    </a>
+                  </div>
+                )}
                 {services === null ? (
                   <div className="bk-loading">
                     <span className="bk-spinner" />
@@ -566,12 +1064,8 @@ export default function BookPage() {
                             <ServiceIcon serviceKey={s.serviceKey} />
                           </span>
                           <span className="bk-service-text">
-                            <span className="bk-service-title">
-                              {t(`service.${s.serviceKey}.title`, undefined, s.displayName)}
-                            </span>
-                            <span className="bk-service-desc">
-                              {t(`service.${s.serviceKey}.desc`, undefined, s.description ?? '')}
-                            </span>
+                            <span className="bk-service-title">{tileTitle(s, lang, t)}</span>
+                            <span className="bk-service-desc">{tileDesc(s, lang, t)}</span>
                           </span>
                           <span className="bk-service-tick" aria-hidden>
                             <CheckIcon size={14} />
@@ -667,7 +1161,11 @@ export default function BookPage() {
                     .map((section) => (
                       <div key={section.id} className="bk-section">
                         <h3 className="bk-section-title">
-                          {t(`section.${section.id}.title`, undefined, section.title)}
+                          {(typeof section.title_i18n?.[lang] === 'string' &&
+                          section.title_i18n[lang].trim()
+                            ? section.title_i18n[lang]
+                            : undefined) ??
+                            t(`section.${section.id}.title`, undefined, section.title)}
                         </h3>
                         <div className="bk-fields">
                           {section.fields
@@ -697,10 +1195,21 @@ export default function BookPage() {
                       </div>
                     ))}
                 </div>
-                {/* Intake-only services submit HERE — the captcha renders on
-                    whichever step hosts the write (the public route 403s
-                    without a verified token). */}
-                {!needsSlot && TURNSTILE_SITE_KEY && (
+                {/* PORTAL-1: a signed-in intake-only submit happens HERE (no
+                    captcha — the authed route is session-gated). Anonymous
+                    flows continue to the account gate, which hosts the captcha. */}
+                {!needsSlot && signedIn && feeQuote && (
+                  <FeeConsentCard
+                    quote={feeQuote}
+                    accepted={feeAccepted}
+                    onAccept={setFeeAccepted}
+                    t={t}
+                  />
+                )}
+                {/* "Something else" (item 3) submits from THIS step (a triage
+                    request never reaches the account gate), so it hosts its own
+                    captcha — the same public-write discipline as the booking. */}
+                {selectedServiceKey === SOMETHING_ELSE_KEY && TURNSTILE_SITE_KEY && (
                   <div className="bk-captcha" aria-live="polite">
                     <Turnstile
                       siteKey={TURNSTILE_SITE_KEY}
@@ -718,7 +1227,7 @@ export default function BookPage() {
                   <button
                     className="bk-btn bk-btn-ghost"
                     disabled={busy === 'submit'}
-                    onClick={() => setStep('contact')}
+                    onClick={() => setStep(signedIn ? 'service' : 'contact')}
                   >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
@@ -734,22 +1243,42 @@ export default function BookPage() {
                   ) : (
                     <button
                       className="bk-btn bk-btn-primary bk-btn-grow"
-                      disabled={busy === 'submit' || (Boolean(TURNSTILE_SITE_KEY) && !captchaToken)}
+                      disabled={
+                        busy === 'submit' ||
+                        // Something-else submits from here, so its captcha must
+                        // be solved before the button arms (same as the gate).
+                        (selectedServiceKey === SOMETHING_ELSE_KEY &&
+                          Boolean(TURNSTILE_SITE_KEY) &&
+                          !captchaToken)
+                      }
+                      aria-describedby={
+                        !needsSlot && signedIn && feeQuote && !feeAccepted ? feeHintId : undefined
+                      }
                       onClick={advanceFromIntake}
                     >
                       {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
-                      {busy === 'submit' ? t('intake.submitting') : t('intake.submit')}
+                      {busy === 'submit'
+                        ? t('intake.submitting')
+                        : signedIn || selectedServiceKey === SOMETHING_ELSE_KEY
+                          ? t('intake.submit')
+                          : t('common.continue')}
                       {busy !== 'submit' && <CheckIcon size={18} />}
                     </button>
                   )}
                 </div>
+                {!needsSlot && signedIn && feeQuote && !feeAccepted && (
+                  <p className="bk-fee-hint" id={feeHintId} aria-live="polite">
+                    {t('fee.hint', undefined, 'Accept the fee above to continue.')}
+                  </p>
+                )}
               </>
             )}
 
             {step === 'slot' && (
               <>
-                {slotsSource === 'stub' && <div className="bk-notice">{t('slot.stub_notice')}</div>}
-                {slots === null ? (
+                {slotsSource === 'unavailable' ? (
+                  <p className="bk-empty">{t('slot.unavailable')}</p>
+                ) : slots === null ? (
                   <div className="bk-loading">
                     <span className="bk-spinner" />
                     {t('slot.loading')}
@@ -759,7 +1288,6 @@ export default function BookPage() {
                 ) : (
                   <AvailabilityCalendar
                     slots={slots}
-                    live={slotsSource !== 'stub'}
                     selectedStartIso={selectedSlot?.startIso ?? null}
                     onSelect={setSelectedSlot}
                     lastUpdated={slotsLastUpdated}
@@ -804,7 +1332,151 @@ export default function BookPage() {
                   </div>
                 )}
 
-                {TURNSTILE_SITE_KEY && (
+                {signedIn && feeQuote && (
+                  <FeeConsentCard
+                    quote={feeQuote}
+                    accepted={feeAccepted}
+                    onAccept={setFeeAccepted}
+                    t={t}
+                  />
+                )}
+                <div className="bk-actions">
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    disabled={busy === 'submit'}
+                    onClick={() => setStep('intake')}
+                  >
+                    <ChevronLeftIcon size={18} />
+                    {t('common.back')}
+                  </button>
+                  <button
+                    className="bk-btn bk-btn-primary bk-btn-grow"
+                    disabled={!selectedSlot || busy === 'submit'}
+                    aria-describedby={signedIn && feeQuote && !feeAccepted ? feeHintId : undefined}
+                    onClick={() => {
+                      if (signedIn) void submitBooking()
+                      else void goToAccountGate()
+                    }}
+                  >
+                    {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
+                    {busy === 'submit'
+                      ? t('slot.booking')
+                      : signedIn
+                        ? t('slot.confirm')
+                        : t('common.continue')}
+                    {busy !== 'submit' && <CheckIcon size={18} />}
+                  </button>
+                </div>
+                {signedIn && feeQuote && !feeAccepted && (
+                  <p className="bk-fee-hint" id={feeHintId} aria-live="polite">
+                    {t('fee.hint', undefined, 'Accept the fee above to continue.')}
+                  </p>
+                )}
+              </>
+            )}
+
+            {step === 'account' && accountMode === 'signin' && (
+              <>
+                {hasPortalAccount && (
+                  <div className="bk-notice" role="note">
+                    {t(
+                      'account.known',
+                      undefined,
+                      'It looks like you already have an account — sign in to link this request.',
+                    )}
+                  </div>
+                )}
+                {feeQuote && (
+                  <FeeConsentCard
+                    quote={feeQuote}
+                    accepted={feeAccepted}
+                    onAccept={setFeeAccepted}
+                    t={t}
+                  />
+                )}
+                {/* No captcha here: the panel signs in, then submits through the
+                    session-gated portal route. */}
+                <PortalSignInInline
+                  initialEmail={contact.email}
+                  continuePath="/book"
+                  onSignedIn={signedInFromAccountStep}
+                />
+                <div className="bk-actions">
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    disabled={busy === 'submit'}
+                    onClick={() => setStep(needsSlot ? 'slot' : 'intake')}
+                  >
+                    <ChevronLeftIcon size={18} />
+                    {t('common.back')}
+                  </button>
+                </div>
+                <p className="bk-secure" style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="bk-linklike"
+                    onClick={() => {
+                      accountTouchedRef.current = true
+                      setAccountMode('create')
+                    }}
+                  >
+                    {t(
+                      'account.create_toggle',
+                      undefined,
+                      'New here, or can’t sign in? Create your account instead',
+                    )}
+                  </button>
+                </p>
+              </>
+            )}
+
+            {step === 'account' && accountMode === 'create' && (
+              <>
+                <p className="bk-sub" style={{ marginTop: 0 }}>
+                  {t(
+                    'account.blurb',
+                    undefined,
+                    'One last step: create your secure client portal account. You will use it to track your matter, read and sign documents, message the firm, and pay invoices.',
+                  )}
+                </p>
+                <div className="bk-fields">
+                  <ContactField
+                    label={t('contact.email')}
+                    icon={<MailIcon size={18} />}
+                    type="email"
+                    value={contact.email}
+                    onChange={() => undefined}
+                    disabled
+                  />
+                  <ContactField
+                    label={t('account.password', undefined, 'Choose a password')}
+                    icon={<LockIcon size={18} />}
+                    type="password"
+                    value={password}
+                    onChange={(v) => {
+                      accountTouchedRef.current = true
+                      setPassword(v)
+                    }}
+                    autoComplete="new-password"
+                  />
+                  <ContactField
+                    label={t('account.password2', undefined, 'Confirm password')}
+                    icon={<LockIcon size={18} />}
+                    type="password"
+                    value={password2}
+                    onChange={setPassword2}
+                    autoComplete="new-password"
+                  />
+                </div>
+                {feeQuote && (
+                  <FeeConsentCard
+                    quote={feeQuote}
+                    accepted={feeAccepted}
+                    onAccept={setFeeAccepted}
+                    t={t}
+                  />
+                )}
+                {!signedIn && TURNSTILE_SITE_KEY && (
                   <div className="bk-captcha" aria-live="polite">
                     <Turnstile
                       siteKey={TURNSTILE_SITE_KEY}
@@ -819,7 +1491,7 @@ export default function BookPage() {
                   <button
                     className="bk-btn bk-btn-ghost"
                     disabled={busy === 'submit'}
-                    onClick={() => setStep('intake')}
+                    onClick={() => setStep(needsSlot ? 'slot' : 'intake')}
                   >
                     <ChevronLeftIcon size={18} />
                     {t('common.back')}
@@ -827,17 +1499,41 @@ export default function BookPage() {
                   <button
                     className="bk-btn bk-btn-primary bk-btn-grow"
                     disabled={
-                      !selectedSlot ||
                       busy === 'submit' ||
-                      (Boolean(TURNSTILE_SITE_KEY) && !captchaToken)
+                      (Boolean(TURNSTILE_SITE_KEY) && !captchaToken) ||
+                      (Boolean(feeQuote) && !feeAccepted)
                     }
-                    onClick={submitBooking}
+                    aria-describedby={feeQuote && !feeAccepted ? feeHintId : undefined}
+                    onClick={submitWithAccount}
                   >
                     {busy === 'submit' && <span className="bk-spinner bk-spinner-sm" />}
-                    {busy === 'submit' ? t('slot.booking') : t('slot.confirm')}
+                    {busy === 'submit'
+                      ? t('slot.booking')
+                      : t('account.submit', undefined, 'Create account & submit')}
                     {busy !== 'submit' && <CheckIcon size={18} />}
                   </button>
                 </div>
+                {feeQuote && !feeAccepted && (
+                  <p className="bk-fee-hint" id={feeHintId} aria-live="polite">
+                    {t('fee.hint', undefined, 'Accept the fee above to continue.')}
+                  </p>
+                )}
+                <p className="bk-secure" style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="bk-linklike"
+                    onClick={() => {
+                      accountTouchedRef.current = true
+                      setAccountMode('signin')
+                    }}
+                  >
+                    {t(
+                      'account.signin_toggle',
+                      undefined,
+                      'Already have a portal account? Sign in instead',
+                    )}
+                  </button>
+                </p>
               </>
             )}
           </div>
@@ -852,14 +1548,16 @@ export default function BookPage() {
   )
 }
 
-function BookTopbar() {
+function BookTopbar({ firmName }: { firmName: string | null }) {
   return (
     <header className="bk-topbar">
       <div className="bk-brand">
         <span className="bk-brand-mark">
           <ScaleIcon size={18} />
         </span>
-        <span className="bk-brand-name">Pacheco Law</span>
+        {/* Resolved firm name (MULTI-TENANT-1). Blank until firm_branding lands —
+            a real firm always resolves a name, so this fills within a beat. */}
+        <span className="bk-brand-name">{firmName ?? ''}</span>
       </div>
       <LanguageToggle />
     </header>
@@ -927,6 +1625,7 @@ function ContactField({
   type = 'text',
   inputMode,
   autoComplete,
+  disabled,
 }: {
   label: string
   icon: React.ReactNode
@@ -935,6 +1634,7 @@ function ContactField({
   type?: string
   inputMode?: 'email' | 'text' | 'tel'
   autoComplete?: string
+  disabled?: boolean
 }) {
   const id = useId()
   return (
@@ -953,6 +1653,7 @@ function ContactField({
           inputMode={inputMode}
           autoComplete={autoComplete}
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
         />
       </div>
@@ -988,7 +1689,7 @@ function FieldRenderer({
   // add button hides on the submission-wide total, not this field's count.
   totalStaged: number
 }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const fieldId = useId()
   // file_upload transient UI state — declared unconditionally (hooks rule);
   // unused by every other field type.
@@ -1014,7 +1715,7 @@ function FieldRenderer({
       return { ...prev, [syncFieldId]: names }
     })
   }, [staged, syncFieldId, syncFieldType, setResponses])
-  const fieldLabel = t(`field.${field.id}.label`, undefined, field.label)
+  const fieldLabel = fieldLabelOf(field, lang, t)
   const isUnknown = value === UNKNOWN_ANSWER
   const unknownToggle = field.allow_unknown ? (
     <label className="bk-checkbox bk-unknown">
@@ -1248,7 +1949,7 @@ function FieldRenderer({
           <option value="">{t('select.choose')}</option>
           {field.options.map((opt) => (
             <option key={opt} value={opt}>
-              {t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))}
+              {optionLabelOf(field, opt, lang, t)}
             </option>
           ))}
         </select>
@@ -1279,7 +1980,9 @@ function FieldRenderer({
               disabled={isUnknown}
               onClick={() => set(current === opt ? '' : opt)}
             >
-              {opt}
+              {/* WP-7: translated LABEL; the stored VALUE stays the English word
+                  (it merges into documents). */}
+              {t(`choice.${opt.toLowerCase()}`, undefined, opt)}
             </button>
           ))}
         </div>
@@ -1309,7 +2012,7 @@ function FieldRenderer({
               disabled={isUnknown}
               onClick={() => toggle(opt)}
             >
-              {t(`option.${opt}`, undefined, opt.replace(/_/g, ' '))}
+              {optionLabelOf(field, opt, lang, t)}
             </button>
           ))}
         </div>

@@ -2,8 +2,10 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { QuestionnaireEditorModal } from '@/components/QuestionnaireEditorModal'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the QuestionnaireProposal captured in
@@ -49,17 +51,51 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 export function QuestionnaireProposalCard({
   proposal,
   onApproved,
+  onEdited,
 }: {
   proposal: QuestionnaireProposal
   onApproved?: OnApproved
+  // WP-H (HARDENING-RESIDUALS-1): fired after the attorney edits the proposal in
+  // the pop-up editor, so the session records proposal → human edit → approval.
+  onEdited?: (note: string) => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  // WP-H: the card's CURRENT artifact — the proposal until the attorney edits it
+  // in the pop-up; Approve always captures this (the attorney's version).
+  const [current, setCurrent] = useState<QuestionnaireProposal>(proposal)
+  const [editing, setEditing] = useState(false)
+  const [editSeedSchema, setEditSeedSchema] = useState<unknown | null>(null)
+  const [editLoading, setEditLoading] = useState(false)
 
-  const sections = proposal.schema?.sections ?? []
+  // Post-approval Edit seeds from the SAVED intake questionnaire, not the card's
+  // frozen snapshot — an edit made meanwhile on the questionnaire tab must show up
+  // here, not get silently replaced by Save.
+  async function openEditor() {
+    if (approveState !== 'approved') {
+      setEditSeedSchema(null)
+      setEditing(true)
+      return
+    }
+    setEditLoading(true)
+    try {
+      const r = await callAttorneyMcp<{ questionnaire: { sections: unknown[] } | null }>({
+        toolName: 'legal.service.questionnaire.get',
+        input: { serviceKey: current.serviceKey },
+      })
+      setEditSeedSchema(r.questionnaire ?? current.schema)
+    } catch {
+      setEditSeedSchema(current.schema) // read failure: the card's copy is the best seed
+    } finally {
+      setEditLoading(false)
+    }
+    setEditing(true)
+  }
+
+  const sections = current.schema?.sections ?? []
   const fieldCount = sections.reduce((n, s) => n + (s.fields?.length ?? 0), 0)
   const missing = proposal.missingForTokens ?? []
 
@@ -82,9 +118,9 @@ export function QuestionnaireProposalCard({
           headers,
           credentials: 'same-origin',
           body: JSON.stringify({
-            schema: proposal.schema,
-            summary: proposal.summary,
-            confidence: proposal.confidence,
+            schema: current.schema,
+            summary: current.summary,
+            confidence: current.confidence,
           }),
         },
       )
@@ -123,46 +159,60 @@ export function QuestionnaireProposalCard({
         </span>
       </div>
 
-      {proposal.summary && (
+      {current.summary && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {proposal.summary}
+          {current.summary}
         </div>
       )}
 
+      {/* BUILDER-UX-1 WP-2.1: each section is a bolded header with its fields as a
+          BULLETED list, never a comma-run. */}
       <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         {sections.map((s, si) => (
-          <div key={s.id ?? si} style={{ marginBottom: 'var(--space-1)' }}>
+          <div key={s.id ?? si} style={{ marginBottom: 'var(--space-2)' }}>
             <strong>{s.title || s.id || `Section ${si + 1}`}</strong>
             {s.fields && s.fields.length > 0 && (
-              <span className="text-muted">
-                {' '}
-                —{' '}
-                {s.fields
-                  .map((f) =>
-                    f.internal ? `${fieldLabel(f)} (you fill in review)` : fieldLabel(f),
-                  )
-                  .join(', ')}
-              </span>
+              <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
+                {s.fields.map((f, fi) => (
+                  <li key={f.id ?? fi}>
+                    {fieldLabel(f)}
+                    {f.internal ? <span className="text-muted"> (you fill in review)</span> : null}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         ))}
       </div>
 
-      {/* The variable contract — the point of the wizard. A token with no field would
-          render [[MISSING]] in the document, so the attorney sees coverage first. */}
-      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-        {missing.length === 0 ? (
-          <div className="text-muted">Collects everything the documents need — no gaps.</div>
-        ) : (
+      {/* The variable contract — a token with no field renders [[MISSING]]. Only the
+          actionable GAP is shown; the positive "no gaps" outro (WP-2.2 redundant
+          second blurb) is removed — the section list above already says what it
+          collects. */}
+      {missing.length > 0 && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
           <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
             Doesn&rsquo;t yet collect {missing.length} thing{missing.length === 1 ? '' : 's'} the
             document needs: <strong>{missing.map((m) => fieldLabel({ id: m })).join(', ')}</strong>.
             The document would leave {missing.length === 1 ? 'it' : 'them'} blank until added.
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="uac-doc-actions">
+        <button
+          type="button"
+          className="uac-reply-btn"
+          onClick={() => void openEditor()}
+          disabled={approveState === 'approving' || editLoading}
+          title={
+            approveState === 'approved'
+              ? 'Edit the saved questionnaire — saves a new version'
+              : 'Edit the proposed questionnaire before approving'
+          }
+        >
+          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
+        </button>
         <button
           type="button"
           className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
@@ -187,6 +237,38 @@ export function QuestionnaireProposalCard({
         <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
+      )}
+      {editing && (
+        // BUILDER-UX-1 WP-4: the REAL questionnaire builder in a pop-up (no JSON
+        // textarea). Pre-approval, Save updates the CARD (the attorney's version) —
+        // nothing is written until Approve. POST-approval (BUILDER-UX-2 WP-2), the
+        // same editor persists to the service's saved intake questionnaire through
+        // legal.service.questionnaire.update — the questionnaire tab's write path.
+        <QuestionnaireEditorModal
+          title={
+            approveState === 'approved'
+              ? `Edit questionnaire — ${current.serviceKey}`
+              : `Edit proposed questionnaire — ${current.serviceKey}`
+          }
+          initialSchema={(editSeedSchema ?? current.schema ?? { sections: [] }) as ProposalSchema}
+          name={(current.schema as ProposalSchema)?.title ?? current.serviceKey}
+          regenerateTargetId={current.serviceKey}
+          onSave={async (schema) => {
+            if (approveState === 'approved') {
+              await callAttorneyMcp({
+                toolName: 'legal.service.questionnaire.update',
+                input: { serviceKey: current.serviceKey, intakeSchema: schema },
+              })
+            }
+            setCurrent((c) => ({ ...c, schema }))
+            onEdited?.(
+              approveState === 'approved'
+                ? `questionnaire for "${current.serviceKey}" (saved)`
+                : `questionnaire for "${current.serviceKey}"`,
+            )
+          }}
+          onClose={() => setEditing(false)}
+        />
       )}
     </div>
   )

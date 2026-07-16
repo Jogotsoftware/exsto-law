@@ -23,6 +23,7 @@ export async function POST(
   }
 
   const body = (await request.json().catch(() => null)) as {
+    documentFees?: Record<string, string>
     costType?: ServiceCostType
     amount?: string
     hours?: number | null
@@ -47,7 +48,12 @@ export async function POST(
     const result = await createCostAI(
       ctxOrError,
       serviceKey,
-      { costType, amount, hours: body?.hours ?? null },
+      {
+        costType,
+        amount,
+        hours: body?.hours ?? null,
+        ...(body?.documentFees ? { documentFees: body.documentFees } : {}),
+      },
       {
         conclusion:
           (body?.summary ?? '').trim() || `Set the ${costType} fee for ${serviceKey} to ${amount}.`,

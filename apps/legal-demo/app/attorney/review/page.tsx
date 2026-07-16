@@ -21,6 +21,14 @@ interface PendingDraft {
   versionNumber: number
   status: string
   recordedAt: string
+  // MACHINE-COMMS-1: 'communication' = an email draft (approve = send); its
+  // subject is the row's label. 'document' rows carry nulls.
+  channel: 'document' | 'communication'
+  emailSubject: string | null
+  emailToRole: string | null
+  // STYLE-FIX-2: house-voice check flags recorded on the version ([] = clean,
+  // null = not checked — document drafts and template merges).
+  voiceViolations: { rule: string; where: string; offending: string }[] | null
 }
 
 // Batch actions map 1:1 to the per-draft review MCP tools the detail page already
@@ -133,7 +141,8 @@ export default function ReviewQueue() {
       list = list.filter(
         (d) =>
           d.matterNumber.toLowerCase().includes(q) ||
-          humanizeKind(d.documentKind).toLowerCase().includes(q),
+          humanizeKind(d.documentKind).toLowerCase().includes(q) ||
+          (d.emailSubject ?? '').toLowerCase().includes(q),
       )
     }
     const sorted = [...list].sort((a, b) => {
@@ -412,7 +421,38 @@ export default function ReviewQueue() {
                         />
                       </td>
                       <td>{d.matterNumber}</td>
-                      <td>{humanizeKind(d.documentKind)}</td>
+                      <td>
+                        {d.channel === 'communication' ? (
+                          // Email draft: the subject is the label; approving SENDS it.
+                          <>
+                            <span
+                              className="badge info"
+                              style={{ marginRight: 'var(--space-2)' }}
+                              title="An email draft — approving it sends it to the client."
+                            >
+                              Email
+                            </span>
+                            {d.emailSubject || humanizeKind(d.documentKind)}
+                            <div className="text-sm text-muted">approve = send</div>
+                            {(d.voiceViolations?.length ?? 0) > 0 && (
+                              // STYLE-FIX-2: the deterministic house-voice check
+                              // flagged this version after its one corrective
+                              // retry — the draft still queues; the attorney
+                              // sees exactly what tripped before opening it.
+                              <div
+                                className="badge warn"
+                                style={{ marginTop: 'var(--space-1)' }}
+                                title={d.voiceViolations!.map((v) => v.offending).join('\n')}
+                              >
+                                Voice check: {d.voiceViolations!.length}{' '}
+                                {d.voiceViolations!.length === 1 ? 'flag' : 'flags'}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          humanizeKind(d.documentKind)
+                        )}
+                      </td>
                       <td>v{d.versionNumber}</td>
                       <td>{formatDateTime(d.recordedAt)}</td>
                       <td>

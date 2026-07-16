@@ -18,6 +18,8 @@ let cached: {
   draftingPrompt?: string
   reviewPrompt?: string
   redlinePrompt?: string
+  emailDraftingPrompt?: string
+  transcriptExtractionPrompt?: string
 } = {}
 
 export interface QuestionnaireField {
@@ -160,6 +162,43 @@ export function loadReviewPrompt(): string {
     cached.reviewPrompt = readFileSync(resolve(templatesDir, 'document-review-prompt.md'), 'utf8')
   }
   return cached.reviewPrompt
+}
+
+// MACHINE-COMMS-1 (WP2/WP3) — email drafting + transcript extraction prompts.
+// Repo-controlled, worker-only loads (the serverless bundle never reads these:
+// email/extraction always run on the worker via legal.capability.* jobs). Their
+// output contracts (SUBJECT line / [fact]|[action] bullets + trailing trace
+// fence) are parsed in code, so they are deliberately NOT attorney-editable —
+// the attorney's voice rides the per-call instructions and firm skills instead.
+// STYLE-FIX-2 — the email prompt COMPOSES the house-voice doctrine
+// (templates/house-voice.md, adapted from stop-slop) at load time: one doctrine
+// file included whole, never duplicated into the prompt. The deterministic
+// validator lists in api/emailVoiceChecks.ts mirror that file — change both
+// together. Function replacer so `$`-patterns in the doctrine stay inert.
+const HOUSE_VOICE_SLOT = '{{house_voice_doctrine}}'
+
+export function loadEmailDraftingPrompt(): string {
+  if (!cached.emailDraftingPrompt) {
+    const raw = readFileSync(resolve(templatesDir, 'email-drafting-prompt.md'), 'utf8')
+    if (!raw.includes(HOUSE_VOICE_SLOT)) {
+      // Loud, not silent: a prompt that lost its doctrine slot must never draft
+      // undoctored client email.
+      throw new Error(`email-drafting-prompt.md is missing the ${HOUSE_VOICE_SLOT} slot`)
+    }
+    const voice = readFileSync(resolve(templatesDir, 'house-voice.md'), 'utf8').trim()
+    cached.emailDraftingPrompt = raw.replace(HOUSE_VOICE_SLOT, () => voice)
+  }
+  return cached.emailDraftingPrompt
+}
+
+export function loadTranscriptExtractionPrompt(): string {
+  if (!cached.transcriptExtractionPrompt) {
+    cached.transcriptExtractionPrompt = readFileSync(
+      resolve(templatesDir, 'transcript-extraction-prompt.md'),
+      'utf8',
+    )
+  }
+  return cached.transcriptExtractionPrompt
 }
 
 // The redline pass's prompt is REPO-CONTROLLED (not attorney-editable): its

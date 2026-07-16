@@ -11,6 +11,7 @@ import {
   insertRelationship,
   lookupKindId,
 } from './common.js'
+import { sanitizeVoiceViolations, type VoiceViolation } from '../api/emailVoiceChecks.js'
 import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
@@ -52,6 +53,31 @@ interface PersistDraftArgs {
   sourceRef: string
   confidence?: number
   versionMetadata?: Record<string, unknown>
+  // BACKHALF-BLOCKS-1 (WP4) — regenerate SUPERSEDES: when set, the new draft is
+  // written as version n+1 on THIS existing document_draft entity (prior versions
+  // retained, append-only — the document.edit pattern) instead of a brand-new
+  // entity at v1. No matter_status flip either: a deliberate regenerate must not
+  // yank the matter's stage mirror backwards (the workflow instance is authority).
+  supersedesDocumentEntityId?: string | null
+  // MACHINE-COMMS-1 (WP2) — the COMMUNICATION channel: an outbound email draft.
+  // Same persistence shape (entity + versions + review queue), but a distinct
+  // entity kind (communication_draft) and relationship (comm_draft_of), so the
+  // document reads — runner latest-draft, e-sign picker, mail attachments, the
+  // public /d share — never see it. No matter_status flip (an email being drafted
+  // is not the matter's document pipeline), and a comm_draft.completed event
+  // instead of draft.completed (the portal renders draft.completed as "a document
+  // is ready" — wrong for an internal email draft).
+  channel?: 'document' | 'communication'
+  emailSubject?: string | null
+  emailToRole?: string | null
+  // STYLE-FIX-2 — deterministic house-voice check results for the EMAIL channel
+  // (api/emailVoiceChecks.ts). Recorded on the version metadata (what the review
+  // queue reads) AND the comm_draft.completed event payload (the audit receipt).
+  // null = the producing path never ran the validator (documents, template
+  // merges); [] = a clean pass, queryable as such.
+  voiceViolations?: VoiceViolation[] | null
+  voiceFirstPassViolations?: VoiceViolation[] | null
+  voiceRegenerated?: boolean
 }
 
 async function persistDraftDocument(
@@ -72,41 +98,104 @@ async function persistDraftDocument(
     body: p.documentMarkdown,
   })
 
-  const docKindId = await lookupKindId(
-    client,
-    'entity_kind_definition',
-    ctx.tenantId,
-    'document_draft',
-  )
-  const draftEntityId = await insertEntity(
-    client,
-    ctx.tenantId,
-    actionId,
-    docKindId,
-    `${p.documentKind} draft`,
-    { document_kind: p.documentKind, jurisdiction: p.jurisdiction },
-  )
+  const supersedes = (p.supersedesDocumentEntityId ?? '').trim() || null
+  let draftEntityId: string
+  let versionNumber = 1
 
-  const draftAttrs: Array<{ kind: string; value: unknown; confidence?: number }> = [
-    { kind: 'document_kind', value: p.documentKind },
-    { kind: 'draft_status', value: 'pending_review' },
-    { kind: 'document_jurisdiction', value: p.jurisdiction },
-    { kind: 'generation_mode', value: p.generationMode },
-  ]
-  if (p.confidence != null)
-    draftAttrs.push({ kind: 'drafting_confidence', value: p.confidence, confidence: p.confidence })
-  for (const a of draftAttrs) {
-    const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)
+  if (supersedes) {
+    // Regenerate (WP4): reuse the EXISTING draft entity — new version n+1, prior
+    // versions retained. The entity + draft_of relationship already exist.
+    const maxRes = await client.query<{ max: number | null }>(
+      `SELECT max(version_number) AS max FROM document_version
+       WHERE tenant_id = $1 AND document_entity_id = $2`,
+      [ctx.tenantId, supersedes],
+    )
+    if (maxRes.rows[0]?.max == null) {
+      throw new Error(`supersedes_document_entity_id has no versions: ${supersedes}`)
+    }
+    draftEntityId = supersedes
+    versionNumber = (maxRes.rows[0].max ?? 0) + 1
+    // MACHINE-COMMS-1 (WP2): the email SUBJECT lives on the entity metadata (all
+    // versions share it — it's what approve-and-send uses). A regenerated email
+    // that produced a new subject must supersede it too, or the send would carry
+    // the v1 subject over a v(n+1) body (found live in the acceptance walk).
+    if (p.channel === 'communication' && p.emailSubject?.trim()) {
+      await client.query(
+        `UPDATE entity SET metadata = coalesce(metadata, '{}'::jsonb) || $3::jsonb
+          WHERE tenant_id = $1 AND id = $2`,
+        [ctx.tenantId, draftEntityId, JSON.stringify({ email_subject: p.emailSubject.trim() })],
+      )
+    }
+    // The draft goes back to pending_review (append-only supersession) — a
+    // regenerated document always re-enters the attorney review queue.
+    const statusAkId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'draft_status',
+    )
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
       entityId: draftEntityId,
-      attributeKindId: akId,
-      value: a.value,
-      confidence: a.confidence ?? 1.0,
+      attributeKindId: statusAkId,
+      value: 'pending_review',
+      confidence: 1.0,
       sourceType: p.sourceType,
       sourceRef: p.sourceRef,
     })
+  } else {
+    const isComm = p.channel === 'communication'
+    const docKindId = await lookupKindId(
+      client,
+      'entity_kind_definition',
+      ctx.tenantId,
+      isComm ? 'communication_draft' : 'document_draft',
+    )
+    draftEntityId = await insertEntity(
+      client,
+      ctx.tenantId,
+      actionId,
+      docKindId,
+      `${p.documentKind} draft`,
+      {
+        document_kind: p.documentKind,
+        jurisdiction: p.jurisdiction,
+        ...(isComm
+          ? {
+              channel: 'communication',
+              email_subject: p.emailSubject ?? null,
+              email_to_role: p.emailToRole ?? 'client',
+            }
+          : {}),
+      },
+    )
+
+    const draftAttrs: Array<{ kind: string; value: unknown; confidence?: number }> = [
+      { kind: 'document_kind', value: p.documentKind },
+      { kind: 'draft_status', value: 'pending_review' },
+      { kind: 'document_jurisdiction', value: p.jurisdiction },
+      { kind: 'generation_mode', value: p.generationMode },
+    ]
+    if (p.confidence != null)
+      draftAttrs.push({
+        kind: 'drafting_confidence',
+        value: p.confidence,
+        confidence: p.confidence,
+      })
+    for (const a of draftAttrs) {
+      const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)
+      await insertAttribute(client, {
+        tenantId: ctx.tenantId,
+        actionId,
+        entityId: draftEntityId,
+        attributeKindId: akId,
+        value: a.value,
+        confidence: a.confidence ?? 1.0,
+        sourceType: p.sourceType,
+        sourceRef: p.sourceRef,
+      })
+    }
   }
 
   const versionId = await insertDocumentVersion(client, {
@@ -114,26 +203,33 @@ async function persistDraftDocument(
     actionId,
     documentEntityId: draftEntityId,
     contentBlobId,
-    versionNumber: 1,
+    versionNumber,
     status: 'pending_review',
     reasoningTraceId: p.reasoningTraceId,
-    metadata: { generation_mode: p.generationMode, ...(p.versionMetadata ?? {}) },
+    metadata: {
+      generation_mode: p.generationMode,
+      ...(supersedes ? { regenerated: true } : {}),
+      ...(p.voiceViolations ? { voice_violations: p.voiceViolations } : {}),
+      ...(p.versionMetadata ?? {}),
+    },
   })
 
-  const draftOfId = await lookupKindId(
-    client,
-    'relationship_kind_definition',
-    ctx.tenantId,
-    'draft_of',
-  )
-  await insertRelationship(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    sourceEntityId: draftEntityId,
-    targetEntityId: p.matterEntityId,
-    relationshipKindId: draftOfId,
-    properties: { document_kind: p.documentKind },
-  })
+  if (!supersedes) {
+    const draftOfId = await lookupKindId(
+      client,
+      'relationship_kind_definition',
+      ctx.tenantId,
+      p.channel === 'communication' ? 'comm_draft_of' : 'draft_of',
+    )
+    await insertRelationship(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      sourceEntityId: draftEntityId,
+      targetEntityId: p.matterEntityId,
+      relationshipKindId: draftOfId,
+      properties: { document_kind: p.documentKind },
+    })
+  }
 
   // An AI review MEMO is an internal attorney artifact, NOT a client
   // deliverable. It must not touch the client-visible matter workflow: no
@@ -142,15 +238,27 @@ async function persistDraftDocument(
   // misleading "A document is ready" with nothing released). Its audit trail is
   // the separate document.review.completed event runDocumentReview records.
   const isReviewMemo = p.generationMode === 'ai_review'
+  // A COMMUNICATION draft is likewise internal until approved-and-sent: no
+  // matter_status flip, and its completion event is comm_draft.completed (below).
+  const isComm = p.channel === 'communication'
 
-  // Matter moves to in_review once a draft lands (unless already terminal).
+  // Matter moves to in_review once a draft lands (unless already terminal). A
+  // REGENERATE (supersede) never flips the status — the workflow instance is the
+  // stage authority and the matter stays where it is; the new version just re-enters
+  // the review queue.
   const currentStatus = await getLatestAttributeValue<string>(
     client,
     ctx.tenantId,
     p.matterEntityId,
     'matter_status',
   )
-  if (!isReviewMemo && currentStatus !== 'approved' && currentStatus !== 'closed') {
+  if (
+    !isReviewMemo &&
+    !isComm &&
+    !supersedes &&
+    currentStatus !== 'approved' &&
+    currentStatus !== 'closed'
+  ) {
     const statusKindId = await lookupKindId(
       client,
       'attribute_kind_definition',
@@ -173,7 +281,11 @@ async function persistDraftDocument(
     await insertEvent(client, {
       tenantId: ctx.tenantId,
       actionId,
-      eventKindName: 'draft.completed',
+      // comm_draft.completed is runtime-defined (demo/seed-comms-kinds.ts); a
+      // tenant using the communication channel must have seeded it — a missing
+      // kind fails the persist loudly rather than mislabeling an email as a
+      // client-visible document milestone.
+      eventKindName: isComm ? 'comm_draft.completed' : 'draft.completed',
       primaryEntityId: p.matterEntityId,
       secondaryEntityIds: [draftEntityId],
       data: {
@@ -181,13 +293,30 @@ async function persistDraftDocument(
         document_version_id: versionId,
         generation_mode: p.generationMode,
         model_identity: p.generationMode === 'ai_draft' ? p.sourceRef : null,
+        ...(isComm ? { email_subject: p.emailSubject ?? null } : {}),
+        // STYLE-FIX-2: the voice-check receipt rides the completion event —
+        // final violations always (empty array = clean pass), plus the first
+        // pass and whether the one corrective regenerate produced the persisted
+        // draft (false = retry attempted but errored; draft 1 queued flagged).
+        ...(isComm && p.voiceViolations
+          ? {
+              voice_violations: p.voiceViolations,
+              ...(p.voiceFirstPassViolations
+                ? {
+                    voice_first_pass_violations: p.voiceFirstPassViolations,
+                    voice_regenerated: p.voiceRegenerated === true,
+                  }
+                : {}),
+            }
+          : {}),
+        ...(supersedes ? { regenerated: true, version_number: versionNumber } : {}),
       },
       sourceType: p.sourceType,
       sourceRef: p.sourceRef,
     })
   }
 
-  return { draftEntityId, contentBlobId, documentVersionId: versionId, versionNumber: 1 }
+  return { draftEntityId, contentBlobId, documentVersionId: versionId, versionNumber }
 }
 
 interface DraftGeneratePayload {
@@ -211,6 +340,18 @@ interface DraftGeneratePayload {
   review_source_text?: string | null
   review_redline_text?: string | null
   redline_reasoning_trace_id?: string | null
+  // WP4 regenerate: write this draft as version n+1 on the named existing entity.
+  supersedes_document_entity_id?: string | null
+  // MACHINE-COMMS-1 (WP2): 'communication' persists an EMAIL draft (see
+  // PersistDraftArgs.channel). Anything else stays the document channel.
+  channel?: string
+  email_subject?: string | null
+  email_to_role?: string | null
+  // STYLE-FIX-2: house-voice check results from composeEmailDraft (email path
+  // only; sanitized at this payload boundary).
+  voice_violations?: unknown
+  voice_first_pass_violations?: unknown
+  voice_regenerated?: boolean
 }
 
 registerActionHandler('draft.generate', async (ctx, client, payload, actionId) => {
@@ -256,6 +397,13 @@ registerActionHandler('draft.generate', async (ctx, client, payload, actionId) =
     sourceRef: p.model_identity,
     confidence: p.confidence,
     versionMetadata,
+    supersedesDocumentEntityId: p.supersedes_document_entity_id ?? null,
+    channel: p.channel === 'communication' ? 'communication' : 'document',
+    emailSubject: p.email_subject ?? null,
+    emailToRole: p.email_to_role ?? null,
+    voiceViolations: sanitizeVoiceViolations(p.voice_violations),
+    voiceFirstPassViolations: sanitizeVoiceViolations(p.voice_first_pass_violations),
+    voiceRegenerated: p.voice_regenerated === true,
   })
 })
 
@@ -268,6 +416,12 @@ interface DraftMergePayload {
   template_id?: string
   // Slots left unfilled by the deterministic merge — surfaced to the attorney.
   missing_fields?: string[]
+  // WP4 regenerate: write this draft as version n+1 on the named existing entity.
+  supersedes_document_entity_id?: string | null
+  // MACHINE-COMMS-1 (WP2): template-mode email drafts merge deterministically too.
+  channel?: string
+  email_subject?: string | null
+  email_to_role?: string | null
 }
 
 registerActionHandler('draft.merge', async (ctx, client, payload, actionId) => {
@@ -285,6 +439,10 @@ registerActionHandler('draft.merge', async (ctx, client, payload, actionId) => {
       template_id: p.template_id ?? null,
       missing_fields: p.missing_fields ?? [],
     },
+    supersedesDocumentEntityId: p.supersedes_document_entity_id ?? null,
+    channel: p.channel === 'communication' ? 'communication' : 'document',
+    emailSubject: p.email_subject ?? null,
+    emailToRole: p.email_to_role ?? null,
   })
 })
 
@@ -312,7 +470,7 @@ async function reviewDecision(
     polarity: 'positive' | 'neutral' | 'negative'
     notes?: string
   },
-): Promise<{ documentEntityId: string; matterEntityId: string | null }> {
+): Promise<{ documentEntityId: string; matterEntityId: string | null; isCommunication: boolean }> {
   const versionRes = await client.query<{ document_entity_id: string }>(
     `SELECT document_entity_id FROM document_version WHERE tenant_id = $1 AND id = $2`,
     [args.tenantId, args.versionId],
@@ -325,6 +483,21 @@ async function reviewDecision(
     args.tenantId,
     args.versionId,
   ])
+
+  if (args.versionStatus === 'approved') {
+    // Approving a version supersedes every SIBLING version of the same document
+    // still pending_review — without this, approving the token-resolved n+1 the
+    // approve path mints (api/reviewDraft.ts) leaves version n zombie-listed in
+    // the review queue forever, and re-approving it would mint n+2 (and re-send a
+    // communication draft). Same transaction as the approval; 'superseded' is
+    // already in document_version's status CHECK vocabulary (migration 0005).
+    await client.query(
+      `UPDATE document_version SET status = 'superseded'
+        WHERE tenant_id = $1 AND document_entity_id = $2
+          AND id <> $3 AND status = 'pending_review'`,
+      [args.tenantId, documentEntityId, args.versionId],
+    )
+  }
 
   const statusAttrId = await lookupKindId(
     client,
@@ -373,15 +546,22 @@ async function reviewDecision(
     sourceRef: args.actorId,
   })
 
-  // Find the matter for status propagation (draft_of: draft → matter).
-  const matterRes = await client.query<{ matter_id: string }>(
-    `SELECT r.target_entity_id AS matter_id FROM relationship r
+  // Find the matter for status propagation. Documents link via draft_of;
+  // communication (email) drafts via comm_draft_of (MACHINE-COMMS-1 WP2) — the
+  // review decisions apply identically, the caller branches on the channel.
+  const matterRes = await client.query<{ matter_id: string; rel_kind: string }>(
+    `SELECT r.target_entity_id AS matter_id, rkd.kind_name AS rel_kind FROM relationship r
      JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-     WHERE r.tenant_id = $1 AND r.source_entity_id = $2 AND rkd.kind_name = 'draft_of'
+     WHERE r.tenant_id = $1 AND r.source_entity_id = $2
+       AND rkd.kind_name IN ('draft_of', 'comm_draft_of')
      LIMIT 1`,
     [args.tenantId, documentEntityId],
   )
-  return { documentEntityId, matterEntityId: matterRes.rows[0]?.matter_id ?? null }
+  return {
+    documentEntityId,
+    matterEntityId: matterRes.rows[0]?.matter_id ?? null,
+    isCommunication: matterRes.rows[0]?.rel_kind === 'comm_draft_of',
+  }
 }
 
 // ADR 0045 — keep the workflow_instance in lock-step with the matter_status mirror
@@ -398,6 +578,14 @@ async function advanceInstanceOnApprove(
   ctx: { tenantId: string; actorId: string },
   matterEntityId: string,
   actionId: string,
+  // MACHINE-COMMS-1 (WP2): which CHANNEL's approval is driving this. A
+  // communication (email) approval may only advance a stage that is itself an
+  // email step (invoke_capability running email_generation); a document approval
+  // may only advance a NON-email stage. Without this, approving an ad-hoc email
+  // on a matter parked at a document-review stage would fire that stage's
+  // draft.approve edge — advancing the matter past a document the attorney
+  // never approved (and vice versa).
+  channel: 'document' | 'communication' = 'document',
 ): Promise<void> {
   if (!workflowEngineEnabled()) return
   const instance = await getWorkflowInstanceForMatter(client, ctx.tenantId, matterEntityId)
@@ -416,6 +604,15 @@ async function advanceInstanceOnApprove(
     graph = bound?.graph ?? []
   }
   if (graph.length === 0) return
+
+  // Channel ↔ stage agreement: the current stage must be the KIND of stage this
+  // approval reviews.
+  const currentStage = stageByKey(graph, from)
+  const stageConfig = (currentStage?.action?.config ?? {}) as { capability_slug?: unknown }
+  const isEmailStage =
+    currentStage?.action?.kind === 'invoke_capability' &&
+    String(stageConfig.capability_slug ?? '') === 'email_generation'
+  if (channel === 'communication' ? !isEmailStage : isEmailStage) return
 
   // Only the attorney 'draft.approve' edge out of the current stage. If the instance
   // is already past it (idempotent re-approve) there is no such edge → no-op.
@@ -480,7 +677,7 @@ async function advanceInstanceOnApprove(
 
 registerActionHandler('draft.approve', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as DraftReviewPayload
-  const { documentEntityId, matterEntityId } = await reviewDecision(client, {
+  const { documentEntityId, matterEntityId, isCommunication } = await reviewDecision(client, {
     tenantId: ctx.tenantId,
     actionId,
     actorId: ctx.actorId,
@@ -490,7 +687,7 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
     polarity: 'positive',
     notes: p.review_notes,
   })
-  if (matterEntityId) {
+  if (matterEntityId && !isCommunication) {
     const statusKindId = await lookupKindId(
       client,
       'attribute_kind_definition',
@@ -517,10 +714,18 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
       documentEntityId,
     })
   }
+  if (matterEntityId && isCommunication) {
+    // MACHINE-COMMS-1 (WP2): approving an EMAIL draft is not a document milestone —
+    // no matter_status='approved' mirror (the matter's document pipeline did not
+    // move) and no document fee. The workflow DOES advance — but ONLY when the
+    // current stage is itself an email_generation stage (channel-gated inside).
+    await advanceInstanceOnApprove(client, ctx, matterEntityId, actionId, 'communication')
+  }
   return {
     documentVersionId: p.document_version_id,
     documentEntityId,
     status: 'approved' as const,
+    isCommunication,
   }
 })
 
@@ -569,7 +774,12 @@ async function accrueDocumentFeeOnApproval(
     args.matterEntityId,
     'service_key',
   )
-  if (!serviceKey) return
+  if (!serviceKey) {
+    // A matter with no service_key cannot resolve a billing declaration. Never
+    // silently pretend a fee accrued — record WHY on the matter timeline.
+    await recordNoFeeObservation(client, args, documentKind, 'no_service_key')
+    return
+  }
 
   const feeRes = await client.query<{
     document_fees: Record<string, string> | null
@@ -582,7 +792,15 @@ async function accrueDocumentFeeOnApproval(
   )
   const fees = feeRes.rows[0]?.document_fees ?? null
   const amount = fees && typeof fees === 'object' ? fees[documentKind] : null
-  if (!amount || !String(amount).trim()) return
+  if (!amount || !String(amount).trim()) {
+    // The service declares no per-document fee for THIS document kind (WP1: the
+    // modal promises accrual — if there's nothing to accrue we say so, we never
+    // pretend). Records an observation the timeline/billing can surface so a firm
+    // sees "approved, no fee declared for X" rather than a silent gap. WP2 makes
+    // the service DECLARE its fees so this branch stops firing where it shouldn't.
+    await recordNoFeeObservation(client, args, documentKind, 'no_fee_declared', serviceKey)
+    return
+  }
 
   await insertEvent(client, {
     tenantId: args.tenantId,
@@ -597,6 +815,40 @@ async function accrueDocumentFeeOnApproval(
       document_kind: documentKind,
       amount: String(amount),
       description: `Document fee — ${documentKind.replace(/_/g, ' ')}`,
+    },
+  })
+}
+
+// Record — never silently swallow — the case where an approved document accrues no
+// fee (WP1). An observation on the matter timeline, keyed so a query can tell
+// "approved but nothing to bill" apart from a bug. NOT a billing ledger entry, so it
+// never appears in the unbilled feed or an invoice.
+async function recordNoFeeObservation(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    matterEntityId: string
+    documentEntityId: string
+  },
+  documentKind: string,
+  reason: 'no_service_key' | 'no_fee_declared',
+  serviceKey?: string,
+): Promise<void> {
+  await insertEvent(client, {
+    tenantId: args.tenantId,
+    actionId: args.actionId,
+    eventKindName: 'observation',
+    primaryEntityId: args.matterEntityId,
+    secondaryEntityIds: [args.documentEntityId],
+    sourceType: 'system',
+    sourceRef: args.actorId,
+    data: {
+      kind: 'document_fee_not_declared',
+      reason,
+      document_kind: documentKind,
+      service_key: serviceKey ?? null,
     },
   })
 }

@@ -466,10 +466,13 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
 
 // ── Token (link) surface ──────────────────────────────────────────────────────
 
-export async function loadSignableDocument(token: string): Promise<SignableDocument> {
+export async function loadSignableDocument(
+  token: string,
+  signerIp?: string | null,
+): Promise<SignableDocument> {
   const tok = verifySigningToken(token)
   const ctx = signingCtx(tok.tenantId)
-  await recordOpen(ctx, tok.requestId, tok.envelopeId)
+  await recordOpen(ctx, tok.requestId, tok.envelopeId, signerIp)
   return buildSignable(ctx, tok.requestId)
 }
 
@@ -479,6 +482,8 @@ export interface RecordSignatureInput {
   signatureData?: string | null
   consent: string
   fieldValues?: Record<string, string>
+  /** Requester IP, captured by the route for the audit trail (PORTAL-1 WP2). */
+  signerIp?: string | null
 }
 export interface RecordSignatureResult {
   ok: boolean
@@ -495,16 +500,18 @@ export async function recordSignature(input: RecordSignatureInput): Promise<Reco
     signatureData: input.signatureData ?? null,
     consent: input.consent,
     fieldValues: input.fieldValues,
+    signerIp: input.signerIp ?? null,
   })
 }
 
 export async function declineSignature(input: {
   token: string
   reason?: string
+  signerIp?: string | null
 }): Promise<{ ok: boolean; envelopeId: string }> {
   const tok = verifySigningToken(input.token)
   const ctx = signingCtx(tok.tenantId)
-  await declineRequest(ctx, tok.requestId, tok.envelopeId, input.reason)
+  await declineRequest(ctx, tok.requestId, tok.envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId: tok.envelopeId }
 }
 
@@ -521,8 +528,15 @@ export async function listClientSignatures(p: ClientPrincipal): Promise<PendingS
   const ctx = signingCtx(p.tenantId)
   if (p.matterIds.length === 0) return []
   return withActionContext(ctx, async (client) => {
-    const res = await client.query<{ request_id: string; envelope_id: string; status: string }>(
+    const res = await client.query<{
+      request_id: string
+      envelope_id: string
+      status: string
+      matter_id: string | null
+      matter_number: string | null
+    }>(
       `SELECT req.source_entity_id AS request_id, env.id AS envelope_id,
+              m.id AS matter_id, m.name AS matter_number,
               (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
                  ON akd.id=a.attribute_kind_id AND akd.kind_name='signer_status'
                  WHERE a.entity_id=req.source_entity_id AND a.tenant_id=$1
@@ -536,6 +550,7 @@ export async function listClientSignatures(p: ClientPrincipal): Promise<PendingS
        JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
        JOIN attribute em ON em.entity_id=req.source_entity_id AND em.tenant_id=$1
        JOIN attribute_kind_definition emk ON emk.id=em.attribute_kind_id AND emk.kind_name='signer_email'
+       LEFT JOIN entity m ON m.id=df.target_entity_id
        WHERE req.tenant_id=$1 AND df.target_entity_id = ANY($2)
          AND lower(em.value #>> '{}') = lower($3)
          AND (em.valid_to IS NULL OR em.valid_to > now())
@@ -563,6 +578,9 @@ export interface ClientDocument {
   requestId: string
   envelopeId: string
   documentTitle: string | null
+  /** The matter the signed document belongs to (the client's own). */
+  matterEntityId: string | null
+  matterNumber: string | null
   /** Client-facing state derived from signer_status (never the raw key). */
   state: 'awaiting_you' | 'signed' | 'declined' | 'in_progress'
   /** Raw signer_status (for the portal to pick the right action link). */
@@ -579,8 +597,15 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
   const ctx = signingCtx(p.tenantId)
   if (p.matterIds.length === 0) return []
   return withActionContext(ctx, async (client) => {
-    const res = await client.query<{ request_id: string; envelope_id: string; status: string }>(
+    const res = await client.query<{
+      request_id: string
+      envelope_id: string
+      status: string
+      matter_id: string | null
+      matter_number: string | null
+    }>(
       `SELECT req.source_entity_id AS request_id, env.id AS envelope_id,
+              m.id AS matter_id, m.name AS matter_number,
               (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
                  ON akd.id=a.attribute_kind_id AND akd.kind_name='signer_status'
                  WHERE a.entity_id=req.source_entity_id AND a.tenant_id=$1
@@ -594,6 +619,7 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
        JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
        JOIN attribute em ON em.entity_id=req.source_entity_id AND em.tenant_id=$1
        JOIN attribute_kind_definition emk ON emk.id=em.attribute_kind_id AND emk.kind_name='signer_email'
+       LEFT JOIN entity m ON m.id=df.target_entity_id
        WHERE req.tenant_id=$1 AND df.target_entity_id = ANY($2)
          AND lower(em.value #>> '{}') = lower($3)
          AND (em.valid_to IS NULL OR em.valid_to > now())
@@ -618,6 +644,8 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
         requestId: row.request_id,
         envelopeId: row.envelope_id,
         documentTitle: title,
+        matterEntityId: row.matter_id,
+        matterNumber: row.matter_number,
         state,
         rawStatus: raw,
       })
@@ -655,10 +683,11 @@ async function assertClientOwnsRequest(p: ClientPrincipal, requestId: string): P
 export async function loadSignableForClient(
   p: ClientPrincipal,
   requestId: string,
+  signerIp?: string | null,
 ): Promise<SignableDocument> {
   const envelopeId = await assertClientOwnsRequest(p, requestId)
   const ctx = signingCtx(p.tenantId)
-  await recordOpen(ctx, requestId, envelopeId)
+  await recordOpen(ctx, requestId, envelopeId, signerIp)
   return buildSignable(ctx, requestId)
 }
 
@@ -670,6 +699,7 @@ export async function recordSignatureForClient(
     signatureData?: string | null
     consent: string
     fieldValues?: Record<string, string>
+    signerIp?: string | null
   },
 ): Promise<RecordSignatureResult> {
   const envelopeId = await assertClientOwnsRequest(p, input.requestId)
@@ -679,16 +709,17 @@ export async function recordSignatureForClient(
     signatureData: input.signatureData ?? null,
     consent: input.consent,
     fieldValues: input.fieldValues,
+    signerIp: input.signerIp ?? null,
   })
 }
 
 export async function declineForClient(
   p: ClientPrincipal,
-  input: { requestId: string; reason?: string },
+  input: { requestId: string; reason?: string; signerIp?: string | null },
 ): Promise<{ ok: boolean; envelopeId: string }> {
   const envelopeId = await assertClientOwnsRequest(p, input.requestId)
   const ctx = signingCtx(p.tenantId)
-  await declineRequest(ctx, input.requestId, envelopeId, input.reason)
+  await declineRequest(ctx, input.requestId, envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId }
 }
 
@@ -703,6 +734,7 @@ async function signRequest(
     signatureData?: string | null
     consent: string
     fieldValues?: Record<string, string>
+    signerIp?: string | null
   },
 ): Promise<RecordSignatureResult> {
   if (!input.signatureName?.trim()) throw new Error('A signature (typed name) is required.')
@@ -718,6 +750,7 @@ async function signRequest(
       signature_data: input.signatureData ?? null,
       consent_text: input.consent.trim(),
       field_values: input.fieldValues ?? null,
+      signer_ip: input.signerIp ?? null,
     },
   })
   const eff = (result.effects[0] ?? {}) as {
@@ -740,6 +773,7 @@ async function declineRequest(
   requestId: string,
   envelopeId: string,
   reason?: string,
+  signerIp?: string | null,
 ): Promise<void> {
   await assertSignerTurn(ctx, requestId)
   await submitAction(ctx, {
@@ -749,6 +783,7 @@ async function declineRequest(
       request_entity_id: requestId,
       envelope_entity_id: envelopeId,
       reason: reason ?? null,
+      signer_ip: signerIp ?? null,
     },
   })
 }
@@ -757,11 +792,16 @@ async function recordOpen(
   ctx: ActionContext,
   requestId: string,
   envelopeId: string,
+  signerIp?: string | null,
 ): Promise<void> {
   await submitAction(ctx, {
     actionKindName: 'esign.open',
     intentKind: 'automatic_sync',
-    payload: { request_entity_id: requestId, envelope_entity_id: envelopeId },
+    payload: {
+      request_entity_id: requestId,
+      envelope_entity_id: envelopeId,
+      signer_ip: signerIp ?? null,
+    },
   })
 }
 

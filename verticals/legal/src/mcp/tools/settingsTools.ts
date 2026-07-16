@@ -3,22 +3,31 @@ import {
   connectIntegration,
   disconnectGranola,
   disconnectIntegration,
+  getAttorneyActorEmail,
+  getAttorneySignature,
   getFirmSignature,
   getFirmBookingRules,
   getOwnPublicSlug,
   getFirmDefaultRate,
   setFirmDefaultRate,
+  getFirmProfile,
+  setFirmProfile,
   getTenantSettings,
   listIntegrationStatuses,
+  setAttorneySignature,
   setFirmSignature,
   updateFirmBookingRules,
   updateTenantSettings,
+  type AttorneySignature,
   type ConnectIntegrationInput,
   type ConnectResult,
+  type FirmProfileFields,
   type FirmSignature,
   type FirmBookingRules,
   type IntegrationProvider,
   type IntegrationStatus,
+  type SetAttorneySignatureInput,
+  type SetFirmProfileInput,
   type SetFirmSignatureInput,
   type TenantSettings,
   type UpdateTenantSettingsInput,
@@ -43,6 +52,28 @@ registerTool({
     settings: await updateTenantSettings(ctx, input),
   }),
 } satisfies Tool<UpdateTenantSettingsInput, { settings: TenantSettings }>)
+
+// ── Firm profile (P13) ──────────────────────────────────────────────────────
+// Firm identity as substrate config: firm_name/address/phone/email attributes on
+// the firm_profile singleton, written via legal.firm.set_profile. These fields
+// fill the {{firm_*}} SYSTEM merge slots on generated documents; the Settings
+// "Firm details" section is their editor surface.
+
+registerTool({
+  name: 'legal.settings.firm_profile.get',
+  description:
+    'Fetch the firm profile (firm name, mailing address, phone, contact email) — the identity block generated documents and letterheads resolve. Values come from the firm_profile record, falling back to legacy settings where never set.',
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ profile: await getFirmProfile(ctx) }),
+} satisfies Tool<Record<string, never>, { profile: FirmProfileFields }>)
+
+registerTool({
+  name: 'legal.settings.firm_profile.set',
+  description:
+    'Set the firm profile (firm name, mailing address, phone, contact email). Undefined fields are left alone; an empty value clears the field. Each change is appended — prior values stay in history. Applies to every subsequently generated document.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({ profile: await setFirmProfile(ctx, input) }),
+} satisfies Tool<SetFirmProfileInput, { profile: FirmProfileFields }>)
 
 // ── Email signature (fix #10) ────────────────────────────────────────────────
 // The signature is applied in the central Contract B send path; this is its
@@ -75,6 +106,38 @@ registerTool({
     return { signature, sendAsDisplayName: FIRM_SENDER_DISPLAY_NAME }
   },
 } satisfies Tool<SetFirmSignatureInput, SignatureGetResult>)
+
+// ── Attorney signature (P15) ─────────────────────────────────────────────────
+// The signed-in attorney's standing signature (typed / drawn / uploaded), stored
+// on their per-actor attorney_profile via legal.attorney.signature_set and
+// applied when they sign documents electronically. `attorneyEmail` lets the sign
+// pages prefill only on the attorney's OWN signature request.
+
+interface AttorneySignatureGetResult {
+  signature: AttorneySignature | null
+  attorneyEmail: string | null
+}
+
+registerTool({
+  name: 'legal.settings.attorney_signature.get',
+  description:
+    "Fetch the signed-in attorney's saved signature (typed name, drawn image, or uploaded image; null when never saved) plus their account email.",
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({
+    signature: await getAttorneySignature(ctx),
+    attorneyEmail: await getAttorneyActorEmail(ctx),
+  }),
+} satisfies Tool<Record<string, never>, AttorneySignatureGetResult>)
+
+registerTool({
+  name: 'legal.settings.attorney_signature.set',
+  description:
+    "Set the signed-in attorney's standing signature. mode 'typed' needs a non-empty name; 'drawn'/'uploaded' need a PNG or JPEG data URL under 500 KB. Each save is appended — prior signatures stay in history. Applied when the attorney signs documents electronically.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    signature: await setAttorneySignature(ctx, input),
+  }),
+} satisfies Tool<SetAttorneySignatureInput, { signature: AttorneySignature | null }>)
 
 // ── Firm booking rules (Contract L) ──────────────────────────────────────────
 

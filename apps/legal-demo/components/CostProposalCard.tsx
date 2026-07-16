@@ -2,7 +2,9 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { CostEditorModal } from '@/components/CostEditorModal'
+import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is a
@@ -13,6 +15,8 @@ export interface CostProposal {
   costType: 'hourly' | 'fixed'
   amount: string
   hours: number | null
+  // BUILDER-CERT-1 (WP1) — per-document fees declared alongside the cost.
+  documentFees?: Record<string, string>
   summary: string
   confidence: number
 }
@@ -26,21 +30,106 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 export function CostProposalCard({
   proposal,
   onApproved,
+  onEdited,
 }: {
   proposal: CostProposal
   onApproved?: OnApproved
+  // WP-H: fired after the attorney edits the proposal in the pop-up editor.
+  onEdited?: (note: string) => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
   const [approveError, setApproveError] = useState<string | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  // WP-H: the card's CURRENT price — the proposal until the attorney edits it;
+  // Approve always captures this (the attorney's version).
+  const [current, setCurrent] = useState<CostProposal>(proposal)
+  const [editing, setEditing] = useState(false)
+  const [editSeed, setEditSeed] = useState<{
+    costType: 'hourly' | 'fixed'
+    amount: string
+    hours: number | null
+    documentFees?: Record<string, string>
+  } | null>(null)
+  const [editLoading, setEditLoading] = useState(false)
+
+  // Post-approval Edit seeds from the SAVED cost + document fees, not the card's
+  // frozen snapshot — a fee set meanwhile on the Billing tab must show up here, not
+  // get silently cleared by Save (the update REPLACES the stored fee map).
+  async function openEditor() {
+    if (approveState !== 'approved') {
+      setEditSeed(null)
+      setEditing(true)
+      return
+    }
+    setEditLoading(true)
+    try {
+      const r = await callAttorneyMcp<{
+        service: {
+          cost: { type: 'hourly' | 'fixed'; amount: string; hours: number | null } | null
+          documentFees: Record<string, string>
+        } | null
+      }>({ toolName: 'legal.service.get', input: { serviceKey: current.serviceKey } })
+      if (r.service) {
+        setEditSeed({
+          costType: r.service.cost?.type ?? current.costType,
+          amount: r.service.cost?.amount ?? current.amount,
+          hours: r.service.cost?.hours ?? null,
+          documentFees: Object.keys(r.service.documentFees ?? {}).length
+            ? r.service.documentFees
+            : undefined,
+        })
+      } else {
+        setEditSeed(null)
+      }
+    } catch {
+      setEditSeed(null) // read failure: the card's copy is the best seed we have
+    } finally {
+      setEditLoading(false)
+    }
+    setEditing(true)
+  }
 
   // Human-readable price line, e.g. "$350.00 / hour (est. 6 hrs)" or "$1,500.00 flat".
   const priceLabel =
-    proposal.costType === 'hourly'
-      ? `$${proposal.amount} / hour${proposal.hours != null ? ` (est. ${proposal.hours} hrs)` : ''}`
-      : `$${proposal.amount} flat fee`
+    current.costType === 'hourly'
+      ? `$${current.amount} / hour${current.hours != null ? ` (est. ${current.hours} hrs)` : ''}`
+      : `$${current.amount} flat fee`
+
+  // WP-3.2 (BUILDER-UX-2) — the single-billing-card coherence invariant, stated in
+  // code, not prose. The founder's cease-and-desist walk produced a "$0.00" billing
+  // card that nonetheless listed a "$500.00" line item; an attorney approving it sets
+  // a $0 fee and mis-bills. RULE: a fixed-fee card that lists per-document line items
+  // must have a header amount EQUAL to the sum of those line items — the fee shown once
+  // is the same money the breakdown lists (confirm-only, one billing point per WP-3.3),
+  // never a separate additive charge and never a $0 header beside a paid line. When the
+  // amounts disagree (or any is unparseable), the card is INCOHERENT: it refuses to
+  // render an Approve control — a correction notice + Edit stands in — and logs, so no
+  // one approves a contradictory price. (Root cause of the *duplicate* card is fixed
+  // upstream in costEnableTools.buildProposeCostTool: one build → one billing proposal,
+  // superseded in place.)
+  const toCents = (s: string | number | null | undefined): number | null => {
+    if (s == null) return null
+    const n = Number.parseFloat(String(s).replace(/[^0-9.-]/g, ''))
+    return Number.isFinite(n) ? Math.round(n * 100) : null
+  }
+  const docFeeEntries = Object.entries(current.documentFees ?? {})
+  const lineCentsList = docFeeEntries.map(([k, v]) => [k, toCents(v)] as const)
+  const lineCentsSum = lineCentsList.reduce((a, [, c]) => a + (c ?? 0), 0)
+  const headerCents = toCents(current.amount)
+  const billingIncoherent =
+    current.costType === 'fixed' &&
+    docFeeEntries.length > 0 &&
+    (headerCents === null ||
+      lineCentsList.some(([, c]) => c === null) ||
+      headerCents !== lineCentsSum)
+  if (billingIncoherent && typeof console !== 'undefined') {
+    // Logged (not silent) so a mismatch is observable and the model can regenerate.
+    console.warn(
+      `[billing-card] incoherent proposal for ${current.serviceKey}: header $${current.amount} ≠ line items ${JSON.stringify(current.documentFees)} — Approve suppressed.`,
+    )
+  }
 
   async function approve() {
     setApproveState('approving')
@@ -61,11 +150,12 @@ export function CostProposalCard({
           headers,
           credentials: 'same-origin',
           body: JSON.stringify({
-            costType: proposal.costType,
-            amount: proposal.amount,
-            hours: proposal.hours,
-            summary: proposal.summary,
-            confidence: proposal.confidence,
+            costType: current.costType,
+            amount: current.amount,
+            hours: current.hours,
+            ...(current.documentFees ? { documentFees: current.documentFees } : {}),
+            summary: current.summary,
+            confidence: current.confidence,
           }),
         },
       )
@@ -100,35 +190,70 @@ export function CostProposalCard({
           <LayersIcon size={14} /> Proposed billing — {proposal.serviceKey}
         </span>
         <span className="text-muted" style={{ fontSize: 12 }}>
-          {proposal.costType}
+          {current.costType}
         </span>
       </div>
 
-      {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
-          {proposal.summary}
+      {/* BUILDER-UX-1 WP-2.3/WP-3: the fee value appears ONCE, prominently. The
+          model summary (which restated the fee) is dropped, and the card is
+          confirm-only — the fee was already captured by the final wizard
+          question; this is not a second entry, just a confirmation. */}
+      <div className="uac-doc-body" style={{ fontSize: 15 }}>
+        <strong>{priceLabel}</strong>
+      </div>
+      {current.documentFees && Object.keys(current.documentFees).length > 0 && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
+          <strong>Per-document fees</strong>
+          <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
+            {Object.entries(current.documentFees).map(([kind, amt]) => (
+              <li key={kind}>
+                {kind.replace(/_/g, ' ')}: ${amt}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
-      <div className="uac-doc-body" style={{ fontSize: 13 }}>
-        <strong>{priceLabel}</strong>
-      </div>
+      {billingIncoherent && (
+        <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
+          This price is inconsistent — the fee (${current.amount}) does not match the per-document
+          amount{docFeeEntries.length === 1 ? '' : 's'} listed above. Edit it so the fee equals what
+          the document charges, then approve.
+        </div>
+      )}
 
       <div className="uac-doc-actions">
         <button
           type="button"
-          className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
-          onClick={approve}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Approve this billing — this writes the service's fee model"
+          className="uac-reply-btn"
+          onClick={() => void openEditor()}
+          disabled={approveState === 'approving' || editLoading}
+          title={
+            approveState === 'approved'
+              ? 'Edit the saved billing — saves a new version'
+              : 'Edit the proposed billing before approving'
+          }
         >
-          {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-          {approveState === 'approving'
-            ? 'Saving…'
-            : approveState === 'approved'
-              ? 'Saved'
-              : 'Approve & set billing'}
+          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
         </button>
+        {/* WP-3.2: no Approve control while the card is incoherent — the attorney
+            must reconcile the fee and the line items first. */}
+        {!billingIncoherent && (
+          <button
+            type="button"
+            className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
+            onClick={approve}
+            disabled={approveState === 'approving' || approveState === 'approved'}
+            title="Approve this billing — this writes the service's fee model"
+          >
+            {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
+            {approveState === 'approving'
+              ? 'Saving…'
+              : approveState === 'approved'
+                ? 'Saved'
+                : 'Approve & set billing'}
+          </button>
+        )}
         {link && (
           <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
             View billing →
@@ -139,6 +264,69 @@ export function CostProposalCard({
         <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
           {approveError}
         </div>
+      )}
+      {editing && (
+        <CostEditorModal
+          title={
+            approveState === 'approved'
+              ? `Edit billing — ${current.serviceKey}`
+              : `Edit proposed billing — ${current.serviceKey}`
+          }
+          initialValue={
+            editSeed ?? {
+              costType: current.costType,
+              amount: current.amount,
+              hours: current.hours,
+              ...(current.documentFees ? { documentFees: current.documentFees } : {}),
+            }
+          }
+          regenerateTargetId={current.serviceKey}
+          onSave={async (next) => {
+            if (approveState === 'approved') {
+              // Post-approval: persist to the SAVED service (a new immutable version
+              // through legal.service.update, resending the identity fields the update
+              // contract requires — read fresh so we never clobber them with staleness).
+              const r = await callAttorneyMcp<{
+                service: { displayName: string; description: string | null } | null
+              }>({ toolName: 'legal.service.get', input: { serviceKey: current.serviceKey } })
+              if (!r.service) throw new Error(`Service not found: ${current.serviceKey}`)
+              await callAttorneyMcp({
+                toolName: 'legal.service.update',
+                input: {
+                  serviceKey: current.serviceKey,
+                  displayName: r.service.displayName,
+                  description: r.service.description,
+                  cost: {
+                    type: next.costType,
+                    amount: next.amount.trim(),
+                    hours: next.costType === 'hourly' ? next.hours : null,
+                  },
+                  documentFees:
+                    next.documentFees && Object.keys(next.documentFees).length
+                      ? next.documentFees
+                      : null,
+                },
+              })
+            }
+            // Either way the card re-renders with the attorney's version.
+            setCurrent((c) => ({
+              ...c,
+              costType: next.costType,
+              amount: next.amount,
+              hours: next.hours,
+              documentFees:
+                next.documentFees && Object.keys(next.documentFees).length
+                  ? next.documentFees
+                  : undefined,
+            }))
+            onEdited?.(
+              approveState === 'approved'
+                ? `billing for "${current.serviceKey}" (saved)`
+                : `billing for "${current.serviceKey}"`,
+            )
+          }}
+          onClose={() => setEditing(false)}
+        />
       )}
     </div>
   )

@@ -2,7 +2,9 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { ServiceEditorModal } from '@/components/ServiceEditorModal'
+import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
 
 // CONSTRAINT (mirrors WorkflowProposalCard): no server-package imports. This shape
 // is a structural mirror of verticals/legal/src/api/serviceAuthoring.ts's
@@ -11,8 +13,18 @@ export interface ServiceProposal {
   displayName: string
   derivedKey: string
   description: string | null
+  // Client-facing tile copy (UI-BUILDER-FIX-1 Phase 2): outcome-only, <=70 chars.
+  clientDisplayName?: string | null
+  clientDescription?: string | null
+  // BUILDER-UX-2 WP-7 — the wizard-authored Spanish tile copy (falls back to English
+  // on the Spanish intake when absent).
+  clientDisplayNameEs?: string | null
+  clientDescriptionEs?: string | null
   route: 'auto' | 'manual'
   generationMode: 'template_merge' | 'ai_draft'
+  // BUILDER-CERT-1 (WP3) — booking mode: true = booking opens with a consultation
+  // slot; false = intake-only (document-review). Forwarded on approve.
+  appointmentRequired?: boolean
   summary: string
   confidence: number
 }
@@ -36,18 +48,76 @@ export type OnApproved = (info: {
 export function ServiceProposalCard({
   proposal,
   onApproved,
+  onEdited,
 }: {
   proposal: ServiceProposal
   onApproved?: OnApproved
+  // WP-H: fired after the attorney edits the proposal in the pop-up editor.
+  onEdited?: (note: string) => void
 }) {
   const [approveState, setApproveState] = useState<'idle' | 'approving' | 'approved' | 'error'>(
     'idle',
   )
+  // WP-H: the card's CURRENT shell — the proposal until the attorney edits it;
+  // Approve always captures this (the attorney's version).
+  const [current, setCurrent] = useState<ServiceProposal>(proposal)
+  const [editing, setEditing] = useState(false)
+  const [editLoading, setEditLoading] = useState(false)
+  // WP-7 — the SAVED locale map from the freshest read, so a post-approval save
+  // merges the es entry over OTHER locales instead of wiping them.
+  const [savedI18n, setSavedI18n] = useState<Record<
+    string,
+    { displayName?: string; description?: string }
+  > | null>(null)
   const [approveError, setApproveError] = useState<string | null>(null)
   const [serviceKey, setServiceKey] = useState<string | null>(null)
   // The link to the created service, returned by the approve route — shown as
   // "View service →" and handed to onApproved for the auto-continuation.
   const [link, setLink] = useState<string | null>(null)
+
+  // Post-approval Edit seeds from the SAVED service, not the card's frozen snapshot —
+  // an edit made meanwhile on the Settings tab must show up here, not get silently
+  // reverted by Save. The fresh read lands in `current` so the card re-renders too.
+  async function openEditor() {
+    if (approveState === 'approved' && serviceKey) {
+      setEditLoading(true)
+      try {
+        const r = await callAttorneyMcp<{
+          service: {
+            displayName: string
+            description: string | null
+            clientDisplayName: string | null
+            clientDescription: string | null
+            clientCopyI18n: Record<string, { displayName?: string; description?: string }> | null
+            route: 'auto' | 'manual'
+            generationMode: 'template_merge' | 'ai_draft'
+            appointmentRequired: boolean
+          } | null
+        }>({ toolName: 'legal.service.get', input: { serviceKey } })
+        if (r.service) {
+          const svc = r.service
+          setSavedI18n(svc.clientCopyI18n ?? null)
+          setCurrent((c) => ({
+            ...c,
+            displayName: svc.displayName,
+            description: svc.description,
+            clientDisplayName: svc.clientDisplayName,
+            clientDescription: svc.clientDescription,
+            clientDisplayNameEs: svc.clientCopyI18n?.es?.displayName ?? null,
+            clientDescriptionEs: svc.clientCopyI18n?.es?.description ?? null,
+            route: svc.route,
+            generationMode: svc.generationMode,
+            appointmentRequired: svc.appointmentRequired,
+          }))
+        }
+      } catch {
+        /* read failure: the card's copy is the best seed we have */
+      } finally {
+        setEditLoading(false)
+      }
+    }
+    setEditing(true)
+  }
 
   async function approve() {
     setApproveState('approving')
@@ -66,12 +136,19 @@ export function ServiceProposalCard({
         headers,
         credentials: 'same-origin',
         body: JSON.stringify({
-          displayName: proposal.displayName,
-          description: proposal.description,
-          route: proposal.route,
-          generationMode: proposal.generationMode,
-          summary: proposal.summary,
-          confidence: proposal.confidence,
+          displayName: current.displayName,
+          description: current.description,
+          clientDisplayName: current.clientDisplayName ?? null,
+          clientDescription: current.clientDescription ?? null,
+          clientDisplayNameEs: current.clientDisplayNameEs ?? null,
+          clientDescriptionEs: current.clientDescriptionEs ?? null,
+          route: current.route,
+          generationMode: current.generationMode,
+          ...(typeof current.appointmentRequired === 'boolean'
+            ? { appointmentRequired: current.appointmentRequired }
+            : {}),
+          summary: current.summary,
+          confidence: current.confidence,
         }),
       })
       const data = (await res.json().catch(() => null)) as {
@@ -93,7 +170,7 @@ export function ServiceProposalCard({
           artifact: 'service',
           link: data.link,
           serviceKey: key,
-          label: data.label || `Service "${proposal.displayName}"`,
+          label: data.label || `Service "${current.displayName}"`,
         })
       }
     } catch (e) {
@@ -106,37 +183,76 @@ export function ServiceProposalCard({
     <div className="uac-doc-card">
       <div className="uac-doc-head">
         <span className="uac-doc-title">
-          <LayersIcon size={14} /> Proposed service — {proposal.displayName}
+          <LayersIcon size={14} /> Proposed service — {current.displayName}
         </span>
         <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-          key: {proposal.derivedKey}
+          key: {current.derivedKey}
         </span>
       </div>
 
-      {/* The CLIENT-FACING description leads — it's what the attorney is actually
-          approving onto their booking page. The AI's WHY (summary) is a muted
-          footnote, not the headline: reasoning is context, not content. */}
-      {proposal.description && (
+      {/* BUILDER-UX-1 WP-1.2: the two copies are LABELED, never two unlabeled
+          paragraphs — "Client sees" (the public booking tile) above "Internal"
+          (the attorney-facing description). */}
+      {(current.clientDisplayName || current.clientDescription) && (
         <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {proposal.description}
+          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+            Client sees
+          </div>
+          <div>
+            {current.clientDisplayName}
+            {current.clientDescription ? ` — ${current.clientDescription}` : ''}
+          </div>
+        </div>
+      )}
+      {/* WP-7: the Spanish tile copy the wizard authored alongside the English —
+          shown labeled so the attorney reviews BOTH before approving. */}
+      {(current.clientDisplayNameEs || current.clientDescriptionEs) && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
+          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+            Client sees (Español)
+          </div>
+          <div>
+            {current.clientDisplayNameEs}
+            {current.clientDescriptionEs ? ` — ${current.clientDescriptionEs}` : ''}
+          </div>
+        </div>
+      )}
+      {current.description && (
+        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
+          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+            Internal
+          </div>
+          <div>{current.description}</div>
         </div>
       )}
 
       <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
         <div>
-          <strong>Route:</strong> {proposal.route} · <strong>Documents:</strong>{' '}
-          {proposal.generationMode === 'ai_draft' ? 'AI draft' : 'template merge'}
+          <strong>Route:</strong> {current.route} · <strong>Documents:</strong>{' '}
+          {current.generationMode === 'ai_draft' ? 'AI draft' : 'template merge'}
         </div>
-        {proposal.summary && (
-          <div className="text-muted" style={{ marginTop: 4 }}>
-            {proposal.summary}
-          </div>
-        )}
         {/* Set expectations: a created service starts disabled until it's completed. */}
         <div className="text-muted">Created disabled — finish setting it up, then enable it.</div>
       </div>
 
       <div className="uac-doc-actions">
+        <button
+          type="button"
+          className="uac-reply-btn"
+          onClick={() => void openEditor()}
+          disabled={
+            approveState === 'approving' ||
+            editLoading ||
+            (approveState === 'approved' && !serviceKey)
+          }
+          title={
+            approveState === 'approved'
+              ? 'Edit the created service — saves a new version'
+              : 'Edit the proposed service shell before approving'
+          }
+        >
+          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
+        </button>
         <button
           type="button"
           className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
@@ -163,6 +279,82 @@ export function ServiceProposalCard({
         <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
           {approveError}
         </div>
+      )}
+      {editing && (
+        <ServiceEditorModal
+          title={
+            approveState === 'approved'
+              ? `Edit service — ${current.displayName}`
+              : `Edit proposed service — ${current.displayName}`
+          }
+          initialValue={{
+            displayName: current.displayName,
+            route: current.route,
+            clientDisplayName: current.clientDisplayName ?? '',
+            clientDescription: current.clientDescription ?? '',
+            clientDisplayNameEs: current.clientDisplayNameEs ?? '',
+            clientDescriptionEs: current.clientDescriptionEs ?? '',
+            description: current.description ?? '',
+            generationMode: current.generationMode,
+            appointmentRequired: current.appointmentRequired ?? true,
+          }}
+          onSave={async (next) => {
+            if (approveState === 'approved' && serviceKey) {
+              // Post-approval: persist to the CREATED service (a new immutable version
+              // through legal.service.update — the same write the settings page does).
+              await callAttorneyMcp({
+                toolName: 'legal.service.update',
+                input: {
+                  serviceKey,
+                  displayName: next.displayName,
+                  description: next.description || null,
+                  clientDisplayName: next.clientDisplayName || null,
+                  clientDescription: next.clientDescription || null,
+                  // WP-7: merge the es entry over the SAVED locale map (other
+                  // locales survive); clearing both es inputs drops only es.
+                  clientCopyI18n: (() => {
+                    const rest = Object.fromEntries(
+                      Object.entries(savedI18n ?? {}).filter(([k]) => k !== 'es'),
+                    )
+                    if (next.clientDisplayNameEs || next.clientDescriptionEs) {
+                      rest.es = {
+                        ...(next.clientDisplayNameEs
+                          ? { displayName: next.clientDisplayNameEs }
+                          : {}),
+                        ...(next.clientDescriptionEs
+                          ? { description: next.clientDescriptionEs }
+                          : {}),
+                      }
+                    }
+                    return Object.keys(rest).length ? rest : null
+                  })(),
+                  route: next.route,
+                  generationMode: next.generationMode,
+                  appointmentRequired: next.appointmentRequired,
+                },
+              })
+            }
+            // Either way the card re-renders with the attorney's version.
+            setCurrent((c) => ({
+              ...c,
+              displayName: next.displayName,
+              route: next.route,
+              clientDisplayName: next.clientDisplayName || null,
+              clientDescription: next.clientDescription || null,
+              clientDisplayNameEs: next.clientDisplayNameEs || null,
+              clientDescriptionEs: next.clientDescriptionEs || null,
+              description: next.description || null,
+              generationMode: next.generationMode,
+              appointmentRequired: next.appointmentRequired,
+            }))
+            onEdited?.(
+              approveState === 'approved' && serviceKey
+                ? `service shell "${next.displayName}" (saved)`
+                : `service shell "${current.displayName}"`,
+            )
+          }}
+          onClose={() => setEditing(false)}
+        />
       )}
     </div>
   )

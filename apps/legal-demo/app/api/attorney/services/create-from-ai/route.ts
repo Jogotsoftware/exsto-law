@@ -16,8 +16,14 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     displayName?: string
     description?: string | null
+    clientDisplayName?: string | null
+    clientDescription?: string | null
+    // WP-7 — the wizard-authored Spanish tile copy (stored as transitions.client_copy_i18n.es).
+    clientDisplayNameEs?: string | null
+    clientDescriptionEs?: string | null
     route?: WorkflowRoute
     generationMode?: GenerationMode
+    appointmentRequired?: boolean
     summary?: string
     confidence?: number
   } | null
@@ -37,8 +43,15 @@ export async function POST(request: Request) {
       {
         displayName,
         description: body?.description ?? null,
+        clientDisplayName: body?.clientDisplayName ?? null,
+        clientDescription: body?.clientDescription ?? null,
+        clientDisplayNameEs: body?.clientDisplayNameEs ?? null,
+        clientDescriptionEs: body?.clientDescriptionEs ?? null,
         route: body?.route,
         generationMode: body?.generationMode,
+        ...(typeof body?.appointmentRequired === 'boolean'
+          ? { appointmentRequired: body.appointmentRequired }
+          : {}),
       },
       {
         conclusion: (body?.summary ?? '').trim() || `Created the service "${displayName}".`,

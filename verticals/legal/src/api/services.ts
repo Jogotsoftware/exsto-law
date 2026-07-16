@@ -38,6 +38,12 @@ export interface ServiceField {
   // (WP2.4). Kept optional so legacy repo/config schemas still type-check on read.
   help?: string
   options?: string[]
+  // BUILDER-UX-2 WP-7 — locale variants of the client-facing question text
+  // ('es', …). options_i18n is locale → parallel array (same order as options).
+  // The intake renders the variant for its language and falls back to English.
+  label_i18n?: Record<string, string>
+  options_i18n?: Record<string, string[]>
+  placeholder_i18n?: Record<string, string>
   memberFields?: ServiceField[]
   minItems?: number
   // 1.1 WP5 — visibility boundary. A field the ATTORNEY fills during review (or a
@@ -51,6 +57,8 @@ export interface ServiceField {
 export interface ServiceSection {
   id: string
   title: string
+  // WP-7 — locale variants of the section title.
+  title_i18n?: Record<string, string>
   fields: ServiceField[]
 }
 
@@ -88,11 +96,27 @@ export interface ServiceBooking {
   duration_minutes: BookingDuration
 }
 
+// BUILDER-UX-2 WP-7 — locale variants of the client-facing copy, keyed by locale
+// code ('es', …): { es: { displayName, description } }. Lives in
+// transitions.client_copy_i18n (configuration-as-data — the upsert handler's open
+// merge carries it forward across versions like every other transitions key), NOT
+// new columns. English stays the source of truth in client_display_name /
+// client_description; a missing locale/field ALWAYS falls back to English — never
+// blank, never a key.
+export type ServiceClientCopyI18n = Record<string, { displayName?: string; description?: string }>
+
 export interface ServiceDefinition {
   id: string
   serviceKey: string
   displayName: string
   description: string | null
+  // Client-facing copy for the public intake tiles (UI-BUILDER-FIX-1 Phase 1):
+  // outcome-only, <=70 chars, no jurisdiction/process. Null = not authored yet;
+  // the tile falls back to displayName/description so nothing renders blank.
+  clientDisplayName: string | null
+  clientDescription: string | null
+  // Locale variants of the client copy (WP-7). Null = none authored.
+  clientCopyI18n: ServiceClientCopyI18n | null
   route: WorkflowRoute
   intakeFormId: string
   intakeSchema: IntakeSchema
@@ -111,6 +135,10 @@ export interface ServiceDefinition {
   // cannot mean "no appointment" without breaking existing services.
   appointmentRequired: boolean
   isActive: boolean
+  // MACHINE-COMMS-1 (WP0) — booking honesty: a service is bookable ONLY when it is
+  // active AND carries a non-empty authored lifecycle. matter.open fails loudly on
+  // anything else, so surfaces that offer booking must gate on this, not isActive.
+  bookable: boolean
   sortOrder: number
   updatedAt: string
 }
@@ -120,6 +148,8 @@ type WorkflowRow = {
   kind_name: string
   display_name: string
   description: string | null
+  client_display_name: string | null
+  client_description: string | null
   transitions: {
     route?: string
     intake_form_id?: string
@@ -133,10 +163,14 @@ type WorkflowRow = {
     generation_mode?: string
     booking?: { enabled?: boolean; send_calendar_invite?: boolean; duration_minutes?: number }
     appointment_required?: boolean
+    client_copy_i18n?: ServiceClientCopyI18n
     [k: string]: unknown
   }
   status: string
   recorded_at: string
+  // Computed in SQL: does the current row carry a non-empty authored lifecycle?
+  // (MACHINE-COMMS-1 WP0 — feeds `bookable`.)
+  has_lifecycle?: boolean
 }
 
 // Display order for the booking page's service selection (REQ-INTAKE-02) is now
@@ -304,6 +338,9 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     serviceKey: r.kind_name,
     displayName: r.display_name,
     description: r.description,
+    clientDisplayName: r.client_display_name,
+    clientDescription: r.client_description,
+    clientCopyI18n: parseClientCopyI18n(r.transitions.client_copy_i18n),
     route: r.transitions.route === 'auto' ? 'auto' : 'manual',
     intakeFormId,
     intakeSchema,
@@ -314,9 +351,27 @@ function mapRow(r: WorkflowRow): ServiceDefinition {
     booking: parseBooking(r.transitions.booking),
     appointmentRequired: parseAppointmentRequired(r.transitions.appointment_required),
     isActive: r.status === 'active',
+    bookable: r.status === 'active' && r.has_lifecycle === true,
     sortOrder: sortOrderOf(r),
     updatedAt: r.recorded_at,
   }
+}
+
+// Defensive parse of the stored locale map (WP-7): keep only locale entries whose
+// values are objects with string displayName/description — a malformed write must
+// never take the whole service read down, just fall back to English.
+function parseClientCopyI18n(v: unknown): ServiceClientCopyI18n | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const out: ServiceClientCopyI18n = {}
+  for (const [locale, copy] of Object.entries(v as Record<string, unknown>)) {
+    if (!copy || typeof copy !== 'object' || Array.isArray(copy)) continue
+    const c = copy as Record<string, unknown>
+    const entry: { displayName?: string; description?: string } = {}
+    if (typeof c.displayName === 'string' && c.displayName.trim()) entry.displayName = c.displayName
+    if (typeof c.description === 'string' && c.description.trim()) entry.description = c.description
+    if (Object.keys(entry).length) out[locale] = entry
+  }
+  return Object.keys(out).length ? out : null
 }
 
 function compareServices(a: ServiceDefinition, b: ServiceDefinition): number {
@@ -324,7 +379,9 @@ function compareServices(a: ServiceDefinition, b: ServiceDefinition): number {
 }
 
 const WORKFLOW_COLS = `
-  id, kind_name, display_name, description, transitions, status,
+  id, kind_name, display_name, description, client_display_name, client_description,
+  transitions, status,
+  (jsonb_typeof(states) = 'array' AND jsonb_array_length(states) > 0) AS has_lifecycle,
   to_char(recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at
 `
 
@@ -423,6 +480,11 @@ export async function listServicesIncludingInactive(
 export interface CreateServiceInput {
   displayName: string
   description?: string | null
+  // Client-facing tile copy (Phase 1). Omit = none (new service starts null).
+  clientDisplayName?: string | null
+  clientDescription?: string | null
+  // Locale variants of the client copy (WP-7), e.g. { es: { displayName, description } }.
+  clientCopyI18n?: ServiceClientCopyI18n | null
   route?: WorkflowRoute
   documents?: string[]
   sortOrder?: number
@@ -432,6 +494,14 @@ export interface UpdateServiceMetadataInput {
   serviceKey: string
   displayName: string
   description?: string | null
+  // Client-facing tile copy (Phase 1). OMIT to carry the prior version's copy
+  // forward untouched; explicit null clears it (tiles fall back to displayName).
+  clientDisplayName?: string | null
+  clientDescription?: string | null
+  // Locale variants (WP-7). OMIT to carry forward; the passed map REPLACES the
+  // stored one (pass null to clear all locales). Merging per-locale is the caller's
+  // job — the read side hands back the full map to edit.
+  clientCopyI18n?: ServiceClientCopyI18n | null
   route?: WorkflowRoute
   documents?: string[]
   sortOrder?: number
@@ -461,9 +531,19 @@ export async function createService(
     payload: {
       display_name: input.displayName,
       description: input.description ?? null,
+      ...(input.clientDisplayName !== undefined
+        ? { client_display_name: input.clientDisplayName }
+        : {}),
+      ...(input.clientDescription !== undefined
+        ? { client_description: input.clientDescription }
+        : {}),
       route: input.route,
       documents: input.documents,
       sort_order: input.sortOrder,
+      // Locale variants (WP-7) ride the transitions merge like generation_mode does.
+      ...(input.clientCopyI18n !== undefined
+        ? { transitions_patch: { client_copy_i18n: input.clientCopyI18n } }
+        : {}),
     },
   })
   const eff = res.effects[0] as { serviceKey: string }
@@ -490,6 +570,8 @@ export async function updateServiceMetadata(
   if (input.cost !== undefined) transitionsPatch.cost = normalizeCost(input.cost)
   if (input.documentFees !== undefined)
     transitionsPatch.document_fees = normalizeDocumentFees(input.documentFees)
+  // Locale variants of the client copy (WP-7): the passed map replaces the stored one.
+  if (input.clientCopyI18n !== undefined) transitionsPatch.client_copy_i18n = input.clientCopyI18n
   if (input.appointmentRequired !== undefined) {
     // Strict boolean only. The read side treats garbage as true (safe default),
     // so the write side must never coerce garbage ("true", 1, null) into a
@@ -507,6 +589,14 @@ export async function updateServiceMetadata(
       service_key: input.serviceKey,
       display_name: input.displayName,
       description: input.description ?? null,
+      // undefined stays OFF the payload entirely — the handler reads absence as
+      // "carry the prior version's client copy forward" (Phase 1 versioning rule).
+      ...(input.clientDisplayName !== undefined
+        ? { client_display_name: input.clientDisplayName }
+        : {}),
+      ...(input.clientDescription !== undefined
+        ? { client_description: input.clientDescription }
+        : {}),
       route: input.route,
       documents: input.documents,
       sort_order: input.sortOrder,
@@ -947,11 +1037,55 @@ export function validateIntakeSchema(schema: unknown): QuestionnaireDoc {
     if (!Array.isArray(section.fields)) {
       throw new Error(`Section ${section.id} must have a fields array.`)
     }
+    normalizeI18nMap(section, 'title_i18n')
     for (const rawField of section.fields as unknown[]) {
       validateField(rawField, section.id)
     }
   }
   return schema as QuestionnaireDoc
+}
+
+// WP-7 — SANITIZE (never throw on) the questionnaire's locale maps at the write
+// chokepoint. A bad translation must never break the intake or the build; the
+// fallback contract is "English, never blank" — so empty/non-string entries are
+// dropped, and options_i18n arrays that don't pair 1:1 with options are dropped
+// (index pairing would silently mislabel choices). Mutates in place; the schema
+// object is what gets persisted.
+function normalizeI18nMap(obj: Record<string, unknown>, key: string): void {
+  const raw = obj[key]
+  if (raw === undefined) return
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    delete obj[key]
+    return
+  }
+  const clean: Record<string, string> = {}
+  for (const [locale, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.trim()) clean[locale] = v
+  }
+  if (Object.keys(clean).length) obj[key] = clean
+  else delete obj[key]
+}
+
+function normalizeOptionsI18n(field: Record<string, unknown>): void {
+  const raw = field.options_i18n
+  if (raw === undefined) return
+  const options = Array.isArray(field.options) ? (field.options as unknown[]) : []
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || options.length === 0) {
+    delete field.options_i18n
+    return
+  }
+  const clean: Record<string, string[]> = {}
+  for (const [locale, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (
+      Array.isArray(v) &&
+      v.length === options.length &&
+      v.every((o) => typeof o === 'string' && o.trim())
+    ) {
+      clean[locale] = v as string[]
+    }
+  }
+  if (Object.keys(clean).length) field.options_i18n = clean
+  else delete field.options_i18n
 }
 
 function validateField(rawField: unknown, sectionId: string): void {
@@ -987,6 +1121,11 @@ function validateField(rawField: unknown, sectionId: string): void {
       validateField(sub, `${sectionId}.${field.id}`)
     }
   }
+  // WP-7 — sanitize the locale maps (drop empty/non-string entries; drop mispaired
+  // options_i18n). Fallback is English; a bad translation never breaks the write.
+  normalizeI18nMap(field, 'label_i18n')
+  normalizeI18nMap(field, 'placeholder_i18n')
+  normalizeOptionsI18n(field)
 }
 
 // Write a service's questionnaire as a new immutable version. Validates the shape
@@ -1132,9 +1271,53 @@ export function resolveDraftingPromptDoc(
   }
 }
 
-// Validate a drafting prompt against the FIXED slot contract before persisting.
-// Throws a descriptive Error naming the missing slots (the editor surfaces
-// .message). Reads never validate — a legacy repo prompt always renders.
+// The OUTPUT/TRACE contract (BACKHALF-BLOCKS-1 WP5). The drafting worker's parser
+// (adapters/claude.splitDocumentAndTrace) needs the model to emit a fenced ```json
+// reasoning trace after the document; the model only does that when the PROMPT tells
+// it to. A config prompt saved WITHOUT these instructions produced draft output with
+// no fence → every ai_draft on that service dead-lettered silently (the Jun 20 → Jul 9
+// outage class). This block is auto-appended on save when a prompt lacks the contract,
+// so no service can ship a prompt that can't be parsed. (The worker parser is ALSO
+// made tolerant — a missing trace defaults to evidence:[] — as defense in depth.)
+export const DRAFTING_TRACE_CONTRACT = `
+
+# Reasoning trace (required)
+
+After the document text, you MUST also produce a JSON block (fenced with \`\`\`json) containing a structured reasoning trace. The attorney's review UI relies on this. Do not skip it.
+
+\`\`\`json
+{
+  "prompt_id": "<service>/<document_kind>",
+  "model_identity": "<model id you used>",
+  "evidence": [
+    { "source": "questionnaire | transcript", "field": "<field id>", "value": "<value>", "used_in": "<clause>" }
+  ],
+  "alternatives_considered": [],
+  "conclusion": "<one or two sentence summary of the draft's overall posture>",
+  "confidence": 0.7,
+  "ambiguities": [
+    { "topic": "<short label>", "explanation": "<what is uncertain>", "needs_input_from": "client | attorney | both" }
+  ]
+}
+\`\`\`
+
+# Output format
+
+Produce, in order: (1) the full document in markdown, (2) a horizontal rule (\`---\`), (3) the reasoning trace JSON block fenced as \`\`\`json. Do not produce any prose after the JSON block.`
+
+// A prompt carries the output/trace contract when it already instructs the model to
+// emit the two trace keys that appear ONLY in the reasoning-trace schema (never in an
+// input slot) — a robust signal that the repo prompt and any compliant config prompt
+// satisfy, and a bare prompt does not. Keeps auto-append from double-appending.
+export function hasDraftingTraceContract(promptText: string): boolean {
+  return promptText.includes('"conclusion"') && promptText.includes('"confidence"')
+}
+
+// Validate a drafting prompt before persisting, and RETURN the prompt to store —
+// possibly AUGMENTED (WP5): the FIXED mustache slots must be present (throws, naming
+// the missing slots), and the output/trace contract is auto-appended when absent so
+// the saved prompt is always parseable by the drafting worker. Reads never validate —
+// a legacy repo prompt always renders.
 export function validateDraftingPrompt(promptText: unknown): string {
   if (typeof promptText !== 'string' || !promptText.trim()) {
     throw new Error('The drafting prompt must be non-empty text.')
@@ -1146,7 +1329,9 @@ export function validateDraftingPrompt(promptText: unknown): string {
         `Every prompt must contain ${REQUIRED_DRAFTING_SLOTS.join(', ')} so the worker can fill them.`,
     )
   }
-  return promptText
+  return hasDraftingTraceContract(promptText)
+    ? promptText
+    : `${promptText.trimEnd()}\n${DRAFTING_TRACE_CONTRACT}`
 }
 
 // Write a service's drafting prompt for one document kind as a new immutable
@@ -1517,6 +1702,17 @@ export async function submitBooking(
   if (!service) {
     throw new Error(`Unknown service: ${input.serviceKey}`)
   }
+  // MACHINE-COMMS-1 (WP0) — booking honesty at the FRONT DOOR: a disabled service
+  // or one with no authored lifecycle is not bookable. getService deliberately
+  // resolves any current row (the admin needs that); the public submit gates here,
+  // BEFORE any side effect, so no slot is consumed and no half-open matter exists.
+  // matter.open enforces the same rule as defense in depth.
+  if (!service.bookable) {
+    throw new Error(
+      `Service "${service.displayName}" is not currently accepting bookings` +
+        (service.isActive ? ' (it has no active workflow definition).' : ' (it is disabled).'),
+    )
+  }
   const appointmentRequired = service.appointmentRequired
   if (appointmentRequired && !input.scheduledAtIso) {
     throw new Error('This service requires choosing a consultation time.')
@@ -1725,6 +1921,24 @@ export async function submitBooking(
       console.error('[submitBooking] manage-link token not minted (booking still saved):', err)
     }
   }
+  // PORTAL-1: the "create your account" link for the confirmation email — an
+  // invite set-password link for accountless contacts, a prefilled login link
+  // otherwise. Best-effort: any failure falls back to the login link.
+  async function buildAccountUrl(): Promise<string> {
+    const loginUrl = `${baseUrl}/portal/login?email=${encodeURIComponent(input.clientEmail)}`
+    const contactId = intakeEffects.clientEntityId
+    if (!contactId) return loginUrl
+    try {
+      const { resolvePortalActorId } = await import('./portalAccount.js')
+      if (await resolvePortalActorId(ctx.tenantId, contactId)) return loginUrl
+      const { signPortalInviteToken } = await import('./portalInviteToken.js')
+      const token = signPortalInviteToken({ clientContactId: contactId, tenantId: ctx.tenantId })
+      return `${baseUrl}/portal/set-password?token=${encodeURIComponent(token)}`
+    } catch {
+      return loginUrl
+    }
+  }
+
   const commonVars = {
     matter_entity_id: matterEntityId,
     matter_number: matterNumber,
@@ -1749,13 +1963,13 @@ export async function submitBooking(
         })
       : null,
     matter_url: baseUrl ? `${baseUrl}/attorney/matters/${matterEntityId}` : null,
-    // Client account access (S10): magic-link portal sign-in. The prospect
-    // booking confirmation email links here, pre-filled with the email they just
-    // booked with, so "Create your account" lands them one click from a link.
+    // Client account access (PORTAL-1): when the contact has no portal account
+    // yet, "Create your account" is a signed set-password invite (the same
+    // token the send_portal_invite capability mints) — one click to a real
+    // account, not a login form they have no password for. Existing accounts
+    // get the login link, email pre-filled.
     portal_url: baseUrl ? `${baseUrl}/portal/login` : null,
-    account_url: baseUrl
-      ? `${baseUrl}/portal/login?email=${encodeURIComponent(input.clientEmail)}`
-      : null,
+    account_url: baseUrl ? await buildAccountUrl() : null,
     // Self-service reschedule / cancel: one HMAC-signed, tenant-bound token gates
     // the public /book/manage page (exsto-public-surface). The page opens on
     // reschedule; ?intent=cancel jumps straight to the cancel panel.

@@ -13,7 +13,7 @@ import {
 // The closed set of step-action kinds (catalog.ts). validateLifecycle rejects any
 // stage.action.kind outside it — the same guardrail the builder/AI compose from,
 // now enforced structurally so a graph with a made-up action can never be saved.
-import { STEP_ACTION_KINDS } from './catalog.js'
+import { STEP_ACTION_KINDS, stepActionSpec } from './catalog.js'
 
 export function stageByKey(lc: Lifecycle, key: string): LifecycleStage | null {
   return lc.find((s) => s.key === key) ?? null
@@ -152,6 +152,49 @@ export function validateLinearLifecycle(lc: Lifecycle): LifecycleValidation {
       errors.push(
         `stage "${s.key}" has ${s.advances_to.length} outgoing edges — workflows must be linear (one step leads to one next step)`,
       )
+  }
+  return { ok: errors.length === 0, errors }
+}
+
+// Is a stage BLOCKING — a step that must be completed before the matter moves on?
+// An explicit stage.blocking wins; otherwise the step-action catalog's default for
+// the stage's action kind decides (a stage with no action kind defaults to blocking —
+// the safe side). Terminal stages are the finish line, never a step to bypass.
+export function isBlockingStage(s: LifecycleStage): boolean {
+  if (s.terminal) return false
+  if (s.blocking === false) return false
+  if (s.blocking === true) return true
+  const spec = s.action ? stepActionSpec(s.action.kind) : undefined
+  return spec ? spec.blocking : true
+}
+
+// HOTFIX-P17 (L1 composition) — a BLOCKING step must be UNSKIPPABLE: it must lie on
+// EVERY route from the entry stage to a terminal, so no path to completion can bypass
+// it. The test: remove one blocking stage from the graph; if a terminal is still
+// reachable from entry, that step is bypassable → reject. A strictly linear graph
+// passes trivially (each middle stage is the only way forward), so this bites only a
+// graph that introduces a SHORTCUT around a required step (e.g. an edge from an early
+// stage straight to the terminal). Kept separate from validateLifecycle — like
+// validateLinearLifecycle — so only the authoring/save paths carry the constraint and
+// legacy/derived graphs are untouched. The message names the step in plain language
+// and leaks no validator internals (P3).
+export function validateBlockingReachability(lc: Lifecycle): LifecycleValidation {
+  const errors: string[] = []
+  if (!Array.isArray(lc) || lc.length === 0) return { ok: true, errors }
+  const terminals = lc.filter((s) => s.terminal)
+  if (terminals.length === 0) return { ok: true, errors } // validateLifecycle flags this
+  for (const b of lc) {
+    if (!isBlockingStage(b)) continue
+    // Reachability of any terminal from entry with `b` cut out of the graph.
+    const without = lc.filter((s) => s.key !== b.key)
+    const reachable = reachableFromEntry(without)
+    if (terminals.some((t) => t.key !== b.key && reachable.has(t.key))) {
+      errors.push(
+        `the "${b.label}" step can be skipped on the way to finishing the matter — ` +
+          `a required step has to be completed before the matter can be closed. ` +
+          `Remove the shortcut that goes around it.`,
+      )
+    }
   }
   return { ok: errors.length === 0, errors }
 }

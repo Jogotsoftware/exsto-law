@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { setServiceActive } from '@exsto/legal'
+import { setServiceActive, getOwnPublicSlug } from '@exsto/legal'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
 
 export const runtime = 'nodejs'
@@ -37,6 +37,12 @@ export async function POST(
     // handler). After this the service is bookable and its template/questionnaire
     // pages — which read the active version — resolve its data.
     const result = await setServiceActive(ctxOrError, serviceKey, true)
+    // MULTI-TENANT-1: carry THIS firm's slug so the shared link resolves to the
+    // attorney's own firm on the public funnel, not the env-default tenant.
+    const slug = await getOwnPublicSlug(ctxOrError)
+    const bookingParams = new URLSearchParams()
+    if (slug) bookingParams.set('firm', slug)
+    bookingParams.set('service', serviceKey)
     return NextResponse.json({
       result,
       serviceKey,
@@ -46,7 +52,7 @@ export async function POST(
       // WP4: the REAL public booking URL for this service — the same link the
       // attorney shares with clients. The card renders a real button for it, so it
       // never depends on a model-typed link (which routed to "/").
-      bookingLink: `/book?service=${encodeURIComponent(serviceKey)}`,
+      bookingLink: `/book?${bookingParams.toString()}`,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

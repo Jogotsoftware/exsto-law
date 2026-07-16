@@ -43,7 +43,9 @@ import {
   type QuestionnaireDoc,
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
-import { listStandaloneTemplates } from '../queries/templates.js'
+import { isSystemToken } from './tokenClasses.js'
+import { listStandaloneTemplates, type TemplateSignature } from '../queries/templates.js'
+import { createTemplate, updateTemplate } from './standaloneTemplates.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
 // the SAME id intakeAuthoring.ts / serviceAuthoring.ts source their writes to.
@@ -317,7 +319,10 @@ export function validateProposedTemplate(
   }
   const tokens = extractRenderedTokens(validated)
   const known = new Set(fieldIds.map((f) => f.toLowerCase()))
-  const orphanTokens = tokens.filter((t) => !known.has(t.toLowerCase()))
+  // System tokens (firm/attorney identity, dates, matter facts — tokenClasses.ts)
+  // are platform-resolved: they never become questionnaire questions, so listing
+  // them as orphans would misleadingly pitch them to the attorney as gaps.
+  const orphanTokens = tokens.filter((t) => !known.has(t.toLowerCase()) && !isSystemToken(t))
   const reusableFromFirm = orphanTokens.filter((t) => firmKnown.has(t.toLowerCase()))
   return {
     ok: errors.length === 0,
@@ -348,6 +353,11 @@ export interface CreateTemplateAIInput {
   body: string
   docKind: string
   category?: 'document'
+  // BUILDER-CERT-1 (WP3) — the template's signability declaration, from the wizard's
+  // "does the finished document get signed, and by whom?" ask (author-template Step 3).
+  // Omitted/undefined = unsigned. Carried onto the FIRM-LIBRARY twin below, where the
+  // e-sign composition validator reads it.
+  signature?: TemplateSignature
 }
 
 // Persist a reasoning_trace for an AI template write (mirrors intakeAuthoring's):
@@ -398,7 +408,7 @@ async function persistReasoningTrace(
 function defaultDraftingPrompt(docKind: string): string {
   const label = docKind.replace(/_/g, ' ')
   return [
-    `You are drafting a ${label} under North Carolina law (and applicable U.S. federal law). Complete the firm's template below using the client's intake answers; fill every field the answers provide and follow the template's structure exactly. Where a required value is genuinely missing, leave a clearly marked placeholder for the attorney rather than inventing it. Output the final document only — no commentary. This is the BASE guidance: if the attorney adds specific instructions for this draft (appended below these inputs), FOLLOW THEM — attorney instructions always take precedence over this base prompt wherever they conflict.`,
+    `You are drafting a ${label} under North Carolina law (and applicable U.S. federal law). Complete the firm's template below using the client's intake answers; fill every field the answers provide and follow the template's structure exactly. Where a required value is genuinely missing, LEAVE ITS {{token}} IN PLACE UNCHANGED — never invent a value and never write bracketed filler like "[X — TO INSERT]"; the platform renders unresolved tokens as visible markers and resolves them at review. Never write draft banners, watermarks, or review notices into the document — review state is rendered by the platform from the document's status, not written into its text. Output the final document only — no commentary. This is the BASE guidance: if the attorney adds specific instructions for this draft (appended below these inputs), FOLLOW THEM — attorney instructions always take precedence over this base prompt wherever they conflict.`,
     ``,
     `The client's intake answers (use these to fill the document):`,
     `{{questionnaire_responses_json}}`,
@@ -424,12 +434,21 @@ export async function createTemplateAI(
   serviceKey: string,
   input: CreateTemplateAIInput,
   reasoning: TemplateReasoning,
-): Promise<{ serviceKey: string; documentKind: string }> {
+): Promise<{ serviceKey: string; documentKind: string; templateEntityId: string }> {
   const docKind = (input.docKind ?? '').trim()
   if (!docKind) throw new Error('A document kind is required to author a template.')
   // Validate the body BEFORE any write (incl. the trace) so an invalid proposal
   // leaves no trace row behind.
   const body = validateDocumentTemplate(input.body)
+  // Validate the signature declaration BEFORE any write too — the twin write (below)
+  // is a separate action AFTER the service-bound write commits, so a malformed
+  // declaration must fail HERE, not half-way through (review finding: the HTTP
+  // approve route forwards it unvalidated).
+  if (input.signature?.required === true && (input.signature.signer_roles ?? []).length === 0) {
+    throw new Error(
+      'signature.required is true but signer_roles is empty — declare who signs (client, attorney, witness, notary).',
+    )
+  }
 
   // Read the current row to MERGE into its document_templates (so other kinds'
   // bodies survive), its `documents` list (the doc kinds the service produces — a
@@ -521,7 +540,49 @@ export async function createTemplateAI(
 
   const saved = await getDocumentTemplate(agentCtx, serviceKey, docKind)
   if (!saved) throw new Error(`Document template not found after write: ${serviceKey}`)
-  return { serviceKey, documentKind: docKind }
+
+  // BUILDER-CERT-1 (WP3) — the FIRM-LIBRARY TWIN. The service-bound copy above is
+  // what auto-route drafting + completeness read; but the drafting CAPABILITY
+  // (invoke_capability{document_generation}) binds a template by EXACT firm-library
+  // entity id, and the e-sign validator reads signability off that entity — neither
+  // can see a service-bound body. Without this write, a wizard-authored template is
+  // invisible to get_workflow_context's availableTemplates and no drafting/e-sign
+  // step can ever bind it (the exact wall the certification drive hit).
+  //
+  // Upsert key: docKind ALONE — the same key the service-bound store uses and the
+  // same association the docKind→service autobind model rests on. Keying by
+  // (docKind, name) duplicated the twin whenever a revision arrived under a new
+  // display name, stranding any workflow step bound to the old twin's entity id on
+  // stale content (review finding). Renames update the SAME entity in place; when
+  // several twins already share the docKind (legacy data), the exact-name match
+  // wins, else the newest.
+  const library = (await listStandaloneTemplates(agentCtx)).filter(
+    (t) => t.category === 'document' && t.docKind === docKind,
+  )
+  const twin =
+    library.find((t) => t.name === input.name) ??
+    [...library].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0]
+  let templateEntityId: string
+  if (twin) {
+    await updateTemplate(agentCtx, {
+      templateEntityId: twin.templateEntityId,
+      name: input.name,
+      body,
+      ...(input.signature != null ? { signature: input.signature } : {}),
+    })
+    templateEntityId = twin.templateEntityId
+  } else {
+    const created = await createTemplate(agentCtx, {
+      name: input.name,
+      category: 'document',
+      body,
+      docKind,
+      ...(input.signature != null ? { signature: input.signature } : {}),
+    })
+    templateEntityId = created.templateEntityId
+  }
+
+  return { serviceKey, documentKind: docKind, templateEntityId }
 }
 
 // Honest confidence: an AI authoring write must never claim certainty (ADR 0006).

@@ -5,7 +5,7 @@
 // (modal) to view/download what it produced (questionnaire, transcript, document)
 // and to advance it (record the call, generate documents). Status, title,
 // Actions menu and Back live in the layout header.
-import { use, useCallback, useEffect, useState } from 'react'
+import { use, useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
@@ -29,10 +29,21 @@ import {
   type StepKey,
   type StepState,
   type WfStage,
+  type WfEdge,
   type WfStepState,
   type MatterWorkflow,
 } from './shared'
 import { WorkflowEditor } from './WorkflowEditor'
+import { WorkflowStepList } from '@/components/WorkflowStepList'
+import {
+  RunnerReview,
+  CapabilityStatePanel,
+  ClientReviewStep,
+  CompleteMatterStep,
+} from './RunnerReview'
+import { skipStep } from '@/lib/stepRunner'
+import { useConfirm, usePrompt } from '@/components/ConfirmModal'
+import { NotesSection } from '@/components/NotesSection'
 
 const GENERATABLE: Array<{ kind: string; label: string }> = [
   { kind: 'operating_agreement', label: 'operating agreement' },
@@ -181,6 +192,12 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         // straight from matter.workflow.graph. This branch is reached ONLY when a
         // workflow instance exists; the no-workflow path below is untouched.
         <WorkflowWindow matter={matter} workflow={matter.workflow} onChanged={load} />
+      ) : matter.workflowRepairAvailable ? (
+        // ── MACHINE-COMMS-1: honest repair panel ─────────────────────────────
+        // The matter has NO workflow instance but its service HAS an authored
+        // lifecycle — never pretend with the legacy derived steps; say so and
+        // offer to start the real workflow.
+        <WorkflowRepairPanel matterEntityId={id} onStarted={load} />
       ) : (
         // ── Fallback: the existing derived-step window (#197), UNCHANGED ──────
         <section>
@@ -215,6 +232,16 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
           </p>
         </section>
       )}
+
+      {/* MACHINE-COMMS-1 — working notes on the matter (attorney + AI-extracted). */}
+      <NotesSection targetEntityId={id} createInput={{ matterEntityId: id }} />
+
+      {/* MACHINE-COMMS-1 — ad-hoc client email: AI-drafted, lands in the review
+          queue where approving it sends it. */}
+      <section>
+        <h2>Communications</h2>
+        <DraftEmailControl matterEntityId={id} />
+      </section>
 
       {!matter.workflow && openStep === 'intake' && (
         <Modal
@@ -263,7 +290,10 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
         <Modal title="Consultation" onClose={closeStep}>
           {error && <div className="alert alert-error">{error}</div>}
           {hasTranscript && matter.transcriptText ? (
-            <TranscriptView text={matter.transcriptText} />
+            <>
+              <TranscriptView text={matter.transcriptText} />
+              <ExtractToNotesButton matterEntityId={id} />
+            </>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
               <p className="text-muted text-sm">
@@ -332,6 +362,269 @@ function StepIcon({ state }: { state: StepState }) {
   return <FileTextIcon size={18} />
 }
 
+// ── MACHINE-COMMS-1: honest workflow repair panel ───────────────────────────
+// Shown when the matter has NO workflow instance but its service HAS an authored
+// lifecycle (matter.workflowRepairAvailable). Instead of the legacy derived steps
+// (which would pretend a workflow is running), say plainly that the workflow was
+// never started and offer to start it — POST /workflow/start → startMatterWorkflow,
+// then reload the matter so the real workflow window takes over.
+function WorkflowRepairPanel({
+  matterEntityId,
+  onStarted,
+}: {
+  matterEntityId: string
+  onStarted: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function start() {
+    setBusy(true)
+    setErr(null)
+    try {
+      const res = await fetch(`/api/attorney/matters/${matterEntityId}/workflow/start`, {
+        method: 'POST',
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'Failed to start the workflow.')
+      await onStarted()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section>
+      <h2>Workflow</h2>
+      <div style={{ borderLeft: '3px solid var(--border)', paddingLeft: 'var(--space-3)' }}>
+        <p style={{ marginTop: 0 }}>
+          <strong>Workflow not started</strong>
+        </p>
+        <p className="text-muted text-sm">
+          This matter was opened without its service&apos;s workflow instance, so there are no steps
+          running yet. Start the workflow to pick up the service&apos;s authored steps from the
+          beginning.
+        </p>
+        {err && <div className="alert alert-error">{err}</div>}
+        <button
+          className="primary"
+          onClick={() => void start()}
+          disabled={busy}
+          style={{ marginTop: 'var(--space-2)' }}
+        >
+          {busy && <span className="spinner" />}
+          {busy ? 'Starting…' : 'Start workflow'}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+// ── MACHINE-COMMS-1: ad-hoc "Draft email" control ───────────────────────────
+// Opens a small inline form; legal.email.draft only ENQUEUES (the model work runs
+// on the worker), so the success state points at the review queue where approving
+// the draft sends it.
+function DraftEmailControl({ matterEntityId }: { matterEntityId: string }) {
+  const [open, setOpen] = useState(false)
+  const [purpose, setPurpose] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [queued, setQueued] = useState(false)
+
+  async function draft() {
+    if (busy || !purpose.trim()) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.email.draft',
+        input: { matterEntityId, purpose: purpose.trim() },
+      })
+      setQueued(true)
+      setOpen(false)
+      setPurpose('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <p className="text-muted text-sm">
+        Have the AI draft an email to the client from this matter&apos;s facts. Nothing reaches the
+        client unapproved — the draft lands in the Review queue first.
+      </p>
+      {err && <div className="alert alert-error">{err}</div>}
+      {queued && (
+        <div className="alert alert-success">
+          Email draft queued — it will appear in the Review queue; approving it sends it.
+        </div>
+      )}
+      {open ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <textarea
+            value={purpose}
+            onChange={(e) => setPurpose(e.target.value)}
+            rows={3}
+            placeholder="What should this email say?"
+            disabled={busy}
+            autoFocus
+          />
+          <div className="row" style={{ gap: 'var(--space-2)' }}>
+            <button
+              className="primary"
+              onClick={() => void draft()}
+              disabled={busy || !purpose.trim()}
+            >
+              {busy && <span className="spinner" />}
+              {busy ? 'Queuing…' : 'Draft email'}
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false)
+                setErr(null)
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => {
+            setQueued(false)
+            setOpen(true)
+          }}
+        >
+          Draft email
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── MACHINE-COMMS-1: "Extract to notes" (transcript → notes) ────────────────
+// Rendered under the transcript. legal.transcript.extract only ENQUEUES; the
+// distilled summary + facts land as notes on the matter when the worker finishes.
+function ExtractToNotesButton({ matterEntityId }: { matterEntityId: string }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [queued, setQueued] = useState(false)
+
+  async function extract() {
+    if (busy) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.transcript.extract',
+        input: { matterEntityId },
+      })
+      setQueued(true)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (queued) {
+    return (
+      <div className="alert alert-success" style={{ marginTop: 'var(--space-3)' }}>
+        Extraction queued — notes will appear on this matter.
+      </div>
+    )
+  }
+  return (
+    <div style={{ marginTop: 'var(--space-3)' }}>
+      {err && <div className="alert alert-error">{err}</div>}
+      <button
+        onClick={() => void extract()}
+        disabled={busy}
+        title="Distill this transcript into notes on the matter — a summary plus extracted facts, for your review."
+      >
+        {busy && <span className="spinner" />}
+        {busy ? 'Queuing…' : 'Extract to notes'}
+      </button>
+    </div>
+  )
+}
+
+// ── P11: "Upload transcript" fallback ───────────────────────────────────────
+// For a consultation step whose transcript never arrived on its own: a plain
+// text-file picker (.txt/.md/.vtt) that records the call through the SAME door as
+// the transcript-tab paste (legal.call.record_manual → call.ingest) — never
+// document.upload, which is the matter-DOCUMENT lane. Capture (notes extraction)
+// then fires off the arrival automatically, like any other transcript.
+const MAX_TRANSCRIPT_UPLOAD_BYTES = 1_000_000
+
+function UploadTranscriptControl({
+  matterEntityId,
+  onChanged,
+}: {
+  matterEntityId: string
+  onChanged?: () => Promise<void>
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function handleFile(file: File | null) {
+    if (!file || busy) return
+    setErr(null)
+    if (file.size > MAX_TRANSCRIPT_UPLOAD_BYTES) {
+      setErr('That file is too large — transcript uploads are capped at 1 MB of plain text.')
+      return
+    }
+    setBusy(true)
+    try {
+      const text = (await file.text()).trim()
+      if (!text) throw new Error('That file is empty — nothing to record.')
+      await callAttorneyMcp({
+        toolName: 'legal.call.record_manual',
+        input: { matterEntityId, transcriptText: text },
+      })
+      await onChanged?.()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      {err && <div className="alert alert-error">{err}</div>}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".txt,.md,.vtt,text/plain,text/markdown,text/vtt"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0] ?? null
+          e.target.value = ''
+          void handleFile(f)
+        }}
+      />
+      <div>
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}>
+          {busy && <span className="spinner" />}
+          {busy ? 'Recording…' : 'Upload transcript'}
+        </button>
+      </div>
+      <p className="text-muted text-sm" style={{ marginTop: 'var(--space-2)' }}>
+        Plain-text transcript files (.txt, .md, .vtt). Once recorded, the consultation is captured
+        into notes on the matter automatically.
+      </p>
+    </div>
+  )
+}
+
 function labelForState(state: StepState): string {
   if (state === 'done') return 'Done'
   if (state === 'current') return 'Current'
@@ -383,31 +676,18 @@ function WorkflowWindow({
             <EditIcon size={16} /> Edit steps for this matter
           </button>
         </div>
-        <div className="step-list">
-          {steps.map(({ stage, state }) => {
-            const stripState = workflowStripState(state)
-            return (
-              <button
-                key={stage.key}
-                type="button"
-                className={`step-row step-${stripState}`}
-                onClick={() => setOpenKey(stage.key)}
-              >
-                <span className="step-ico" aria-hidden>
-                  <StepIcon state={stripState} />
-                </span>
-                <span className="step-titles">
-                  <span className="step-title">{stage.label}</span>
-                  <span className="step-subtitle">{stage.client_label ?? stage.label}</span>
-                </span>
-                <span className="step-state-pill">{labelForState(stripState)}</span>
-                <span className="step-chevron" aria-hidden>
-                  <ChevronRightIcon size={16} />
-                </span>
-              </button>
-            )
-          })}
-        </div>
+        {/* The SHARED step-list visual (UI-BUILDER-FIX-1 5b) — the proposal-review
+            card renders this same component, so proposed and running workflows
+            look identical to the attorney. */}
+        <WorkflowStepList
+          items={steps.map(({ stage, state }) => ({
+            key: stage.key,
+            title: stage.label,
+            subtitle: stage.client_label ?? stage.label,
+            state: workflowStripState(state),
+            onClick: () => setOpenKey(stage.key),
+          }))}
+        />
         <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
           Click a step to view what it produced, or to advance the matter.
         </p>
@@ -418,7 +698,7 @@ function WorkflowWindow({
           matter={matter}
           workflow={workflow}
           stage={openEntry.stage}
-          isCurrent={openEntry.state === 'current'}
+          state={openEntry.state}
           onClose={() => setOpenKey(null)}
           onChanged={onChanged}
         />
@@ -436,126 +716,226 @@ function WorkflowWindow({
   )
 }
 
-// One step's pop-up. The body is dispatched by stage.action.kind onto the reused
-// step bodies; the current stage additionally gets the Continue advance affordance.
+// One step's pop-up — the in-place runner (WORKFLOW-RUNNER-1). The body is chosen
+// by stage.action.kind and its state; document steps render the FULL review inside
+// the modal (RunnerReview), capability steps render honest worker state, and the
+// terminal step completes/archives — all without ever navigating away. The current
+// stage carries the advance affordance: Continue on an attorney gate, Skip on a
+// client gate, a waiting note on a system/automatic gate.
 function WorkflowStepWindow({
   matter,
   stage,
-  isCurrent,
+  state,
   onClose,
   onChanged,
 }: {
   matter: MatterDetail
   workflow: MatterWorkflow
   stage: WfStage
-  isCurrent: boolean
+  state: WfStepState
   onClose: () => void
   onChanged: () => Promise<void>
 }) {
-  const [advancing, setAdvancing] = useState(false)
-  const [advanceErr, setAdvanceErr] = useState<string | null>(null)
-
-  // The manual (attorney/client) outgoing edge is the one a human "Continue" fires.
-  const manualEdge = isCurrent
-    ? (stage.advances_to.find((e) => e.gate === 'attorney' || e.gate === 'client') ?? null)
+  const isCurrent = state === 'current'
+  // Human advance edges for the current stage (attorney → Continue, client → Skip).
+  const attorneyEdge = isCurrent
+    ? (stage.advances_to.find((e) => e.gate === 'attorney') ?? null)
     : null
-  // A current stage with ONLY a system/automatic outgoing edge waits on its event.
-  const waitsOnSystem =
-    isCurrent &&
-    !manualEdge &&
-    stage.advances_to.some((e) => e.gate === 'system' || e.gate === 'automatic')
+  const clientEdge = isCurrent ? (stage.advances_to.find((e) => e.gate === 'client') ?? null) : null
+  const systemEdge = isCurrent
+    ? (stage.advances_to.find((e) => e.gate === 'system' || e.gate === 'automatic') ?? null)
+    : null
+  const waitsOnSystem = isCurrent && !attorneyEdge && !clientEdge && !!systemEdge
 
-  async function advance() {
-    if (!manualEdge) return
-    setAdvancing(true)
-    setAdvanceErr(null)
-    try {
-      await callAttorneyMcp({
-        toolName: 'legal.matter.advance',
-        input: {
-          matterEntityId: matter.matterEntityId,
-          toState: manualEdge.to,
-          gate: manualEdge.gate,
-          trigger: 'continue',
-        },
-      })
-      await onChanged()
-      onClose()
-    } catch (e) {
-      setAdvanceErr(e instanceof Error ? e.message : String(e))
-      setAdvancing(false)
-    }
+  // The advance control appended to a step's footer: Continue (attorney gate) or
+  // Skip (client gate — advance without the client). A system-only gate has none.
+  const advanceFooter = attorneyEdge ? (
+    <ContinueButton matter={matter} edge={attorneyEdge} onChanged={onChanged} onClose={onClose} />
+  ) : clientEdge ? (
+    <SkipButton matter={matter} stageKey={stage.key} onChanged={onChanged} onClose={onClose} />
+  ) : null
+  const waitsNote = waitsOnSystem ? <WaitingNote /> : null
+
+  const kind = stage.action?.kind
+  const isDocKind = kind === 'review_send_document' || kind === 'generate_document'
+  const isProducingCapability = kind === 'invoke_capability' && (stage.documents?.length ?? 0) > 0
+
+  // ── Document steps: the full review, in the pop-up (WP2 flagship) ───────────
+  if (isDocKind || isProducingCapability) {
+    return (
+      <RunnerReview
+        matter={matter}
+        stage={stage}
+        isCurrent={isCurrent}
+        producing
+        onChanged={onChanged}
+        onClose={onClose}
+        advanceFooter={advanceFooter}
+        waitsNote={waitsNote}
+      />
+    )
   }
 
-  const continueButton = manualEdge ? (
-    <button className="primary" onClick={() => void advance()} disabled={advancing}>
-      {advancing && <span className="spinner" />}
-      {advancing ? 'Advancing…' : 'Continue'}
-    </button>
-  ) : null
-
-  // ── review_send_document: reuse ApproveBody + ClientBody in one window ──────
-  if (stage.action?.kind === 'review_send_document') {
+  // ── Complete + archive the matter (WP3) ─────────────────────────────────────
+  if (kind === 'complete_matter') {
     return (
-      <Modal
-        title={stage.label}
+      <CompleteMatterStep
+        stage={stage}
+        matter={matter}
+        onChanged={onChanged}
         onClose={onClose}
-        footer={
-          <>
-            {matter.latestDraftVersionId && (
-              <Link href={`/attorney/review/${matter.latestDraftVersionId}`} className="button">
-                Open full review
-              </Link>
-            )}
-            {continueButton}
-          </>
-        }
-      >
-        {advanceErr && <div className="alert alert-error">{advanceErr}</div>}
-        <ApproveBody matter={matter} onChanged={onChanged} onClose={onClose} />
-        <div
-          style={{
-            marginTop: 'var(--space-5)',
-            borderTop: '1px solid var(--border)',
-            paddingTop: 'var(--space-4)',
-          }}
-        >
-          <ClientBody matter={matter} />
-        </div>
-        {waitsOnSystem && <WaitingNote />}
-      </Modal>
+        advanceFooter={advanceFooter}
+      />
     )
   }
 
   // ── approve_send_invoice: reuse the BillStep window verbatim ────────────────
-  if (stage.action?.kind === 'approve_send_invoice') {
+  if (kind === 'approve_send_invoice') {
     return (
       <BillStep
         matter={matter}
         onClose={onClose}
         onChanged={onChanged}
         title={stage.label}
-        extraFooter={
-          <>
-            {advanceErr && (
-              <span className="text-sm" style={{ color: 'var(--danger)' }}>
-                {advanceErr}
-              </span>
-            )}
-            {continueButton}
-          </>
-        }
+        extraFooter={advanceFooter}
       />
     )
   }
 
-  // ── All other kinds: a Modal with the matching body + Continue footer ───────
+  // ── Client-gated wait (no attorney edge): the honest client-status panel ────
+  // Checked BEFORE invoke_capability: a current client-gated capability stage
+  // (e.g. request_client_materials → wait for the client) is WAITING ON THE
+  // CLIENT, not "running on the worker" — the capability fired on entry and
+  // finished; the spinner panel would spin forever on a client wait.
+  if (isCurrent && clientEdge && !attorneyEdge) {
+    return (
+      <ClientReviewStep stage={stage} matter={matter} onChanged={onChanged} onClose={onClose} />
+    )
+  }
+
+  // ── invoke_capability (non-producing): honest worker state ──────────────────
+  if (kind === 'invoke_capability') {
+    return (
+      <CapabilityStatePanel
+        stage={stage}
+        matter={matter}
+        state={state}
+        onChanged={onChanged}
+        onClose={onClose}
+        advanceFooter={advanceFooter}
+        waitsNote={waitsNote}
+      />
+    )
+  }
+
+  // ── All other kinds (view_intake / view_consultation / await_payment /
+  //    manual_task): a Modal with the matching body + advance footer ───────────
   return (
-    <Modal title={stage.label} onClose={onClose} footer={continueButton}>
-      {advanceErr && <div className="alert alert-error">{advanceErr}</div>}
-      <WorkflowStepBody stage={stage} matter={matter} />
-      {waitsOnSystem && <WaitingNote />}
+    <Modal title={stage.label} onClose={onClose} footer={advanceFooter}>
+      <WorkflowStepBody stage={stage} matter={matter} onChanged={onChanged} />
+      {waitsNote}
     </Modal>
+  )
+}
+
+// Continue: advance the matter along an attorney-gated edge, then close so the
+// window swaps to the next step in place.
+function ContinueButton({
+  matter,
+  edge,
+  onChanged,
+  onClose,
+}: {
+  matter: MatterDetail
+  edge: WfEdge
+  onChanged: () => Promise<void>
+  onClose: () => void
+}) {
+  const [advancing, setAdvancing] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  async function advance() {
+    setAdvancing(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.matter.advance',
+        input: {
+          matterEntityId: matter.matterEntityId,
+          toState: edge.to,
+          gate: edge.gate,
+          trigger: 'continue',
+        },
+      })
+      await onChanged()
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+      setAdvancing(false)
+    }
+  }
+  return (
+    <>
+      {err && (
+        <span className="text-sm" style={{ color: 'var(--danger)', marginRight: 'auto' }}>
+          {err}
+        </span>
+      )}
+      <button className="primary" onClick={() => void advance()} disabled={advancing}>
+        {advancing && <span className="spinner" />}
+        {advancing ? 'Advancing…' : 'Continue'}
+      </button>
+    </>
+  )
+}
+
+// Skip: attorney advances a client-gated step without the client's acceptance
+// (Contract W skip — records the override in the matter history).
+function SkipButton({
+  matter,
+  stageKey,
+  onChanged,
+  onClose,
+}: {
+  matter: MatterDetail
+  stageKey: string
+  onChanged: () => Promise<void>
+  onClose: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const { confirm, confirmElement } = useConfirm()
+  async function skip() {
+    const ok = await confirm({
+      title: 'Skip this client step?',
+      body: 'Advances the matter without the client’s acceptance — the skip is recorded in the matter history as an attorney override.',
+      confirmLabel: 'Skip step',
+      danger: true,
+    })
+    if (!ok) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await skipStep(matter.matterEntityId, stageKey)
+      await onChanged()
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      {confirmElement}
+      {err && (
+        <span className="text-sm" style={{ color: 'var(--danger)', marginRight: 'auto' }}>
+          {err}
+        </span>
+      )}
+      <button className="warn" onClick={() => void skip()} disabled={busy}>
+        {busy && <span className="spinner" />}
+        {busy ? 'Skipping…' : 'Skip this step'}
+      </button>
+    </>
   )
 }
 
@@ -569,7 +949,15 @@ function WaitingNote() {
 }
 
 // Body for the simple step-action kinds, reusing the existing view components.
-function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDetail }) {
+function WorkflowStepBody({
+  stage,
+  matter,
+  onChanged,
+}: {
+  stage: WfStage
+  matter: MatterDetail
+  onChanged?: () => Promise<void>
+}) {
   const kind = stage.action?.kind
   if (kind === 'view_intake') {
     return matter.questionnaireResponses ? (
@@ -582,9 +970,18 @@ function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDet
   }
   if (kind === 'view_consultation') {
     return matter.transcriptText ? (
-      <TranscriptView text={matter.transcriptText} />
+      <>
+        <TranscriptView text={matter.transcriptText} />
+        <ExtractToNotesButton matterEntityId={matter.matterEntityId} />
+      </>
     ) : (
-      <p className="text-muted text-sm">No consultation transcript on this matter yet.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <p className="text-muted text-sm">
+          No consultation transcript on this matter yet. It arrives on its own from a recorded
+          meeting — or upload the transcript file here.
+        </p>
+        <UploadTranscriptControl matterEntityId={matter.matterEntityId} onChanged={onChanged} />
+      </div>
     )
   }
   if (kind === 'await_payment') {
@@ -592,21 +989,6 @@ function WorkflowStepBody({ stage, matter }: { stage: WfStage; matter: MatterDet
       <p className="text-sm">
         Waiting for the client’s payment. Once the invoice is marked paid, the matter moves on
         automatically.
-      </p>
-    )
-  }
-  if (kind === 'complete_matter') {
-    return (
-      <p className="text-sm">
-        This matter is <strong>complete</strong>. Every step in the workflow has run.
-      </p>
-    )
-  }
-  if (kind === 'generate_document') {
-    return (
-      <p className="text-sm">
-        Generate this step’s document from the <strong>Documents</strong> tab; it will appear here
-        once drafted.
       </p>
     )
   }
@@ -688,11 +1070,15 @@ function DocumentStep({
   const footer =
     versionId && draft ? (
       <>
-        <Link href={`/attorney/review/${versionId}`} className="button">
-          Open full review
-        </Link>
-        <button onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase)}>Download Word</button>
-        <button className="primary" onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase)}>
+        <button
+          onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase, { status: draft.status })}
+        >
+          Download Word
+        </button>
+        <button
+          className="primary"
+          onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase, { status: draft.status })}
+        >
           Download PDF
         </button>
       </>
@@ -798,11 +1184,8 @@ function ApproveStep({
   return (
     <Modal title="Approve" onClose={onClose}>
       <ApproveBody matter={matter} onChanged={onChanged} onClose={onClose} />
-      {versionId && (
+      {versionId && extraFooter && (
         <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
-          <Link href={`/attorney/review/${versionId}`} className="button">
-            Open full review
-          </Link>
           {extraFooter}
         </div>
       )}
@@ -905,15 +1288,22 @@ function ClientBody({ matter }: { matter: MatterDetail }) {
   const approved = matter.latestDraftStatus === 'approved'
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
+  const { confirm, confirmElement } = useConfirm()
+  const { prompt, promptElement } = usePrompt()
 
   async function send() {
     if (!versionId) return
-    const defaultTo = matter.clientEmail ?? ''
-    const to =
-      defaultTo ||
-      (typeof window !== 'undefined'
-        ? (window.prompt('No client email on file. Send to which email?', '') ?? '').trim()
-        : '')
+    let to = matter.clientEmail ?? ''
+    if (!to) {
+      const entered = await prompt({
+        title: 'Send to which email?',
+        body: 'No client email is on file for this matter.',
+        label: 'Recipient email',
+        placeholder: 'client@example.com',
+        confirmLabel: 'Continue',
+      })
+      to = entered ?? ''
+    }
     if (!to) {
       setStatus({
         kind: 'err',
@@ -921,7 +1311,12 @@ function ClientBody({ matter }: { matter: MatterDetail }) {
       })
       return
     }
-    if (typeof window !== 'undefined' && !window.confirm(`Email the document to ${to}?`)) return
+    const ok = await confirm({
+      title: 'Email the document?',
+      body: `Emails the client a link to this document at ${to}.`,
+      confirmLabel: 'Send',
+    })
+    if (!ok) return
     setBusy(true)
     setStatus(null)
     try {
@@ -944,6 +1339,8 @@ function ClientBody({ matter }: { matter: MatterDetail }) {
 
   return (
     <>
+      {confirmElement}
+      {promptElement}
       {status && (
         <div className={`alert ${status.kind === 'ok' ? 'alert-success' : 'alert-error'}`}>
           {status.msg}

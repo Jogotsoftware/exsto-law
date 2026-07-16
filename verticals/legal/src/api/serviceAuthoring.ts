@@ -188,8 +188,25 @@ export interface ServiceProposal {
   // attorney sees the key before approving (the handler has the final say).
   derivedKey: string
   description: string | null
+  // Client-facing tile copy (UI-BUILDER-FIX-1 Phase 2): outcome-only, no
+  // jurisdiction, <=70 chars. Distinct from displayName/description, which stay
+  // attorney-facing (jurisdiction- and process-specific is CORRECT there).
+  clientDisplayName: string | null
+  clientDescription: string | null
+  // BUILDER-UX-2 WP-7 — the SPANISH client tile copy, authored by the wizard
+  // ALONGSIDE the English at proposal time (same two-ends doctrine). Stored on
+  // approve as transitions.client_copy_i18n.es; the Spanish intake renders it and
+  // falls back to English when absent.
+  clientDisplayNameEs: string | null
+  clientDescriptionEs: string | null
   route: WorkflowRoute
   generationMode: GenerationMode
+  // BUILDER-CERT-1 (WP3) — does booking START with a consultation appointment
+  // (client picks a slot at booking), or does the work begin straight from intake
+  // (document-review services)? Derived from the walkthrough like route/mode; the
+  // certification drive found the wizard had NO way to express an intake-only
+  // front door, so every wizard-built service demanded a slot.
+  appointmentRequired: boolean
   summary: string
   confidence: number
 }
@@ -237,8 +254,19 @@ export interface ServiceReasoning {
 export interface CreateServiceAIInput {
   displayName: string
   description?: string | null
+  // Client-facing tile copy (Phase 2). The upsert handler caps both at 70 chars
+  // server-side (truncate-and-flag) — never trust the prompt alone.
+  clientDisplayName?: string | null
+  clientDescription?: string | null
+  // Spanish variants (WP-7) — persisted into transitions.client_copy_i18n.es.
+  clientDisplayNameEs?: string | null
+  clientDescriptionEs?: string | null
   route?: WorkflowRoute
   generationMode?: GenerationMode
+  // Explicit booking mode (BUILDER-CERT-1 WP3). Undefined = the platform default
+  // (appointment required) so pre-existing callers are unchanged; the wizard's
+  // propose_service always sets it explicitly.
+  appointmentRequired?: boolean
 }
 
 // Persist a reasoning_trace for an AI service-creation write (mirrors
@@ -329,10 +357,29 @@ export async function createServiceAI(
       // No service_key → the handler creates a new version-1, DISABLED row.
       display_name: displayName,
       description: input.description ?? null,
+      client_display_name: input.clientDisplayName ?? null,
+      client_description: input.clientDescription ?? null,
       route,
       // generation_mode isn't a top-level upsert field — it merges through the
-      // transitions patch, the same path updateServiceMetadata uses for it.
-      transitions_patch: { generation_mode: generationMode },
+      // transitions patch, the same path updateServiceMetadata uses for it (as does
+      // appointment_required, written explicitly whenever the wizard chose it, and
+      // the WP-7 Spanish client copy when the wizard authored it).
+      transitions_patch: {
+        generation_mode: generationMode,
+        ...(typeof input.appointmentRequired === 'boolean'
+          ? { appointment_required: input.appointmentRequired }
+          : {}),
+        ...(input.clientDisplayNameEs || input.clientDescriptionEs
+          ? {
+              client_copy_i18n: {
+                es: {
+                  ...(input.clientDisplayNameEs ? { displayName: input.clientDisplayNameEs } : {}),
+                  ...(input.clientDescriptionEs ? { description: input.clientDescriptionEs } : {}),
+                },
+              },
+            }
+          : {}),
+      },
     },
   })
   return res.effects[0] as { serviceKey: string; version: number }

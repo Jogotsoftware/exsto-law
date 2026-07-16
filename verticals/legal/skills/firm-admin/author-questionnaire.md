@@ -19,6 +19,8 @@ You cannot build this questionnaire correctly without the enumerated token list 
 
 **Full coverage is enforced, and reuse comes first.** `propose_questionnaire` will REFUSE any questionnaire that leaves a template token uncovered — so you cannot hand the attorney a form with holes to patch by hand; cover every token before you propose. Before authoring a new field, check `get_questionnaire_context` for a question the firm ALREADY defines for that token (same id) on another service and REUSE its definition (id / label / type) rather than re-inventing it.
 
+**SYSTEM tokens are excluded from coverage — never ask the client for them.** Tokens the platform resolves itself — firm identity (`firm_name`, `firm_address`, `firm_phone`, `firm_email`), the approving attorney (`attorney_name`, `attorney_email`), dates (`today`, `letter_date`, `effective_date`), matter facts (`matter_number`, `client_name`, `client_email`), and the fee/clause slots — do not appear in the token list `get_questionnaire_context` returns, and they need no questionnaire field. Do not create fields for them: a client-facing field whose id is one of these is automatically forced to `internal: true` (the client is never asked for attorney/firm/system data).
+
 ## The binding contract (read this first)
 
 `field.id` IS the merge token. When a matter runs, the deterministic engine flattens every answer into a `{{field_id}} → value` map and fills the templates. So:
@@ -52,6 +54,7 @@ The platform validates the questionnaire against a FIXED set of field types (`KN
 | `number` | a numeric value | e.g. ownership_pct |
 | `address_autocomplete` | a postal address | structured; merges as the formatted address |
 | `members_repeater` | a repeating group (e.g. multiple members) | requires a non-empty `memberFields[]` of sub-fields |
+| `file_upload` | the client attaches document(s) at intake (e.g. the contract/lease to review) | the files bind to the matter on submit; the stored answer is the filename(s) — REQUIRED for any document-review service |
 
 Match the type to the token's nature: a `{{effective_date}}` token → `date`; `{{principal_office_address}}` → `address_autocomplete`; `{{ownership_pct}}` → `number`; a multi-member LLC's members → `members_repeater` with sub-fields. `select`/`checkbox` fields MUST carry a non-empty `options` array; `members_repeater` MUST carry non-empty `memberFields`.
 

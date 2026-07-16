@@ -160,7 +160,22 @@ export async function sendInvoice(
   }
 
   const base = (input.payUrlBase ?? '').replace(/\/+$/, '')
-  const payUrl = `${base}/portal/pay/${encodeURIComponent(invoice.invoiceNumber)}`
+  // PORTAL-1 (WP6): the emailed link is a MAGIC LINK — a signed pay token rides
+  // it so the client can view + pay this one invoice without a portal session
+  // (the signed-in portal reaches the same invoice through the session door).
+  // Token minting is best-effort: without a signing secret the plain portal
+  // link (session door) still works.
+  let payUrl = `${base}/portal/pay/${encodeURIComponent(invoice.invoiceNumber)}`
+  try {
+    const { signInvoicePayToken } = await import('./paymentLinkToken.js')
+    const payToken = signInvoicePayToken({
+      invoiceNumber: invoice.invoiceNumber,
+      tenantId: ctx.tenantId,
+    })
+    payUrl = `${payUrl}?t=${encodeURIComponent(payToken)}`
+  } catch {
+    // fall through to the session-door link
+  }
 
   const { subject, body } = renderInvoiceEmail({
     greetingName,

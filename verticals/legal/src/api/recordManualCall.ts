@@ -9,6 +9,10 @@ import { getMatter } from '../queries/matters.js'
 //
 // It replaces the old `simulateCall` synthetic-data driver: a production pilot
 // records real calls, never generated ones.
+
+// Mirrors the matter page's MAX_TRANSCRIPT_UPLOAD_BYTES (1 MB of plain text).
+const MAX_TRANSCRIPT_TEXT_CHARS = 1_000_000
+
 export interface RecordManualCallInput {
   matterEntityId: string
   // The real transcript text (required — there is no synthetic fallback).
@@ -30,6 +34,14 @@ export async function recordManualCall(
   const transcript = input.transcriptText.trim()
   if (!transcript) {
     throw new Error('Paste the call transcript first.')
+  }
+  // Server-side twin of the matter page's 1 MB upload cap: the text lands in
+  // append-only storage and auto-fans into a model call, so an oversized paste
+  // that bypasses the UI must be rejected here too.
+  if (transcript.length > MAX_TRANSCRIPT_TEXT_CHARS) {
+    throw new Error(
+      'That transcript is too long — transcripts are capped at 1,000,000 characters (about 1 MB of plain text).',
+    )
   }
 
   // A stable, clearly-manual call id keeps call.ingest idempotent without

@@ -29,17 +29,12 @@ type QtRow = {
 }
 
 const QT_SELECT = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
-    FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1 ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )
   SELECT
     e.id AS question_template_id,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'question_template_label') AS label,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'question_template_type')  AS type,
-    (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'question_template_token') AS token,
-    (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'question_template_options')        AS options,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'question_template_label' ORDER BY a.valid_from DESC LIMIT 1) AS label,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'question_template_type' ORDER BY a.valid_from DESC LIMIT 1)  AS type,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'question_template_token' ORDER BY a.valid_from DESC LIMIT 1) AS token,
+    (SELECT a.value FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'question_template_options' ORDER BY a.valid_from DESC LIMIT 1)        AS options,
     e.created_at AS updated_at
   FROM entity e
   JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'question_template'

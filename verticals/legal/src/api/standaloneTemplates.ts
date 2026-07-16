@@ -7,6 +7,7 @@ import {
   getStandaloneTemplate,
   type StandaloneTemplate,
   type StandaloneTemplateCategory,
+  type TemplateSignature,
   type TemplateVariables,
 } from '../queries/templates.js'
 
@@ -20,6 +21,9 @@ export interface CreateTemplateInput {
   body: string
   docKind?: string | null
   variables?: TemplateVariables
+  // ESIGN-BLOCK-1 (WP1) — does the finished document get signed, and by whom?
+  // Omitted = unsigned (the read default).
+  signature?: TemplateSignature
 }
 
 export async function createTemplate(
@@ -35,6 +39,7 @@ export async function createTemplate(
       body: input.body,
       doc_kind: input.docKind ?? null,
       variables: input.variables,
+      signature: input.signature,
     },
   })
   const { templateEntityId } = res.effects[0] as { templateEntityId: string }
@@ -49,6 +54,7 @@ export interface UpdateTemplateInput {
   body?: string
   docKind?: string | null
   variables?: TemplateVariables
+  signature?: TemplateSignature
 }
 
 export async function updateTemplate(
@@ -64,10 +70,24 @@ export async function updateTemplate(
       body: input.body,
       doc_kind: input.docKind,
       variables: input.variables,
+      signature: input.signature,
     },
   })
   const updated = await getStandaloneTemplate(ctx, input.templateEntityId)
   if (!updated) throw new Error('Template updated but could not be read back.')
+  // Phase 10 (UI-BUILDER-FIX-1): template ⇄ questionnaire sync. A body edit that
+  // introduces fill-in tokens the feeding questionnaire doesn't capture confirms/
+  // creates the questionnaire_feeds_template edge and enqueues (worker_job) an AI
+  // rebuild PROPOSAL for the questionnaire — approval-gated, never auto-applied.
+  // Best-effort: a sync failure never fails the save.
+  if (typeof input.body === 'string' && input.body.trim()) {
+    try {
+      const { syncQuestionnaireForTemplate } = await import('./templateQuestionnaireSync.js')
+      await syncQuestionnaireForTemplate(ctx, input.templateEntityId, input.body)
+    } catch (err) {
+      console.error('updateTemplate: questionnaire sync failed (non-fatal)', err)
+    }
+  }
   return updated
 }
 
@@ -262,8 +282,27 @@ export async function aiEnhanceTemplate(
   return { body: reply.trim() }
 }
 
+// Retire a standalone template (HARDENING-RESIDUALS-1 WP-F): soft, through the
+// legal.template.retire action (migration 0150), mirroring legal.service.retire.
+// The handler BLOCKS while the template is attached to an active service or fed
+// by a questionnaire — the error names the holder ("in use by X") so the
+// attorney detaches there first. Document drafts already generated survive.
+export async function retireTemplate(
+  ctx: ActionContext,
+  templateEntityId: string,
+): Promise<{ templateEntityId: string; retired: true }> {
+  await submitAction(ctx, {
+    actionKindName: 'legal.template.retire',
+    intentKind: 'enforcement',
+    payload: { template_entity_id: templateEntityId },
+  })
+  return { templateEntityId, retired: true }
+}
+
 // Archive a standalone template through the core entity.archive action (status
 // 'archived' — kept as history, dropped from active listings). Append-only.
+// Prefer retireTemplate above (it refuses while the template is in use);
+// archive remains for callers that have already detached everything.
 export async function archiveTemplate(
   ctx: ActionContext,
   templateEntityId: string,

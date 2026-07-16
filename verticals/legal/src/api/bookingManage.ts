@@ -57,26 +57,20 @@ async function loadMatter(
   const ctx = manageCtx(tok.tenantId)
   const row = await withActionContext(ctx, async (client) => {
     const res = await client.query<MatterRow>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-           a.entity_id, akd.kind_name, a.value
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         WHERE a.tenant_id = $1
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT
+      `SELECT
          e.name AS matter_number,
          (SELECT a2.value #>> '{}'
             FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
-            JOIN attrs a2 ON a2.entity_id = r.source_entity_id AND a2.kind_name = 'full_name'
+            JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = r.source_entity_id
+            JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
             WHERE r.tenant_id = $1 AND r.target_entity_id = e.id AND rkd.kind_name = 'client_of'
+            ORDER BY a2.valid_from DESC
             LIMIT 1) AS client_name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'service_key') AS service_key,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'service_key' ORDER BY a.valid_from DESC LIMIT 1) AS service_key,
          e.metadata->>'scheduled_at' AS scheduled_at,
          e.metadata->>'scheduled_end' AS scheduled_end,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_status' ORDER BY a.valid_from DESC LIMIT 1) AS status
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1 AND e.id = $2 AND ekd.kind_name = 'matter' AND e.status = 'active'`,

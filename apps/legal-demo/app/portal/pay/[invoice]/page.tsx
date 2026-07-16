@@ -71,6 +71,26 @@ function base64ToBlobUrl(base64: string, contentType: string): string {
 export default function InvoicePayPage({ params }: { params: Promise<{ invoice: string }> }) {
   const { invoice } = use(params)
   const invoiceNumber = decodeURIComponent(invoice)
+  // PORTAL-1 (WP6): the emailed MAGIC-LINK door. With ?t=<signed token> the
+  // invoice loads (and pays) without a portal session, pinned server-side to
+  // the token's invoice. Without it, the signed client session is the door.
+  const [payToken] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('t'),
+  )
+
+  const callPayLink = useCallback(
+    async <T,>(op: 'get' | 'intent'): Promise<T> => {
+      const res = await fetch('/api/client/pay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: payToken, op }),
+      })
+      const data = (await res.json().catch(() => null)) as (T & { error?: string }) | null
+      if (!res.ok || !data) throw new Error(data?.error ?? 'This payment link is invalid.')
+      return data
+    },
+    [payToken],
+  )
   const [data, setData] = useState<ClientInvoiceDetail | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
@@ -114,10 +134,13 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
   }
 
   const loadInvoice = useCallback(() => {
-    callClientPortalMcp<{ invoice: ClientInvoiceDetail | null }>({
-      toolName: 'legal.client.invoice_get',
-      input: { invoiceNumber },
-    })
+    ;(payToken
+      ? callPayLink<{ invoice: ClientInvoiceDetail | null }>('get')
+      : callClientPortalMcp<{ invoice: ClientInvoiceDetail | null }>({
+          toolName: 'legal.client.invoice_get',
+          input: { invoiceNumber },
+        })
+    )
       .then((r) => {
         if (!r.invoice) {
           setState('notfound')
@@ -131,7 +154,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
         setError(e instanceof Error ? e.message : String(e))
         setState('error')
       })
-  }, [invoiceNumber])
+  }, [invoiceNumber, payToken, callPayLink])
 
   useEffect(() => {
     loadInvoice()
@@ -143,10 +166,12 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
     setPayState('loading')
     setPayReason(null)
     try {
-      const r = await callClientPortalMcp<IntentResult>({
-        toolName: 'legal.client.invoice_payment_intent',
-        input: { invoiceNumber },
-      })
+      const r = payToken
+        ? (await callPayLink<{ intent: IntentResult }>('intent')).intent
+        : await callClientPortalMcp<IntentResult>({
+            toolName: 'legal.client.invoice_payment_intent',
+            input: { invoiceNumber },
+          })
       if (r.status === 'ready') {
         setIntent(r)
         setPayState('ready')
@@ -219,7 +244,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
               )}
 
               <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
-                {!pdf ? (
+                {payToken ? null : !pdf ? (
                   <button
                     type="button"
                     className="pdash-btn pdash-btn-sm"
@@ -265,6 +290,13 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
               </p>
             ) : (
               <div style={{ marginTop: 'var(--space-4)' }}>
+                {payToken && (
+                  <p className="text-sm text-muted">
+                    Viewing via your emailed payment link.{' '}
+                    <a href="/portal/login">Sign in to your portal</a> for downloads and more
+                    payment options.
+                  </p>
+                )}
                 {payState === 'idle' && (
                   <button type="button" className="pdash-btn" onClick={startPayment}>
                     Pay {money(data.total, data.currency)} online
@@ -295,10 +327,12 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
                 {/* Instruct-then-verify rails (Zelle / crypto) — shown alongside the
                     online option whenever the firm has configured them. Renders
                     nothing when no methods are set. */}
-                <ManualPaymentOptions
-                  invoiceNumber={data.invoiceNumber}
-                  amountLabel={money(data.total, data.currency)}
-                />
+                {!payToken && (
+                  <ManualPaymentOptions
+                    invoiceNumber={data.invoiceNumber}
+                    amountLabel={money(data.total, data.currency)}
+                  />
+                )}
               </div>
             )}
           </>

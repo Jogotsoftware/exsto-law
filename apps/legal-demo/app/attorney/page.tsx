@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
 import { PageHead } from '@/components/PageHead'
 import { Tabs, type TabSpec } from '@/components/Tabs'
 import {
@@ -15,12 +16,14 @@ import { parseTimestamp } from '@/lib/datetime'
 
 // Copies the public booking-page link to the clipboard. Replaces the old
 // "/attorney/share" link, which 404'd (no such route) — the link prospects use
-// to book is the public /book page.
+// to book is the public /book page. MULTI-TENANT-1: the link carries THIS firm's
+// slug (?firm=…) so a prospect lands on the attorney's own firm, not the default.
 function ShareBookingButton({ compact }: { compact?: boolean }) {
   const [copied, setCopied] = useState(false)
+  const slug = useFirmPublicSlug()
   async function copy() {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/book`)
+      await navigator.clipboard.writeText(buildFirmBookingUrl(window.location.origin, slug))
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
     } catch {

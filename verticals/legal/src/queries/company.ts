@@ -41,16 +41,6 @@ export interface CompanyDetail extends CompanySummary {
   matters: CompanyMatterRow[]
 }
 
-const ATTRS_CTE = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-      a.entity_id, akd.kind_name, a.value
-    FROM attribute a
-    JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1
-    ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )`
-
 // List companies (the CRM Companies tab). When onlyClients is true, returns only
 // companies with engagement_status = 'client' (the Clients tab).
 export async function listCompanies(
@@ -69,12 +59,12 @@ export async function listCompanies(
       matter_count: string
       created_at: Date
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id AS company_entity_id, e.name AS name,
-         coalesce((SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_engagement_status'), 'prospect') AS engagement_status,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_billable_rate') AS billable_rate,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_billing_type')  AS billing_type,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_main_contact')  AS main_contact_id,
+         coalesce((SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_engagement_status' ORDER BY a.valid_from DESC LIMIT 1), 'prospect') AS engagement_status,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_billable_rate' ORDER BY a.valid_from DESC LIMIT 1) AS billable_rate,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_billing_type' ORDER BY a.valid_from DESC LIMIT 1)  AS billing_type,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_main_contact' ORDER BY a.valid_from DESC LIMIT 1)  AS main_contact_id,
          (SELECT count(*) FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
             WHERE r.tenant_id = $1 AND r.target_entity_id = e.id AND rkd.kind_name = 'contact_of_company'
@@ -119,12 +109,12 @@ export async function getCompany(
       main_contact_id: string | null
       created_at: Date
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id, e.name AS name,
-         coalesce((SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_engagement_status'), 'prospect') AS engagement_status,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_billable_rate') AS billable_rate,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_billing_type')  AS billing_type,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'company_main_contact')  AS main_contact_id,
+         coalesce((SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_engagement_status' ORDER BY a.valid_from DESC LIMIT 1), 'prospect') AS engagement_status,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_billable_rate' ORDER BY a.valid_from DESC LIMIT 1) AS billable_rate,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_billing_type' ORDER BY a.valid_from DESC LIMIT 1)  AS billing_type,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'company_main_contact' ORDER BY a.valid_from DESC LIMIT 1)  AS main_contact_id,
          e.created_at
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
@@ -140,11 +130,11 @@ export async function getCompany(
       email: string | null
       phone: string | null
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id AS contact_entity_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'full_name') AS full_name,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'email')     AS email,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'phone')     AS phone
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'full_name' ORDER BY a.valid_from DESC LIMIT 1) AS full_name,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'email' ORDER BY a.valid_from DESC LIMIT 1)     AS email,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'phone' ORDER BY a.valid_from DESC LIMIT 1)     AS phone
        FROM entity e
        JOIN relationship r ON r.source_entity_id = e.id
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
@@ -161,10 +151,10 @@ export async function getCompany(
       status: string | null
       created_at: Date
     }>(
-      `${ATTRS_CTE}
+      `
        SELECT e.id AS matter_entity_id, e.name AS matter_number,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'service_key')   AS service_key,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'matter_status') AS status,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'service_key' ORDER BY a.valid_from DESC LIMIT 1)   AS service_key,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_status' ORDER BY a.valid_from DESC LIMIT 1) AS status,
          e.created_at
        FROM entity e
        JOIN relationship r ON r.source_entity_id = e.id

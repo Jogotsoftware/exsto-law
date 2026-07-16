@@ -13,6 +13,11 @@ export type CapabilityInputSource =
   | 'service_config'
   | 'prior_step_output'
   | 'client_response'
+  // CAPABILITY-UNIFY-1: a firm-library template entity, referenced by EXACT entity
+  // id in the step's capability_config — never resolved by (serviceKey, docKind)
+  // convention. The reuse seam that lets ONE document_generation block draft a
+  // different document per step.
+  | 'document_template'
 
 export interface CapabilityInput {
   key: string
@@ -82,19 +87,10 @@ export async function listCapabilities(
       status: string | null
       spec: unknown
     }>(
-      `WITH attrs AS (
-         SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
-         FROM attribute a
-         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-         JOIN entity e ON e.id = a.entity_id
-         JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
-         WHERE a.tenant_id = $1 AND ekd.kind_name = 'platform_capability' AND e.status = 'active'
-         ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-       )
-       SELECT e.id AS entity_id,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'capability_slug')   AS slug,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'capability_status') AS status,
-         (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'capability_spec')            AS spec
+      `SELECT e.id AS entity_id,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'capability_slug' ORDER BY a.valid_from DESC LIMIT 1)   AS slug,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'capability_status' ORDER BY a.valid_from DESC LIMIT 1) AS status,
+         (SELECT a.value FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'capability_spec' ORDER BY a.valid_from DESC LIMIT 1)            AS spec
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'platform_capability'
        WHERE e.tenant_id = $1 AND e.status = 'active'`,

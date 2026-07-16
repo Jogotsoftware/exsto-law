@@ -24,7 +24,13 @@ import type { DbClient } from '@exsto/shared'
 import { completenessFromTransitions } from '../api/services.js'
 // Pure lifecycle validator + the graph type (ADR 0045). The lifecycle module is
 // substrate-free (no DB, no handlers), so importing it here introduces no cycle.
-import { validateLifecycle, validateLinearLifecycle, type Lifecycle } from '../lifecycle/index.js'
+import {
+  validateLifecycle,
+  validateLinearLifecycle,
+  validateBlockingReachability,
+  diagnoseEdgeTransition,
+  type Lifecycle,
+} from '../lifecycle/index.js'
 // The pure id-collector the AI proposal validator uses — shared so the manual save
 // path rejects dangling template refs the SAME way the AI path does (no drift).
 import { collectReferencedTemplateIds } from '../api/workflowAuthoring.js'
@@ -50,7 +56,27 @@ interface ServiceWorkflowRow {
   participating_entity_kinds: unknown
   display_name: string
   description: string | null
+  client_display_name: string | null
+  client_description: string | null
   status: string
+}
+
+// Client-facing copy cap (UI-BUILDER-FIX-1 Phase 2): the intake tiles are small;
+// enforce the doctrine server-side because prompts get ignored under load.
+export const CLIENT_COPY_MAX_CHARS = 70
+
+// Truncate-and-flag rather than reject: a too-long AI proposal should still land
+// (the attorney reviews it anyway), but never overflow the tile. Word-boundary
+// truncation with an ellipsis so the flagged copy still reads like copy.
+export function capClientCopy(v: string | null | undefined): {
+  value: string | null
+  truncated: boolean
+} {
+  const s = v?.trim() || null
+  if (!s || s.length <= CLIENT_COPY_MAX_CHARS) return { value: s, truncated: false }
+  const cut = s.slice(0, CLIENT_COPY_MAX_CHARS - 1)
+  const atWord = cut.includes(' ') ? cut.slice(0, cut.lastIndexOf(' ')) : cut
+  return { value: `${atWord}…`, truncated: true }
 }
 
 // Slugify a display name into a stable kind_name. Mirrors the (deleted)
@@ -89,7 +115,8 @@ async function currentActive(
   kindName: string,
 ): Promise<ServiceWorkflowRow | null> {
   const res = await client.query<ServiceWorkflowRow>(
-    `SELECT id, version, states, transitions, participating_entity_kinds, display_name, description, status
+    `SELECT id, version, states, transitions, participating_entity_kinds, display_name, description,
+            client_display_name, client_description, status
        FROM workflow_definition
       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
       ORDER BY version DESC
@@ -134,6 +161,11 @@ interface ServiceUpsertPayload {
   service_key?: string // existing kind_name; omit to create a new service
   display_name: string
   description?: string | null
+  // Client-facing copy (UI-BUILDER-FIX-1 Phase 1): outcome-only, <=70 chars.
+  // OMITTED (undefined) = carry the prior version's copy forward untouched;
+  // explicit null clears it (fall back to display_name/description on the tiles).
+  client_display_name?: string | null
+  client_description?: string | null
   route?: string // 'auto' | 'manual'
   documents?: string[]
   sort_order?: number
@@ -165,6 +197,34 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
   if (p.route !== undefined) merged.route = p.route
   if (p.documents !== undefined) merged.documents = p.documents
   if (p.sort_order !== undefined) merged.sort_order = p.sort_order
+
+  // BUILDER-UX-2 WP-7 — the locale variants of the client copy get the SAME
+  // last-resort discipline as the English columns: non-object garbage is dropped,
+  // non-string/empty entries are dropped, and over-long text is word-truncated
+  // (capClientCopy). English is capped at the column write below; without this the
+  // Spanish tile copy had no server-side cap at all.
+  if (merged.client_copy_i18n !== undefined && merged.client_copy_i18n !== null) {
+    const raw = merged.client_copy_i18n
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      delete merged.client_copy_i18n
+    } else {
+      const clean: Record<string, { displayName?: string; description?: string }> = {}
+      for (const [locale, copy] of Object.entries(raw as Record<string, unknown>)) {
+        if (!copy || typeof copy !== 'object' || Array.isArray(copy)) continue
+        const c = copy as Record<string, unknown>
+        const entry: { displayName?: string; description?: string } = {}
+        if (typeof c.displayName === 'string' && c.displayName.trim())
+          entry.displayName = capClientCopy(c.displayName).value ?? undefined
+        if (typeof c.description === 'string' && c.description.trim())
+          entry.description = capClientCopy(c.description).value ?? undefined
+        if (entry.displayName || entry.description) clean[locale] = entry
+      }
+      if (Object.keys(clean).length) merged.client_copy_i18n = clean
+      else delete merged.client_copy_i18n
+    }
+  } else if (merged.client_copy_i18n === null) {
+    delete merged.client_copy_i18n
+  }
   // A brand-new service has no intake form bound yet (deferred to a later PR);
   // default route to manual so it never auto-drafts before a form exists.
   if (!isUpdate && merged.route === undefined) merged.route = 'manual'
@@ -199,12 +259,27 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
   //    LIVE service keeps it live and editing a disabled one keeps it disabled.
   //    Enable/disable stays the sole job of set_active.
   const status = isUpdate ? (prior?.status ?? 'active') : 'deprecated'
+
+  // Client copy carry-forward (Phase 1, load-bearing): a versioned save that does
+  // not mention the client fields must NOT lose them — undefined means "carry the
+  // prior version's copy forward". Explicit values (including null) win, capped
+  // server-side at CLIENT_COPY_MAX_CHARS (truncate-and-flag, never reject).
+  const cdn =
+    p.client_display_name !== undefined
+      ? capClientCopy(p.client_display_name)
+      : { value: prior?.client_display_name ?? null, truncated: false }
+  const cds =
+    p.client_description !== undefined
+      ? capClientCopy(p.client_description)
+      : { value: prior?.client_description ?? null, truncated: false }
+
   const newId = randomUUID()
   await client.query(
     `INSERT INTO workflow_definition
        (id, tenant_id, action_id, kind_name, display_name, description,
+        client_display_name, client_description,
         states, transitions, participating_entity_kinds, version, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13)`,
     [
       newId,
       ctx.tenantId,
@@ -212,6 +287,8 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
       kindName,
       displayName,
       p.description ?? prior?.description ?? null,
+      cdn.value,
+      cds.value,
       JSON.stringify(states),
       JSON.stringify(merged),
       JSON.stringify(participating),
@@ -237,7 +314,14 @@ registerActionHandler('legal.service.upsert', async (ctx, client, payload, actio
     },
   })
 
-  return { workflowDefinitionId: newId, serviceKey: kindName, version: nextVersion }
+  return {
+    workflowDefinitionId: newId,
+    serviceKey: kindName,
+    version: nextVersion,
+    // Cap receipts: true when the server shortened over-long client copy, so the
+    // caller can surface "truncated to fit" instead of silently differing.
+    clientCopyTruncated: cdn.truncated || cds.truncated,
+  }
 })
 
 interface ServiceSetActivePayload {
@@ -335,6 +419,33 @@ registerActionHandler('legal.service.retire', async (ctx, client, payload, actio
   return { serviceKey: p.service_key, retired: true }
 })
 
+// The "<description>" filler the AI-authoring step template seeds config values
+// with. It is non-empty, so diagnoseCapabilityStepConfig's required-value check
+// passes it — but at runtime it is a literal placeholder (a template id of
+// "<the template to draft>" dead-letters the matter). The palette blanks these on
+// read (workflowCatalogTools); this guard is the write-side backstop, so a
+// placeholder that reaches a save — pasted, AI-left-verbatim, or from an old
+// client — is rejected with the field named instead of stored.
+const PLACEHOLDER_VALUE_RE = /^<.*>$/
+
+// Collect the (leaf) config keys whose string value is still placeholder filler,
+// walking nested objects/arrays (capability_config included). The leaf key is what
+// the builder's config editor labels the field with, so it is the name the
+// attorney can act on. Exported for the pure doctrine tests (capClientCopy idiom).
+export function collectPlaceholderKeys(value: unknown, key: string, out: string[]): void {
+  if (typeof value === 'string') {
+    if (PLACEHOLDER_VALUE_RE.test(value) && !out.includes(key)) out.push(key)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) collectPlaceholderKeys(v, key, out)
+    return
+  }
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) collectPlaceholderKeys(v, k, out)
+  }
+}
+
 // Reject any stage.documents[].templateEntityId that is not a real DOCUMENT template
 // entity in the firm library. The AI authoring path already enforces this
 // (workflowAuthoring.validateProposedLifecycle); a graph saved via the MCP tool /
@@ -396,6 +507,42 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
   if (!linear.ok) {
     throw new Error(`Invalid workflow lifecycle: ${linear.errors.join('; ')}`)
   }
+  // HOTFIX-P17 (L1) — a blocking step must be unskippable: no shortcut may reach a
+  // terminal while bypassing a required step. A linear graph passes trivially; this
+  // rejects a branch that jumps around a blocking step to completion.
+  const blocking = validateBlockingReachability(p.graph)
+  if (!blocking.ok) {
+    throw new Error(`Invalid workflow lifecycle: ${blocking.errors.join('; ')}`)
+  }
+  // P12 — the advance-token vocabulary check now guards the MANUAL save path too
+  // (it was AI-authoring-only): the visual builder re-threads edges on reorder, and
+  // a dead via/on token — e.g. the old 'event' default still stored on a legacy
+  // graph — must be rejected with a message the attorney can act on, not saved as a
+  // workflow that never advances. Joined with NEWLINES: the builder surfaces split
+  // the message into one line per edge.
+  const tokenErrors: string[] = []
+  for (const stage of p.graph) {
+    for (const edge of stage.advances_to ?? []) {
+      const err = diagnoseEdgeTransition(stage.key, edge.to, edge.gate, edge.via, edge.on)
+      if (err) tokenErrors.push(err)
+    }
+  }
+  // Placeholder filler in an invoke_capability config is rejected here, not at
+  // runtime: see PLACEHOLDER_VALUE_RE above. Newline-joined like the token errors
+  // (the builder surfaces itemize the message on newlines).
+  for (const stage of p.graph) {
+    if (stage.action?.kind !== 'invoke_capability') continue
+    const keys: string[] = []
+    collectPlaceholderKeys(stage.action.config ?? {}, '', keys)
+    for (const key of keys) {
+      tokenErrors.push(
+        `Step "${stage.label}": fill in its configuration — placeholder text is still in ${key}.`,
+      )
+    }
+  }
+  if (tokenErrors.length > 0) {
+    throw new Error(`Invalid workflow lifecycle:\n${tokenErrors.join('\n')}`)
+  }
   // Document refs must resolve to real library templates (same rule the AI path
   // enforces) — a dangling templateEntityId must never reach workflow_definition.states.
   await assertTemplateRefsExist(client, ctx.tenantId, p.graph)
@@ -421,8 +568,9 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
   await client.query(
     `INSERT INTO workflow_definition
        (id, tenant_id, action_id, kind_name, display_name, description,
+        client_display_name, client_description,
         states, transitions, participating_entity_kinds, version, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13)`,
     [
       newId,
       ctx.tenantId,
@@ -430,6 +578,10 @@ registerActionHandler('legal.service.set_lifecycle', async (ctx, client, payload
       p.service_key,
       prior.display_name,
       prior.description ?? null,
+      // Client copy carries forward verbatim (Phase 1): authoring a lifecycle
+      // graph must never drop the tiles' client-facing copy.
+      prior.client_display_name ?? null,
+      prior.client_description ?? null,
       JSON.stringify(p.graph),
       JSON.stringify(prior.transitions),
       JSON.stringify(prior.participating_entity_kinds),

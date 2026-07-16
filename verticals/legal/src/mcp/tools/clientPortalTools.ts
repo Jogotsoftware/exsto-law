@@ -30,8 +30,36 @@ import {
   getClientPaymentMethods,
   reportInvoicePayment,
   type ManualPaymentMethods,
+  getClientBillingSummary,
+  listClientTodos,
+  type ClientBillingSummary,
+  type ClientTodo,
+  getPortalSchedulingAvailability,
+  getSchedulingFeeQuote,
+  scheduleClientTime,
+  SchedulingFeeConsentRequiredError,
+  getClientIntakePrefill,
+  type PortalSchedulingAvailability,
+  type SchedulingFeeQuote,
+  type ScheduledTimeResult,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
+import {
+  getPortalHomeSummary,
+  listClientNotifications,
+  markClientNotificationsRead,
+  type PortalHomeSummary,
+  type PortalNotificationFeed,
+  type PortalLocale,
+} from '../../index.js'
+import {
+  acceptEngagement,
+  declineEngagement,
+  getEngagementConfig,
+  getEngagementStatus,
+  type EngagementConfig,
+  type EngagementStatus,
+} from '../../api/engagement.js'
 
 // AUTHENTICATED client-portal tools. These are reachable ONLY through the authed
 // route (/api/client/portal/mcp) — they are in CLIENT_PORTAL_AUTHED_TOOLS, NOT
@@ -329,6 +357,200 @@ const reportPaymentTool: Tool<ReportPaymentInput, { eventId: string }> = {
     }),
 }
 
+// PORTAL-1 (WP2) — Billing: invoices + accruing not-yet-invoiced fees + running
+// total, computed from the SAME source as the attorney's billing panel.
+const billingSummaryTool: Tool<{ clientContactId: string }, { billing: ClientBillingSummary }> = {
+  name: 'legal.client.billing_summary',
+  description:
+    'Per-matter billing for the signed-in client: invoices (open + paid), accrued not-yet-invoiced fees (recorded ledger events only — never estimates), and a running total.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    billing: await getClientBillingSummary(ctx, input.clientContactId),
+  }),
+}
+
+// PORTAL-1 (WP2) — Things to do: sign / pay / materials-requested in one list.
+const todosTool: Tool<{ clientContactId: string }, { todos: ClientTodo[] }> = {
+  name: 'legal.client.todos',
+  description:
+    'Everything waiting on the signed-in client: documents to sign, invoices to pay, materials the firm requested.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    todos: await listClientTodos(ctx, input.clientContactId),
+  }),
+}
+
+// PORTAL-1 (WP4) — schedule time on the firm's REAL availability.
+const scheduleAvailabilityTool: Tool<
+  { durationMinutes?: number; daysOut?: number },
+  { availability: PortalSchedulingAvailability }
+> = {
+  name: 'legal.client.schedule_availability',
+  description:
+    'Open consultation slots on the firm’s live calendar (rules ∩ Google free/busy — never fabricated).',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    availability: await getPortalSchedulingAvailability(ctx, {
+      durationMinutes: input.durationMinutes,
+      daysOut: input.daysOut,
+    }),
+  }),
+}
+
+const scheduleQuoteTool: Tool<
+  { clientContactId: string; durationMinutes: number },
+  { quote: SchedulingFeeQuote | null }
+> = {
+  name: 'legal.client.schedule_quote',
+  description:
+    'The fee (rate × duration) for portal-scheduled time when the firm bills it — null when scheduling is free for this client.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    quote: await getSchedulingFeeQuote(ctx, input.clientContactId, input.durationMinutes ?? 30),
+  }),
+}
+
+interface ScheduleTimeInput {
+  clientContactId: string
+  startIso: string
+  endIso: string
+  durationMinutes?: number
+  reason?: string | null
+  feeAccepted?: boolean
+}
+const scheduleTimeTool: Tool<
+  ScheduleTimeInput,
+  { result?: ScheduledTimeResult; feeConsentRequired?: true; quote?: SchedulingFeeQuote }
+> = {
+  name: 'legal.client.schedule_time',
+  description:
+    'Book a consultation slot as the signed-in client. Billable time (per the firm’s setting) requires accepting the rate × duration fee first — enforced server-side.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => {
+    try {
+      const result = await scheduleClientTime(ctx, {
+        clientContactId: input.clientContactId,
+        startIso: input.startIso,
+        endIso: input.endIso,
+        durationMinutes: input.durationMinutes,
+        reason: input.reason ?? null,
+        feeAccepted: input.feeAccepted === true,
+      })
+      return { result }
+    } catch (err) {
+      if (err instanceof SchedulingFeeConsentRequiredError) {
+        return { feeConsentRequired: true, quote: err.quote }
+      }
+      throw err
+    }
+  },
+}
+
+// PORTAL-1 (WP4) — prefill a repeat booking from what the firm already knows.
+const intakePrefillTool: Tool<
+  { clientContactId: string; serviceKey?: string },
+  { responses: Record<string, unknown> | null }
+> = {
+  name: 'legal.client.intake_prefill',
+  description:
+    "The signed-in client's most recent intake answers (preferring the same service), for prefilled repeat booking. The client edits and confirms before submitting.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    responses: await getClientIntakePrefill(ctx, input.clientContactId, input.serviceKey ?? null),
+  }),
+}
+
+// ── CLIENT-PORTAL-UI-1 — home summary, notifications, engagement gate ────────
+// clientContactId is stamped by the authed route from the session cookie on all
+// of these; locale is client-chosen presentation state ('en' | 'es'), nothing
+// more — it selects copy from the canonical i18n store, never data.
+
+interface HomeInput {
+  clientContactId: string
+  locale?: string
+}
+
+const homeSummaryTool: Tool<HomeInput, { home: PortalHomeSummary }> = {
+  name: 'legal.client.home_summary',
+  description:
+    "The portal home in one read: the signed-in client's matters, attention items, message/billing previews, unread badge, and engagement-gate state.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    home: await getPortalHomeSummary(
+      ctx,
+      input.clientContactId,
+      input.locale === 'es' ? 'es' : ('en' as PortalLocale),
+    ),
+  }),
+}
+
+interface ContactOnlyInput {
+  clientContactId: string
+}
+
+const notificationsTool: Tool<ContactOnlyInput, { feed: PortalNotificationFeed }> = {
+  name: 'legal.client.notifications',
+  description:
+    "The signed-in client's notifications feed (what happened, newest first) with the unread watermark applied.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    feed: await listClientNotifications(ctx, input.clientContactId),
+  }),
+}
+
+const notificationsReadTool: Tool<ContactOnlyInput, { readAt: string }> = {
+  name: 'legal.client.notifications_read',
+  description:
+    'Mark the signed-in client’s notifications as read (append-only watermark — no fact row is updated).',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    markClientNotificationsRead(ctx, input.clientContactId),
+}
+
+const engagementTool: Tool<
+  ContactOnlyInput,
+  { status: EngagementStatus; config: EngagementConfig }
+> = {
+  name: 'legal.client.engagement',
+  description:
+    'The signed-in client’s engagement-agreement state (accepted?) plus the current firm rate and terms for the gate card.',
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    status: await getEngagementStatus(ctx, input.clientContactId),
+    config: await getEngagementConfig(ctx),
+  }),
+}
+
+const engagementAcceptTool: Tool<
+  ContactOnlyInput,
+  { consentEventId: string; rate: string | null; termsVersion: number | null }
+> = {
+  name: 'legal.client.engagement_accept',
+  description:
+    'The client’s own actor accepts the firm-level engagement agreement (rate + terms version bound server-side). One-time: messaging and booking unlock.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => acceptEngagement(ctx, input.clientContactId),
+}
+
+const engagementDeclineTool: Tool<ContactOnlyInput, { consentEventId: string }> = {
+  name: 'legal.client.engagement_decline',
+  description: 'The client’s own actor declines the firm-level engagement agreement.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => declineEngagement(ctx, input.clientContactId),
+}
+
+registerTool(homeSummaryTool)
+registerTool(notificationsTool)
+registerTool(notificationsReadTool)
+registerTool(engagementTool)
+registerTool(engagementAcceptTool)
+registerTool(engagementDeclineTool)
+registerTool(scheduleAvailabilityTool)
+registerTool(scheduleQuoteTool)
+registerTool(scheduleTimeTool)
+registerTool(intakePrefillTool)
+registerTool(billingSummaryTool)
+registerTool(todosTool)
 registerTool(matterTimelineTool)
 registerTool(mattersTool)
 registerTool(threadGetTool)

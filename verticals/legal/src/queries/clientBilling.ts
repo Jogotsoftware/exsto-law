@@ -14,16 +14,6 @@ import { resolveClientMatterIds } from '../api/clientIdentity.js'
 // re-resolve that contact's current matter set from the DB and scope every read
 // to it. A client can never see a stranger's invoice even by guessing a number.
 
-const ATTRS_CTE = `
-  WITH attrs AS (
-    SELECT DISTINCT ON (a.entity_id, akd.kind_name)
-      a.entity_id, akd.kind_name, a.value
-    FROM attribute a
-    JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-    WHERE a.tenant_id = $1
-    ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-  )`
-
 // Invoices a client may see: issued/sent (outstanding) or paid. Drafts are the
 // attorney's working state and never leave the firm.
 const CLIENT_VISIBLE_STATUSES = ['issued', 'sent', 'paid']
@@ -77,12 +67,12 @@ function toSummary(r: InvoiceHeadRow): ClientInvoiceSummary {
 
 const HEAD_COLUMNS = `
   e.id AS invoice_id,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_number')      AS number,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_status')      AS status,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_total')       AS total,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_currency')    AS currency,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_issued_date') AS issued_date,
-  (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_due_date')    AS due_date`
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_number' ORDER BY a.valid_from DESC LIMIT 1)      AS number,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_status' ORDER BY a.valid_from DESC LIMIT 1)      AS status,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_total' ORDER BY a.valid_from DESC LIMIT 1)       AS total,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_currency' ORDER BY a.valid_from DESC LIMIT 1)    AS currency,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_issued_date' ORDER BY a.valid_from DESC LIMIT 1) AS issued_date,
+  (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_due_date' ORDER BY a.valid_from DESC LIMIT 1)    AS due_date`
 
 // List the signed-in client's invoices (newest first), scoped to their matters.
 export async function listClientInvoices(
@@ -93,14 +83,14 @@ export async function listClientInvoices(
   if (matterIds.length === 0) return []
   return withActionContext(ctx, async (client) => {
     const res = await client.query<InvoiceHeadRow>(
-      `${ATTRS_CTE}
+      `
        SELECT ${HEAD_COLUMNS}
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1 AND ekd.kind_name = 'invoice' AND e.status = 'active'
-         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_status')
+         AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_status' ORDER BY a.valid_from DESC LIMIT 1)
              = ANY($3::text[])
-         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_matter_id')
+         AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_matter_id' ORDER BY a.valid_from DESC LIMIT 1)
              = ANY($2::text[])
        ORDER BY e.created_at DESC`,
       [ctx.tenantId, matterIds, CLIENT_VISIBLE_STATUSES],
@@ -120,9 +110,9 @@ export async function getClientInvoiceByNumber(
   if (matterIds.length === 0) return null
   return withActionContext(ctx, async (client) => {
     const head = await client.query<InvoiceHeadRow & { client_name: string | null }>(
-      `${ATTRS_CTE}
+      `
        SELECT ${HEAD_COLUMNS},
-         (SELECT (SELECT value #>> '{}' FROM attrs WHERE entity_id = r.target_entity_id AND kind_name = 'client_name')
+         (SELECT (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = r.target_entity_id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)
             FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
             WHERE r.tenant_id = $1 AND r.source_entity_id = e.id AND rkd.kind_name = 'invoice_of'
@@ -130,10 +120,10 @@ export async function getClientInvoiceByNumber(
        FROM entity e
        JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
        WHERE e.tenant_id = $1 AND ekd.kind_name = 'invoice' AND e.status = 'active'
-         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_number') = $2
-         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_status')
+         AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_number' ORDER BY a.valid_from DESC LIMIT 1) = $2
+         AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_status' ORDER BY a.valid_from DESC LIMIT 1)
              = ANY($4::text[])
-         AND (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'invoice_matter_id')
+         AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_matter_id' ORDER BY a.valid_from DESC LIMIT 1)
              = ANY($3::text[])
        LIMIT 1`,
       [ctx.tenantId, invoiceNumber, matterIds, CLIENT_VISIBLE_STATUSES],
@@ -142,10 +132,10 @@ export async function getClientInvoiceByNumber(
     if (!h) return null
 
     const linesRes = await client.query<{ description: string | null; amount: string | null }>(
-      `${ATTRS_CTE}
+      `
        SELECT
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_description') AS description,
-         (SELECT value #>> '{}' FROM attrs WHERE entity_id = le.id AND kind_name = 'line_amount')      AS amount
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_description' ORDER BY a.valid_from DESC LIMIT 1) AS description,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = le.id AND akd.kind_name = 'line_amount' ORDER BY a.valid_from DESC LIMIT 1)      AS amount
        FROM entity le
        JOIN relationship r ON r.source_entity_id = le.id
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
@@ -163,5 +153,50 @@ export async function getClientInvoiceByNumber(
         amount: r.amount ?? '0.00',
       })),
     }
+  })
+}
+
+// PORTAL-1 (WP6) — the magic-link pay door: resolve the CLIENT CONTACT the
+// invoice bills, from the invoice itself (invoice_client_id → the client's main
+// contact, else any contact). The pay token (bound to this invoice + tenant,
+// emailed only to the on-file address) is the authorization; this lookup only
+// supplies the contact the existing session-door functions expect.
+export async function resolveInvoiceClientContact(
+  ctx: ActionContext,
+  invoiceNumber: string,
+): Promise<string | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ contact_id: string }>(
+      `
+       SELECT COALESCE(
+         (SELECT a.value #>> '{}' FROM attribute a
+           JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+           WHERE a.tenant_id = $1
+             AND a.entity_id = (SELECT a2.value #>> '{}' FROM attribute a2
+                                 JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id
+                                WHERE a2.tenant_id = $1 AND a2.entity_id = e.id AND akd2.kind_name = 'invoice_client_id'
+                                ORDER BY a2.valid_from DESC LIMIT 1)::uuid
+             AND akd.kind_name = 'client_main_contact'
+           ORDER BY a.valid_from DESC LIMIT 1),
+         (SELECT r.source_entity_id::text
+            FROM relationship r
+            JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+           WHERE r.tenant_id = $1
+             AND r.target_entity_id = (SELECT a2.value #>> '{}' FROM attribute a2
+                                        JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id
+                                       WHERE a2.tenant_id = $1 AND a2.entity_id = e.id AND akd2.kind_name = 'invoice_client_id'
+                                       ORDER BY a2.valid_from DESC LIMIT 1)::uuid
+             AND rkd.kind_name = 'contact_of'
+             AND (r.valid_to IS NULL OR r.valid_to > now())
+           ORDER BY r.recorded_at DESC LIMIT 1)
+       ) AS contact_id
+       FROM entity e
+       JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id
+       WHERE e.tenant_id = $1 AND ekd.kind_name = 'invoice' AND e.status = 'active'
+         AND (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'invoice_number' ORDER BY a.valid_from DESC LIMIT 1) = $2
+       LIMIT 1`,
+      [ctx.tenantId, invoiceNumber],
+    )
+    return res.rows[0]?.contact_id ?? null
   })
 }

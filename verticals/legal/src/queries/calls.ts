@@ -39,20 +39,15 @@ type CallRow = {
 // and (optionally) the matter it is attached to. `whereClause`/`params` scope it.
 function callSelect(whereClause: string): string {
   return `
-    WITH attrs AS (
-      SELECT DISTINCT ON (a.entity_id, akd.kind_name) a.entity_id, akd.kind_name, a.value
-      FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
-      WHERE a.tenant_id = $1 ORDER BY a.entity_id, akd.kind_name, a.valid_from DESC
-    )
     SELECT
       e.id AS call_entity_id,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'call_started_at')      AS started_at,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'call_ended_at')        AS ended_at,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'call_duration_seconds') AS duration_seconds,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = e.id AND kind_name = 'granola_call_id')      AS granola_call_id,
-      (SELECT value FROM attrs WHERE entity_id = e.id AND kind_name = 'call_notes')                    AS summary,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = t.id AND kind_name = 'transcript_text')      AS transcript_text,
-      (SELECT value #>> '{}' FROM attrs WHERE entity_id = t.id AND kind_name = 'transcript_word_count') AS word_count,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'call_started_at' ORDER BY a.valid_from DESC LIMIT 1)      AS started_at,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'call_ended_at' ORDER BY a.valid_from DESC LIMIT 1)        AS ended_at,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'call_duration_seconds' ORDER BY a.valid_from DESC LIMIT 1) AS duration_seconds,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'granola_call_id' ORDER BY a.valid_from DESC LIMIT 1)      AS granola_call_id,
+      (SELECT a.value FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'call_notes' ORDER BY a.valid_from DESC LIMIT 1)                    AS summary,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = t.id AND akd.kind_name = 'transcript_text' ORDER BY a.valid_from DESC LIMIT 1)      AS transcript_text,
+      (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = t.id AND akd.kind_name = 'transcript_word_count' ORDER BY a.valid_from DESC LIMIT 1) AS word_count,
       m.id   AS matter_entity_id,
       m.name AS matter_number,
       e.created_at AS recorded_at
