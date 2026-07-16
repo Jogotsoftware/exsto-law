@@ -35,14 +35,14 @@ import {
 import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { verifyCaptchaIfConfigured } from '@/lib/captcha'
+import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
 
 export const runtime = 'nodejs'
 // Booking a service whose workflow opens on a producing stage can draft
 // synchronously in this request (same budget as the public mcp route).
 export const maxDuration = 300
 
-const TENANT_ID = process.env.LEGAL_CLIENT_TENANT_ID ?? '00000000-0000-0000-0000-000000000001'
-const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
+// MULTI-TENANT-1: tenant + public-intake actor resolved per request (lib/publicTenant.ts).
 const MIN_PASSWORD_LENGTH = 8
 const BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
@@ -132,7 +132,18 @@ export async function POST(request: Request) {
     )
   }
 
-  const publicCtx: ActionContext = { tenantId: TENANT_ID, actorId: ACTOR_ID }
+  let tenantId: string
+  let publicCtx: ActionContext
+  try {
+    const pub = await resolvePublicTenant(request)
+    tenantId = pub.tenantId
+    publicCtx = { tenantId: pub.tenantId, actorId: pub.actorId }
+  } catch (e) {
+    if (e instanceof FirmNotFoundError) {
+      return NextResponse.json({ error: 'This firm could not be found.' }, { status: 404 })
+    }
+    throw e
+  }
   const intakeResponses =
     body.intakeResponses && typeof body.intakeResponses === 'object'
       ? (body.intakeResponses as Record<string, unknown>)
@@ -187,7 +198,7 @@ export async function POST(request: Request) {
       trigger: 'intake_gate',
     })
     const clientActorId = provisioned.actorId
-    const clientCtx: ActionContext = { tenantId: TENANT_ID, actorId: clientActorId }
+    const clientCtx: ActionContext = { tenantId, actorId: clientActorId }
 
     // 5. Record the acceptance as the client's OWN actor (the consent receipt).
     if (quote && !priorConsent) {

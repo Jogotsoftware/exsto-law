@@ -19,12 +19,12 @@ import {
 import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { verifyCaptchaIfConfigured } from '@/lib/captcha'
+import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
 
 export const runtime = 'nodejs'
 
-const TENANT_ID = process.env.LEGAL_CLIENT_TENANT_ID ?? '00000000-0000-0000-0000-000000000001'
+// MULTI-TENANT-1: tenant + intake actor resolved per request (see lib/publicTenant.ts).
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
-const ACTOR_ID = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`intake-stage:${clientIpFrom(request)}`)
@@ -46,11 +46,23 @@ export async function POST(request: Request) {
   } | null
   if (!body) return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })
 
+  let tenantId: string
+  let ctx: ActionContext
+  try {
+    const pub = await resolvePublicTenant(request)
+    tenantId = pub.tenantId
+    ctx = { tenantId: pub.tenantId, actorId: pub.actorId }
+  } catch (e) {
+    if (e instanceof FirmNotFoundError) {
+      return NextResponse.json({ error: 'This firm could not be found.' }, { status: 404 })
+    }
+    throw e
+  }
+
   const captcha = await verifyCaptchaIfConfigured(
     typeof body.captchaToken === 'string' ? body.captchaToken : undefined,
     clientIpFrom(request),
   )
-  const ctx: ActionContext = { tenantId: TENANT_ID, actorId: ACTOR_ID }
   if (!captcha.ok) {
     // Probe-degrade: the funnel calls this on entry to the account step, where no
     // captcha token can exist yet (the widget mounts on that step). Without a
@@ -62,7 +74,7 @@ export async function POST(request: Request) {
     try {
       const contactId = await findClientContactIdByEmail(ctx, str(body.clientEmail))
       hasPortalAccount =
-        contactId != null && (await resolvePortalActorId(TENANT_ID, contactId)) != null
+        contactId != null && (await resolvePortalActorId(tenantId, contactId)) != null
       const q = await resolveServiceFeeQuote(ctx, str(body.serviceKey), contactId)
       if (q) {
         quote = {
@@ -113,7 +125,7 @@ export async function POST(request: Request) {
     // already returns accountExisted post-submit — and the copy stays neutral.
     let hasPortalAccount = false
     try {
-      hasPortalAccount = (await resolvePortalActorId(TENANT_ID, staged.clientEntityId)) != null
+      hasPortalAccount = (await resolvePortalActorId(tenantId, staged.clientEntityId)) != null
     } catch {
       hasPortalAccount = false
     }

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
+import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
 import { LayersIcon, CheckIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 
@@ -45,6 +46,9 @@ export function EnableProposalCard({
   // model-typed link). Rendered as a real button + copy action once the service is live.
   const [bookingLink, setBookingLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  // MULTI-TENANT-1: firm slug for the firm-scoped fallback link (the server value is
+  // preferred; this only applies if the enable response omitted bookingLink).
+  const publicSlug = useFirmPublicSlug()
 
   async function approve() {
     setApproveState('approving')
@@ -73,7 +77,8 @@ export function EnableProposalCard({
       if (!res.ok) throw new Error(data?.error || `Enable failed (${res.status})`)
       setLink(data?.link ?? null)
       setBookingLink(
-        data?.bookingLink ?? `/book?service=${encodeURIComponent(proposal.serviceKey)}`,
+        data?.bookingLink ??
+          buildFirmBookingUrl('', publicSlug, { serviceKey: proposal.serviceKey }),
       )
       setApproveState('approved')
       // This is the TERMINAL step — onApproved tells the chat the service is live (with

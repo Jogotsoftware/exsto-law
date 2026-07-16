@@ -1,6 +1,7 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   getService,
+  getTenantSettings,
   listServices,
   submitBooking,
   submitSomethingElseRequest,
@@ -17,6 +18,25 @@ const listServicesTool: Tool<Record<string, never>, { services: ServiceDefinitio
     'List the service kinds Pacheco Law offers via the booking page (workflow_definition rows: route + intake form binding).',
   mode: 'read',
   handler: async (ctx: ActionContext) => ({ services: await listServices(ctx) }),
+}
+
+// MULTI-TENANT-1 — public, client-safe firm identity for the booking page's
+// branding (topbar name + the confirmation's "consultation with …"). Runs under
+// the tenant the public route resolved, so each firm's funnel shows ITS OWN name
+// from data — never a hardcoded literal. Returns only the name + attorney display
+// name (no address/phone/email); honest nulls when a firm hasn't set them.
+const firmBrandingTool: Tool<
+  Record<string, never>,
+  { firmName: string | null; attorneyName: string | null }
+> = {
+  name: 'legal.public.firm_branding',
+  description:
+    "The resolved firm's public identity for the booking page: firm name and attorney display name. Client-safe (name only).",
+  mode: 'read',
+  handler: async (ctx: ActionContext) => {
+    const s = await getTenantSettings(ctx)
+    return { firmName: s.firmName, attorneyName: s.attorneyName }
+  },
 }
 
 const getServiceTool: Tool<{ serviceKey: string }, { service: ServiceDefinition | null }> = {
@@ -49,6 +69,7 @@ const somethingElseTool: Tool<SomethingElseInput, { requestId: string; clientCon
   }
 
 registerTool(listServicesTool)
+registerTool(firmBrandingTool)
 registerTool(getServiceTool)
 registerTool(submitBookingTool)
 registerTool(somethingElseTool)

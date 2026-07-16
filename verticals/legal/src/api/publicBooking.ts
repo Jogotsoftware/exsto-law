@@ -10,7 +10,7 @@
 // NO-SIMULATE: availability is REAL Google free/busy only (getGoogleAvailability,
 // never getAvailability's stub fallback). A firm with no connected calendar shows
 // honestly-empty availability, never fabricated slots.
-import { withAppRole } from '@exsto/shared'
+import { withAppRole, withTenant } from '@exsto/shared'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { getFirmBookingRules, type FirmBookingRules } from './firmBookingRules.js'
 import { getGoogleAvailability, createCalendarEvent } from '../adapters/googleCalendar.js'
@@ -32,11 +32,18 @@ const PUBLIC_INTAKE_ACTOR_FALLBACK =
   process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 // The tenant's own public-intake actor: the historical …0005 when it exists in this
-// tenant (tenant zero), else the tenant's system/agent actor. Uses withAppRole (no
-// tenant ctx yet, mirroring resolvePublicFirm) so the lookup runs before any tenant
-// context is set.
-async function resolvePublicIntakeActor(tenantId: string): Promise<string> {
-  return withAppRole(async (client) => {
+// tenant (tenant zero), else the tenant's system/agent actor. Reads the `actor` table
+// UNDER THE TENANT'S OWN CONTEXT (withTenant): the tenant id is already known, and the
+// actor RLS policy casts app.tenant_id::uuid — under an RLS-engaged role (ADR 0037
+// SUBSTRATE_DB_ROLE=authenticated) withAppRole leaves app.tenant_id unset (''), which
+// blows up as "invalid input syntax for type uuid". withTenant binds it, so the lookup
+// is RLS-safe whether the connection logs in as owner or authenticator. (This is why it
+// differs from resolvePublicFirm, which is a genuinely cross-tenant slug→tenant lookup
+// via a SECURITY DEFINER function.) Exported (MULTI-TENANT-1): the app-layer public
+// funnel resolves the per-tenant intake actor the same way the /book/{slug} front door
+// does, so a write under a resolved firm is attributed to THAT firm's actor.
+export async function resolvePublicIntakeActor(tenantId: string): Promise<string> {
+  return withTenant(tenantId, async (client) => {
     const res = await client.query<{ id: string }>(
       `SELECT id FROM actor
         WHERE tenant_id = $1 AND status = 'active'
