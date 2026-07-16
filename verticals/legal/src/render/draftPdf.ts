@@ -1,5 +1,7 @@
-import { createElement as h } from 'react'
 import { Document, Page, Text, View, StyleSheet, renderToBuffer } from '@react-pdf/renderer'
+// createElement bound to react-pdf's own React — MUST match the reconciler's
+// React or every server-side render fails with React error #31. See the module.
+import { h } from './reactPdfElement.js'
 import { marked } from 'marked'
 import type { Token, Tokens } from 'marked'
 
