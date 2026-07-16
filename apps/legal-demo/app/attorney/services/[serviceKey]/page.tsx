@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
 import { ServiceSettingsFields } from '@/components/ServiceSettingsFields'
 
 type GenerationMode = 'template_merge' | 'ai_draft'
@@ -96,6 +97,8 @@ export default function ServiceSettingsPage() {
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [origin, setOrigin] = useState('')
+  // MULTI-TENANT-1: the firm's slug so the shareable service link resolves to THIS firm.
+  const publicSlug = useFirmPublicSlug()
 
   useEffect(() => setOrigin(window.location.origin), [])
 
@@ -267,7 +270,7 @@ export default function ServiceSettingsPage() {
     }
   }
 
-  const bookingUrl = origin ? `${origin}/book?service=${serviceKey}` : ''
+  const bookingUrl = origin ? buildFirmBookingUrl(origin, publicSlug, { serviceKey }) : ''
 
   return (
     <>

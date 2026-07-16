@@ -270,6 +270,14 @@ export default function BookPage() {
     attributionSource: '',
   })
   const [services, setServices] = useState<Service[] | null>(null)
+  // MULTI-TENANT-1: the resolved firm's identity for branding — never a literal.
+  // Comes from legal.public.firm_branding, which runs under the tenant the public
+  // route resolved (host subdomain / ?firm= selector). attorneyName may be null
+  // (a firm that hasn't set one) → the confirmation falls back to the firm name.
+  const [firmBranding, setFirmBranding] = useState<{
+    firmName: string | null
+    attorneyName: string | null
+  } | null>(null)
   const [selectedServiceKey, setSelectedServiceKey] = useState<string | null>(null)
   const [intakeResponses, setIntakeResponses] = useState<Record<string, unknown>>({})
   const [members, setMembers] = useState<MemberRow[]>([emptyMember()])
@@ -366,6 +374,15 @@ export default function BookPage() {
       setSelectedServiceKey(s)
       setStep('contact')
     }
+  }, [])
+
+  // Resolve the firm's branding once on mount (topbar name + confirmation attorney).
+  useEffect(() => {
+    callClientMcp<{ firmName: string | null; attorneyName: string | null }>({
+      toolName: 'legal.public.firm_branding',
+    })
+      .then(setFirmBranding)
+      .catch(() => setFirmBranding(null))
   }, [])
 
   useEffect(() => {
@@ -859,7 +876,7 @@ export default function BookPage() {
       <main className="bk-shell">
         <div className="bk-aurora" aria-hidden />
         <div className="bk-frame">
-          <BookTopbar />
+          <BookTopbar firmName={firmBranding?.firmName ?? null} />
           <section className="bk-card bk-confirm" key="done">
             <div className="bk-success">
               <span className="bk-success-ring" aria-hidden />
@@ -870,7 +887,7 @@ export default function BookPage() {
             <h1 className="bk-h1">{hasSlot ? t('confirm.title') : t('confirm.title_intake')}</h1>
             <p className="bk-confirm-line">
               {scheduledBefore}
-              <strong>Juan Carlos Pacheco</strong>
+              <strong>{firmBranding?.attorneyName ?? firmBranding?.firmName ?? ''}</strong>
               {scheduledMiddle}
               {hasSlot && <strong>{whenStr}</strong>}
               {scheduledAfter}
@@ -958,7 +975,7 @@ export default function BookPage() {
     <main className="bk-shell">
       <div className="bk-aurora" aria-hidden />
       <div className="bk-frame">
-        <BookTopbar />
+        <BookTopbar firmName={firmBranding?.firmName ?? null} />
         <BookProgress
           step={step}
           steps={PROGRESS_STEPS.filter(
@@ -1531,14 +1548,16 @@ export default function BookPage() {
   )
 }
 
-function BookTopbar() {
+function BookTopbar({ firmName }: { firmName: string | null }) {
   return (
     <header className="bk-topbar">
       <div className="bk-brand">
         <span className="bk-brand-mark">
           <ScaleIcon size={18} />
         </span>
-        <span className="bk-brand-name">Pacheco Law</span>
+        {/* Resolved firm name (MULTI-TENANT-1). Blank until firm_branding lands —
+            a real firm always resolves a name, so this fills within a beat. */}
+        <span className="bk-brand-name">{firmName ?? ''}</span>
       </div>
       <LanguageToggle />
     </header>
