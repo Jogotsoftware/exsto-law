@@ -19,9 +19,31 @@ import { createRequire } from 'node:module'
 // react-pdf itself — guaranteeing element creation and reconciliation share one
 // React. Outside Next (workers, tests) this resolves the same single react@18.3.1
 // the store dedupes to, so behaviour is unchanged there.
-const requireHere = createRequire(import.meta.url)
-const reactFromReactPdf = requireHere(
-  requireHere.resolve('react', { paths: [requireHere.resolve('@react-pdf/renderer')] }),
-) as typeof import('react')
+//
+// CRITICAL — resolve LAZILY, on the first render, never at module load. This
+// module is pulled in by EVERY route that imports @exsto/legal (auth, MCP, etc.),
+// not just the two that render a PDF. Next's function tracer cannot follow the
+// createRequire below, so @react-pdf/renderer is bundled only into the functions
+// that visibly use it — a route like /api/auth/google/init imports @exsto/legal
+// for an unrelated handler and does NOT ship react-pdf. Resolving at module load
+// therefore threw MODULE_NOT_FOUND there and 500'd the whole route (the "Sign in
+// with Google" button). Deferring to the first h() call keeps the resolution on
+// the invoice/draft routes, where react-pdf is present.
+let cachedCreateElement: typeof import('react').createElement | undefined
 
-export const h: typeof import('react').createElement = reactFromReactPdf.createElement
+function reactPdfCreateElement(): typeof import('react').createElement {
+  if (!cachedCreateElement) {
+    const requireHere = createRequire(import.meta.url)
+    const react = requireHere(
+      requireHere.resolve('react', { paths: [requireHere.resolve('@react-pdf/renderer')] }),
+    ) as typeof import('react')
+    cachedCreateElement = react.createElement
+  }
+  return cachedCreateElement
+}
+
+// A thin wrapper so callers keep writing `h(...)`; the real (react-pdf) createElement
+// is resolved + cached on the first invocation. Module load does no resolution.
+export const h: typeof import('react').createElement = ((
+  ...args: Parameters<typeof import('react').createElement>
+) => reactPdfCreateElement()(...args)) as typeof import('react').createElement
