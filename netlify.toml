@@ -13,3 +13,10 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+# Custom functions (alongside the Next.js plugin's own). Holds the scheduled
+# worker-liveness detector — see netlify/functions/worker-liveness.mts. esbuild
+# bundles the pure @exsto/worker-runtime/liveness module + pg into it.
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
