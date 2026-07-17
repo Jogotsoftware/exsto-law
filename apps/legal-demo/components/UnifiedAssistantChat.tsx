@@ -1978,6 +1978,19 @@ export function UnifiedAssistantChat({
       setError(finalError)
       setStreaming(null)
       setBusy(false)
+      // FREEZE FIX (WP li-builder-fix): a continuation queued while THIS turn was
+      // mid-stream — e.g. the attorney approved a proposal card as the turn was still
+      // streaming — must STILL fire even though the turn ended in error/abort. The
+      // drain used to live only on the success path below, so an approval that landed
+      // during a turn that then failed was stranded forever: busy is now false, no turn
+      // is in flight, and nothing ever advanced the build → permanent freeze. Firing it
+      // here starts a fresh turn (which clears this error banner) and advances the build,
+      // so an approval ALWAYS moves forward regardless of the concurrent turn's fate.
+      const queuedAfterError = pendingContinuationRef.current
+      if (queuedAfterError) {
+        pendingContinuationRef.current = null
+        void send(queuedAfterError, { hidden: true })
+      }
       return
     }
     retryRef.current = null
@@ -2082,6 +2095,24 @@ export function UnifiedAssistantChat({
   // approval; now it queues here and fires when the in-flight turn completes. One
   // slot is enough — approvals are sequential, and the latest continuation wins.
   const pendingContinuationRef = useRef<string | null>(null)
+
+  // FREEZE FIX belt-and-suspenders (WP li-builder-fix): the queued continuation is
+  // drained inline on BOTH the success and error/abort paths of send(). This effect is
+  // the safety net that covers every OTHER way a turn can end with the flag still set
+  // (a superseded !live() return, a future early-return). Whenever the chat settles to
+  // idle (busy → false) with a continuation still queued, fire it — an approval must
+  // ALWAYS advance the build. sendRef always points at the latest send() so the drain
+  // never runs a stale closure whose captured `busy` would no-op the send.
+  const sendRef = useRef(send)
+  useEffect(() => {
+    sendRef.current = send
+  })
+  useEffect(() => {
+    if (busy || !pendingContinuationRef.current) return
+    const queued = pendingContinuationRef.current
+    pendingContinuationRef.current = null
+    void sendRef.current(queued, { hidden: true })
+  }, [busy])
 
   // The service under construction in the active build — set by the first approval
   // that carries a serviceKey. Sent with every message so the server injects the
@@ -3037,9 +3068,12 @@ export function UnifiedAssistantChat({
                     }}
                   />
                 )}
-                {/* The model's reasoning/process — relocated out of the reply into a
-                    collapsed disclosure the attorney can expand on demand. */}
-                {!t.buildQuestions?.length && t.reasoning?.trim() && (
+                {/* The model's reasoning/process — a collapsed disclosure in normal
+                    chat. Hidden throughout BUILD MODE (founder walk): the progress
+                    strip is the activity signal there, so the "Thinking" tab was just
+                    chrome on every builder turn (interview cards and proposal cards
+                    alike). */}
+                {!buildMode && !t.buildQuestions?.length && t.reasoning?.trim() && (
                   <ReasoningDisclosure reasoning={t.reasoning} />
                 )}
                 {/* Documents the assistant produced — downloadable deliverables
