@@ -21403,3 +21403,41 @@ a.li-uac-done-primary:hover {
     display: none;
   }
 }
+
+/* ── Gem-colored thinking dots (founder walk 2026-07-17): the typing dots share
+   the gemstar palette, cycling while they bounce — staggered so the trio reads
+   as one flowing gradient. Never a star-then-slash in this comment. ─────────── */
+@keyframes li-gem-dot-cycle {
+  0% {
+    background-color: #f3a6e4;
+  }
+  17% {
+    background-color: #b79bf7;
+  }
+  34% {
+    background-color: #7fb8ff;
+  }
+  51% {
+    background-color: #54e6de;
+  }
+  68% {
+    background-color: #93efb9;
+  }
+  85% {
+    background-color: #f1ee9e;
+  }
+  100% {
+    background-color: #f3a6e4;
+  }
+}
+.uac-typing span {
+  animation:
+    uac-bounce 1.1s ease-in-out infinite,
+    li-gem-dot-cycle 5.4s linear infinite;
+}
+.uac-typing span:nth-child(2) {
+  animation-delay: 0.18s, 0.9s;
+}
+.uac-typing span:nth-child(3) {
+  animation-delay: 0.36s, 1.8s;
+}

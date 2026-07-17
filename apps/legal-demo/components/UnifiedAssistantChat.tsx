@@ -35,7 +35,7 @@ import { QuestionBatch } from '@/components/QuestionBatch'
 import type { BuildQuestionEvent } from '@/lib/assistantStream'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster, GemSparkle } from '@/components/GemSparkle'
 import {
   SendIcon,
   SettingsIcon,
@@ -2334,7 +2334,7 @@ export function UnifiedAssistantChat({
           feedback / history / new / close as translucent icon buttons ───────── */}
       <div className="li-uac-head">
         <div className="li-uac-head-id">
-          <GemSparkle size={28} />
+          <GemCluster size={28} />
           <div className="li-uac-head-text">
             <div className="li-uac-head-title">Legal Assistant</div>
             <div className="li-uac-head-status">

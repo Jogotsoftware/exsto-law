@@ -37,10 +37,15 @@ function scopeForPath(pathname: string): {
 // (per-instance id — SVG ids are document-global).
 function AssistantFabIcon(): React.ReactElement {
   const gradientId = `li-uac-fabgem-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const stars =
-    'M16.40 0.80L17.85 3.75L20.80 5.20L17.85 6.65L16.40 9.60L14.95 6.65L12.00 5.20L14.95 3.75ZM11.60 8.30L12.42 9.98L14.10 10.80L12.42 11.63L11.60 13.30L10.78 11.63L9.10 10.80L10.78 9.98ZM14.70 11.80L15.23 12.87L16.30 13.40L15.23 13.93L14.70 15.00L14.17 13.93L13.10 13.40L14.17 12.87Z'
+  const shineId = `li-uac-fabshine-${gradientId}`
+  // Three separate star paths so each twinkles on its own beat (li-gemstar).
+  const starA = 'M16.4 0.8 17.85 3.75 20.8 5.2 17.85 6.65 16.4 9.6 14.95 6.65 12 5.2 14.95 3.75Z'
+  const starB =
+    'M11.6 8.3 12.42 9.98 14.1 10.8 12.42 11.63 11.6 13.3 10.78 11.63 9.1 10.8 10.78 9.98Z'
+  const starC =
+    'M14.7 11.8 15.23 12.87 16.3 13.4 15.23 13.93 14.7 15 14.17 13.93 13.1 13.4 14.17 12.87Z'
   return (
-    <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true">
+    <svg className="li-gemstar" width="30" height="30" viewBox="0 0 24 24" aria-hidden="true">
       <defs>
         <linearGradient
           id={gradientId}
@@ -74,6 +79,28 @@ function AssistantFabIcon(): React.ReactElement {
               repeatCount="indefinite"
             />
           </stop>
+          <animateTransform
+            attributeName="gradientTransform"
+            type="rotate"
+            values="0 12 12;360 12 12"
+            dur="22s"
+            repeatCount="indefinite"
+          />
+        </linearGradient>
+        {/* The comp FAB's white shine sweeping across the cluster. */}
+        <linearGradient id={shineId} x1="2" y1="4" x2="12" y2="20" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="0.42" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="0.5" stopColor="#ffffff" stopOpacity="0.4" />
+          <stop offset="0.58" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          <animateTransform
+            attributeName="gradientTransform"
+            type="translate"
+            values="-18 0;18 0;-18 0"
+            dur="4.5s"
+            repeatCount="indefinite"
+          />
         </linearGradient>
       </defs>
       <path
@@ -84,7 +111,12 @@ function AssistantFabIcon(): React.ReactElement {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <path d={stars} fill={`url(#${gradientId})`} />
+      <path d={starA} fill={`url(#${gradientId})`} />
+      <path d={starB} fill={`url(#${gradientId})`} style={{ animationDelay: '.4s' }} />
+      <path d={starC} fill={`url(#${gradientId})`} style={{ animationDelay: '.9s' }} />
+      <path d={starA} fill={`url(#${shineId})`} />
+      <path d={starB} fill={`url(#${shineId})`} />
+      <path d={starC} fill={`url(#${shineId})`} />
     </svg>
   )
 }
