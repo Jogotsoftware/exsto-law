@@ -1,13 +1,15 @@
 'use client'
 
-// User management (S9 — WP9.3). The owning attorney (firm.admin) adds firm
-// users, assigns roles, and deactivates accounts. Every write goes to the
-// operation core via the legal.user.* MCP tools; the admin gate is enforced
-// server-side (requireAdmin) — this page only shows/hides for convenience.
+// Settings → Users & roles (WP-G). Split out of the old settings monolith —
+// same legal.user.* MCP tools (admin-gated server-side via requireAdmin),
+// restyled to the comp's avatar-row list with a header-level "Invite user"
+// action. Keeps the app's richer per-row role SELECT + Deactivate button
+// (the comp shows a bare kebab menu) — no capability dropped, just presented
+// inline instead of behind a hidden menu.
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
 
 interface FirmUser {
   actorId: string
@@ -32,7 +34,14 @@ interface WhoAmI {
   rank: number
 }
 
-export function UsersRolesSection() {
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '·'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+export default function UsersRolesPage(): React.ReactElement {
   const [me, setMe] = useState<WhoAmI | null>(null)
   const [users, setUsers] = useState<FirmUser[] | null>(null)
   const [roles, setRoles] = useState<FirmRole[]>([])
@@ -40,7 +49,7 @@ export function UsersRolesSection() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [showInvite, setShowInvite] = useState(false)
 
-  async function load() {
+  async function load(): Promise<void> {
     setError(null)
     try {
       const who = await callAttorneyMcp<WhoAmI>({ toolName: 'legal.user.me' })
@@ -63,7 +72,7 @@ export function UsersRolesSection() {
     void load()
   }, [])
 
-  async function changeRole(actorId: string, roleName: string) {
+  async function changeRole(actorId: string, roleName: string): Promise<void> {
     setBusyId(actorId)
     setError(null)
     try {
@@ -76,7 +85,7 @@ export function UsersRolesSection() {
     }
   }
 
-  async function deactivate(actorId: string) {
+  async function deactivate(actorId: string): Promise<void> {
     if (!confirm('Deactivate this user? They will lose access immediately.')) return
     setBusyId(actorId)
     setError(null)
@@ -91,98 +100,96 @@ export function UsersRolesSection() {
   }
 
   return (
-    <CollapsibleSection id="settings-section-users" title="Users & roles">
-      {error && <div className="alert alert-error">{error}</div>}
+    <>
+      <SettingsHeader
+        title="Users & roles"
+        actions={
+          me?.isAdmin ? (
+            <button className="li-set-btn li-set-btn-primary" onClick={() => setShowInvite(true)}>
+              + Invite user
+            </button>
+          ) : undefined
+        }
+      />
+      {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
 
       {me && !me.isAdmin && (
-        <div className="empty-block">Only the firm owner (admin) can manage users.</div>
+        <div className="li-set-card li-set-card--medium">
+          Only the firm owner (admin) can manage users.
+        </div>
       )}
 
       {me?.isAdmin && (
-        <section className="section-flush">
-          <div
-            className="client-search-row"
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-          >
-            <span className="text-muted text-xs">
+        <div className="li-set-card li-set-card--medium li-set-card--flush">
+          <div className="li-set-toolbar">
+            <span className="li-set-toolbar-count">
               {users ? `${users.filter((u) => u.status === 'active').length} active` : ' '}
             </span>
-            <button className="primary" onClick={() => setShowInvite(true)}>
-              + Invite user
-            </button>
           </div>
 
-          {users === null && (
-            <div className="loading-block" role="status">
-              <span className="spinner" /> Loading…
-            </div>
-          )}
+          {users === null && <SettingsLoading />}
 
-          {users && users.length > 0 && (
-            <table className="client-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => {
-                  const isSelf = u.actorId === me.actorId
-                  // You can only manage someone strictly below your own rank — the
-                  // same rule the operation core enforces server-side.
-                  const manageable = !isSelf && u.rank < me.rank
-                  return (
-                    <tr key={u.actorId} style={{ opacity: u.status === 'active' ? 1 : 0.5 }}>
-                      <td>
-                        {u.displayName}
-                        {isSelf && <span className="text-xs text-muted"> (you)</span>}
-                      </td>
-                      <td className="text-muted">{u.email ?? '—'}</td>
-                      <td>
-                        <select
-                          value={roles.find((r) => r.displayName === u.role)?.roleName ?? ''}
-                          disabled={busyId === u.actorId || u.status !== 'active' || !manageable}
-                          onChange={(e) => changeRole(u.actorId, e.target.value)}
-                        >
-                          <option value="" disabled>
-                            {u.role ?? '(custom / unrestricted)'}
-                          </option>
-                          {roles
-                            .filter((r) => r.rank < me.rank)
-                            .map((r) => (
-                              <option key={r.roleName} value={r.roleName}>
-                                {r.displayName}
-                              </option>
-                            ))}
-                        </select>
-                      </td>
-                      <td>
-                        <span className={`badge ${u.status === 'active' ? 'ok' : ''}`}>
-                          {u.status}
+          {users &&
+            users.map((u) => {
+              const isSelf = u.actorId === me.actorId
+              // You can only manage someone strictly below your own rank — the
+              // same rule the operation core enforces server-side.
+              const manageable = !isSelf && u.rank < me.rank
+              return (
+                <div
+                  key={u.actorId}
+                  className="li-set-user-row"
+                  style={{ opacity: u.status === 'active' ? 1 : 0.55 }}
+                >
+                  <span className="li-set-user-avatar">{initials(u.displayName)}</span>
+                  <div className="li-set-user-main">
+                    <div className="li-set-user-name">
+                      {u.displayName}
+                      {isSelf && (
+                        <span className="li-set-hint" style={{ margin: 0 }}>
+                          &nbsp;(you)
                         </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        {u.status === 'active' && manageable && (
-                          <button
-                            className="danger outline"
-                            disabled={busyId === u.actorId}
-                            onClick={() => deactivate(u.actorId)}
-                          >
-                            Deactivate
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </section>
+                      )}
+                    </div>
+                    <div className="li-set-user-email">{u.email ?? '—'}</div>
+                  </div>
+                  <div className="li-set-user-controls">
+                    <select
+                      className="li-set-select"
+                      value={roles.find((r) => r.displayName === u.role)?.roleName ?? ''}
+                      disabled={busyId === u.actorId || u.status !== 'active' || !manageable}
+                      onChange={(e) => changeRole(u.actorId, e.target.value)}
+                    >
+                      <option value="" disabled>
+                        {u.role ?? '(custom / unrestricted)'}
+                      </option>
+                      {roles
+                        .filter((r) => r.rank < me.rank)
+                        .map((r) => (
+                          <option key={r.roleName} value={r.roleName}>
+                            {r.displayName}
+                          </option>
+                        ))}
+                    </select>
+                    <span
+                      className={`li-set-role-pill${u.status !== 'active' ? ' is-inactive' : ''}`}
+                    >
+                      {u.status}
+                    </span>
+                    {u.status === 'active' && manageable && (
+                      <button
+                        className="li-set-btn li-set-btn-danger li-set-btn-sm"
+                        disabled={busyId === u.actorId}
+                        onClick={() => deactivate(u.actorId)}
+                      >
+                        Deactivate
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+        </div>
       )}
 
       {showInvite && (
@@ -196,7 +203,7 @@ export function UsersRolesSection() {
           }}
         />
       )}
-    </CollapsibleSection>
+    </>
   )
 }
 
@@ -210,7 +217,7 @@ function InviteModal({
   maxRank: number
   onClose: () => void
   onDone: () => void
-}) {
+}): React.ReactElement {
   // You can only grant roles below your own rank.
   const grantable = roles.filter((r) => r.rank < maxRank)
   const [email, setEmail] = useState('')
@@ -223,7 +230,7 @@ function InviteModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function save() {
+  async function save(): Promise<void> {
     if (!email.trim()) {
       setError('Enter the user’s email (their sign-in identity).')
       return
@@ -292,7 +299,7 @@ function InviteModal({
           <button onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button className="primary" onClick={save} disabled={busy}>
+          <button className="li-set-btn li-set-btn-primary" onClick={save} disabled={busy}>
             {busy ? 'Adding…' : 'Add user'}
           </button>
         </div>
