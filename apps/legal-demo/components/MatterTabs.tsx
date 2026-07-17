@@ -10,6 +10,7 @@ export function MatterTabs({ matterEntityId }: { matterEntityId: string }) {
   return (
     <NavTabs
       ariaLabel="Matter workspace"
+      className="li-mat-tabs"
       tabs={[
         { href: base, label: 'Overview' },
         { href: `${base}/activity`, label: 'Activity' },

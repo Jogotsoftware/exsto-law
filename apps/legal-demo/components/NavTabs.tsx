@@ -13,13 +13,23 @@ export interface NavTabSpec {
   label: string
 }
 
-export function NavTabs({ tabs, ariaLabel }: { tabs: NavTabSpec[]; ariaLabel: string }) {
+export function NavTabs({
+  tabs,
+  ariaLabel,
+  className,
+}: {
+  tabs: NavTabSpec[]
+  ariaLabel: string
+  /** Extra class appended alongside `nav-tabs` (e.g. a surface-specific restyle
+   *  that must not affect the other `.nav-tabs` consumers — CRM, service editor). */
+  className?: string
+}) {
   const pathname = usePathname()
   const activeHref = tabs
     .filter((t) => pathname === t.href || pathname.startsWith(t.href + '/'))
     .sort((a, b) => b.href.length - a.href.length)[0]?.href
   return (
-    <nav className="nav-tabs" aria-label={ariaLabel}>
+    <nav className={className ? `nav-tabs ${className}` : 'nav-tabs'} aria-label={ariaLabel}>
       {tabs.map((t) => (
         <Link
           key={t.href}

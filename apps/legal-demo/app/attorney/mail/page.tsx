@@ -177,6 +177,12 @@ export default function MailPage() {
   // Contract D — launchCompose: open the composer pre-wired from query params
   // (?compose=1&to=…|contactId=…&subject=…). A contactId is resolved to the
   // client's email; otherwise `to` is used directly.
+  //
+  // WP-B2: a matter Documents-tab "Email" on an upload adds
+  // &attachKind=upload&attachId=<versionId>&attachLabel=<filename>&matterId=<id>
+  // — pre-selects that upload in the SAME AttachmentPicker state a manual pick
+  // would set (composeAttach/composeMatterId), reusing the existing attach +
+  // send path rather than a new one.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
@@ -184,6 +190,15 @@ export default function MailPage() {
     const subject = params.get('subject') ?? ''
     const to = params.get('to') ?? ''
     const contactId = params.get('contactId')
+    const attachKind = params.get('attachKind')
+    const attachId = params.get('attachId')
+    const matterIdParam = params.get('matterId')
+    if (attachKind === 'upload' && attachId) {
+      setComposeAttach([
+        { kind: 'upload', id: attachId, label: params.get('attachLabel') || 'Attached file' },
+      ])
+    }
+    if (matterIdParam) setComposeMatterId(matterIdParam)
     if (to || !contactId) {
       setCompose({ to, subject, body: EMPTY_BODY })
       return
@@ -194,6 +209,14 @@ export default function MailPage() {
     })
       .then((r) => setCompose({ to: r.contact?.email ?? '', subject, body: EMPTY_BODY }))
       .catch(() => setCompose({ to: '', subject, body: EMPTY_BODY }))
+  }, [])
+
+  // Deep-link into a specific thread (?thread=<gmailThreadId>) — the matter
+  // Activity tab's Emails card (WP-B2) opens rows this way.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const threadId = new URLSearchParams(window.location.search).get('thread')
+    if (threadId) void openThread(threadId)
   }, [])
 
   // Resolve which matters the compose recipient is a client of, so the attachment

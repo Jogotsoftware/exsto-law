@@ -118,12 +118,12 @@ const addAttendeesTool: Tool<
 // ── Mail tab (REQ-CALMAIL-02/03) ───────────────────────────────────────────
 
 const mailThreadsTool: Tool<
-  { query?: string },
+  { query?: string; matterEntityId?: string },
   { threads: MailThreadSummary[]; clientEmailCount: number }
 > = {
   name: 'legal.mail.threads',
   description:
-    'Client-related Gmail threads (queries are scoped to known matter-contact addresses only), matter-matched. An optional `query` is ANDed onto that scope as a Gmail search (e.g. "invoice", "subject:engagement", "after:2026/01/01"), so it filters within client mail without escaping it.',
+    'Client-related Gmail threads (queries are scoped to known matter-contact addresses only), matter-matched. An optional `query` is ANDed onto that scope as a Gmail search (e.g. "invoice", "subject:engagement", "after:2026/01/01"), so it filters within client mail without escaping it. An optional `matterEntityId` further restricts results to threads matched to that one matter (e.g. a matter\'s Activity tab Emails card).',
   mode: 'read',
   inputSchema: {
     type: 'object',
@@ -132,10 +132,14 @@ const mailThreadsTool: Tool<
         type: 'string',
         description: 'Optional Gmail search terms, applied within the client-mail scope.',
       },
+      matterEntityId: {
+        type: 'string',
+        description: 'Optional: restrict to threads matched to this matter.',
+      },
     },
     additionalProperties: false,
   },
-  handler: (ctx: ActionContext, input) => listMailThreads(ctx, input.query),
+  handler: (ctx: ActionContext, input) => listMailThreads(ctx, input.query, input.matterEntityId),
 }
 
 const mailThreadGetTool: Tool<{ gmailThreadId: string }, MailThreadView> = {

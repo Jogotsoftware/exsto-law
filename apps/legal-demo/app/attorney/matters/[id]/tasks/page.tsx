@@ -3,12 +3,18 @@
 // Matter › TASKS tab. Ad-hoc to-dos on the matter (migration 0084) AND signature
 // tasks (migration 0113): a task can carry a document, and opening it walks the
 // DocuSign-style flow (prepare → track → review) in the task window. This page is
-// the list + quick-create; the per-task window lives at ./[taskId].
+// the list + quick-create (comp TASK MODAL); the per-task window lives at ./[taskId].
+//
+// HYBRID status model (founder decision, WP-B): the list's CHECKBOX toggles
+// done/undone for plain tasks (comp). The full 4-state status (open/in_progress/
+// blocked/done) stays editable on the task DETAIL page — this list is a fast
+// done-toggle, not the only way to set status.
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { DateField } from '@/components/DateField'
 import { formatDate } from '@/lib/datetime'
+import { BriefcaseIcon, CheckIcon, SignatureIcon, UsersIcon, XIcon } from '@/components/icons'
 import { humanizeKind } from '../shared'
 
 interface Task {
@@ -32,24 +38,21 @@ interface DraftDoc {
   status: string
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  open: 'Open',
-  in_progress: 'In progress',
-  blocked: 'Blocked',
-  done: 'Done',
-}
-function statusBadge(s: string): string {
-  if (s === 'done') return 'badge ok'
-  if (s === 'blocked') return 'badge danger'
-  if (s === 'in_progress') return 'badge warn'
-  return 'badge muted'
-}
 // What a signature task is waiting on, derived from its stored fields (the live
 // envelope state shows inside the task window).
 function signatureState(t: Task): string {
   if (t.status === 'done' || t.reviewedAt) return 'Completed'
   if (t.esignEnvelopeId) return 'Out for signature'
   return 'Not sent'
+}
+function billingChip(t: Task): string | null {
+  if (t.billingMode === 'hours' && t.hours) return `${t.hours}h`
+  if (t.billingMode === 'fixed' && t.feeAmount) return `$${t.feeAmount}`
+  return null
+}
+function isOverdue(t: Task): boolean {
+  if (!t.dueDate || t.status === 'done') return false
+  return new Date(t.dueDate + 'T23:59:59').getTime() < Date.now()
 }
 
 export default function MatterTasksPage({ params }: { params: Promise<{ id: string }> }) {
@@ -59,13 +62,7 @@ export default function MatterTasksPage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-
-  // New-task form.
-  const [title, setTitle] = useState('')
-  const [dueDate, setDueDate] = useState('')
-  const [billingMode, setBillingMode] = useState('none')
-  const [cost, setCost] = useState('')
-  const [signDoc, setSignDoc] = useState('') // documentVersionId, '' = plain task
+  const [showModal, setShowModal] = useState(false)
 
   const load = useCallback(async () => {
     setError(null)
@@ -93,43 +90,19 @@ export default function MatterTasksPage({ params }: { params: Promise<{ id: stri
     load()
   }, [load])
 
-  async function createTask() {
-    if (!title.trim()) {
-      setError('A task needs a title.')
-      return
-    }
-    setBusy('create')
-    setError(null)
+  // The header Actions menu's "New task" lands here with ?new=1.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (new URLSearchParams(window.location.search).get('new') === '1') setShowModal(true)
+  }, [])
+
+  async function toggleDone(t: Task) {
+    setBusy(t.taskId)
     try {
       await callAttorneyMcp({
-        toolName: 'legal.task.create',
-        input: {
-          matterEntityId: id,
-          title: title.trim(),
-          dueDate: dueDate || undefined,
-          billingMode,
-          hours: billingMode === 'hours' ? cost || undefined : undefined,
-          feeAmount: billingMode === 'fixed' ? cost || undefined : undefined,
-          documentVersionId: signDoc || undefined,
-        },
+        toolName: 'legal.task.update',
+        input: { taskId: t.taskId, status: t.status === 'done' ? 'open' : 'done' },
       })
-      setTitle('')
-      setDueDate('')
-      setBillingMode('none')
-      setCost('')
-      setSignDoc('')
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function setStatus(taskId: string, status: string) {
-    setBusy(taskId)
-    try {
-      await callAttorneyMcp({ toolName: 'legal.task.update', input: { taskId, status } })
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -147,124 +120,243 @@ export default function MatterTasksPage({ params }: { params: Promise<{ id: stri
 
   return (
     <>
-      <section>
-        <h2>Tasks</h2>
-        {error && <div className="alert alert-error">{error}</div>}
-        {tasks.length === 0 ? (
-          <p className="text-muted">No tasks yet. Add one below.</p>
-        ) : (
-          <div className="table-wrap" style={{ marginTop: 'var(--space-2)' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Task</th>
-                  <th>Due</th>
-                  <th>Status</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.map((t) => {
-                  const isSig = t.kind === 'signature'
-                  return (
-                    <tr key={t.taskId}>
-                      <td>
-                        <Link href={`/attorney/matters/${id}/tasks/${t.taskId}`}>{t.title}</Link>
-                        {isSig && (
-                          <span className="badge" style={{ marginLeft: 'var(--space-2)' }}>
-                            ✍ Signature
-                          </span>
-                        )}
-                      </td>
-                      <td className="text-sm text-muted">
-                        {t.dueDate ? formatDate(t.dueDate) : '—'}
-                      </td>
-                      <td>
-                        {isSig ? (
-                          <span className={statusBadge(t.status)}>{signatureState(t)}</span>
-                        ) : (
-                          <select
-                            value={t.status}
-                            disabled={busy === t.taskId}
-                            onChange={(e) => setStatus(t.taskId, e.target.value)}
-                          >
-                            {Object.entries(STATUS_LABEL).map(([v, label]) => (
-                              <option key={v} value={v}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </td>
-                      <td>
-                        <Link href={`/attorney/matters/${id}/tasks/${t.taskId}`}>
-                          {isSig ? 'Open →' : 'View →'}
-                        </Link>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section style={{ marginTop: 'var(--space-5)' }}>
-        <h3>New task</h3>
-        <div
-          className="row"
-          style={{ gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}
-        >
-          <input
-            style={{ minWidth: 240, flex: 1 }}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="What needs doing?"
-          />
-          <DateField value={dueDate} onValueChange={setDueDate} title="Due date (optional)" />
-          <select
-            value={billingMode}
-            onChange={(e) => setBillingMode(e.target.value)}
-            title="Billing"
-          >
-            <option value="none">No charge</option>
-            <option value="hours">Hours</option>
-            <option value="fixed">Fixed fee</option>
-          </select>
-          {billingMode !== 'none' && (
-            <input
-              style={{ width: 90 }}
-              value={cost}
-              onChange={(e) => setCost(e.target.value)}
-              placeholder={billingMode === 'hours' ? 'Hours' : 'Amount'}
-            />
-          )}
-        </div>
-        <div
-          className="row"
-          style={{ gap: 'var(--space-2)', marginTop: 'var(--space-2)', alignItems: 'center' }}
-        >
-          <label className="text-sm">Attach document for signature:</label>
-          <select value={signDoc} onChange={(e) => setSignDoc(e.target.value)}>
-            <option value="">— None (plain task) —</option>
-            {docs.map((d) => (
-              <option key={d.documentVersionId} value={d.documentVersionId}>
-                {humanizeKind(d.documentKind)} (v{d.versionNumber})
-              </option>
-            ))}
-          </select>
-          {docs.length === 0 && (
-            <span className="text-sm text-muted">No generated documents on this matter yet.</span>
-          )}
-        </div>
-        <div style={{ marginTop: 'var(--space-3)' }}>
-          <button className="primary" onClick={createTask} disabled={busy === 'create'}>
-            {busy === 'create' && <span className="spinner" />}
-            {signDoc ? 'Create signature task' : 'Add task'}
+      <div className="li-mat-card li-mat-doccard">
+        <div className="li-mat-doccard-head">
+          <h2 className="li-mat-card-title">Tasks</h2>
+          <button type="button" className="li-mat-upload-btn" onClick={() => setShowModal(true)}>
+            New task
           </button>
         </div>
-      </section>
+        {error && <div className="alert alert-error">{error}</div>}
+        {tasks.length === 0 ? (
+          <p className="text-muted" style={{ padding: '8px 4px 16px' }}>
+            No tasks yet.
+          </p>
+        ) : (
+          <div className="li-mat-tasklist">
+            {tasks.map((t) => {
+              const isSig = t.kind === 'signature'
+              const done = t.status === 'done'
+              const bill = billingChip(t)
+              return (
+                <div key={t.taskId} className="li-mat-task-row">
+                  <span
+                    className={
+                      done
+                        ? 'li-mat-task-check is-done'
+                        : isSig
+                          ? 'li-mat-task-check is-disabled'
+                          : 'li-mat-task-check'
+                    }
+                    role={isSig ? undefined : 'checkbox'}
+                    aria-checked={done}
+                    aria-disabled={isSig || busy === t.taskId}
+                    title={isSig ? 'Signature tasks complete via the review step' : 'Toggle done'}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      if (isSig || busy === t.taskId) return
+                      void toggleDone(t)
+                    }}
+                  >
+                    {done && <CheckIcon size={13} />}
+                  </span>
+                  <Link
+                    href={`/attorney/matters/${id}/tasks/${t.taskId}`}
+                    className="li-mat-task-main"
+                  >
+                    <span
+                      className={isSig ? 'li-mat-task-role is-shared' : 'li-mat-task-role'}
+                      title={isSig ? 'Requires signature' : 'Attorney task'}
+                    >
+                      {isSig ? <UsersIcon size={14} /> : <BriefcaseIcon size={14} />}
+                    </span>
+                    <span className={done ? 'li-mat-task-title is-done' : 'li-mat-task-title'}>
+                      {t.title}
+                    </span>
+                    <span className="li-mat-task-chips">
+                      {t.dueDate && (
+                        <span
+                          className={
+                            isOverdue(t) ? 'li-mat-chip li-mat-chip-danger' : 'li-mat-chip'
+                          }
+                        >
+                          {formatDate(t.dueDate)}
+                        </span>
+                      )}
+                      {bill && <span className="li-mat-chip li-mat-chip-info">{bill}</span>}
+                      {isSig && (
+                        <span className="li-mat-chip li-mat-chip-purple">
+                          <SignatureIcon size={12} />
+                          {signatureState(t)}
+                        </span>
+                      )}
+                    </span>
+                  </Link>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {showModal && (
+        <NewTaskModal
+          matterEntityId={id}
+          docs={docs}
+          onClose={() => setShowModal(false)}
+          onCreated={async () => {
+            setShowModal(false)
+            await load()
+          }}
+        />
+      )}
     </>
+  )
+}
+
+function NewTaskModal({
+  matterEntityId,
+  docs,
+  onClose,
+  onCreated,
+}: {
+  matterEntityId: string
+  docs: DraftDoc[]
+  onClose: () => void
+  onCreated: () => Promise<void>
+}) {
+  const [title, setTitle] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [billingMode, setBillingMode] = useState('none')
+  const [cost, setCost] = useState('')
+  const [attachSig, setAttachSig] = useState(false)
+  const [signDoc, setSignDoc] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function create() {
+    if (!title.trim()) {
+      setError('A task needs a title.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.task.create',
+        input: {
+          matterEntityId,
+          title: title.trim(),
+          dueDate: dueDate || undefined,
+          billingMode,
+          hours: billingMode === 'hours' ? cost || undefined : undefined,
+          feeAmount: billingMode === 'fixed' ? cost || undefined : undefined,
+          documentVersionId: attachSig ? signDoc || undefined : undefined,
+        },
+      })
+      await onCreated()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="li-mat-modal-backdrop" onClick={() => !busy && onClose()}>
+      <div className="li-mat-task-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="li-mat-upload-head">
+          <h2>New task</h2>
+          <button
+            type="button"
+            className="li-mat-modal-x"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="Close"
+          >
+            <XIcon size={16} />
+          </button>
+        </div>
+        <div className="li-mat-task-modal-body">
+          <label className="li-mat-field">
+            <span>What needs doing</span>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Draft the notice of representation"
+              autoFocus
+            />
+          </label>
+          <label className="li-mat-field">
+            <span>Due date</span>
+            <DateField value={dueDate} onValueChange={setDueDate} />
+          </label>
+          <div className="li-mat-field">
+            <span>Billing</span>
+            <div className="li-mat-segrow">
+              {(['none', 'hours', 'fixed'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={billingMode === m ? 'li-mat-seg is-active' : 'li-mat-seg'}
+                  onClick={() => setBillingMode(m)}
+                >
+                  {m === 'none' ? 'No charge' : m === 'hours' ? 'Hours' : 'Fixed fee'}
+                </button>
+              ))}
+            </div>
+            {billingMode !== 'none' && (
+              <input
+                className="li-mat-cost-input"
+                value={cost}
+                onChange={(e) => setCost(e.target.value)}
+                placeholder={billingMode === 'hours' ? 'Hours' : 'Amount'}
+              />
+            )}
+          </div>
+          <label className="li-mat-checkrow">
+            <span
+              className={attachSig ? 'li-mat-task-check is-done' : 'li-mat-task-check'}
+              onClick={() => setAttachSig((v) => !v)}
+            >
+              {attachSig && <CheckIcon size={13} />}
+            </span>
+            Attach a document for signature
+          </label>
+          {attachSig && (
+            <label className="li-mat-field">
+              <span>Document</span>
+              <select value={signDoc} onChange={(e) => setSignDoc(e.target.value)}>
+                <option value="">— None (plain task) —</option>
+                {docs.map((d) => (
+                  <option key={d.documentVersionId} value={d.documentVersionId}>
+                    {humanizeKind(d.documentKind)} (v{d.versionNumber})
+                  </option>
+                ))}
+              </select>
+              {docs.length === 0 && (
+                <span className="text-sm text-muted">
+                  No generated documents on this matter yet.
+                </span>
+              )}
+            </label>
+          )}
+          {error && <div className="alert alert-error">{error}</div>}
+        </div>
+        <div className="li-mat-upload-actions">
+          <button type="button" className="li-mat-btn-ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="li-mat-btn-primary"
+            onClick={() => void create()}
+            disabled={busy || !title.trim()}
+          >
+            {busy ? 'Creating…' : 'Create task'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -16,6 +16,7 @@ import {
   FileTextIcon,
   EditIcon,
 } from '@/components/icons'
+import { GemSparkle } from '@/components/GemSparkle'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 import {
   humanizeService,
@@ -34,7 +35,6 @@ import {
   type MatterWorkflow,
 } from './shared'
 import { WorkflowEditor } from './WorkflowEditor'
-import { WorkflowStepList } from '@/components/WorkflowStepList'
 import {
   RunnerReview,
   CapabilityStatePanel,
@@ -59,6 +59,18 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
   const [callTranscript, setCallTranscript] = useState('')
   const [openStep, setOpenStep] = useState<StepKey | null>(null)
   const [hasInvoice, setHasInvoice] = useState(false)
+  // The matter header's "Close matter" action lands here with ?closeMatter=1 —
+  // auto-opens the workflow's complete_matter stage window (WP-B). Read via
+  // window.location (not useSearchParams) to match the app's established
+  // no-Suspense-boundary convention for query-triggered opens (billing ?add=,
+  // mail ?compose=).
+  const [closeMatterRequested, setCloseMatterRequested] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (new URLSearchParams(window.location.search).get('closeMatter') === '1') {
+      setCloseMatterRequested(true)
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setError(null)
@@ -160,88 +172,98 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
 
   return (
     <>
-      <section>
-        <h2>Overview</h2>
-        <div className="kv-grid">
+      <div className="li-mat-ov-col">
+        <div className="li-mat-card li-mat-facts">
           <div>
-            <div className="kv-label">Client</div>
-            <div className="kv-value">
-              {matter.clientEntityId ? (
-                <Link href={`/attorney/crm/${matter.clientEntityId}`}>
-                  {matter.clientName || 'View client'}
-                </Link>
-              ) : (
-                matter.clientName || '—'
-              )}
+            <div className="li-mat-facts-label">Client</div>
+            {matter.clientEntityId ? (
+              <Link href={`/attorney/crm/${matter.clientEntityId}`} className="li-mat-facts-link">
+                {matter.clientName || 'View client'}
+              </Link>
+            ) : (
+              <div className="li-mat-facts-value">{matter.clientName || '—'}</div>
+            )}
+          </div>
+          <div>
+            <div className="li-mat-facts-label">Practice area</div>
+            <div className="li-mat-facts-value">{humanizeService(matter.practiceArea)}</div>
+          </div>
+          <div>
+            <div className="li-mat-facts-label">Opened</div>
+            <div className="li-mat-facts-value">
+              {new Date(matter.createdAt).toLocaleDateString()}
             </div>
           </div>
-          <div>
-            <div className="kv-label">Practice area</div>
-            <div className="kv-value">{humanizeService(matter.practiceArea)}</div>
-          </div>
-          <div>
-            <div className="kv-label">Opened</div>
-            <div className="kv-value">{new Date(matter.createdAt).toLocaleDateString()}</div>
-          </div>
         </div>
-      </section>
 
-      {matter.workflow ? (
-        // ── Data-driven workflow window (ADR 0045 PR3) ──────────────────────
-        // The matter is running an authored lifecycle: render the strip + window
-        // straight from matter.workflow.graph. This branch is reached ONLY when a
-        // workflow instance exists; the no-workflow path below is untouched.
-        <WorkflowWindow matter={matter} workflow={matter.workflow} onChanged={load} />
-      ) : matter.workflowRepairAvailable ? (
-        // ── MACHINE-COMMS-1: honest repair panel ─────────────────────────────
-        // The matter has NO workflow instance but its service HAS an authored
-        // lifecycle — never pretend with the legacy derived steps; say so and
-        // offer to start the real workflow.
-        <WorkflowRepairPanel matterEntityId={id} onStarted={load} />
-      ) : (
-        // ── Fallback: the existing derived-step window (#197), UNCHANGED ──────
-        <section>
-          <h2>Workflow</h2>
-          {/* The page-level error banner only shows when no modal is open; modals
-              surface their own errors in-context (an action started in a modal). */}
-          {error && openStep === null && <div className="alert alert-error">{error}</div>}
-          <div className="step-list">
-            {steps.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                className={`step-row step-${s.state}`}
-                onClick={() => openStepAt(s.key)}
-              >
-                <span className="step-ico" aria-hidden>
-                  <StepIcon state={s.state} />
-                </span>
-                <span className="step-titles">
-                  <span className="step-title">{s.title}</span>
-                  <span className="step-subtitle">{s.subtitle}</span>
-                </span>
-                <span className="step-state-pill">{labelForState(s.state)}</span>
-                <span className="step-chevron" aria-hidden>
-                  <ChevronRightIcon size={16} />
-                </span>
-              </button>
-            ))}
-          </div>
-          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-            Click a step to view or download what it produced, or to advance it.
-          </p>
+        {matter.workflow ? (
+          // ── Data-driven workflow window (ADR 0045 PR3) ──────────────────────
+          // The matter is running an authored lifecycle: render the strip + window
+          // straight from matter.workflow.graph. This branch is reached ONLY when a
+          // workflow instance exists; the no-workflow path below is untouched.
+          <WorkflowWindow
+            matter={matter}
+            workflow={matter.workflow}
+            onChanged={load}
+            initialOpenKey={
+              closeMatterRequested
+                ? (matter.workflow.graph.find((s) => s.action?.kind === 'complete_matter')?.key ??
+                  null)
+                : null
+            }
+          />
+        ) : matter.workflowRepairAvailable ? (
+          // ── MACHINE-COMMS-1: honest repair panel ─────────────────────────────
+          // The matter has NO workflow instance but its service HAS an authored
+          // lifecycle — never pretend with the legacy derived steps; say so and
+          // offer to start the real workflow.
+          <WorkflowRepairPanel matterEntityId={id} onStarted={load} />
+        ) : (
+          // ── Fallback: the existing derived-step window (#197), UNCHANGED ──────
+          <section className="li-mat-card">
+            <h2 className="li-mat-card-title">Workflow</h2>
+            {/* The page-level error banner only shows when no modal is open; modals
+                surface their own errors in-context (an action started in a modal). */}
+            {error && openStep === null && <div className="alert alert-error">{error}</div>}
+            <div className="step-list">
+              {steps.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  className={`step-row step-${s.state}`}
+                  onClick={() => openStepAt(s.key)}
+                >
+                  <span className="step-ico" aria-hidden>
+                    <StepIcon state={s.state} />
+                  </span>
+                  <span className="step-titles">
+                    <span className="step-title">{s.title}</span>
+                    <span className="step-subtitle">{s.subtitle}</span>
+                  </span>
+                  <span className="step-state-pill">{labelForState(s.state)}</span>
+                  <span className="step-chevron" aria-hidden>
+                    <ChevronRightIcon size={16} />
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
+              Click a step to view or download what it produced, or to advance it.
+            </p>
+          </section>
+        )}
+
+        {/* MACHINE-COMMS-1 — working notes on the matter (attorney + AI-extracted). */}
+        <NotesSection targetEntityId={id} createInput={{ matterEntityId: id }} variant="card" />
+
+        {/* MACHINE-COMMS-1 — ad-hoc client email: AI-drafted, lands in the review
+            queue where approving it sends it. Not in the comp — a real capability
+            the app is richer for; kept, restyled into the same card language. */}
+        <section className="li-mat-card">
+          <h2 className="li-mat-card-title">Communications</h2>
+          <DraftEmailControl matterEntityId={id} />
         </section>
-      )}
-
-      {/* MACHINE-COMMS-1 — working notes on the matter (attorney + AI-extracted). */}
-      <NotesSection targetEntityId={id} createInput={{ matterEntityId: id }} />
-
-      {/* MACHINE-COMMS-1 — ad-hoc client email: AI-drafted, lands in the review
-          queue where approving it sends it. */}
-      <section>
-        <h2>Communications</h2>
-        <DraftEmailControl matterEntityId={id} />
-      </section>
+      </div>
 
       {!matter.workflow && openStep === 'intake' && (
         <Modal
@@ -641,20 +663,33 @@ function labelForState(state: StepState): string {
 // the manual (attorney/client) outgoing edge and reloads, so the window swaps to
 // the next step in place. A stage whose only outgoing edge is system/automatic
 // disables Continue and shows a waiting note (the engine advances on the event).
-function workflowStripState(state: WfStepState): StepState {
-  return state === 'upcoming' ? 'pending' : state
+// A step's real performer role, derived from its own outgoing edges (the same
+// attorney/client/system signal WorkflowStepWindow already uses to decide the
+// advance control) — not fabricated per-row demo data. 'automatic' gets the
+// GemSparkle affordance per the comp; the others get a tinted, numbered icon.
+type StepRole = 'automatic' | 'attorney' | 'client' | 'system'
+function stepRole(stage: WfStage): StepRole {
+  const edges = stage.advances_to
+  if (edges.some((e) => e.gate === 'client')) return 'client'
+  if (edges.some((e) => e.gate === 'attorney')) return 'attorney'
+  if (edges.some((e) => e.gate === 'automatic')) return 'automatic'
+  return 'system'
 }
 
 function WorkflowWindow({
   matter,
   workflow,
   onChanged,
+  initialOpenKey = null,
 }: {
   matter: MatterDetail
   workflow: MatterWorkflow
   onChanged: () => Promise<void>
+  // Deep-link support: the matter-header "Close matter" action opens straight to
+  // the complete_matter stage's window (WP-B).
+  initialOpenKey?: string | null
 }) {
-  const [openKey, setOpenKey] = useState<string | null>(null)
+  const [openKey, setOpenKey] = useState<string | null>(initialOpenKey)
   // PR6: the "Edit steps for this matter" mode (per-matter workflow customization).
   const [editing, setEditing] = useState(false)
   const steps = workflowStepStates(workflow.graph, workflow.currentState)
@@ -662,35 +697,44 @@ function WorkflowWindow({
 
   return (
     <>
-      <section>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 'var(--space-3)',
-          }}
-        >
-          <h2>Workflow</h2>
-          <button type="button" className="button" onClick={() => setEditing(true)}>
-            <EditIcon size={16} /> Edit steps for this matter
+      <section className="li-mat-card">
+        <div className="li-mat-card-head">
+          <h2 className="li-mat-card-title">Workflow</h2>
+          <button
+            type="button"
+            className="li-mat-pencil"
+            onClick={() => setEditing(true)}
+            title="Edit steps for this matter"
+            aria-label="Edit steps for this matter"
+          >
+            <EditIcon size={16} />
           </button>
         </div>
-        {/* The SHARED step-list visual (UI-BUILDER-FIX-1 5b) — the proposal-review
-            card renders this same component, so proposed and running workflows
-            look identical to the attorney. */}
-        <WorkflowStepList
-          items={steps.map(({ stage, state }) => ({
-            key: stage.key,
-            title: stage.label,
-            subtitle: stage.client_label ?? stage.label,
-            state: workflowStripState(state),
-            onClick: () => setOpenKey(stage.key),
-          }))}
-        />
-        <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-          Click a step to view what it produced, or to advance the matter.
-        </p>
+        <div className="li-mat-wf-list">
+          {steps.map(({ stage, state }, i) => {
+            const role = stepRole(stage)
+            return (
+              <button
+                key={stage.key}
+                type="button"
+                className="li-mat-wf-row"
+                onClick={() => setOpenKey(stage.key)}
+              >
+                <span className={`li-mat-wf-ico li-mat-wf-ico-${role}`}>
+                  {role === 'automatic' ? <GemSparkle size={16} secondary={false} /> : i + 1}
+                </span>
+                <span className="li-mat-wf-name">{stage.label}</span>
+                {state === 'done' ? (
+                  <CheckCircleIcon size={18} className="li-mat-wf-check" />
+                ) : state === 'current' ? (
+                  <span className="li-mat-wf-status li-mat-wf-status-current">Current</span>
+                ) : (
+                  <span className="li-mat-wf-status li-mat-wf-status-upcoming">Upcoming</span>
+                )}
+              </button>
+            )
+          })}
+        </div>
       </section>
 
       {openEntry && (

@@ -19,6 +19,10 @@ export interface ActionItem {
   onClick?: () => void
   title?: string
   disabled?: boolean
+  // Destructive item (e.g. "Close matter") — rendered in the danger color. The
+  // menu is portaled to document.body (outside .li-shell), so the modifier class
+  // below uses literal hex, not `var(--li-*)`, which wouldn't inherit there.
+  danger?: boolean
 }
 
 export function ActionsMenu({
@@ -140,13 +144,14 @@ export function ActionsMenu({
                   <span>{item.label}</span>
                 </>
               )
+              const linkClass = item.danger ? 'att-menu-link att-menu-link-danger' : 'att-menu-link'
               if (item.href && !item.disabled) {
                 return (
                   <Link
                     key={item.label}
                     href={item.href}
                     role="menuitem"
-                    className="att-menu-link"
+                    className={linkClass}
                     title={item.title}
                     onClick={() => setOpen(false)}
                   >
@@ -159,7 +164,7 @@ export function ActionsMenu({
                   key={item.label}
                   type="button"
                   role="menuitem"
-                  className="att-menu-link"
+                  className={linkClass}
                   title={item.title}
                   disabled={item.disabled}
                   onClick={() => {

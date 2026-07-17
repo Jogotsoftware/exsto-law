@@ -446,3 +446,21 @@ export const SignatureIcon = (p: IconProps) => (
     <line x1="3" x2="21" y1="21" y2="21" />
   </Svg>
 )
+
+// Kebab menu trigger (LI matters restyle: document/task row actions).
+export const MoreVerticalIcon = (p: IconProps) => (
+  <Svg {...p} fill="currentColor" stroke="none">
+    <circle cx="12" cy="5" r="1.7" />
+    <circle cx="12" cy="12" r="1.7" />
+    <circle cx="12" cy="19" r="1.7" />
+  </Svg>
+)
+
+// Upload document (LI matters restyle: Documents tab upload modal).
+export const UploadIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </Svg>
+)

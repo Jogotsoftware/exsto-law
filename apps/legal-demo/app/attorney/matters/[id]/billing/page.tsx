@@ -1,19 +1,24 @@
 'use client'
 
-// Matter › BILLING tab. Two ledgers for this matter:
-//   • Unbilled — logged time, expenses, and accrued fees not yet on an invoice
+// Matter › BILLING tab. Three ledgers for this matter (comp: Accrued / Invoiced /
+// Paid sub-tabs):
+//   • Accrued — logged time, expenses, and accrued fees not yet on an invoice
 //     (filtered from the firm-wide unbilled feed to this matter), plus the matter's
 //     engagement fee from its service config, and the panel to log more.
-//   • Invoiced — line items already billed, each with its invoice number + status.
-// "Unbilled" = a ledger event (time.logged / expense.recorded / *_fee.recorded)
-// with no matching billed event; generating an invoice happens on the Billing
-// dashboard (which groups a client's matters together).
+//   • Invoiced — line items already billed but not yet paid.
+//   • Paid — invoiced line items whose invoice has been marked paid (status data
+//     already exists on each line; this is a client-side filter, no new read).
+// "Accrued" = a ledger event (time.logged / expense.recorded / *_fee.recorded)
+// with no matching billed event. "Send invoice" (WP-B2) issues + sends one
+// in place, scoped to this matter — legal.invoice.issue already accepts an
+// optional matterEntityId (the same call the Overview workflow's BillStep
+// makes for the same purpose), so no dashboard hop is needed.
 //
 // v1 reads the tenant-wide legal.billing.unbilled and filters to this matter — fine
 // at firm scale; a matter-scoped query is a perf follow-up.
 import { use, useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { SendIcon } from '@/components/icons'
 
 // PORTAL-1 (WP3): the client's fee-consent trail (who consented, to what
 // amount, for what, when) rendered beside the fees it authorized.
@@ -86,11 +91,8 @@ function fmtDate(iso: string | null): string {
   const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso)
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString()
 }
-function invoiceStatusClass(status: string): string {
-  if (status === 'sent' || status === 'paid') return 'badge ok'
-  if (status === 'issued') return 'badge info'
-  return 'badge'
-}
+
+type BillTab = 'accrued' | 'invoiced' | 'paid'
 
 export default function MatterBillingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -102,7 +104,8 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
   const [fee, setFee] = useState<ServiceCost | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  // "Log time"/"Log expense"/"Add fee" buttons at the top of the matter deep-link
+  const [tab, setTab] = useState<BillTab>('accrued')
+  // "Add time"/"Add expense"/"Add fee" buttons at the top of the matter deep-link
   // here with ?add=time|expense|fee to open the corresponding form on arrival.
   const [initialForm, setInitialForm] = useState<'time' | 'expense' | null>(null)
   // Manual "Add fee" form + service-completion / void actions.
@@ -114,7 +117,8 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const add = new URLSearchParams(window.location.search).get('add')
+    const params = new URLSearchParams(window.location.search)
+    const add = params.get('add')
     if (add === 'time' || add === 'expense') setInitialForm(add)
     if (add === 'fee') setShowFee(true)
   }, [])
@@ -174,6 +178,48 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
     )
   }
 
+  // WP-B2: in-tab "Send invoice" — issues + sends an invoice from THIS
+  // matter's accrued entries, in place. legal.invoice.issue already accepts an
+  // optional matterEntityId to scope the invoice to one matter (the same call
+  // the Overview workflow's BillStep makes), so no new operation is needed —
+  // just this tab's own selection (all of `entries`, matching the comp's
+  // single "Send invoice" action with no per-line picking).
+  async function sendInvoiceNow() {
+    if (!matter?.clientEntityId) {
+      setError('This matter has no linked client, so an invoice can’t be addressed.')
+      return
+    }
+    if (entries.length === 0) return
+    setBusy('send-invoice')
+    setError(null)
+    setNotice(null)
+    try {
+      const issued = await callAttorneyMcp<{ invoiceEntityId: string; invoiceNumber: string }>({
+        toolName: 'legal.invoice.issue',
+        input: {
+          clientEntityId: matter.clientEntityId,
+          matterEntityId: id,
+          currency,
+          lines: entries.map((e) => ({ sourceEventId: e.sourceEventId, kind: e.kind })),
+        },
+      })
+      const sent = await callAttorneyMcp<{ to?: string }>({
+        toolName: 'legal.invoice.send',
+        input: {
+          invoiceEntityId: issued.invoiceEntityId,
+          payUrlBase: typeof window !== 'undefined' ? window.location.origin : undefined,
+        },
+      })
+      setNotice(`Invoice ${issued.invoiceNumber} sent${sent.to ? ` to ${sent.to}` : ''}.`)
+      setTab('invoiced')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const load = useCallback(async () => {
     setError(null)
     try {
@@ -228,13 +274,16 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
 
   const entries = unbilled?.entries ?? []
   const acceptedConsents = consents.filter((c) => c.decision !== 'quoted')
-  const invoicedTotal = invoiced.reduce((s, i) => s + (Number(i.amount) || 0), 0).toFixed(2)
+  const invoicedUnpaid = invoiced.filter((i) => i.invoiceStatus !== 'paid')
+  const invoicedPaid = invoiced.filter((i) => i.invoiceStatus === 'paid')
+  const unpaidTotal = invoicedUnpaid.reduce((s, i) => s + (Number(i.amount) || 0), 0).toFixed(2)
+  const paidTotal = invoicedPaid.reduce((s, i) => s + (Number(i.amount) || 0), 0).toFixed(2)
 
   return (
-    <>
+    <div className="li-mat-ov-col">
       {acceptedConsents.length > 0 && (
-        <section>
-          <h2>Client fee consents</h2>
+        <section className="li-mat-card">
+          <h2 className="li-mat-card-title">Client fee consents</h2>
           <p className="text-muted text-sm">
             Fees the client explicitly accepted (or declined) in the portal, on the ledger.
           </p>
@@ -273,197 +322,130 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
         </section>
       )}
 
-      <section>
-        <h2>Invoiced</h2>
-        <p className="text-muted text-sm">
-          Line items already billed on this matter, with the status of each invoice.
-        </p>
-        {invoiced.length === 0 ? (
-          <p className="text-muted" style={{ marginTop: 'var(--space-3)' }}>
-            Nothing invoiced on this matter yet.
-          </p>
-        ) : (
-          <div className="table-wrap" style={{ marginTop: 'var(--space-3)' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Issued</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                  <th>Amount</th>
-                  <th>Invoice</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoiced.map((i) => (
-                  <tr key={i.lineEntityId}>
-                    <td>{fmtDate(i.issuedDate)}</td>
-                    <td>
-                      <span className={`badge ${i.kind === 'time' ? 'info' : ''}`}>
-                        {humanizeKind(i.kind)}
-                      </span>
-                    </td>
-                    <td>{i.description || '—'}</td>
-                    <td>{money(i.amount, currency)}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      {i.invoiceNumber}{' '}
-                      <span className={invoiceStatusClass(i.invoiceStatus)}>{i.invoiceStatus}</span>
-                    </td>
-                  </tr>
-                ))}
-                <tr>
-                  <td colSpan={3} style={{ textAlign: 'right', fontWeight: 600 }}>
-                    Total invoiced
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{money(invoicedTotal, currency)}</td>
-                  <td />
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      <section className="li-mat-card li-mat-billcard">
+        <div className="li-mat-billtabs">
+          {(['accrued', 'invoiced', 'paid'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={tab === t ? 'li-mat-billtab is-active' : 'li-mat-billtab'}
+              onClick={() => setTab(t)}
+            >
+              {t === 'accrued' ? 'Accrued' : t === 'invoiced' ? 'Invoiced' : 'Paid'}
+            </button>
+          ))}
+        </div>
 
-      <section>
-        <h2>Unbilled</h2>
-        <p className="text-muted text-sm">
-          {matter?.clientName ? (
-            <>
-              Client: <strong>{matter.clientName}</strong>.{' '}
-            </>
-          ) : null}
-          Logged time, expenses, and fees on this matter not yet on an invoice.{' '}
-          <Link href="/attorney/billing" className="back-link">
-            Generate an invoice on the Billing dashboard →
-          </Link>
-        </p>
         {error && <div className="alert alert-error">{error}</div>}
         {notice && <div className="alert">{notice}</div>}
 
-        {fee && (
-          <p className="text-sm" style={{ marginTop: 'var(--space-2)' }}>
-            <strong>Engagement fee:</strong>{' '}
-            {fee.type === 'fixed'
-              ? `${money(fee.amount, currency)} fixed`
-              : `${money(fee.amount, currency)}/hr${fee.hours ? ` · ~${fee.hours}h` : ''}`}{' '}
-            <span className="text-muted">(from the service)</span>
-          </p>
-        )}
-
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--space-2)',
-            flexWrap: 'wrap',
-            marginTop: 'var(--space-3)',
-          }}
-        >
-          <button onClick={() => setShowFee((v) => !v)} disabled={busy === 'add-fee'}>
-            {showFee ? 'Cancel' : 'Add fee'}
-          </button>
-          <button onClick={markComplete} disabled={busy === 'complete'}>
-            {busy === 'complete' ? 'Working…' : 'Mark service complete'}
-          </button>
-        </div>
-
-        {showFee && (
-          <div
-            style={{
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-sm)',
-              padding: 'var(--space-3)',
-              marginTop: 'var(--space-3)',
-              display: 'grid',
-              gap: 'var(--space-2)',
-              maxWidth: 460,
-            }}
-          >
-            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-              <label>
-                <div className="text-muted text-sm">Fee type</div>
-                <select
-                  value={feeType}
-                  onChange={(e) => setFeeType(e.target.value as 'service' | 'document')}
-                >
-                  <option value="service">Service fee</option>
-                  <option value="document">Document fee</option>
-                </select>
-              </label>
-              <label>
-                <div className="text-muted text-sm">Amount (USD)</div>
-                <input
-                  inputMode="decimal"
-                  value={feeAmount}
-                  onChange={(e) => setFeeAmount(e.target.value)}
-                  placeholder="250.00"
-                  style={{ width: 120 }}
-                />
-              </label>
-            </div>
-            <label>
-              <div className="text-muted text-sm">Description (optional)</div>
-              <input
-                value={feeDesc}
-                onChange={(e) => setFeeDesc(e.target.value)}
-                placeholder="e.g. Filing package"
-                style={{ width: '100%' }}
-              />
-            </label>
-            <div>
+        {tab === 'accrued' && (
+          <div className="li-mat-billpanel">
+            {matter?.clientName && (
+              <p className="text-muted text-sm">
+                Client: <strong>{matter.clientName}</strong>
+              </p>
+            )}
+            {fee && (
+              <p className="text-sm">
+                <strong>Engagement fee:</strong>{' '}
+                {fee.type === 'fixed'
+                  ? `${money(fee.amount, currency)} fixed`
+                  : `${money(fee.amount, currency)}/hr${fee.hours ? ` · ~${fee.hours}h` : ''}`}{' '}
+                <span className="text-muted">(from the service)</span>
+              </p>
+            )}
+            <div className="li-mat-billactions">
               <button
-                className="primary"
-                onClick={() => void addFee()}
+                type="button"
+                className="li-mat-btn-ghost"
+                onClick={() => setShowFee((v) => !v)}
                 disabled={busy === 'add-fee'}
               >
-                {busy === 'add-fee' ? 'Saving…' : 'Save fee'}
+                {showFee ? 'Cancel' : 'Add fee'}
+              </button>
+              <button
+                type="button"
+                className="li-mat-btn-ghost"
+                onClick={markComplete}
+                disabled={busy === 'complete'}
+              >
+                {busy === 'complete' ? 'Working…' : 'Mark service complete'}
               </button>
             </div>
-          </div>
-        )}
 
-        {entries.length === 0 ? (
-          <p className="text-muted" style={{ marginTop: 'var(--space-3)' }}>
-            Nothing unbilled on this matter. Log time or an expense below.
-          </p>
-        ) : (
-          <div className="table-wrap" style={{ marginTop: 'var(--space-3)' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Description</th>
-                  <th>Qty</th>
-                  <th>Rate</th>
-                  <th>Amount</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((e) => {
-                  const isFee = e.kind === 'service_fee' || e.kind === 'document_fee'
-                  return (
-                    <tr key={e.sourceEventId}>
-                      <td>{fmtDate(e.date)}</td>
-                      <td>
-                        <span className={`badge ${e.kind === 'time' ? 'info' : ''}`}>
-                          {humanizeKind(e.kind)}
-                        </span>
-                      </td>
-                      <td>{e.description || '—'}</td>
-                      <td>
-                        {e.kind === 'time'
-                          ? e.durationMinutes != null
-                            ? `${(e.durationMinutes / 60).toFixed(2)}h`
-                            : (e.quantity ?? '—')
-                          : '1'}
-                      </td>
-                      <td>{money(e.rate, currency)}</td>
-                      <td>{money(e.amount, currency)}</td>
-                      <td style={{ textAlign: 'right' }}>
+            {showFee && (
+              <div className="li-mat-feeform">
+                <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                  <label className="li-mat-field">
+                    <span>Fee type</span>
+                    <select
+                      value={feeType}
+                      onChange={(e) => setFeeType(e.target.value as 'service' | 'document')}
+                    >
+                      <option value="service">Service fee</option>
+                      <option value="document">Document fee</option>
+                    </select>
+                  </label>
+                  <label className="li-mat-field">
+                    <span>Amount (USD)</span>
+                    <input
+                      inputMode="decimal"
+                      value={feeAmount}
+                      onChange={(e) => setFeeAmount(e.target.value)}
+                      placeholder="250.00"
+                      style={{ width: 120 }}
+                    />
+                  </label>
+                </div>
+                <label className="li-mat-field">
+                  <span>Description (optional)</span>
+                  <input
+                    value={feeDesc}
+                    onChange={(e) => setFeeDesc(e.target.value)}
+                    placeholder="e.g. Filing package"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="li-mat-btn-primary"
+                  onClick={() => void addFee()}
+                  disabled={busy === 'add-fee'}
+                >
+                  {busy === 'add-fee' ? 'Saving…' : 'Save fee'}
+                </button>
+              </div>
+            )}
+
+            {entries.length === 0 ? (
+              <div className="li-mat-billempty">
+                <div className="li-mat-billempty-ico">
+                  <SendIcon size={20} />
+                </div>
+                <div>Nothing accrued. Log time or an expense below.</div>
+              </div>
+            ) : (
+              <>
+                <div className="li-mat-billlines">
+                  {entries.map((e) => {
+                    const isFee = e.kind === 'service_fee' || e.kind === 'document_fee'
+                    return (
+                      <div key={e.sourceEventId} className="li-mat-billline">
+                        <div className="li-mat-billline-main">
+                          <div className="li-mat-billline-desc">
+                            {e.description || humanizeKind(e.kind)}
+                          </div>
+                          <div className="li-mat-billline-meta">
+                            {fmtDate(e.date)}
+                            {e.kind === 'time' && e.durationMinutes != null
+                              ? ` · ${(e.durationMinutes / 60).toFixed(2)}h`
+                              : ''}
+                          </div>
+                        </div>
                         {isFee && (
                           <button
-                            className="link-button danger"
+                            type="button"
+                            className="li-mat-billvoid"
                             onClick={() => voidFee(e.sourceEventId)}
                             disabled={busy === `void:${e.sourceEventId}`}
                             title="Void this fee"
@@ -471,30 +453,124 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
                             {busy === `void:${e.sourceEventId}` ? '…' : 'Void'}
                           </button>
                         )}
-                      </td>
-                    </tr>
-                  )
-                })}
-                <tr>
-                  <td colSpan={5} style={{ textAlign: 'right', fontWeight: 600 }}>
-                    Total unbilled
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{money(unbilled?.total ?? '0.00', currency)}</td>
-                  <td />
-                </tr>
-              </tbody>
-            </table>
+                        <span className="li-mat-billline-amount">{money(e.amount, currency)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="li-mat-billfooter">
+                  <button
+                    type="button"
+                    className="li-mat-billsend"
+                    onClick={() => void sendInvoiceNow()}
+                    disabled={busy === 'send-invoice' || !matter?.clientEntityId}
+                    title={
+                      matter?.clientEntityId
+                        ? 'Issue and send an invoice for everything accrued on this matter'
+                        : 'This matter has no linked client'
+                    }
+                  >
+                    <SendIcon size={15} />
+                    {busy === 'send-invoice' ? 'Sending…' : 'Send invoice'}
+                  </button>
+                  <span className="li-mat-billtotal">
+                    <span className="li-mat-billtotal-label">Total accrued</span>
+                    <span className="li-mat-billtotal-amount">
+                      {money(unbilled?.total ?? '0.00', currency)}
+                    </span>
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === 'invoiced' && (
+          <div className="li-mat-billpanel">
+            {invoicedUnpaid.length === 0 ? (
+              <div className="li-mat-billempty">
+                <div className="li-mat-billempty-ico">
+                  <SendIcon size={20} />
+                </div>
+                <div>Nothing invoiced (and unpaid) on this matter.</div>
+              </div>
+            ) : (
+              <>
+                <div className="li-mat-billlines">
+                  {invoicedUnpaid.map((i) => (
+                    <div key={i.lineEntityId} className="li-mat-billline">
+                      <div className="li-mat-billline-main">
+                        <div className="li-mat-billline-desc">
+                          {i.description || humanizeKind(i.kind)}
+                        </div>
+                        <div className="li-mat-billline-meta">
+                          {fmtDate(i.issuedDate)} · {i.invoiceNumber}
+                        </div>
+                      </div>
+                      <span className="li-mat-chip li-mat-chip-info">{i.invoiceStatus}</span>
+                      <span className="li-mat-billline-amount">{money(i.amount, currency)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="li-mat-billfooter">
+                  <span />
+                  <span className="li-mat-billtotal">
+                    <span className="li-mat-billtotal-label">Total invoiced</span>
+                    <span className="li-mat-billtotal-amount">{money(unpaidTotal, currency)}</span>
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === 'paid' && (
+          <div className="li-mat-billpanel">
+            {invoicedPaid.length === 0 ? (
+              <div className="li-mat-billempty">
+                <div className="li-mat-billempty-ico">
+                  <SendIcon size={20} />
+                </div>
+                <div>No payments recorded.</div>
+              </div>
+            ) : (
+              <>
+                <div className="li-mat-billlines">
+                  {invoicedPaid.map((i) => (
+                    <div key={i.lineEntityId} className="li-mat-billline">
+                      <div className="li-mat-billline-main">
+                        <div className="li-mat-billline-desc">
+                          {i.description || humanizeKind(i.kind)}
+                        </div>
+                        <div className="li-mat-billline-meta">
+                          {fmtDate(i.issuedDate)} · {i.invoiceNumber}
+                        </div>
+                      </div>
+                      <span className="li-mat-chip li-mat-chip-ok">Paid</span>
+                      <span className="li-mat-billline-amount">{money(i.amount, currency)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="li-mat-billfooter">
+                  <span />
+                  <span className="li-mat-billtotal">
+                    <span className="li-mat-billtotal-label">Total paid</span>
+                    <span className="li-mat-billtotal-amount">{money(paidTotal, currency)}</span>
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         )}
       </section>
 
-      <section>
-        <h2>Log time &amp; expenses</h2>
+      <section className="li-mat-card">
+        <h2 className="li-mat-card-title">Log time &amp; expenses</h2>
         <p className="text-muted text-sm">
-          Each entry is recorded on the matter timeline and appears above until invoiced.
+          Each entry is recorded on the matter timeline and appears under Accrued until invoiced.
         </p>
         <TimeExpensePanel matterEntityId={id} initialForm={initialForm} onChange={load} />
       </section>
-    </>
+    </div>
   )
 }
