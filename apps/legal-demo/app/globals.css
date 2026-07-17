@@ -21621,3 +21621,257 @@ a.li-uac-done-primary:hover {
   border-color: var(--li-gold);
   color: var(--li-navy);
 }
+
+/* ============================================================
+   li-send — the unified "Send to client" modal (founder comp).
+   Email a document to the client: To/Cc/Subject/Message prefills,
+   attachment card with a PDF/Word segmented toggle, static
+   "Logged to the matter timeline" note (sends are ALWAYS audited
+   via Contract B — a checkbox here would be a dead control), lock
+   footer + navy Send button. Appended at the END of globals.css
+   (both-append conflict discipline).
+   ============================================================ */
+.li-send-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.li-send-card {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid #e7ebf3;
+  box-shadow: 0 24px 64px rgba(16, 24, 52, 0.28);
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 22px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.li-send-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.li-send-title {
+  margin: 0;
+  font-size: 1.06rem;
+  font-weight: 700;
+  color: #1b2a4a;
+  letter-spacing: -0.01em;
+}
+.li-send-x {
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 8px;
+  color: #67728c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+}
+.li-send-x:hover:not(:disabled) {
+  background: #f1f4fa;
+  color: #1b2a4a;
+}
+.li-send-alert {
+  margin: 0;
+}
+.li-send-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.li-send-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #67728c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.li-send-input {
+  width: 100%;
+  border: 1px solid #dce2ee;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 0.9rem;
+  color: #1b2a4a;
+  background: #fff;
+}
+.li-send-input::placeholder {
+  color: #8a94a8;
+}
+.li-send-input:focus {
+  outline: none;
+  border-color: #1b2a4a;
+  box-shadow: 0 0 0 3px rgba(27, 42, 74, 0.08);
+}
+.li-send-input:disabled {
+  background: #f6f8fc;
+  color: #67728c;
+}
+.li-send-textarea {
+  min-height: 165px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.li-send-attach {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e7ebf3;
+  border-radius: 12px;
+  padding: 11px 12px;
+}
+.li-send-attach-tile {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #fbecea;
+  color: #c4443b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.li-send-attach-tile--word {
+  background: #eaf0fb;
+  color: #2b579a;
+}
+.li-send-attach-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.li-send-attach-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1b2a4a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-send-attach-meta {
+  font-size: 0.76rem;
+  color: #8a94a8;
+}
+.li-send-toggle {
+  display: inline-flex;
+  background: #eef1f7;
+  border-radius: 999px;
+  padding: 3px;
+  flex-shrink: 0;
+}
+.li-send-toggle-pill {
+  border: none;
+  background: transparent;
+  padding: 5px 13px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #67728c;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.li-send-toggle-pill:hover:not(:disabled) {
+  color: #1b2a4a;
+}
+.li-send-toggle-pill.is-active {
+  background: #fff;
+  color: #1b2a4a;
+  box-shadow: 0 1px 3px rgba(16, 24, 52, 0.16);
+}
+.li-send-logged {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.83rem;
+  color: #67728c;
+}
+.li-send-logged svg {
+  color: #2f9e63;
+  flex-shrink: 0;
+}
+.li-send-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #e7ebf3;
+  padding-top: 14px;
+  margin-top: 2px;
+}
+.li-send-secure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: #8a94a8;
+  min-width: 0;
+}
+.li-send-secure svg {
+  flex-shrink: 0;
+}
+.li-send-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+.li-send-btn-cancel {
+  background: #fff;
+  border: 1px solid #dce2ee;
+  border-radius: 9px;
+  padding: 8px 15px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1b2a4a;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.li-send-btn-cancel:hover:not(:disabled) {
+  background: #f6f8fc;
+  border-color: #c9d2e4;
+}
+.li-send-btn-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #1b2a4a;
+  border: 1px solid #1b2a4a;
+  border-radius: 9px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.li-send-btn-send:hover:not(:disabled) {
+  background: #24365c;
+  border-color: #24365c;
+}
+.li-send-btn-send:disabled,
+.li-send-btn-cancel:disabled,
+.li-send-toggle-pill:disabled,
+.li-send-x:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.li-send-btn-send .spinner {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}

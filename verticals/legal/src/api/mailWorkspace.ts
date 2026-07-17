@@ -434,8 +434,55 @@ export async function replyToThread(ctx: ActionContext, input: ReplyInput): Prom
 // callers that need the message id (draft links, receipts) can use them.
 // ───────────────────────────────────────────────────────────────────────────
 
+// ── Cc = firm staff only ─────────────────────────────────────────────────────
+// The To recipient stays under Contract B's client-contact allow-list (below).
+// Cc is a SEPARATE, narrower rail: co-counsel / paralegals — i.e. the tenant's
+// own active human actors (a human actor's email IS its external_id, see
+// api/identity.ts). Anything else is refused with a clear error, so Cc can never
+// become a side door around the client-mail-only discipline.
+
+// Comma-separated Cc string → trimmed address list (empty input → []).
+export function parseCcList(cc: string | undefined): string[] {
+  return (cc ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+// Pure policy check (unit-tested): every Cc address must be a firm user's email.
+// Returns the normalized (trimmed) list; throws the user-facing error otherwise.
+export function validateFirmCc(cc: string | undefined, firmEmails: Set<string>): string[] {
+  const list = parseCcList(cc)
+  const lowered = new Set([...firmEmails].map((e) => e.toLowerCase()))
+  for (const addr of list) {
+    if (!lowered.has(addr.toLowerCase())) {
+      throw new Error("Cc is limited to your firm's users (co-counsel or paralegal).")
+    }
+  }
+  return list
+}
+
+// The tenant's active human actors' emails (actor.external_id) — the Cc
+// allow-list. Client-portal actors carry a synthetic 'client:<id>' external_id,
+// so the LIKE '%@%' filter keeps this to real staff sign-in emails.
+async function firmStaffEmails(ctx: ActionContext): Promise<Set<string>> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ external_id: string }>(
+      `SELECT external_id FROM actor
+        WHERE tenant_id = $1 AND actor_type = 'human' AND status = 'active'
+          AND external_id LIKE '%@%'`,
+      [ctx.tenantId],
+    )
+    return new Set(res.rows.map((r) => r.external_id.trim().toLowerCase()))
+  })
+}
+
 export interface EnqueueClientEmailInput {
   to: string
+  // Optional Cc, comma-separated. FIRM STAFF ONLY — validated here against the
+  // tenant's active human actors; the send is refused if any address is not a
+  // firm user's email.
+  cc?: string
   subject: string
   body: string
   // Optional branded HTML alternative (text/html). Plaintext `body` is always the
@@ -501,6 +548,11 @@ export async function enqueueClientEmail(
   }
   const matterEntityId = input.matterId || authorized[0]!
 
+  // Cc = firm staff only (see validateFirmCc above). Validated HERE, at the
+  // Contract B chokepoint, so every caller inherits the policy.
+  const ccList = input.cc?.trim() ? validateFirmCc(input.cc, await firmStaffEmails(ctx)) : []
+  const cc = ccList.length > 0 ? ccList.join(', ') : undefined
+
   // Resolve client document refs to bytes HERE, scope-checked against matterEntityId
   // (the matter this send is authorized for), then append trusted server bytes.
   const attachments = await buildSendAttachments(ctx, matterEntityId, input)
@@ -531,6 +583,7 @@ export async function enqueueClientEmail(
     ctx.tenantId,
     {
       to: input.to,
+      cc,
       subject: input.subject,
       body: signed.body,
       html: signed.html,
@@ -547,11 +600,12 @@ export async function enqueueClientEmail(
       gmail_message_id: sent.messageId,
       subject: input.subject,
       to: input.to,
+      cc: cc ?? null,
       from: sent.from,
       body_text: signed.body,
       matter_entity_id: matterEntityId,
       contact_entity_id: input.contactId ?? null,
-      participant_emails: [input.to, sent.from],
+      participant_emails: [input.to, sent.from, ...ccList],
       attachment_filenames: (attachments ?? []).map((a) => a.filename),
     },
   })

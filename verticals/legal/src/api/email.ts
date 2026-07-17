@@ -9,12 +9,75 @@ export interface SendDraftLinkInput {
   documentVersionId: string
   shareUrl: string
   to?: string
+  // Optional Cc, comma-separated. FIRM STAFF ONLY — Contract B validates every
+  // address against the tenant's active human actors and refuses others.
+  cc?: string
+  // Optional attorney-composed subject/message (the Send-to-client modal). Used
+  // verbatim when provided; the secure tokenized link block is ALWAYS appended
+  // to the message body. When omitted, the default composition below is used
+  // unchanged (back-compat).
+  subject?: string
+  message?: string
+  // Which export the emailed link should lead with. 'word' appends &fmt=word to
+  // the share URL so the client view can preselect the Word download.
+  format?: 'pdf' | 'word'
 }
 
 export interface SendDraftLinkResult {
   messageId: string
   from: string
   to: string
+}
+
+// Pure composition seam (unit-tested): the subject + plaintext body of a
+// draft-link email. Two modes:
+//   default  — no subject/message supplied: the original composition, unchanged.
+//   composed — the Send-to-client modal supplies subject/message verbatim; the
+//              secure tokenized link block is ALWAYS appended to the body, so an
+//              attorney can never accidentally strip the client's access link.
+export interface DraftLinkEmailParts {
+  subject: string
+  body: string
+}
+
+export function composeDraftLinkEmail(args: {
+  docTitle: string
+  matterNumber: string
+  clientName: string | null
+  tokenizedUrl: string
+  subject?: string
+  message?: string
+  format?: 'pdf' | 'word'
+}): DraftLinkEmailParts {
+  const defaultSubject = `Your draft ${args.docTitle} — ${args.matterNumber}`
+  const subject = args.subject?.trim() ? args.subject : defaultSubject
+
+  if (args.message?.trim()) {
+    const formatLabel = args.format === 'word' ? 'Word' : 'PDF'
+    const body = [
+      args.message.replace(/\s+$/, ''),
+      '',
+      `Your ${args.docTitle} (${formatLabel}) is ready to view and download securely:`,
+      '',
+      args.tokenizedUrl,
+    ].join('\r\n')
+    return { subject, body }
+  }
+
+  const firstName = args.clientName?.split(' ')[0]?.trim() || ''
+  const greeting = firstName ? `Hi ${firstName},` : 'Hi,'
+  const body = [
+    greeting,
+    '',
+    `Your draft ${args.docTitle} is ready for review:`,
+    '',
+    args.tokenizedUrl,
+    '',
+    'You can view it in your browser and download a PDF or Word copy from the page.',
+    '',
+    'Take a look at your convenience and let me know if you have questions.',
+  ].join('\r\n')
+  return { subject, body }
 }
 
 // Send a Pacheco Law-branded email to the client with a link to the public
@@ -38,9 +101,6 @@ export async function sendDraftLinkEmail(
   const docKind = draft?.documentKind ?? 'document'
   const docTitle = docKind.replace(/_/g, ' ')
 
-  const firstName = matter.clientName?.split(' ')[0]?.trim() || ''
-  const greeting = firstName ? `Hi ${firstName},` : 'Hi,'
-
   // PORTAL-1 (WP2): the emailed link carries a SHORT-LIVED signed token — the
   // bare /d/<versionId> capability URL is no longer publicly readable. Signed-in
   // clients reach the same document through their portal session instead.
@@ -49,26 +109,25 @@ export async function sendDraftLinkEmail(
     tenantId: ctx.tenantId,
   })
   const sep = input.shareUrl.includes('?') ? '&' : '?'
-  const tokenizedUrl = `${input.shareUrl}${sep}t=${encodeURIComponent(token)}`
+  let tokenizedUrl = `${input.shareUrl}${sep}t=${encodeURIComponent(token)}`
+  if (input.format === 'word') tokenizedUrl += '&fmt=word'
 
-  const subject = `Your draft ${docTitle} — ${matter.matterNumber}`
-  const body = [
-    greeting,
-    '',
-    `Your draft ${docTitle} is ready for review:`,
-    '',
+  const { subject, body } = composeDraftLinkEmail({
+    docTitle,
+    matterNumber: matter.matterNumber,
+    clientName: matter.clientName ?? null,
     tokenizedUrl,
-    '',
-    'You can view it in your browser and download a PDF or Word copy from the page.',
-    '',
-    'Take a look at your convenience and let me know if you have questions.',
-  ].join('\r\n')
+    subject: input.subject,
+    message: input.message,
+    format: input.format,
+  })
 
   // Route through Contract B so the draft-link email is recorded as a mail.send
   // action and shows up in the matter's communication history (was previously a
-  // raw send with no audit row).
+  // raw send with no audit row). Cc (firm staff only) is validated there.
   const { messageId, from } = await enqueueClientEmail(ctx, {
     to,
+    cc: input.cc,
     subject,
     body,
     matterId: input.matterEntityId,
