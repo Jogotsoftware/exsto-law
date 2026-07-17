@@ -479,14 +479,71 @@ BUILD (comp's hardcoded demos become real):
 - [ ] D8: `LEGAL_BUILD_WIZARD` ON in prod
 - [ ] GATE: full conversation → published, bookable service, certified on the new UI before merge
 
-## WP-N · eSign (feature build)
+## WP-N · eSign (feature build) — SHIPPED
 
-- [ ] BUILD: envelopes list — stat cards (Action needed / Out for signature / Completed), filter pills, table
-      (document / signers / status / sent / updated)
-- [ ] BUILD: envelope detail — sequential routing view, doc preview with SIGN-HERE blocks, Resend / Void /
-      Download-executed
-- [ ] BUILD: restyled 4-step prepare wizard (Document → Signers → Fields → Review) over existing `sign/prepare`
-- [ ] BUILD: eSign rail item (module-gated); all new reads through the operation core
+- [x] BUILD: envelopes list at `app/attorney/esign/page.tsx` — stat cards (Action needed / Out for signature /
+      Completed), filter pills with counts (All / Action needed / Out for signature / Completed / Declined),
+      table (DOCUMENT w/ icon + `matter · doc` subline / SIGNERS names + `n of m signed` / STATUS chip / SENT /
+      UPDATED). Backed by the real read `legal.esign.envelopes_list`.
+- [x] BUILD: envelope detail at `app/attorney/esign/[envelopeId]/page.tsx` — signers & sequential-routing card
+      (order badge, avatar, name/title/email, per-signer status chip + channel + signed-at, routing footer),
+      DocumentSheet preview with a SIGN-HERE block per signer, and the real actions Resend / Void /
+      Download-executed. Reuses the `legal.esign.status` data path (getEnvelopeStatus, extended with matter /
+      documentKind / sentAt / bucket / signer key).
+- [x] BUILD: restyled four-step prepare wizard (Document → Signers → Fields → Review, step dots, "Envelope sent"
+      confirmation) — comp chrome over the EXISTING `PrepareSignature` logic (anchor/field/send mechanics
+      unchanged). Used by both `/attorney/sign/prepare/[versionId]` and the signature-task window.
+- [x] BUILD: eSign rail item after Review (module-gated key `e-sign`; `MODULE_AREAS['e-sign'] =
+      ['/attorney/esign']`). All new reads/writes go through the operation core (MCP tools over `submitAction` /
+      query helpers — no direct DB from app code).
+
+### New operation-core surface (the exact tools/actions added)
+
+- **`legal.esign.envelopes_list`** (read, `esignAttorneyTools.ts` → `listEnvelopes(ctx)` in `api/esign.ts`): every
+  envelope in the tenant, newest first, with signers, document, matter, signed progress, and a derived `bucket`.
+  One tenant-scoped query over `signature_envelope` entities joining `envelope_of → document → draft_of → matter`
+  and a `jsonb_agg` of the `request_of` signer children. No new substrate kinds (read only).
+- **`legal.esign.resend`** (write → `resendEnvelope(ctx, envelopeId)`): re-notifies the signer(s) whose turn is
+  currently active (delivered | opened) on a `sent` envelope by re-running the existing `notifyDelivered` path
+  (re-queues the same secure link / portal nudge through `queueNotification` → `submitAction`). Refused on
+  completed / declined / voided / pending_dispatch. **No new action kind** — it reuses the notification-queue write.
+- **`legal.esign.void`** (write → `voidEnvelope(ctx, envelopeId)` → action `esign.void`): NEW real capability
+  (migration `0167_esign_void.sql` adds action `esign.void` id `…1013-…e6` + event `esign.voided` id `…1014-…e7`;
+  handler in `handlers/esign.ts`). Sets `envelope_status = 'voided'` and closes every open signer request
+  (`signer_status = 'voided'`); `assertSignerTurn` + `buildSignable` now treat `voided` as terminal so a stale
+  link can no longer sign. Send-authz-gated (`assertCanSendOnMatter`). Refused once completed / declined / voided.
+- **Download executed copy**: the existing executed-artifact path — `getEnvelopeStatus` surfaces
+  `executedDocumentVersionId` (a `document_version` with `metadata.executed`); the detail fetches its body via
+  `legal.draft.get` and renders the PDF client-side through `downloadAsPdf(..., { status: 'executed' })`. No new
+  backend.
+
+### "Action needed" classification rule (mirrors the comp's firm-blocked semantics)
+
+Each envelope is classified into one bucket (`classifyEnvelope` in `api/esign.ts`):
+
+- `completed` = `envelope_status` completed · `declined` = declined · `voided` = voided.
+- Active (`sent` | `pending_dispatch`): **`action_needed`** iff it has a currently-active signer (status
+  `delivered` or `opened`) whose `signer_key` is `attorney` or `firm` — i.e. the envelope is blocked waiting on
+  the FIRM's own signature slot (the key the prepare flow / templates assign to the firm). Otherwise **`out`**
+  (waiting on a client / external signer). This mirrors the comp's "Action needed" = blocked on the FIRM as
+  closely as the data allows; if no envelope uses a firm key, Action needed is naturally 0.
+
+Stat cards + filter pills use exactly the comp's five surfaces (All / Action needed / Out for signature /
+Completed / Declined). **`voided`** is a real terminal state added by the Void control that the comp doesn't
+model: a voided envelope shows a grey "Voided" chip and is reachable via **All** (excluded from the four named
+buckets/cards — it is not a client-signature outcome). Nothing is hidden or relabeled.
+
+### Deviations / notes
+
+- The comp's list "New envelope" opens a document-picker modal; our prepare flow is entered per approved document
+  (`versionId`), so "New envelope" routes to **Review** (the real document-selection surface where "Send for
+  signature" launches the wizard) rather than duplicating a cross-matter picker. The wizard's step-1 "Document" is
+  the confirm of the already-chosen document.
+- No stubs / no dead controls: Resend, Void, and Download-executed are all real operation-core paths (Void is a
+  newly-built real action, not a stub). Verified live (juan-carlos, port 3113): rail item present; list shows 10
+  real envelopes with correct stats (0 / 5 / 5) and filters; completed detail Download → `legal.draft.get` 200;
+  Resend on a NEW test envelope → 200 + re-notify; Void on that same NEW test envelope → 200, envelope + signer
+  both `voided`, `esign.voided` event recorded. No real pending envelope was voided.
 
 ## WP-M / WP-O / WP-P
 

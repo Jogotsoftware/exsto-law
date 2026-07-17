@@ -309,6 +309,9 @@ export interface EnvelopeSignerStatus {
   channel: string | null
   status: string
   signedAt: string | null
+  // The field-tag key this signer fills ({{type:key}}); 'attorney'/'firm' marks
+  // the firm's own signature slot (used to classify the "action needed" bucket).
+  key: string | null
 }
 export interface EnvelopeStatus {
   envelopeId: string
@@ -319,6 +322,13 @@ export interface EnvelopeStatus {
   // copy (a document_version with metadata.executed = 'true') for the review step.
   documentEntityId: string | null
   executedDocumentVersionId: string | null
+  // WP-N detail header: the matter + document + when it was sent, and the derived
+  // stat-card/filter bucket (same rule as the list — see classifyEnvelope).
+  matterEntityId: string | null
+  matterNumber: string | null
+  documentKind: string | null
+  sentAt: string | null
+  bucket: EnvelopeBucket
 }
 
 export async function getEnvelopeStatus(
@@ -328,11 +338,22 @@ export async function getEnvelopeStatus(
   return withActionContext(ctx, async (client) => {
     const subject = await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_subject')
     const status = await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_status')
+    const meta = await client.query<{ sent_at: string | null }>(
+      `SELECT to_char(recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS sent_at
+         FROM entity WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+      [ctx.tenantId, envelopeId],
+    )
     const doc = await client.query<{
       document_entity_id: string
       executed_version_id: string | null
+      matter_entity_id: string | null
+      matter_number: string | null
+      document_kind: string | null
     }>(
       `SELECT r.target_entity_id AS document_entity_id,
+              coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
+              df.target_entity_id AS matter_entity_id,
+              e_matter.name AS matter_number,
               (SELECT dv.id FROM document_version dv
                  WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
                    AND (dv.metadata->>'executed') = 'true'
@@ -340,6 +361,13 @@ export async function getEnvelopeStatus(
          FROM relationship r
          JOIN relationship_kind_definition rkd
            ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
+         LEFT JOIN entity e_doc ON e_doc.id = r.target_entity_id
+         LEFT JOIN relationship df ON df.source_entity_id = r.target_entity_id
+           AND df.tenant_id = $1 AND (df.valid_to IS NULL OR df.valid_to > now())
+           AND df.relationship_kind_id =
+               (SELECT id FROM relationship_kind_definition
+                 WHERE kind_name = 'draft_of' AND tenant_id = $1 LIMIT 1)
+         LEFT JOIN entity e_matter ON e_matter.id = df.target_entity_id
         WHERE r.tenant_id = $1 AND r.source_entity_id = $2
           AND (r.valid_to IS NULL OR r.valid_to > now())
         LIMIT 1`,
@@ -359,11 +387,13 @@ export async function getEnvelopeStatus(
       channel: string | null
       status: string | null
       signed_at: string | null
+      signer_key: string | null
     }>(
       `SELECT r.source_entity_id AS request_id, ${a('signer_name')} AS name,
               ${a('signer_email')} AS email, ${a('signer_title')} AS title,
               ${a('signer_order')} AS ord, ${a('signer_channel')} AS channel,
-              ${a('signer_status')} AS status, ${a('signed_at')} AS signed_at
+              ${a('signer_status')} AS status, ${a('signed_at')} AS signed_at,
+              ${a('signer_key')} AS signer_key
        FROM relationship r
        JOIN relationship_kind_definition rkd
          ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'request_of'
@@ -372,24 +402,284 @@ export async function getEnvelopeStatus(
        ORDER BY ${a('signer_order')} NULLS LAST, r.recorded_at`,
       [ctx.tenantId, envelopeId],
     )
+    const signers = res.rows.map((row) => ({
+      requestId: row.request_id,
+      name: row.name,
+      email: row.email,
+      title: row.title,
+      order: Number(row.ord) || 1,
+      channel: row.channel,
+      status: row.status ?? 'pending',
+      signedAt: row.signed_at,
+      key: row.signer_key,
+    }))
     return {
       envelopeId,
       status,
       subject,
       documentEntityId: doc.rows[0]?.document_entity_id ?? null,
       executedDocumentVersionId: doc.rows[0]?.executed_version_id ?? null,
-      signers: res.rows.map((row) => ({
-        requestId: row.request_id,
-        name: row.name,
-        email: row.email,
-        title: row.title,
-        order: Number(row.ord) || 1,
-        channel: row.channel,
-        status: row.status ?? 'pending',
-        signedAt: row.signed_at,
-      })),
+      matterEntityId: doc.rows[0]?.matter_entity_id ?? null,
+      matterNumber: doc.rows[0]?.matter_number ?? null,
+      documentKind: doc.rows[0]?.document_kind ?? null,
+      sentAt: meta.rows[0]?.sent_at ?? null,
+      bucket: classifyEnvelope(status ?? 'pending_dispatch', signers),
+      signers,
     }
   })
+}
+
+// ── Envelope list (attorney eSign surface, WP-N) ─────────────────────────────
+
+export interface EnvelopeListSigner {
+  name: string | null
+  email: string | null
+  title: string | null
+  order: number
+  channel: string | null
+  status: string
+  key: string | null
+  signedAt: string | null
+}
+/** Which stat-card / filter bucket an envelope falls in on the eSign surface. */
+export type EnvelopeBucket = 'action_needed' | 'out' | 'completed' | 'declined' | 'voided'
+export interface EnvelopeListItem {
+  envelopeId: string
+  subject: string | null
+  status: string
+  bucket: EnvelopeBucket
+  documentEntityId: string | null
+  documentKind: string | null
+  matterEntityId: string | null
+  matterNumber: string | null
+  signers: EnvelopeListSigner[]
+  signedCount: number
+  signerCount: number
+  sentAt: string | null
+  updatedAt: string | null
+}
+
+// A signer whose key marks the FIRM's own signature slot. The prepare flow and
+// bundled templates assign 'attorney' to the firm's counter-signature; an
+// envelope currently waiting on that signer is blocked on the FIRM (the comp's
+// "Action needed" bucket) rather than out for a client's signature.
+const FIRM_SIGNER_KEYS = new Set(['attorney', 'firm'])
+const ACTIVE_SIGNER = new Set(['delivered', 'opened'])
+
+function classifyEnvelope(status: string, signers: EnvelopeListSigner[]): EnvelopeBucket {
+  if (status === 'completed') return 'completed'
+  if (status === 'declined') return 'declined'
+  if (status === 'voided') return 'voided'
+  // Active (sent | pending_dispatch): blocked on the firm iff a currently-active
+  // signer holds a firm key; otherwise it is out for a client/external signer.
+  const active = signers.filter((s) => ACTIVE_SIGNER.has(s.status))
+  if (active.some((s) => s.key != null && FIRM_SIGNER_KEYS.has(s.key))) return 'action_needed'
+  return 'out'
+}
+
+// Every envelope in the tenant, newest first, with its signers, document, matter,
+// and derived bucket — backs the eSign list (stat cards + filter pills + table).
+export async function listEnvelopes(ctx: ActionContext): Promise<EnvelopeListItem[]> {
+  return withActionContext(ctx, async (client) => {
+    // Latest-value scalar subquery for an attribute of the request row `req`.
+    const rq = (k: string) =>
+      `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
+          ON akd.id = a.attribute_kind_id AND akd.kind_name = '${k}'
+          WHERE a.entity_id = req.source_entity_id AND a.tenant_id = $1
+          ORDER BY a.valid_from DESC LIMIT 1)`
+    // Latest-value scalar subquery for an attribute of the envelope row `e`.
+    const ev = (k: string) =>
+      `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
+          ON akd.id = a.attribute_kind_id AND akd.kind_name = '${k}'
+          WHERE a.entity_id = e.id AND a.tenant_id = $1
+          ORDER BY a.valid_from DESC LIMIT 1)`
+    const res = await client.query<{
+      envelope_id: string
+      subject: string | null
+      status: string | null
+      document_entity_id: string | null
+      document_kind: string | null
+      matter_entity_id: string | null
+      matter_number: string | null
+      sent_at: string
+      signers: EnvelopeListSigner[] | null
+    }>(
+      `SELECT
+         e.id AS envelope_id,
+         ${ev('envelope_subject')} AS subject,
+         ${ev('envelope_status')} AS status,
+         eo.target_entity_id AS document_entity_id,
+         coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
+         df.target_entity_id AS matter_entity_id,
+         e_matter.name AS matter_number,
+         to_char(e.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS sent_at,
+         (SELECT coalesce(jsonb_agg(jsonb_build_object(
+             'name', ${rq('signer_name')},
+             'email', ${rq('signer_email')},
+             'title', ${rq('signer_title')},
+             'order', coalesce((${rq('signer_order')})::int, 1),
+             'channel', ${rq('signer_channel')},
+             'status', coalesce(${rq('signer_status')}, 'pending'),
+             'key', ${rq('signer_key')},
+             'signedAt', ${rq('signed_at')}
+           ) ORDER BY coalesce((${rq('signer_order')})::int, 1), req.recorded_at), '[]'::jsonb)
+          FROM relationship req
+          JOIN relationship_kind_definition reqk
+            ON reqk.id = req.relationship_kind_id AND reqk.kind_name = 'request_of'
+          WHERE req.tenant_id = $1 AND req.target_entity_id = e.id
+            AND (req.valid_to IS NULL OR req.valid_to > now())) AS signers
+       FROM entity e
+       JOIN entity_kind_definition ekd
+         ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'signature_envelope'
+       LEFT JOIN relationship eo
+         ON eo.source_entity_id = e.id AND eo.tenant_id = $1
+        AND (eo.valid_to IS NULL OR eo.valid_to > now())
+        AND eo.relationship_kind_id =
+            (SELECT id FROM relationship_kind_definition
+              WHERE kind_name = 'envelope_of' AND tenant_id = $1 LIMIT 1)
+       LEFT JOIN entity e_doc ON e_doc.id = eo.target_entity_id
+       LEFT JOIN relationship df
+         ON df.source_entity_id = eo.target_entity_id AND df.tenant_id = $1
+        AND (df.valid_to IS NULL OR df.valid_to > now())
+        AND df.relationship_kind_id =
+            (SELECT id FROM relationship_kind_definition
+              WHERE kind_name = 'draft_of' AND tenant_id = $1 LIMIT 1)
+       LEFT JOIN entity e_matter ON e_matter.id = df.target_entity_id
+       WHERE e.tenant_id = $1
+       ORDER BY e.recorded_at DESC`,
+      [ctx.tenantId],
+    )
+    return res.rows.map((row) => {
+      const signers = (row.signers ?? []).map((s) => ({
+        name: s.name,
+        email: s.email,
+        title: s.title,
+        order: Number(s.order) || 1,
+        channel: s.channel,
+        status: s.status ?? 'pending',
+        key: s.key,
+        signedAt: s.signedAt,
+      }))
+      const status = row.status ?? 'pending_dispatch'
+      const signedCount = signers.filter((s) => s.status === 'signed').length
+      const signedTimes = signers
+        .map((s) => s.signedAt)
+        .filter((t): t is string => Boolean(t))
+        .sort()
+      return {
+        envelopeId: row.envelope_id,
+        subject: row.subject,
+        status,
+        bucket: classifyEnvelope(status, signers),
+        documentEntityId: row.document_entity_id,
+        documentKind: row.document_kind,
+        matterEntityId: row.matter_entity_id,
+        matterNumber: row.matter_number,
+        signers,
+        signedCount,
+        signerCount: signers.length,
+        sentAt: row.sent_at,
+        updatedAt: signedTimes.length ? signedTimes[signedTimes.length - 1]! : row.sent_at,
+      }
+    })
+  })
+}
+
+// ── Resend / Void (attorney actions, WP-N) ───────────────────────────────────
+
+export interface ResendResult {
+  envelopeId: string
+  notified: number
+  signers: Array<{ email: string; channel: 'portal' | 'link' }>
+}
+
+// Re-notify the signers whose turn is currently active (delivered | opened) on an
+// ACTIVE envelope — the real "resend the signing link" path (re-queues the same
+// secure link / portal nudge each active signer already had). Terminal envelopes
+// (completed | declined | voided) and pending_dispatch (external, never sent) are
+// refused. Goes through the operation core via queueNotification (submitAction).
+export async function resendEnvelope(
+  ctx: ActionContext,
+  envelopeId: string,
+): Promise<ResendResult> {
+  const status = await withActionContext(ctx, (c) =>
+    latestAttr(c, ctx.tenantId, envelopeId, 'envelope_status'),
+  )
+  if (status !== 'sent') {
+    throw new Error(
+      status == null
+        ? 'Envelope not found.'
+        : `Only an envelope that is out for signature can be resent (this one is ${status}).`,
+    )
+  }
+  const activeIds = await withActionContext(ctx, async (client) => {
+    const res = await client.query<{ request_id: string }>(
+      `SELECT r.source_entity_id AS request_id FROM relationship r
+         JOIN relationship_kind_definition rkd
+           ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'request_of'
+        WHERE r.tenant_id = $1 AND r.target_entity_id = $2
+          AND (r.valid_to IS NULL OR r.valid_to > now())
+          AND (SELECT a.value #>> '{}' FROM attribute a
+                 JOIN attribute_kind_definition akd
+                   ON akd.id = a.attribute_kind_id AND akd.kind_name = 'signer_status'
+                WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
+                ORDER BY a.valid_from DESC LIMIT 1) IN ('delivered', 'opened')`,
+      [ctx.tenantId, envelopeId],
+    )
+    return res.rows.map((r) => r.request_id)
+  })
+  if (activeIds.length === 0) {
+    throw new Error('No signer is currently awaiting signature on this envelope.')
+  }
+  const targets = await notifyDelivered(ctx, envelopeId, activeIds)
+  return {
+    envelopeId,
+    notified: targets.length,
+    signers: targets.map((t) => ({ email: '', channel: t.channel })),
+  }
+}
+
+export interface VoidResult {
+  envelopeId: string
+  status: 'voided'
+  voidedRequestIds: string[]
+}
+
+// Void an active envelope (firm-initiated). Send authz: voiding pulls a document
+// back from the client, so gate it like sending — only a matter owner / granted
+// attorney / firm admin may void. Routes through the operation core (esign.void).
+export async function voidEnvelope(
+  ctx: ActionContext,
+  envelopeId: string,
+  reason?: string,
+): Promise<VoidResult> {
+  const matterId = await withActionContext(ctx, async (client) => {
+    const res = await client.query<{ matter_id: string | null }>(
+      `SELECT df.target_entity_id AS matter_id
+         FROM relationship eo
+         JOIN relationship_kind_definition eok
+           ON eok.id = eo.relationship_kind_id AND eok.kind_name = 'envelope_of'
+         LEFT JOIN relationship df ON df.source_entity_id = eo.target_entity_id
+           AND df.tenant_id = eo.tenant_id
+         LEFT JOIN relationship_kind_definition dfk
+           ON dfk.id = df.relationship_kind_id AND dfk.kind_name = 'draft_of'
+        WHERE eo.tenant_id = $1 AND eo.source_entity_id = $2
+          AND (eo.valid_to IS NULL OR eo.valid_to > now())
+          AND (df.valid_to IS NULL OR df.valid_to > now())
+        LIMIT 1`,
+      [ctx.tenantId, envelopeId],
+    )
+    return res.rows[0]?.matter_id ?? null
+  })
+  if (matterId) await assertCanSendOnMatter(ctx, matterId)
+
+  const result = await submitAction(ctx, {
+    actionKindName: 'esign.void',
+    intentKind: 'enforcement',
+    payload: { envelope_entity_id: envelopeId, reason: reason ?? null },
+  })
+  const eff = (result.effects[0] ?? {}) as { voidedRequestIds?: string[] }
+  return { envelopeId, status: 'voided', voidedRequestIds: eff.voidedRequestIds ?? [] }
 }
 
 // ── Signable document + the signer's fields ──────────────────────────────────
@@ -454,12 +744,15 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       signerStatus,
       envelopeStatus,
       fields: myFields,
-      canSign: signerStatus === 'delivered' || signerStatus === 'opened',
+      canSign:
+        (signerStatus === 'delivered' || signerStatus === 'opened') && envelopeStatus !== 'voided',
       alreadyResolved:
         signerStatus === 'signed' ||
         signerStatus === 'declined' ||
+        signerStatus === 'voided' ||
         envelopeStatus === 'completed' ||
-        envelopeStatus === 'declined',
+        envelopeStatus === 'declined' ||
+        envelopeStatus === 'voided',
     }
   })
 }
@@ -811,6 +1104,9 @@ async function assertSignerTurn(ctx: ActionContext, requestId: string): Promise<
   )
   if (status === 'signed' || status === 'declined') {
     throw new Error('This request has already been completed.')
+  }
+  if (status === 'voided') {
+    throw new Error('This envelope was voided by the firm and can no longer be signed.')
   }
   if (status === 'pending') {
     throw new Error('It is not your turn to sign yet — a prior signer must sign first.')
