@@ -3025,7 +3025,11 @@ export function UnifiedAssistantChat({
                 markup. User turns stay verbatim. */}
             {t.role === 'assistant' ? (
               <>
-                {stripMachinery(t.content).trim() && (
+                {/* Founder walk 2026-07-17: on interview turns the question card IS
+                    the message — the lead-in prose duplicated it and the Thinking
+                    tab added chrome, so both are suppressed when the turn carries
+                    build questions. */}
+                {!t.buildQuestions?.length && stripMachinery(t.content).trim() && (
                   <div
                     className="assistant-md"
                     dangerouslySetInnerHTML={{
@@ -3035,7 +3039,9 @@ export function UnifiedAssistantChat({
                 )}
                 {/* The model's reasoning/process — relocated out of the reply into a
                     collapsed disclosure the attorney can expand on demand. */}
-                {t.reasoning?.trim() && <ReasoningDisclosure reasoning={t.reasoning} />}
+                {!t.buildQuestions?.length && t.reasoning?.trim() && (
+                  <ReasoningDisclosure reasoning={t.reasoning} />
+                )}
                 {/* Documents the assistant produced — downloadable deliverables
                     (PDF/Word + save to matter), not the prose. Downloads attach
                     here, never to an ordinary reply. */}
@@ -3195,7 +3201,9 @@ export function UnifiedAssistantChat({
             {/* "Using <skill>" chips are process signals, not the reply — a live
                 progress affordance only. They clear the moment answer text arrives so
                 the reply channel reads clean (BUILDER-REASONING-CHANNEL-1). */}
-            {!streaming.text && streaming.skills.length > 0 && (
+            {/* Founder walk 2026-07-17: in build mode the progress strip already
+                says what's running — the skill pill was noise there. */}
+            {!streaming.text && !buildMode && streaming.skills.length > 0 && (
               <div className="uac-skill-chips">
                 {streaming.skills.map((s) => (
                   <span key={s.slug} className="uac-skill-chip">
@@ -3289,7 +3297,9 @@ export function UnifiedAssistantChat({
             {streaming.buildQuestions.length > 0 && (
               <QuestionBatch questions={streaming.buildQuestions} onAnswer={handleQuestionAnswer} />
             )}
-            {streaming.text && <StreamingMarkdown text={streaming.text} />}
+            {streaming.text && streaming.buildQuestions.length === 0 && (
+              <StreamingMarkdown text={streaming.text} />
+            )}
             {/* Live notices (BUILDER-UX-3 P3): status tone is the muted transient
                 progress line ("Taking another pass…") — it renders only here and is
                 dropped when the turn commits; warnings keep the amber box. */}
