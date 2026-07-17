@@ -13,6 +13,7 @@ import { use, useCallback, useEffect, useState } from 'react'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 import { BackButton } from '@/components/BackButton'
 import { PayForm } from './PayForm'
+import { ScaleIcon } from '@/components/icons'
 import { ManualPaymentOptions } from './ManualPaymentOptions'
 import { formatDate } from '@/lib/datetime'
 
@@ -191,7 +192,12 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
       <BackButton fallback="/portal" forceFallback />
       <div className="public-draft-head">
         <div>
-          <div className="public-draft-firm">Pacheco Law</div>
+          <div className="pd-brandrow">
+            <span className="cp-crest" aria-hidden>
+              <ScaleIcon size={18} />
+            </span>
+            <div className="public-draft-firm">Pacheco Law</div>
+          </div>
           <h1 style={{ margin: 'var(--space-1) 0 0' }}>Invoice {invoiceNumber}</h1>
         </div>
       </div>

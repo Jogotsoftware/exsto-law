@@ -10511,11 +10511,18 @@ svg.lucide {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* padding 0 beats the global button padding, which was flex-squeezing the
+     26px scales-of-justice mark to a 2px sliver — the "missing logo" from the
+     founder walk. */
+  padding: 0;
   background: transparent;
   border: none;
   border-radius: 8px;
   color: var(--li-rail-gold);
   cursor: pointer;
+}
+.li-rail-pin svg {
+  flex: none;
 }
 .li-rail-pin:hover {
   background: rgba(255, 255, 255, 0.08);
@@ -10860,10 +10867,16 @@ svg.lucide {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* padding 0 beats the global button padding (0.55rem 1rem), which was
+     flex-squeezing the 19px icon to a 6px sliver (founder walk). */
+  padding: 0;
   border: none;
   background: transparent;
   color: #c6d2ea;
   cursor: pointer;
+}
+.li-top-search-btn svg {
+  flex: none;
 }
 .li-top-search-btn:hover {
   color: #fff;
@@ -10973,11 +10986,17 @@ svg.lucide {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* padding 0 beats the global button padding — same icon-sliver bug as
+     .li-top-search-btn (founder walk). */
+  padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.06);
   color: #c6d2ea;
   cursor: pointer;
+}
+.li-top-bell svg {
+  flex: none;
 }
 .li-top-bell:hover {
   color: #fff;
@@ -21442,4 +21461,21 @@ a.li-uac-done-primary:hover {
 }
 .uac-typing span:nth-child(3) {
   animation-delay: 0.36s, 1.8s;
+}
+
+/* ============================================================
+   pd-brand — the Legal Instruments scales crest on PUBLIC cards
+   (portal login / set-password / pay, shared-doc, e-sign). One
+   row: navy crest tile (reuses .cp-crest) + the firm name that
+   was already there. Founder walk 2026-07-17: the scales mark
+   must brand every platform surface top-left.
+   ============================================================ */
+.pd-brandrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.pd-brandrow .public-draft-firm {
+  margin: 0;
 }

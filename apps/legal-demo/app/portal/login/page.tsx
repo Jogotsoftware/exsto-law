@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { safeInternalPath } from '@/lib/safeRedirect'
+import { ScaleIcon } from '@/components/icons'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
 import { bridgeSupabaseSession, signInWithPasswordAndBridge } from '@/components/PortalSignInInline'
 
@@ -228,7 +229,12 @@ function Shell({
   return (
     <main className="public-draft cauth-shell">
       <div className="cauth-card">
-        <div className="public-draft-firm">Pacheco Law</div>
+        <div className="pd-brandrow">
+          <span className="cp-crest" aria-hidden>
+            <ScaleIcon size={18} />
+          </span>
+          <div className="public-draft-firm">Pacheco Law</div>
+        </div>
         <h1 className="cauth-title">{title}</h1>
         {children}
       </div>
