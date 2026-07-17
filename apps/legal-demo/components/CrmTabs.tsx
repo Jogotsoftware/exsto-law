@@ -10,6 +10,7 @@ export function CrmTabs() {
   return (
     <NavTabs
       ariaLabel="CRM"
+      className="li-crm-tabs"
       tabs={[
         { href: '/attorney/crm', label: 'Clients' },
         { href: '/attorney/crm/contacts', label: 'Contacts' },

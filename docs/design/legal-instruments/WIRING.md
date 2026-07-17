@@ -255,11 +255,71 @@ pathname-prefix match.
       client-contact address match; Portal: threads are matter-scoped by construction) already covers it; a
       manual override would be a control with no gap to fill.
 
-## WP-J · CRM
+## WP-J · CRM — SHIPPED (branch li/wp-j-crm)
 
-- [ ] WIRED: clients/contacts lists + detail pages + portal invite — restyle to comp tables/stat cards
-- [ ] ADAPT: status filter-in-header-column pattern
-- [ ] VERIFY: "New client" / "New contact" create flows exist and open comp-styled forms
+- [x] WIRED: clients/contacts lists + detail pages + portal invite — restyled to the comp's underline tabs,
+      header (title + count + primary New button), search + "N shown", grid table (avatar-initials + name,
+      status chip with dot, sortable-header carets), client detail (avatar tile + h1 + status chip, Email/
+      Schedule/Edit actions, 4 stat cards, Contacts card with Main badge, Matters card with status-dot rows),
+      contact detail (kv info card, Portal access card, Matters list). New family `li-crm-*` appended at the end
+      of globals.css.
+- [x] ADAPT: status filter-in-header-column pattern — the STATUS column header is now the comp's uppercase
+      `<select>` (`li-crm-statusfilter`), shared by both tabs via the new `CrmListTable` component
+      (`components/CrmListTable.tsx`). Clients previously had no status concept at all (only contacts did, via
+      `crmBucket`); Contacts previously had a separate four-way tab strip (All/Active/Prospective/Prior) above
+      the table instead of a header filter — both are now the one comp pattern. Column sorting (click header,
+      caret flips/dims) is real client-side sort, not decorative — neither list had sort before this WP.
+- [x] VERIFY resolved, split by tab: "New client" — a real manual create flow already existed
+      (`legal.client.create`, ClientsPage's inline form); kept, restyled into a Modal (matching the WP-B
+      NewMatterModal pattern — the shared Modal primitive itself isn't comp-restyled until WP-M), same round
+      trip (create → route to the new client's detail page). "New contact" — VERIFIED ABSENT: there is no
+      `legal.contact.create` tool anywhere in the MCP surface; contacts only ever arrive via intake (booking,
+      questionnaire, matter open), never a manual attorney-authored record. Per "no dead controls," the
+      Contacts tab does NOT get a New button — this is a real reclassification of the WIRING item (VERIFY →
+      confirmed not present), not an oversight.
+
+### Data + deviations found while restyling (not scope creep — all real, all in the CRM read path this WP touches)
+
+- The comp's Clients table shows a WEBSITE column and a STATUS chip that don't correspond to anything in the
+  client data model (no website attribute exists anywhere in the substrate for clients; clients had no status
+  concept at all before this WP). Per "simpler wins" / no-fabrication: WEBSITE is dropped, and STATUS is now a
+  real derived field — `verticals/legal/src/queries/client.ts` extends `listClients`/`getClient` to compute
+  `crmBucket` via the exact same `deriveCrmBucket(matterStatuses)` contacts already use (three-way Active/
+  Prospective/Prior split off the client's matters), so "status" reads identically everywhere in the CRM rather
+  than inventing a second vocabulary. `lastActivityAt` mirrors contacts.ts too (latest matter creation, else the
+  client's own createdAt). In the dropped WEBSITE column's place, the Clients table gets a real substitute
+  column: the main contact's name (`mainContactName`, one additional correlated subquery) — kept because the
+  comp visibly uses that slot to show "who to talk to," and it's genuinely free data (already resolvable via the
+  existing `client_main_contact` attribute), not fabricated.
+- Contact detail gained a header "Email" button (comp shows one; the app didn't). Wired to the same `launchCompose`
+  (Contract D) the Client detail page already used identically — a real, proven, working flow, not a new one.
+- Client detail's action row (Email/Schedule/Edit) and Contact detail's Portal-access invite were all VERIFIED
+  already real and working (`launchCompose`, `launchScheduler`, `legal.client.update` via the existing inline
+  edit form, `legal.contact.invite_to_portal`) — none omitted, all kept and restyled only.
+- NotesSection on Client detail is not in the comp's CRM screens at all, but it's real, substrate-backed
+  capability (not a stub) — kept per the WP-C precedent ("AI review kept... real, pre-existing capability the
+  comp doesn't show"), housed in its own `li-crm-panel` rather than dropped or left unstyled.
+- Found, not fixed (pre-existing, predates this WP, out of a restyle WP's scope): `listClients`'s `matter_count`
+  subquery counts all `matter_of` relationships regardless of the matter entity's own `status`, while
+  `getClient`'s matters query filters `AND e.status = 'active'` — so a client whose matters include an archived/
+  non-active entity shows a higher count in the list than the number of rows in its own detail panel (verified
+  live: one seed client showed "5 matters" in the list, 2 in its own detail + stat card). Both queries were
+  already like this before WP-J; this WP only added new columns alongside the existing count logic, it didn't
+  touch it. Flagging for a future data-consistency pass, not fixing here.
+
+### Verification (2026-07-17, live app, `?demo_user=juan-carlost`, Playwright)
+
+Both tabs, search ("a" narrowed 24→20 contacts), status header-filter (Active → 21/24 shown, header reads
+"ACTIVE"), column sort (asc/desc flips the leading row), row → client/contact detail, client detail actions
+(Email/Schedule/Edit all present and correctly disabled without a main-contact email), 4 stat cards, Contacts
+panel with Main badge, Matters panel → real click-through to `/attorney/matters/{id}` (verified with href
+inspection + network trace, not just a screenshot), contact detail kv card + Portal access card, portal invite
+button fired for real (`legal.contact.invite_to_portal`, success alert rendered), New client round trip (modal →
+create → routed to the new client's own detail page, name confirmed on page), "New contact" absent (0 matches
+for the button) on the Contacts tab as expected. Dev-environment Supabase pooler 500s (EMAXCONNSESSION) were hit
+several times during the walk — pre-existing, unrelated to this WP's queries (traced to `withSuperuser`/
+`actorIsActive` session verification, not `legal.client.*`/`legal.contact.*`); retried and passed on the retry
+each time, consistent with prior WPs' notes on this environment.
 
 ## WP-K · Intake Forms + Questions
 

@@ -2,16 +2,24 @@
 
 // Contact detail (CRM). Shows the contact's attributes, standing, referral
 // source, and all their matters (clickable through to each). Read-only over the
-// existing legal.contact.get query.
+// existing legal.contact.get query; portal invite is the one write action here.
+//
+// li-wp-j: restyled to the comp's CRM CONTACT DETAIL (avatar + h1 + status chip,
+// Email + Invite-to-portal header actions, kv info card, Portal access card,
+// Matters list). The header's "Email" button is new — the comp shows one and
+// launchCompose (Contract D, already used identically on the Client detail page)
+// is a real, working flow, so it's wired rather than omitted. Invite-to-portal
+// was already real (legal.contact.invite_to_portal); kept, restyled, and now
+// also mirrored as the header action per the comp (both call the same invite()).
 
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { BackButton } from '@/components/BackButton'
-import { PageHead } from '@/components/PageHead'
-
-type CrmBucket = 'active' | 'prospective' | 'prior'
+import { launchCompose } from '@/lib/contractD'
+import { MailIcon } from '@/components/icons'
+import { CRM_STATUS_META, crmInitials, type CrmBucket } from '@/lib/crmStatus'
 
 interface ContactMatter {
   matterEntityId: string
@@ -36,12 +44,6 @@ interface ContactDetail {
   matters: ContactMatter[]
 }
 
-const BUCKET_META: Record<CrmBucket, { label: string; color: string }> = {
-  active: { label: 'Active', color: '#16a34a' },
-  prospective: { label: 'Prospective', color: '#3b82f6' },
-  prior: { label: 'Prior', color: '#6b7280' },
-}
-
 function humanizeService(key: string): string {
   if (!key) return ''
   if (key === 'llc_formation' || key === 'business_formation') return 'NC LLC formation'
@@ -52,6 +54,21 @@ function humanizeService(key: string): string {
 
 function humanizeStatus(s: string): string {
   return s.replace(/_/g, ' ')
+}
+
+// Mirrors the Client detail page's dot coloring (kept as a small local helper —
+// each CRM surface owns its own, per the app's established convention).
+const MATTER_DOT: Array<{ matches: (s: string) => boolean; color: string }> = [
+  { matches: (s) => s === 'matter_closed', color: 'var(--li-muted)' },
+  { matches: (s) => s === 'engagement_signed' || s === 'matter_active', color: 'var(--li-ok)' },
+  { matches: (s) => s === 'drafting' || s === 'review_pending', color: 'var(--li-warn)' },
+  {
+    matches: (s) => s === 'consultation_scheduled' || s === 'consultation_completed',
+    color: 'var(--li-info)',
+  },
+]
+function matterDotColor(status: string): string {
+  return MATTER_DOT.find((g) => g.matches(status))?.color ?? 'var(--li-purple)'
 }
 
 export default function ContactDetailPage() {
@@ -100,117 +117,152 @@ export default function ContactDetailPage() {
     }
   }, [id])
 
-  const standing = contact ? BUCKET_META[contact.crmBucket] : null
+  if (error && !contact) {
+    return (
+      <>
+        <BackButton
+          fallback="/attorney/crm/contacts"
+          className="li-crm-back"
+          label="Contacts"
+          style={{ gap: 6, paddingLeft: 10, marginBottom: 18 }}
+        />
+        <div className="alert alert-error">{error}</div>
+      </>
+    )
+  }
+
+  if (!contact) {
+    return (
+      <div className="loading-block" role="status">
+        <span className="spinner" /> Loading…
+      </div>
+    )
+  }
+
+  const statusMeta = CRM_STATUS_META[contact.crmBucket]
 
   return (
-    <main>
-      <BackButton fallback="/attorney/crm/contacts" />
-      <PageHead
-        title={
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            {contact?.fullName || contact?.email || 'Contact'}
-            {standing && (
-              <span
-                className="badge"
-                style={{
-                  background: standing.color,
-                  color: 'var(--surface)',
-                  borderColor: standing.color,
-                }}
-              >
-                {standing.label}
-              </span>
-            )}
-          </span>
-        }
-      />
+    <>
+      <BackButton fallback="/attorney/crm/contacts" className="li-crm-back" label="Contacts" />
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      {!contact && !error ? (
-        <div className="loading-block" role="status">
-          <span className="spinner" /> Loading…
-        </div>
-      ) : contact ? (
-        <>
-          <section>
-            <div className="form-grid">
-              <Field label="Email" value={contact.email || '—'} />
-              <Field label="Phone" value={contact.phone || '—'} />
-              <Field label="Company" value={contact.companyName || '—'} />
-              <Field label="Referral source" value={contact.attributionSource || '—'} />
-            </div>
-          </section>
-
-          <section>
-            <h2 style={{ marginBottom: 'var(--space-2)' }}>Portal access</h2>
-            <p className="text-muted" style={{ marginTop: 0 }}>
-              Email this client a secure link to set their password and sign in to view their
-              matters, documents, and invoices, and message you. Re-sending resets their password.
-            </p>
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={inviting || !contact.email}
-              onClick={invite}
+      <div className="li-crm-detail-head">
+        <span className="li-crm-avatar li-crm-avatar-lg">
+          {crmInitials(contact.fullName || contact.email || '?')}
+        </span>
+        <div className="li-crm-detail-titles">
+          <div className="li-crm-detail-name-row">
+            <h1>{contact.fullName || contact.email || 'Contact'}</h1>
+            <span
+              className="li-crm-detail-status"
+              style={{ background: statusMeta.bg, color: statusMeta.fg }}
             >
-              {inviting ? 'Sending…' : 'Invite to portal'}
-            </button>
-            {!contact.email && (
-              <span className="text-muted" style={{ marginLeft: 'var(--space-2)' }}>
-                Add an email first.
+              <span className="li-crm-status-dot" style={{ background: statusMeta.fg }} />
+              {statusMeta.label}
+            </span>
+          </div>
+        </div>
+        <div className="li-crm-actions">
+          <button
+            type="button"
+            className="li-crm-btn"
+            onClick={() => launchCompose({ contactId: contact.contactEntityId, to: contact.email })}
+            disabled={!contact.email}
+            title={contact.email ? `Email ${contact.email}` : 'No email on file'}
+          >
+            <MailIcon size={15} />
+            Email
+          </button>
+          <button
+            type="button"
+            className="li-crm-btn-primary"
+            disabled={inviting || !contact.email}
+            onClick={invite}
+          >
+            {inviting ? 'Sending…' : 'Invite to portal'}
+          </button>
+        </div>
+      </div>
+
+      <div className="li-crm-kv-card">
+        <div className="li-crm-kv-grid">
+          <div>
+            <div className="li-crm-kv-label">Email</div>
+            <div className="li-crm-kv-value">{contact.email || '—'}</div>
+          </div>
+          <div>
+            <div className="li-crm-kv-label">Phone</div>
+            <div className="li-crm-kv-value">{contact.phone || '—'}</div>
+          </div>
+          <div>
+            <div className="li-crm-kv-label">Company</div>
+            <div className="li-crm-kv-value">{contact.companyName || '—'}</div>
+          </div>
+          <div>
+            <div className="li-crm-kv-label">Referral source</div>
+            <div className="li-crm-kv-value">{contact.attributionSource || '—'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="li-crm-portal-card">
+        <h2 className="li-crm-panel-title">Portal access</h2>
+        <p className="li-crm-portal-desc">
+          Email this client a secure link to set a password and sign in to view their matters,
+          documents, and invoices, and message you. Re-sending resets their password.
+        </p>
+        <button
+          type="button"
+          className="li-crm-btn-primary"
+          disabled={inviting || !contact.email}
+          onClick={invite}
+        >
+          {inviting ? 'Sending…' : 'Invite to portal'}
+        </button>
+        {!contact.email && <span className="li-crm-portal-hint">Add an email first.</span>}
+        {inviteMsg && (
+          <div className={`alert ${inviteMsg.ok ? 'alert-success' : 'alert-error'}`}>
+            {inviteMsg.text}
+          </div>
+        )}
+      </div>
+
+      <div className="li-crm-panel">
+        <div className="li-crm-panel-head">
+          <h2 className="li-crm-panel-title">
+            Matters <span className="li-crm-panel-count">{contact.matterCount}</span>
+          </h2>
+        </div>
+        {contact.matters.length === 0 ? (
+          <div className="li-crm-panel-empty">No matters yet.</div>
+        ) : (
+          contact.matters.map((m) => (
+            <Link
+              key={m.matterEntityId}
+              href={`/attorney/matters/${m.matterEntityId}`}
+              className="li-crm-matter-row"
+            >
+              <span
+                className="li-crm-matter-dot"
+                style={{ background: matterDotColor(m.status) }}
+              />
+              <span className="li-crm-contact-info">
+                <span className="li-crm-contact-name">
+                  {humanizeService(m.serviceKey) || m.matterNumber}
+                </span>
+                <span className="li-crm-contact-sub">
+                  {humanizeStatus(m.status)}
+                  {m.summary && ` · ${m.summary}`}
+                </span>
               </span>
-            )}
-            {inviteMsg && (
-              <div
-                className={`alert ${inviteMsg.ok ? 'alert-success' : 'alert-error'}`}
-                style={{ marginTop: 'var(--space-2)' }}
-              >
-                {inviteMsg.text}
-              </div>
-            )}
-          </section>
-
-          <section>
-            <h2 style={{ marginBottom: 'var(--space-2)' }}>
-              Matters{' '}
-              <span style={{ color: 'var(--muted)', fontWeight: 400 }}>{contact.matterCount}</span>
-            </h2>
-            {contact.matters.length === 0 ? (
-              <p className="text-muted">No matters yet.</p>
-            ) : (
-              <div className="matter-list">
-                {contact.matters.map((m) => (
-                  <Link
-                    key={m.matterEntityId}
-                    href={`/attorney/matters/${m.matterEntityId}`}
-                    className="matter-row"
-                  >
-                    <div>
-                      <div className="matter-row-title">
-                        {humanizeService(m.serviceKey) || m.matterNumber}
-                      </div>
-                      <div className="matter-row-sub">
-                        {humanizeStatus(m.status)}
-                        {m.summary && ` · ${m.summary}`}
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </section>
-        </>
-      ) : null}
-    </main>
-  )
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <label>
-      <span>{label}</span>
-      <div style={{ padding: 'var(--space-2) 0', fontWeight: 500 }}>{value}</div>
-    </label>
+              <span className="li-crm-matter-chevron" aria-hidden="true">
+                ›
+              </span>
+            </Link>
+          ))
+        )}
+      </div>
+    </>
   )
 }
