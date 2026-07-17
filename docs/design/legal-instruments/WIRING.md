@@ -43,17 +43,45 @@ Audited against `origin/main` @ c26b3ae (2026-07-16, three code audits). This is
 - [ ] CONFLICT (Joe): task checkbox (comp) vs 4-state status select (app)
 - [ ] CONFLICT (Joe): uploaded-doc menu — download+AI-review today vs comp's full Edit/Word/PDF/Email
 
-## WP-C · Review queue + reader ★ flagship
+## WP-C · Review queue + reader ★ flagship — SHIPPED (branch li/wp-c-review)
 
-- [ ] WIRED: batch select + select-all + batch disposition bar; Begin-review sequential ("n of m", auto-advance)
-- [ ] WIRED: column sorts, kind filter, search; Download PDF/Word; Send-via-email; Approve/Reject/Request-revision
-- [ ] WIRED: reasoning-trace drawer ("Matter context"); proportional letter page + DRAFT watermark; regenerate modal
-      with skills picker
-- [ ] BUILD: interactive AI-revision tracked-changes loop — prompt (+ suggestion chips) → inline redline (red
-      strikethrough deletions / green underline insertions) → Accept all / Edit revision / Discard; Accept
-      materializes as version n+1 (append-only preserved)
-- [ ] BUILD: client column + sort in the queue
-- [ ] CONFLICT (Joe): batch approve/reject bar (richer than comp's Begin-review-only)
+- [x] WIRED: select + select-all; Begin-review sequential ("n of m", auto-advance, prev/next). Batch disposition
+      bar CUT (see CONFLICT below).
+- [x] WIRED: column sorts (matter/client/kind/generated), kind filter, search; Download PDF/Word; Send-via-email;
+      Approve/Reject.
+- [x] WIRED→ADAPTED: reasoning trace is now the inline **Matter context** panel (comp), not a drawer; proportional
+      letter page on the shared `DocumentSheet` (variant `full`) inside `DocumentCanvas` + gold DRAFT watermark for
+      unapproved versions. Standalone "Regenerate draft…" + skills picker are subsumed by the AI-revision flagship
+      for documents (kept only for email drafts, which retain their async `legal.email.draft` regenerate).
+- [x] BUILD: interactive AI-revision tracked-changes loop — "Revise with AI" modal (prompt + 4 suggestion chips that
+      run immediately) → GemShimmer "Drafting…" → inline word-level redline (red strikethrough deletions / green
+      underline insertions) → Accept all / Edit / Discard. Real sync AI via new `legal.draft.revise`. See mapping.
+- [x] BUILD: client column + sort in the queue (new `clientName` on `legal.draft.list_pending`).
+- [x] CONFLICT (Joe, 2026-07-17, binding) RESOLVED — **cut to comp**: the queue's batch approve/request-revision/
+      reject bar is removed. Selection feeds ONLY "Begin review →" (comp-exact band: "N selected · Clear · Begin
+      review →"). Mirrored in the reader: the disposition set is Reject / AI revision / Approve (comp's three
+      buttons); the app's richer Request-revision + standalone Regenerate + Compare-versions + Open-client-view are
+      subsumed/cut per the comp+task toolbar spec. request_revision stays available via MCP for other surfaces.
+
+### Append-only mapping (the flagship — as implemented, preview-then-persist)
+
+- **Generate revision** → `legal.draft.revise` (new sync MCP tool): reads version n's markdown, asks Claude (via the
+  existing `callClaudeDrafter` adapter) to redraft the WHOLE document under the instruction, records an append-only
+  `reasoning_trace` (exsto-ai-operation, honest confidence < 1.0), and returns `{ revisedMarkdown, reasoningTraceId }`.
+  It does **NOT** create a version — the revision is a proposal (comp: "Nothing is sent to the client — you review the
+  redlines and accept or reject").
+- **Redline view** → client computes a word-level diff of n vs the proposal (`lib/wordDiff.buildRedline`, extends the
+  line-LCS to run-level; markdown normalized to readable prose for display only) and renders del/ins runs.
+- **Accept all** → persists the proposal as version **n+1** via the EXISTING append-only `legal.draft.edit`
+  (`document.edit`), note `AI revision: <prompt>`; reader navigates to n+1. Queue history shows both (append-only).
+- **Discard changes** → drops the in-memory proposal; version n is untouched and NO throwaway version is written
+  (cleaner than voiding a persisted n+1, and exactly the comp's model). The generation trace remains as an honest
+  record that the AI reasoned.
+- **Edit** → gold-bordered textarea prefilled with the revised markdown; **Accept edits** persists the edited text as
+  version n+1 (or n+2 if a prior Accept already landed) via the same `legal.draft.edit`.
+- Rationale for preview-then-persist over persist-on-generate: only accepted revisions become substrate versions
+  (clean history, no reject-dance, queue never doubles during review), and every persist is the existing append-only
+  edit path — faithful to the comp, which persists nothing until Accept.
 
 ## WP-D · Services + service editor
 

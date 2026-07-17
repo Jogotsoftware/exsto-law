@@ -1,11 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
-import { PageHead } from '@/components/PageHead'
 
 // Shared with the detail page: a step-through review session is the ordered list of
 // selected draft ids + where we are in it, kept in sessionStorage (per tab) and
@@ -17,79 +15,39 @@ interface PendingDraft {
   documentEntityId: string
   matterEntityId: string
   matterNumber: string
+  clientName: string
   documentKind: string
   versionNumber: number
   status: string
   recordedAt: string
-  // MACHINE-COMMS-1: 'communication' = an email draft (approve = send); its
-  // subject is the row's label. 'document' rows carry nulls.
   channel: 'document' | 'communication'
   emailSubject: string | null
   emailToRole: string | null
-  // STYLE-FIX-2: house-voice check flags recorded on the version ([] = clean,
-  // null = not checked — document drafts and template merges).
   voiceViolations: { rule: string; where: string; offending: string }[] | null
 }
 
-// Batch actions map 1:1 to the per-draft review MCP tools the detail page already
-// drives. request_revision requires notes (same rule as the detail page).
-type BatchAction = 'approve' | 'request_revision' | 'reject'
-const BATCH_TOOL: Record<BatchAction, string> = {
-  approve: 'legal.draft.approve',
-  request_revision: 'legal.draft.request_revision',
-  reject: 'legal.draft.reject',
-}
-const BATCH_LABEL: Record<BatchAction, string> = {
-  approve: 'Approve',
-  request_revision: 'Request revision',
-  reject: 'Reject',
-}
-
-type SortKey = 'recordedAt' | 'matterNumber' | 'documentKind'
-type ItemState = 'queued' | 'running' | 'ok' | 'error'
-interface ItemResult {
-  state: ItemState
-  message?: string
-}
+// Sortable columns. WP-C adds `clientName` (the built CLIENT column).
+type SortKey = 'recordedAt' | 'matterNumber' | 'clientName' | 'documentKind'
 
 function humanizeKind(kind: string): string {
   return kind.replace(/_/g, ' ')
 }
 
-// A clickable column header that sorts the queue by `sortKey`. Clicking the
-// active column flips direction; an arrow shows the current state (▲/▼), and a
-// faint ↕ marks the other sortable columns. aria-sort keeps it accessible.
-function SortHeader({
-  label,
+// Comp caret indicators: ⇅ idle, ▴ asc, ▾ desc — colored gold when active.
+function SortCaret({
   columnKey,
   activeKey,
   asc,
-  onSort,
 }: {
-  label: string
   columnKey: SortKey
   activeKey: SortKey
   asc: boolean
-  onSort: (k: SortKey) => void
 }) {
   const active = activeKey === columnKey
   return (
-    <th
-      className="sortable-th"
-      role="button"
-      tabIndex={0}
-      aria-sort={active ? (asc ? 'ascending' : 'descending') : 'none'}
-      title={`Sort by ${label}`}
-      onClick={() => onSort(columnKey)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSort(columnKey)
-        }
-      }}
-    >
-      {label} <span className="sort-arrow">{active ? (asc ? '▲' : '▼') : '↕'}</span>
-    </th>
+    <span className={`li-rev-caret${active ? ' is-active' : ''}`} aria-hidden>
+      {active ? (asc ? '▴' : '▾') : '⇅'}
+    </span>
   )
 }
 
@@ -98,20 +56,11 @@ export default function ReviewQueue() {
   const [drafts, setDrafts] = useState<PendingDraft[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Selection + filter/sort state. No shared "saved-views" component exists in the
-  // app yet (only the savedViews data layer), so the queue ships a self-contained
-  // filter/sort here rather than rebuilding one elsewhere.
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [kindFilter, setKindFilter] = useState('all')
   const [sortKey, setSortKey] = useState<SortKey>('recordedAt')
   const [sortAsc, setSortAsc] = useState(false)
-
-  // Batch-execute state.
-  const [batchAction, setBatchAction] = useState<BatchAction>('approve')
-  const [batchNotes, setBatchNotes] = useState('')
-  const [running, setRunning] = useState(false)
-  const [results, setResults] = useState<Map<string, ItemResult>>(new Map())
 
   async function load() {
     try {
@@ -141,6 +90,7 @@ export default function ReviewQueue() {
       list = list.filter(
         (d) =>
           d.matterNumber.toLowerCase().includes(q) ||
+          d.clientName.toLowerCase().includes(q) ||
           humanizeKind(d.documentKind).toLowerCase().includes(q) ||
           (d.emailSubject ?? '').toLowerCase().includes(q),
       )
@@ -149,14 +99,14 @@ export default function ReviewQueue() {
       let cmp = 0
       if (sortKey === 'recordedAt') cmp = a.recordedAt.localeCompare(b.recordedAt)
       else if (sortKey === 'matterNumber') cmp = a.matterNumber.localeCompare(b.matterNumber)
+      else if (sortKey === 'clientName') cmp = a.clientName.localeCompare(b.clientName)
       else cmp = a.documentKind.localeCompare(b.documentKind)
       return sortAsc ? cmp : -cmp
     })
     return sorted
   }, [drafts, kindFilter, query, sortKey, sortAsc])
 
-  // Selection is scoped to what's visible: clear any selection that filtered out so
-  // a batch never runs on a hidden row.
+  // Selection is scoped to what's visible so a review never opens a hidden row.
   const visibleIds = useMemo(() => new Set(visible.map((d) => d.documentVersionId)), [visible])
   const selectedVisible = useMemo(
     () => [...selected].filter((id) => visibleIds.has(id)),
@@ -182,8 +132,8 @@ export default function ReviewQueue() {
     })
   }
 
-  // Click a column header to sort by it; clicking the active column flips
-  // direction. Date defaults to newest-first; text columns to A→Z.
+  // Click a header to sort; clicking the active column flips direction. Date
+  // defaults newest-first; text columns A→Z.
   function sortBy(key: SortKey) {
     if (key === sortKey) {
       setSortAsc((v) => !v)
@@ -193,51 +143,9 @@ export default function ReviewQueue() {
     }
   }
 
-  const notesRequired = batchAction === 'request_revision'
-  const canRun =
-    !running && selectedVisible.length > 0 && (!notesRequired || batchNotes.trim().length > 0)
-
-  // Sequential batch-execute: run the chosen action on each selected draft one at a
-  // time, recording a per-item result. A single failure is captured and the batch
-  // keeps going (one bad draft must not sink the rest).
-  async function runBatch() {
-    if (!canRun) return
-    const ids = visible.map((d) => d.documentVersionId).filter((id) => selected.has(id)) // preserve the on-screen (sorted) order
-    setRunning(true)
-    setError(null)
-    setResults(new Map(ids.map((id) => [id, { state: 'queued' as ItemState }])))
-
-    const toolName = BATCH_TOOL[batchAction]
-    const notes = batchNotes.trim() || undefined
-    for (const id of ids) {
-      setResults((prev) => new Map(prev).set(id, { state: 'running' }))
-      try {
-        await callAttorneyMcp({ toolName, input: { documentVersionId: id, reviewNotes: notes } })
-        setResults((prev) =>
-          new Map(prev).set(id, { state: 'ok', message: BATCH_LABEL[batchAction] }),
-        )
-      } catch (err) {
-        setResults((prev) =>
-          new Map(prev).set(id, {
-            state: 'error',
-            message: err instanceof Error ? err.message : String(err),
-          }),
-        )
-      }
-    }
-
-    setRunning(false)
-    // Reload so completed drafts (no longer pending_review) drop off, but keep the
-    // results map so the attorney sees what each item did even after it leaves.
-    setSelected(new Set())
-    setBatchNotes('')
-    await load()
-  }
-
-  // Step-through review: open each selected draft in order and auto-advance after
-  // each disposition (the detail page drives the advance). Records the ordered id
-  // list in sessionStorage and opens the first. This is the "review one by one"
-  // path, distinct from the batch-apply above.
+  // Begin review (the ONLY thing selection feeds — the batch disposition bar was
+  // cut, FOUNDER DECISION 2026-07-17): walk the selected drafts in order; the
+  // reader auto-advances after each disposition. Ordered ids in sessionStorage.
   function beginReview() {
     const ids = visible.map((d) => d.documentVersionId).filter((id) => selected.has(id))
     if (ids.length === 0) return
@@ -245,12 +153,16 @@ export default function ReviewQueue() {
     router.push(`/attorney/review/${ids[0]}?review=session`)
   }
 
-  const okCount = [...results.values()].filter((r) => r.state === 'ok').length
-  const errCount = [...results.values()].filter((r) => r.state === 'error').length
+  function openReview(id: string) {
+    router.push(`/attorney/review/${id}`)
+  }
 
   return (
-    <main>
-      <PageHead title="Review queue" />
+    <main className="li-rev">
+      <h1 className="li-rev-title">Review queue</h1>
+      <p className="li-rev-sub">
+        Drafts the AI produced, waiting for your review before they reach the client.
+      </p>
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -260,27 +172,36 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {drafts && drafts.length === 0 && (
-        <section>
-          <p>No drafts pending review.</p>
-        </section>
-      )}
+      {drafts && drafts.length === 0 && <p className="li-rev-empty">No drafts pending review.</p>}
 
       {drafts && drafts.length > 0 && (
         <>
-          {/* Filter toolbar. Sorting lives on the clickable column headers below. */}
-          <div className="row" style={{ marginBottom: 'var(--space-3)' }}>
-            <input
-              type="text"
-              placeholder="Search matter or document kind…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              style={{ width: 'auto', flex: '1 1 14rem', minWidth: '12rem' }}
-            />
+          <div className="li-rev-filters">
+            <div className="li-rev-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                <line
+                  x1="21"
+                  y1="21"
+                  x2="16.5"
+                  y2="16.5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search matter, client, or document kind…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search the review queue"
+              />
+            </div>
             <select
+              className="li-rev-kind"
               value={kindFilter}
               onChange={(e) => setKindFilter(e.target.value)}
-              style={{ width: 'auto' }}
               aria-label="Filter by document kind"
             >
               <option value="all">All document kinds</option>
@@ -290,192 +211,117 @@ export default function ReviewQueue() {
                 </option>
               ))}
             </select>
-            <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)', marginLeft: 'auto' }}>
+            <span className="li-rev-count">
               {visible.length} of {drafts.length} shown
             </span>
           </div>
 
-          {/* Batch action bar — appears once at least one visible draft is selected. */}
+          {/* Selection bar — Begin review only (batch disposition cut to comp). */}
           {selectedVisible.length > 0 && (
-            <section
-              style={{
-                marginBottom: 'var(--space-4)',
-                background: 'var(--navy-50)',
-                border: '1px solid var(--navy-100)',
-              }}
-            >
-              <div className="row">
-                <strong>{selectedVisible.length} selected</strong>
-                <button className="primary" onClick={beginReview} disabled={running}>
-                  Begin review →
-                </button>
-                <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
-                  or apply to all:
-                </span>
-                <select
-                  value={batchAction}
-                  onChange={(e) => setBatchAction(e.target.value as BatchAction)}
-                  style={{ width: 'auto' }}
-                  disabled={running}
-                  aria-label="Batch action"
-                >
-                  <option value="approve">Approve</option>
-                  <option value="request_revision">Request revision</option>
-                  <option value="reject">Reject</option>
-                </select>
-                <button
-                  className={
-                    batchAction === 'reject' ? 'danger' : batchAction === 'approve' ? 'ok' : 'warn'
-                  }
-                  disabled={!canRun}
-                  onClick={runBatch}
-                >
-                  {running && <span className="spinner" />}
-                  {running
-                    ? `Running ${okCount + errCount}/${selectedVisible.length}…`
-                    : `${BATCH_LABEL[batchAction]} ${selectedVisible.length} draft${selectedVisible.length === 1 ? '' : 's'}`}
-                </button>
-                <button onClick={() => setSelected(new Set())} disabled={running}>
-                  Clear
-                </button>
-              </div>
-              {notesRequired && (
-                <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-                  Revision notes (required, applied to each selected draft)
-                  <textarea
-                    rows={2}
-                    value={batchNotes}
-                    onChange={(e) => setBatchNotes(e.target.value)}
-                    placeholder="What needs to change across these drafts?"
-                    style={{ marginTop: 'var(--space-1)' }}
-                    disabled={running}
+            <div className="li-rev-selbar">
+              <span className="li-rev-selcount">{selectedVisible.length} selected</span>
+              <button type="button" className="li-rev-clear" onClick={() => setSelected(new Set())}>
+                Clear
+              </button>
+              <button type="button" className="li-rev-begin" onClick={beginReview}>
+                Begin review
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <line
+                    x1="5"
+                    y1="12"
+                    x2="19"
+                    y2="12"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
                   />
-                </label>
-              )}
-            </section>
-          )}
-
-          {/* Batch result summary — persists after the list reloads. */}
-          {results.size > 0 && (
-            <div
-              className={errCount > 0 ? 'alert alert-error' : 'badge ok'}
-              style={{ display: 'block', marginBottom: 'var(--space-3)' }}
-            >
-              Batch complete: {okCount} succeeded
-              {errCount > 0 ? `, ${errCount} failed` : ''}.
+                  <polyline
+                    points="12 5 19 12 12 19"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+                </svg>
+              </button>
             </div>
           )}
 
-          <section style={{ padding: 0, overflow: 'hidden' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '2.5rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      onChange={toggleAll}
-                      aria-label="Select all"
-                      style={{ width: 'auto' }}
-                    />
-                  </th>
-                  <SortHeader
-                    label="Matter"
-                    columnKey="matterNumber"
-                    activeKey={sortKey}
-                    asc={sortAsc}
-                    onSort={sortBy}
+          <div className="li-rev-table">
+            <div className="li-rev-thead">
+              <label className="li-rev-check">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleAll}
+                  aria-label="Select all"
+                />
+              </label>
+              <button type="button" className="li-rev-th" onClick={() => sortBy('matterNumber')}>
+                MATTER <SortCaret columnKey="matterNumber" activeKey={sortKey} asc={sortAsc} />
+              </button>
+              <button type="button" className="li-rev-th" onClick={() => sortBy('clientName')}>
+                CLIENT <SortCaret columnKey="clientName" activeKey={sortKey} asc={sortAsc} />
+              </button>
+              <button type="button" className="li-rev-th" onClick={() => sortBy('documentKind')}>
+                DOCUMENT KIND{' '}
+                <SortCaret columnKey="documentKind" activeKey={sortKey} asc={sortAsc} />
+              </button>
+              <span className="li-rev-th li-rev-th--static">VERSION</span>
+              <button type="button" className="li-rev-th" onClick={() => sortBy('recordedAt')}>
+                GENERATED <SortCaret columnKey="recordedAt" activeKey={sortKey} asc={sortAsc} />
+              </button>
+              <span className="li-rev-th li-rev-th--static li-rev-th--result">RESULT</span>
+            </div>
+
+            {visible.map((d) => (
+              <div key={d.documentVersionId} className="li-rev-row">
+                <label className="li-rev-check">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(d.documentVersionId)}
+                    onChange={() => toggle(d.documentVersionId)}
+                    aria-label={`Select ${d.matterNumber}`}
                   />
-                  <SortHeader
-                    label="Document kind"
-                    columnKey="documentKind"
-                    activeKey={sortKey}
-                    asc={sortAsc}
-                    onSort={sortBy}
-                  />
-                  <th>Version</th>
-                  <SortHeader
-                    label="Generated"
-                    columnKey="recordedAt"
-                    activeKey={sortKey}
-                    asc={sortAsc}
-                    onSort={sortBy}
-                  />
-                  <th>Result</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((d) => {
-                  const r = results.get(d.documentVersionId)
-                  return (
-                    <tr key={d.documentVersionId}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(d.documentVersionId)}
-                          onChange={() => toggle(d.documentVersionId)}
-                          disabled={running}
-                          aria-label={`Select ${d.matterNumber}`}
-                          style={{ width: 'auto' }}
-                        />
-                      </td>
-                      <td>{d.matterNumber}</td>
-                      <td>
-                        {d.channel === 'communication' ? (
-                          // Email draft: the subject is the label; approving SENDS it.
-                          <>
-                            <span
-                              className="badge info"
-                              style={{ marginRight: 'var(--space-2)' }}
-                              title="An email draft — approving it sends it to the client."
-                            >
-                              Email
-                            </span>
-                            {d.emailSubject || humanizeKind(d.documentKind)}
-                            <div className="text-sm text-muted">approve = send</div>
-                            {(d.voiceViolations?.length ?? 0) > 0 && (
-                              // STYLE-FIX-2: the deterministic house-voice check
-                              // flagged this version after its one corrective
-                              // retry — the draft still queues; the attorney
-                              // sees exactly what tripped before opening it.
-                              <div
-                                className="badge warn"
-                                style={{ marginTop: 'var(--space-1)' }}
-                                title={d.voiceViolations!.map((v) => v.offending).join('\n')}
-                              >
-                                Voice check: {d.voiceViolations!.length}{' '}
-                                {d.voiceViolations!.length === 1 ? 'flag' : 'flags'}
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          humanizeKind(d.documentKind)
-                        )}
-                      </td>
-                      <td>v{d.versionNumber}</td>
-                      <td>{formatDateTime(d.recordedAt)}</td>
-                      <td>
-                        {r?.state === 'running' && <span className="spinner" />}
-                        {r?.state === 'queued' && (
-                          <span style={{ color: 'var(--muted)' }}>queued</span>
-                        )}
-                        {r?.state === 'ok' && <span className="badge ok">{r.message}</span>}
-                        {r?.state === 'error' && (
-                          <span className="badge danger" title={r.message}>
-                            failed
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <Link href={`/attorney/review/${d.documentVersionId}`}>Review</Link>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </section>
+                </label>
+                <span className="li-rev-matter">{d.matterNumber}</span>
+                <span className="li-rev-client">{d.clientName || '—'}</span>
+                <span className="li-rev-kindcell">
+                  {d.channel === 'communication' ? (
+                    <>
+                      <span
+                        className="li-rev-emailtag"
+                        title="An email draft — approving sends it."
+                      >
+                        Email
+                      </span>
+                      {d.emailSubject || humanizeKind(d.documentKind)}
+                      {(d.voiceViolations?.length ?? 0) > 0 && (
+                        <span
+                          className="li-rev-voicetag"
+                          title={d.voiceViolations!.map((v) => v.offending).join('\n')}
+                        >
+                          Voice check: {d.voiceViolations!.length}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    humanizeKind(d.documentKind)
+                  )}
+                </span>
+                <span className="li-rev-ver">v{d.versionNumber}</span>
+                <span className="li-rev-when">{formatDateTime(d.recordedAt)}</span>
+                <button
+                  type="button"
+                  className="li-rev-result"
+                  onClick={() => openReview(d.documentVersionId)}
+                >
+                  Review
+                </button>
+              </div>
+            ))}
+          </div>
         </>
       )}
     </main>
