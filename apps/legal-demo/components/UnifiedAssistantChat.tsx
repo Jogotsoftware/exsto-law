@@ -776,6 +776,10 @@ export function UnifiedAssistantChat({
   // Toolbar panels + settings.
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [feedbackMode, setFeedbackMode] = useState(false)
+  // The working model to restore when leaving feedback mode — feedback always
+  // runs on the cheapest available Claude model (founder rule: triage threads,
+  // not legal work).
+  const fbPrevModelRef = useRef<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
   const [workRate, setWorkRate] = useState<WorkRate>('balanced')
@@ -2326,9 +2330,28 @@ export function UnifiedAssistantChat({
     }
   }
 
+  // Enter feedback mode on the cheapest available Claude model (Haiku),
+  // remembering the working model so leaving restores it.
+  function enterFeedbackMode() {
+    const cheap = models?.find(
+      (m) => m.provider === 'anthropic' && m.available && m.connected && /haiku/i.test(m.model),
+    )
+    if (cheap && cheap.id !== modelId) {
+      fbPrevModelRef.current = modelId
+      setModelId(cheap.id)
+    }
+    setFeedbackMode(true)
+  }
+
   // Leave feedback mode. After a submitted thread, start a fresh regular chat;
-  // otherwise just drop the banner and keep whatever was said.
+  // otherwise just drop the banner and keep whatever was said. Either way the
+  // pre-feedback model comes back.
   function exitFeedbackMode() {
+    const prev = fbPrevModelRef.current
+    if (prev) {
+      fbPrevModelRef.current = null
+      setModelId(prev)
+    }
     if (fbDone) {
       newChat()
       return
@@ -2410,7 +2433,8 @@ export function UnifiedAssistantChat({
             type="button"
             className={`li-uac-headbtn${feedbackMode ? ' active' : ''}`}
             onClick={() => {
-              setFeedbackMode((m) => !m)
+              if (feedbackMode) exitFeedbackMode()
+              else enterFeedbackMode()
               setSettingsOpen(false)
               setHistoryOpen(false)
               setFbDone(false)
@@ -2723,75 +2747,67 @@ export function UnifiedAssistantChat({
 
       {/* ── Feedback mode banner ──────────────────────────────────────────── */}
       {feedbackMode && (
-        <div className="uac-fbmode" role="region" aria-label="Feedback mode">
+        <div className="li-uac-fbstrip" role="region" aria-label="Feedback mode">
           {fbDone ? (
-            <div className="uac-fbmode-done">
-              <span className="uac-fbmode-thanks">
-                <SparklesIcon size={16} /> Thank you — your feedback is with the team.
+            <div className="li-uac-fbstrip-done">
+              <span className="li-uac-fbstrip-thanks">
+                <GemCluster size={18} /> Thank you — your feedback is with the team.
               </span>
               {fbRef && (
-                <span className="uac-fbmode-refrow">
-                  <span className="uac-fbmode-reflabel">Reference</span>
+                <span className="li-uac-fbstrip-refrow">
+                  <span className="li-uac-fbstrip-reflabel">Reference</span>
                   <code className="uac-beta-ref" title={`Recorded as event ${fbRef}`}>
                     {fbRef.slice(0, 8)}
                   </code>
                 </span>
               )}
-              <button
-                type="button"
-                className="uac-fbmode-exit uac-fbmode-backbtn"
-                onClick={exitFeedbackMode}
-              >
+              <button type="button" className="li-uac-fbstrip-back" onClick={exitFeedbackMode}>
                 Back to chat
               </button>
             </div>
           ) : (
             <>
-              <div className="uac-fbmode-head">
-                <span className="uac-fbmode-title">
-                  <MegaphoneIcon size={13} /> Feedback mode
-                </span>
-                <span className="uac-fbmode-sub">
-                  Tell me what’s working, broken, or missing — I’ll ask a follow-up or two, then log
-                  the whole thread to the team.
-                </span>
+              <div className="li-uac-fbstrip-row">
+                <GemCluster size={18} />
+                <span className="li-uac-fbstrip-title">Beta feedback</span>
+                <span className="li-uac-fbstrip-phase">·&nbsp;request features or report bugs</span>
+                <select
+                  className="li-uac-fbstrip-cat"
+                  aria-label="Feedback category"
+                  value={fbCategory}
+                  onChange={(e) => setFbCategory(e.target.value as FeedbackCategory)}
+                >
+                  {FEEDBACK_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="li-uac-fbstrip-send"
+                  disabled={fbBusy || turns.length === 0}
+                  onClick={() => void submitFeedback()}
+                  title={
+                    turns.length === 0 ? 'Describe your feedback in the chat first' : undefined
+                  }
+                >
+                  {fbBusy ? 'Submitting…' : 'Submit feedback'}
+                </button>
+                <button
+                  type="button"
+                  className="li-uac-fbstrip-exit"
+                  onClick={exitFeedbackMode}
+                  disabled={fbBusy}
+                  title="Exit feedback (the conversation stays)"
+                  aria-label="Exit feedback"
+                >
+                  <XIcon size={14} />
+                </button>
               </div>
-              <div className="uac-fbmode-controls">
-                <label className="uac-fbmode-catlabel">
-                  <span>Category</span>
-                  <select
-                    aria-label="Feedback category"
-                    value={fbCategory}
-                    onChange={(e) => setFbCategory(e.target.value as FeedbackCategory)}
-                  >
-                    {FEEDBACK_CATEGORIES.map((c) => (
-                      <option key={c.value} value={c.value}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="uac-fbmode-actions">
-                  <button
-                    type="button"
-                    className="uac-fbmode-exit"
-                    onClick={exitFeedbackMode}
-                    disabled={fbBusy}
-                  >
-                    Exit
-                  </button>
-                  <button
-                    type="button"
-                    className="primary uac-fbmode-send"
-                    disabled={fbBusy || turns.length === 0}
-                    onClick={() => void submitFeedback()}
-                    title={
-                      turns.length === 0 ? 'Describe your feedback in the chat first' : undefined
-                    }
-                  >
-                    {fbBusy ? 'Submitting…' : 'Submit feedback'}
-                  </button>
-                </div>
+              <div className="li-uac-fbstrip-sub">
+                Tell me what’s working, broken, or missing — I’ll ask a follow-up or two, then log
+                the whole thread to the team.
               </div>
               {fbError && <div className="alert alert-error">{fbError}</div>}
             </>
@@ -2863,6 +2879,17 @@ export function UnifiedAssistantChat({
                     Create a new service
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="li-uac-starter"
+                  onClick={enterFeedbackMode}
+                  disabled={busy}
+                >
+                  <span className="li-uac-starter-icon">
+                    <MegaphoneIcon size={17} />
+                  </span>
+                  Request features or report bugs
+                </button>
               </div>
             )}
           </div>
