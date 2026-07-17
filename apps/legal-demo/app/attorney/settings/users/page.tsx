@@ -251,19 +251,19 @@ function InviteModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
+    <div className="li-modal-backdrop" onClick={onClose}>
+      <div className="li-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="li-modal-head">
           <h2>Invite user</h2>
-          <button onClick={onClose} aria-label="Close" className="modal-close">
+          <button onClick={onClose} aria-label="Close" className="li-modal-close">
             <X size={18} aria-hidden />
           </button>
         </div>
-        <div className="modal-body">
-          <p className="text-muted">
+        <div className="li-modal-body">
+          <p className="li-modal-muted">
             The email is the user’s sign-in identity (they sign in with that Google account).
           </p>
-          <label>
+          <label className="li-modal-field">
             <span>Email</span>
             <input
               type="email"
@@ -274,7 +274,7 @@ function InviteModal({
               autoFocus
             />
           </label>
-          <label>
+          <label className="li-modal-field">
             <span>Display name</span>
             <input
               type="text"
@@ -283,7 +283,7 @@ function InviteModal({
               placeholder="Jane Paralegal"
             />
           </label>
-          <label>
+          <label className="li-modal-field">
             <span>Role</span>
             <select value={roleName} onChange={(e) => setRoleName(e.target.value)}>
               {grantable.map((r) => (
@@ -293,10 +293,10 @@ function InviteModal({
               ))}
             </select>
           </label>
-          {error && <div className="alert alert-error">{error}</div>}
+          {error && <div className="li-modal-alert">{error}</div>}
         </div>
-        <div className="modal-foot">
-          <button onClick={onClose} disabled={busy}>
+        <div className="li-modal-foot">
+          <button className="li-modal-btn-ghost" onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button className="li-set-btn li-set-btn-primary" onClick={save} disabled={busy}>

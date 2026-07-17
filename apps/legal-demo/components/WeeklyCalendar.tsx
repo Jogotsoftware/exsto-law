@@ -496,15 +496,16 @@ function CalendarActionModal({
       onClose={onClose}
       footer={
         <>
-          {error && (
-            <span style={{ color: '#b91c1c', marginRight: 'auto', fontSize: '0.85rem' }}>
-              {error}
-            </span>
-          )}
-          <button type="button" onClick={onClose} disabled={busy}>
+          {error && <span className="li-modal-foot-error">{error}</span>}
+          <button type="button" className="li-modal-btn-ghost" onClick={onClose} disabled={busy}>
             Close
           </button>
-          <button type="button" className="primary" onClick={submit} disabled={busy}>
+          <button
+            type="button"
+            className={type === 'cancel' ? 'li-modal-btn-danger' : 'li-modal-btn-primary'}
+            onClick={submit}
+            disabled={busy}
+          >
             {busy
               ? 'Working…'
               : type === 'cancel'
@@ -516,10 +517,10 @@ function CalendarActionModal({
         </>
       }
     >
-      <p style={{ marginTop: 0, color: 'var(--muted)' }}>{item.title}</p>
+      <p style={{ marginTop: 0 }}>{item.title}</p>
       {type === 'reschedule' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label className="li-modal-field">
             <span>Start</span>
             <input
               type="datetime-local"
@@ -527,7 +528,7 @@ function CalendarActionModal({
               onChange={(e) => setStartInput(e.target.value)}
             />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label className="li-modal-field">
             <span>End</span>
             <input
               type="datetime-local"
@@ -538,7 +539,7 @@ function CalendarActionModal({
         </div>
       )}
       {type === 'cancel' && (
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <label className="li-modal-field">
           <span>Reason (optional, shared with the client)</span>
           <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} />
         </label>
@@ -549,7 +550,7 @@ function CalendarActionModal({
             No categories defined yet. Add them in Settings → Calendar categories.
           </p>
         ) : (
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label className="li-modal-field">
             <span>Category</span>
             <select value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
               {categories.map((c) => (
@@ -561,7 +562,7 @@ function CalendarActionModal({
           </label>
         ))}
       {type === 'attendees' && (
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <label className="li-modal-field">
           <span>Guest emails (comma or space separated) — they’ll get a Google invite</span>
           <textarea
             value={attendeesInput}

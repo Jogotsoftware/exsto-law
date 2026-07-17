@@ -3572,66 +3572,6 @@ main.book-main {
   margin-bottom: 0.15rem;
 }
 
-/* Modal — used by contacts +Add */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-  padding: 1rem;
-}
-.modal-card {
-  background: white;
-  border-radius: 12px;
-  width: 100%;
-  max-width: 640px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-}
-.modal-head {
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border-soft);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.modal-close {
-  background: transparent;
-  border: none;
-  font-size: 1.5rem;
-  line-height: 1;
-  padding: 0.2rem 0.5rem;
-  color: var(--muted);
-}
-.modal-close:hover {
-  color: var(--fg);
-}
-.modal-body {
-  padding: 1rem 1.25rem;
-  overflow-y: auto;
-}
-.modal-foot {
-  padding: 0.85rem 1.25rem;
-  border-top: 1px solid var(--border-soft);
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.6rem;
-}
-/* Wide modal — the workflow runner's document steps (review/edit) need room to
-   show a document as a document, not a confirm box (WORKFLOW-RUNNER-1). */
-.modal-card-wide {
-  max-width: 1040px;
-}
-.modal-foot .modal-foot-spacer {
-  margin-right: auto;
-}
-
 /* ============================================================
    Workflow runner — in-place step execution (WORKFLOW-RUNNER-1)
    Every step runs inside its modal; nothing navigates away.
@@ -21874,4 +21814,303 @@ a.li-uac-done-primary:hover {
   width: 13px;
   height: 13px;
   border-width: 2px;
+}
+
+/* ==========================================================================
+   WP-M — SHARED MODAL PRIMITIVE (li-modal-). The one dialog chrome every
+   confirm / prompt / editor pop-up renders through (components/Modal.tsx),
+   plus the small set of content classes its consumers need for their
+   immediate footer/field/alert markup. Deep editor bodies these modals embed
+   (ServiceSettingsFields, QuestionnaireBuilder, WorkflowBuilder,
+   TemplateEditor — each already comp-styled by its own WP and reused on the
+   standalone pages too) are left untouched; this family only covers the
+   chrome and the plain button/input/alert content that used to fall back to
+   the pre-redesign `.modal-*`/`button`/`.primary`/`.input`/`.alert-error`
+   classes. Own family, appended last; consumes the shared --li-* tokens set
+   on .li-shell (every attorney page). Replaces the old `.modal-backdrop` /
+   `.modal-card(-wide)` / `.modal-head` / `.modal-close` / `.modal-body` /
+   `.modal-foot(-spacer)` rules, deleted below once nothing referenced them.
+   ========================================================================== */
+
+.li-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.li-modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - 64px);
+  background: var(--li-card);
+  border-radius: var(--li-radius-card);
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.li-modal-card-wide {
+  max-width: 1040px;
+}
+.li-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--li-border-soft);
+  flex: 0 0 auto;
+}
+.li-modal-head h2 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--li-navy);
+}
+.li-modal-close {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--li-bg);
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  color: var(--li-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.li-modal-close:hover:not(:disabled) {
+  border-color: var(--li-gold);
+  color: var(--li-navy);
+}
+.li-modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+.li-modal-body p {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--li-body);
+  line-height: 1.55;
+}
+.li-modal-body p:last-child {
+  margin-bottom: 0;
+}
+.li-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--li-border-soft);
+  flex: 0 0 auto;
+}
+/* Pushes everything after it to the right — the old `.modal-foot-spacer`
+   idiom for an inline status/error message pinned to the footer's left. */
+.li-modal-foot-spacer {
+  margin-right: auto;
+}
+.li-modal-foot-error {
+  margin-right: auto;
+  font-size: 13px;
+  color: var(--li-danger);
+}
+
+/* ---- Buttons ---- */
+.li-modal-btn-ghost {
+  background: var(--li-card);
+  border: 1px solid var(--li-border-input);
+  color: var(--li-muted);
+  border-radius: var(--li-radius-btn);
+  padding: 9px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-modal-btn-ghost:hover:not(:disabled) {
+  border-color: var(--li-gold);
+  color: var(--li-navy);
+}
+.li-modal-btn-ghost:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.li-modal-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 9px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-modal-btn-primary:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+}
+.li-modal-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.li-modal-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--li-danger);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 9px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-modal-btn-danger:hover:not(:disabled) {
+  background: #a8382f;
+}
+.li-modal-btn-danger:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* The busy-state `.spinner` (global, untouched) is invisible on a filled
+   navy/danger button by default (light ring, navy top) — brighten it only
+   inside these two buttons. */
+.li-modal-btn-primary .spinner,
+.li-modal-btn-danger .spinner {
+  border-color: rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+}
+
+/* ---- Segmented toggle (ConfigEditModal's View / Edit chooser) ---- */
+.li-modal-seg-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.li-modal-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--li-border-input);
+  background: var(--li-card);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-modal-seg:hover:not(:disabled) {
+  border-color: var(--li-gold);
+  color: var(--li-navy);
+}
+.li-modal-seg.is-active {
+  border: 1.5px solid var(--li-gold);
+  background: var(--li-gold-bg-soft);
+  color: var(--li-gold-text);
+}
+
+/* ---- Fields ---- */
+.li-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.li-modal-field:last-child {
+  margin-bottom: 0;
+}
+.li-modal-field > span:first-child {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-muted);
+}
+.li-modal-field input,
+.li-modal-field select,
+.li-modal-field textarea {
+  width: 100%;
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  padding: 11px 13px;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  color: var(--li-navy);
+  background: var(--li-card);
+  box-sizing: border-box;
+}
+.li-modal-field textarea {
+  resize: vertical;
+  min-height: 84px;
+}
+.li-modal-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+/* Standalone input outside a .li-modal-field wrapper (inline prompt rows). */
+.li-modal-input {
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  padding: 9px 13px;
+  font-family: inherit;
+  font-size: 13.5px;
+  outline: none;
+  color: var(--li-navy);
+  background: var(--li-card);
+  box-sizing: border-box;
+}
+
+/* ---- Text / status ---- */
+.li-modal-muted {
+  color: var(--li-muted);
+}
+.li-modal-alert {
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+  margin-bottom: 14px;
+  background: var(--li-danger-bg);
+  color: var(--li-danger);
+  border: 1px solid rgba(196, 68, 59, 0.22);
+}
+.li-modal-alert:last-child {
+  margin-bottom: 0;
+}
+.li-modal-alert ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* ---- AI proposal preview panel (ConfigEditModal / AiRegenerateRail) ---- */
+.li-modal-proposal {
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: var(--li-bg);
+}
+.li-modal-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.li-modal-proposal-head strong {
+  color: var(--li-navy);
+  font-size: 14px;
 }

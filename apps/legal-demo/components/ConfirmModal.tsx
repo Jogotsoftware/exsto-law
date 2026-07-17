@@ -42,12 +42,12 @@ export function ConfirmModal({
       onClose={onCancel}
       footer={
         <>
-          <button type="button" onClick={onCancel} disabled={busy}>
+          <button type="button" className="li-modal-btn-ghost" onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </button>
           <button
             type="button"
-            className={danger ? 'warn' : 'primary'}
+            className={danger ? 'li-modal-btn-danger' : 'li-modal-btn-primary'}
             onClick={onConfirm}
             disabled={busy}
             autoFocus
@@ -58,9 +58,7 @@ export function ConfirmModal({
         </>
       }
     >
-      <p className="text-sm" style={{ margin: 0 }}>
-        {body}
-      </p>
+      <p style={{ margin: 0 }}>{body}</p>
     </Modal>
   )
 }
@@ -93,12 +91,12 @@ export function PromptModal({
       onClose={onCancel}
       footer={
         <>
-          <button type="button" onClick={onCancel}>
+          <button type="button" className="li-modal-btn-ghost" onClick={onCancel}>
             Cancel
           </button>
           <button
             type="button"
-            className="primary"
+            className="li-modal-btn-primary"
             onClick={() => canSubmit && onSubmit(value.trim())}
             disabled={!canSubmit}
           >
@@ -107,12 +105,8 @@ export function PromptModal({
         </>
       }
     >
-      {body && (
-        <p className="text-sm" style={{ marginTop: 0 }}>
-          {body}
-        </p>
-      )}
-      <label>
+      {body && <p style={{ marginTop: 0 }}>{body}</p>}
+      <label className="li-modal-field">
         <span>{label}</span>
         <input
           type="text"

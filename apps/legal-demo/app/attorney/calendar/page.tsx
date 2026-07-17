@@ -1823,9 +1823,11 @@ export default function CalendarPage() {
           onClose={() => setAttendeesFor(null)}
           footer={
             <>
-              <button onClick={() => setAttendeesFor(null)}>Cancel</button>
+              <button className="li-modal-btn-ghost" onClick={() => setAttendeesFor(null)}>
+                Cancel
+              </button>
               <button
-                className="primary"
+                className="li-modal-btn-primary"
                 disabled={busy || !attendeeInput.trim()}
                 onClick={submitAttendees}
               >
@@ -1834,7 +1836,7 @@ export default function CalendarPage() {
             </>
           }
         >
-          <p className="text-muted text-sm" style={{ marginTop: 0 }}>
+          <p className="li-modal-muted" style={{ marginTop: 0 }}>
             Add guests to this consultation. Google emails them the invite. Separate multiple
             addresses with a comma or new line.
           </p>

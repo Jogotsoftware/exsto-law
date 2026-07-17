@@ -493,19 +493,17 @@ function ConnectKeyModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
+    <div className="li-modal-backdrop" onClick={onClose}>
+      <div className="li-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="li-modal-head">
           <h2>Connect {meta.name}</h2>
-          <button onClick={onClose} aria-label="Close" className="modal-close">
+          <button onClick={onClose} aria-label="Close" className="li-modal-close">
             <X size={18} aria-hidden />
           </button>
         </div>
-        <div className="modal-body">
-          <p style={{ color: 'var(--muted)' }}>
-            Paste your API key. We&apos;ll verify it with {meta.name} before saving.
-          </p>
-          <label>
+        <div className="li-modal-body">
+          <p>Paste your API key. We&apos;ll verify it with {meta.name} before saving.</p>
+          <label className="li-modal-field">
             <span>API key</span>
             <input
               type="password"
@@ -526,10 +524,10 @@ function ConnectKeyModal({
               Find my {meta.name} API key →
             </a>
           )}
-          {error && <div className="alert alert-error">{error}</div>}
+          {error && <div className="li-modal-alert">{error}</div>}
         </div>
-        <div className="modal-foot">
-          <button onClick={onClose} disabled={busy}>
+        <div className="li-modal-foot">
+          <button className="li-modal-btn-ghost" onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button className="li-set-btn li-set-btn-primary" onClick={save} disabled={busy}>

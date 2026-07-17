@@ -283,7 +283,7 @@ export function RunnerReview({
 
   const footer = (
     <>
-      {advanceFooter && <span className="modal-foot-spacer" />}
+      {advanceFooter && <span className="li-modal-foot-spacer" />}
       {advanceFooter}
     </>
   )
