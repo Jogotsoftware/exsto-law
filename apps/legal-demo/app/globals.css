@@ -10985,3 +10985,192 @@ svg.lucide {
     top: 42%;
   }
 }
+
+/* ==========================================================================
+   LEGAL INSTRUMENTS FOUNDATION — attorney-console redesign token layer
+   Spec: docs/design/legal-instruments/ (comp is binding; see WIRING.md).
+   Scoped under .li-shell so the portal (cp-, cph-, pdash- families), booking
+   (bk- family) and shared primitives keep reading the legacy :root values
+   untouched. (Never write a star immediately followed by a slash in this
+   comment — it terminates the comment early and breaks the CSS minifier.)
+   ========================================================================== */
+.li-shell {
+  /* chrome */
+  --li-rail-bg: #14213d;
+  --li-rail-fg: #aeb8cc;
+  --li-rail-fg-dim: #7e89a3;
+  --li-rail-fg-active: #ffffff;
+  --li-rail-gold: #d8c084;
+  --li-rail-tint: rgba(212, 192, 130, 0.12);
+  --li-topbar-bg: #1b2a4a;
+  /* core */
+  --li-navy: #1b2a4a;
+  --li-navy-hover: #24365c;
+  --li-bg: #f4f6fb;
+  --li-card: #ffffff;
+  --li-border: #e7ebf3;
+  --li-border-soft: #f0f3f8;
+  --li-border-input: #dce2ee;
+  --li-fg: #1b2a4a;
+  --li-body: #23324f;
+  --li-muted: #67728c;
+  --li-muted-2: #8a94a8;
+  --li-muted-3: #9aa4b8;
+  --li-link: #3b6fd4;
+  /* gold accents (hover borders, AI chrome, merge tokens) */
+  --li-gold: #c6a968;
+  --li-gold-deep: #b69653;
+  --li-gold-text: #8c7534;
+  --li-gold-bg: #f2e8d0;
+  --li-gold-bg-soft: #fbf6ea;
+  /* status pairs */
+  --li-ok: #2f9e6b;
+  --li-ok-bg: #e7f4ec;
+  --li-info: #3b6fd4;
+  --li-info-bg: #eef4ff;
+  --li-warn: #9a6e1e;
+  --li-warn-bg: #fbefd6;
+  --li-danger: #c4443b;
+  --li-danger-bg: #fbe9e7;
+  --li-purple: #7a5ad1;
+  --li-purple-bg: #f1ecfb;
+  /* shape */
+  --li-radius-card: 16px;
+  --li-radius-panel: 14px;
+  --li-radius-btn: 10px;
+  --li-radius-chip: 999px;
+  --li-shadow-card: 0 1px 2px rgba(27, 42, 74, 0.04);
+  --li-shadow-pop: 0 14px 40px rgba(15, 23, 42, 0.18);
+  /* Comp surfaces are flat — the aurora canvas does not apply inside the shell. */
+  background: var(--li-bg);
+  color: var(--li-body);
+}
+
+/* --- Gemstar: the ONE animated AI affordance (never re-implement) --------- */
+@keyframes li-gemtw {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.85) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08) rotate(8deg);
+  }
+}
+@keyframes li-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+@keyframes li-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.li-gemstar path {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: li-gemtw 2.4s ease-in-out infinite;
+}
+/* Universal "AI is working" sweep — absolutely fills its positioned parent. */
+.li-shimmer-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    rgba(212, 192, 130, 0) 30%,
+    rgba(212, 192, 130, 0.14) 50%,
+    rgba(212, 192, 130, 0) 70%
+  );
+  background-size: 220% 100%;
+  animation: li-shimmer 1.3s infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* --- DocumentSheet: every document is a true proportional letter page ----- */
+.li-doc-canvas {
+  background: #edf0f5;
+  border: 1px solid #e1e6f0;
+  border-radius: var(--li-radius-card, 16px);
+  padding: 34px;
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: auto;
+}
+.li-docsheet {
+  position: relative;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 3px 16px rgba(15, 23, 42, 0.1);
+  overflow: hidden;
+  color: #1b2a4a;
+}
+/* Full letter page — 8.5in × 11in at 96dpi, 1in padding (review reader, eSign). */
+.li-docsheet--full {
+  width: 816px;
+  min-height: 1056px;
+  padding: 96px;
+  flex: 0 0 auto;
+  font-size: 16px;
+  line-height: 1.65;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+}
+/* Editor page — the comp's 612px template-editor canvas (US letter at 72dpi). */
+.li-docsheet--editor {
+  width: 612px;
+  min-height: 792px;
+  padding: 64px 68px;
+  flex: 0 0 auto;
+  font-size: 15px;
+  line-height: 1.85;
+  color: #23324f;
+}
+/* Thumbnails scale typography with the container (comp uses cqw units).
+   aspect-ratio values are decimals, not "w / h" ratios: the cssnano vendored
+   in Next 15.5 fails the production build on the ratio slash
+   ("Unexpected '/'"). 0.77273 = 8.5/11 (US letter), 0.89474 = 8.5/9.5. */
+.li-docsheet--thumb {
+  container-type: inline-size;
+  width: 100%;
+  aspect-ratio: 0.77273;
+  border: 1px solid #e4eaf4;
+  border-radius: 3px 3px 0 0;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+}
+.li-docsheet--thumb-form {
+  aspect-ratio: 0.89474;
+}
+.li-docsheet--serif {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, 'Times New Roman', serif);
+}
+.li-docsheet-watermark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.li-docsheet-watermark span {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: rgba(198, 169, 104, 0.16);
+  transform: rotate(-24deg);
+  white-space: nowrap;
+}
+/* Merge tokens render as gold chips inline in the page at every size. */
+.li-token-chip {
+  background: var(--li-gold-bg, #f2e8d0);
+  color: var(--li-gold-text, #8c7534);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-weight: 600;
+}
