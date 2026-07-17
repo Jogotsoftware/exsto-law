@@ -14,6 +14,7 @@
 import { useState } from 'react'
 import { useCallback, useEffect } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { UserIcon, ScaleIcon, SettingsIcon, FileTextIcon } from '@/components/icons'
 import {
   type WfGate,
   type WfActionKind,
@@ -117,6 +118,28 @@ export const GATE_LABELS: Record<WfGate, string> = {
   attorney: 'Attorney — an attorney action brings the matter here',
   client: 'Client — a client action brings the matter here',
   system: 'System — an external event brings the matter here',
+}
+
+// Comp: each step tile tints by WHO brings the matter there — client (blue),
+// attorney (gold), system (green). `automatic` reads as a system tint too (no
+// human is involved).
+const ROLE_TINT: Record<WfGate, 'client' | 'attorney' | 'system'> = {
+  client: 'client',
+  attorney: 'attorney',
+  system: 'system',
+  automatic: 'system',
+}
+const ROLE_ICON: Record<WfGate, typeof UserIcon> = {
+  client: UserIcon,
+  attorney: ScaleIcon,
+  system: SettingsIcon,
+  automatic: SettingsIcon,
+}
+const ROLE_SHORT_LABEL: Record<WfGate, string> = {
+  client: 'Client',
+  attorney: 'Attorney',
+  system: 'System',
+  automatic: 'System',
 }
 
 // One builder step → a saved-step STAGE (no edges/key/entry/terminal). The free-text
@@ -365,20 +388,15 @@ export function WorkflowBuilder({
   )
 }
 
+// Comp: a thin vertical connector line under the numbered tile column (not an
+// arrow glyph) — mirrors the gap between one numbered circle and the next.
 function Connector() {
   return (
-    <div
-      aria-hidden
-      style={{
-        display: 'flex',
-        justifyContent: 'center',
-        color: 'var(--muted)',
-        height: 22,
-        lineHeight: '22px',
-        fontSize: '1.1rem',
-      }}
-    >
-      ↓
+    <div style={{ display: 'flex', gap: 14 }} aria-hidden>
+      <div style={{ flex: '0 0 auto', width: 26, display: 'flex', justifyContent: 'center' }}>
+        <div style={{ width: 2, height: 18, background: 'var(--li-border, #e7ebf3)' }} />
+      </div>
+      <div style={{ flex: '1 1 auto' }} />
     </div>
   )
 }
@@ -573,120 +591,134 @@ function StepCard({
   const actionLabel = capSlug
     ? capabilityLabel(capSlug, catalog)
     : (catalog?.actions.find((a) => a.kind === step.actionKind)?.label ?? step.actionKind)
+  const tint = ROLE_TINT[step.gate]
+  const RoleIcon = ROLE_ICON[step.gate]
 
   return (
-    <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        padding: '0.7rem 0.8rem',
-        background: 'var(--bg, #fff)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-        <span
-          aria-hidden
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 22,
-            height: 22,
-            borderRadius: '50%',
-            background: 'var(--border)',
-            fontSize: '0.75rem',
-            fontWeight: 600,
-            flex: '0 0 auto',
-          }}
-        >
+    <div style={{ display: 'flex', alignItems: 'stretch', gap: 14 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          flex: '0 0 auto',
+        }}
+      >
+        <span className="li-svc-wf-num" aria-hidden>
           {index + 1}
         </span>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600 }}>{step.label || <em>Untitled step</em>}</div>
-          <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>
-            {actionLabel}
-            {' · '}
-            {/* P12: gate describes the step's INCOMING edge, so the first step shows
-                'entry' (nothing precedes it) and the last shows its gate + terminal. */}
-            {index === 0 ? 'entry' : `gate: ${step.gate}`}
+      </div>
+      <div
+        style={{
+          flex: '1 1 auto',
+          minWidth: 0,
+          background: '#fff',
+          border: '1px solid var(--li-border, #e7ebf3)',
+          borderRadius: 12,
+          boxShadow: 'var(--li-shadow-card, 0 1px 2px rgba(27, 42, 74, .04))',
+          padding: '14px 16px',
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span className={`li-svc-wf-role ${tint}`} aria-hidden>
+            <RoleIcon size={14} />
+          </span>
+          <span style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--li-fg, #1b2a4a)' }}>
+            {step.label || <em>Untitled step</em>}
+          </span>
+          <span className={`li-svc-wf-rolechip ${tint}`}>{ROLE_SHORT_LABEL[step.gate]}</span>
+          {step.blocking && <span className="li-svc-wf-blocking">Blocking</span>}
+          <span className="li-svc-wf-trigger">
+            {index === 0 ? 'entry' : step.trigger || step.gate}
             {isLast && ' · terminal'}
-            {step.documents.length > 0 &&
-              ` · ${step.documents.length} doc${step.documents.length > 1 ? 's' : ''}`}
-            {!step.blocking && ' · non-blocking'}
-          </div>
+          </span>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem', flex: '0 0 auto' }}>
+        <div
+          style={{
+            marginTop: 4,
+            color: 'var(--li-muted, #67728c)',
+            fontSize: '12.5px',
+          }}
+        >
+          {actionLabel}
+          {!step.blocking && ' · non-blocking'}
+        </div>
+        {step.documents.length > 0 && (
+          <div className="li-svc-wf-doc">
+            <FileTextIcon size={13} />
+            {step.documents.length} doc{step.documents.length > 1 ? 's' : ''}
+          </div>
+        )}
+
+        <div style={{ marginTop: 10, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           <button
             type="button"
-            className="outline"
+            className="li-svc-iconbtn"
             title="Move up"
             onClick={onMoveUp}
             disabled={index === 0}
-            style={{ padding: '0.25rem 0.5rem' }}
           >
             ↑
           </button>
           <button
             type="button"
-            className="outline"
+            className="li-svc-iconbtn"
             title="Move down"
             onClick={onMoveDown}
             disabled={isLast}
-            style={{ padding: '0.25rem 0.5rem' }}
           >
             ↓
           </button>
           {canSaveToLib && (
             <button
               type="button"
-              className="outline"
+              className="li-svc-btn li-svc-btn-sm"
               title="Save this step to the firm library for reuse in other workflows"
               onClick={onStartSaveToLib}
               disabled={savingToLib}
-              style={{ padding: '0.25rem 0.6rem' }}
             >
               Save to library
             </button>
           )}
           <button
             type="button"
-            className="outline"
+            className="li-svc-btn li-svc-btn-sm"
             onClick={onToggle}
-            style={{ padding: '0.25rem 0.6rem' }}
+            aria-expanded={open}
           >
             {open ? 'Done' : 'Edit'}
           </button>
           <button
             type="button"
-            className="danger outline"
+            className="li-svc-iconbtn danger"
             title="Remove step"
             onClick={onRemove}
-            style={{ padding: '0.25rem 0.5rem' }}
           >
             ✕
           </button>
         </div>
+
+        {savingToLib && (
+          <SaveToLibraryRow
+            defaultName={step.label}
+            onCancel={onCancelSaveToLib}
+            onSave={onSaveToLib}
+          />
+        )}
+
+        {open && (
+          <StepEditor
+            step={step}
+            prevStep={prevStep}
+            isFirst={index === 0}
+            isLast={isLast}
+            catalog={catalog}
+            serviceKey={serviceKey}
+            onChange={onChange}
+          />
+        )}
       </div>
-
-      {savingToLib && (
-        <SaveToLibraryRow
-          defaultName={step.label}
-          onCancel={onCancelSaveToLib}
-          onSave={onSaveToLib}
-        />
-      )}
-
-      {open && (
-        <StepEditor
-          step={step}
-          prevStep={prevStep}
-          isFirst={index === 0}
-          isLast={isLast}
-          catalog={catalog}
-          serviceKey={serviceKey}
-          onChange={onChange}
-        />
-      )}
     </div>
   )
 }

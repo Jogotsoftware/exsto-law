@@ -6,6 +6,13 @@
 // render. Extracted so the two surfaces edit a service through ONE form, never a fork.
 // The page composes these fields with its extra booking-schedule fieldset; the modal
 // uses them alone (the wizard proposal has no booking-schedule).
+//
+// WP-D (Legal Instruments): route + generationMode are now the comp's segmented pill
+// toggles (li-svc-pilltoggle) instead of <select>s — restyle only, same value/onChange
+// contract, so both host surfaces (the routed Settings tab and the wizard modal) pick
+// up the comp look at once. The English/Spanish client-copy fields are switched by a
+// small pill toggle (component-local UI state — both languages still live in `value`).
+import { useState } from 'react'
 
 export type ServiceRoute = 'auto' | 'manual'
 export type ServiceGenerationMode = 'template_merge' | 'ai_draft'
@@ -34,79 +41,130 @@ export function ServiceSettingsFields({
 }): React.ReactElement {
   const update = <K extends keyof ServiceSettingsValue>(key: K, v: ServiceSettingsValue[K]) =>
     onChange({ ...value, [key]: v })
+  // Component-local — which language's client-copy inputs are showing. Both
+  // languages still live in `value`; this only decides what's on screen.
+  const [lang, setLang] = useState<'en' | 'es'>('en')
 
   return (
     <>
-      <div className="form-grid">
-        <label>
-          <span>Display name</span>
-          <input
-            value={value.displayName}
-            onChange={(e) => update('displayName', e.target.value)}
-            placeholder="e.g. Single-Member LLC Formation"
-          />
-        </label>
-        <label>
-          <span>Workflow route</span>
-          <select
-            value={value.route}
-            onChange={(e) => update('route', e.target.value as ServiceRoute)}
-          >
-            <option value="manual">Manual — attorney drafts</option>
-            <option value="auto">Attorney in the loop — auto-drafts on intake</option>
-          </select>
-        </label>
-      </div>
-      {/* Client-facing copy the booking tile shows — kept distinct from the internal
-          description below. */}
-      <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-        <span>Client-facing name</span>
+      <label className="li-svc-field">
+        <span>Display name</span>
         <input
-          value={value.clientDisplayName}
-          onChange={(e) => update('clientDisplayName', e.target.value)}
-          placeholder="e.g. Last Will & Testament"
+          value={value.displayName}
+          onChange={(e) => update('displayName', e.target.value)}
+          placeholder="e.g. Single-Member LLC Formation"
         />
-        <small className="text-muted">
-          What the client sees on the booking page (outcome, no jurisdiction/jargon).
-        </small>
       </label>
-      <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
-        <span>Client-facing description</span>
-        <textarea
-          value={value.clientDescription}
-          onChange={(e) => update('clientDescription', e.target.value)}
-          rows={2}
-          placeholder="e.g. Have an attorney review your NDA agreement."
-        />
-        <small className="text-muted">
-          What the client sees — one plain sentence in second person.
-        </small>
-      </label>
-      {/* WP-7 — the Spanish client copy, edited beside the English. Empty is safe:
-          the Spanish intake falls back to the English copy above. */}
-      <div className="form-grid" style={{ marginTop: 'var(--space-3)' }}>
-        <label>
-          <span>Client-facing name (Español)</span>
-          <input
-            value={value.clientDisplayNameEs}
-            onChange={(e) => update('clientDisplayNameEs', e.target.value)}
-            placeholder="e.g. Testamento"
-          />
-          <small className="text-muted">
-            Shown when the client uses the intake in Spanish; empty falls back to English.
-          </small>
-        </label>
-        <label>
-          <span>Client-facing description (Español)</span>
-          <textarea
-            value={value.clientDescriptionEs}
-            onChange={(e) => update('clientDescriptionEs', e.target.value)}
-            rows={2}
-            placeholder="e.g. Cuéntenos su situación y reciba su carta lista para enviar."
-          />
-        </label>
+
+      <div style={{ marginTop: 'var(--space-3)' }}>
+        <span
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 600,
+            color: '#48546e',
+            marginBottom: 6,
+          }}
+        >
+          Workflow route
+        </span>
+        <div className="li-svc-pilltoggle">
+          <button
+            type="button"
+            className={`li-svc-pilltoggle-opt${value.route === 'auto' ? ' on' : ''}`}
+            aria-pressed={value.route === 'auto'}
+            onClick={() => update('route', 'auto')}
+            title="Attorney in the loop — auto-drafts on intake"
+          >
+            Automatic
+          </button>
+          <button
+            type="button"
+            className={`li-svc-pilltoggle-opt${value.route === 'manual' ? ' on' : ''}`}
+            aria-pressed={value.route === 'manual'}
+            onClick={() => update('route', 'manual')}
+            title="Manual — attorney drafts"
+          >
+            Manual
+          </button>
+        </div>
       </div>
-      <label style={{ display: 'block', marginTop: 'var(--space-3)' }}>
+
+      {/* Client-facing copy the booking tile shows — kept distinct from the internal
+          description below. A small EN/ES pill picks which language is on screen;
+          both are always saved together. */}
+      <div style={{ marginTop: 'var(--space-4)' }}>
+        <div className="li-svc-pilltoggle li-svc-pilltoggle--sm">
+          <button
+            type="button"
+            className={`li-svc-pilltoggle-opt${lang === 'en' ? ' on blue' : ''}`}
+            aria-pressed={lang === 'en'}
+            onClick={() => setLang('en')}
+          >
+            English
+          </button>
+          <button
+            type="button"
+            className={`li-svc-pilltoggle-opt${lang === 'es' ? ' on blue' : ''}`}
+            aria-pressed={lang === 'es'}
+            onClick={() => setLang('es')}
+          >
+            Español
+          </button>
+        </div>
+        {lang === 'en' ? (
+          <>
+            <label className="li-svc-field">
+              <span>Client-facing name</span>
+              <input
+                value={value.clientDisplayName}
+                onChange={(e) => update('clientDisplayName', e.target.value)}
+                placeholder="e.g. Last Will & Testament"
+              />
+              <small className="li-svc-small">
+                What the client sees on the booking page (outcome, no jurisdiction/jargon).
+              </small>
+            </label>
+            <label className="li-svc-field" style={{ marginTop: 'var(--space-3)' }}>
+              <span>Client-facing description</span>
+              <textarea
+                value={value.clientDescription}
+                onChange={(e) => update('clientDescription', e.target.value)}
+                rows={2}
+                placeholder="e.g. Have an attorney review your NDA agreement."
+              />
+              <small className="li-svc-small">
+                What the client sees — one plain sentence in second person.
+              </small>
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="li-svc-field">
+              <span>Client-facing name (Español)</span>
+              <input
+                value={value.clientDisplayNameEs}
+                onChange={(e) => update('clientDisplayNameEs', e.target.value)}
+                placeholder="e.g. Testamento"
+              />
+              <small className="li-svc-small">
+                Shown when the client uses the intake in Spanish; empty falls back to English.
+              </small>
+            </label>
+            <label className="li-svc-field" style={{ marginTop: 'var(--space-3)' }}>
+              <span>Client-facing description (Español)</span>
+              <textarea
+                value={value.clientDescriptionEs}
+                onChange={(e) => update('clientDescriptionEs', e.target.value)}
+                rows={2}
+                placeholder="e.g. Cuéntenos su situación y reciba su carta lista para enviar."
+              />
+            </label>
+          </>
+        )}
+      </div>
+
+      <label className="li-svc-field" style={{ marginTop: 'var(--space-4)' }}>
         <span>Internal description</span>
         <textarea
           value={value.description}
@@ -114,37 +172,49 @@ export function ServiceSettingsFields({
           rows={2}
           placeholder="Attorney-facing notes about this service (not shown to clients)."
         />
-        <small className="text-muted">
+        <small className="li-svc-small">
           Attorney-facing; the booking page uses the client-facing copy above.
         </small>
       </label>
 
-      <fieldset className="svc-fieldset">
-        <legend>Document generation</legend>
-        <label>
-          <span>How documents are produced</span>
-          <select
-            value={value.generationMode}
-            onChange={(e) => update('generationMode', e.target.value as ServiceGenerationMode)}
-          >
-            <option value="template_merge">
-              Template merge — fill the template from the answers (no AI)
-            </option>
-            <option value="ai_draft">AI draft — the assistant writes the document</option>
-          </select>
-        </label>
-        <p
+      <div style={{ marginTop: 'var(--space-1)' }}>
+        <span
           style={{
-            color: 'var(--muted)',
-            fontSize: 'var(--text-sm)',
-            margin: 'var(--space-2) 0 0',
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 600,
+            color: '#48546e',
+            marginBottom: 6,
           }}
         >
+          Document generation
+        </span>
+        <div className="li-svc-pilltoggle">
+          <button
+            type="button"
+            className={`li-svc-pilltoggle-opt${value.generationMode === 'template_merge' ? ' on blue' : ''}`}
+            aria-pressed={value.generationMode === 'template_merge'}
+            onClick={() => update('generationMode', 'template_merge')}
+            title="Fill the template from the answers (no AI)"
+          >
+            Template merge
+          </button>
+          <button
+            type="button"
+            className={`li-svc-pilltoggle-opt${value.generationMode === 'ai_draft' ? ' on blue' : ''}`}
+            aria-pressed={value.generationMode === 'ai_draft'}
+            onClick={() => update('generationMode', 'ai_draft')}
+            title="The assistant writes the document"
+          >
+            AI draft
+          </button>
+        </div>
+        <small className="li-svc-small">
           {value.generationMode === 'ai_draft'
             ? 'AI draft uses the per-document instructions on the Prompt tab.'
             : 'Template merge fills the bodies on the Templates tab — no Prompt tab needed.'}
-        </p>
-      </fieldset>
+        </small>
+      </div>
     </>
   )
 }

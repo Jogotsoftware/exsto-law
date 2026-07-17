@@ -114,7 +114,7 @@ export default function ReviewConfigPage() {
 
   return (
     <>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.2rem' }}>
+      <p className="li-svc-hint">
         When enabled, every document a client uploads during this service&rsquo;s intake is
         automatically reviewed by the AI: a review memo lands in your review queue to edit or
         approve, optionally with a suggested redline of the client&rsquo;s document. Saving creates
@@ -128,21 +128,14 @@ export default function ReviewConfigPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : (
-        <section style={{ borderLeft: '3px solid var(--border)' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              marginBottom: 'var(--space-2)',
-            }}
-          >
+        <section className="li-svc-panel li-svc-panel--accent">
+          <div className="li-svc-tplcard-head">
             <strong>AI document review</strong>
-            <span className={`badge ${enabled ? 'ok' : ''}`}>
+            <span className={`li-svc-toggle-status${enabled ? ' on' : ''}`}>
               {enabled ? 'Enabled' : 'Disabled'}
             </span>
             <button
-              className="primary"
+              className="li-svc-btn-primary"
               style={{ marginLeft: 'auto' }}
               onClick={save}
               disabled={busy || missingSlot}
@@ -151,7 +144,7 @@ export default function ReviewConfigPage() {
             </button>
           </div>
 
-          <label className="svc-check">
+          <label className="li-svc-check">
             <input
               type="checkbox"
               checked={enabled}
@@ -159,7 +152,7 @@ export default function ReviewConfigPage() {
             />
             <span>Automatically review documents uploaded during intake</span>
           </label>
-          <label className="svc-check">
+          <label className="li-svc-check" style={{ marginBottom: 0 }}>
             <input
               type="checkbox"
               checked={redline}
@@ -168,53 +161,40 @@ export default function ReviewConfigPage() {
             <span>Also produce a suggested redline (revised version) of the document</span>
           </label>
 
-          <div style={{ margin: 'var(--space-3) 0 var(--space-2)' }}>
-            <div
-              style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: 'var(--space-1)' }}
-            >
+          <div>
+            <div className="li-svc-label-row">
               Review prompt{' '}
               {customPrompt
                 ? `— custom${promptVersion != null ? ` · v${promptVersion}` : ''}`
                 : '— using the built-in default (type below to customize)'}
             </div>
-            <ul
-              style={{
-                listStyle: 'none',
-                margin: '0 0 var(--space-2)',
-                padding: 0,
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 'var(--space-2)',
-              }}
-            >
-              <li>
-                <span
-                  className={`badge ${!customPrompt || prompt.includes(REQUIRED_SLOT) ? 'ok' : 'danger'}`}
-                  title="Required in a custom prompt — the document's extracted text"
-                >
-                  <code style={{ background: 'transparent', color: 'inherit' }}>
-                    {REQUIRED_SLOT}
-                  </code>{' '}
-                  (required)
-                </span>
-              </li>
+            <div className="li-svc-chips" style={{ marginBottom: 12 }}>
+              <span
+                className={`li-svc-chip${!customPrompt || prompt.includes(REQUIRED_SLOT) ? ' ok' : ''}`}
+                title="Required in a custom prompt — the document's extracted text"
+              >
+                <code>{REQUIRED_SLOT}</code> required
+              </span>
               {OPTIONAL_SLOTS.map((slot) => (
-                <li key={slot}>
-                  <span className="badge" title="Optional slot">
-                    <code style={{ background: 'transparent', color: 'inherit' }}>{slot}</code>
-                  </span>
-                </li>
+                <span key={slot} className="li-svc-chip" title="Optional slot">
+                  <code>{slot}</code>
+                </span>
               ))}
-            </ul>
+            </div>
             <textarea
               value={prompt}
               onChange={(e) => {
                 setPrompt(e.target.value)
                 setSaved(false)
               }}
-              rows={16}
+              rows={7}
               spellCheck={false}
-              style={{ fontFamily: 'var(--mono, monospace)', fontSize: '0.82rem', width: '100%' }}
+              style={{
+                width: '100%',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: '12.5px',
+                lineHeight: 1.6,
+              }}
               placeholder={`Leave empty to use the built-in review prompt.\nA custom prompt must include ${REQUIRED_SLOT}.`}
             />
             {missingSlot && (
@@ -226,48 +206,27 @@ export default function ReviewConfigPage() {
           </div>
 
           {skills.length > 0 && (
-            <div style={{ marginBottom: 'var(--space-2)' }}>
-              <div
-                style={{
-                  fontSize: '0.82rem',
-                  color: 'var(--muted)',
-                  marginBottom: 'var(--space-1)',
-                }}
-              >
+            <div>
+              <div className="li-svc-label-row" style={{ margin: '14px 0 8px' }}>
                 Always apply these skills (legal playbooks)
               </div>
-              <ul
-                style={{
-                  listStyle: 'none',
-                  margin: 0,
-                  padding: 0,
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 'var(--space-2)',
-                }}
-              >
+              <div className="li-svc-chips">
                 {skills.map((s) => (
-                  <li key={s.slug}>
-                    <button
-                      type="button"
-                      className={`badge ${skillSlugs.includes(s.slug) ? 'info' : ''}`}
-                      style={{ cursor: 'pointer' }}
-                      aria-pressed={skillSlugs.includes(s.slug)}
-                      onClick={() => toggleSkill(s.slug)}
-                    >
-                      {s.name}
-                    </button>
-                  </li>
+                  <button
+                    key={s.slug}
+                    type="button"
+                    className={`li-svc-chip skill${skillSlugs.includes(s.slug) ? '' : ' off'}`}
+                    aria-pressed={skillSlugs.includes(s.slug)}
+                    onClick={() => toggleSkill(s.slug)}
+                  >
+                    {s.name}
+                  </button>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
 
-          {saved && (
-            <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
-              Saved a new version.
-            </div>
-          )}
+          {saved && <div className="alert alert-success">Saved a new version.</div>}
         </section>
       )}
     </>

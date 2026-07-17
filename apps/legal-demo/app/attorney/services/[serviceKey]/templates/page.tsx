@@ -11,7 +11,7 @@
 // template's fields in one click. Composition: {{>other_template}} inlines another
 // template (handled by renderTemplate; insert it like any token).
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
@@ -21,6 +21,7 @@ import type { VariableStatus } from '@/components/templates/TemplateVariableNode
 import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { EyeIcon } from '@/components/icons'
 import { htmlToMarkdown, markdownToHtml } from '@/lib/templateBody'
+import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
 
 // Standard merge tokens available in every document (filled at generation time
 // from the client/matter/firm profile), so the `{{` autocomplete and chip
@@ -100,6 +101,32 @@ function humanize(token: string): string {
 
 function humanKind(k: string): string {
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// A handful of lines from the template body for the collapsed card's mini
+// thumbnail (comp: SERVICE EDITOR › Templates), rendering {{token}} markers as
+// gold TokenChips so the preview reads as a real merge document, not a mockup.
+function renderThumbLines(body: string, max = 6): ReactNode[] {
+  const lines = body
+    .split(/\r?\n/)
+    .map((l) =>
+      l
+        .replace(/^#+\s*/, '')
+        .replace(/[*_>#-]/g, '')
+        .trim(),
+    )
+    .filter(Boolean)
+    .slice(0, max)
+  return lines.map((line, i) => {
+    const parts = line.split(TOKEN_RE)
+    return (
+      <div key={i} className="li-svc-thumb-line">
+        {parts.map((part, j) =>
+          j % 2 === 1 ? <TokenChip key={j}>{part}</TokenChip> : <Fragment key={j}>{part}</Fragment>,
+        )}
+      </div>
+    )
+  })
 }
 
 interface AiModelOpt {
@@ -469,6 +496,10 @@ export default function TemplateEditorPage() {
 
   return (
     <>
+      <p className="li-svc-hint">
+        The documents this service produces. Insert a field by point-and-click from the intake
+        questions — it places a <code>{'{{token}}'}</code> bound to that question.
+      </p>
       {error && <div className="alert alert-error">{error}</div>}
       {note && <div className="alert alert-success">{note}</div>}
 
@@ -477,7 +508,7 @@ export default function TemplateEditorPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : (
-        <>
+        <div className="li-svc-body">
           <DocumentsManager
             serviceKey={serviceKey}
             service={service}
@@ -485,7 +516,7 @@ export default function TemplateEditorPage() {
             onChanged={load}
           />
           {templates.length === 0 ? (
-            <p className="text-muted" style={{ marginTop: 'var(--space-4)' }}>
+            <p className="text-muted">
               No documents yet — add one above to start writing its template.
             </p>
           ) : (
@@ -502,7 +533,7 @@ export default function TemplateEditorPage() {
               />
             ))
           )}
-        </>
+        </div>
       )}
     </>
   )
@@ -560,16 +591,12 @@ function DocumentsManager({
   const available = library.filter((l) => !docs.includes(l.docKind))
 
   return (
-    <section className="tpl-docs">
-      {err && (
-        <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-          {err}
-        </div>
-      )}
+    <section className="li-svc-docsbar">
+      {err && <div className="alert alert-error">{err}</div>}
       {docs.length > 0 && (
-        <div className="tpl-docs-pills">
+        <div className="li-svc-docpills">
           {docs.map((d) => (
-            <span key={d} className="tpl-docs-pill">
+            <span key={d} className="li-svc-docpill">
               {humanKind(d)}
               <button
                 type="button"
@@ -584,10 +611,9 @@ function DocumentsManager({
           ))}
         </div>
       )}
-      <div className="tpl-docs-add">
+      <div className="li-svc-docadd">
         {available.length > 0 && (
           <select
-            className="tpl-docs-select"
             value=""
             aria-label="Add a document from the template library"
             disabled={busy}
@@ -604,7 +630,6 @@ function DocumentsManager({
           </select>
         )}
         <input
-          className="tpl-docs-new"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -617,7 +642,7 @@ function DocumentsManager({
         />
         <button
           type="button"
-          className="tpl-docs-addbtn"
+          className="li-svc-btn"
           onClick={() => add(draft)}
           disabled={busy || !draft.trim()}
         >
@@ -656,6 +681,10 @@ function KindEditor({
   const [libNote, setLibNote] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [showAi, setShowAi] = useState(false)
+  // Comp: the Templates tab card is COLLAPSED to a thumbnail by default; "Open
+  // editor" expands it in place to the full rich-text editor below (no separate
+  // template-editor route exists yet — that's WP-E's scope).
+  const [open, setOpen] = useState(false)
   // "Insert a field" collapses by default so the field list doesn't eat vertical
   // space — typing `{{` in the editor is the primary way to drop a field anyway.
   const [showFields, setShowFields] = useState(false)
@@ -754,208 +783,255 @@ function KindEditor({
     }
   }
 
+  const fieldCount = tokens.length
+
   return (
-    <section style={{ borderLeft: '3px solid var(--border)' }}>
+    <section className="li-svc-tplcard">
       {confirmElement}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-2)',
-          marginBottom: 'var(--space-2)',
-        }}
-      >
+      <div className="li-svc-tplcard-head">
         <strong>{humanKind(template.documentKind)}</strong>
-        <button
-          type="button"
-          className={showAi ? 'primary' : undefined}
-          style={{
-            marginLeft: 'auto',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 'var(--space-1)',
-          }}
-          onClick={() => setShowAi((v) => !v)}
-          title="Draft or revise this document with skill-aware AI"
-        >
-          ✨ AI
-        </button>
-        <button
-          type="button"
-          className={showPreview ? 'primary' : undefined}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
-          onClick={() => setShowPreview((v) => !v)}
-          title="Preview the finished document with sample data, side by side"
-        >
-          <EyeIcon size={15} /> Preview
-        </button>
-        <button className="primary" onClick={save} disabled={busy || !text.trim()}>
-          {busy ? 'Saving…' : 'Save new version'}
-        </button>
-      </div>
-
-      {showAi && (
-        <AiEnhancePanel
-          currentBody={text}
-          fieldIds={fields.map((f) => f.id)}
-          onClose={() => setShowAi(false)}
-          onResult={(body) => {
-            // Replace the body with the AI revision; remount the editor to re-seed
-            // (typing flows through onChange, but a wholesale swap must re-seed HTML).
-            setText(body)
-            setSeedHtml(markdownToHtml(body))
-            setEditorKey((k) => k + 1)
-            setSaved(false)
-            setErr(null)
-          }}
-        />
-      )}
-
-      <div className="tpl-insert" style={{ marginBottom: 'var(--space-2)' }}>
-        <span className="tpl-insert-label">Library:</span>
-        {library.length > 0 && (
-          <select
-            value=""
-            aria-label="Start from a library template"
-            disabled={busy}
-            onChange={(e) => {
-              const pick = library.find((l) => l.docKind === e.target.value)
-              if (!pick) return
-              const apply = () => {
-                setText(pick.body)
-                setSeedHtml(markdownToHtml(pick.body))
-                setEditorKey((k) => k + 1)
-                setSaved(false)
-              }
-              if (!text.trim()) return apply()
-              void confirm({
-                title: 'Replace this document body?',
-                body: `Replaces the current body with the “${pick.name}” library template. Unsaved edits to the body are lost.`,
-                confirmLabel: 'Replace',
-                danger: true,
-              }).then((ok) => {
-                if (ok) apply()
-              })
-            }}
-          >
-            <option value="">Start from a library template…</option>
-            {library.map((l) => (
-              <option key={l.docKind} value={l.docKind}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !text.trim()}>
-          Save to library
-        </button>
-        {libNote && <span className="badge ok">{libNote}</span>}
-      </div>
-
-      <div className="tpl-insert tpl-insert-collapsible">
-        <button
-          type="button"
-          className="tpl-insert-toggle"
-          aria-expanded={showFields}
-          onClick={() => setShowFields((s) => !s)}
-        >
-          <span className={`tpl-insert-caret${showFields ? ' open' : ''}`} aria-hidden="true">
-            ▸
-          </span>
-          Insert a field
-          {fields.length > 0 && <span className="tpl-insert-count">{fields.length}</span>}
-          <span className="tpl-insert-hint">or just type {'{{'} in the document</span>
-        </button>
-        {showFields && (
-          <div className="tpl-insert-body">
-            {fields.length === 0 && (
-              <span className="text-muted">No questions yet — add one →</span>
-            )}
-            {fields.map((f) => (
-              <button
-                key={f.id}
-                className="qb-pill"
-                type="button"
-                onClick={() => insertField(f.id)}
-              >
-                {f.label}
-              </button>
-            ))}
-            <span className="tpl-newfield">
-              <input
-                value={newLabel}
-                onChange={(e) => setNewLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    void addNewField()
-                  }
-                }}
-                placeholder="New field label…"
-              />
-              <button type="button" onClick={() => void addNewField()} disabled={!newLabel.trim()}>
-                + Add &amp; insert
-              </button>
-            </span>
-          </div>
-        )}
-      </div>
-
-      {orphans.length > 0 && (
-        <div className="alert alert-warn">
-          Unbound markers (no matching question):{' '}
-          {orphans.map((o) => (
-            <code key={o} style={{ marginRight: 'var(--space-2)' }}>{`{{${o}}}`}</code>
-          ))}
+        <span className="li-svc-fieldcount">
+          {fieldCount} field{fieldCount === 1 ? '' : 's'}
+        </span>
+        <div className="li-svc-tplcard-actions">
           <button
             type="button"
-            style={{ marginLeft: 'var(--space-2)' }}
-            onClick={() => void onAddFields(orphans.map((o) => ({ id: o, label: humanize(o) })))}
+            className="li-svc-openeditor"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
           >
-            Add {orphans.length === 1 ? 'it' : 'them all'} as questions
+            {open ? 'Close editor' : 'Open editor'}
           </button>
         </div>
-      )}
+      </div>
 
-      <div style={{ marginTop: 'var(--space-2)' }}>
-        <span
-          className="tpl-insert-label"
-          style={{ display: 'block', marginBottom: 'var(--space-1)' }}
-        >
-          Document
-        </span>
-        <div className="tpl-split">
-          <div className="tpl-split-col">
-            <TemplateEditor
-              key={editorKey}
-              initialHtml={seedHtml}
-              editorRef={editorRef}
-              placeholder="Write the document. Type {{ to insert a field…"
-              validateVariable={validateVariable}
-              variableNames={suggestVariables}
-              onChange={(html) => {
-                setText(htmlToMarkdown(html))
+      <div className="li-svc-thumbwrap">
+        <DocumentSheet variant="thumb" serif className="li-svc-thumb">
+          <div className="li-svc-thumb-title">{humanKind(template.documentKind).toUpperCase()}</div>
+          {text.trim() ? (
+            renderThumbLines(text)
+          ) : (
+            <div className="li-svc-thumb-line text-muted">No content yet — open the editor.</div>
+          )}
+        </DocumentSheet>
+      </div>
+
+      {open && (
+        <div className="li-svc-tplcard-expanded">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <button
+              type="button"
+              className={showAi ? 'primary' : undefined}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+              }}
+              onClick={() => setShowAi((v) => !v)}
+              title="Draft or revise this document with skill-aware AI"
+            >
+              ✨ AI
+            </button>
+            <button
+              type="button"
+              className={showPreview ? 'primary' : undefined}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
+              onClick={() => setShowPreview((v) => !v)}
+              title="Preview the finished document with sample data, side by side"
+            >
+              <EyeIcon size={15} /> Preview
+            </button>
+            <button
+              className="li-svc-btn-primary"
+              style={{ marginLeft: 'auto' }}
+              onClick={save}
+              disabled={busy || !text.trim()}
+            >
+              {busy ? 'Saving…' : 'Save new version'}
+            </button>
+          </div>
+
+          {showAi && (
+            <AiEnhancePanel
+              currentBody={text}
+              fieldIds={fields.map((f) => f.id)}
+              onClose={() => setShowAi(false)}
+              onResult={(body) => {
+                // Replace the body with the AI revision; remount the editor to re-seed
+                // (typing flows through onChange, but a wholesale swap must re-seed HTML).
+                setText(body)
+                setSeedHtml(markdownToHtml(body))
+                setEditorKey((k) => k + 1)
                 setSaved(false)
                 setErr(null)
               }}
             />
+          )}
+
+          <div className="tpl-insert" style={{ marginBottom: 'var(--space-2)' }}>
+            <span className="tpl-insert-label">Library:</span>
+            {library.length > 0 && (
+              <select
+                value=""
+                aria-label="Start from a library template"
+                disabled={busy}
+                onChange={(e) => {
+                  const pick = library.find((l) => l.docKind === e.target.value)
+                  if (!pick) return
+                  const apply = () => {
+                    setText(pick.body)
+                    setSeedHtml(markdownToHtml(pick.body))
+                    setEditorKey((k) => k + 1)
+                    setSaved(false)
+                  }
+                  if (!text.trim()) return apply()
+                  void confirm({
+                    title: 'Replace this document body?',
+                    body: `Replaces the current body with the “${pick.name}” library template. Unsaved edits to the body are lost.`,
+                    confirmLabel: 'Replace',
+                    danger: true,
+                  }).then((ok) => {
+                    if (ok) apply()
+                  })
+                }}
+              >
+                <option value="">Start from a library template…</option>
+                {library.map((l) => (
+                  <option key={l.docKind} value={l.docKind}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              onClick={() => void saveToLibrary()}
+              disabled={busy || !text.trim()}
+            >
+              Save to library
+            </button>
+            {libNote && <span className="badge ok">{libNote}</span>}
           </div>
-          {showPreview && (
-            <div className="tpl-split-col">
-              <TemplatePreview body={text} />
+
+          <div className="tpl-insert tpl-insert-collapsible">
+            <button
+              type="button"
+              className="tpl-insert-toggle"
+              aria-expanded={showFields}
+              onClick={() => setShowFields((s) => !s)}
+            >
+              <span className={`tpl-insert-caret${showFields ? ' open' : ''}`} aria-hidden="true">
+                ▸
+              </span>
+              Insert a field
+              {fields.length > 0 && <span className="tpl-insert-count">{fields.length}</span>}
+              <span className="tpl-insert-hint">or just type {'{{'} in the document</span>
+            </button>
+            {showFields && (
+              <div className="tpl-insert-body">
+                {fields.length === 0 && (
+                  <span className="text-muted">No questions yet — add one →</span>
+                )}
+                {fields.map((f) => (
+                  <button
+                    key={f.id}
+                    className="qb-pill"
+                    type="button"
+                    onClick={() => insertField(f.id)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+                <span className="tpl-newfield">
+                  <input
+                    value={newLabel}
+                    onChange={(e) => setNewLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        void addNewField()
+                      }
+                    }}
+                    placeholder="New field label…"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void addNewField()}
+                    disabled={!newLabel.trim()}
+                  >
+                    + Add &amp; insert
+                  </button>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {orphans.length > 0 && (
+            <div className="alert alert-warn">
+              Unbound markers (no matching question):{' '}
+              {orphans.map((o) => (
+                <code key={o} style={{ marginRight: 'var(--space-2)' }}>{`{{${o}}}`}</code>
+              ))}
+              <button
+                type="button"
+                style={{ marginLeft: 'var(--space-2)' }}
+                onClick={() =>
+                  void onAddFields(orphans.map((o) => ({ id: o, label: humanize(o) })))
+                }
+              >
+                Add {orphans.length === 1 ? 'it' : 'them all'} as questions
+              </button>
             </div>
           )}
-        </div>
-      </div>
 
-      {err && (
-        <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-          {err}
-        </div>
-      )}
-      {saved && (
-        <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
-          Saved a new version.
+          <div style={{ marginTop: 'var(--space-2)' }}>
+            <span
+              className="tpl-insert-label"
+              style={{ display: 'block', marginBottom: 'var(--space-1)' }}
+            >
+              Document
+            </span>
+            <div className="tpl-split">
+              <div className="tpl-split-col">
+                <TemplateEditor
+                  key={editorKey}
+                  initialHtml={seedHtml}
+                  editorRef={editorRef}
+                  placeholder="Write the document. Type {{ to insert a field…"
+                  validateVariable={validateVariable}
+                  variableNames={suggestVariables}
+                  onChange={(html) => {
+                    setText(htmlToMarkdown(html))
+                    setSaved(false)
+                    setErr(null)
+                  }}
+                />
+              </div>
+              {showPreview && (
+                <div className="tpl-split-col">
+                  <TemplatePreview body={text} />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {err && (
+            <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+              {err}
+            </div>
+          )}
+          {saved && (
+            <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
+              Saved a new version.
+            </div>
+          )}
         </div>
       )}
     </section>

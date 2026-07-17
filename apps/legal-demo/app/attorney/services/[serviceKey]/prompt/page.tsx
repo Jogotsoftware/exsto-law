@@ -137,7 +137,7 @@ export default function PromptEditorPage() {
 
   return (
     <>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.2rem' }}>
+      <p className="li-svc-hint">
         The instructions the drafting agent follows when generating each document for{' '}
         <code>{serviceKey}</code>. Saving creates a new immutable version; the drafting worker uses
         it on the next run. Each prompt must contain every required slot — they are filled in with
@@ -156,77 +156,47 @@ export default function PromptEditorPage() {
           <code>operating_agreement</code>) on the service editor first.
         </div>
       ) : (
-        kinds.map((k, idx) => {
-          const missing = missingSlots(k.text)
-          return (
-            <section key={k.documentKind} style={{ borderLeft: '3px solid var(--border)' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  marginBottom: 'var(--space-2)',
-                }}
-              >
-                <strong>{humanKind(k.documentKind)}</strong>
-                <span className={`badge ${k.source === 'config' ? 'info' : ''}`}>
-                  {k.source === 'config'
-                    ? `Custom${k.promptVersion != null ? ` · v${k.promptVersion}` : ''}`
-                    : k.source === 'repo'
-                      ? 'Default (built-in)'
-                      : 'No prompt'}
-                </span>
-                <button
-                  className="primary"
-                  style={{ marginLeft: 'auto' }}
-                  onClick={() => save(idx)}
-                  disabled={k.busy || missing.length > 0}
-                >
-                  {k.busy ? 'Saving…' : 'Save new version'}
-                </button>
-              </div>
-
-              <div style={{ marginBottom: 'var(--space-2)' }}>
-                <div
-                  style={{
-                    fontSize: '0.82rem',
-                    color: 'var(--muted)',
-                    marginBottom: 'var(--space-1)',
-                  }}
-                >
-                  Required slots
+        <div className="li-svc-body">
+          {kinds.map((k, idx) => {
+            const missing = missingSlots(k.text)
+            return (
+              <section key={k.documentKind} className="li-svc-panel li-svc-panel--accent">
+                <div className="li-svc-tplcard-head">
+                  <strong>{humanKind(k.documentKind)}</strong>
+                  <span className={`li-svc-chip${k.source === 'config' ? ' custom' : ''}`}>
+                    {k.source === 'config'
+                      ? `Custom${k.promptVersion != null ? ` · v${k.promptVersion}` : ''}`
+                      : k.source === 'repo'
+                        ? 'Default (built-in)'
+                        : 'No prompt'}
+                  </span>
+                  <button
+                    className="li-svc-btn-primary"
+                    style={{ marginLeft: 'auto' }}
+                    onClick={() => save(idx)}
+                    disabled={k.busy || missing.length > 0}
+                  >
+                    {k.busy ? 'Saving…' : 'Save new version'}
+                  </button>
                 </div>
-                <ul
-                  style={{
-                    listStyle: 'none',
-                    margin: 0,
-                    padding: 0,
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: 'var(--space-2)',
-                  }}
-                >
+
+                <div className="li-svc-label-row">Required slots</div>
+                <div className="li-svc-chips" style={{ marginBottom: 14 }}>
                   {REQUIRED_SLOTS.map((slot) => {
                     const present = k.text.includes(slot)
                     return (
-                      <li key={slot}>
-                        <span
-                          className={`badge ${present ? 'ok' : 'danger'}`}
-                          title={present ? 'Present' : 'Missing — add this slot'}
-                        >
-                          <span aria-hidden>{present ? '✓' : '✗'}</span>
-                          <code style={{ background: 'transparent', color: 'inherit' }}>
-                            {slot}
-                          </code>
-                        </span>
-                      </li>
+                      <span
+                        key={slot}
+                        className={`li-svc-chip${present ? ' ok' : ''}`}
+                        title={present ? 'Present' : 'Missing — add this slot'}
+                      >
+                        <span aria-hidden>{present ? '✓' : '✗'}</span>
+                        <code>{slot}</code>
+                      </span>
                     )
                   })}
-                </ul>
-              </div>
+                </div>
 
-              <label>
-                <span>Prompt</span>
                 <textarea
                   value={k.text}
                   onChange={(e) =>
@@ -237,32 +207,37 @@ export default function PromptEditorPage() {
                       error: null,
                     }))
                   }
-                  rows={18}
+                  rows={10}
                   spellCheck={false}
-                  style={{ fontFamily: 'var(--mono, monospace)', fontSize: '0.82rem' }}
+                  style={{
+                    width: '100%',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    fontSize: '12.5px',
+                    lineHeight: 1.6,
+                  }}
                   placeholder="Drafting instructions, including the required {{slots}}…"
                 />
-              </label>
 
-              {missing.length > 0 && (
-                <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-                  Missing required slot(s): {missing.join(', ')}. Saving is blocked until every slot
-                  is present.
-                </div>
-              )}
-              {k.error && (
-                <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-                  {k.error}
-                </div>
-              )}
-              {k.saved && (
-                <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
-                  Saved a new version.
-                </div>
-              )}
-            </section>
-          )
-        })
+                {missing.length > 0 && (
+                  <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+                    Missing required slot(s): {missing.join(', ')}. Saving is blocked until every
+                    slot is present.
+                  </div>
+                )}
+                {k.error && (
+                  <div className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+                    {k.error}
+                  </div>
+                )}
+                {k.saved && (
+                  <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
+                    Saved a new version.
+                  </div>
+                )}
+              </section>
+            )
+          })}
+        </div>
       )}
     </>
   )

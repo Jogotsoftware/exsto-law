@@ -83,14 +83,35 @@ Audited against `origin/main` @ c26b3ae (2026-07-16, three code audits). This is
   (clean history, no reject-dance, queue never doubles during review), and every persist is the existing append-only
   edit path — faithful to the comp, which persists nothing until Accept.
 
-## WP-D · Services + service editor
+## WP-D · Services + service editor — SHIPPED (branch li/wp-d-services)
 
-- [ ] WIRED: settings (EN/ES client copy, route/generation selection, booking fieldset, consultation toggle/length)
-- [ ] WIRED: questionnaire (token binding, types, required, add-from-library, save-to-library)
-- [ ] WIRED: AI-review tab (auto-review + redline toggles, prompt slot chips, skills chips); workflow tab; billing
-      tab; Edit-with-AI rail
-- [ ] ADAPT: route/generation dropdowns → comp's segmented pill toggles
-- [ ] VERIFY: "New service" button → wires to the build wizard (D8)
+- [x] WIRED: settings (EN/ES client copy, route/generation selection, booking fieldset, consultation toggle/length) —
+      EN/ES now switched by a comp-style pill toggle (both languages still save together)
+- [x] WIRED: questionnaire (token binding, types, required, add-from-library, save-to-library) — all existing logic
+      preserved (drag reorder, allow_unknown/ask_attorney, members_repeater, per-question save-to-library, start/save
+      library) inside the comp's row layout
+- [x] WIRED: AI-review tab (auto-review + redline toggles, prompt slot chips, skills chips); workflow tab; billing
+      tab; Edit-with-AI rail — the rail is a new chrome-level banner (layout.tsx) reusing the existing
+      `exsto:assistant:prime` mechanism (same one the Workflow tab's "Build with AI" already used); billing's legacy
+      "Edit in window" (BillingConfigModal, JSON-editor duplicate of the inline form, not in the comp) was cut —
+      superseded by the new rail
+- [x] ADAPT: route/generation dropdowns → comp's segmented pill toggles — done in the shared
+      `ServiceSettingsFields` (so the wizard's `ServiceEditorModal` picks it up too)
+- [x] VERIFY resolved: "New service" button — a real manual create flow already exists
+      (`/attorney/services/new`, handled by the `[serviceKey]` layout's `isNew` branch); kept wired to it
+      (restyled only). The build wizard is D8-gated (`LEGAL_BUILD_WIZARD` off) — not a real alternative today; no
+      WP-L follow-up needed since the button isn't dead.
+- Templates tab: cards are collapsed by default (comp) with a mini `DocumentSheet` thumbnail (`TokenChip`-rendered
+  merge tokens from the live body) + field-count chip; "Open editor" expands the SAME existing rich-text editor
+  in place (no separate template-editor route exists yet — that's WP-E's scope).
+- Workflow tab: `WorkflowBuilder`'s `StepCard` restyled to the comp's numbered-tile + role-chip
+  (client blue / attorney gold / system green) + Blocking badge + monospace trigger + doc chip; the deep
+  edit-in-place `StepEditor` (opened via "Edit") keeps its existing form, unrestyled (not in the comp).
+- CSS bug found + fixed while restyling: the base `button { padding: .55rem 1rem }` rule out-sizes a 28px
+  fixed-width icon button and flex-shrinks its SVG child to 0 width (invisible icons) unless the icon-button class
+  resets `padding: 0`; a bare `button.danger { background }` rule also outranks a single-class `.danger` modifier's
+  background — both now fixed (`li-svc-iconbtn`, `li-svc-row-gear`), and every new hover rule on a real `<button>`
+  carries `:not(:disabled)` so it wins over the global `button:hover:not(:disabled)`.
 
 ## WP-E · Templates gallery + editor
 

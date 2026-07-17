@@ -9,7 +9,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { BillingConfigModal } from '@/components/configEditors'
 
 type CostType = '' | 'hourly' | 'fixed'
 const MONEY_RE = /^\d+(\.\d{1,2})?$/
@@ -36,8 +35,6 @@ export default function ServiceBillingPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
-  // Phase 9: the shared edit-in-modal over this service's billing config.
-  const [modalOpen, setModalOpen] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -120,84 +117,58 @@ export default function ServiceBillingPage() {
     )
 
   return (
-    <section>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.2rem' }}>
-        What this service costs. Shown to clients on the booking page; saving writes a new version.
+    <>
+      <p className="li-svc-hint">
+        What this service costs. Shown to clients on the booking page; a fixed fee bills once when
+        the service is complete, an hourly rate bills through logged time.
       </p>
       {error && <div className="alert alert-error">{error}</div>}
       {saved && <div className="alert alert-success">Saved a new version.</div>}
-      <fieldset className="svc-fieldset">
-        <legend>Service fee</legend>
-        <p className="text-muted text-sm" style={{ marginTop: '-0.2rem' }}>
-          How the service itself is priced. A <strong>fixed</strong> fee bills once when the service
-          is marked complete; an <strong>hourly</strong> rate bills through logged time. Shown to
-          clients on the booking page.
-        </p>
-        <div className="form-grid">
-          <label>
-            <span>Fee</span>
-            <select
-              value={costType}
-              onChange={(e) => edited(setCostType)(e.target.value as CostType)}
-            >
-              <option value="">No fee set</option>
-              <option value="hourly">Hourly rate</option>
-              <option value="fixed">Fixed fee</option>
-            </select>
-          </label>
-          {costType !== '' && (
-            <label>
-              <span>{costType === 'hourly' ? 'Hourly rate (USD)' : 'Flat fee (USD)'}</span>
-              <input
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => edited(setAmount)(e.target.value)}
-                placeholder="350.00"
-              />
+      <div className="li-svc-panel">
+        <fieldset className="li-svc-fieldset">
+          <legend>Service fee</legend>
+          <div className="li-svc-grid2">
+            <label className="li-svc-field">
+              <span>Fee</span>
+              <select
+                value={costType}
+                onChange={(e) => edited(setCostType)(e.target.value as CostType)}
+              >
+                <option value="">No fee set</option>
+                <option value="hourly">Hourly rate</option>
+                <option value="fixed">Fixed fee</option>
+              </select>
             </label>
-          )}
-          {costType === 'hourly' && (
-            <label>
-              <span>Estimated hours (optional)</span>
-              <input
-                inputMode="numeric"
-                value={hours}
-                onChange={(e) => edited(setHours)(e.target.value)}
-                placeholder="e.g. 3"
-              />
-            </label>
-          )}
+            {costType !== '' && (
+              <label className="li-svc-field">
+                <span>{costType === 'hourly' ? 'Hourly rate (USD)' : 'Flat fee (USD)'}</span>
+                <input
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => edited(setAmount)(e.target.value)}
+                  placeholder="350.00"
+                />
+              </label>
+            )}
+            {costType === 'hourly' && (
+              <label className="li-svc-field">
+                <span>Estimated hours (optional)</span>
+                <input
+                  inputMode="numeric"
+                  value={hours}
+                  onChange={(e) => edited(setHours)(e.target.value)}
+                  placeholder="e.g. 3"
+                />
+              </label>
+            )}
+          </div>
+        </fieldset>
+        <div className="li-svc-actions" style={{ marginTop: 18 }}>
+          <button className="li-svc-btn-primary" onClick={save} disabled={busy}>
+            {busy ? 'Saving…' : 'Save new version'}
+          </button>
         </div>
-      </fieldset>
-      <div style={{ marginTop: 'var(--space-4)', display: 'flex', gap: '0.6rem' }}>
-        <button className="primary" onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : 'Save new version'}
-        </button>
-        <button className="outline" onClick={() => setModalOpen(true)} disabled={busy}>
-          Edit in window
-        </button>
       </div>
-      {/* UI-BUILDER-FIX-1 Phase 9: the shared edit-in-modal (view / edit /
-          AI-regenerate via worker_job / save = a new immutable version). */}
-      {modalOpen && (
-        <BillingConfigModal
-          serviceKey={serviceKey}
-          meta={{
-            displayName: meta.displayName,
-            description: meta.description,
-            route: meta.route,
-            documents: meta.documents,
-            sortOrder: meta.sortOrder,
-          }}
-          cost={
-            meta.cost
-              ? { costType: meta.cost.type, amount: meta.cost.amount, hours: meta.cost.hours }
-              : null
-          }
-          onClose={() => setModalOpen(false)}
-          onChanged={load}
-        />
-      )}
-    </section>
+    </>
   )
 }
