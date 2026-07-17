@@ -4,21 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
-import { PageHead } from '@/components/PageHead'
-import { Tabs, type TabSpec } from '@/components/Tabs'
 import {
   WeeklyCalendar,
   type CalendarItem,
   type CalendarCategory,
 } from '@/components/WeeklyCalendar'
-import { ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
+import { ChevronDownIcon, ClockIcon, Share2Icon } from '@/components/icons'
 import { parseTimestamp } from '@/lib/datetime'
 
 // Copies the public booking-page link to the clipboard. Replaces the old
 // "/attorney/share" link, which 404'd (no such route) — the link prospects use
 // to book is the public /book page. MULTI-TENANT-1: the link carries THIS firm's
 // slug (?firm=…) so a prospect lands on the attorney's own firm, not the default.
-function ShareBookingButton({ compact }: { compact?: boolean }) {
+function ShareBookingButton() {
   const [copied, setCopied] = useState(false)
   const slug = useFirmPublicSlug()
   async function copy() {
@@ -31,14 +29,9 @@ function ShareBookingButton({ compact }: { compact?: boolean }) {
     }
   }
   return (
-    <button
-      type="button"
-      onClick={copy}
-      className="icon-inline"
-      style={compact ? { fontSize: '0.85rem' } : undefined}
-    >
-      <Share2Icon size={compact ? 13 : 14} />
-      {copied ? 'Link copied!' : compact ? 'Share a booking link' : 'Share booking link'}
+    <button type="button" onClick={copy} className="li-dash-share">
+      <Share2Icon size={14} />
+      {copied ? 'Link copied!' : 'Share a booking link'}
     </button>
   )
 }
@@ -68,30 +61,64 @@ interface MatterSummary {
   createdAt: string
 }
 
-const STATUS_COLUMNS: Array<{ key: string; label: string; matches: (s: string) => boolean }> = [
+// The matters TABLE's status filter groups + chip styling (li-dash-mstatus). Same
+// bucketing the old status-tab panel used, so the filter still covers every status
+// the app produces. Colors reuse the shared li- status-pair tokens (ADAPT — comp
+// hardcodes per-row demo colors; we derive them from real status instead).
+const STATUS_GROUPS: Array<{
+  key: string
+  label: string
+  chipLabel: string
+  matches: (s: string) => boolean
+  fg: string
+  bg: string
+}> = [
   {
     key: 'inquiry',
     label: 'New inquiries',
+    chipLabel: 'New inquiry',
     matches: (s) =>
       s === 'inquiry' || s === 'questionnaire_pending' || s === 'questionnaire_submitted',
+    fg: 'var(--li-purple)',
+    bg: 'var(--li-purple-bg)',
   },
   {
     key: 'scheduled',
     label: 'Consultation booked',
+    chipLabel: 'Consultation booked',
     matches: (s) => s === 'consultation_scheduled' || s === 'consultation_completed',
+    fg: 'var(--li-info)',
+    bg: 'var(--li-info-bg)',
   },
   {
     key: 'drafting',
     label: 'Drafting / review',
+    chipLabel: 'Drafting',
     matches: (s) => s === 'drafting' || s === 'review_pending',
+    fg: 'var(--li-warn)',
+    bg: 'var(--li-warn-bg)',
   },
   {
     key: 'active',
     label: 'Active / signed',
+    chipLabel: 'Active',
     matches: (s) => s === 'engagement_signed' || s === 'matter_active',
+    fg: 'var(--li-ok)',
+    bg: 'var(--li-ok-bg)',
   },
-  { key: 'closed', label: 'Closed', matches: (s) => s === 'matter_closed' },
+  {
+    key: 'closed',
+    label: 'Closed',
+    chipLabel: 'Closed',
+    matches: (s) => s === 'matter_closed',
+    fg: 'var(--li-muted)',
+    bg: 'var(--li-border-soft)',
+  },
 ]
+
+function matterStatusGroup(status: string): (typeof STATUS_GROUPS)[number] {
+  return STATUS_GROUPS.find((g) => g.matches(status)) ?? STATUS_GROUPS[0]!
+}
 
 function humanizeService(key: string): string {
   if (key === 'llc_formation') return 'NC LLC formation'
@@ -114,6 +141,20 @@ function timeAgo(iso: string): string {
   return `${d}d ago`
 }
 
+// Gmail-style short date for the matters table's DATE column: "Jan 12", or with a
+// year once it's not the current one. Same convention as the mail inbox.
+function formatDateShort(iso: string): string {
+  const d = parseTimestamp(iso)
+  if (!d) return '—'
+  const sameYear = d.getFullYear() === new Date().getFullYear()
+  return d.toLocaleDateString(
+    undefined,
+    sameYear
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' },
+  )
+}
+
 export default function AttorneyHome() {
   const [upcoming, setUpcoming] = useState<CalendarItem[] | null>(null)
   const [categories, setCategories] = useState<CalendarCategory[]>([])
@@ -122,6 +163,8 @@ export default function AttorneyHome() {
   const [error, setError] = useState<string | null>(null)
   const [calendarError, setCalendarError] = useState<string | null>(null)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
+  const [dashStatusFilter, setDashStatusFilter] = useState('')
+  const [dashSortDir, setDashSortDir] = useState<'asc' | 'desc'>('desc')
 
   // Fetch the unified calendar feed (real Google events + app consultations) for a
   // broad window; the calendar navigates within it client-side. Reused by the
@@ -172,47 +215,21 @@ export default function AttorneyHome() {
     return () => clearInterval(id)
   }, [refreshUpcoming])
 
-  const matterGroups = useMemo(() => {
-    const buckets: Record<string, MatterSummary[]> = {}
-    for (const col of STATUS_COLUMNS) buckets[col.key] = []
-    for (const m of matters ?? []) {
-      const col = STATUS_COLUMNS.find((c) => c.matches(m.status)) ?? STATUS_COLUMNS[0]!
-      buckets[col.key]!.push(m)
-    }
-    return buckets
-  }, [matters])
+  const dashMatters = useMemo(() => {
+    const rows = (matters ?? []).filter(
+      (m) => !dashStatusFilter || matterStatusGroup(m.status).key === dashStatusFilter,
+    )
+    const dir = dashSortDir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const ta = parseTimestamp(a.createdAt)?.getTime() ?? 0
+      const tb = parseTimestamp(b.createdAt)?.getTime() ?? 0
+      return (ta - tb) * dir
+    })
+  }, [matters, dashStatusFilter, dashSortDir])
 
-  const matterTabs: TabSpec[] = STATUS_COLUMNS.map((col) => {
-    const group = matterGroups[col.key] ?? []
-    return {
-      key: col.key,
-      label: col.label,
-      count: group.length,
-      content:
-        group.length === 0 ? (
-          <p className="text-muted">Nothing here yet.</p>
-        ) : (
-          <div className="matter-list">
-            {group.map((m) => (
-              <Link
-                key={m.matterEntityId}
-                href={`/attorney/matters/${m.matterEntityId}`}
-                className="matter-row"
-              >
-                <div>
-                  <div className="matter-row-title">{m.clientName || m.matterNumber}</div>
-                  <div className="matter-row-sub">
-                    {humanizeService(m.practiceArea)}
-                    {m.summary && ` · ${m.summary}`}
-                  </div>
-                </div>
-                <ChevronRightIcon size={16} className="matter-row-chevron" />
-              </Link>
-            ))}
-          </div>
-        ),
-    }
-  })
+  function toggleDashSort() {
+    setDashSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+  }
 
   return (
     <main>
@@ -220,26 +237,136 @@ export default function AttorneyHome() {
           button from this row. A neutral title keeps the page's h1 for
           structure/a11y; the booking link is still shareable from the "This week"
           row below. */}
-      <PageHead title="Dashboard" />
+      <h1 className="li-dash-title">Home</h1>
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <section>
-        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <h2>This week</h2>
-          <ShareBookingButton compact />
+      <div className="li-dash-grid">
+        <section className="li-dash-card">
+          <h2 className="li-dash-card-title">Matters</h2>
+          <div className="li-dash-mheader">
+            <span className="li-dash-mheader-label">Matter</span>
+            <button
+              type="button"
+              className="li-dash-sort"
+              onClick={toggleDashSort}
+              title="Sort by date"
+              aria-label={`Sort matters by date, currently ${dashSortDir === 'desc' ? 'newest first' : 'oldest first'}`}
+            >
+              Date
+              <ChevronDownIcon
+                size={12}
+                style={{ transform: dashSortDir === 'asc' ? 'rotate(180deg)' : 'none' }}
+              />
+            </button>
+            <span className="li-dash-statusfilter">
+              <select
+                value={dashStatusFilter}
+                onChange={(e) => setDashStatusFilter(e.target.value)}
+                aria-label="Filter matters by status"
+              >
+                <option value="">All statuses</option>
+                {STATUS_GROUPS.map((g) => (
+                  <option key={g.key} value={g.key}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon size={12} />
+            </span>
+          </div>
+          {matters === null && !error && (
+            <div className="loading-block" role="status">
+              <span className="spinner" /> Loading…
+            </div>
+          )}
+          {matters && dashMatters.length === 0 && (
+            <p className="li-dash-empty">No matters match this filter.</p>
+          )}
+          {matters && dashMatters.length > 0 && (
+            <div className="li-dash-mbody">
+              {dashMatters.map((m) => {
+                const group = matterStatusGroup(m.status)
+                return (
+                  <Link
+                    key={m.matterEntityId}
+                    href={`/attorney/matters/${m.matterEntityId}`}
+                    className="li-dash-mrow"
+                  >
+                    <span className="li-dash-mclient">
+                      <span className="li-dash-dot" style={{ background: group.fg }} />
+                      <span className="li-dash-mclient-text">
+                        <span className="li-dash-mname">{m.clientName || m.matterNumber}</span>
+                        <span className="li-dash-mnum">{m.matterNumber}</span>
+                      </span>
+                    </span>
+                    <span className="li-dash-mdate">{formatDateShort(m.createdAt)}</span>
+                    <span
+                      className="li-dash-mstatus"
+                      style={{ background: group.bg, color: group.fg }}
+                    >
+                      <span className="li-dash-mstatus-dot" style={{ background: group.fg }} />
+                      {group.chipLabel}
+                    </span>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </section>
+
+        <section className="li-dash-card">
+          <h2 className="li-dash-card-title">Recently booked</h2>
+          {recent === null && !error && (
+            <div className="loading-block" role="status">
+              <span className="spinner" /> Loading…
+            </div>
+          )}
+          {recent && recent.length === 0 && <p className="li-dash-empty">No bookings yet.</p>}
+          {recent && recent.length > 0 && (
+            <div className="li-dash-rbody">
+              {recent.map((r) => (
+                <Link
+                  key={r.matterEntityId}
+                  href={`/attorney/matters/${r.matterEntityId}`}
+                  className="li-dash-rrow"
+                >
+                  <span>
+                    <span className="li-dash-rclient">{r.clientName || r.matterNumber}</span>
+                    <span className="li-dash-rservice">{humanizeService(r.serviceKey)}</span>
+                  </span>
+                  <span className="li-dash-rtime">
+                    <ClockIcon size={12} />
+                    {timeAgo(r.bookedAt)}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      <section className="li-dash-week">
+        <div className="li-dash-week-head">
+          <h2 className="li-dash-card-title li-dash-week-title">This week</h2>
+          <ShareBookingButton />
         </div>
         {calendarError && (
-          <div className="alert alert-error">
-            <strong>Google connected, but the live calendar read failed.</strong> {calendarError}{' '}
-            <span className="text-muted">
-              (If you just enabled the Calendar API in Google Cloud, wait a few minutes and reload.)
-            </span>
+          <div className="li-dash-week-pad">
+            <div className="alert alert-error">
+              <strong>Google connected, but the live calendar read failed.</strong> {calendarError}{' '}
+              <span className="text-muted">
+                (If you just enabled the Calendar API in Google Cloud, wait a few minutes and
+                reload.)
+              </span>
+            </div>
           </div>
         )}
         {upcoming === null && !error ? (
-          <div className="loading-block" role="status">
-            <span className="spinner" /> Loading…
+          <div className="li-dash-week-pad">
+            <div className="loading-block" role="status">
+              <span className="spinner" /> Loading…
+            </div>
           </div>
         ) : (
           <WeeklyCalendar
@@ -251,48 +378,6 @@ export default function AttorneyHome() {
           />
         )}
       </section>
-
-      <div className="home-grid">
-        <section>
-          <h2>Matters</h2>
-          {matters === null && !error && (
-            <div className="loading-block" role="status">
-              <span className="spinner" /> Loading…
-            </div>
-          )}
-          {matters && <Tabs tabs={matterTabs} />}
-        </section>
-
-        <section>
-          <h2>Recently booked</h2>
-          {recent === null && !error && (
-            <div className="loading-block" role="status">
-              <span className="spinner" /> Loading…
-            </div>
-          )}
-          {recent && recent.length === 0 && <p className="text-muted">No bookings yet.</p>}
-          {recent && recent.length > 0 && (
-            <div className="recent-list">
-              {recent.map((r) => (
-                <Link
-                  key={r.matterEntityId}
-                  href={`/attorney/matters/${r.matterEntityId}`}
-                  className="recent-row"
-                >
-                  <div>
-                    <div className="recent-client">{r.clientName || r.matterNumber}</div>
-                    <div className="recent-meta">{humanizeService(r.serviceKey)}</div>
-                  </div>
-                  <div className="recent-time">
-                    <ClockIcon size={12} />
-                    {timeAgo(r.bookedAt)}
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
     </main>
   )
 }
