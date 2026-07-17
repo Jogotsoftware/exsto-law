@@ -92,6 +92,7 @@ const styles = StyleSheet.create({
   space: { height: 6 },
   strong: { fontFamily: 'Helvetica-Bold' },
   em: { fontFamily: 'Helvetica-Oblique' },
+  del: { textDecoration: 'line-through' },
   codespan: { fontFamily: 'Courier', fontSize: 10, color: '#374151' },
   // P13 — draft watermark (render state, never template text): a diagonal stamp
   // repeated on every page (fixed) plus a bordered banner line at the top.
@@ -148,7 +149,11 @@ function renderInline(
           renderInline((tok as Tokens.Em).tokens, (tok as Tokens.Em).text, key),
         )
       case 'del':
-        return renderInline((tok as Tokens.Del).tokens, (tok as Tokens.Del).text, key)
+        return h(
+          Text,
+          { key, style: styles.del },
+          renderInline((tok as Tokens.Del).tokens, (tok as Tokens.Del).text, key),
+        )
       case 'codespan':
         return h(Text, { key, style: styles.codespan }, (tok as Tokens.Codespan).text)
       case 'link': {

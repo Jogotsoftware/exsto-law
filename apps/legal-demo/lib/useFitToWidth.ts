@@ -14,7 +14,11 @@ import { useEffect, useRef } from 'react'
 // inside the contenteditable.
 const PAGE_WIDTH_PX = 7.75 * 96 // matches --tpl-page-width (7.75in) at 96dpi
 
-export function useFitToWidth<T extends HTMLElement>() {
+// pageWidthPx is the natural (unscaled) width of the content being fit — the
+// legacy 7.75in canvas by default. WP-E's comp-faithful editor passes the
+// DocumentSheet `editor` page width (612px), doubled + gap when the side-by-side
+// preview is showing, so one page or two scale together to the column.
+export function useFitToWidth<T extends HTMLElement>(pageWidthPx: number = PAGE_WIDTH_PX) {
   const ref = useRef<T | null>(null)
   useEffect(() => {
     const el = ref.current
@@ -23,13 +27,13 @@ export function useFitToWidth<T extends HTMLElement>() {
       const style = getComputedStyle(el)
       const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
       const avail = el.clientWidth - padX
-      const scale = avail > 0 ? Math.min(1, avail / PAGE_WIDTH_PX) : 1
+      const scale = avail > 0 ? Math.min(1, avail / pageWidthPx) : 1
       el.style.setProperty('--tpl-zoom', String(Math.round(scale * 1000) / 1000))
     }
     apply()
     const ro = new ResizeObserver(apply)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [pageWidthPx])
   return ref
 }

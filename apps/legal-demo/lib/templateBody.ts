@@ -14,7 +14,19 @@ import { Marked } from 'marked'
 // below) — keep them aligned if the server bridge ever enters the live path.
 
 // A private marked instance so we never mutate global marked options app-wide.
-const md = new Marked({ gfm: true, breaks: true })
+// renderer.del: marked's GFM strikethrough (`~~text~~`) parses to <del> by
+// default, but TipTap's Strike mark (WP-E toolbar) only recognizes <s> on the
+// way back in (see the strike turndown rule below) — override so the round trip
+// is lossless instead of silently dropping struck text back to plain text.
+const md = new Marked({
+  gfm: true,
+  breaks: true,
+  renderer: {
+    del(token) {
+      return `<s>${this.parser.parseInline(token.tokens)}</s>`
+    },
+  },
+})
 
 const turndown = new TurndownService({
   headingStyle: 'atx',
@@ -58,6 +70,19 @@ turndown.keep((node) => {
   // The page-break block.
   if (el.nodeName === 'DIV' && el.classList?.contains('page-break')) return true
   return false
+})
+
+// Strikethrough (WP-E toolbar) has no built-in turndown rule (that's only in the
+// separate turndown-plugin-gfm, not a dependency here) — without one, an <s> mark
+// would fall through to turndown's generic unknown-inline handling and silently
+// lose its strike styling on save. GFM `~~text~~` is what markdownToHtml's
+// renderer.del override above expects back. A filter function (not the string-
+// array shorthand) because 'strike' is a deprecated tag absent from TypeScript's
+// HTMLElementTagNameMap — the shorthand's type won't accept it.
+const STRIKE_TAGS = new Set(['S', 'STRIKE', 'DEL'])
+turndown.addRule('strike', {
+  filter: (node) => STRIKE_TAGS.has(node.nodeName),
+  replacement: (content) => `~~${content}~~`,
 })
 
 // Alignment lives on block elements that DO have built-in commonmark rules

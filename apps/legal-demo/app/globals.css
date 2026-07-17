@@ -16965,3 +16965,805 @@ fieldset.li-svc-fieldset legend {
   font-weight: 700;
   color: var(--li-navy);
 }
+
+/* ==========================================================================
+   WP-E — TEMPLATES GALLERY + EDITOR (li-tpl-). Own family, appended last;
+   consumes the --li- tokens and the shared DocumentSheet / DocumentCanvas
+   equivalent / GemSparkle / GemShimmer / TokenChip. Comp: docs/design/
+   legal-instruments TEMPLATES + TEMPLATE EDITOR (FULL PAGE). Does NOT touch
+   the legacy tpl-* family (still used by the per-service document editor and
+   the shared edit-in-modal — components/templates/TemplateEditor.tsx keeps
+   both chromes behind a `variant` prop). No star-then-slash in comments
+   (cssnano prod-build landmine).
+   ========================================================================== */
+
+.li-tpl {
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  color: var(--li-body);
+}
+.li-tpl-alert {
+  margin-bottom: 14px;
+}
+.li-tpl-empty {
+  color: var(--li-muted);
+  font-size: 14px;
+}
+
+/* --- Gallery header ------------------------------------------------------- */
+.li-tpl-gallery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.li-tpl-title {
+  font-family: 'Public Sans', sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--li-fg);
+}
+.li-tpl-new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-tpl-new-btn:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+}
+
+/* --- Gallery grid + cards -------------------------------------------------- */
+.li-tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px;
+}
+.li-tpl-card-wrap {
+  position: relative;
+}
+.li-tpl-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-panel);
+  padding: 0;
+  overflow: hidden;
+  box-shadow: var(--li-shadow-card);
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s,
+    transform 0.12s;
+}
+.li-tpl-card:hover:not(:disabled) {
+  border-color: #b9c4da;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+  transform: translateY(-2px);
+}
+.li-tpl-card-thumbwrap {
+  background: #eef2f8;
+  padding: 20px 22px 0;
+  display: flex;
+  justify-content: center;
+}
+.li-tpl-card-thumb {
+  max-width: 158px;
+  width: 100%;
+  padding: 13% 12% 0;
+}
+.li-tpl-thumb-heading {
+  text-align: center;
+  font-size: 6.4cqw;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--li-navy);
+  line-height: 1.25;
+  margin-bottom: 6cqw;
+  font-family: 'Public Sans', sans-serif;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.li-tpl-thumb-heading .li-token-chip {
+  font-size: 0.8em;
+  white-space: normal;
+}
+.li-tpl-thumb-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3cqw;
+}
+.li-tpl-thumb-line {
+  font-size: 4.1cqw;
+  line-height: 1.4;
+  color: #48546e;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li-tpl-thumb-line .li-token-chip {
+  font-family: 'Public Sans', sans-serif;
+  font-size: 0.85em;
+}
+.li-tpl-card-meta {
+  padding: 13px 16px;
+}
+.li-tpl-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.li-tpl-card-name {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--li-fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-tpl-card-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5a7bc4;
+  background: #eef2fa;
+  border-radius: var(--li-radius-chip);
+  padding: 2px 9px;
+}
+.li-tpl-card-sub {
+  font-size: 12px;
+  color: var(--li-muted-2);
+  margin-top: 4px;
+}
+.li-tpl-card-menu-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: #48546e;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.15);
+}
+.li-tpl-card-menu-btn:hover:not(:disabled) {
+  background: #fff;
+  border-color: #b9c4da;
+}
+.li-tpl-card-menu {
+  position: absolute;
+  top: 42px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  background: #fff;
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  box-shadow: var(--li-shadow-pop);
+  padding: 6px;
+}
+.li-tpl-card-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--li-fg);
+  cursor: pointer;
+}
+.li-tpl-card-menu button:hover:not(:disabled) {
+  background: #f4f6fb;
+}
+/* Extra class-selector (not !important) beats the plain `.li-tpl-card-menu
+   button` rule above on specificity alone. */
+.li-tpl-card-menu button.li-tpl-card-menu-danger {
+  color: var(--li-danger);
+}
+
+/* --- Editor: back pill + header -------------------------------------------- */
+.li-tpl-editor {
+  display: flex;
+  flex-direction: column;
+}
+.li-tpl-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-chip);
+  padding: 6px 14px 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #48546e;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+.li-tpl-back:hover:not(:disabled) {
+  border-color: #b9c4da;
+}
+.li-tpl-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.li-tpl-editor-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.li-tpl-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: 'Public Sans', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--li-navy);
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid transparent;
+  padding: 0 0 2px;
+}
+.li-tpl-name-input:hover,
+.li-tpl-name-input:focus {
+  outline: none;
+  border-bottom-color: var(--li-border-input);
+}
+.li-tpl-kind-badge {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #5a7bc4;
+  background: #eef2fa;
+  border-radius: var(--li-radius-chip);
+  padding: 3px 11px;
+}
+.li-tpl-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.li-tpl-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 15px;
+  background: #fff;
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #48546e;
+  cursor: pointer;
+}
+.li-tpl-preview-toggle:hover:not(:disabled) {
+  border-color: #b9c4da;
+}
+/* :not(:disabled) here isn't about a disabled state — it matches the global
+   button:hover:not(:disabled) rule's specificity (0,2,1) so a hovered+active
+   toggle doesn't fall back to the generic grey hover background (WP-D already
+   hit this class of bug; source order then wins the tie since this rule is
+   later than the plain :hover rule above). */
+.li-tpl-preview-toggle.active:not(:disabled) {
+  background: var(--li-navy);
+  border-color: var(--li-navy);
+  color: #fff;
+}
+.li-tpl-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 18px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-tpl-save-btn:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+}
+.li-tpl-save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* --- Editor: app-only meta row (name/kind live in the header; this covers
+   Type + Document kind — the comp's static demo has no equivalent control) -- */
+.li-tpl-meta-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.li-tpl-meta-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--li-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.li-tpl-meta-field select,
+.li-tpl-meta-field .tpl-kind-combo input {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+  border: 1px solid var(--li-border-input);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--li-fg);
+  background: #fff;
+}
+
+/* --- Editor: persistent inline AI-edit bar --------------------------------- */
+.li-tpl-ai-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--li-border-input);
+  border-radius: 11px;
+  padding: 8px 12px;
+  background: #fff;
+  margin-bottom: 14px;
+}
+.li-tpl-ai-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  font-family: 'Public Sans', sans-serif;
+  font-size: 14px;
+  color: var(--li-fg);
+  background: transparent;
+}
+.li-tpl-ai-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  background: var(--li-bg);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-chip);
+  padding: 3px 6px 3px 10px;
+  font-size: 12px;
+  color: #48546e;
+}
+.li-tpl-ai-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-tpl-ai-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--li-muted-2);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.li-tpl-ai-chip button:hover:not(:disabled) {
+  color: var(--li-danger);
+}
+.li-tpl-ai-icon-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-tpl-ai-icon-btn:hover:not(:disabled) {
+  background: #eef2f8;
+  border-color: var(--li-border-input);
+}
+.li-tpl-ai-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.li-tpl-ai-busy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #5a7bc4;
+  white-space: nowrap;
+}
+.li-tpl-ai-spin {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #cbd9f0;
+  border-top-color: #3b6fd4;
+  border-radius: 50%;
+  display: inline-block;
+  animation: li-spin 0.7s linear infinite;
+}
+.li-tpl-ai-run {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.li-tpl-ai-run:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+}
+.li-tpl-ai-run:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* --- Editor: workspace (toolbar + canvas + merge-fields rail) -------------- */
+.li-tpl-workspace {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #e4e8f0;
+  border-radius: var(--li-radius-panel);
+  overflow: hidden;
+}
+.li-tpl-canvas-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.li-tpl-rail {
+  width: 320px;
+  flex: 0 0 auto;
+  background: #fff;
+  border-left: 1px solid #e4e8f0;
+  padding: 18px 20px;
+  overflow-y: auto;
+  max-height: calc(100vh - 300px);
+}
+.li-tpl-rail-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--li-navy);
+  margin-bottom: 4px;
+}
+.li-tpl-rail-hint {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--li-muted-2);
+  line-height: 1.5;
+}
+.li-tpl-rail-subtitle {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--li-muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 18px 0 8px;
+}
+.li-tpl-standard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.li-tpl-standard-chip {
+  background: var(--li-bg);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-chip);
+  padding: 5px 11px;
+  font-size: 12.5px;
+  color: #48546e;
+  cursor: pointer;
+}
+.li-tpl-standard-chip:hover:not(:disabled) {
+  border-color: #b9c4da;
+  background: #eef2fa;
+}
+
+/* --- Toolbar (li variant of components/templates/TemplateEditor.tsx) ------ */
+.li-tpl-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 12px;
+  background: #f7f9fc;
+  border-bottom: 1px solid #e4e8f0;
+  flex-wrap: wrap;
+}
+.li-tpl-tb-select {
+  background: #fff;
+  border: 1px solid #d3dae8;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-family: 'Public Sans', sans-serif;
+  font-size: 13px;
+  color: #33415b;
+  cursor: pointer;
+  outline: none;
+}
+.li-tpl-tb-sep {
+  width: 1px;
+  height: 22px;
+  background: #d3dae8;
+  margin: 0 3px;
+  flex: 0 0 auto;
+}
+.li-tpl-tb-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #33415b;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.li-tpl-tb-btn:hover:not(:disabled) {
+  background: #e4e9f2;
+}
+/* :not(:disabled) matches the global button:hover:not(:disabled) specificity
+   (0,2,1) so an active (applied-formatting) toolbar button doesn't lose its
+   tint to the generic hover background while the pointer is over it. */
+.li-tpl-tb-btn.active:not(:disabled) {
+  background: #eef2fa;
+  color: var(--li-navy);
+}
+
+/* --- Canvas desk + DocumentSheet pages (editable + side-by-side preview) --- */
+.li-tpl-editor-loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--li-muted-2);
+  font-size: 14px;
+  background: #fff;
+}
+.li-tpl-canvas-desk {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 500px;
+  max-height: calc(100vh - 340px);
+  background: #edf0f5;
+  padding: 30px;
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: auto;
+}
+.li-tpl-page {
+  zoom: var(--tpl-zoom, 1);
+}
+.li-tpl-page--preview {
+  position: relative;
+}
+.li-tpl-preview-tag {
+  position: absolute;
+  top: 20px;
+  right: 22px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--li-muted-2);
+  text-transform: uppercase;
+}
+
+/* The page body's own typography — shared by the editable Tiptap canvas
+   (components/templates/TemplateEditor.tsx, variant="li") and the read-only
+   sample-data sheet (TemplateSampleSheet in app/attorney/templates/page.tsx),
+   so both pages read identically per the comp. */
+.li-tpl-page-body {
+  outline: none;
+}
+.li-tpl-page-body > * + * {
+  margin-top: 0.9em;
+}
+.li-tpl-page-body h1 {
+  font-family: 'Public Sans', sans-serif;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1.2em;
+  letter-spacing: 0.02em;
+  margin: 0 0 0.9em;
+}
+.li-tpl-page-body h2 {
+  font-family: 'Public Sans', sans-serif;
+  font-weight: 700;
+  font-size: 1.05em;
+  margin-top: 1.2em;
+}
+.li-tpl-page-body h3 {
+  font-family: 'Public Sans', sans-serif;
+  font-weight: 700;
+  font-size: 0.96em;
+  margin-top: 1em;
+}
+.li-tpl-page-body p {
+  margin: 0;
+}
+.li-tpl-page-body ul,
+.li-tpl-page-body ol {
+  padding-left: 1.4em;
+  margin: 0;
+}
+.li-tpl-page-body li {
+  margin: 0 0 4px;
+}
+.li-tpl-page-body blockquote {
+  border-left: 3px solid #e4e8f0;
+  padding-left: 14px;
+  color: var(--li-muted);
+  font-style: italic;
+  margin: 0;
+}
+.li-tpl-page-body p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--li-muted-3);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* --- Merge-fields rail cards (components/templates/TemplateFieldsPanel.tsx) */
+.li-tpl-fields-empty {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  color: var(--li-muted-2);
+  line-height: 1.5;
+}
+.li-tpl-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+.li-tpl-field-card {
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  padding: 11px 13px;
+  background: #fff;
+}
+.li-tpl-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.li-tpl-field-row--meta {
+  margin-top: 8px;
+}
+.li-tpl-field-chip {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  color: var(--li-gold-text);
+  background: var(--li-gold-bg);
+  border: none;
+  border-radius: 5px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.li-tpl-field-chip:hover:not(:disabled) {
+  background: #ecdcb0;
+}
+.li-tpl-field-required {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--li-muted-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.li-tpl-field-required:has(input:checked) {
+  color: var(--li-danger);
+}
+.li-tpl-field-label {
+  font-size: 12.5px;
+  color: #48546e;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-tpl-field-type {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #5a7bc4;
+  background: #eef2fa;
+  border: 1px solid transparent;
+  border-radius: var(--li-radius-chip);
+  padding: 2px 9px;
+  cursor: pointer;
+}
+.li-tpl-field-default {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  border: 1px solid var(--li-border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  color: var(--li-fg);
+  background: #fafbfe;
+}
+
+@media (max-width: 900px) {
+  .li-tpl-workspace {
+    flex-direction: column;
+  }
+  .li-tpl-rail {
+    width: auto;
+    max-height: none;
+    border-left: none;
+    border-top: 1px solid #e4e8f0;
+  }
+}

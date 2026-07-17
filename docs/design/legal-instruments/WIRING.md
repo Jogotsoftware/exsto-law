@@ -150,14 +150,37 @@ unaffected either way.
   background — both now fixed (`li-svc-iconbtn`, `li-svc-row-gear`), and every new hover rule on a real `<button>`
   carries `:not(:disabled)` so it wins over the global `button:hover:not(:disabled)`.
 
-## WP-E · Templates gallery + editor
+## WP-E · Templates gallery + editor — SHIPPED (branch li/wp-e-templates)
 
-- [ ] WIRED: Tiptap toolbar (font/size/B/I/U/H1-3/align/lists/signature-line/page-break); merge-fields panel
+- [x] WIRED: Tiptap toolbar (font/size/B/I/U/H1-3/align/lists/signature-line/page-break); merge-fields panel
       (7 types, required, click-insert); sample-data preview; letter-page canvas; AI draft modal
-- [ ] BUILD: gallery cards with proportional page thumbnails (today: table; drop extra columns per D6)
-- [ ] BUILD: side-by-side preview (today: toggle replaces canvas)
-- [ ] BUILD: persistent inline AI-edit bar with working shimmer (today: modal + "Drafting…")
-- [ ] BUILD: strikethrough toolbar button
+- [x] BUILD: gallery cards with proportional page thumbnails (today: table; drop extra columns per D6)
+- [x] BUILD: side-by-side preview (today: toggle replaces canvas)
+- [x] BUILD: persistent inline AI-edit bar with working shimmer (today: modal + "Drafting…")
+- [x] BUILD: strikethrough toolbar button
+
+### WP-E decisions (binding)
+
+- **AI draft modal retired, not restyled.** The old `legal.template.ai_draft`-backed
+  "Draft with AI" modal (list-view entry + in-editor button, with model/skill pickers and a
+  reference-file attach) is gone. The persistent inline bar is the ONE AI entry point once a
+  draft is open — it drafts (empty body) or revises (non-empty body) via `legal.template.ai_enhance`,
+  streamed the same way the per-service editor's "✨ AI" panel already worked
+  (`lib/templateAiStream.ts`). It is a strict capability superset of the old draft-only flow (bar
+  keeps the reference-document attach via a paperclip icon button; model/skill pickers are dropped —
+  comp has no equivalent control, "simpler wins"). The "New template" chooser (scratch / clone /
+  from questionnaire) is untouched, per instruction.
+- **Merge-fields panel is always-on**, not a togglable "Fields" section — matches the comp's
+  permanent right rail. The old body-inline "Insert a field" collapsible palette is replaced by a
+  "Standard fields" quick-insert strip in the same rail.
+- **App-only meta row** (Type / Document kind) sits below the header — the comp's static demo has
+  no control for these, but they're real template metadata (not view-only), so they're kept, not
+  dropped. Paper size (Letter/Legal) and Font-size view prefs ARE dropped: they were
+  never-persisted localStorage-only preferences with no comp equivalent, superseded by the shared
+  fixed-size `DocumentSheet` `editor` page every other WP already uses.
+- **Card kebab menu** (small overflow button per card) carries "Edit in window" and "Retire" —
+  the comp's card is a single "open the editor" click target with no equivalent, so these two
+  pre-existing actions needed a new (small, non-comp) home.
 
 ## WP-F · Billing — fully WIRED, pure restyle
 
