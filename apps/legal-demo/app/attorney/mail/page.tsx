@@ -1,21 +1,27 @@
 'use client'
 
-// Mail tab (WP7, REQ-CALMAIL-02): client-related Gmail only — read, reply,
-// compose in-app through the attorney's real account. Opening a thread also
-// ingests it (mail.ingest, idempotent) so each matter carries its
-// communication history. Gmail read is granted as part of the single
-// "Connect Google" consent in Settings (one connection = calendar + full email);
-// the in-tab "Reconnect Google" button is only a fallback for legacy connections
-// made before that consent was unified.
+// Mail tab (WP7 baseline + WP-I redesign): a two-pane inbox — Gmail client
+// threads (read, reply, compose, matter attachments, signature) plus a Portal
+// chat tab aggregating every matter's client↔attorney portal thread. Opening a
+// Gmail thread also ingests it (mail.ingest, idempotent) and now clears
+// Gmail's own UNREAD label (legal.mail.thread_get → markThreadRead), so the
+// Email tab's unread badge is real Gmail read-state, not a heuristic. The
+// Portal tab reuses the SAME tools the matter Activity tab already uses
+// (legal.matter.thread_get / legal.matter.message_post) plus one new
+// cross-matter read (legal.matter.portal_threads) — no parallel messaging
+// path. Gmail read/send is granted as part of the single "Connect Google"
+// consent in Settings; the in-tab "Reconnect Google" button is only a
+// fallback for legacy connections made before that consent was unified.
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { fetchSession } from '@/lib/auth'
-import { PageHead } from '@/components/PageHead'
+import { formatDateTime } from '@/lib/datetime'
 import { MailComposer, type ComposerValue } from '@/components/MailComposer'
 import { SignatureBlock, type FirmSignature } from '@/components/SignatureBlock'
 import { Modal } from '@/components/Modal'
 import { AttachmentPicker, type PickedAttachment } from '@/components/mail/AttachmentPicker'
+import { SearchIcon, SendIcon, FileTextIcon, PlusIcon } from '@/components/icons'
 
 type MatterRef = { matterEntityId: string; matterNumber: string }
 
@@ -38,9 +44,12 @@ interface ThreadSummary {
   lastAt: string | null
   participantEmails: string[]
   messageCount: number
-  matters: Array<{ matterEntityId: string; matterNumber: string }>
+  matters: MatterRef[]
   // email (lowercased, bare) → known client contact name.
   participantNames: Record<string, string>
+  // Real Gmail read-state (WP-I): true while any message in the thread still
+  // carries Gmail's UNREAD label.
+  unread: boolean
 }
 
 interface ThreadMessage {
@@ -60,8 +69,27 @@ interface ThreadView {
   subject: string
   participantEmails: string[]
   messages: ThreadMessage[]
-  matters: Array<{ matterEntityId: string; matterNumber: string }>
+  matters: MatterRef[]
   participantNames: Record<string, string>
+}
+
+// WP-I — Portal chat tab types. Mirrors legal.matter.portal_threads /
+// legal.matter.thread_get (the SAME PortalMessage shape the matter Activity
+// tab's Messages card already reads).
+interface PortalThreadSummary {
+  matterEntityId: string
+  matterNumber: string
+  clientName: string
+  lastAuthor: 'client' | 'attorney' | null
+  lastBody: string
+  lastAt: string | null
+  messageCount: number
+  unreadCount: number
+}
+interface PortalMessage {
+  author: 'client' | 'attorney'
+  body: string
+  sentAt: string
 }
 
 // "Name <a@b.com>" → "Name"; bare "a@b.com" → "a@b.com". Used for the reading
@@ -83,6 +111,15 @@ function emailInitials(addr: string): string {
   const parts = local.split(' ').filter(Boolean)
   if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase()
   return (local.slice(0, 2) || '·').toUpperCase()
+}
+
+// Two-letter avatar initials from a person's full name ("Teo Marsh" → "TM"),
+// for the Portal chat tab (whose rows are client_contact names, not emails).
+function nameInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase()
+  if (parts.length === 1) return (parts[0]!.slice(0, 2) || '·').toUpperCase()
+  return '·'
 }
 
 // Resolve an address to a known client contact name, falling back to the display
@@ -117,9 +154,16 @@ function relativeDate(iso: string): string {
 }
 
 const EMPTY_BODY: ComposerValue = { html: '', text: '' }
+type MailTab = 'email' | 'portal'
 
 export default function MailPage() {
+  const [tab, setTab] = useState<MailTab>('email')
+
+  // ── Email tab state ──────────────────────────────────────────────────────
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null)
+  // The full inbox's unread count, independent of a search filter's result set
+  // (kept in step with `threads` only on unfiltered loads — see `load`).
+  const [inboxUnread, setInboxUnread] = useState(0)
   const [open, setOpen] = useState<ThreadView | null>(null)
   const [reply, setReply] = useState<ComposerValue>(EMPTY_BODY)
   const [compose, setCompose] = useState<{
@@ -143,7 +187,16 @@ export default function MailPage() {
   const [composeMatters, setComposeMatters] = useState<MatterRef[]>([])
   const [composeMatterId, setComposeMatterId] = useState<string | null>(null)
 
-  async function load(search?: string) {
+  // ── Portal chat tab state ────────────────────────────────────────────────
+  const [portalThreads, setPortalThreads] = useState<PortalThreadSummary[] | null>(null)
+  const [portalError, setPortalError] = useState<string | null>(null)
+  const [portalQuery, setPortalQuery] = useState('')
+  const [openMatterId, setOpenMatterId] = useState<string | null>(null)
+  const [portalMessages, setPortalMessages] = useState<PortalMessage[] | null>(null)
+  const [portalDraft, setPortalDraft] = useState('')
+  const [portalBusy, setPortalBusy] = useState(false)
+
+  async function load(search?: string): Promise<ThreadSummary[]> {
     setError(null)
     setNeedsMailScope(false)
     try {
@@ -152,6 +205,12 @@ export default function MailPage() {
         input: search && search.trim() ? { query: search.trim() } : {},
       })
       setThreads(res.threads)
+      // Only an unfiltered load reflects the whole inbox — a search's result set
+      // must never make the tab badge look like the inbox emptied out.
+      if (!search || !search.trim()) {
+        setInboxUnread(res.threads.filter((t) => t.unread).length)
+      }
+      return res.threads
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('MAIL_SCOPE_MISSING')) {
@@ -160,11 +219,35 @@ export default function MailPage() {
         setError(msg)
       }
       setThreads([])
+      return []
     }
   }
 
+  function loadPortalThreads(): Promise<PortalThreadSummary[]> {
+    return callAttorneyMcp<{ threads: PortalThreadSummary[] }>({
+      toolName: 'legal.matter.portal_threads',
+    })
+      .then((r) => {
+        setPortalThreads(r.threads)
+        return r.threads
+      })
+      .catch((err) => {
+        setPortalError(err instanceof Error ? err.message : String(err))
+        setPortalThreads([])
+        return []
+      })
+  }
+
   useEffect(() => {
-    load()
+    // Honor a deep link into a specific Gmail thread (?thread=<id>, from the
+    // matter Activity tab's Emails card) — skip auto-selecting the first row
+    // when one is pending; the other mount effect below opens it.
+    const hasThreadParam =
+      typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('thread')
+    load().then((res) => {
+      if (!hasThreadParam && res.length > 0) openThread(res[0]!.gmailThreadId)
+    })
+    loadPortalThreads()
     // The firm signature the send path will append, shown (and editable) in the
     // composer so the attorney sees what gets added (it is appended server-side).
     callAttorneyMcp<{ signature: FirmSignature }>({
@@ -173,6 +256,13 @@ export default function MailPage() {
       .then((r) => setSignature(r.signature))
       .catch(() => setSignature(null))
   }, [])
+
+  // Auto-select the first portal thread the first time the tab is actually
+  // visited (lazy — no point opening a thread detail nobody has looked at).
+  useEffect(() => {
+    if (tab !== 'portal' || openMatterId || !portalThreads || portalThreads.length === 0) return
+    openPortalThread(portalThreads[0]!.matterEntityId)
+  }, [tab, portalThreads])
 
   // Contract D — launchCompose: open the composer pre-wired from query params
   // (?compose=1&to=…|contactId=…&subject=…). A contactId is resolved to the
@@ -257,6 +347,7 @@ export default function MailPage() {
   async function openThread(gmailThreadId: string) {
     setBusy('open')
     setError(null)
+    const wasUnread = threads?.find((t) => t.gmailThreadId === gmailThreadId)?.unread ?? false
     try {
       const view = await callAttorneyMcp<ThreadView>({
         toolName: 'legal.mail.thread_get',
@@ -267,6 +358,14 @@ export default function MailPage() {
       setReplyAttach([])
       setReplyMatterId(view.matters[0]?.matterEntityId ?? null)
       setComposerNonce((n) => n + 1)
+      // Opening ingests + marks the thread read server-side (legal.mail.thread_get
+      // → markThreadRead); clear the row's dot to match without a full reload.
+      setThreads((prev) =>
+        prev
+          ? prev.map((t) => (t.gmailThreadId === gmailThreadId ? { ...t, unread: false } : t))
+          : prev,
+      )
+      if (wasUnread) setInboxUnread((n) => Math.max(0, n - 1))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -352,6 +451,47 @@ export default function MailPage() {
     }
   }
 
+  async function openPortalThread(matterEntityId: string) {
+    setOpenMatterId(matterEntityId)
+    setPortalMessages(null)
+    setPortalError(null)
+    try {
+      const r = await callAttorneyMcp<{ messages: PortalMessage[] }>({
+        toolName: 'legal.matter.thread_get',
+        input: { matterEntityId },
+      })
+      setPortalMessages(r.messages)
+    } catch (err) {
+      setPortalError(err instanceof Error ? err.message : String(err))
+      setPortalMessages([])
+    }
+  }
+
+  async function sendPortalReply() {
+    if (!openMatterId || !portalDraft.trim() || portalBusy) return
+    setPortalBusy(true)
+    setPortalError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.matter.message_post',
+        input: { matterEntityId: openMatterId, body: portalDraft.trim() },
+      })
+      setPortalDraft('')
+      const [msgs] = await Promise.all([
+        callAttorneyMcp<{ messages: PortalMessage[] }>({
+          toolName: 'legal.matter.thread_get',
+          input: { matterEntityId: openMatterId },
+        }),
+        loadPortalThreads(),
+      ])
+      setPortalMessages(msgs.messages)
+    } catch (err) {
+      setPortalError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPortalBusy(false)
+    }
+  }
+
   // Reconnect Google to grant email reading. One Google connection now covers
   // calendar + full email, so this is only a fallback for LEGACY connections made
   // before that change — it routes through the same full-scope connect (the init
@@ -370,10 +510,37 @@ export default function MailPage() {
     window.location.href = `/api/auth/google/init?${params.toString()}`
   }
 
+  const portalUnreadTabCount = portalThreads?.filter((t) => t.unreadCount > 0).length ?? 0
+  const trimmedPortalQuery = portalQuery.trim().toLowerCase()
+  const filteredPortalThreads = portalThreads
+    ? trimmedPortalQuery
+      ? portalThreads.filter(
+          (t) =>
+            t.matterNumber.toLowerCase().includes(trimmedPortalQuery) ||
+            t.clientName.toLowerCase().includes(trimmedPortalQuery) ||
+            t.lastBody.toLowerCase().includes(trimmedPortalQuery),
+        )
+      : portalThreads
+    : null
+  const currentPortalMeta = portalThreads?.find((t) => t.matterEntityId === openMatterId) ?? null
+
   return (
     <main>
-      <PageHead title="Mail" />
-      {needsMailScope && (
+      <div className="li-mail-head">
+        <h1 className="li-mail-title">Inbox</h1>
+        {tab === 'email' && (
+          <button
+            type="button"
+            className="li-mail-composebtn"
+            onClick={() => setCompose({ to: '', subject: '', body: EMPTY_BODY })}
+          >
+            <PlusIcon size={15} />
+            Compose
+          </button>
+        )}
+      </div>
+
+      {tab === 'email' && needsMailScope && (
         <div className="alert">
           <strong>Reconnect Google.</strong> This Google connection was made before email reading
           was included. Reconnect once to grant it — a single connection now covers calendar and
@@ -388,256 +555,429 @@ export default function MailPage() {
         </div>
       )}
       {error && <div className="alert alert-error">{error}</div>}
+      {portalError && <div className="alert alert-error">{portalError}</div>}
       {sentNote && <div className="alert">{sentNote}</div>}
 
-      <section>
-        <div className="mail-toolbar">
-          <form
-            className="mail-search"
-            onSubmit={(e) => {
-              e.preventDefault()
-              setThreads(null)
-              load(query)
-            }}
-          >
-            <input
-              type="search"
-              placeholder="Search client mail"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <button type="submit" disabled={busy !== null}>
-              Search
-            </button>
-            {query && (
-              <button
-                type="button"
-                onClick={() => {
-                  setQuery('')
-                  setThreads(null)
-                  load()
-                }}
-              >
-                Clear
-              </button>
-            )}
-          </form>
-          <button
-            className="primary"
-            onClick={() => setCompose({ to: '', subject: '', body: EMPTY_BODY })}
-          >
-            Compose
-          </button>
-        </div>
+      <div className="li-mail-tabs">
+        <button
+          type="button"
+          className={`li-mail-tab ${tab === 'email' ? 'is-active' : ''}`}
+          onClick={() => setTab('email')}
+        >
+          Email
+          {inboxUnread > 0 && <span className="li-mail-tab-count">{inboxUnread}</span>}
+        </button>
+        <button
+          type="button"
+          className={`li-mail-tab ${tab === 'portal' ? 'is-active' : ''}`}
+          onClick={() => setTab('portal')}
+        >
+          Portal chat
+          {portalUnreadTabCount > 0 && (
+            <span className="li-mail-tab-count">{portalUnreadTabCount}</span>
+          )}
+        </button>
+      </div>
 
-        {compose && (
-          <Modal
-            title="New message"
-            onClose={() => setCompose(null)}
-            footer={
-              <>
-                <button onClick={() => setCompose(null)}>Discard</button>
-                <button
-                  className="primary"
-                  disabled={
-                    busy !== null || !compose.to || !compose.subject || !compose.body.text.trim()
-                  }
-                  onClick={sendCompose}
-                >
-                  {busy === 'compose' ? 'Sending…' : 'Send from my Gmail'}
-                </button>
-              </>
-            }
-          >
-            <label className="mail-field">
-              <span className="mail-field-label">To</span>
-              <input
-                type="email"
-                placeholder="client@example.com"
-                value={compose.to}
-                onChange={(e) => setCompose({ ...compose, to: e.target.value })}
-              />
-            </label>
-            <label className="mail-field">
-              <span className="mail-field-label">Subject</span>
-              <input
-                type="text"
-                value={compose.subject}
-                onChange={(e) => setCompose({ ...compose, subject: e.target.value })}
-              />
-            </label>
-            <MailComposer
-              key={`compose-${composerNonce}`}
-              placeholder="Write your message… Only known client contacts are accepted."
-              footer={<SignatureBlock value={signature} onChange={setSignature} />}
-              onChange={(v) => setCompose((c) => (c ? { ...c, body: v } : c))}
-            />
-            {composeMatters.length > 0 && (
-              <AttachmentPicker
-                matterId={composeMatterId}
-                matterOptions={composeMatters}
-                value={composeAttach}
-                onChange={setComposeAttach}
-                onMatterChange={(id) => {
-                  setComposeMatterId(id)
-                  setComposeAttach([]) // documents are matter-scoped; reset on switch
-                }}
-              />
-            )}
-          </Modal>
-        )}
-
-        {threads === null ? (
-          <div className="loading-block" role="status">
-            <span className="spinner" /> Loading client mail…
-          </div>
-        ) : threads.length === 0 && !needsMailScope ? (
-          <p className="text-muted">
-            {query
-              ? 'No client mail matches your search.'
-              : 'No client-related threads found (only mail involving known matter contacts is shown).'}
-          </p>
-        ) : (
-          <div className="mail-list">
-            {threads.map((t) => (
-              <div
-                key={t.gmailThreadId}
-                className={`mail-row ${open?.gmailThreadId === t.gmailThreadId ? 'active' : ''}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => openThread(t.gmailThreadId)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+      <div className="li-mail-grid">
+        {tab === 'email' ? (
+          <>
+            <div className="li-mail-listpane">
+              <div className="li-mail-searchwrap">
+                <form
+                  className="li-mail-searchbox"
+                  onSubmit={(e) => {
                     e.preventDefault()
-                    openThread(t.gmailThreadId)
-                  }
-                }}
-              >
-                <span className="mail-avatar" aria-hidden="true">
-                  {emailInitials(t.participantEmails[0] ?? '?')}
-                </span>
-                <div className="mail-row-main">
-                  <div className="mail-row-top">
-                    <span className="mail-row-people">
-                      {senderLabel(t.participantEmails, t.participantNames)}
-                    </span>
-                    {t.matters[0] && (
-                      <span className="mail-row-matter-tag" title={t.matters[0].matterNumber}>
-                        {t.matters[0].matterNumber}
+                    setThreads(null)
+                    load(query)
+                  }}
+                >
+                  <SearchIcon size={15} />
+                  <input
+                    type="search"
+                    placeholder="Search email…"
+                    value={query}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      const wasFiltered = query.trim().length > 0
+                      setQuery(v)
+                      if (!v.trim() && wasFiltered) {
+                        setThreads(null)
+                        load()
+                      }
+                    }}
+                  />
+                </form>
+              </div>
+              <div className="li-mail-rows">
+                {threads === null ? (
+                  <div className="li-mail-loading">
+                    <span className="spinner" /> Loading client mail…
+                  </div>
+                ) : threads.length === 0 ? (
+                  <div className="li-mail-empty">
+                    {query
+                      ? `No conversations match "${query}".`
+                      : needsMailScope
+                        ? 'Reconnect Google to see client mail.'
+                        : 'No client-related threads found (only mail involving known matter contacts is shown).'}
+                  </div>
+                ) : (
+                  threads.map((t) => (
+                    <button
+                      key={t.gmailThreadId}
+                      type="button"
+                      className={`li-mail-row ${open?.gmailThreadId === t.gmailThreadId ? 'is-active' : ''} ${t.unread ? 'is-unread' : ''}`}
+                      onClick={() => openThread(t.gmailThreadId)}
+                    >
+                      <span className="li-mail-row-avatar" aria-hidden="true">
+                        {emailInitials(t.participantEmails[0] ?? '?')}
                       </span>
-                    )}
-                    <span className="mail-row-date">{t.lastAt ? relativeDate(t.lastAt) : ''}</span>
-                  </div>
-                  <div className="mail-row-subject">
-                    {t.subject}
-                    {t.messageCount > 1 && <span className="mail-row-count">{t.messageCount}</span>}
-                  </div>
-                  <div className="mail-row-snippet">{t.snippet}</div>
-                  {t.matters.length > 0 && (
-                    <div className="mail-row-matters">
-                      {t.matters.map((m) => (
-                        <Link
-                          key={m.matterEntityId}
-                          href={`/attorney/matters/${m.matterEntityId}`}
-                          className="badge info"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {m.matterNumber}
-                        </Link>
-                      ))}
+                      <span className="li-mail-row-main">
+                        <span className="li-mail-row-top">
+                          <span className="li-mail-row-name">
+                            {senderLabel(t.participantEmails, t.participantNames)}
+                          </span>
+                          <span className="li-mail-row-time">
+                            {t.lastAt ? relativeDate(t.lastAt) : ''}
+                          </span>
+                          {t.unread && <span className="li-mail-row-dot" aria-label="Unread" />}
+                        </span>
+                        <span className="li-mail-row-subject">
+                          {t.subject || '(no subject)'}
+                          {t.messageCount > 1 && (
+                            <span className="li-mail-row-subject-count">{t.messageCount}</span>
+                          )}
+                        </span>
+                        <span className="li-mail-row-preview">{t.snippet}</span>
+                        {t.matters[0] && (
+                          <Link
+                            href={`/attorney/matters/${t.matters[0].matterEntityId}`}
+                            className="li-mail-row-matter"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {t.matters[0].matterNumber}
+                          </Link>
+                        )}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="li-mail-detailpane">
+              {!open ? (
+                <div className="li-mail-detailplaceholder">
+                  {busy === 'open' ? 'Opening…' : 'Select a conversation.'}
+                </div>
+              ) : (
+                <>
+                  <div className="li-mail-detailhead">
+                    <span className="li-mail-detailhead-avatar" aria-hidden="true">
+                      {emailInitials(open.participantEmails[0] ?? '?')}
+                    </span>
+                    <div className="li-mail-detailhead-main">
+                      <div className="li-mail-detailhead-subject">
+                        {open.subject || '(no subject)'}
+                      </div>
+                      <div className="li-mail-detailhead-sub">
+                        {open.participantEmails
+                          .map((e) => personLabel(e, open.participantNames))
+                          .join(', ')}
+                      </div>
                     </div>
-                  )}
+                    {open.matters[0] && (
+                      <Link
+                        href={`/attorney/matters/${open.matters[0].matterEntityId}`}
+                        className="li-mail-detailhead-btn"
+                        title={`Open ${open.matters[0].matterNumber}`}
+                        aria-label={`Open matter ${open.matters[0].matterNumber}`}
+                      >
+                        <FileTextIcon size={17} />
+                      </Link>
+                    )}
+                  </div>
+
+                  <div className="li-mail-body">
+                    {open.messages.map((m) => (
+                      <article key={m.gmailMessageId} className="li-mail-msgcard">
+                        <div className="li-mail-msgcard-head">
+                          <span className="li-mail-msgcard-avatar" aria-hidden="true">
+                            {emailInitials(m.from)}
+                          </span>
+                          <div className="li-mail-msgcard-main">
+                            <div className="li-mail-msgcard-toprow">
+                              <span className="li-mail-msgcard-who" title={m.from}>
+                                {personLabel(m.from, open.participantNames)}{' '}
+                                <span className="li-mail-msgcard-addr">
+                                  &lt;{bareEmail(m.from)}&gt;
+                                </span>
+                              </span>
+                              <span className="li-mail-msgcard-when">
+                                {m.sentAt ? new Date(m.sentAt).toLocaleString() : ''}
+                              </span>
+                            </div>
+                            <div className="li-mail-msgcard-to" title={m.to}>
+                              to {personLabel(m.to, open.participantNames)}
+                            </div>
+                          </div>
+                        </div>
+                        {/* The HTML body is already allowlist-sanitized server-side
+                            (sanitizeEmailHtml), so rendering it directly is safe and
+                            keeps natural formatting; plaintext-only messages fall back. */}
+                        {m.bodyHtml ? (
+                          <div
+                            className="li-mail-msgcard-body li-mail-msgcard-body-html"
+                            dangerouslySetInnerHTML={{ __html: m.bodyHtml }}
+                          />
+                        ) : (
+                          <div className="li-mail-msgcard-body">{m.bodyText.trim()}</div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className="li-mail-replywrap">
+                    <div className="li-mail-replylabel">
+                      Reply to{' '}
+                      {open.participantEmails.length > 0
+                        ? personLabel(open.participantEmails[0]!, open.participantNames)
+                        : 'the client'}
+                    </div>
+                    <MailComposer
+                      key={`reply-${open.gmailThreadId}-${composerNonce}`}
+                      placeholder="Reply to the client…"
+                      footer={<SignatureBlock value={signature} onChange={setSignature} />}
+                      onChange={setReply}
+                    />
+                    {open.matters.length > 0 && (
+                      <AttachmentPicker
+                        matterId={replyMatterId}
+                        matterOptions={open.matters}
+                        value={replyAttach}
+                        onChange={setReplyAttach}
+                        onMatterChange={(id) => {
+                          setReplyMatterId(id)
+                          setReplyAttach([])
+                        }}
+                      />
+                    )}
+                    <div className="li-mail-replysendrow">
+                      <button
+                        type="button"
+                        className="li-mail-replysendbtn"
+                        disabled={busy !== null || !reply.text.trim()}
+                        onClick={sendReply}
+                      >
+                        <SendIcon size={15} />
+                        {busy === 'reply' ? 'Sending…' : 'Send reply'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="li-mail-listpane">
+              <div className="li-mail-searchwrap">
+                <div className="li-mail-searchbox">
+                  <SearchIcon size={15} />
+                  <input
+                    type="search"
+                    placeholder="Search portal chat…"
+                    value={portalQuery}
+                    onChange={(e) => setPortalQuery(e.target.value)}
+                  />
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {open && (
-        <Modal title={open.subject} onClose={() => setOpen(null)}>
-          <p className="mail-thread-meta">
-            {open.participantEmails.map((e) => personLabel(e, open.participantNames)).join(', ')}
-            {open.matters.length > 0 && (
-              <>
-                {' · '}
-                {open.matters.map((m) => (
-                  <Link key={m.matterEntityId} href={`/attorney/matters/${m.matterEntityId}`}>
-                    {m.matterNumber}
-                  </Link>
-                ))}
-              </>
-            )}
-          </p>
-
-          <div className="mail-msgs">
-            {open.messages.map((m) => (
-              <article key={m.gmailMessageId} className="mail-msg">
-                <span className="mail-avatar" aria-hidden="true">
-                  {emailInitials(m.from)}
-                </span>
-                <div className="mail-msg-main">
-                  <div className="mail-msg-head">
-                    <span className="mail-msg-from" title={m.from}>
-                      {personLabel(m.from, open.participantNames)}
-                    </span>
-                    <span className="mail-msg-date">
-                      {m.sentAt ? new Date(m.sentAt).toLocaleString() : ''}
-                    </span>
+              <div className="li-mail-rows">
+                {portalThreads === null ? (
+                  <div className="li-mail-loading">
+                    <span className="spinner" /> Loading portal chat…
                   </div>
-                  <div className="mail-msg-to" title={m.to}>
-                    to {personLabel(m.to, open.participantNames)}
+                ) : filteredPortalThreads && filteredPortalThreads.length === 0 ? (
+                  <div className="li-mail-empty">
+                    {portalQuery
+                      ? `No conversations match "${portalQuery}".`
+                      : 'No client messages yet.'}
                   </div>
-                  {/* The HTML body is already allowlist-sanitized server-side
-                      (sanitizeEmailHtml), so rendering it directly is safe and
-                      keeps natural height; plaintext-only messages fall back. */}
-                  {m.bodyHtml ? (
-                    <div
-                      className="mail-msg-body mail-msg-body-html"
-                      dangerouslySetInnerHTML={{ __html: m.bodyHtml }}
-                    />
-                  ) : (
-                    <div className="mail-msg-body">{m.bodyText.trim()}</div>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-
-          <div className="mail-reply">
-            <div className="mail-reply-label">
-              Reply to{' '}
-              {open.participantEmails.length > 0
-                ? personLabel(open.participantEmails[0]!, open.participantNames)
-                : 'the client'}
+                ) : (
+                  filteredPortalThreads?.map((t) => (
+                    <button
+                      key={t.matterEntityId}
+                      type="button"
+                      className={`li-mail-row ${openMatterId === t.matterEntityId ? 'is-active' : ''} ${t.unreadCount > 0 ? 'is-unread' : ''}`}
+                      onClick={() => openPortalThread(t.matterEntityId)}
+                    >
+                      <span className="li-mail-row-avatar" aria-hidden="true">
+                        {nameInitials(t.clientName || t.matterNumber)}
+                      </span>
+                      <span className="li-mail-row-main">
+                        <span className="li-mail-row-top">
+                          <span className="li-mail-row-name">{t.clientName || t.matterNumber}</span>
+                          <span className="li-mail-row-time">
+                            {t.lastAt ? relativeDate(t.lastAt) : ''}
+                          </span>
+                          {t.unreadCount > 0 && (
+                            <span className="li-mail-row-dot" aria-label="Unread" />
+                          )}
+                        </span>
+                        <span className="li-mail-row-subject">{t.matterNumber}</span>
+                        <span className="li-mail-row-preview">
+                          {t.lastAuthor === 'attorney' ? 'You: ' : ''}
+                          {t.lastBody}
+                        </span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
-            <MailComposer
-              key={`reply-${open.gmailThreadId}-${composerNonce}`}
-              placeholder="Reply to the client…"
-              footer={<SignatureBlock value={signature} onChange={setSignature} />}
-              onChange={setReply}
+
+            <div className="li-mail-detailpane">
+              {!openMatterId ? (
+                <div className="li-mail-detailplaceholder">Select a conversation.</div>
+              ) : (
+                <>
+                  <div className="li-mail-detailhead">
+                    <span className="li-mail-detailhead-avatar" aria-hidden="true">
+                      {nameInitials(
+                        currentPortalMeta?.clientName || currentPortalMeta?.matterNumber || '?',
+                      )}
+                    </span>
+                    <div className="li-mail-detailhead-main">
+                      <div className="li-mail-detailhead-subject">
+                        {currentPortalMeta?.clientName ||
+                          currentPortalMeta?.matterNumber ||
+                          'Portal chat'}
+                      </div>
+                      <div className="li-mail-detailhead-sub">
+                        {currentPortalMeta?.matterNumber}
+                      </div>
+                    </div>
+                    <Link
+                      href={`/attorney/matters/${openMatterId}`}
+                      className="li-mail-detailhead-btn"
+                      title="Open matter"
+                      aria-label="Open matter"
+                    >
+                      <FileTextIcon size={17} />
+                    </Link>
+                  </div>
+
+                  <div className="li-mail-pbubbles">
+                    {portalMessages === null ? (
+                      <div className="li-mail-loading">
+                        <span className="spinner" /> Loading…
+                      </div>
+                    ) : portalMessages.length === 0 ? (
+                      <div className="li-mail-empty">No messages yet.</div>
+                    ) : (
+                      portalMessages.map((m, i) => (
+                        <div
+                          key={`${m.sentAt}-${i}`}
+                          className={`li-mail-pbubblerow ${m.author === 'attorney' ? 'is-attorney' : 'is-client'}`}
+                        >
+                          <div className="li-mail-pbubble-meta">
+                            {m.author === 'attorney'
+                              ? 'You'
+                              : currentPortalMeta?.clientName || 'Client'}
+                            {' · '}
+                            {formatDateTime(m.sentAt)}
+                          </div>
+                          <div className="li-mail-pbubble">{m.body}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="li-mail-replywrap">
+                    <div className="li-mail-portalreplybar">
+                      <textarea
+                        rows={1}
+                        className="li-mail-portalreplytextarea"
+                        placeholder="Reply to the client…"
+                        value={portalDraft}
+                        onChange={(e) => setPortalDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendPortalReply()
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="li-mail-portalsendbtn"
+                        aria-label="Send"
+                        disabled={portalBusy || !portalDraft.trim()}
+                        onClick={sendPortalReply}
+                      >
+                        <SendIcon size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {compose && (
+        <Modal
+          title="New message"
+          onClose={() => setCompose(null)}
+          footer={
+            <>
+              <button onClick={() => setCompose(null)}>Discard</button>
+              <button
+                className="primary"
+                disabled={
+                  busy !== null || !compose.to || !compose.subject || !compose.body.text.trim()
+                }
+                onClick={sendCompose}
+              >
+                {busy === 'compose' ? 'Sending…' : 'Send from my Gmail'}
+              </button>
+            </>
+          }
+        >
+          <label className="mail-field">
+            <span className="mail-field-label">To</span>
+            <input
+              type="email"
+              placeholder="client@example.com"
+              value={compose.to}
+              onChange={(e) => setCompose({ ...compose, to: e.target.value })}
             />
-            {open.matters.length > 0 && (
-              <AttachmentPicker
-                matterId={replyMatterId}
-                matterOptions={open.matters}
-                value={replyAttach}
-                onChange={setReplyAttach}
-                onMatterChange={(id) => {
-                  setReplyMatterId(id)
-                  setReplyAttach([])
-                }}
-              />
-            )}
-            <button
-              className="primary"
-              style={{ marginTop: 'var(--space-2)' }}
-              disabled={busy !== null || !reply.text.trim()}
-              onClick={sendReply}
-            >
-              {busy === 'reply' ? 'Sending…' : 'Send reply'}
-            </button>
-          </div>
+          </label>
+          <label className="mail-field">
+            <span className="mail-field-label">Subject</span>
+            <input
+              type="text"
+              value={compose.subject}
+              onChange={(e) => setCompose({ ...compose, subject: e.target.value })}
+            />
+          </label>
+          <MailComposer
+            key={`compose-${composerNonce}`}
+            placeholder="Write your message… Only known client contacts are accepted."
+            footer={<SignatureBlock value={signature} onChange={setSignature} />}
+            onChange={(v) => setCompose((c) => (c ? { ...c, body: v } : c))}
+          />
+          {composeMatters.length > 0 && (
+            <AttachmentPicker
+              matterId={composeMatterId}
+              matterOptions={composeMatters}
+              value={composeAttach}
+              onChange={setComposeAttach}
+              onMatterChange={(id) => {
+                setComposeMatterId(id)
+                setComposeAttach([]) // documents are matter-scoped; reset on switch
+              }}
+            />
+          )}
         </Modal>
       )}
     </main>

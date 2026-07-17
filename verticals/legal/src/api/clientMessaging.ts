@@ -191,3 +191,117 @@ export async function getMatterThread(
     }))
   })
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// WP-I (Mail) — Portal chat tab. The attorney-side Mail workspace needs one
+// cross-matter list of portal threads (like Gmail's inbox, but for the portal
+// channel), matching the shape `legal.mail.threads` already gives Gmail. This
+// is the ONE new read: it extends the SAME portal-thread projection rules as
+// getMatterThread (author/body/sentAt, communication_thread/message, channel
+// = 'portal') rather than forking a parallel query, just aggregated across
+// every active matter instead of scoped to one.
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface PortalThreadSummary {
+  matterEntityId: string
+  matterNumber: string
+  clientName: string
+  lastAuthor: 'client' | 'attorney' | null
+  lastBody: string
+  lastAt: string | null
+  messageCount: number
+  // Honest heuristic (no attorney-side portal read-marker exists today, unlike
+  // Gmail's real UNREAD label): count of client messages sent after the
+  // attorney's own last reply on this matter's thread. Replying clears it;
+  // merely opening the thread does not (recorded in WIRING §WP-I).
+  unreadCount: number
+}
+
+export async function listPortalThreads(ctx: ActionContext): Promise<PortalThreadSummary[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      matter_entity_id: string
+      matter_number: string
+      client_name: string | null
+      last_author: string | null
+      last_body: string | null
+      last_at: string | null
+      n: string
+      unread: string | null
+    }>(
+      `WITH portal_matter_msgs AS (
+         SELECT
+           mat.id AS matter_entity_id,
+           m.occurred_at,
+           m.recorded_at,
+           m.payload->>'author' AS author,
+           b.body AS body
+         FROM entity mat
+         JOIN entity_kind_definition ekd ON ekd.id = mat.entity_kind_id AND ekd.kind_name = 'matter'
+         JOIN communication_thread t
+           ON t.tenant_id = mat.tenant_id
+          AND t.participants->>'channel' = 'portal'
+          AND mat.id = ANY(t.related_entity_ids)
+         JOIN communication_message m ON m.tenant_id = t.tenant_id AND m.thread_id = t.id
+         LEFT JOIN content_blob b ON b.id = m.body_blob_id
+         WHERE mat.tenant_id = $1 AND mat.status = 'active'
+           AND COALESCE(mat.metadata->>'demo_hidden', '') <> 'true'
+       ),
+       per_matter AS (
+         SELECT
+           matter_entity_id,
+           count(*) AS n,
+           max(occurred_at) AS last_at,
+           max(occurred_at) FILTER (WHERE author = 'attorney') AS last_attorney_at
+         FROM portal_matter_msgs
+         GROUP BY matter_entity_id
+       ),
+       last_msg AS (
+         SELECT DISTINCT ON (matter_entity_id) matter_entity_id, author, body, occurred_at
+         FROM portal_matter_msgs
+         ORDER BY matter_entity_id, occurred_at DESC, recorded_at DESC
+       ),
+       unread_counts AS (
+         SELECT pmm.matter_entity_id, count(*) AS unread
+         FROM portal_matter_msgs pmm
+         JOIN per_matter pm2 ON pm2.matter_entity_id = pmm.matter_entity_id
+         WHERE pmm.author = 'client'
+           AND pmm.occurred_at > COALESCE(pm2.last_attorney_at, '-infinity'::timestamptz)
+         GROUP BY pmm.matter_entity_id
+       )
+       SELECT
+         mat.id AS matter_entity_id,
+         mat.name AS matter_number,
+         (SELECT a2.value #>> '{}'
+            FROM relationship r
+            JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+            JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = r.source_entity_id
+            JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
+            WHERE r.tenant_id = $1 AND r.target_entity_id = mat.id AND rkd.kind_name = 'client_of'
+            ORDER BY a2.valid_from DESC
+            LIMIT 1) AS client_name,
+         lm.author AS last_author,
+         lm.body AS last_body,
+         to_char(pm.last_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_at,
+         pm.n AS n,
+         COALESCE(uc.unread, 0) AS unread
+       FROM per_matter pm
+       JOIN entity mat ON mat.tenant_id = $1 AND mat.id = pm.matter_entity_id
+       LEFT JOIN last_msg lm ON lm.matter_entity_id = pm.matter_entity_id
+       LEFT JOIN unread_counts uc ON uc.matter_entity_id = pm.matter_entity_id
+       ORDER BY pm.last_at DESC NULLS LAST`,
+      [ctx.tenantId],
+    )
+    return res.rows.map((r) => ({
+      matterEntityId: r.matter_entity_id,
+      matterNumber: r.matter_number,
+      clientName: r.client_name ?? '',
+      lastAuthor:
+        r.last_author === 'attorney' ? 'attorney' : r.last_author === 'client' ? 'client' : null,
+      lastBody: r.last_body ?? '',
+      lastAt: r.last_at,
+      messageCount: Number(r.n),
+      unreadCount: Number(r.unread ?? 0),
+    }))
+  })
+}

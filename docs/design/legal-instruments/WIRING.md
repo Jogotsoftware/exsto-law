@@ -224,12 +224,36 @@ pathname-prefix match.
       (config-as-data, no hardcoded kinds)
 - [ ] CONFLICT (Joe): List view + drag interactions (richer than comp — presumably keep)
 
-## WP-I · Mail
+## WP-I · Mail — SHIPPED (branch li/wp-i-mail)
 
-- [ ] WIRED: Gmail thread list, search, open-ingests, reply/compose that send, matter attachments, signature,
-      matter tags
-- [ ] BUILD: Portal chat as second tab (aggregate per-matter portal threads) + unread counts on both tabs
-- [ ] CONFLICT (Joe): manual "file email to matter" control (auto-association already exists)
+- [x] WIRED: Gmail thread list, search, open-ingests, reply/compose that send, matter attachments, signature,
+      matter tags — restyled to the comp's two-pane inbox (`li-mail-*`); regression-verified live: real Gmail
+      threads open with formatted HTML bodies, `?thread=` deep link from the matter Emails card still works,
+      compose/reply/attachments/signature unchanged underneath
+- [x] BUILD: Portal chat as second tab — aggregates every matter's existing portal thread into one cross-tenant
+      list. No parallel messaging path was forked: the detail pane and inline reply reuse the SAME
+      `legal.matter.thread_get` / `legal.matter.message_post` the matter Activity tab's Messages card already
+      calls; the only new surface is the list itself, a new read `legal.matter.portal_threads`
+      (`listPortalThreads` in `clientMessaging.ts`) that projects the same `communication_thread`/`_message`
+      rows `getMatterThread` does, aggregated across matters instead of scoped to one. Verified live: a reply
+      typed in the Mail tab posted, appeared instantly in the Mail bubble thread, AND appeared in that same
+      matter's own Activity → Portal messages card (same thread, proven via direct read-back) — the CONFLICT
+      below is resolved BY this: auto-association (every portal thread is already matter-scoped by construction)
+      makes a manual "file to matter" control meaningless, so none was built.
+- [x] BUILD: unread counts on both tabs. Email = Gmail's own `UNREAD` label (`gmail.ts` now returns
+      `unread: boolean` per thread from `labelIds`, already fetched in `format:'metadata'`); opening a thread
+      calls a new best-effort `markThreadRead` (`threads.modify` removing `UNREAD`, gated on the `gmail.modify`
+      scope every "Connect Google" already grants) — verified live end-to-end: badge went 2→1 on open, and
+      **survived a full page reload**, proving the label was actually cleared server-side, not just an
+      optimistic UI flag. Portal = **honest heuristic, recorded here per the brief**: there is no attorney-side
+      portal read-marker in the substrate today, so unread = count of client messages sent after the attorney's
+      own last reply on that matter's thread. Replying clears it (proven live: badge 1→0 after the reply
+      round-trip above); merely opening the thread does not, since the heuristic has no read-state to flip. If a
+      real read-marker is added later, swap `listPortalThreads`'s `unread_counts` CTE — the tool/UI contract
+      (`unreadCount: number` per thread) doesn't need to change.
+- [x] CONFLICT (Joe) RESOLVED — no manual "file email to matter" control: auto-association (Gmail: known
+      client-contact address match; Portal: threads are matter-scoped by construction) already covers it; a
+      manual override would be a control with no gap to fill.
 
 ## WP-J · CRM
 

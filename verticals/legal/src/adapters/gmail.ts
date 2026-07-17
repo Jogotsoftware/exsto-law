@@ -4,6 +4,7 @@ import {
   loadCredentials,
   GMAIL_SEND_SCOPE,
   GMAIL_READ_SCOPE,
+  GMAIL_MODIFY_SCOPE,
 } from './googleCalendar.js'
 import { sanitizeEmailHtml } from './sanitizeEmailHtml.js'
 
@@ -262,6 +263,10 @@ export interface GmailThreadSummary {
   lastAt: string | null
   participantEmails: string[]
   messageCount: number
+  // Real Gmail read-state (WP-I): true when any message in the thread still
+  // carries the UNREAD label. This is Gmail's own signal, not a heuristic —
+  // `threads.get` with format:'metadata' returns labelIds for every message.
+  unread: boolean
 }
 
 export interface GmailMessage {
@@ -428,9 +433,33 @@ export async function listClientThreads(
       lastAt: last?.internalDate ? new Date(Number(last.internalDate)).toISOString() : null,
       participantEmails: [...participants],
       messageCount: msgs.length,
+      unread: msgs.some((m) => (m.labelIds ?? []).includes('UNREAD')),
     })
   }
   return out
+}
+
+// Mark a thread read (clears Gmail's own UNREAD label) — the natural counterpart
+// to opening it, mirroring what the real Gmail web/mobile client does on open.
+// Best-effort: a legacy connection without gmail.modify, or a transient API
+// failure, must never block opening the thread — the unread dot just persists
+// until the next successful open.
+export async function markThreadRead(
+  tenantId: string,
+  gmailThreadId: string,
+  actorId?: string | null,
+): Promise<void> {
+  try {
+    const { gmail, creds } = await gmailClient(tenantId, actorId)
+    if (!creds.scope.includes(GMAIL_MODIFY_SCOPE)) return
+    await gmail.users.threads.modify({
+      userId: 'me',
+      id: gmailThreadId,
+      requestBody: { removeLabelIds: ['UNREAD'] },
+    })
+  } catch {
+    // Best-effort — see comment above.
+  }
 }
 
 export async function getClientThread(
