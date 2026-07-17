@@ -123,7 +123,7 @@ export function PaymentsSection(): React.ReactElement {
   }
 
   return (
-    <CollapsibleSection title="Payments">
+    <CollapsibleSection id="settings-section-payments" title="Payments">
       {banner && (
         <div
           className={banner.tone === 'error' ? 'alert alert-error' : 'alert'}

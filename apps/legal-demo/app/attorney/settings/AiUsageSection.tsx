@@ -113,7 +113,7 @@ export function AiUsageSection() {
     : 0
 
   return (
-    <CollapsibleSection title="AI usage & cost">
+    <CollapsibleSection id="settings-section-ai_usage" title="AI usage & cost">
       <div style={{ display: 'flex', gap: 4, margin: '0.4rem 0 1rem' }}>
         {WINDOWS.map((w) => {
           const active = w.days === windowDays
