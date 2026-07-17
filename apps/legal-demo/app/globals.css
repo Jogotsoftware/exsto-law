@@ -11550,6 +11550,14 @@ svg.lucide {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 28px 32px;
+  /* Defeat the legacy global `main` element rule (max-width 1240px + auto side
+     margins). Auto cross-axis margins make a flex child shrink-to-fit, which
+     collapsed this scroll container to content width — content floated in a
+     narrow centered strip and wheel-scroll was dead outside it (founder bug
+     report 2026-07-17). */
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 .li-main-inner {
   max-width: 1180px;
