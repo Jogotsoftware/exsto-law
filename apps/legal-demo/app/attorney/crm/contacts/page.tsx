@@ -1,16 +1,22 @@
 'use client'
 
-// Contacts CRM (WP2.2). Everyone who's reached the firm, in four views derived
-// from their matter status — Active / Prospective / Prior / All. A contact's
-// standing is a fact about their matters, not a manually-managed stage.
+// Contacts CRM. Everyone who's reached the firm; standing (Active / Prospective /
+// Prior) is derived from their matter statuses, not manually managed.
+//
+// li-wp-j: restyled to the comp's CRM list — the old four-way tab strip
+// (All/Active/Prospective/Prior) is replaced by the status filter embedded in
+// the STATUS column's own header (WIRING.md ADAPT item), matching the Clients
+// tab's table exactly. VERIFIED during this WP: there is no legal.contact.create
+// tool — contacts only ever arrive via intake (booking, questionnaire, matter
+// open), never a manual attorney-authored record — so unlike Clients, there is
+// no "New contact" button here (a button with no backing flow is a dead
+// control). See WIRING.md §WP-J for the reclassification.
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { PageHead } from '@/components/PageHead'
-
-type CrmBucket = 'active' | 'prospective' | 'prior'
-type Tab = 'all' | CrmBucket
+import { SearchIcon } from '@/components/icons'
+import { CrmListTable, type CrmColumn } from '@/components/CrmListTable'
+import { CRM_STATUS_META, crmInitials, formatCrmDate, type CrmBucket } from '@/lib/crmStatus'
 
 interface Contact {
   contactEntityId: string
@@ -25,39 +31,11 @@ interface Contact {
   lastActivityAt: string
 }
 
-const TABS: { key: Tab; label: string; hint: string }[] = [
-  { key: 'all', label: 'All', hint: 'Everyone who has reached the firm' },
-  { key: 'active', label: 'Active', hint: 'At least one open matter' },
-  { key: 'prospective', label: 'Prospective', hint: 'A lead — no matter yet' },
-  { key: 'prior', label: 'Prior', hint: 'Past clients — every matter closed' },
-]
-
-const BUCKET_LABEL: Record<CrmBucket, string> = {
-  active: 'Active',
-  prospective: 'Prospective',
-  prior: 'Prior',
-}
-const BUCKET_COLOR: Record<CrmBucket, string> = {
-  active: '#16a34a',
-  prospective: '#3b82f6',
-  prior: '#6b7280',
-}
-
-function timeAgo(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!Number.isFinite(t)) return ''
-  const d = Math.round((Date.now() - t) / 86_400_000)
-  if (d <= 0) return 'today'
-  if (d === 1) return 'yesterday'
-  if (d < 30) return `${d}d ago`
-  return `${Math.round(d / 30)}mo ago`
-}
-
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [q, setQ] = useState('')
-  const [tab, setTab] = useState<Tab>('all')
+  const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<CrmBucket | ''>('')
 
   useEffect(() => {
     callAttorneyMcp<{ contacts: Contact[] }>({ toolName: 'legal.contact.list' })
@@ -65,97 +43,114 @@ export default function ContactsPage() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
 
-  const counts = useMemo(() => {
-    const c: Record<Tab, number> = { all: 0, active: 0, prospective: 0, prior: 0 }
-    for (const x of contacts ?? []) {
-      c.all += 1
-      c[x.crmBucket] += 1
-    }
-    return c
-  }, [contacts])
-
   const visible = useMemo(() => {
-    const t = q.trim().toLowerCase()
+    const q = query.trim().toLowerCase()
     return (contacts ?? []).filter((c) => {
-      if (tab !== 'all' && c.crmBucket !== tab) return false
-      if (!t) return true
+      if (statusFilter && c.crmBucket !== statusFilter) return false
+      if (!q) return true
       return [c.fullName, c.email, c.companyName ?? '', c.phone ?? ''].some((s) =>
-        s.toLowerCase().includes(t),
+        s.toLowerCase().includes(q),
       )
     })
-  }, [contacts, q, tab])
+  }, [contacts, query, statusFilter])
+
+  const columns: CrmColumn<Contact>[] = [
+    {
+      key: 'name',
+      label: 'Contact',
+      width: '1.6fr',
+      sortValue: (c) => c.fullName || c.email,
+      render: (c) => (
+        <span className="li-crm-cell-name">
+          <span className="li-crm-avatar">{crmInitials(c.fullName || c.email || '?')}</span>
+          <span className="li-crm-cell-text">{c.fullName || c.email || '(no name)'}</span>
+        </span>
+      ),
+    },
+    {
+      key: 'company',
+      label: 'Company',
+      width: '1.3fr',
+      sortValue: (c) => c.companyName ?? '',
+      render: (c) => <span className="li-crm-cell-text">{c.companyName || '—'}</span>,
+    },
+    {
+      key: 'email',
+      label: 'Email',
+      width: '1.6fr',
+      sortValue: (c) => c.email,
+      render: (c) => <span className="li-crm-cell-text">{c.email || '—'}</span>,
+    },
+    {
+      key: 'matters',
+      label: 'Matters',
+      width: '.8fr',
+      sortValue: (c) => c.matterCount,
+      render: (c) => `${c.matterCount} matter${c.matterCount === 1 ? '' : 's'}`,
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      width: '.9fr',
+      render: (c) => {
+        const meta = CRM_STATUS_META[c.crmBucket]
+        return (
+          <span className="li-crm-status" style={{ background: meta.bg, color: meta.fg }}>
+            <span className="li-crm-status-dot" style={{ background: meta.fg }} />
+            {meta.label}
+          </span>
+        )
+      },
+    },
+    {
+      key: 'last',
+      label: 'Last activity',
+      width: '1fr',
+      sortValue: (c) => c.lastActivityAt,
+      render: (c) => formatCrmDate(c.lastActivityAt),
+    },
+  ]
 
   return (
-    <main>
-      <PageHead
-        title="Contacts"
-        actions={contacts ? <span style={{ color: 'var(--muted)' }}>{contacts.length}</span> : null}
-      />
+    <>
+      <div className="li-crm-list-head">
+        <h1 className="li-crm-list-title">
+          Contacts
+          {contacts && <span className="li-crm-list-count">{contacts.length}</span>}
+        </h1>
+      </div>
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <div className="crm-tabs" role="tablist">
-        {TABS.map((tEntry) => (
-          <button
-            key={tEntry.key}
-            role="tab"
-            aria-selected={tab === tEntry.key}
-            className={`crm-tab ${tab === tEntry.key ? 'active' : ''}`}
-            title={tEntry.hint}
-            onClick={() => setTab(tEntry.key)}
-          >
-            {tEntry.label}
-            <span className="crm-tab-count">{counts[tEntry.key]}</span>
-          </button>
-        ))}
+      <div className="li-crm-toolbar">
+        <div className="li-crm-search">
+          <SearchIcon size={16} />
+          <input
+            type="search"
+            placeholder="Search name, email, company"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        {contacts && <span className="li-crm-shown">{visible.length} shown</span>}
       </div>
 
-      <input
-        type="search"
-        placeholder="Search name, email, company, phone…"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        style={{ width: '100%', maxWidth: 440, margin: 'var(--space-4) 0' }}
-      />
-
-      {contacts === null ? (
+      {contacts === null && !error ? (
         <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
-      ) : visible.length === 0 ? (
-        <section>
-          <p className="text-muted">
-            No contacts{q ? ' match your search' : tab === 'all' ? ' yet' : ` in ${tab}`}.
-          </p>
-        </section>
       ) : (
-        <div className="matter-list">
-          {visible.map((c) => (
-            <Link
-              key={c.contactEntityId}
-              href={`/attorney/crm/contacts/${c.contactEntityId}`}
-              className="matter-row"
-            >
-              <div>
-                <div className="matter-row-title">{c.fullName || c.email || '(no name)'}</div>
-                <div className="matter-row-sub">
-                  {c.companyName && `${c.companyName} · `}
-                  {c.email}
-                  {c.matterCount > 0 &&
-                    ` · ${c.matterCount} matter${c.matterCount === 1 ? '' : 's'}`}
-                  {c.lastActivityAt && ` · ${timeAgo(c.lastActivityAt)}`}
-                </div>
-              </div>
-              <span
-                className="crm-pill"
-                style={{ color: BUCKET_COLOR[c.crmBucket], borderColor: BUCKET_COLOR[c.crmBucket] }}
-              >
-                {BUCKET_LABEL[c.crmBucket]}
-              </span>
-            </Link>
-          ))}
-        </div>
+        <CrmListTable
+          rows={visible}
+          columns={columns}
+          getRowKey={(c) => c.contactEntityId}
+          getHref={(c) => `/attorney/crm/contacts/${c.contactEntityId}`}
+          statusColumnKey="status"
+          statusValue={statusFilter}
+          onStatusChange={setStatusFilter}
+          emptyLabel={contacts && contacts.length === 0 ? 'No contacts yet.' : 'No matches.'}
+        />
       )}
-    </main>
+    </>
   )
 }
