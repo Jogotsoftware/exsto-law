@@ -2,7 +2,7 @@
 
 // Legal Instruments left rail (attorney-console redesign — binding comp in
 // docs/design/legal-instruments). A dark, collapsible rail:
-//   - 72px collapsed / 256px expanded, pinned state persisted in localStorage.
+//   - 58px collapsed / 256px expanded (tightened per founder walk), pinned state persisted in localStorage.
 //   - An absolutely-positioned overlay sitting over a flow "spacer" so a
 //     hover-expand floats over content instead of shoving it.
 //   - Primary nav ported from the old AttorneyTopNav NAV array, KEEPING the
@@ -217,8 +217,8 @@ export function AttorneyRail(): React.JSX.Element {
   // The popover keeps the rail expanded even after the pointer leaves the aside
   // (the popover is a fixed overlay outside the aside box).
   const expanded = pinned || hovered || userMenuOpen
-  const railWidth = expanded ? 256 : 72
-  const spacerWidth = pinned && !isNarrow ? 256 : 72
+  const railWidth = expanded ? 256 : 58
+  const spacerWidth = pinned && !isNarrow ? 256 : 58
 
   function togglePin(): void {
     setPinned((p) => {
