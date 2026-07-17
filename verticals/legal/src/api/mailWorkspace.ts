@@ -13,6 +13,7 @@ import {
   listClientThreads,
   getClientThread,
   sendEmail,
+  markThreadRead,
   type GmailThreadSummary,
   type GmailThreadDetail,
   type EmailAttachment,
@@ -277,6 +278,9 @@ export async function openMailThread(
   gmailThreadId: string,
 ): Promise<MailThreadView> {
   const detail = await getClientThread(ctx.tenantId, gmailThreadId, ctx.actorId)
+  // Opening the thread clears Gmail's own UNREAD label (WP-I), mirroring real
+  // Gmail client behavior. Fire-and-forget-safe: markThreadRead never throws.
+  void markThreadRead(ctx.tenantId, gmailThreadId, ctx.actorId)
   const [index, names] = await Promise.all([clientEmailIndex(ctx), clientNameIndex(ctx)])
   const matters = dedupeMatters(
     detail.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? []),
