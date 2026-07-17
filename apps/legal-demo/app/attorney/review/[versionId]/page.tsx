@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, shareUrlFor, watermarkForStatus } from '@/lib/draftExport'
-import { formatDateTime } from '@/lib/datetime'
+import { formatDateTimeShort } from '@/lib/datetime'
 import { lineDiff, diffStats, type DiffOp } from '@/lib/lineDiff'
 import { buildRedline, toReadableText } from '@/lib/wordDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
@@ -86,7 +86,7 @@ const KIND_LABEL: Record<string, string> = {
   executed: 'Executed',
   rejected: 'Rejected',
   revision_requested: 'Revision requested',
-  pending_review: 'Pending review',
+  pending_review: 'Awaiting review',
 }
 function statusChipClass(status: string): string {
   if (status === 'approved' || status === 'executed') return 'li-rev-chip li-rev-chip--ok'
@@ -100,6 +100,14 @@ function humanizeKind(kind: string): string {
 }
 function humanizeService(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+// Sentence case for the doc title only: capitalize the first character.
+// humanizeKind's underscore-replace leaves a raw kind key ("attorney letter")
+// all-lowercase; the comp shows sentence case ("Attorney letter"), not
+// Title-Cased or CSS `capitalize` (which would upper the first letter of
+// every word — "Attorney Letter").
+function sentenceCase(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s
 }
 
 // Line diff for AI-review MEMOS (client's doc vs the model's suggested redline) —
@@ -498,7 +506,9 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   )
   const docFileBase = `${humanizeKind(draft.documentKind).replace(/\s+/g, '-').toLowerCase()}-${draft.matterNumber}`
   const watermark = watermarkForStatus(draft.status)?.toUpperCase()
-  const title = isEmail ? draft.emailSubject || 'Email draft' : humanizeKind(draft.documentKind)
+  const title = isEmail
+    ? draft.emailSubject || 'Email draft'
+    : sentenceCase(humanizeKind(draft.documentKind))
   const subParts = [
     draft.clientName,
     isEmail ? 'Email' : draft.serviceKey ? humanizeService(draft.serviceKey) : '',
@@ -526,6 +536,10 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
               Exit review ({sessionPos + 1} of {sessionIds.length})
             </button>
           ) : (
+            // Direct-open (row click / deep link, no Begin-review session): no
+            // honest n/m is available here without fetching the whole pending
+            // queue just to guess a position the attorney never walked — so the
+            // pill reads plain "Exit review" rather than fabricate a count.
             <Link href="/attorney/review" className="li-rev-pill">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <polyline
@@ -536,7 +550,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
                   strokeLinejoin="round"
                 />
               </svg>
-              Review queue
+              Exit review
             </Link>
           )}
           <Link
@@ -599,7 +613,9 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       <div className="li-rev-titlerow">
         <h1 className="li-rev-doctitle">{title}</h1>
         <div className="li-rev-meta">
-          <span className="li-rev-generated">Generated {formatDateTime(draft.recordedAt)}</span>
+          <span className="li-rev-generated">
+            Generated {formatDateTimeShort(draft.recordedAt)}
+          </span>
           <span className="li-rev-vbadge">v{draft.versionNumber}</span>
           <span className={statusChipClass(draft.status)}>
             {KIND_LABEL[draft.status] ?? humanizeKind(draft.status)}
