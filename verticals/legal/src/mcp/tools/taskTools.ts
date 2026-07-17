@@ -1,6 +1,7 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
   listTasksByMatter,
+  listDueTasks,
   getTaskById,
   createTask,
   updateTask,
@@ -9,6 +10,7 @@ import {
   linkTaskEnvelope,
   reviewTask,
   type Task,
+  type DueTask,
   type CreateTaskInput,
   type UpdateTaskInput,
 } from '../../index.js'
@@ -47,6 +49,27 @@ const listTool: Tool<{ matterEntityId: string }, { tasks: Task[] }> = {
   handler: async (ctx: ActionContext, input) => ({
     tasks: await listTasksByMatter(ctx, input.matterEntityId),
   }),
+}
+
+// Firm-wide tasks with a due date in a window — the Calendar's task-due feed
+// (WP-H). Unlike listTool, this crosses every matter; dates are plain
+// YYYY-MM-DD (no time zone), matching how the Calendar computes its visible
+// window's LOCAL date boundaries (avoids a UTC-shift day-off-by-one).
+const listDueTool: Tool<{ fromDate: string; toDateExclusive: string }, { tasks: DueTask[] }> = {
+  name: 'legal.task.list_due',
+  description:
+    "Firm-wide tasks (any matter) whose due date falls in [fromDate, toDateExclusive) — plain YYYY-MM-DD dates, no time. Powers the Calendar's task-due events.",
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      fromDate: { type: 'string', description: 'YYYY-MM-DD, inclusive.' },
+      toDateExclusive: { type: 'string', description: 'YYYY-MM-DD, exclusive.' },
+    },
+    required: ['fromDate', 'toDateExclusive'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => ({ tasks: await listDueTasks(ctx, input) }),
 }
 
 const getTool: Tool<{ taskId: string }, { task: Task | null }> = {
@@ -167,6 +190,7 @@ const reviewTool: Tool<{ taskId: string }, { task: Task }> = {
 }
 
 registerTool(listTool)
+registerTool(listDueTool)
 registerTool(getTool)
 registerTool(createTool)
 registerTool(updateTool)

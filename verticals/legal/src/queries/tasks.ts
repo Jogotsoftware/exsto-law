@@ -184,3 +184,49 @@ export async function getTask(ctx: ActionContext, taskId: string): Promise<Task 
     return res.rows[0] ? mapTask(res.rows[0]) : null
   })
 }
+
+// ── Firm-wide tasks with a due date, for the Calendar's task-due feed ───────
+// A due task, enriched with the matter it belongs to (a plain to-do always
+// belongs to exactly one matter via `task_of` — see TASK_SELECT above).
+
+export interface DueTask {
+  taskId: string
+  matterEntityId: string
+  matterNumber: string
+  title: string
+  status: TaskStatus
+  dueDate: string
+}
+
+type DueTaskRow = TaskRow & { matter_number: string | null }
+
+// All active tasks across every matter whose due date falls in
+// [fromDate, toDateExclusive) (plain YYYY-MM-DD strings, compared as text —
+// due dates carry no time zone, so this avoids any UTC/local shift). Reuses
+// the same TASK_SELECT the per-matter listing uses, just without the matter
+// filter, joined to the owning matter's number for display.
+export async function listDueTasks(
+  ctx: ActionContext,
+  opts: { fromDate: string; toDateExclusive: string },
+): Promise<DueTask[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<DueTaskRow>(
+      `SELECT t.*, m.name AS matter_number
+         FROM (${TASK_SELECT}) t
+         LEFT JOIN entity m ON m.tenant_id = $1 AND m.id = t.matter_id
+        WHERE t.due_date IS NOT NULL AND t.due_date >= $2 AND t.due_date < $3
+        ORDER BY t.due_date ASC`,
+      [ctx.tenantId, opts.fromDate, opts.toDateExclusive],
+    )
+    return res.rows
+      .filter((r) => r.matter_id) // a task always belongs to a matter; skip any orphan defensively
+      .map((r) => ({
+        taskId: r.task_id,
+        matterEntityId: r.matter_id as string,
+        matterNumber: r.matter_number ?? '',
+        title: r.title ?? '',
+        status: asStatus(r.status),
+        dueDate: r.due_date as string,
+      }))
+  })
+}

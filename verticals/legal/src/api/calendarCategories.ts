@@ -17,11 +17,12 @@ export interface CalendarCategory {
 }
 
 // Starter palette (also the fallback when the firm has never configured one).
+// Colors match the Legal Instruments comp's calendar legend exactly (WP-H).
 export const DEFAULT_CALENDAR_CATEGORIES: CalendarCategory[] = [
-  { key: 'consultation', label: 'Consultation', color: '#2563eb' },
-  { key: 'follow_up', label: 'Follow-up', color: '#7c3aed' },
-  { key: 'court', label: 'Court', color: '#b91c1c' },
-  { key: 'internal', label: 'Internal', color: '#64748b' },
+  { key: 'consultation', label: 'Consultation', color: '#3b6fd4' },
+  { key: 'follow_up', label: 'Follow-up', color: '#7a5ad1' },
+  { key: 'court', label: 'Court', color: '#c4443b' },
+  { key: 'internal', label: 'Internal', color: '#6b7690' },
 ]
 
 const KIND = 'firm.calendar_categories'
@@ -53,9 +54,8 @@ export function normalizeCalendarCategories(stored: unknown): CalendarCategory[]
   return out.length ? out : DEFAULT_CALENDAR_CATEGORIES
 }
 
-// The firm's active palette, normalized (defaults when never configured).
-export async function getCalendarCategories(ctx: ActionContext): Promise<CalendarCategory[]> {
-  const stored = await withActionContext(ctx, async (client) => {
+async function readStoredCategories(ctx: ActionContext): Promise<unknown> {
+  return withActionContext(ctx, async (client) => {
     const res = await client.query<{ transitions: unknown }>(
       `SELECT transitions FROM workflow_definition
         WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL
@@ -64,7 +64,22 @@ export async function getCalendarCategories(ctx: ActionContext): Promise<Calenda
     )
     return res.rows[0]?.transitions ?? null
   })
-  return normalizeCalendarCategories(stored)
+}
+
+// The firm's active palette, normalized (defaults when never configured).
+export async function getCalendarCategories(ctx: ActionContext): Promise<CalendarCategory[]> {
+  return normalizeCalendarCategories(await readStoredCategories(ctx))
+}
+
+// Same read, plus whether a row has ever been saved (`configured`). Callers
+// (the Calendar page) use this to seed the starter palette as a REAL firm-
+// category row on first load — config-as-data, not a code-only fallback —
+// without re-seeding a firm that has genuinely saved its own palette.
+export async function getCalendarCategoriesState(
+  ctx: ActionContext,
+): Promise<{ categories: CalendarCategory[]; configured: boolean }> {
+  const stored = await readStoredCategories(ctx)
+  return { categories: normalizeCalendarCategories(stored), configured: stored !== null }
 }
 
 // Persist the palette through the action layer. Returns the normalized result.
