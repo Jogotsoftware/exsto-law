@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "css:check": "node scripts/check-css-structure.mjs apps/legal-demo/app/globals.css",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "dev": "pnpm build && pnpm --filter @exsto/legal-demo dev",
