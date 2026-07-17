@@ -12,7 +12,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import '@exsto/legal/mcp'
-import { findClientContactByEmail } from '@exsto/legal'
+import { findClientContactMembershipsByEmail } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
@@ -45,8 +45,10 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     accessToken?: unknown
     continue?: unknown
+    tenantId?: unknown
   } | null
   const accessToken = typeof body?.accessToken === 'string' ? body.accessToken : ''
+  const requestedTenantId = typeof body?.tenantId === 'string' ? body.tenantId : null
   const dest = safeInternalPath(
     typeof body?.continue === 'string' ? body.continue : null,
     '/portal',
@@ -87,9 +89,29 @@ export async function POST(request: Request) {
     )
   }
 
-  // Map the verified email to a client of the firm. They authenticated as this
-  // email, so a clear "not a client" message is safe (it's their own address).
-  const contact = await findClientContactByEmail(user.email)
+  // Map the verified email to the person's firm memberships. They authenticated
+  // as this email, so a clear "not a client" message is safe (their own address).
+  // MULTI-FIRM (referrals-tenancy P1): a person can be an active client at
+  // several firms. Default = their MAIN firm (oldest contact — the firm they
+  // signed up with, memberships[0]); an explicit body tenantId is honored ONLY
+  // when it is one of their own memberships (the in-portal firm switcher and the
+  // invite sign-in leg use this). A tenantId outside their memberships gets the
+  // same 403 as an unknown email — no membership oracle. The funnel middleware's
+  // x-firm-slug header is deliberately ignored here: a stale ?firm= cookie must
+  // never steer an authenticated session.
+  const memberships = await findClientContactMembershipsByEmail(user.email)
+  if (memberships.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          'We couldn’t find a client account for this email. Use the email where you received your booking confirmation, or contact the firm.',
+      },
+      { status: 403 },
+    )
+  }
+  const contact = requestedTenantId
+    ? memberships.find((m) => m.tenantId === requestedTenantId)
+    : memberships[0]
   if (!contact) {
     return NextResponse.json(
       {

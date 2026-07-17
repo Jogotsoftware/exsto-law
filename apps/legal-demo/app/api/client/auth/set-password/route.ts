@@ -18,6 +18,7 @@ import {
   isClientContactActive,
   provisionClientPortalActor,
   resolveClientMatterIds,
+  resolvePublicIntakeActor,
 } from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
@@ -34,11 +35,6 @@ const BASE_URL = (
 ).replace(/\/$/, '')
 
 const MIN_PASSWORD_LENGTH = 8
-
-// Submitting actor for the account-provisioning action (the resulting session
-// then acts as the client's own actor).
-const PUBLIC_INTAKE_ACTOR_ID =
-  process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`client-auth-set-password:${clientIpFrom(request)}`)
@@ -120,10 +116,11 @@ export async function POST(request: Request) {
   // not left to the mint's lazy backfill — so the receipt reads trigger:'invite'.
   {
     // Idempotent (and self-heals the RBAC scope for pre-0136 actors); advances
-    // any matter parked on a send_portal_invite client gate.
+    // any matter parked on a send_portal_invite client gate. Submitted as the
+    // INVITING tenant's own public-intake actor (per-tenant, never tenant-zero's).
     const matterIds = await resolveClientMatterIds(invite.tenantId, invite.clientContactId)
     await provisionClientPortalActor(
-      { tenantId: invite.tenantId, actorId: PUBLIC_INTAKE_ACTOR_ID },
+      { tenantId: invite.tenantId, actorId: await resolvePublicIntakeActor(invite.tenantId) },
       { clientContactId: invite.clientContactId, matterEntityIds: matterIds, trigger: 'invite' },
     )
   }
