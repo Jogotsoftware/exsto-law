@@ -19560,3 +19560,401 @@ a.li-cal-agenda-card:hover {
   gap: 8px;
   padding: 10px 0;
 }
+
+/* ==========================================================================
+   WP-K — Intake Forms + Questions galleries (li-int-). Intake Forms gets the
+   comp's card gallery with a DocumentSheet thumb-form mini rendering of the
+   REAL form (icon + decorative title bar, then each real field as a
+   proportional label bar + input box). Questions gets the comp's card-list
+   row pattern. Both screens share this one family. Per D6: no usage counts,
+   no "Feeds" column on the card. Mirrors li-tpl- (WP-E) structurally; kept
+   separate per-screen since li-tpl- is scoped to the templates gallery.
+   ========================================================================== */
+.li-int-alert {
+  margin-bottom: 14px;
+}
+.li-int-empty {
+  color: var(--li-muted);
+  font-size: 14px;
+}
+
+/* --- Shared gallery/list header ------------------------------------------- */
+.li-int-gallery-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+.li-int-title {
+  font-family: 'Public Sans', sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--li-fg);
+}
+.li-int-sub {
+  margin: 6px 0 0;
+  color: var(--li-muted);
+  font-size: 14px;
+}
+.li-int-sublink {
+  margin: 0 0 20px;
+  color: var(--li-muted-2);
+  font-size: 13px;
+}
+.li-int-new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-int-new-btn:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+}
+.li-int-new-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* --- Intake Forms: gallery grid + cards ------------------------------------ */
+.li-int-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+.li-int-card-wrap {
+  position: relative;
+}
+.li-int-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  text-decoration: none;
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-panel);
+  padding: 0;
+  overflow: hidden;
+  box-shadow: var(--li-shadow-card);
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s,
+    transform 0.12s;
+}
+.li-int-card:hover:not(:disabled) {
+  border-color: #b9c4da;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+  transform: translateY(-2px);
+  text-decoration: none;
+}
+.li-int-card-thumbwrap {
+  background: #eef2f8;
+  padding: 20px 22px 0;
+  display: flex;
+  justify-content: center;
+}
+.li-int-card-thumb {
+  max-width: 180px;
+  width: 100%;
+  padding: 11% 11% 0;
+}
+.li-int-thumb-head {
+  display: flex;
+  align-items: center;
+  gap: 2cqw;
+  margin-bottom: 7cqw;
+}
+.li-int-thumb-icon {
+  flex: 0 0 auto;
+  width: 8cqw;
+  height: 8cqw;
+  min-width: 16px;
+  min-height: 16px;
+  border-radius: 2cqw;
+  background: #eaf2ff;
+  color: #3b6fd4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-int-thumb-icon svg {
+  width: 60%;
+  height: 60%;
+}
+.li-int-thumb-title {
+  height: 3cqw;
+  width: 52%;
+  border-radius: 2cqw;
+  background: var(--li-navy);
+}
+.li-int-thumb-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 5cqw;
+}
+.li-int-thumb-field-label {
+  height: 2.4cqw;
+  border-radius: 2cqw;
+  background: #d7e3fa;
+  margin-bottom: 2.4cqw;
+}
+.li-int-thumb-field-input {
+  height: 6cqw;
+  border: 1px solid #e4e9f1;
+  border-radius: 1.6cqw;
+  background: #fafbfe;
+}
+.li-int-card-meta {
+  padding: 13px 16px;
+}
+.li-int-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.li-int-card-name {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--li-fg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-int-card-sub {
+  font-size: 12px;
+  color: var(--li-muted-2);
+  margin-top: 4px;
+}
+.li-int-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--li-radius-chip);
+  padding: 2px 9px;
+}
+.li-int-status--active {
+  color: var(--li-ok);
+  background: var(--li-ok-bg);
+}
+.li-int-status--draft {
+  color: var(--li-muted-2);
+  background: #eef1f6;
+}
+.li-int-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.li-int-card-menu-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: #48546e;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.15);
+}
+.li-int-card-menu-btn:hover:not(:disabled) {
+  background: #fff;
+  border-color: #b9c4da;
+}
+.li-int-card-menu {
+  position: absolute;
+  top: 42px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  background: #fff;
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  box-shadow: var(--li-shadow-pop);
+  padding: 6px;
+}
+.li-int-card-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--li-fg);
+  cursor: pointer;
+}
+.li-int-card-menu button:hover:not(:disabled) {
+  background: #f4f6fb;
+}
+/* Extra class-selector (not !important) beats the plain `.li-int-card-menu
+   button` rule above on specificity alone. */
+.li-int-card-menu button.li-int-card-menu-danger {
+  color: var(--li-danger);
+}
+
+/* --- Questions: search + card-list rows ------------------------------------ */
+.li-int-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  padding: 9px 14px;
+  margin: 20px 0;
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-chip);
+  background: #fff;
+  color: var(--li-muted-2);
+}
+.li-int-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-family: 'Public Sans', sans-serif;
+  font-size: 13.5px;
+  color: var(--li-fg);
+}
+.li-int-search input::placeholder {
+  color: var(--li-muted-3);
+}
+.li-int-section-title {
+  margin: 24px 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--li-muted);
+}
+.li-int-list {
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-card);
+  box-shadow: var(--li-shadow-card);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.li-int-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 24px;
+  border-bottom: 1px solid var(--li-border-soft);
+}
+.li-int-list .li-int-row:last-child {
+  border-bottom: none;
+}
+.li-int-row:hover {
+  background: #f7f9fc;
+}
+.li-int-row-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #f1ecfb;
+  color: #7a5ad1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-int-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.li-int-row-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--li-fg);
+}
+.li-int-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--li-muted);
+}
+.li-int-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-int-row-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid var(--li-border);
+  color: var(--li-muted-2);
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    color 0.12s,
+    background 0.12s;
+}
+.li-int-row-btn:hover:not(:disabled) {
+  border-color: #b7c2d6;
+  color: var(--li-navy);
+  background: #f7f9fc;
+}
+.li-int-row-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.li-int-row-btn-danger:hover:not(:disabled) {
+  border-color: var(--li-danger);
+  color: var(--li-danger);
+  background: var(--li-danger-bg);
+}
+.li-int-row-linkbtn {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  background: #fff;
+  border: 1px solid var(--li-border-input);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-fg);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.li-int-row-linkbtn:hover {
+  border-color: #b7c2d6;
+  background: #f7f9fc;
+  text-decoration: none;
+}

@@ -7,13 +7,18 @@
 // builder). Beta feedback: showing only the saved bank hid the questions a live
 // service was already asking. Authoring also happens inline from the service
 // questionnaire editor's "Save to library"; this page is the bank's home.
+//
+// WP-K (Legal Instruments redesign): the list is now the comp's card-list row
+// pattern (icon tile, label, type + {{token}} chip, edit/delete actions) via the
+// shared `li-int-*` family. The inline edit form (QuestionRow) is unchanged —
+// only the read/display row was restyled.
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
-import { PageHead } from '@/components/PageHead'
-import { PlusIcon, SearchIcon, XIcon } from '@/components/icons'
+import { TokenChip } from '@/components/DocumentSheet'
+import { EditIcon, HelpCircleIcon, PlusIcon, SearchIcon, XIcon } from '@/components/icons'
 
 // In lockstep with the legal API's KNOWN_FIELD_TYPES (minus members_repeater,
 // which is questionnaire-structural, not a reusable single question).
@@ -95,7 +100,7 @@ interface ServiceQuestion {
   options: string[] | null
 }
 
-export default function QuestionLibraryPage() {
+export default function QuestionLibraryPage(): ReactElement {
   const { confirm, confirmElement } = useConfirm()
   const [items, setItems] = useState<LibQuestion[]>([])
   const [svcQuestions, setSvcQuestions] = useState<ServiceQuestion[]>([])
@@ -268,18 +273,26 @@ export default function QuestionLibraryPage() {
   return (
     <main>
       {confirmElement}
-      <PageHead
-        title="Question library"
-        actions={
-          <button className="primary" onClick={startNew} disabled={busy || !!edit.new}>
-            <PlusIcon size={16} /> New question
-          </button>
-        }
-      />
 
-      {error && <div className="alert alert-error">{error}</div>}
+      <div className="li-int-gallery-head">
+        <div>
+          <h1 className="li-int-title">Questions</h1>
+          <p className="li-int-sub">The reusable question bank your intake forms draw from.</p>
+        </div>
+        <button
+          type="button"
+          className="li-int-new-btn"
+          onClick={startNew}
+          disabled={busy || !!edit.new}
+        >
+          <PlusIcon size={16} />
+          New question
+        </button>
+      </div>
 
-      <div className="qlib-search" style={{ maxWidth: 420, margin: '0 0 var(--space-4)' }}>
+      {error && <div className="alert alert-error li-int-alert">{error}</div>}
+
+      <div className="li-int-search">
         <SearchIcon size={15} />
         <input
           value={q}
@@ -303,53 +316,63 @@ export default function QuestionLibraryPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : filtered.length === 0 && svcFiltered.length === 0 && !edit.new ? (
-        <p style={{ color: 'var(--muted)' }}>
+        <p className="li-int-empty">
           {items.length === 0 && svcOnly.length === 0
             ? 'No saved questions yet. Add one here, or use “Save to library” from a service questionnaire.'
             : 'No matches.'}
         </p>
       ) : (
-        filtered.map((it) =>
-          edit[it.questionTemplateId] ? (
-            <QuestionRow
-              key={it.questionTemplateId}
-              draft={edit[it.questionTemplateId]}
-              onPatch={(d) => patch(it.questionTemplateId, d)}
-              onSave={() => save(it.questionTemplateId)}
-              onCancel={() => cancel(it.questionTemplateId)}
-              busy={busy}
-            />
-          ) : (
-            <div
-              key={it.questionTemplateId}
-              className="qb-card"
-              style={{ marginBottom: 'var(--space-2)' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{it.label}</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
-                    {TYPE_LABEL(it.type)} · <code>{`{{${it.token}}}`}</code>
-                    {it.options && it.options.length > 0 ? ` · ${it.options.join(', ')}` : ''}
+        filtered.length > 0 && (
+          <div className="li-int-list">
+            {filtered.map((it) =>
+              edit[it.questionTemplateId] ? (
+                <QuestionRow
+                  key={it.questionTemplateId}
+                  draft={edit[it.questionTemplateId]}
+                  onPatch={(d) => patch(it.questionTemplateId, d)}
+                  onSave={() => save(it.questionTemplateId)}
+                  onCancel={() => cancel(it.questionTemplateId)}
+                  busy={busy}
+                />
+              ) : (
+                <div key={it.questionTemplateId} className="li-int-row">
+                  <span className="li-int-row-icon">
+                    <HelpCircleIcon size={17} />
+                  </span>
+                  <div className="li-int-row-main">
+                    <div className="li-int-row-title">{it.label}</div>
+                    <div className="li-int-row-sub">
+                      <span>{TYPE_LABEL(it.type)}</span>
+                      <TokenChip>{`{{${it.token}}}`}</TokenChip>
+                    </div>
+                  </div>
+                  <div className="li-int-row-actions">
+                    <button
+                      type="button"
+                      className="li-int-row-btn"
+                      onClick={() =>
+                        setEdit((m) => ({ ...m, [it.questionTemplateId]: toDraft(it) }))
+                      }
+                      title="Edit question"
+                      aria-label="Edit question"
+                    >
+                      <EditIcon size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      className="li-int-row-btn li-int-row-btn-danger"
+                      onClick={() => void archive(it)}
+                      disabled={busy}
+                      title="Archive question"
+                      aria-label="Archive question"
+                    >
+                      <XIcon size={15} />
+                    </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => setEdit((m) => ({ ...m, [it.questionTemplateId]: toDraft(it) }))}
-                >
-                  Edit
-                </button>
-                <button
-                  className="qb-iconbtn qb-danger"
-                  onClick={() => void archive(it)}
-                  disabled={busy}
-                  title="Archive question"
-                  aria-label="Archive question"
-                >
-                  <XIcon size={15} />
-                </button>
-              </div>
-            </div>
-          ),
+              ),
+            )}
+          </div>
         )
       )}
 
@@ -357,30 +380,34 @@ export default function QuestionLibraryPage() {
           part of the firm's full question inventory, edited in the service builder. */}
       {!loading && svcFiltered.length > 0 && (
         <>
-          <h3 style={{ margin: 'var(--space-4) 0 var(--space-2)' }}>In service intake forms</h3>
-          {svcFiltered.map((it, i) => (
-            <div
-              key={`${it.serviceKey}-${it.token}-${i}`}
-              className="qb-card"
-              style={{ marginBottom: 'var(--space-2)' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{it.label}</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
-                    {TYPE_LABEL(it.type)} · <code>{`{{${it.token}}}`}</code> · from{' '}
-                    <strong>{it.serviceName}</strong>
-                    {it.options && it.options.length > 0 ? ` · ${it.options.join(', ')}` : ''}
+          <h3 className="li-int-section-title">In service intake forms</h3>
+          <div className="li-int-list">
+            {svcFiltered.map((it, i) => (
+              <div key={`${it.serviceKey}-${it.token}-${i}`} className="li-int-row">
+                <span className="li-int-row-icon">
+                  <HelpCircleIcon size={17} />
+                </span>
+                <div className="li-int-row-main">
+                  <div className="li-int-row-title">{it.label}</div>
+                  <div className="li-int-row-sub">
+                    <span>{TYPE_LABEL(it.type)}</span>
+                    <TokenChip>{`{{${it.token}}}`}</TokenChip>
+                    <span>
+                      from <strong>{it.serviceName}</strong>
+                    </span>
                   </div>
                 </div>
-                <Link
-                  href={`/attorney/services/${encodeURIComponent(it.serviceKey)}/questionnaire`}
-                >
-                  <button>Edit in service</button>
-                </Link>
+                <div className="li-int-row-actions">
+                  <Link
+                    href={`/attorney/services/${encodeURIComponent(it.serviceKey)}/questionnaire`}
+                    className="li-int-row-linkbtn"
+                  >
+                    Edit in service
+                  </Link>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </>
       )}
     </main>
@@ -399,7 +426,7 @@ function QuestionRow({
   onSave: () => void
   onCancel: () => void
   busy: boolean
-}) {
+}): ReactElement {
   return (
     <div className="qb-card" style={{ marginBottom: 'var(--space-2)' }}>
       <div className="form-grid">

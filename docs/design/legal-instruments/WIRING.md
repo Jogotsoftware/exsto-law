@@ -364,10 +364,102 @@ several times during the walk — pre-existing, unrelated to this WP's queries (
 `actorIsActive` session verification, not `legal.client.*`/`legal.contact.*`); retried and passed on the retry
 each time, consistent with prior WPs' notes on this environment.
 
-## WP-K · Intake Forms + Questions
+## WP-K · Intake Forms + Questions — SHIPPED (branch li/wp-k-intake)
 
-- [ ] BUILD: visual card galleries with proportional form thumbnails + status badges (today: table / list cards)
-- [ ] Per D6: NO usage counts; drop today's Feeds column
+- [x] BUILD: visual card galleries with proportional form thumbnails + status badges (today: table / list cards)
+- [x] Per D6: NO usage counts; drop today's Feeds column
+
+Intake Forms (`app/attorney/questionnaires/page.tsx`): the table became a
+`li-int-grid` of cards (`repeat(auto-fill, minmax(240px,1fr))`), each a
+`DocumentSheet variant="thumb-form"` mini rendering of the REAL form — icon +
+decorative title bar, then each real field (first four) as a proportional
+label bar (width from the real label's length) + input box — plus name,
+status badge, and a `meta` line of `N questions` only (no usage counts, no
+Feeds column; both are still real data, still editable inside the
+questionnaire, just not shown as gallery chrome). Card click keeps today's
+"Edit" behavior (opens the existing inline draft editor — the gallery hides
+while a draft is open, mirroring WP-E); a per-card kebab menu carries "Edit
+in window" (the modal) and "Archive", the WP-E precedent for pre-existing
+actions with no comp equivalent. "New intake form" keeps the existing create
+flow. Service-bound intake forms (read-only here, edited in the service
+builder) are now cards too, whole-card `Link`s to the service questionnaire.
+
+Questions (`app/attorney/questions/page.tsx`): the list became the comp's
+card-list row pattern (`li-int-row`) — icon tile, question label, type +
+`{{token}}` `TokenChip`, edit/archive icon actions — reusing the SAME
+`li-int-*` family (one CSS family for the WP, per instruction). The inline
+edit form (`QuestionRow`) is untouched, still swaps in place per row exactly
+as before. Service-embedded questions (read-only, "Edit in service") are a
+second `li-int-list` block with a link-button per row. "New question" kept.
+
+### WP-K decisions (binding)
+
+- **Status badge source.** The comp's Active/green-dot vs Draft/gray badge
+  needed a REAL signal, not a fabricated one. Library questionnaires are
+  always "Active": the list query already filters `entity.status = 'active'`
+  (archived ones never reach this page), so every card in the library group
+  is a live, usable form — there is no other draft/active flag on
+  `questionnaire_template`. Service-bound forms follow the service's own
+  `isActive` — the one real live/disabled signal this app has for an intake
+  form. This is a from-scratch mapping (comp's own datum was a demo
+  placeholder), documented here per README rule 4.
+- **Screenshot vs interactive comp — found, not followed.** The reference
+  screenshot `screenshots/intake.png` shows a plain row-list (icon, name,
+  green/gray status dot, "N questions · used by N services" text, one pencil
+  icon) — NOT a card gallery. The interactive `legal-instruments.dc.html`
+  disagrees with its own screenshot: it has a dedicated
+  `<!-- ===== INTAKE FORMS (GALLERY) ===== -->` section with full
+  `DocumentSheet`-style thumbnail card markup, and its state wiring
+  (`showIntakeForms: active === 'questionnaires'`) is what actually renders
+  when a user navigates there — the row-list markup nearby
+  (`simpleData('questionnaires')`) is dead code for that route, only reached
+  via `showSimple` for `requests`/`questions`. Per README rule 1 ("the comp
+  is the [dc.html] spec, not inspiration") and the explicit WP brief
+  ("visual card galleries with proportional form thumbnails"), this WP built
+  the gallery in the dc.html and treated `intake.png` as a stale capture
+  predating that revision. Flagging for the record; not a unilateral
+  reinterpretation since the brief was independently explicit about the
+  gallery.
+- **Gallery hides while the inline draft editor is open.** Previously both
+  the table and an open draft-edit form rendered simultaneously (a
+  pre-existing quirk — no `!draft` gate). Gated the gallery/header behind
+  `!draft`, matching the WP-E templates precedent (gallery swaps for the
+  editor). Same state, same functions, just not double-rendered; the error
+  banner was hoisted above both branches so it still shows while editing.
+  This is the only behavior change beyond the visual restyle.
+- **No `questions.png` screenshot exists** in the comp assets; the Questions
+  card-list pattern was built directly from the `.dc.html`'s `showSimple` /
+  `simpleRows` markup (the same markup the intake.png-style row previously
+  used), per the WP brief's explicit pointer to that pattern.
+
+### Verification (2026-07-17, live app, `?demo_user=juan-carlos`, Playwright)
+
+Gate order: `pnpm format && pnpm lint && pnpm typecheck && pnpm build &&
+pnpm test:unit` all green (206/206 unit tests), then `apps/legal-demo`'s own
+`npx next build` green (all 76 routes, including both restyled pages,
+compiled/prerendered with no errors). Dev walk (`next dev -p 3111`, no
+pooler 500s hit this run — retry wrapper was in place, unused):
+
+- Intake Forms: 13 cards rendered from real data, each with a real
+  `DocumentSheet` thumb-form thumbnail (47 field-boxes total across 13
+  cards, capped at 4/card); status badges a real mix of Active/Draft; meta
+  lines confirmed `"N questions"` only (no `"used by"`/`"used in"` text
+  anywhere, no `<table>`, no "Feeds" text on the page). Card click → real
+  "Edit questionnaire" editor opened with the card's actual data (verified
+  "Lease Review Intake" card's 2 field bars matched its real fields, Landlord
+  name / Monthly rent, in the opened editor). "New intake form" → real "New
+  questionnaire" flow. Kebab menu → "Edit in window" + "Archive" both
+  present and clickable.
+- Questions: 142 rows across the bank + service-derived section (24 bank +
+  118 service-embedded), every row showing a type + a real gold
+  `{{token}}` chip (142/142). Edit icon → inline `QuestionRow` form opens
+  in place (existing behavior, unchanged). "New question" → same inline
+  create form. Service-derived section present with working "Edit in
+  service" link-buttons (118, all pointing at their real service).
+- No console or page errors during the walk. Screenshots saved to
+  `scratchpad/wp-k/` (01 gallery, 02 card→editor, 03 new-intake-form, 04
+  kebab menu, 05 questions list, 06 edit action, 07 new-question, 08
+  service-questions section).
 
 ## WP-L · Assistant + service builder ★ flagship
 
