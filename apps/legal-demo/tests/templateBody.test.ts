@@ -89,6 +89,25 @@ describe('template body round-trip', () => {
     expect(md).toContain('<u>Exhibit A</u>')
   })
 
+  // WP-E toolbar strikethrough (TipTap's Strike mark serializes to <s>). Vanilla
+  // turndown has no built-in strike rule (only turndown-plugin-gfm does, which
+  // is not a dependency here), so this pins the addRule + the marked
+  // renderer.del override that keeps the round trip lossless instead of
+  // silently dropping the struck text back to plain text.
+  it('keeps strikethrough (<s>) as GFM ~~text~~ and back', () => {
+    const md = htmlToMarkdown('<p>Void <s>this clause</s> entirely.</p>')
+    expect(md).toContain('~~this clause~~')
+    const html = markdownToHtml(md)
+    expect(html).toContain('<s>this clause</s>')
+  })
+
+  it('strikethrough survives an idempotent round-trip', () => {
+    const once = roundTrip('Keep this but ~~not this~~ part.')
+    const twice = roundTrip(once)
+    expect(twice.trim()).toBe(once.trim())
+    expect(once).toContain('~~not this~~')
+  })
+
   it('keeps the signature-line block', () => {
     const md = htmlToMarkdown(
       '<div class="sig-line"><span class="sig-line-label">Signature</span></div>',

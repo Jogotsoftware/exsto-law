@@ -11,10 +11,13 @@ import { SignatureLine } from './SignatureLineNode'
 import { PageBreak } from './PageBreakNode'
 import { VariableSuggestion } from './VariableSuggestion'
 import { useFitToWidth } from '@/lib/useFitToWidth'
+import { DocumentSheet } from '@/components/DocumentSheet'
+import { GemShimmer } from '@/components/GemSparkle'
 import {
   BoldIcon,
   ItalicIcon,
   UnderlineIcon,
+  StrikethroughIcon,
   ListIcon,
   ListOrderedIcon,
   QuoteIcon,
@@ -52,6 +55,17 @@ interface Props {
   // Known variable names offered by the `{{` autocomplete. Read live (the
   // reference sets load asynchronously) so updates need no remount.
   variableNames?: string[]
+  // 'legacy' (default) is the untouched per-service editor + the shared
+  // edit-in-modal chrome (tpl-* classes) — never changed here. 'li' is WP-E's
+  // comp-faithful chrome (li-tpl-* classes, docs/design/legal-instruments):
+  // the canvas renders on the shared DocumentSheet `editor` page instead of the
+  // legacy fixed-width sheet, so a sibling (the side-by-side sample-data
+  // preview) can be passed as `children` into the same scrollable desk.
+  variant?: 'legacy' | 'li'
+  children?: ReactNode
+  // li variant only: sweep the canvas with the shared GemShimmer while the
+  // persistent AI bar (page.tsx) is drafting/revising the open document.
+  aiRunning?: boolean
 }
 
 // Word-style font choices. Values are full CSS stacks (so the document renders
@@ -76,6 +90,9 @@ export function TemplateEditor({
   editorRef,
   validateVariable,
   variableNames,
+  variant = 'legacy',
+  children,
+  aiRunning = false,
 }: Props) {
   // The variable classifier read live by the node's coloring plugin. Configured
   // once (below) as a stable closure over this ref; updating the ref + nudging
@@ -119,7 +136,7 @@ export function TemplateEditor({
     },
     editorProps: {
       attributes: {
-        class: 'tpl-editor-content',
+        class: variant === 'li' ? 'li-tpl-page-body' : 'tpl-editor-content',
         spellcheck: 'true',
       },
     },
@@ -169,11 +186,40 @@ export function TemplateEditor({
     }
   }, [editor, editorRef])
 
-  // Zoom-to-fit so the fixed-width page scales to the (often narrow) editor column.
-  const fitRef = useFitToWidth<HTMLDivElement>()
+  // Zoom-to-fit so the fixed-width page scales to the (often narrow) editor
+  // column. The li variant's page is the shared DocumentSheet `editor` width
+  // (612px); with the side-by-side sample preview showing (children present)
+  // there are two pages + a 24px gap to fit instead of one.
+  const LI_PAGE_WIDTH = 612
+  const fitRef = useFitToWidth<HTMLDivElement>(
+    variant === 'li' ? (children ? LI_PAGE_WIDTH * 2 + 24 : LI_PAGE_WIDTH) : undefined,
+  )
 
   if (!editor) {
-    return <div className="tpl-editor-shell tpl-editor-loading">Loading editor…</div>
+    return (
+      <div
+        className={
+          variant === 'li' ? 'li-tpl-editor-loading' : 'tpl-editor-shell tpl-editor-loading'
+        }
+      >
+        Loading editor…
+      </div>
+    )
+  }
+
+  if (variant === 'li') {
+    return (
+      <>
+        <Toolbar editor={editor} variant="li" />
+        <div className="li-tpl-canvas-desk" ref={fitRef}>
+          {aiRunning && <GemShimmer />}
+          <DocumentSheet variant="editor" serif className="li-tpl-page">
+            <EditorContent editor={editor} />
+          </DocumentSheet>
+          {children}
+        </div>
+      </>
+    )
   }
 
   return (
@@ -186,7 +232,12 @@ export function TemplateEditor({
   )
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
+function Toolbar({ editor, variant = 'legacy' }: { editor: Editor; variant?: 'legacy' | 'li' }) {
+  const isLi = variant === 'li'
+  const toolbarClass = isLi ? 'li-tpl-toolbar' : 'tpl-toolbar'
+  const selectClass = isLi ? 'li-tpl-tb-select' : 'tpl-tb-select'
+  const sepClass = isLi ? 'li-tpl-tb-sep' : 'tpl-tb-sep'
+
   // `aria` is the accessible name; the visible label is an icon (Word-style) or a
   // short text style name (H1/H2/H3). Toggle buttons expose aria-pressed; one-shot
   // actions (undo/redo) opt out.
@@ -199,7 +250,7 @@ function Toolbar({ editor }: { editor: Editor }) {
   ) => (
     <button
       type="button"
-      className={`tpl-tb-btn${active ? ' active' : ''}`}
+      className={`${isLi ? 'li-tpl-tb-btn' : 'tpl-tb-btn'}${active ? ' active' : ''}`}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       title={opts.title ?? aria}
@@ -218,9 +269,9 @@ function Toolbar({ editor }: { editor: Editor }) {
   )
 
   return (
-    <div className="tpl-toolbar" role="toolbar" aria-label="Text formatting">
+    <div className={toolbarClass} role="toolbar" aria-label="Text formatting">
       <select
-        className="tpl-tb-select tpl-tb-font"
+        className={`${selectClass} ${isLi ? 'li-tpl-tb-font' : 'tpl-tb-font'}`}
         aria-label="Font"
         title="Font"
         value={currentFont}
@@ -238,7 +289,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         ))}
       </select>
       <select
-        className="tpl-tb-select tpl-tb-size"
+        className={`${selectClass} ${isLi ? 'li-tpl-tb-size' : 'tpl-tb-size'}`}
         aria-label="Font size"
         title="Font size"
         value={currentSize}
@@ -257,7 +308,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         ))}
       </select>
 
-      <div className="tpl-tb-sep" aria-hidden="true" />
+      <div className={sepClass} aria-hidden="true" />
       {btn(
         editor.isActive('bold'),
         <BoldIcon size={15} />,
@@ -279,8 +330,15 @@ function Toolbar({ editor }: { editor: Editor }) {
         () => editor.chain().focus().toggleUnderline().run(),
         { title: 'Underline (Ctrl+U)' },
       )}
+      {btn(
+        editor.isActive('strike'),
+        <StrikethroughIcon size={15} />,
+        'Strikethrough',
+        () => editor.chain().focus().toggleStrike().run(),
+        { title: 'Strikethrough' },
+      )}
 
-      <div className="tpl-tb-sep" aria-hidden="true" />
+      <div className={sepClass} aria-hidden="true" />
       {btn(editor.isActive('heading', { level: 1 }), 'H1', 'Heading 1', () =>
         editor.chain().focus().toggleHeading({ level: 1 }).run(),
       )}
@@ -291,7 +349,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         editor.chain().focus().toggleHeading({ level: 3 }).run(),
       )}
 
-      <div className="tpl-tb-sep" aria-hidden="true" />
+      <div className={sepClass} aria-hidden="true" />
       {btn(editor.isActive({ textAlign: 'left' }), <AlignLeftIcon size={15} />, 'Align left', () =>
         editor.chain().focus().setTextAlign('left').run(),
       )}
@@ -314,7 +372,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         () => editor.chain().focus().setTextAlign('justify').run(),
       )}
 
-      <div className="tpl-tb-sep" aria-hidden="true" />
+      <div className={sepClass} aria-hidden="true" />
       {btn(editor.isActive('bulletList'), <ListIcon size={15} />, 'Bulleted list', () =>
         editor.chain().focus().toggleBulletList().run(),
       )}
@@ -322,7 +380,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         editor.chain().focus().toggleOrderedList().run(),
       )}
 
-      <div className="tpl-tb-sep" aria-hidden="true" />
+      <div className={sepClass} aria-hidden="true" />
       {btn(editor.isActive('blockquote'), <QuoteIcon size={15} />, 'Block quote', () =>
         editor.chain().focus().toggleBlockquote().run(),
       )}
@@ -341,7 +399,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         { toggle: false, title: 'Insert page break' },
       )}
 
-      <div className="tpl-tb-sep" aria-hidden="true" />
+      <div className={sepClass} aria-hidden="true" />
       {btn(false, <UndoIcon size={15} />, 'Undo', () => editor.chain().focus().undo().run(), {
         toggle: false,
       })}

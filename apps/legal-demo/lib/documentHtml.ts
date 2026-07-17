@@ -19,7 +19,21 @@ import sanitizeHtml from 'sanitize-html'
 // img/event-handlers, and style is filtered to a fixed set of typographic
 // properties with validated values (no url()/expression()/injection).
 
-const md = new Marked({ gfm: true, breaks: true })
+// renderer.del: a stored `~~text~~` (WP-E strikethrough) parses to <del> by
+// default, but <del> is not in DOCUMENT_SANITIZE_OPTIONS.allowedTags below and
+// disallowedTagsMode 'discard' means an unmapped <del> would DELETE the struck
+// text entirely (not just its styling) from every surface this renders —
+// review, share links, eSign, PDF/Word export. Emit the allowlisted <s> instead,
+// matching templateBody.ts's editor round trip (lib/templateBody.ts).
+const md = new Marked({
+  gfm: true,
+  breaks: true,
+  renderer: {
+    del(token) {
+      return `<s>${this.parser.parseInline(token.tokens)}</s>`
+    },
+  },
+})
 
 // CSS values we accept, each validated so nothing but the intended typography
 // gets through. font-family forbids ( ) : ; so url()/expression() can't appear.

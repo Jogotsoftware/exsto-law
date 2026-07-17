@@ -58,6 +58,18 @@ describe('template preview', () => {
     expect(html).toContain('Client signature')
   })
 
+  // WP-E strikethrough: renderDocumentHtml (lib/documentHtml.ts) sanitizes with
+  // disallowedTagsMode 'discard', and <del> — marked's default GFM
+  // strikethrough tag — is not in its allowedTags. Without the renderer.del
+  // override there, a struck clause would be silently DELETED (not just
+  // unstyled) from every surface buildPreview shares a renderer with (review,
+  // share links, eSign, PDF/Word export).
+  it('keeps a struck clause instead of discarding it', () => {
+    const html = buildPreview('Void ~~this clause~~ entirely.').html
+    expect(html).toContain('<s>this clause</s>')
+    expect(html).not.toContain('<del>')
+  })
+
   it('leaks no private-use sentinels into output', () => {
     const html = buildPreview(BODY).html
     expect(html).not.toContain(String.fromCharCode(0xe000))

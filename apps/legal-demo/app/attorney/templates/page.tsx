@@ -1,32 +1,35 @@
 'use client'
 
 // Templates tab — the firm's reusable, NOT-service-bound template library (Obj 9).
-// Builder UX (UI refresh): a document-styled canvas, a click-to-insert merge-token
-// palette (like Outreach's email tokens), AI-drafting from a plain-language brief,
-// and import (paste or upload a text/markdown/HTML file). The body is text with
-// {{tokens}}; CRUD + AI go through the through-core legal.template.* tools.
+// WP-E (Legal Instruments redesign): a comp-faithful gallery of proportional page
+// thumbnails + a full-page editor (docs/design/legal-instruments — TEMPLATES /
+// TEMPLATE EDITOR). The body is text with {{tokens}}; CRUD + AI go through the
+// through-core legal.template.* tools.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
 import { TemplateConfigModal } from '@/components/configEditors'
 import { readDevSession } from '@/lib/auth'
 import {
-  SparklesIcon,
   FileTextIcon,
   EyeIcon,
-  LayersIcon,
   XIcon,
   PlusIcon,
   CopyIcon,
   LayoutGridIcon,
+  ChevronLeftIcon,
+  PaperclipIcon,
+  MoreHorizontalIcon,
 } from '@/components/icons'
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
-import { TemplatePreview } from '@/components/templates/TemplatePreview'
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
-import { PageHead } from '@/components/PageHead'
+import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
+import { GemSparkle } from '@/components/GemSparkle'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
+import { buildPreview } from '@/lib/templatePreview'
+import { streamTemplateAi } from '@/lib/templateAiStream'
 import type { TemplateVariables, TemplateVariableSpec } from '@exsto/legal'
 
 type Category = 'document' | 'email'
@@ -48,20 +51,6 @@ interface Draft {
   body: string
   docKind: string
   variables: TemplateVariables
-}
-
-// Options for the "Draft with AI" model + skill pickers.
-interface AiModelOpt {
-  id: string
-  label: string
-  available: boolean
-  provider: string
-  model: string
-}
-interface AiSkillOpt {
-  slug: string
-  name: string
-  practiceArea: string
 }
 
 // A questionnaire from the firm library — used to seed a new template with its
@@ -102,10 +91,6 @@ const STANDARD_TOKENS: { id: string; label: string }[] = [
   { id: 'today', label: "Today's date" },
   { id: 'letter_date', label: 'Letter date' },
 ]
-
-// The font-scale options offered in the Font size select. loadPageSetup whitelists
-// against this so a stray stored value can never de-sync the controlled select.
-const FONT_SCALES = [0.9, 1, 1.1, 1.2] as const
 
 const TOKEN_RE = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
 
@@ -157,7 +142,8 @@ function humanKind(k: string): string {
 
 // Searchable document-kind combobox: the kinds already in the library as click
 // options, filtered as you type, plus "use as new kind" for anything novel (beta
-// feedback: the raw text input read as a schema field, not a control).
+// feedback: the raw text input read as a schema field, not a control). Unchanged
+// by WP-E — an app-only meta control the comp's static demo doesn't model.
 function DocKindCombobox({
   value,
   kinds,
@@ -231,54 +217,98 @@ function DocKindCombobox({
   )
 }
 
+// The kind badge shown on a gallery card and the editor header — real data (the
+// comp's "Letter"/"Agreement" badges are placeholder taxonomy this app doesn't
+// have): the template's own document-kind tag when set, else its category.
+function kindBadge(t: Pick<Template, 'category' | 'docKind'>): string {
+  return t.docKind ? humanKind(t.docKind) : t.category === 'email' ? 'Email' : 'Document'
+}
+
+// Split a line of body text into literal-text / {{token}} runs, so a gallery
+// thumbnail can render real merge tokens as gold chips (comp: editBlocks runs).
+function renderTokenRuns(text: string): ReactNode[] {
+  const parts: ReactNode[] = []
+  const re = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
+  let last = 0
+  let i = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text))) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    parts.push(<TokenChip key={i++}>{`{{${m[1]}}}`}</TokenChip>)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
+}
+
+// A light-touch markdown-to-plain pass for thumbnail text — strips heading
+// markers, emphasis, and any raw inline HTML the body carries (aligned blocks
+// / per-run styling are kept as literal <p style="..."> etc. in the stored
+// markdown, see lib/templateBody.ts's alignedBlock rule — a thumbnail must
+// never show that markup verbatim). Keeps {{tokens}} intact for
+// renderTokenRuns above. No length-slicing here: overflow/ellipsis in CSS
+// (.li-tpl-thumb-heading / .li-tpl-thumb-line) truncates visually without
+// ever cutting a {{token}} in half.
+function stripMd(s: string): string {
+  return s
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/[*_`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Real content for a gallery card thumbnail: the template's own first heading
+// (or its name, if the body has none yet) + a few real body lines — never the
+// comp's placeholder bars (README rule 4: comp demo data is never hardcoded).
+function thumbPreview(t: Template): { heading: string; lines: string[] } {
+  // isHeading is read off the RAW row (before stripMd removes the `#` marker
+  // it's testing for) — stripMd is applied only to the text kept for display.
+  const rawRows = (t.body ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+  let heading = ''
+  const lines: string[] = []
+  for (const raw of rawRows) {
+    const isHeading = /^#{1,6}\s+/.test(raw)
+    const row = stripMd(raw)
+    if (!row) continue
+    if (!heading) {
+      heading = row
+      continue
+    }
+    if (isHeading) continue // one heading in the snippet, like the comp
+    lines.push(row)
+    if (lines.length >= 4) break
+  }
+  return { heading: heading || t.name || 'Untitled', lines }
+}
+
 export default function TemplatesPage() {
   const { confirm, confirmElement } = useConfirm()
   const [templates, setTemplates] = useState<Template[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
-  // AI drafting state — the brief is entered in a modal "Draft with AI" window.
-  const [aiPrompt, setAiPrompt] = useState('')
-  const [aiBusy, setAiBusy] = useState(false)
-  // A document attached as context for the AI draft — parsed to text and folded
-  // into the brief (not inserted into the body).
-  const [aiAttachName, setAiAttachName] = useState('')
-  const [aiAttachText, setAiAttachText] = useState('')
-  const [aiAttaching, setAiAttaching] = useState(false)
-  const [showAi, setShowAi] = useState(false)
-  // "Draft with AI" options: model (defaults to cheapest) + optional forced skills.
-  const [aiModelId, setAiModelId] = useState('')
-  const [aiModels, setAiModels] = useState<AiModelOpt[]>([])
-  const [aiSkills, setAiSkills] = useState<AiSkillOpt[]>([])
-  const [aiSkillSlugs, setAiSkillSlugs] = useState<string[]>([])
-  const [aiSkillQuery, setAiSkillQuery] = useState('')
   const [importing, setImporting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
-  const [showFields, setShowFields] = useState(false)
-  // The "Insert a field" palette — collapsed by default (beta feedback: it listed
-  // every merge variable expanded and crowded the editor). The ghost "+" in the
-  // body and typing `{{` / `#` are the primary insert paths.
-  const [showInsert, setShowInsert] = useState(false)
   // "New template" start-options chooser: scratch / clone existing / from a
   // questionnaire. Questionnaires load lazily the first time the chooser opens.
   const [showNew, setShowNew] = useState(false)
   // Phase 9: the shared edit-in-modal, opened per template row.
   const [modalTemplate, setModalTemplate] = useState<Template | null>(null)
+  // The gallery card kebab menu (Edit in window / Retire) — only one open at a
+  // time; the comp's card is a single "open the editor" click target, so these
+  // two existing actions live behind a small per-card overflow instead.
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [questionnaires, setQuestionnaires] = useState<QuestionnaireOpt[] | null>(null)
-  // Page setup (paper size + font scale) — a per-template VIEW/print preference,
-  // persisted client-side (localStorage), so the canvas + preview render true to
-  // the chosen page. Not substrate state (it never affects what's stored).
-  const [paper, setPaper] = useState<'letter' | 'legal'>('letter')
-  const [fontScale, setFontScale] = useState(1)
   const editorRef = useRef<TemplateEditorHandle | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
-  // The "Draft with AI" trigger, so closing the modal restores focus to it.
-  const aiTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const aiAttachRef = useRef<HTMLInputElement | null>(null)
 
-  function closeAi() {
-    setShowAi(false)
-    aiTriggerRef.current?.focus()
-  }
   // Bumped whenever we replace the WHOLE body (open / new / AI / import) so the
   // editor re-seeds from the new markdown. Plain typing does NOT bump it, so the
   // cursor never jumps mid-edit.
@@ -299,6 +329,17 @@ export default function TemplatesPage() {
     Array<{ serviceKey: string; documents: string[] }>
   >([])
 
+  // Persistent inline AI-edit bar (comp: TEMPLATE EDITOR "Draft or revise with
+  // AI"). One control drafts (empty body) or revises (non-empty body) the OPEN
+  // document via legal.template.ai_enhance, streamed the same way the
+  // per-service editor's "✨ AI" panel already does (lib/templateAiStream.ts).
+  const [aiText, setAiText] = useState('')
+  const [aiRunning, setAiRunning] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiAttachName, setAiAttachName] = useState('')
+  const [aiAttachText, setAiAttachText] = useState('')
+  const [aiAttaching, setAiAttaching] = useState(false)
+
   function load() {
     setError(null)
     callAttorneyMcp<{ templates: Template[] }>({ toolName: 'legal.template.list' })
@@ -307,27 +348,10 @@ export default function TemplatesPage() {
   }
   useEffect(load, [])
 
-  // Model + skill options for "Draft with AI" and the question library for variable
-  // coloring — all fetched once on mount, best-effort. The model defaults to the
-  // cheapest available Claude model (drafts are simple, so Haiku is plenty).
+  // The question library (for variable coloring) + the firm-wide field catalog —
+  // fetched once on mount, best-effort.
   useEffect(() => {
     let cancelled = false
-    callAttorneyMcp<{ models: AiModelOpt[] }>({ toolName: 'legal.assistant.models' })
-      .then((r) => {
-        if (cancelled) return
-        const claude = (r.models ?? []).filter((m) => m.provider === 'anthropic' && m.available)
-        setAiModels(claude)
-        const rank = (m: AiModelOpt) =>
-          /haiku/i.test(m.model) ? 0 : /sonnet/i.test(m.model) ? 1 : /opus/i.test(m.model) ? 2 : 3
-        const cheapest = [...claude].sort((a, b) => rank(a) - rank(b))[0]
-        setAiModelId((cur) => cur || cheapest?.id || '')
-      })
-      .catch(() => {})
-    callAttorneyMcp<{ skills: AiSkillOpt[] }>({ toolName: 'legal.skill.list' })
-      .then((r) => {
-        if (!cancelled) setAiSkills(r.skills ?? [])
-      })
-      .catch(() => {})
     callAttorneyMcp<{ questions: Array<{ token?: string }> }>({
       toolName: 'legal.question_template.list',
     })
@@ -442,60 +466,16 @@ export default function TemplatesPage() {
     return [...set].sort()
   }, [libraryTokens, draft?.variables, firmFieldEntries, mergeFields])
 
-  // Escape closes the "Draft with AI" modal (and restores focus to its trigger).
-  useEffect(() => {
-    if (!showAi) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && !aiBusy) {
-        setShowAi(false)
-        aiTriggerRef.current?.focus()
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [showAi, aiBusy])
-
-  // Per-template page setup (paper + font), persisted client-side only.
-  function loadPageSetup(id: string | null) {
-    let paperV: 'letter' | 'legal' = 'letter'
-    let fontV = 1
-    try {
-      const raw = localStorage.getItem(`tpl-pagesetup:${id ?? 'new'}`)
-      if (raw) {
-        const v = JSON.parse(raw) as { paper?: string; fontScale?: number }
-        if (v.paper === 'legal') paperV = 'legal'
-        if (
-          typeof v.fontScale === 'number' &&
-          (FONT_SCALES as readonly number[]).includes(v.fontScale)
-        )
-          fontV = v.fontScale
-      }
-    } catch {
-      /* ignore malformed/absent storage */
-    }
-    setPaper(paperV)
-    setFontScale(fontV)
+  function closeDraft() {
+    setDraft(null)
+    setAiText('')
+    setAiError(null)
+    setAiAttachName('')
+    setAiAttachText('')
+    setShowPreview(false)
   }
 
-  // The storage key for the open draft's page setup ('new' until first save).
-  // null when no draft is open. A primitive, so the persist effect below fires on
-  // paper/font/identity changes only — NOT on every keystroke (which replaces the
-  // whole draft object).
-  const activeSetupId = draft ? (draft.templateEntityId ?? 'new') : null
-
-  // Persist page setup whenever it changes for the open draft.
-  useEffect(() => {
-    if (!activeSetupId) return
-    try {
-      localStorage.setItem(`tpl-pagesetup:${activeSetupId}`, JSON.stringify({ paper, fontScale }))
-    } catch {
-      /* storage unavailable — view-only preference, safe to drop */
-    }
-  }, [paper, fontScale, activeSetupId])
-
   function edit(t: Template) {
-    setAiPrompt('')
-    loadPageSetup(t.templateEntityId)
     setDraft({
       templateEntityId: t.templateEntityId,
       name: t.name,
@@ -504,21 +484,16 @@ export default function TemplatesPage() {
       docKind: t.docKind ?? '',
       variables: t.variables ?? {},
     })
+    setAiText('')
+    setAiError(null)
     setSeedKey((k) => k + 1)
   }
 
   function newDraft() {
-    setAiPrompt('')
-    loadPageSetup(null)
     setDraft({ ...EMPTY_DRAFT })
+    setAiText('')
+    setAiError(null)
     setSeedKey((k) => k + 1)
-  }
-
-  // Start a fresh draft and open the AI brief — the list-view "Draft with AI"
-  // entry point (the in-editor button just opens the modal on the open draft).
-  function startAiDraft() {
-    newDraft()
-    setShowAi(true)
   }
 
   // Open the "how do you want to start?" chooser; lazy-load questionnaires once.
@@ -542,8 +517,6 @@ export default function TemplatesPage() {
   // Clone an existing template into a brand-new, unsaved draft (no entity id).
   function startFromClone(t: Template) {
     setShowNew(false)
-    setAiPrompt('')
-    loadPageSetup(null)
     setDraft({
       templateEntityId: null,
       name: `${t.name} (copy)`,
@@ -552,6 +525,8 @@ export default function TemplatesPage() {
       docKind: t.docKind ?? '',
       variables: t.variables ?? {},
     })
+    setAiText('')
+    setAiError(null)
     setSeedKey((k) => k + 1)
   }
 
@@ -569,8 +544,6 @@ export default function TemplatesPage() {
       variables[tok] = { type: 'text' }
       lines.push(`${f.label?.trim() || humanize(tok)}: {{${tok}}}`)
     }
-    setAiPrompt('')
-    loadPageSetup(null)
     setDraft({
       templateEntityId: null,
       name: q.name ? `${q.name} — document` : '',
@@ -579,10 +552,12 @@ export default function TemplatesPage() {
       docKind: '',
       variables,
     })
+    setAiText('')
+    setAiError(null)
     setSeedKey((k) => k + 1)
   }
 
-  // Field metadata edits from the Fields panel.
+  // Field metadata edits from the merge-fields rail.
   function onVariablesChange(next: TemplateVariables) {
     setDraft((d) => (d ? { ...d, variables: next } : d))
   }
@@ -599,41 +574,9 @@ export default function TemplatesPage() {
     editorRef.current?.insertVariable(id)
   }
 
-  async function generateWithAi(): Promise<boolean> {
-    if (!draft || !aiPrompt.trim()) return false
-    setAiBusy(true)
-    setError(null)
-    try {
-      // Fold any attached reference document into the brief, so the AI drafts from
-      // it. ai_draft is unchanged — the document rides along in `instructions`.
-      const instructions = aiAttachText.trim()
-        ? `${aiPrompt.trim()}\n\n--- Reference document${
-            aiAttachName ? ` (${aiAttachName})` : ''
-          } ---\n${aiAttachText.trim()}`
-        : aiPrompt.trim()
-      const r = await callAttorneyMcp<{ body: string }>({
-        toolName: 'legal.template.ai_draft',
-        input: {
-          instructions,
-          category: draft.category,
-          skillSlugs: aiSkillSlugs.length ? aiSkillSlugs : undefined,
-          modelId: aiModelId || undefined,
-        },
-      })
-      setDraft({ ...draft, body: r.body })
-      setSeedKey((k) => k + 1) // full-body replacement → re-seed the editor
-      return true
-    } catch (err) {
-      setError((err as Error).message)
-      return false
-    } finally {
-      setAiBusy(false)
-    }
-  }
-
   // Parse an uploaded file (PDF / Word / text) to plain text via the shared server
   // route (/api/attorney/templates/import). Reused by "import into body" and
-  // "attach as AI-draft context". Dev forwards the demo-session headers.
+  // "attach as AI context".
   async function parseFileToText(file: File): Promise<string> {
     const headers: Record<string, string> = {}
     if (process.env.NODE_ENV !== 'production') {
@@ -656,22 +599,16 @@ export default function TemplatesPage() {
     return data.text
   }
 
-  // Import a document into the body (appended to the canvas). Works from the list
-  // view too: if no draft is open yet, the import starts a fresh one.
+  // Import a document into the body (appended to the canvas).
   async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = '' // allow re-importing the same file
-    if (!file) return
-    const hadDraft = Boolean(draft)
+    if (!file || !draft) return
     setImporting(true)
     setError(null)
     try {
       const text = await parseFileToText(file)
-      setDraft((d) => {
-        const base = d ?? { ...EMPTY_DRAFT }
-        return { ...base, body: base.body ? `${base.body}\n\n${text}` : text }
-      })
-      if (!hadDraft) loadPageSetup(null) // fresh draft → default page setup
+      setDraft((d) => (d ? { ...d, body: d.body ? `${d.body}\n\n${text}` : text } : d))
       setSeedKey((k) => k + 1) // imported content → re-seed the editor
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -680,22 +617,71 @@ export default function TemplatesPage() {
     }
   }
 
-  // Attach a document as CONTEXT for the AI draft — its text is folded into the
-  // brief sent to legal.template.ai_draft (NOT inserted into the body), so the AI
-  // can draft from a sample/source document.
+  // Attach a document as CONTEXT for the AI bar — its text is folded into the
+  // instructions sent to legal.template.ai_enhance (NOT inserted into the body).
   async function onAttachAiFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
     setAiAttaching(true)
-    setError(null)
+    setAiError(null)
     try {
       setAiAttachText(await parseFileToText(file))
       setAiAttachName(file.name)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setAiError(err instanceof Error ? err.message : String(err))
     } finally {
       setAiAttaching(false)
+    }
+  }
+
+  // Draft (empty body) or revise (non-empty body) the open document with AI —
+  // the persistent inline bar's one action. Streams over SSE (a full document
+  // outlasts the serverless gateway's sync timeout) and applies the result once
+  // done, same pattern as the per-service editor's AiEnhancePanel.
+  async function runAiEdit() {
+    if (!draft || !aiText.trim()) return
+    const hasBody = draft.body.trim().length > 0
+    const instructions = aiAttachText.trim()
+      ? `${aiText.trim()}\n\n--- Reference document${
+          aiAttachName ? ` (${aiAttachName})` : ''
+        } ---\n${aiAttachText.trim()}`
+      : aiText.trim()
+    setAiRunning(true)
+    setAiError(null)
+    let acc = ''
+    try {
+      await streamTemplateAi(
+        {
+          mode: hasBody ? 'enhance' : 'draft',
+          category: draft.category,
+          instructions,
+          currentBody: hasBody ? draft.body : undefined,
+          fieldIds: Object.keys(draft.variables).length ? Object.keys(draft.variables) : undefined,
+        },
+        {
+          onText: (t) => {
+            acc += t
+          },
+          onDone: () => {
+            const out = acc.trim()
+            if (out) {
+              setDraft((d) => (d ? { ...d, body: out } : d))
+              setSeedKey((k) => k + 1)
+              setAiText('')
+              setAiAttachName('')
+              setAiAttachText('')
+            } else {
+              setAiError('The model returned nothing — try again.')
+            }
+          },
+          onError: (m) => setAiError(m),
+        },
+      )
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAiRunning(false)
     }
   }
 
@@ -731,7 +717,7 @@ export default function TemplatesPage() {
           },
         })
       } else {
-        const res = await callAttorneyMcp<{ template: { templateEntityId: string } }>({
+        await callAttorneyMcp({
           toolName: 'legal.template.create',
           input: {
             name: draft.name.trim(),
@@ -741,17 +727,8 @@ export default function TemplatesPage() {
             variables,
           },
         })
-        // Carry the page setup chosen during creation onto the saved template id
-        // so reopening it keeps the same paper/font (the create-time key is 'new').
-        try {
-          const raw = localStorage.getItem('tpl-pagesetup:new')
-          const newId = res?.template?.templateEntityId
-          if (raw && newId) localStorage.setItem(`tpl-pagesetup:${newId}`, raw)
-        } catch {
-          /* view-only preference — safe to drop */
-        }
       }
-      setDraft(null)
+      closeDraft()
       load()
     } catch (err) {
       setError((err as Error).message)
@@ -774,18 +751,14 @@ export default function TemplatesPage() {
         toolName: 'legal.template.retire',
         input: { templateEntityId: t.templateEntityId },
       })
-      if (draft?.templateEntityId === t.templateEntityId) setDraft(null)
+      if (draft?.templateEntityId === t.templateEntityId) closeDraft()
       load()
     } catch (err) {
       setError((err as Error).message)
     }
   }
 
-  const bodyTokens = draft
-    ? extractTokens(draft.body).filter(
-        (t) => !STANDARD_TOKENS.some((s) => s.id === t.toLowerCase()),
-      )
-    : []
+  const bodyTokens = draft ? extractTokens(draft.body) : []
 
   // HTML the editor mounts with. Recomputed only on a deliberate re-seed
   // (seedKey), never on every keystroke — so typing doesn't reset the editor.
@@ -796,39 +769,11 @@ export default function TemplatesPage() {
   const initialHtml = useMemo(() => markdownToHtml(draftBodyRef.current), [seedKey])
 
   return (
-    <main>
+    <main className="li-tpl">
       {confirmElement}
-      <PageHead
-        title="Templates"
-        actions={
-          !draft ? (
-            <>
-              <button className="primary" onClick={openNewChooser}>
-                New template
-              </button>
-              <button
-                type="button"
-                className="tpl-ai-btn"
-                onClick={startAiDraft}
-                title="Start a new template and draft it with AI (uses your Anthropic key)"
-              >
-                <SparklesIcon size={15} /> Draft with AI
-              </button>
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={importing}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
-              >
-                <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
-              </button>
-            </>
-          ) : undefined
-        }
-      />
 
-      {/* One hidden file input for BOTH the header and the in-editor "Import file"
-          buttons, mounted at page level so import works from the list view too. */}
+      {/* One hidden file input for import, mounted once — the editor's toolbar-
+          adjacent import button opens it. */}
       <input
         ref={fileRef}
         type="file"
@@ -836,8 +781,15 @@ export default function TemplatesPage() {
         style={{ display: 'none' }}
         onChange={onImportFile}
       />
+      <input
+        ref={aiAttachRef}
+        type="file"
+        accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+        style={{ display: 'none' }}
+        onChange={onAttachAiFile}
+      />
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <div className="alert alert-error li-tpl-alert">{error}</div>}
 
       {showNew && (
         <div className="tpl-modal-backdrop" onClick={() => setShowNew(false)}>
@@ -924,87 +876,156 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {draft && (
-        <section style={{ marginBottom: 'var(--space-5)' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-3)',
-              marginBottom: 'var(--space-3)',
-            }}
-          >
-            <h2>{draft.templateEntityId ? 'Edit template' : 'New template'}</h2>
-            <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-              <button
-                ref={aiTriggerRef}
-                type="button"
-                className="tpl-ai-btn"
-                onClick={() => setShowAi(true)}
-                title="Draft this template with AI (uses your Anthropic key)"
-              >
-                <SparklesIcon size={15} /> Draft with AI
-              </button>
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={importing}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
-              >
-                <FileTextIcon size={15} /> {importing ? 'Importing…' : 'Import file'}
-              </button>
+      {!draft && (
+        <>
+          <div className="li-tpl-gallery-head">
+            <h1 className="li-tpl-title">Templates</h1>
+            <button type="button" className="li-tpl-new-btn" onClick={openNewChooser}>
+              <PlusIcon size={16} />
+              New template
+            </button>
+          </div>
+
+          {templates === null && !error && (
+            <div className="loading-block" role="status">
+              <span className="spinner" /> Loading…
             </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
+          )}
+          {templates && templates.length === 0 && (
+            <p className="li-tpl-empty">
+              No templates yet. Create your first reusable document or email template.
+            </p>
+          )}
+          {templates && templates.length > 0 && (
+            <div className="li-tpl-grid">
+              {templates.map((t) => {
+                const preview = thumbPreview(t)
+                const tokenCount = extractTokens(t.body).length
+                const updated = new Date(t.updatedAt).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                })
+                const menuOpen = openMenuId === t.templateEntityId
+                return (
+                  <div key={t.templateEntityId} className="li-tpl-card-wrap">
+                    <button
+                      type="button"
+                      className="li-tpl-card"
+                      onClick={() => edit(t)}
+                      aria-label={`Open ${t.name || 'untitled template'}`}
+                    >
+                      <div className="li-tpl-card-thumbwrap">
+                        <DocumentSheet variant="thumb" className="li-tpl-card-thumb">
+                          <div className="li-tpl-thumb-heading">
+                            {renderTokenRuns(preview.heading)}
+                          </div>
+                          <div className="li-tpl-thumb-body">
+                            {preview.lines.map((l, i) => (
+                              <div key={i} className="li-tpl-thumb-line">
+                                {renderTokenRuns(l)}
+                              </div>
+                            ))}
+                          </div>
+                        </DocumentSheet>
+                      </div>
+                      <div className="li-tpl-card-meta">
+                        <div className="li-tpl-card-row">
+                          <span className="li-tpl-card-name">{t.name || '(untitled)'}</span>
+                          <span className="li-tpl-card-badge">{kindBadge(t)}</span>
+                        </div>
+                        <div className="li-tpl-card-sub">
+                          {tokenCount} merge token{tokenCount === 1 ? '' : 's'} · updated {updated}
+                        </div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      className="li-tpl-card-menu-btn"
+                      aria-label={`More actions for ${t.name || 'untitled template'}`}
+                      aria-expanded={menuOpen}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setOpenMenuId(menuOpen ? null : t.templateEntityId)
+                      }}
+                    >
+                      <MoreHorizontalIcon size={16} />
+                    </button>
+                    {menuOpen && (
+                      <div className="li-tpl-card-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            setModalTemplate(t)
+                          }}
+                        >
+                          Edit in window
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="li-tpl-card-menu-danger"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            void archive(t)
+                          }}
+                        >
+                          Retire
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {draft && (
+        <section className="li-tpl-editor">
+          <button type="button" className="li-tpl-back" onClick={closeDraft}>
+            <ChevronLeftIcon size={16} />
+            Templates
+          </button>
+
+          <div className="li-tpl-editor-head">
+            <div className="li-tpl-editor-headline">
+              <input
+                type="text"
+                className="li-tpl-name-input"
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="Untitled template"
+                aria-label="Template name"
+              />
+              <span className="li-tpl-kind-badge">{kindBadge(draft)}</span>
+            </div>
+            <div className="li-tpl-editor-actions">
               <button
                 type="button"
-                className={showFields ? 'primary' : undefined}
-                onClick={() => setShowFields((v) => !v)}
-                title="Configure each field's type, default, and whether it's required"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
-              >
-                <LayersIcon size={15} /> Fields
-              </button>
-              <button
-                type="button"
-                className={showPreview ? 'primary' : undefined}
+                className={`li-tpl-preview-toggle${showPreview ? ' active' : ''}`}
                 onClick={() => setShowPreview((v) => !v)}
-                title={
-                  showPreview
-                    ? 'Back to editing'
-                    : 'Preview the finished document with sample data (replaces the editor until toggled back)'
-                }
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}
+                aria-pressed={showPreview}
+                title="Preview the finished document with sample data, side by side"
               >
-                <EyeIcon size={15} /> {showPreview ? 'Edit' : 'Preview'}
+                <EyeIcon size={15} />
+                Preview
               </button>
-              <button className="primary" onClick={save} disabled={saving}>
-                {saving ? 'Saving…' : draft.templateEntityId ? 'Save changes' : 'Create template'}
-              </button>
-              <button onClick={() => setDraft(null)} disabled={saving}>
-                Cancel
+              <button type="button" className="li-tpl-save-btn" onClick={save} disabled={saving}>
+                {saving
+                  ? 'Saving…'
+                  : draft.templateEntityId
+                    ? 'Save new version'
+                    : 'Create template'}
               </button>
             </div>
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              gap: 'var(--space-4)',
-              flexWrap: 'wrap',
-              marginBottom: 'var(--space-3)',
-            }}
-          >
-            <label style={{ flex: '1 1 16rem' }}>
-              <span className="field-label">Name</span>
-              <input
-                type="text"
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder="e.g. Mutual NDA"
-              />
-            </label>
-            <label>
-              <span className="field-label">Type</span>
+          <div className="li-tpl-meta-row">
+            <label className="li-tpl-meta-field">
+              <span>Type</span>
               <select
                 value={draft.category}
                 disabled={!!draft.templateEntityId}
@@ -1015,8 +1036,8 @@ export default function TemplatesPage() {
               </select>
             </label>
             {draft.category === 'document' && (
-              <label>
-                <span className="field-label">Document kind (optional)</span>
+              <label className="li-tpl-meta-field">
+                <span>Document kind</span>
                 <DocKindCombobox
                   value={draft.docKind}
                   kinds={[
@@ -1030,368 +1051,135 @@ export default function TemplatesPage() {
                 />
               </label>
             )}
-            {draft.category === 'document' && (
-              <>
-                <label>
-                  <span className="field-label">Paper</span>
-                  <select
-                    value={paper}
-                    onChange={(e) => setPaper(e.target.value as 'letter' | 'legal')}
-                  >
-                    <option value="letter">Letter (8.5 × 11)</option>
-                    <option value="legal">Legal (8.5 × 14)</option>
-                  </select>
-                </label>
-                <label>
-                  <span className="field-label">Font size</span>
-                  <select value={fontScale} onChange={(e) => setFontScale(Number(e.target.value))}>
-                    <option value={0.9}>Small</option>
-                    <option value={1}>Normal</option>
-                    <option value={1.1}>Large</option>
-                    <option value={1.2}>Extra large</option>
-                  </select>
-                </label>
-              </>
-            )}
           </div>
 
-          {/* Click-to-insert token palette — collapsed by default; the ghost "+"
-              in the body and typing `{{` / `#` are the primary insert paths. */}
-          <div className="tpl-insert tpl-insert-collapsible">
+          {/* Persistent inline AI-edit bar (comp: always visible under the header). */}
+          <div className="li-tpl-ai-bar">
+            <GemSparkle size={18} />
+            <input
+              type="text"
+              className="li-tpl-ai-input"
+              value={aiText}
+              disabled={aiRunning}
+              onChange={(e) => setAiText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !aiRunning && aiText.trim()) {
+                  e.preventDefault()
+                  void runAiEdit()
+                }
+              }}
+              placeholder={
+                draft.body.trim()
+                  ? 'Draft or revise with AI — e.g. “add a severability clause”, “make it more formal”…'
+                  : 'Draft with AI — e.g. “a mutual NDA for a NC LLC, 2-year term”…'
+              }
+            />
+            {aiAttachName ? (
+              <span className="li-tpl-ai-chip" title={aiAttachName}>
+                <PaperclipIcon size={12} />
+                <span className="li-tpl-ai-chip-name">{aiAttachName}</span>
+                <button
+                  type="button"
+                  aria-label="Remove attached reference document"
+                  onClick={() => {
+                    setAiAttachName('')
+                    setAiAttachText('')
+                  }}
+                >
+                  <XIcon size={11} />
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="li-tpl-ai-icon-btn"
+                disabled={aiRunning || aiAttaching}
+                onClick={() => aiAttachRef.current?.click()}
+                title="Attach a reference document for AI context (optional)"
+                aria-label="Attach a reference document for AI context"
+              >
+                <PaperclipIcon size={14} />
+              </button>
+            )}
             <button
               type="button"
-              className="tpl-insert-toggle"
-              aria-expanded={showInsert}
-              onClick={() => setShowInsert((s) => !s)}
+              className="li-tpl-ai-icon-btn"
+              disabled={importing}
+              onClick={() => fileRef.current?.click()}
+              title={importing ? 'Importing…' : 'Import a document into the body'}
+              aria-label="Import a document into the body"
             >
-              <span className={`tpl-insert-caret${showInsert ? ' open' : ''}`} aria-hidden="true">
-                ▸
-              </span>
-              Insert a field
-              <span className="tpl-insert-count">{STANDARD_TOKENS.length + bodyTokens.length}</span>
-              <span className="tpl-insert-hint">
-                or type {'{{'} or # in the document, or click the + at your cursor
-              </span>
+              <FileTextIcon size={14} />
             </button>
-            {showInsert && (
-              <div className="tpl-insert-body">
-                {STANDARD_TOKENS.map((t) => (
-                  <button
-                    key={t.id}
-                    className="qb-pill"
-                    type="button"
-                    onClick={() => insertToken(t.id)}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-                {bodyTokens.map((t) => (
-                  <button
-                    key={t}
-                    className="qb-pill"
-                    type="button"
-                    onClick={() => insertToken(t)}
-                    title="A custom token already used in this template"
-                  >
-                    {humanize(t)}
-                  </button>
-                ))}
-              </div>
+            {aiRunning ? (
+              <span className="li-tpl-ai-busy" role="status" aria-live="polite">
+                <span className="li-tpl-ai-spin" aria-hidden="true" />
+                Editing…
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="li-tpl-ai-run"
+                onClick={() => void runAiEdit()}
+                disabled={!aiText.trim()}
+              >
+                Edit with AI
+              </button>
             )}
           </div>
+          {aiError && <div className="alert alert-error li-tpl-alert">{aiError}</div>}
 
-          {/* Fields panel — typed metadata per {{token}}, toggled from the header. */}
-          {showFields && (
-            <section className="tpl-fields-section">
-              <h3 className="tpl-fields-heading">Fields</h3>
-              <TemplateFieldsPanel
-                tokens={extractTokens(draft.body)}
-                variables={draft.variables}
-                onChange={onVariablesChange}
-              />
-            </section>
-          )}
-
-          {/* WYSIWYG canvas OR full-width live preview — an Edit/Preview switch,
-              not a split (beta feedback: side-by-side muddied the view). The
-              editor stays MOUNTED (display:none) while previewing so toggling
-              never re-mounts it or loses cursor/undo state. The body is stored as
-              markdown with {{tokens}}, round-tripped via the shared bridge. */}
-          <div
-            className="tpl-split"
-            // Page setup only applies to documents; emails fall back to the CSS
-            // defaults (so a document's legal/large choice never bleeds into an
-            // email draft, which has no controls to undo it).
-            style={
-              draft.category === 'document'
-                ? ({
-                    '--tpl-font-scale': fontScale,
-                    '--tpl-page-aspect': paper === 'legal' ? 1.647 : 1.294,
-                  } as React.CSSProperties)
-                : undefined
-            }
-          >
-            <div className="tpl-split-col" style={showPreview ? { display: 'none' } : undefined}>
+          <div className="li-tpl-workspace">
+            <div className="li-tpl-canvas-main">
               <TemplateEditor
+                variant="li"
+                aiRunning={aiRunning}
                 initialHtml={initialHtml}
                 placeholder={
                   draft.category === 'email'
-                    ? 'Write the email… type {{ or # (or click the + at your cursor) to drop a {{token}}.'
-                    : 'Dear {{client_name}}, …  — type {{ or # (or click the + at your cursor) to drop a {{token}}.'
+                    ? 'Write the email… type {{ or # to drop a {{token}}.'
+                    : 'Dear {{client_name}}, …  — type {{ or # to drop a {{token}}.'
                 }
                 onChange={onEditorChange}
                 editorRef={editorRef}
                 validateVariable={validateVariable}
                 variableNames={suggestVariables}
-              />
-            </div>
-            {showPreview && (
-              <div className="tpl-split-col">
-                <TemplatePreview body={draft.body} variables={draft.variables} />
-              </div>
-            )}
-          </div>
-
-          {showAi && (
-            <div
-              className="tpl-modal-backdrop"
-              onClick={() => {
-                if (!aiBusy) closeAi()
-              }}
-            >
-              <div
-                className="tpl-modal"
-                role="dialog"
-                aria-label="Draft with AI"
-                onClick={(e) => e.stopPropagation()}
               >
-                <div className="tpl-modal-head">
-                  <SparklesIcon size={16} />
-                  <span>Draft with AI</span>
-                  <button
-                    type="button"
-                    className="tpl-modal-x"
-                    onClick={closeAi}
-                    disabled={aiBusy}
-                    aria-label="Close"
-                  >
-                    <XIcon size={16} />
-                  </button>
-                </div>
-                <textarea
-                  autoFocus
-                  className="tpl-modal-input"
-                  value={aiPrompt}
-                  disabled={aiBusy}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder={
-                    draft.category === 'email'
-                      ? 'Describe the email to draft — e.g. “a warm engagement-confirmation email with next steps”. The draft will use {{tokens}} for anything filled in per client.'
-                      : 'Describe the document to draft — e.g. “a mutual NDA for a NC LLC, 2-year term”. The draft will use {{tokens}} for anything filled in per client or matter.'
-                  }
-                />
-                {/* Attach a reference document — its text is folded into the brief
-                    so the AI drafts from it (it is NOT inserted into the body). */}
-                <div className="tpl-ai-attach">
-                  <input
-                    id="tpl-ai-attach-input"
-                    type="file"
-                    accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                    style={{ display: 'none' }}
-                    onChange={onAttachAiFile}
-                  />
-                  {aiAttachName ? (
-                    <span className="tpl-ai-attach-chip" title={aiAttachName}>
-                      <FileTextIcon size={13} />
-                      <span className="tpl-ai-attach-name">{aiAttachName}</span>
-                      <button
-                        type="button"
-                        className="tpl-ai-attach-x"
-                        aria-label="Remove attached document"
-                        onClick={() => {
-                          setAiAttachName('')
-                          setAiAttachText('')
-                        }}
-                      >
-                        <XIcon size={12} />
-                      </button>
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="tpl-ai-attach-btn"
-                      disabled={aiBusy || aiAttaching}
-                      onClick={() => document.getElementById('tpl-ai-attach-input')?.click()}
-                    >
-                      <FileTextIcon size={14} />
-                      {aiAttaching ? 'Reading…' : 'Attach a document (optional)'}
-                    </button>
-                  )}
-                </div>
-                {!aiBusy && (
-                  <div className="tpl-ai-opts">
-                    <label className="tpl-ai-opt">
-                      <span className="tpl-ai-opt-lbl">Model</span>
-                      <select
-                        className="tpl-ai-opt-select"
-                        value={aiModelId}
-                        onChange={(e) => setAiModelId(e.target.value)}
-                      >
-                        {aiModels.length === 0 && <option value="">Default</option>}
-                        {aiModels.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="tpl-ai-skillpick">
-                      <span className="tpl-ai-opt-lbl">Skills (optional — force a playbook)</span>
-                      {aiSkillSlugs.length > 0 && (
-                        <div className="tpl-ai-skillchips">
-                          {aiSkillSlugs.map((slug) => (
-                            <span key={slug} className="tpl-ai-skillchip">
-                              {aiSkills.find((x) => x.slug === slug)?.name ?? slug}
-                              <button
-                                type="button"
-                                onClick={() => setAiSkillSlugs((p) => p.filter((x) => x !== slug))}
-                                aria-label="Remove skill"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <input
-                        className="tpl-ai-skillsearch"
-                        value={aiSkillQuery}
-                        onChange={(e) => setAiSkillQuery(e.target.value)}
-                        placeholder="Search legal skills to force…"
-                      />
-                      {aiSkillQuery.trim() &&
-                        (() => {
-                          const q = aiSkillQuery.toLowerCase()
-                          const matches = aiSkills
-                            .filter(
-                              (s) =>
-                                !aiSkillSlugs.includes(s.slug) &&
-                                (s.name.toLowerCase().includes(q) ||
-                                  s.slug.toLowerCase().includes(q) ||
-                                  s.practiceArea.toLowerCase().includes(q)),
-                            )
-                            .slice(0, 8)
-                          return (
-                            <div className="tpl-ai-skilllist">
-                              {matches.length === 0 ? (
-                                <div className="tpl-ai-skillempty">No matching skills.</div>
-                              ) : (
-                                matches.map((s) => (
-                                  <button
-                                    key={s.slug}
-                                    type="button"
-                                    className="tpl-ai-skillopt"
-                                    onClick={() => {
-                                      setAiSkillSlugs((p) => [...p, s.slug])
-                                      setAiSkillQuery('')
-                                    }}
-                                  >
-                                    <span>{s.name}</span>
-                                    <small>{s.practiceArea}</small>
-                                  </button>
-                                ))
-                              )}
-                            </div>
-                          )
-                        })()}
-                    </div>
-                  </div>
+                {showPreview && (
+                  <TemplateSampleSheet body={draft.body} variables={draft.variables} />
                 )}
-                {aiBusy && (
-                  <div className="tpl-drafting" role="status" aria-live="polite">
-                    <div className="tpl-drafting-label">
-                      <SparklesIcon size={14} /> Drafting your{' '}
-                      {draft.category === 'email' ? 'email' : 'document'}…
-                    </div>
-                    <div className="tpl-drafting-lines" aria-hidden="true">
-                      <span style={{ width: '92%' }} />
-                      <span style={{ width: '78%' }} />
-                      <span style={{ width: '85%' }} />
-                      <span style={{ width: '66%' }} />
-                      <span style={{ width: '80%' }} />
-                    </div>
-                  </div>
-                )}
-                <div className="tpl-modal-actions">
-                  <button
-                    type="button"
-                    className="tpl-ai-btn"
-                    disabled={aiBusy || !aiPrompt.trim()}
-                    onClick={async () => {
-                      const ok = await generateWithAi()
-                      if (ok) closeAi()
-                    }}
-                  >
-                    <SparklesIcon size={15} /> {aiBusy ? 'Drafting…' : 'Generate'}
-                  </button>
-                  <button type="button" onClick={closeAi} disabled={aiBusy}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
+              </TemplateEditor>
             </div>
-          )}
-        </section>
-      )}
-
-      {templates === null && !error && (
-        <div className="loading-block" role="status">
-          <span className="spinner" /> Loading…
-        </div>
-      )}
-      {templates && templates.length === 0 && !draft && (
-        <section>
-          <p className="text-muted">
-            No templates yet. Create your first reusable document or email template.
-          </p>
-        </section>
-      )}
-      {templates && templates.length > 0 && (
-        <section>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Document kind</th>
-                  <th>Updated</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {templates.map((t) => (
-                  <tr key={t.templateEntityId}>
-                    <td>{t.name || '(untitled)'}</td>
-                    <td>
-                      <span className={`badge ${t.category === 'email' ? 'info' : ''}`}>
-                        {t.category}
-                      </span>
-                    </td>
-                    <td>{t.docKind ? humanKind(t.docKind) : '—'}</td>
-                    <td>{new Date(t.updatedAt).toLocaleDateString()}</td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button onClick={() => setModalTemplate(t)}>Edit in window</button>{' '}
-                      <button onClick={() => edit(t)}>Edit</button>{' '}
-                      <button onClick={() => archive(t)}>Retire</button>
-                    </td>
-                  </tr>
+            <aside className="li-tpl-rail">
+              <div className="li-tpl-rail-title">Merge fields</div>
+              <p className="li-tpl-rail-hint">
+                Each <code className="li-token-chip">{'{{token}}'}</code> in the document is filled
+                from these fields at generation time.
+              </p>
+              <TemplateFieldsPanel
+                tokens={bodyTokens}
+                variables={draft.variables}
+                onChange={onVariablesChange}
+                onInsert={insertToken}
+              />
+              <div className="li-tpl-rail-subtitle">Standard fields</div>
+              <div className="li-tpl-standard-chips">
+                {STANDARD_TOKENS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="li-tpl-standard-chip"
+                    onClick={() => insertToken(t.id)}
+                  >
+                    {t.label}
+                  </button>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </aside>
           </div>
         </section>
       )}
+
       {/* UI-BUILDER-FIX-1 Phase 9: the shared edit-in-modal (view / rich-text
           edit / AI-regenerate via worker_job / save) — no navigation. */}
       {modalTemplate && (
@@ -1402,5 +1190,19 @@ export default function TemplatesPage() {
         />
       )}
     </main>
+  )
+}
+
+// The comp's side-by-side "Preview · sample data" page — a second DocumentSheet
+// `editor` page rendering the SAME body merged against sample data (the shared
+// preview engine, lib/templatePreview.ts) instead of the editable canvas.
+function TemplateSampleSheet({ body, variables }: { body: string; variables: TemplateVariables }) {
+  const { html } = useMemo(() => buildPreview(body, undefined, variables), [body, variables])
+  return (
+    <DocumentSheet variant="editor" serif className="li-tpl-page li-tpl-page--preview">
+      <span className="li-tpl-preview-tag">Preview · sample data</span>
+      {/* html is sanitized by renderDocumentHtml (lib/documentHtml.ts) via buildPreview. */}
+      <div className="li-tpl-page-body" dangerouslySetInnerHTML={{ __html: html }} />
+    </DocumentSheet>
   )
 }

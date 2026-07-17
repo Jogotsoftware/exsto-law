@@ -464,3 +464,19 @@ export const UploadIcon = (p: IconProps) => (
     <line x1="12" y1="3" x2="12" y2="15" />
   </Svg>
 )
+
+export const StrikethroughIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M16 4H9a3 3 0 0 0-2.83 4" />
+    <path d="M14 12a4 4 0 0 1 0 8H6" />
+    <line x1="4" x2="20" y1="12" y2="12" />
+  </Svg>
+)
+
+export const MoreHorizontalIcon = (p: IconProps) => (
+  <Svg {...p} fill="currentColor" stroke="none">
+    <circle cx="5" cy="12" r="1.6" />
+    <circle cx="12" cy="12" r="1.6" />
+    <circle cx="19" cy="12" r="1.6" />
+  </Svg>
+)
