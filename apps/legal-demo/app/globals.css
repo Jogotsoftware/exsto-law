@@ -11517,6 +11517,7 @@ svg.lucide {
   flex-direction: column;
 }
 .li-topbar {
+  position: relative;
   height: 64px;
   flex: 0 0 auto;
   display: flex;
@@ -11526,15 +11527,21 @@ svg.lucide {
   background: var(--li-topbar-bg);
   color: #fff;
 }
+/* Founder direction 2026-07-17: the firm wordmark sits CENTERED on the bar
+   (overriding the comp's left placement). Absolutely centered so the
+   right-side controls can't push it off-center; pointer-events off so an
+   expanded search overlapping it stays clickable. */
 .li-topbar-firm {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
   font-family: var(--font-serif), 'EB Garamond', Georgia, serif;
   font-size: 24px;
   font-weight: 600;
   letter-spacing: 0.01em;
   color: #fff;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .li-topbar-spacer {
   flex: 1 1 auto;
