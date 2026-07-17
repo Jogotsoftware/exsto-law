@@ -20,6 +20,12 @@ export interface EnableProposal {
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
+// Attorneys never see snake_case: "eviction_filing" → "Eviction Filing" (founder
+// walk — the enable card was showing the raw service slug as its title).
+function humanizeSlug(slug: string): string {
+  return slug.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 // The inline approval card for the TERMINAL Enable step (Build-Wizard Phase 6). It is
 // the HUMAN GATE that makes the service LIVE: clicking Approve POSTs to the
 // enable-from-ai route, which calls legal.service.set_active(true) — flipping the
@@ -89,7 +95,7 @@ export function EnableProposalCard({
           artifact: 'enable',
           link: data.link,
           serviceKey: data.serviceKey || proposal.serviceKey,
-          label: data.label || `Service "${proposal.serviceKey}" (live)`,
+          label: data.label || `Service "${humanizeSlug(proposal.serviceKey)}" (live)`,
         })
       }
     } catch (e) {
@@ -119,7 +125,7 @@ export function EnableProposalCard({
   return (
     <ProposalCardShell
       kind="Review & publish"
-      title={proposal.serviceKey}
+      title={humanizeSlug(proposal.serviceKey)}
       meta="final step"
       footer={
         approveError ? (
