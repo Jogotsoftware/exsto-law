@@ -5034,183 +5034,6 @@ button.danger.outline:hover:not(:disabled) {
   background: var(--danger-soft);
 }
 
-/* ── Feedback assistant (floating chat widget) ───────────────────────────── */
-.feedback-fab {
-  position: fixed;
-  right: 1.25rem;
-  bottom: 1.25rem;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  padding: 0;
-  background: var(--accent);
-  color: var(--gold-400);
-  border: none;
-  border-radius: var(--radius-full);
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.18);
-  cursor: pointer;
-  transition:
-    transform 0.12s ease,
-    box-shadow 0.12s ease;
-}
-.feedback-fab:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.24);
-}
-
-.feedback-panel {
-  position: fixed;
-  right: 1.25rem;
-  bottom: 1.25rem;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  /* Larger default (beta ask). An inline width/height from the drag-to-resize
-     handle overrides these; the min() keeps it from ever exceeding the viewport. */
-  width: min(440px, calc(100vw - 2rem));
-  height: min(660px, calc(100vh - 2.5rem));
-  max-width: calc(100vw - 2rem);
-  max-height: calc(100vh - 2.5rem);
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.22);
-  overflow: hidden;
-}
-
-/* Drag handle in the panel's top-left corner (its only free corner — it's
-   pinned bottom-right). The bracket glyph cues a resize grip. */
-.feedback-panel-resize {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 22px;
-  height: 22px;
-  z-index: 3;
-  cursor: nwse-resize;
-  touch-action: none;
-  border-top-left-radius: var(--radius-xl);
-}
-.feedback-panel-resize::before {
-  content: '';
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  width: 8px;
-  height: 8px;
-  border-top: 2px solid var(--muted);
-  border-left: 2px solid var(--muted);
-  border-top-left-radius: 3px;
-  opacity: 0.5;
-  transition: opacity 0.12s ease;
-}
-.feedback-panel-resize:hover::before {
-  opacity: 1;
-}
-
-/* In the floating panel the message list fills the available height (so a taller,
-   resized panel actually shows more), and is the single scroll region — the body
-   itself doesn't scroll. The embedded chat (outside .feedback-panel) keeps its
-   own 52vh cap. */
-.feedback-panel .feedback-panel-body {
-  overflow: hidden;
-}
-.feedback-panel .uac {
-  flex: 1;
-  min-height: 0;
-}
-.feedback-panel .uac-messages {
-  flex: 1;
-  max-height: none;
-}
-
-.feedback-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.7rem 0.9rem;
-  border-bottom: 1px solid var(--border-soft);
-  background: var(--accent-attorney-soft);
-}
-.feedback-panel-title {
-  font-weight: 600;
-  font-size: 0.92rem;
-}
-.feedback-panel-close {
-  display: inline-flex;
-  padding: 0.25rem;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  line-height: 0;
-}
-.feedback-panel-close:hover {
-  color: var(--fg);
-}
-
-.feedback-panel-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0.9rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-.feedback-bubble {
-  position: relative;
-  max-width: 85%;
-  padding: 0.55rem 0.75rem;
-  border-radius: var(--radius-lg);
-  font-size: 0.88rem;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-/* iMessage-style corner tail: a small triangle merging with the bubble's bottom
-   corner and pointing outward toward its sender's side. Colored to match the
-   bubble so it reads as part of it. */
-.feedback-bubble::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  width: 0;
-  height: 0;
-  border: 5px solid transparent;
-  border-bottom: 0;
-}
-.feedback-bubble-user {
-  align-self: flex-end;
-  background: var(--accent);
-  color: white;
-  border-bottom-right-radius: var(--radius-sm);
-  /* Reserve the tail's overhang inside the bubble's own box so the tail reaches
-     the container edge without spilling past it (the message list scrolls). */
-  margin-right: 4px;
-}
-.feedback-bubble-user::after {
-  right: -4px;
-  border-left-color: var(--accent); /* wedge points right, off the right corner */
-  border-right: 0;
-}
-.feedback-bubble-assistant {
-  align-self: flex-start;
-  background: var(--border-soft);
-  color: var(--fg);
-  border-bottom-left-radius: var(--radius-sm);
-  margin-left: 4px;
-}
-.feedback-bubble-assistant::after {
-  left: -4px;
-  border-right-color: var(--border-soft); /* wedge points left, off the left corner */
-  border-left: 0;
-}
-.feedback-bubble-pending {
-  color: var(--muted);
-}
 /* Copy affordance on an assistant reply — floats at the bubble's bottom-right
    (clear of the tail, which sits bottom-left), hidden until the bubble is
    hovered or its button is focused (keyboard). Has its own surface fill so it
@@ -5224,10 +5047,6 @@ button.danger.outline:hover:not(:disabled) {
   margin-top: 0.35rem;
   opacity: 0;
   transition: opacity 0.12s ease;
-}
-.feedback-bubble-assistant:hover .uac-reply-actions,
-.feedback-bubble-assistant:focus-within .uac-reply-actions {
-  opacity: 1;
 }
 .uac-reply-btn {
   display: inline-flex;
@@ -5341,75 +5160,6 @@ button.danger.outline:hover:not(:disabled) {
   flex-direction: column;
   gap: 0.55rem;
   min-height: 0;
-}
-
-/* Toolbar: settings + beta on the left, model name + context toggle on the right */
-.uac-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.uac-toolbar-spacer {
-  flex: 1;
-}
-.uac-iconbtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  /* reset the global `button` padding (0.55rem 1rem) — on a fixed 34px square it
-     overflows the width and squeezes the icon to zero (invisible icons). */
-  padding: 0;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: white;
-  color: var(--fg);
-  cursor: pointer;
-}
-.uac-iconbtn svg {
-  display: block;
-}
-.uac-iconbtn:hover {
-  color: var(--fg);
-  background: var(--surface);
-  border-color: var(--accent);
-}
-.uac-iconbtn.active {
-  background: var(--accent-attorney-soft);
-  color: var(--fg);
-  border-color: var(--accent);
-}
-.uac-model-name {
-  font-size: 0.76rem;
-  color: var(--muted);
-  max-width: 130px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.uac-web-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-}
-.uac-ctx {
-  font-size: 0.74rem;
-  font-weight: 500;
-  padding: 0.25rem 0.6rem;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.uac-ctx.on {
-  background: var(--accent-attorney-soft);
-  border-color: var(--accent);
-  color: var(--fg);
-  font-weight: 600;
 }
 
 /* Settings / beta popovers */
@@ -5587,45 +5337,6 @@ button.danger.outline:hover:not(:disabled) {
   transform: translateX(16px);
 }
 
-/* Beta feedback form */
-.uac-beta-head {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-.uac-beta-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-weight: 600;
-  font-size: 0.85rem;
-}
-.uac-beta-sub {
-  font-size: 0.74rem;
-  color: var(--muted);
-}
-.uac-beta-text {
-  width: 100%;
-  resize: vertical;
-  font-family: inherit;
-  font-size: 0.85rem;
-  padding: 0.45rem 0.55rem;
-}
-.uac-beta-send {
-  align-self: flex-start;
-}
-.uac-beta-done {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-  color: var(--accent);
-}
-.uac-beta-done > span:first-child {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
 /* The substrate event id, shown as a small reference chip ("ref a1b2c3d4"). */
 .uac-beta-ref {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -5906,31 +5617,6 @@ button.danger.outline:hover:not(:disabled) {
 .uac-composer-wrap {
   position: relative;
 }
-.uac-skillbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.35rem 0.1rem 0.1rem;
-}
-.uac-skilltrigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.15rem 0.55rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-.uac-skilltrigger:hover,
-.uac-skilltrigger.is-open {
-  color: var(--text, inherit);
-  border-color: var(--accent, #6366f1);
-}
 .uac-skill-pill {
   display: inline-flex;
   align-items: center;
@@ -6182,200 +5868,6 @@ button.danger.outline:hover:not(:disabled) {
   color: #fff;
 }
 
-/* Build-mode banner (Phase 7) — the light cue the dock is mid-build. Mirrors the
-   feedback-mode banner's shape so the two modes feel consistent. */
-.uac-buildmode {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border);
-  background: var(--accent-attorney-soft);
-}
-.uac-buildmode-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.uac-buildmode-sub {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--text-xs);
-  color: var(--muted);
-}
-.uac-buildmode-exit {
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg);
-  font-size: var(--text-xs);
-  padding: 3px 10px;
-  cursor: pointer;
-}
-.uac-buildmode-exit:hover {
-  background: rgba(127, 127, 127, 0.1);
-}
-
-/* Structured interview QuestionCard (Phase 7) — the click-to-answer card that makes
-   the guided build feel like a wizard. Shares the doc-card frame for consistency. */
-.uac-qcard {
-  margin-top: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--card, #fff);
-}
-/* Click-through interview stepper (QuestionBatch): one question at a time. */
-.uac-qbatch {
-  margin-top: var(--space-2);
-}
-.uac-qbatch .uac-qcard {
-  margin-top: 6px;
-}
-.uac-qbatch-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.uac-qbatch-back {
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--fg);
-  border-radius: 6px;
-  padding: 3px 8px;
-  font-size: var(--text-xs, 0.78rem);
-  cursor: pointer;
-}
-.uac-qbatch-back:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.uac-qbatch-count {
-  font-size: var(--text-xs, 0.78rem);
-  color: var(--muted);
-  font-weight: 600;
-}
-.uac-qbatch-dots {
-  display: inline-flex;
-  gap: 5px;
-  margin-left: auto;
-  align-items: center;
-}
-.uac-qbatch-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--border);
-}
-.uac-qbatch-dot.is-done {
-  background: var(--accent, #b8935a);
-}
-.uac-qbatch-dot.is-current {
-  outline: 2px solid var(--accent, #b8935a);
-  outline-offset: 1px;
-}
-.uac-qbatch-done {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 6px;
-  font-size: var(--text-xs, 0.78rem);
-  color: var(--muted);
-}
-.uac-qcard-question {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--fg);
-  margin-bottom: var(--space-2);
-}
-.uac-qcard-choices {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: var(--space-2);
-}
-.uac-qcard-choice {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  text-align: left;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--fg);
-  cursor: pointer;
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease;
-}
-.uac-qcard-choice:hover,
-.uac-qcard-choice.is-on {
-  border-color: var(--accent);
-  background: var(--accent-attorney-soft);
-}
-.uac-qcard-choice-label {
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
-.uac-qcard-choice-hint {
-  font-size: var(--text-xs);
-  color: var(--muted);
-}
-.uac-qcard-textrow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.uac-qcard-text {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: var(--text-sm);
-  background: var(--card, #fff);
-  color: var(--fg);
-}
-/* The text-row submit reuses .uac-send (the chat composer's send) — one send
-   affordance app-wide. The row centers it against the input via align-items. */
-/* The answered state — replaces the buttons/input (no raw user bubble), so the
-   answered question reads as a clean record of what was chosen or typed. NOT a pill:
-   a free-text answer can be a full paragraph, so this is a left-aligned rounded block
-   that wraps naturally and reads at any length (a one-word choice still looks tidy). */
-.uac-qcard-answered {
-  display: flex;
-}
-.uac-qcard-answerchip {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 6px;
-  max-width: 100%;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: var(--surface-2, #f1f5f9);
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  line-height: 1.45;
-  text-align: left;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-/* Answered = settled, not a live selection — the chip reads muted/gray rather
-   than accent-colored so a fully answered question looks locked, not editable. */
-.uac-qcard-answerchip svg {
-  flex: 0 0 auto;
-  margin-top: 3px;
-  color: var(--muted);
-}
 /* The toolbar "Context" control popover (lean / balanced / full / secure). */
 .uac-ctxmenu-wrap {
   position: relative;
@@ -6480,39 +5972,6 @@ button.danger.outline:hover:not(:disabled) {
   gap: 0.4rem;
 }
 
-/* Source menu (upload / matter document) above the paperclip. */
-.uac-attach-menu {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
-  z-index: 5;
-  min-width: 200px;
-  display: flex;
-  flex-direction: column;
-  padding: 0.25rem;
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
-}
-.uac-attach-menu-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: 100%;
-  text-align: left;
-  padding: 0.4rem 0.5rem;
-  font-size: 0.82rem;
-  color: var(--fg);
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm, 6px);
-  cursor: pointer;
-}
-.uac-attach-menu-item:hover {
-  background: var(--surface);
-}
-
 /* Staged attachments above the composer, and the read-only chips on a bubble. */
 .uac-staged-attachments,
 .uac-staged-skills,
@@ -6576,13 +6035,6 @@ button.danger.outline:hover:not(:disabled) {
   }
 }
 
-.feedback-panel-foot {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.5rem;
-  padding: 0.7rem 0.75rem;
-  border-top: 1px solid var(--border-soft);
-}
 .feedback-input {
   flex: 1;
   resize: none;
@@ -10799,8 +10251,13 @@ svg.lucide {
    (bk- family) and shared primitives keep reading the legacy :root values
    untouched. (Never write a star immediately followed by a slash in this
    comment — it terminates the comment early and breaks the CSS minifier.)
+   (WP-L: the floating assistant panel + FAB mount OUTSIDE .li-shell — they are
+   fixed overlays, siblings of the shell in the attorney layout — so they carry
+   the token scope themselves.)
    ========================================================================== */
-.li-shell {
+.li-shell,
+.li-uac-panel,
+.li-uac-fab {
   /* chrome */
   --li-rail-bg: #14213d;
   --li-rail-fg: #aeb8cc;
@@ -19559,6 +19016,1101 @@ a.li-cal-agenda-card:hover {
   flex-direction: column;
   gap: 8px;
   padding: 10px 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WP-L · Assistant + service builder (li-uac-) — Legal Instruments comp
+   (docs/design/legal-instruments § ASSISTANT FAB + PANEL). One family, appended
+   last. The inner chat keeps its uac- machinery classes; this family carries the
+   comp chrome: FAB, panel, navy header, build strip, empty-state starter cards,
+   guided flows, proposal cards, menus, model pill.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── FAB (comp: chat bubble + gemstar cluster, blue drop-shadow) ─────────── */
+.li-uac-fab {
+  position: fixed;
+  right: 30px;
+  bottom: 28px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  filter: drop-shadow(0 6px 16px rgba(66, 133, 244, 0.35));
+  transition: transform 0.18s ease;
+}
+.li-uac-fab:hover:not(:disabled) {
+  background: none;
+  transform: scale(1.12) rotate(6deg);
+}
+
+/* ── Panel shell (comp: 20px radius, deep shadow, resizable corner) ──────── */
+.li-uac-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: min(440px, calc(100vw - 48px));
+  height: min(660px, calc(100vh - 48px));
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  background: #fff;
+  border: 1px solid #e6eaf2;
+  border-radius: 20px;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.32);
+  overflow: hidden;
+}
+.li-uac-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 26px;
+  height: 26px;
+  z-index: 5;
+  cursor: nwse-resize;
+  touch-action: none;
+  color: #aebbd4;
+}
+.li-uac-resize svg {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  opacity: 0.55;
+  transition: opacity 0.12s ease;
+}
+.li-uac-resize:hover svg {
+  opacity: 1;
+}
+.li-uac-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.li-uac-panel-body .uac {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The chat column itself: header / (strip|banners) / messages / composer. */
+.li-uac {
+  gap: 0;
+}
+.li-uac .uac-messages {
+  flex: 1;
+  max-height: none;
+  min-height: 120px;
+  padding: 18px 16px;
+  gap: 16px;
+  background: linear-gradient(180deg, #fbfcfe, #f5f8fc);
+}
+.li-uac .uac-composer-wrap {
+  border-top: 1px solid #eef1f6;
+  background: #fff;
+  padding: 12px 14px;
+}
+.li-uac .uac-popover {
+  margin: 10px 14px 0;
+}
+.li-uac .uac-fbmode {
+  margin: 10px 14px 0;
+}
+.li-uac .uac-composer {
+  border-radius: 15px;
+  border-color: var(--li-border-input);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+}
+.li-uac .uac-send {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--li-gold-deep);
+}
+.li-uac .uac-send:hover:not(:disabled) {
+  background: #f4f6fb;
+  color: var(--li-gold-text);
+}
+
+/* ── Header (comp: navy gradient, gemstar, model status, icon buttons) ───── */
+.li-uac-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, #1f3052, #182643);
+  color: #fff;
+}
+.li-uac-head-id {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.li-uac-head-text {
+  line-height: 1.1;
+  min-width: 0;
+}
+.li-uac-head-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.li-uac-head-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  min-width: 0;
+}
+.li-uac-head-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #5bd08a;
+}
+.li-uac-head-model {
+  font-size: 11.5px;
+  color: #aebbd4;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li-uac-head-web {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #aebbd4;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.li-uac-scopechip {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 20px;
+  background: transparent;
+  color: #aebbd4;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.li-uac-scopechip:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.li-uac-scopechip.on {
+  border-color: rgba(198, 169, 104, 0.7);
+  color: #e6d6ae;
+}
+.li-uac-head-btns {
+  display: flex;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.li-uac-headbtn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 9px;
+  background: transparent;
+  border: none;
+  color: #aebbd4;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-uac-headbtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.li-uac-headbtn.active {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+/* ── Build-mode progress strip (comp: phase label, step n of 6, segments) ── */
+.li-uac-buildstrip {
+  flex: 0 0 auto;
+  padding: 12px 16px 13px;
+  background: #fff;
+  border-bottom: 1px solid #eef1f6;
+}
+.li-uac-buildstrip-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.li-uac-buildstrip-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--li-navy);
+  white-space: nowrap;
+}
+.li-uac-buildstrip-phase {
+  font-size: 12px;
+  color: var(--li-muted-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li-uac-buildstrip-step {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--li-muted-2);
+  white-space: nowrap;
+}
+.li-uac-buildstrip-exit {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  background: transparent;
+  border: none;
+  color: #a8b2c6;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-uac-buildstrip-exit:hover:not(:disabled) {
+  background: #f4f6fb;
+  color: #48546e;
+}
+.li-uac-buildstrip-segs {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+}
+.li-uac-buildstrip-seg {
+  flex: 1 1 0;
+  height: 4px;
+  border-radius: 2px;
+  background: #eaedf3;
+}
+.li-uac-buildstrip-seg.is-on {
+  background: linear-gradient(90deg, #4285f4, #9b72cb);
+}
+
+/* ── Empty state (comp: serif greeting + starter suggestion cards) ───────── */
+.li-uac-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 34px 8px 8px;
+}
+.li-uac-empty-title {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 27px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--li-navy);
+}
+.li-uac-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 22px;
+  width: 100%;
+}
+.li-uac-starter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e4e8f0;
+  border-radius: 11px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.li-uac-starter:hover:not(:disabled) {
+  border-color: var(--li-gold);
+  background: #fcfaf4;
+}
+.li-uac-starter:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.li-uac-starter-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--li-gold-deep);
+  flex: 0 0 auto;
+}
+
+/* ── Messages (comp: navy user bubble, bubble-less serif assistant prose) ── */
+.li-uac-msg {
+  min-width: 0;
+}
+.li-uac-msg-user {
+  align-self: flex-end;
+  max-width: 86%;
+  background: var(--li-navy);
+  color: #fff;
+  border-radius: 15px 15px 5px 15px;
+  padding: 10px 14px;
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.li-uac-msg-assistant {
+  align-self: stretch;
+  max-width: 100%;
+  color: var(--li-body);
+}
+.li-uac-msg-assistant > .assistant-md {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--li-body);
+}
+.li-uac-msg-assistant:hover .uac-reply-actions,
+.li-uac-msg-assistant:focus-within .uac-reply-actions {
+  opacity: 1;
+}
+
+/* ── Guided flows (matter picker / new-matter walk) + question chips ─────── */
+.li-uac-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.li-uac-flow-loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-muted-2);
+}
+.li-uac-flow-cancel {
+  align-self: flex-start;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  color: var(--li-muted-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-uac-flow-cancel:hover:not(:disabled) {
+  background: transparent;
+  color: #48546e;
+  text-decoration: underline;
+}
+.li-uac-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.li-uac-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e4e8f0;
+  border-radius: 11px;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--li-navy);
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+.li-uac-opt:hover:not(:disabled) {
+  border-color: var(--li-navy);
+  background: #f7f9fc;
+}
+.li-uac-opt-radio {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1.5px solid #c7d0e0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.li-uac-opt-radio.is-on {
+  background: var(--li-navy);
+  border-color: var(--li-navy);
+}
+.li-uac-opt-text {
+  min-width: 0;
+}
+.li-uac-opt-label {
+  display: block;
+}
+.li-uac-opt-hint {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--li-muted-2);
+  margin-top: 1px;
+}
+.li-uac-answered {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-ok);
+  background: var(--li-ok-bg);
+  border-radius: 20px;
+  padding: 4px 12px;
+}
+.li-uac-flow-inputrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid var(--li-border-input);
+  border-radius: 11px;
+  padding: 4px 4px 4px 13px;
+}
+.li-uac-flow-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--li-navy);
+  padding: 6px 0;
+  box-shadow: none;
+}
+.li-uac-flow-input:focus {
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+.li-uac-flow-submit {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: var(--li-navy);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-uac-flow-submit:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+}
+.li-uac-flow-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.li-uac-qcard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.li-uac-qcard-q {
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--li-body);
+}
+.li-uac-qbatch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.li-uac-qbatch-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--li-muted-2);
+}
+.li-uac-qbatch-back {
+  padding: 4px 10px;
+  background: #fff;
+  border: 1px solid #e4e8f0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #48546e;
+  cursor: pointer;
+}
+.li-uac-qbatch-back:hover:not(:disabled) {
+  border-color: #b7c2d6;
+  color: var(--li-navy);
+  background: #f7f9fc;
+}
+.li-uac-qbatch-back:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.li-uac-qbatch-count {
+  font-weight: 600;
+}
+.li-uac-qbatch-dots {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.li-uac-qbatch-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e1e6f0;
+}
+.li-uac-qbatch-dot.is-done {
+  background: var(--li-ok);
+}
+.li-uac-qbatch-dot.is-current {
+  background: var(--li-navy);
+}
+.li-uac-qbatch-done {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-ok);
+  background: var(--li-ok-bg);
+  border-radius: 20px;
+  padding: 4px 12px;
+}
+
+/* ── Proposal cards (comp: gradient header + kind, previews, actions) ────── */
+.li-uac-prop {
+  margin-top: 12px;
+  background: #fff;
+  border: 1px solid #e1e7f0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 6px 20px rgba(27, 42, 74, 0.1);
+}
+.li-uac-prop-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  background: linear-gradient(120deg, #f4f7fc, #eaf0f9);
+  border-bottom: 1px solid #e4eaf4;
+}
+.li-uac-prop-kind {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--li-navy);
+  text-transform: uppercase;
+}
+.li-uac-prop-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--li-muted-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li-uac-prop-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.li-uac-prop-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--li-navy);
+}
+.li-uac-prop-summary {
+  font-size: 13px;
+  color: #33415b;
+  line-height: 1.5;
+}
+.li-uac-prop-note {
+  font-size: 12px;
+  color: var(--li-muted-2);
+  line-height: 1.5;
+}
+.li-uac-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: #eef1f6;
+  border: 1px solid #eef1f6;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.li-uac-fact {
+  background: #fff;
+  padding: 10px 12px;
+  min-width: 0;
+}
+.li-uac-fact-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--li-muted-3);
+}
+.li-uac-fact-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--li-navy);
+  margin-top: 2px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.li-uac-secs {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.li-uac-sec-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--li-muted-3);
+  margin-bottom: 6px;
+}
+.li-uac-sec-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: #33415b;
+  line-height: 1.5;
+  margin-bottom: 3px;
+}
+.li-uac-sec-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--li-gold);
+  flex: 0 0 auto;
+  margin-top: 7px;
+}
+.li-uac-prop-doc {
+  background: #ebeef4;
+  border: 1px solid #e1e6f0;
+  border-radius: 12px;
+  padding: 18px 18px 0;
+  display: flex;
+  justify-content: center;
+}
+.li-uac-prop-sheet {
+  width: 100%;
+  max-width: 640px;
+}
+.li-uac-prop-dochead {
+  font-size: 2.9cqw;
+  font-weight: 700;
+  color: var(--li-navy);
+  text-align: center;
+  margin-bottom: 2cqw;
+  letter-spacing: 0.04em;
+}
+.li-uac-prop-docline {
+  font-size: 2.2cqw;
+  line-height: 1.55;
+  color: #2c3852;
+  margin-bottom: 1.2cqw;
+  overflow-wrap: anywhere;
+}
+.li-uac-steps {
+  display: flex;
+  flex-direction: column;
+}
+.li-uac-step {
+  display: flex;
+  align-items: stretch;
+  gap: 11px;
+}
+.li-uac-step-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.li-uac-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--li-navy);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-uac-step-line {
+  width: 2px;
+  flex: 1 1 auto;
+  min-height: 12px;
+  background: #e1e6f0;
+}
+.li-uac-step-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-bottom: 14px;
+}
+.li-uac-step-toprow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+}
+.li-uac-step-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+}
+.li-uac-step-route {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 20px;
+  background: #eef1f6;
+  color: #6b7690;
+}
+.li-uac-step-route.is-auto {
+  background: var(--li-purple-bg);
+  color: var(--li-purple);
+}
+.li-uac-step-meta {
+  font-size: 11.5px;
+  color: var(--li-muted-2);
+  margin-top: 2px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.li-uac-prop-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.li-uac-prop-btn {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #e4e8f0;
+  color: #48546e;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+a.li-uac-prop-btn:hover {
+  border-color: #b7c2d6;
+  color: var(--li-navy);
+  background: #f7f9fc;
+  text-decoration: none;
+}
+.li-uac-prop-btn:hover:not(:disabled) {
+  border-color: #b7c2d6;
+  color: var(--li-navy);
+  background: #f7f9fc;
+}
+.li-uac-prop-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.li-uac-prop-btn.is-disabled {
+  pointer-events: none;
+  opacity: 0.5;
+}
+.li-uac-prop-btn.primary {
+  background: var(--li-navy);
+  border-color: #24365c;
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(27, 42, 74, 0.22);
+}
+.li-uac-prop-btn.primary:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+  border-color: var(--li-navy-hover);
+  color: #fff;
+}
+a.li-uac-prop-btn.primary:hover {
+  background: var(--li-navy-hover);
+  border-color: var(--li-navy-hover);
+  color: #fff;
+}
+.li-uac-prop-btn.primary:disabled {
+  opacity: 0.75;
+}
+.li-uac-prop-btn.primary.done {
+  opacity: 1;
+  background: var(--li-ok);
+  border-color: var(--li-ok);
+}
+.li-uac-publish {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(27, 42, 74, 0.18);
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.li-uac-publish:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+  box-shadow: 0 2px 8px rgba(27, 42, 74, 0.24);
+}
+.li-uac-publish:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+/* ── Post-publish actions (comp isDone: view / share / email + copied) ───── */
+.li-uac-done {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.li-uac-done-primary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(27, 42, 74, 0.18);
+  transition: background 0.15s;
+}
+.li-uac-done-primary:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+  color: #fff;
+  text-decoration: none;
+}
+a.li-uac-done-primary:hover {
+  background: var(--li-navy-hover);
+  color: #fff;
+  text-decoration: none;
+}
+.li-uac-done-row {
+  display: flex;
+  gap: 8px;
+}
+.li-uac-done-row > * {
+  flex: 1 1 0;
+}
+.li-uac-copied {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--li-ok);
+  background: var(--li-ok-bg);
+  border-radius: 20px;
+  padding: 4px 11px;
+}
+
+/* ── Menus (attach / insert-template / model) above the composer ─────────── */
+.li-uac-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 8px;
+  width: 252px;
+  background: #fff;
+  border: 1px solid #e1e6f0;
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.18);
+  padding: 6px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+}
+.li-uac-menu-head {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--li-muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 8px 8px;
+}
+.li-uac-menu-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--li-muted-2);
+}
+.li-uac-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.li-uac-menu-item:hover:not(:disabled) {
+  background: #f4f6fb;
+}
+.li-uac-menu-tile {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: #f4f6fb;
+  color: #48546e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-uac-menu-text {
+  min-width: 0;
+}
+.li-uac-menu-label {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li-uac-menu-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--li-muted-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li-uac-tplmenu {
+  width: 300px;
+}
+.li-uac-tplmenu-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* ── Model pill + menu (comp: composer bottom-right, connected only) ─────── */
+.li-uac-composer-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.li-uac-modelwrap {
+  position: relative;
+  display: inline-flex;
+}
+.li-uac-modelpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--li-muted);
+  background: #f4f6fb;
+  border: 1px solid #e7ebf3;
+  border-radius: 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  max-width: 180px;
+  white-space: nowrap;
+}
+.li-uac-modelpill:hover:not(:disabled) {
+  background: #edf1f8;
+  color: #48546e;
+}
+.li-uac-modelpill:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.li-uac-modelmenu {
+  left: auto;
+  right: 0;
+  width: 232px;
+}
+.li-uac-modelitem {
+  gap: 9px;
+  font-size: 13.5px;
+  color: var(--li-navy);
+}
+.li-uac-menu-check {
+  width: 16px;
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  color: var(--li-ok);
 }
 
 /* ==========================================================================

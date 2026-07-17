@@ -9,13 +9,14 @@ export function workflowEngineEnabled(): boolean {
   return v === '1' || v === 'true'
 }
 
-// Feature flag for the AI BUILD WIZARD (Phase 1: propose a new service shell from
-// the chatbot). Day-one default is OFF, mirroring workflowEngineEnabled: with the
-// flag off, the assistant registers none of the service-authoring tools and its
-// system prompt says nothing about them, so this is a pure no-op (dormant, like the
-// workflow engine was before PR3). Flip LEGAL_BUILD_WIZARD=1 (or 'true') in an
-// environment to let the attorney's Claude turn propose a service for approval.
+// Feature flag for the AI BUILD WIZARD (propose + approve a new service from the
+// chatbot). Default is ON (Legal Instruments WP-L, decision D8): the guided build
+// is certified (BUILDER-CERT-1) and is the comp's flagship assistant entry point,
+// so every deployment gets it unless explicitly disabled. Set LEGAL_BUILD_WIZARD=0
+// (or 'false') to turn it off — with the flag off, the assistant registers none of
+// the service-authoring tools and its system prompt says nothing about them (the
+// pre-D8 dormant behavior).
 export function buildWizardEnabled(): boolean {
   const v = process.env.LEGAL_BUILD_WIZARD
-  return v === '1' || v === 'true'
+  return v !== '0' && v !== 'false'
 }

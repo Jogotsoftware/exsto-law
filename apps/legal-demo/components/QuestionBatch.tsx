@@ -62,25 +62,25 @@ export function QuestionBatch({
   }
 
   return (
-    <div className="uac-qbatch">
-      <div className="uac-qbatch-head">
+    <div className="li-uac-qbatch">
+      <div className="li-uac-qbatch-head">
         <button
           type="button"
-          className="uac-qbatch-back"
+          className="li-uac-qbatch-back"
           onClick={() => setIdx((i) => Math.max(0, i - 1))}
           disabled={idx === 0}
           aria-label="Previous question"
         >
           ← Back
         </button>
-        <span className="uac-qbatch-count">
+        <span className="li-uac-qbatch-count">
           Question {Math.min(idx + 1, total)} of {total}
         </span>
-        <span className="uac-qbatch-dots" aria-hidden>
+        <span className="li-uac-qbatch-dots" aria-hidden>
           {questions.map((q, i) => (
             <span
               key={q.key}
-              className={`uac-qbatch-dot${i === idx ? ' is-current' : ''}${
+              className={`li-uac-qbatch-dot${i === idx ? ' is-current' : ''}${
                 answered.has(q.key) ? ' is-done' : ''
               }`}
             />
@@ -93,7 +93,7 @@ export function QuestionBatch({
       <QuestionCard key={`${current.key}-${idx}-${attempt}`} question={current} onAnswer={handle} />
 
       {allAnswered && (
-        <div className="uac-qbatch-done">
+        <div className="li-uac-qbatch-done">
           <CheckIcon size={12} /> All set — sending your answers…
         </div>
       )}

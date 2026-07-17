@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
+import { CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { ProposalCardShell } from '@/components/ProposalCardShell'
+import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
 import { TemplateEditorModal } from '@/components/TemplateEditorModal'
-import { TemplatePreview } from '@/components/templates/TemplatePreview'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the TemplateProposal captured in
@@ -42,6 +43,33 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 // matching the templates pages — attorneys never see snake_case.
 function humanKind(k: string): string {
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// WP-L: the comp's proportional doc preview — the first lines of the body on a
+// DocumentSheet thumb, {{token}} markers rendered as gold TokenChips (the same
+// mini-doc idiom the service Templates tab uses).
+const THUMB_TOKEN_RE = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
+function renderThumbLines(body: string, max = 8): ReactNode[] {
+  const lines = body
+    .split(/\r?\n/)
+    .map((l) =>
+      l
+        .replace(/^#+\s*/, '')
+        .replace(/[*_>#-]/g, '')
+        .trim(),
+    )
+    .filter(Boolean)
+    .slice(0, max)
+  return lines.map((line, i) => {
+    const parts = line.split(THUMB_TOKEN_RE)
+    return (
+      <div key={i} className="li-uac-prop-docline">
+        {parts.map((part, j) =>
+          j % 2 === 1 ? <TokenChip key={j}>{part}</TokenChip> : <Fragment key={j}>{part}</Fragment>,
+        )}
+      </div>
+    )
+  })
 }
 
 // The inline approval card for an AI-proposed document TEMPLATE (Build-Wizard Phase
@@ -169,36 +197,81 @@ export function TemplateProposalCard({
   }
 
   return (
-    <div className="uac-doc-card">
-      <div className="uac-doc-head">
-        <span className="uac-doc-title">
-          <LayersIcon size={14} /> Proposed template — {proposal.name}
-        </span>
-        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-          {proposal.serviceKey} · {humanKind(proposal.docKind)}
+    <ProposalCardShell
+      kind="Document template"
+      title={proposal.name}
+      meta={
+        <>
+          {humanKind(proposal.docKind)}
           {proposal.signature?.required
             ? ` · signed by ${proposal.signature.signer_roles.join(', ')}`
             : ''}
-        </span>
+        </>
+      }
+      actions={
+        <>
+          <button
+            type="button"
+            className={`li-uac-prop-btn primary${approveState === 'approved' ? ' done' : ''}`}
+            onClick={approve}
+            disabled={approveState === 'approving' || approveState === 'approved'}
+            title="Approve this template — this writes it to the service"
+          >
+            <CheckIcon size={14} />{' '}
+            {approveState === 'approving'
+              ? 'Saving…'
+              : approveState === 'approved'
+                ? 'Saved'
+                : 'Approve'}
+          </button>
+          <button
+            type="button"
+            className="li-uac-prop-btn"
+            onClick={() => void openEditor()}
+            disabled={
+              approveState === 'approving' ||
+              editLoading ||
+              (approveState === 'approved' && !templateEntityId)
+            }
+            title={
+              approveState === 'approved'
+                ? 'Edit the saved template — saves a new version'
+                : 'Edit the proposed template before approving'
+            }
+          >
+            <EditIcon size={14} /> {editLoading ? 'Loading…' : 'Open & edit'}
+          </button>
+          {link && (
+            <a className="li-uac-prop-btn" href={link} target="_blank" rel="noopener noreferrer">
+              View templates →
+            </a>
+          )}
+        </>
+      }
+      footer={
+        approveError ? (
+          <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+            {approveError}
+          </div>
+        ) : undefined
+      }
+    >
+      {proposal.summary && <div className="li-uac-prop-summary">{proposal.summary}</div>}
+
+      {/* WP-L (comp): the proposed document as a proportional letter page with
+          gold TokenChips — the same DocumentSheet every other surface uses. The
+          FULL body opens in the real editor via "Open & edit". */}
+      <div className="li-uac-prop-doc">
+        <DocumentSheet variant="thumb" serif className="li-uac-prop-sheet">
+          <div className="li-uac-prop-dochead">{humanKind(proposal.docKind).toUpperCase()}</div>
+          {renderThumbLines(currentBody)}
+        </DocumentSheet>
       </div>
 
-      {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {proposal.summary}
-        </div>
-      )}
-
-      {/* WP-4 (BUILDER-UX-2) — render the FORMATTED preview (the SAME renderer the
-          pop-up View uses), not raw markdown source. Height-capped so the card never
-          swallows the chat. */}
-      <div className="uac-doc-body" style={{ maxHeight: 260, overflow: 'auto' }}>
-        <TemplatePreview body={currentBody} />
-      </div>
-
-      {/* WP-4 — the variable contract as CHIPS with a count, never a comma-run. An
-          orphan with no question (once a questionnaire exists) is flagged red because
-          it would render [[MISSING]] in the document. */}
-      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
+      {/* WP-4 (kept) — the variable contract as CHIPS with a count, never a
+          comma-run. An orphan with no question (once a questionnaire exists) is
+          flagged red because it would render [[MISSING]] in the document. */}
+      <div style={{ fontSize: 'var(--text-xs)' }}>
         {proposal.tokens.length === 0 ? (
           <div className="text-muted">No merge fields — this is a static document.</div>
         ) : (
@@ -248,50 +321,6 @@ export function TemplateProposalCard({
           render [[MISSING]]: <strong>{[...missing].join(', ')}</strong>.
         </div>
       )}
-
-      <div className="uac-doc-actions">
-        <button
-          type="button"
-          className="uac-reply-btn"
-          onClick={() => void openEditor()}
-          disabled={
-            approveState === 'approving' ||
-            editLoading ||
-            (approveState === 'approved' && !templateEntityId)
-          }
-          title={
-            approveState === 'approved'
-              ? 'Edit the saved template — saves a new version'
-              : 'Edit the proposed template before approving'
-          }
-        >
-          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
-        </button>
-        <button
-          type="button"
-          className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
-          onClick={approve}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Approve this template — this writes it to the service"
-        >
-          {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-          {approveState === 'approving'
-            ? 'Saving…'
-            : approveState === 'approved'
-              ? 'Saved'
-              : 'Approve & save template'}
-        </button>
-        {link && (
-          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
-            View templates →
-          </a>
-        )}
-      </div>
-      {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-          {approveError}
-        </div>
-      )}
       {editing && (
         <TemplateEditorModal
           title={
@@ -334,6 +363,6 @@ export function TemplateProposalCard({
           onClose={() => setEditing(false)}
         />
       )}
-    </div>
+    </ProposalCardShell>
   )
 }

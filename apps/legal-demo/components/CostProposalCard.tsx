@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CostEditorModal } from '@/components/CostEditorModal'
-import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
+import { ProposalCardShell, ProposalFacts } from '@/components/ProposalCardShell'
+import { CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is a
@@ -184,34 +185,68 @@ export function CostProposalCard({
   }
 
   return (
-    <div className="uac-doc-card">
-      <div className="uac-doc-head">
-        <span className="uac-doc-title">
-          <LayersIcon size={14} /> Proposed billing — {proposal.serviceKey}
-        </span>
-        <span className="text-muted" style={{ fontSize: 12 }}>
-          {current.costType}
-        </span>
-      </div>
-
-      {/* BUILDER-UX-1 WP-2.3/WP-3: the fee value appears ONCE, prominently. The
-          model summary (which restated the fee) is dropped, and the card is
-          confirm-only — the fee was already captured by the final wizard
-          question; this is not a second entry, just a confirmation. */}
-      <div className="uac-doc-body" style={{ fontSize: 15 }}>
-        <strong>{priceLabel}</strong>
-      </div>
-      {current.documentFees && Object.keys(current.documentFees).length > 0 && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-          <strong>Per-document fees</strong>
-          <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
-            {Object.entries(current.documentFees).map(([kind, amt]) => (
-              <li key={kind}>
-                {kind.replace(/_/g, ' ')}: ${amt}
-              </li>
-            ))}
-          </ul>
-        </div>
+    <ProposalCardShell
+      kind="Billing"
+      title={priceLabel}
+      meta={current.costType === 'hourly' ? 'hourly' : 'flat fee'}
+      actions={
+        <>
+          {/* WP-3.2: no Approve control while the card is incoherent — the attorney
+              must reconcile the fee and the line items first. */}
+          {!billingIncoherent && (
+            <button
+              type="button"
+              className={`li-uac-prop-btn primary${approveState === 'approved' ? ' done' : ''}`}
+              onClick={approve}
+              disabled={approveState === 'approving' || approveState === 'approved'}
+              title="Approve this billing — this writes the service's fee model"
+            >
+              <CheckIcon size={14} />{' '}
+              {approveState === 'approving'
+                ? 'Saving…'
+                : approveState === 'approved'
+                  ? 'Saved'
+                  : 'Approve'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="li-uac-prop-btn"
+            onClick={() => void openEditor()}
+            disabled={approveState === 'approving' || editLoading}
+            title={
+              approveState === 'approved'
+                ? 'Edit the saved billing — saves a new version'
+                : 'Edit the proposed billing before approving'
+            }
+          >
+            <EditIcon size={14} /> {editLoading ? 'Loading…' : 'Open & edit'}
+          </button>
+          {link && (
+            <a className="li-uac-prop-btn" href={link} target="_blank" rel="noopener noreferrer">
+              View billing →
+            </a>
+          )}
+        </>
+      }
+      footer={
+        approveError ? (
+          <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
+            {approveError}
+          </div>
+        ) : undefined
+      }
+    >
+      {/* BUILDER-UX-1 WP-2.3/WP-3 (kept): the fee value appears ONCE — as the
+          card's title above — and the card is confirm-only. The comp facts grid
+          carries the breakdown. */}
+      {docFeeEntries.length > 0 && (
+        <ProposalFacts
+          facts={docFeeEntries.map(([kind, amt]) => ({
+            label: kind.replace(/_/g, ' '),
+            value: `$${amt}`,
+          }))}
+        />
       )}
 
       {billingIncoherent && (
@@ -219,50 +254,6 @@ export function CostProposalCard({
           This price is inconsistent — the fee (${current.amount}) does not match the per-document
           amount{docFeeEntries.length === 1 ? '' : 's'} listed above. Edit it so the fee equals what
           the document charges, then approve.
-        </div>
-      )}
-
-      <div className="uac-doc-actions">
-        <button
-          type="button"
-          className="uac-reply-btn"
-          onClick={() => void openEditor()}
-          disabled={approveState === 'approving' || editLoading}
-          title={
-            approveState === 'approved'
-              ? 'Edit the saved billing — saves a new version'
-              : 'Edit the proposed billing before approving'
-          }
-        >
-          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
-        </button>
-        {/* WP-3.2: no Approve control while the card is incoherent — the attorney
-            must reconcile the fee and the line items first. */}
-        {!billingIncoherent && (
-          <button
-            type="button"
-            className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
-            onClick={approve}
-            disabled={approveState === 'approving' || approveState === 'approved'}
-            title="Approve this billing — this writes the service's fee model"
-          >
-            {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-            {approveState === 'approving'
-              ? 'Saving…'
-              : approveState === 'approved'
-                ? 'Saved'
-                : 'Approve & set billing'}
-          </button>
-        )}
-        {link && (
-          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
-            View billing →
-          </a>
-        )}
-      </div>
-      {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
-          {approveError}
         </div>
       )}
       {editing && (
@@ -328,6 +319,6 @@ export function CostProposalCard({
           onClose={() => setEditing(false)}
         />
       )}
-    </div>
+    </ProposalCardShell>
   )
 }

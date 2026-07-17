@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import type { BuildQuestionEvent } from '@/lib/assistantStream'
-import { CheckIcon, SendIcon } from '@/components/icons'
+import { ArrowRightIcon, CheckIcon } from '@/components/icons'
 
 // The click-to-answer card for a structured build-wizard interview question (Phase 7).
 // This is the headline UX fix: instead of the AI typing a question as free chat, it
@@ -74,37 +74,40 @@ export function QuestionCard({
   }
 
   return (
-    <div className="uac-qcard">
-      <div className="uac-qcard-question">{question.question}</div>
+    <div className="li-uac-qcard">
+      <div className="li-uac-qcard-q">{question.question}</div>
 
       {answered ? (
         // Answered: the tidy chip replaces the controls (no raw user bubble).
-        <div className="uac-qcard-answered">
-          <span className="uac-qcard-answerchip">
-            <CheckIcon size={12} /> {answered}
-          </span>
+        <div className="li-uac-answered">
+          <CheckIcon size={13} /> {answered}
         </div>
       ) : (
         <>
           {question.choices.length > 0 && (
-            <div className="uac-qcard-choices">
+            <div className="li-uac-opts">
               {question.choices.map((c) => {
                 const on = picked.has(c.value)
                 return (
                   <button
                     key={c.value}
                     type="button"
-                    className={`uac-qcard-choice${question.multiSelect && on ? ' is-on' : ''}`}
+                    className={`li-uac-opt${question.multiSelect && on ? ' is-on' : ''}`}
                     onClick={() =>
                       question.multiSelect ? toggleMulti(c.value) : pickSingle(c.value)
                     }
                     title={c.hint}
                   >
-                    <span className="uac-qcard-choice-label">
-                      {question.multiSelect && on ? '✓ ' : ''}
-                      {c.label}
+                    <span
+                      className={`li-uac-opt-radio${question.multiSelect && on ? ' is-on' : ''}`}
+                      aria-hidden="true"
+                    >
+                      {question.multiSelect && on ? <CheckIcon size={11} /> : null}
                     </span>
-                    {c.hint && <span className="uac-qcard-choice-hint">{c.hint}</span>}
+                    <span className="li-uac-opt-text">
+                      <span className="li-uac-opt-label">{c.label}</span>
+                      {c.hint && <span className="li-uac-opt-hint">{c.hint}</span>}
+                    </span>
                   </button>
                 )
               })}
@@ -115,19 +118,20 @@ export function QuestionCard({
           {question.multiSelect && question.choices.length > 0 && (
             <button
               type="button"
-              className="uac-reply-btn"
+              className="li-uac-prop-btn"
               onClick={submitMulti}
               disabled={picked.size === 0}
             >
-              <CheckIcon size={12} /> Continue with {picked.size || 'no'} selected
+              <CheckIcon size={13} /> Continue with {picked.size || 'no'} selected
             </button>
           )}
 
-          {/* Free-text answer (also the only control when there are no choices). */}
+          {/* Free-text answer (also the only control when there are no choices) —
+              the comp's inline answer row (rounded input + navy arrow submit). */}
           {question.allowFreeText && (
-            <div className="uac-qcard-textrow">
+            <div className="li-uac-flow-inputrow">
               <input
-                className="uac-qcard-text"
+                className="li-uac-flow-input"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
@@ -141,16 +145,14 @@ export function QuestionCard({
                 }
                 aria-label="Your answer"
               />
-              {/* Same treatment as the chat composer's send (uac-send) — one send
-                  affordance across the app, not a second heavier variant. */}
               <button
                 type="button"
-                className="uac-send"
+                className="li-uac-flow-submit"
                 onClick={submitText}
                 disabled={!text.trim()}
                 aria-label="Submit answer"
               >
-                <SendIcon size={16} />
+                <ArrowRightIcon size={15} />
               </button>
             </div>
           )}
