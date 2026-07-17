@@ -11,3 +11,5 @@ pnpm-lock.yaml
 
 # Vendored third-party agent-skills (managed by skills-lock.json) — not our code to format.
 .agents
+# Vendored design export — byte-exact source of truth, never reformat
+docs/design/legal-instruments/
