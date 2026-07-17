@@ -304,8 +304,11 @@ export default function BookPage() {
     try {
       const r = await fetch('/api/client/auth/me')
       const me = r.ok ? await r.json() : null
+      // A session from ANOTHER firm is treated as not signed in HERE: the
+      // visitor walks this firm's anonymous flow (contact + account) instead of
+      // mixing tenants (cross-firm "Unknown service", founder walk 2026-07-17).
       setPortalMe(
-        me && typeof me.email === 'string'
+        me && typeof me.email === 'string' && me.matchesFirm !== false
           ? { email: me.email, displayName: me.displayName ?? me.email }
           : null,
       )
@@ -764,6 +767,21 @@ export default function BookPage() {
         // Show the exact cost; nothing proceeds until they accept (law 2).
         setFeeQuote(data.quote)
         setFeeAccepted(false)
+        return
+      }
+      if (res.status === 409 && data?.code === 'FIRM_MISMATCH') {
+        // Signed into a different firm's portal: downgrade to the anonymous
+        // flow for THIS firm — re-enter at the contact step, wizard answers
+        // intact. Graceful by design; never a dead-end error.
+        setPortalMe(null)
+        setStep('contact')
+        setError(
+          t(
+            'account.firm_mismatch',
+            undefined,
+            'Your portal account is with a different firm. Continue below as a new client of this firm.',
+          ),
+        )
         return
       }
       if (!res.ok || !data?.ok) throw new Error(data?.error ?? 'Booking failed.')

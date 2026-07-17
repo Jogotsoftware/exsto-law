@@ -15,6 +15,7 @@ import {
 } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 import { readClientSessionFromCookieHeader } from '@/lib/clientSession'
+import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 
 export const runtime = 'nodejs'
@@ -40,6 +41,29 @@ export async function POST(request: Request) {
   }
   if (!(await isClientContactActive(tenantId, clientContactId))) {
     return NextResponse.json({ error: 'Session no longer valid.' }, { status: 401 })
+  }
+  // The session must belong to the firm this funnel is on (middleware ->
+  // x-firm-slug). Without this, a client signed into firm A booking on firm B's
+  // link would run B's service key under A's tenant — the cross-firm "Unknown
+  // service" failure (founder walk 2026-07-17). Structured 409: the funnel
+  // catches FIRM_MISMATCH and re-enters the anonymous flow for this firm.
+  try {
+    const pub = await resolvePublicTenant(request)
+    if (pub.tenantId !== tenantId) {
+      return NextResponse.json(
+        {
+          error:
+            'Your portal account belongs to a different firm — continuing as a new client of this firm.',
+          code: 'FIRM_MISMATCH',
+        },
+        { status: 409 },
+      )
+    }
+  } catch (e) {
+    if (e instanceof FirmNotFoundError) {
+      return NextResponse.json({ error: 'This firm could not be found.' }, { status: 404 })
+    }
+    throw e
   }
 
   const body = (await request.json().catch(() => null)) as {
