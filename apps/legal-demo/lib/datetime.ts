@@ -35,3 +35,20 @@ export function formatDate(value: string | null | undefined, fallback = '—'): 
   const d = parseTimestamp(value)
   return d ? d.toLocaleDateString() : fallback
 }
+
+// Compact date + time, e.g. "Jul 13, 2026, 1:15 PM" — en-US short month, no
+// seconds. Used where the comp shows a short "Generated <date>" timestamp
+// (the review reader header) rather than formatDateTime's longer, seconds-
+// bearing locale string.
+export function formatDateTimeShort(value: string | null | undefined, fallback = '—'): string {
+  const d = parseTimestamp(value)
+  if (!d) return fallback
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+}

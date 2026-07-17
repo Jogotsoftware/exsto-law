@@ -7,7 +7,9 @@ import { registerDocumentAction } from '@/lib/documentActions/registry'
 
 registerDocumentAction({
   id: 'send-via-email',
-  label: 'Send via email',
+  // Comp toolbar label is plain "Send" — the confirm prompt below still spells
+  // out that it's an email so the action stays unambiguous.
+  label: 'Send',
   order: 10,
   confirm: () => 'Email a link to this document to the client on file?',
   run: async (ctx) => {
