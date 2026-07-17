@@ -13881,3 +13881,514 @@ svg.lucide {
   opacity: 0.55;
   cursor: default;
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+   WP-F — Billing (li-bill-). Pure restyle of the already-wired Unbilled /
+   Invoices / Rates tabs per legal-instruments.dc.html's BILLING section.
+   No component logic changes here — only chrome. New chip/table/button
+   patterns this WP needed are namespaced here rather than borrowed from
+   li-set- or li-dash- so the two page families stay independent.
+   ──────────────────────────────────────────────────────────────────────── */
+.li-bill-title {
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+  color: var(--li-navy);
+}
+.li-bill-subtitle {
+  margin: 0 0 20px;
+  color: var(--li-muted);
+  font-size: 14px;
+}
+
+/* Underline tab strip */
+.li-bill-tabs {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--li-border);
+  margin-bottom: 24px;
+}
+.li-bill-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0 0 12px;
+  margin-bottom: -1px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-bill-tab.is-active {
+  font-weight: 700;
+  color: var(--li-navy);
+  border-bottom-color: var(--li-gold);
+}
+
+/* Unbilled — per-client sections */
+.li-bill-client-section {
+  margin-bottom: 28px;
+}
+.li-bill-client-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.li-bill-client-name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--li-navy);
+}
+.li-bill-unbilled-total {
+  margin-left: auto;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--li-navy);
+  white-space: nowrap;
+}
+.li-bill-selectall {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--li-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.li-bill-client-head input[type='checkbox'],
+.li-bill-thead input[type='checkbox'],
+.li-bill-trow input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #2f6fe0;
+}
+
+.li-bill-matter {
+  margin-bottom: 14px;
+}
+.li-bill-matter-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.li-bill-matter-summary {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--li-navy);
+}
+.li-bill-matter-number {
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--li-muted-2);
+}
+.li-bill-matter-total {
+  font-size: 13px;
+  color: var(--li-muted-2);
+}
+
+/* Shared card-table shell — grid-based rows, matching the comp's DOM (no
+   <table>), same pattern WP-A used for the dashboard matters list. */
+.li-bill-table {
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-panel);
+  box-shadow: var(--li-shadow-card);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.li-bill-table--lg {
+  border-radius: var(--li-radius-card);
+  margin-bottom: 28px;
+}
+.li-bill-thead {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 18px;
+  background: #f6f8fc;
+  border-bottom: 1px solid var(--li-border-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--li-muted-2);
+}
+.li-bill-trow {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--li-border-soft);
+  font-size: 13.5px;
+  color: var(--li-fg);
+}
+.li-bill-trow:hover {
+  background: #fafbfe;
+}
+.li-bill-trow:last-child {
+  border-bottom: none;
+}
+.li-bill-td-check {
+  display: flex;
+  cursor: pointer;
+}
+.li-bill-td-right {
+  text-align: right;
+}
+.li-bill-td-muted {
+  color: var(--li-muted);
+}
+.li-bill-amount {
+  font-weight: 600;
+}
+.li-bill-trow-empty {
+  padding: 16px 18px;
+  color: var(--li-muted);
+  font-size: 13.5px;
+}
+
+/* Grid column templates, one per table shape in this WP */
+.li-bill-thead--entries,
+.li-bill-trow--entries {
+  grid-template-columns: 44px 84px 110px 1fr 70px 92px 96px;
+}
+.li-bill-thead--inv,
+.li-bill-trow--inv {
+  gap: 14px;
+  padding-left: 22px;
+  padding-right: 22px;
+  grid-template-columns: 1.1fr 1.3fr 110px 1fr 60px 100px 190px;
+}
+.li-bill-thead--inv {
+  padding-top: 13px;
+  padding-bottom: 13px;
+  font-size: 11.5px;
+}
+.li-bill-trow--inv {
+  padding-top: 15px;
+  padding-bottom: 15px;
+}
+.li-bill-thead--rate,
+.li-bill-trow--rate {
+  gap: 14px;
+  padding-left: 22px;
+  padding-right: 22px;
+  grid-template-columns: 1fr 200px 110px;
+}
+.li-bill-thead--rate {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  font-size: 11.5px;
+}
+.li-bill-trow--rate {
+  padding-top: 13px;
+  padding-bottom: 13px;
+  font-size: 14px;
+}
+.li-bill-thead--orphan,
+.li-bill-trow--orphan {
+  gap: 14px;
+  padding-left: 22px;
+  padding-right: 22px;
+  grid-template-columns: 1fr 1fr 140px 160px;
+}
+.li-bill-thead--orphan {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  font-size: 11.5px;
+}
+.li-bill-trow--orphan {
+  padding-top: 13px;
+  padding-bottom: 13px;
+}
+
+/* Chips — kind (Time/Expense/Service fee/Document fee), status, rate tag,
+   payment method */
+.li-bill-chip {
+  display: inline-block;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--li-radius-chip);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.li-bill-chip--sm {
+  padding: 3px 9px;
+  font-size: 11.5px;
+}
+.li-bill-chip--blue {
+  background: var(--li-info-bg);
+  color: var(--li-info);
+}
+.li-bill-chip--green {
+  background: var(--li-ok-bg);
+  color: var(--li-ok);
+}
+.li-bill-chip--gray {
+  background: #eef1f4;
+  color: #5b6478;
+}
+
+/* Buttons */
+.li-bill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid var(--li-border-input);
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-bill-btn:hover:not(:disabled) {
+  border-color: var(--li-gold);
+  color: var(--li-fg);
+}
+.li-bill-btn--sm {
+  padding: 7px 14px;
+  border-radius: 8px;
+}
+.li-bill-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-bill-btn-primary:hover:not(:disabled) {
+  background: var(--li-navy-hover);
+}
+.li-bill-btn-primary--tall {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+}
+.li-bill-btn-primary--sm {
+  padding: 7px 13px;
+  font-size: 12.5px;
+  border-radius: 8px;
+}
+.li-bill-btn-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--li-ok);
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-bill-btn-ok:hover:not(:disabled) {
+  background: #288a5d;
+}
+.li-bill-btn:disabled,
+.li-bill-btn-primary:disabled,
+.li-bill-btn-ok:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.li-bill-link,
+.li-bill-link-muted {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.li-bill-link {
+  color: var(--li-link);
+}
+.li-bill-link-muted {
+  color: #48546e;
+}
+.li-bill-link:hover,
+.li-bill-link-muted:hover {
+  text-decoration: underline;
+}
+.li-bill-inv-number {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 15px;
+  color: var(--li-navy);
+  cursor: pointer;
+}
+.li-bill-inv-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.li-bill-paid-label {
+  font-size: 13px;
+  color: var(--li-muted-2);
+}
+.li-bill-detail {
+  background: var(--li-bg);
+  padding: 16px 22px;
+}
+.li-bill-iframe {
+  width: 100%;
+  height: 560px;
+  border: 1px solid var(--li-border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+/* Payment reports */
+.li-bill-reports {
+  margin-bottom: 22px;
+}
+.li-bill-reports-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.li-bill-report-card {
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-panel);
+  padding: 16px 18px;
+  background: var(--li-card);
+  box-shadow: var(--li-shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.li-bill-report-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.li-bill-report-number {
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 15px;
+}
+.li-bill-report-meta {
+  font-size: 12.5px;
+  color: var(--li-muted-2);
+}
+.li-bill-report-conf {
+  font-size: 13px;
+  color: var(--li-body);
+  word-break: break-all;
+}
+.li-bill-code {
+  font-family: ui-monospace, monospace;
+  background: #f4f6fb;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.li-bill-report-note {
+  font-size: 13px;
+  color: var(--li-muted-2);
+  font-style: italic;
+}
+.li-bill-report-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 2px;
+}
+
+/* Rates tab */
+.li-bill-rate-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.li-bill-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #48546e;
+}
+.li-bill-input {
+  height: 40px;
+  width: 180px;
+  border: 1px solid var(--li-border-input);
+  border-radius: 10px;
+  padding: 0 12px;
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--li-fg);
+  outline: none;
+  background: #fff;
+}
+.li-bill-input:focus {
+  border-color: var(--li-gold);
+}
+.li-bill-input--sm {
+  height: 36px;
+  width: 150px;
+  border-radius: 9px;
+  padding: 0 11px;
+  text-align: right;
+  font-size: 13.5px;
+}
+.li-bill-hint {
+  margin: 0 0 22px;
+  color: var(--li-muted-2);
+  font-size: 13px;
+  max-width: 620px;
+}
+.li-bill-hint--tight {
+  margin-bottom: 10px;
+}
+.li-bill-section-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--li-navy);
+}
+.li-bill-section-title--lg {
+  font-size: 16px;
+}
+.li-bill-section-title--tight {
+  margin-bottom: 4px;
+}
+.li-bill-doc-fee-note {
+  font-size: 12px;
+  color: var(--li-muted-2);
+  margin-top: 2px;
+}
+.li-bill-doc-fee-note a {
+  color: var(--li-link);
+}
+
+/* Orphaned matters (no client yet) — app-only, richer than the comp */
+.li-bill-orphan-intro {
+  color: var(--li-muted-2);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
