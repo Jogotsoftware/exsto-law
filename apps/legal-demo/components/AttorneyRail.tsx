@@ -40,10 +40,10 @@ import {
 type IconCmp = (props: { size?: number }) => React.JSX.Element
 
 type NavLeaf = { kind: 'leaf'; href: string; label: string; exact?: boolean; Icon: IconCmp }
-// A sub-item: `href` is the base path used for MODULE_AREAS gating; `to` (when
-// present) is the actual navigation target, and `section` keys the settings
-// anchor so we can highlight the active section.
-type NavSub = { href: string; to?: string; section?: string; label: string; Icon: IconCmp }
+// A sub-item: `href` is both the MODULE_AREAS gating key and the real routed
+// page (WP-G split Settings into actual sub-routes — no more query-param
+// section anchors).
+type NavSub = { href: string; label: string; Icon: IconCmp }
 type NavGroup = { kind: 'group'; key: string; label: string; Icon: IconCmp; children: NavSub[] }
 type NavNode = NavLeaf | NavGroup
 
@@ -79,62 +79,18 @@ const NAV: NavNode[] = [
     label: 'Settings',
     Icon: SettingsIcon,
     children: [
+      { href: '/attorney/settings/integrations', label: 'Integrations', Icon: Share2Icon },
+      { href: '/attorney/settings/firm', label: 'Firm details', Icon: Building2Icon },
       {
-        href: '/attorney/settings',
-        to: '/attorney/settings?section=integrations',
-        section: 'integrations',
-        label: 'Integrations',
-        Icon: Share2Icon,
-      },
-      {
-        href: '/attorney/settings',
-        to: '/attorney/settings?section=firm',
-        section: 'firm',
-        label: 'Firm details',
-        Icon: Building2Icon,
-      },
-      {
-        href: '/attorney/settings',
-        to: '/attorney/settings?section=invoice_template',
-        section: 'invoice_template',
+        href: '/attorney/settings/invoice-template',
         label: 'Invoice template',
         Icon: FileTextIcon,
       },
-      {
-        href: '/attorney/settings',
-        to: '/attorney/settings?section=signature',
-        section: 'signature',
-        label: 'Email signature',
-        Icon: MailIcon,
-      },
-      {
-        href: '/attorney/settings',
-        to: '/attorney/settings?section=booking',
-        section: 'booking',
-        label: 'Booking rules',
-        Icon: CalendarIcon,
-      },
-      {
-        href: '/attorney/settings',
-        to: '/attorney/settings?section=users',
-        section: 'users',
-        label: 'Users & roles',
-        Icon: UsersIcon,
-      },
-      {
-        href: '/attorney/settings',
-        to: '/attorney/settings?section=payments',
-        section: 'payments',
-        label: 'Payments',
-        Icon: DollarSignIcon,
-      },
-      {
-        href: '/attorney/settings',
-        to: '/attorney/settings?section=ai_usage',
-        section: 'ai_usage',
-        label: 'AI usage',
-        Icon: SparklesIcon,
-      },
+      { href: '/attorney/settings/signature', label: 'Email signature', Icon: MailIcon },
+      { href: '/attorney/settings/booking', label: 'Booking rules', Icon: CalendarIcon },
+      { href: '/attorney/settings/users', label: 'Users & roles', Icon: UsersIcon },
+      { href: '/attorney/settings/payments', label: 'Payments', Icon: DollarSignIcon },
+      { href: '/attorney/settings/ai-usage', label: 'AI usage', Icon: SparklesIcon },
     ],
   },
 ]
@@ -175,7 +131,6 @@ export function AttorneyRail(): React.JSX.Element {
   const [isNarrow, setIsNarrow] = useState(false)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [hiddenHrefs, setHiddenHrefs] = useState<Set<string>>(new Set())
-  const [activeSection, setActiveSection] = useState<string | null>(null)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [popPos, setPopPos] = useState<{ left: number; bottom: number } | null>(null)
   const userBtnRef = useRef<HTMLButtonElement>(null)
@@ -239,14 +194,6 @@ export function AttorneyRail(): React.JSX.Element {
     }
   }, [])
 
-  // Seed the active settings section from the URL (query changes don't move the
-  // pathname, so the sub-item click handler also sets it for instant feedback).
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const s = new URLSearchParams(window.location.search).get('section')
-    if (s) setActiveSection(s)
-  }, [pathname])
-
   // Close the account popover on outside click / Escape.
   useEffect(() => {
     if (!userMenuOpen) return
@@ -303,10 +250,7 @@ export function AttorneyRail(): React.JSX.Element {
 
   const leafActive = (leaf: { href: string; exact?: boolean }): boolean =>
     leaf.exact ? pathname === leaf.href : pathname.startsWith(leaf.href)
-  const subActive = (sub: NavSub): boolean =>
-    sub.section
-      ? pathname.startsWith('/attorney/settings') && activeSection === sub.section
-      : pathname.startsWith(sub.href)
+  const subActive = (sub: NavSub): boolean => pathname.startsWith(sub.href)
 
   // Drop leaves whose feature module is disabled; drop a group if all children
   // are hidden (settings children share a base href never in MODULE_AREAS).
@@ -419,13 +363,10 @@ export function AttorneyRail(): React.JSX.Element {
                     const { Icon: SubIcon } = sub
                     return (
                       <Link
-                        key={sub.to ?? sub.href}
-                        href={sub.to ?? sub.href}
+                        key={sub.href}
+                        href={sub.href}
                         className={`li-rail-subitem${active ? ' is-active' : ''}`}
                         aria-current={active ? 'page' : undefined}
-                        onClick={() => {
-                          if (sub.section) setActiveSection(sub.section)
-                        }}
                       >
                         <span className="li-rail-subico">
                           <SubIcon size={16} />

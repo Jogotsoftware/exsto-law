@@ -1,15 +1,15 @@
 'use client'
 
-// Payments (Settings → Payments). The firm connects online card/bank payments via
-// Stripe Connect Express: exsto-law is the platform, the firm is a connected
-// account, and clients pay invoices on an embedded form branded as the firm.
-// Connecting is a browser redirect to /api/billing/connect/init (Stripe-hosted
-// onboarding), mirroring the Google connect flow; this card shows status and the
-// connect / finish-setup / refresh / disconnect actions.
+// Settings → Payments (WP-G). Split out of the old settings monolith — same
+// legal.firm.payment_status/payment_refresh/payment_disconnect and
+// legal.firm.get_payment_methods/set_payment_methods tools, restyled to the
+// comp's card. Keeps the app's richer connect/finish-setup/refresh/disconnect
+// flow (the comp shows a single "Manage" button opening a Stripe manage
+// panel — deferred to WIRING.md §WP-G G2, no backing tool exists yet).
 import { useCallback, useEffect, useState } from 'react'
-import { Check } from 'lucide-react'
+import { CreditCard, Check } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { CollapsibleSection } from '@/components/CollapsibleSection'
+import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
 
 interface FirmPaymentStatus {
   configured: boolean
@@ -31,10 +31,15 @@ interface ManualPaymentMethods {
 }
 
 // The ?payments= flag the connect return/refresh routes set on the way back.
-function returnBanner(flag: string | null): { tone: 'ok' | 'warn' | 'error'; text: string } | null {
+function returnBanner(
+  flag: string | null,
+): { tone: 'success' | 'warn' | 'error'; text: string } | null {
   switch (flag) {
     case 'connected':
-      return { tone: 'ok', text: 'Payments connected — your firm can now accept online payments.' }
+      return {
+        tone: 'success',
+        text: 'Payments connected — your firm can now accept online payments.',
+      }
     case 'incomplete':
       return {
         tone: 'warn',
@@ -49,7 +54,7 @@ function returnBanner(flag: string | null): { tone: 'ok' | 'warn' | 'error'; tex
   }
 }
 
-export function PaymentsSection(): React.ReactElement {
+export default function PaymentsPage(): React.ReactElement {
   const [status, setStatus] = useState<FirmPaymentStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -122,99 +127,124 @@ export function PaymentsSection(): React.ReactElement {
     }
   }
 
-  return (
-    <CollapsibleSection id="settings-section-payments" title="Payments">
-      {banner && (
-        <div
-          className={banner.tone === 'error' ? 'alert alert-error' : 'alert'}
-          style={
-            banner.tone === 'warn'
-              ? { background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }
-              : undefined
-          }
-        >
-          {banner.text}
-        </div>
-      )}
+  const statusTone = !status
+    ? 'off'
+    : !status.connected
+      ? 'off'
+      : status.chargesEnabled
+        ? 'ok'
+        : 'warn'
+  const statusText = !status
+    ? ''
+    : !status.configured
+      ? 'Not enabled on this deployment'
+      : !status.connected
+        ? 'Not connected'
+        : status.chargesEnabled
+          ? 'Connected'
+          : 'Setup not finished'
 
-      {error && <div className="alert alert-error">{error}</div>}
+  return (
+    <>
+      <SettingsHeader title="Payments" />
+      {banner && <SettingsAlert tone={banner.tone}>{banner.text}</SettingsAlert>}
+      {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
 
       {loading && !status ? (
-        <div className="loading-block" role="status">
-          <span className="spinner" /> Loading…
-        </div>
+        <SettingsLoading />
       ) : status ? (
-        <>
-          <p className="text-muted" style={{ marginBottom: '1rem', lineHeight: 1.5 }}>
+        <div className="li-set-card li-set-card--narrow">
+          <div className="li-set-pay-head">
+            <span className="li-set-pay-icon">
+              <CreditCard size={20} aria-hidden />
+            </span>
+            <div>
+              <div className="li-set-pay-title">Card payments — Stripe</div>
+              <div className={`li-set-pay-status ${statusTone}`}>{statusText}</div>
+            </div>
+          </div>
+          <p className="li-set-hint" style={{ fontSize: '13.5px', margin: '0 0 18px' }}>
             Accept card and bank (ACH) payments on your invoices. Clients pay on a secure form on
             your own invoice page — it never leaves your site. Powered by Stripe; your firm is the
             account of record and funds settle to your bank.
           </p>
 
           {!status.configured ? (
-            <div className="alert">
+            <SettingsAlert tone="warn">
               Online payments aren’t enabled on this deployment yet. (Set the Stripe keys in the
               environment to turn them on.)
-            </div>
+            </SettingsAlert>
           ) : !status.connected ? (
             <button
               type="button"
-              className="primary"
+              className="li-set-btn li-set-btn-primary"
               disabled={busy === 'connect'}
               onClick={connect}
             >
               {busy === 'connect' ? 'Redirecting…' : 'Connect payments'}
             </button>
           ) : status.chargesEnabled ? (
-            <div>
-              <div className="alert" style={{ background: '#ecfdf5', border: '1px solid #a7f3d0' }}>
+            <>
+              <SettingsAlert tone="success">
                 <strong>Connected.</strong> Your firm is ready to accept online payments.
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: '0.6rem' }}>
-                <button type="button" disabled={busy === 'refresh'} onClick={refresh}>
+              </SettingsAlert>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="li-set-btn"
+                  disabled={busy === 'refresh'}
+                  onClick={refresh}
+                >
                   {busy === 'refresh' ? 'Checking…' : 'Refresh status'}
                 </button>
-                <button type="button" disabled={busy === 'disconnect'} onClick={disconnect}>
+                <button
+                  type="button"
+                  className="li-set-btn li-set-btn-danger"
+                  disabled={busy === 'disconnect'}
+                  onClick={disconnect}
+                >
                   {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
                 </button>
               </div>
-            </div>
+            </>
           ) : (
-            <div>
-              <div
-                className="alert"
-                style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}
-              >
+            <>
+              <SettingsAlert tone="warn">
                 <strong>Setup not finished.</strong> Stripe still needs a few details before you can
                 accept payments.
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginTop: '0.6rem' }}>
+              </SettingsAlert>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   type="button"
-                  className="primary"
+                  className="li-set-btn li-set-btn-primary"
                   disabled={busy === 'connect'}
                   onClick={connect}
                 >
                   {busy === 'connect' ? 'Redirecting…' : 'Finish setup'}
                 </button>
-                <button type="button" disabled={busy === 'refresh'} onClick={refresh}>
+                <button
+                  type="button"
+                  className="li-set-btn"
+                  disabled={busy === 'refresh'}
+                  onClick={refresh}
+                >
                   {busy === 'refresh' ? 'Checking…' : 'Refresh status'}
                 </button>
               </div>
-            </div>
+            </>
           )}
-        </>
+        </div>
       ) : null}
 
-      <ManualMethodsEditor />
-    </CollapsibleSection>
+      <ManualMethodsCard />
+    </>
   )
 }
 
 // Zelle + crypto (migration 0115): instruct-then-verify rails shown to clients on
 // the invoice payment page. Clients report their payment with a confirmation
 // number / tx hash; those reports land on Billing for the attorney to verify.
-function ManualMethodsEditor(): React.ReactElement {
+function ManualMethodsCard(): React.ReactElement {
   const [methods, setMethods] = useState<ManualPaymentMethods | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -228,19 +258,23 @@ function ManualMethodsEditor(): React.ReactElement {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [])
 
-  if (error && !methods) return <div className="alert alert-error">{error}</div>
-  if (!methods) {
+  if (error && !methods)
     return (
-      <div className="loading-block" role="status">
-        <span className="spinner" /> Loading…
+      <div className="li-set-card li-set-card--narrow">
+        <SettingsAlert tone="error">{error}</SettingsAlert>
       </div>
     )
-  }
+  if (!methods)
+    return (
+      <div className="li-set-card li-set-card--narrow">
+        <SettingsLoading />
+      </div>
+    )
 
   const zelle = methods.zelle ?? { recipient: '', recipientName: '' }
-  const setZelle = (patch: Partial<{ recipient: string; recipientName: string }>) =>
+  const setZelle = (patch: Partial<{ recipient: string; recipientName: string }>): void =>
     setMethods({ ...methods, zelle: { ...zelle, ...patch } })
-  const setWallet = (i: number, patch: Partial<CryptoWallet>) =>
+  const setWallet = (i: number, patch: Partial<CryptoWallet>): void =>
     setMethods({
       ...methods,
       wallets: methods.wallets.map((w, wi) => (wi === i ? { ...w, ...patch } : w)),
@@ -279,65 +313,79 @@ function ManualMethodsEditor(): React.ReactElement {
     }
   }
 
-  const field: React.CSSProperties = { display: 'block', width: '100%', marginTop: 4 }
-
   return (
-    <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-      <h3 style={{ margin: '0 0 0.25rem' }}>Zelle &amp; crypto</h3>
-      <p className="text-muted" style={{ marginTop: 0, lineHeight: 1.5 }}>
-        Shown to clients on the invoice payment page as “Other ways to pay”, with step-by-step
-        instructions and QR codes. Clients report their payment with a Zelle confirmation number or
-        crypto transaction ID (plus an optional screenshot); you verify and confirm it on the
-        Billing page — invoices are never marked paid automatically.
-      </p>
-      {error && <div className="alert alert-error">{error}</div>}
+    <div className="li-set-card li-set-card--narrow">
+      <div className="li-set-pay-methods" style={{ marginBottom: 20 }}>
+        <div className="li-set-pay-method">
+          <div className="li-set-pay-method-title">Zelle</div>
+          <div className="li-set-pay-method-sub">{zelle.recipient || 'Not configured'}</div>
+        </div>
+        <div className="li-set-pay-method">
+          <div className="li-set-pay-method-title">Crypto — BTC / USDC</div>
+          <div className="li-set-pay-method-sub">{methods.wallets.length} wallet(s) configured</div>
+        </div>
+      </div>
 
-      <div style={{ display: 'grid', gap: '0.5rem', maxWidth: 560 }}>
-        <label className="text-sm">
-          Zelle email or U.S. phone <span className="text-muted">(blank = don’t offer Zelle)</span>
+      <div
+        className="li-set-manual-block"
+        style={{ marginTop: 0, borderTop: 'none', paddingTop: 0 }}
+      >
+        <h3>Zelle &amp; crypto</h3>
+        <p className="li-set-hint" style={{ margin: '0 0 16px' }}>
+          Shown to clients on the invoice payment page as “Other ways to pay”, with step-by-step
+          instructions and QR codes. Clients report their payment with a Zelle confirmation number
+          or crypto transaction ID (plus an optional screenshot); you verify and confirm it on the
+          Billing page — invoices are never marked paid automatically.
+        </p>
+        {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
+
+        <label className="li-set-label">
+          <span>
+            Zelle email or U.S. phone{' '}
+            <span className="li-set-hint" style={{ display: 'inline', margin: 0 }}>
+              (blank = don’t offer Zelle)
+            </span>
+          </span>
           <input
             type="text"
+            className="li-set-input"
             value={zelle.recipient}
             onChange={(e) => setZelle({ recipient: e.target.value })}
             placeholder="payments@yourfirm.com"
-            style={field}
           />
         </label>
-        <label className="text-sm">
-          Zelle recipient name <span className="text-muted">(what the payer’s bank shows)</span>
+        <label className="li-set-label">
+          <span>
+            Zelle recipient name{' '}
+            <span className="li-set-hint" style={{ display: 'inline', margin: 0 }}>
+              (what the payer’s bank shows)
+            </span>
+          </span>
           <input
             type="text"
+            className="li-set-input"
             value={zelle.recipientName}
             onChange={(e) => setZelle({ recipientName: e.target.value })}
             placeholder="Pacheco Law PLLC"
-            style={field}
           />
         </label>
 
-        <div className="text-sm" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+        <div className="li-set-table-title" style={{ marginTop: 10 }}>
           Crypto wallets
         </div>
         {methods.wallets.map((w, i) => (
-          <div
-            key={i}
-            style={{
-              display: 'grid',
-              gap: '0.4rem',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              padding: '0.6rem',
-            }}
-          >
-            <div style={{ display: 'flex', gap: '0.4rem' }}>
+          <div key={i} className="li-set-wallet-card">
+            <div className="li-set-wallet-row">
               <input
                 type="text"
+                className="li-set-input"
                 value={w.currency}
                 onChange={(e) => setWallet(i, { currency: e.target.value })}
                 placeholder="Currency (BTC, ETH, USDC…)"
-                style={{ flex: 1 }}
               />
               <input
                 type="text"
+                className="li-set-input"
                 value={w.network}
                 onChange={(e) => setWallet(i, { network: e.target.value })}
                 placeholder="Network (e.g. Ethereum mainnet)"
@@ -346,20 +394,22 @@ function ManualMethodsEditor(): React.ReactElement {
             </div>
             <input
               type="text"
+              className="li-set-input"
               value={w.address}
               onChange={(e) => setWallet(i, { address: e.target.value })}
               placeholder="Wallet address"
             />
-            <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <div className="li-set-wallet-row">
               <input
                 type="text"
+                className="li-set-input"
                 value={w.label}
                 onChange={(e) => setWallet(i, { label: e.target.value })}
                 placeholder="Label (optional, e.g. Firm treasury)"
-                style={{ flex: 1 }}
               />
               <button
                 type="button"
+                className="li-set-btn li-set-btn-sm"
                 onClick={() =>
                   setMethods({ ...methods, wallets: methods.wallets.filter((_, wi) => wi !== i) })
                 }
@@ -369,9 +419,10 @@ function ManualMethodsEditor(): React.ReactElement {
             </div>
           </div>
         ))}
-        <div>
+        <div className="li-set-actions-row" style={{ justifyContent: 'flex-start' }}>
           <button
             type="button"
+            className="li-set-btn"
             disabled={methods.wallets.length >= 10}
             onClick={() =>
               setMethods({
@@ -385,16 +436,18 @@ function ManualMethodsEditor(): React.ReactElement {
           >
             Add wallet
           </button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: '0.4rem' }}>
-          <button type="button" className="primary" disabled={saving} onClick={() => void save()}>
+          <button
+            type="button"
+            className="li-set-btn li-set-btn-primary"
+            disabled={saving}
+            onClick={() => void save()}
+          >
             {saving ? 'Saving…' : 'Save payment methods'}
           </button>
           {saved && (
             <span
-              className="text-sm text-muted"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              className="li-set-hint"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, margin: 0 }}
             >
               <Check size={14} aria-hidden /> Saved
             </span>

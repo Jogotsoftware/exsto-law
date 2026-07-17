@@ -81,16 +81,27 @@ Audited against `origin/main` @ c26b3ae (2026-07-16, three code audits). This is
 
 ## WP-G · Settings → rail-routed sections
 
-- [ ] WIRED: booking rules (days/hours/buffer/notice/lengths/copyable public link); AI usage (cards, daily chart,
+Founder decision (2026-07-17): "every settings tab still shares the same settings page instead of each having
+its own page" — the eight settings sections are now REAL routed sub-pages
+(`app/attorney/settings/<integrations|firm|invoice-template|signature|booking|users|payments|ai-usage>/page.tsx`),
+not a single long scroll with anchors. `/attorney/settings` redirects to `/attorney/settings/integrations`. The
+rail's Settings sub-items link directly to these routes (no more `?section=` query anchors); sub-active is a
+pathname-prefix match.
+
+- [x] WIRED: booking rules (days/hours/buffer/notice/lengths/copyable public link); AI usage (cards, daily chart,
       by-model); integrations connect/disconnect + last-checked; invoice config (color/columns/logo/live preview);
       firm view/edit; Stripe connect/refresh/disconnect; Zelle + crypto editor
-- [ ] BUILD: split long scroll into rail-routed sections (Integrations / Firm details / Invoice template /
+- [x] BUILD: split long scroll into rail-routed sections (Integrations / Firm details / Invoice template /
       Email signature / Booking rules / Users & roles / Payments / AI usage)
-- [ ] BUILD: integration favicon logos + 4 coming-soon tiles (LexisNexis, Westlaw, PACER, Fastcase — disabled)
-- [ ] BUILD: firm logo surfaced in Firm details card
-- [ ] BUILD: "Standard client agreement" card (engagement terms: version/updated/signed-by + edit + send-via-eSign)
-- [ ] BUILD: .docx invoice-template upload with merge fields
-- [ ] BUILD: Stripe manage panel (payout account / schedule / fee / balance / open-dashboard via Stripe API)
+- [x] BUILD: integration favicon logos + 4 coming-soon tiles (LexisNexis, Westlaw, PACER, Fastcase — disabled)
+- [x] BUILD: firm logo surfaced in Firm details card (read from the invoice template config, the one place it's
+      uploaded; "Replace logo" links to Settings → Invoice template rather than duplicating the uploader)
+
+### G2 (deferred follow-up) — not built in WP-G
+
+- [ ] "Standard client agreement" card (engagement terms: version/updated/signed-by + edit + send-via-eSign)
+- [ ] .docx invoice-template upload with merge fields
+- [ ] Stripe manage panel (payout account / schedule / fee / balance / open-dashboard via Stripe API)
 
 ## WP-H · Calendar
 
