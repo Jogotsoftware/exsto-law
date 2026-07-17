@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import {
   streamAssistant,
@@ -34,6 +35,7 @@ import { QuestionBatch } from '@/components/QuestionBatch'
 import type { BuildQuestionEvent } from '@/lib/assistantStream'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { GemSparkle } from '@/components/GemSparkle'
 import {
   SendIcon,
   SettingsIcon,
@@ -52,6 +54,10 @@ import {
   WandIcon,
   ChevronRightIcon,
   ChevronDownIcon,
+  ListIcon,
+  CheckCircleIcon,
+  UploadIcon,
+  ArrowRightIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -180,13 +186,60 @@ interface ThreadTurn {
   kindProposals?: KindProposal[]
 }
 
-// A document attached to the next message: an uploaded file (parsed to text) or a
-// matter document. `text` is the content sent to Claude; `name` labels the chip.
+// A document attached to the next message: an uploaded file (parsed to text), a
+// matter document, or a firm template (WP-L "Insert a template"). `text` is the
+// content sent to Claude; `name` labels the chip.
 interface Attachment {
   name: string
   text: string
-  source: 'upload' | 'matter'
+  source: 'upload' | 'matter' | 'template'
 }
+
+// One firm template in the "Insert a template" picker (legal.template.list —
+// the same read the Templates gallery uses; body rides along).
+interface TemplateOpt {
+  templateEntityId: string
+  name: string
+  body: string
+  docKind: string | null
+}
+
+// A bookable service in the guided new-matter flow (legal.matter.open needs one).
+interface ServiceOpt {
+  serviceKey: string
+  displayName: string
+  bookable?: boolean
+}
+
+// WP-L — the guided "Create a new matter" flow (comp: startQaFlow). A LOCAL chip
+// walk, not an AI conversation: each step is an assistant-style question with
+// option chips / a typed answer, and the finish is a REAL matter via the existing
+// legal.matter.open operation (the same call NewMatterModal makes). The comp's
+// demo questions (matter type / how found / turnaround) have no substrate fields;
+// the real flow asks exactly what matter.open needs — see WIRING §WP-L.
+interface MatterFlow {
+  step: 'service' | 'name' | 'email' | 'creating' | 'done' | 'error'
+  services: ServiceOpt[] | null
+  serviceKey?: string
+  serviceName?: string
+  clientFullName?: string
+  clientEmail?: string
+  matterEntityId?: string
+  error?: string
+}
+
+// WP-L — the build-mode progress strip maps approvals onto the comp's six phases.
+// Approvals can land out of canonical order (the wizard sometimes drafts the
+// document before the intake form); the strip shows the FIRST phase not yet
+// approved, and "Step n of 6" counts approvals + the one in progress.
+const BUILD_PHASES: Array<{ artifact: string; label: string }> = [
+  { artifact: 'service', label: 'Define service' },
+  { artifact: 'questionnaire', label: 'Client intake' },
+  { artifact: 'template', label: 'Document template' },
+  { artifact: 'workflow', label: 'Workflow' },
+  { artifact: 'billing', label: 'Billing' },
+  { artifact: 'enable', label: 'Review & publish' },
+]
 
 type FeedbackCategory = 'ui' | 'ai' | 'workflow' | 'feature' | 'other'
 
@@ -238,6 +291,10 @@ export interface UnifiedAssistantChatProps {
   // that pre-writes the request). The attorney still presses Send — we never
   // auto-submit. Seeded once; later edits/sends clear it normally.
   initialInput?: string
+  // WP-L: when hosted in the floating panel, the chat renders the comp's navy
+  // header (gemstar + title + model status + History/New/Close) itself — the
+  // header needs the model + history state that lives here. Absent ⇒ no header.
+  onClose?: () => void
 }
 
 const WORK_RATES: Array<{ value: WorkRate; label: string; hint: string }> = [
@@ -411,7 +468,7 @@ function ReasoningDisclosure({ reasoning }: { reasoning: string }) {
         aria-expanded={open}
       >
         {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
-        <SparklesIcon size={12} />
+        <GemSparkle size={12} secondary={false} />
         <span>Thinking</span>
       </button>
       {open && <div className="uac-reasoning-body">{reasoning}</div>}
@@ -624,7 +681,9 @@ export function UnifiedAssistantChat({
   intro,
   placeholder = 'Ask a question, request a draft, or share feedback…',
   initialInput,
+  onClose,
 }: UnifiedAssistantChatProps) {
+  const router = useRouter()
   const [models, setModels] = useState<AssistantModel[] | null>(null)
   const [modelId, setModelId] = useState<string>('')
   // Whether the guided service-build wizard is enabled for this deployment (server
@@ -632,9 +691,29 @@ export function UnifiedAssistantChat({
   // service" composer control + the build-mode banner; off ⇒ neither exists, so the
   // chatbot is byte-for-byte unchanged.
   const [buildWizard, setBuildWizard] = useState(false)
-  // BUILD MODE: the attorney clicked "Build a service" — the dock shows a banner and
-  // the next send primes the guided interview. Cleared by New chat / leaving the mode.
+  // BUILD MODE: the attorney clicked "Build a service" — the dock shows the comp's
+  // progress strip and the next send primes the guided interview. Cleared by New
+  // chat / leaving the mode.
   const [buildMode, setBuildMode] = useState(false)
+  // WP-L: which wizard artifacts have been APPROVED in this build — drives the
+  // progress strip's phase label, "Step n of 6" and gradient segments. A Set in
+  // state (not a ref) because the strip must re-render on approval.
+  const [approvedPhases, setApprovedPhases] = useState<Set<string>>(new Set())
+  // WP-L: the guided "Create a new matter" chip flow (local — see MatterFlow).
+  const [matterFlow, setMatterFlow] = useState<MatterFlow | null>(null)
+  // Typed answer for the matter flow's free-text steps (name/email).
+  const [matterFlowText, setMatterFlowText] = useState('')
+  // WP-L "Insert a template": the picker's template list (fetched on open).
+  const [templatePicker, setTemplatePicker] = useState<{
+    open: boolean
+    templates: TemplateOpt[] | null
+  }>({ open: false, templates: null })
+  // WP-L: the comp's model pill menu (composer bottom-right).
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  // WP-L: the general-scope "Draft a document" matter picker (chips of matters).
+  const [draftPicker, setDraftPicker] = useState<{
+    matters: Array<{ matterEntityId: string; matterNumber?: string; serviceLabel?: string }> | null
+  } | null>(null)
   const [turns, setTurns] = useState<DisplayTurn[]>([])
   // Seed the composer from initialInput on first render (a primed launcher). The
   // attorney still presses Send; we never auto-submit a primed prompt.
@@ -1014,6 +1093,10 @@ export function UnifiedAssistantChat({
     setTurns([])
     continuedRef.current.clear() // fresh thread ⇒ forget which approvals already auto-continued
     setBuildMode(false) // a different thread is not the in-progress build
+    setApprovedPhases(new Set())
+    setMatterFlow(null)
+    setMatterFlowText('')
+    setDraftPicker(null)
     closeBuildSession('abandoned') // Phase 5: leaving the build closes its session
     setStreaming(null)
     setError(null)
@@ -1070,6 +1153,10 @@ export function UnifiedAssistantChat({
     setActiveScope({})
     chatSessionIdRef.current = null
     setBuildMode(false)
+    setApprovedPhases(new Set())
+    setMatterFlow(null)
+    setMatterFlowText('')
+    setDraftPicker(null)
     closeBuildSession('abandoned')
     setStreaming(null)
     setError(null)
@@ -1115,6 +1202,10 @@ export function UnifiedAssistantChat({
     setTurns([])
     continuedRef.current.clear()
     setBuildMode(false)
+    setApprovedPhases(new Set())
+    setMatterFlow(null)
+    setMatterFlowText('')
+    setDraftPicker(null)
     closeBuildSession('abandoned')
     setStreaming(null)
     setError(null)
@@ -1145,6 +1236,12 @@ export function UnifiedAssistantChat({
     buildServiceKeyRef.current = null // …and which service was under construction
     pendingContinuationRef.current = null // a queued continuation dies with its conversation
     setBuildMode(false) // a fresh chat is not in build mode until the attorney re-enters it
+    setApprovedPhases(new Set())
+    setMatterFlow(null)
+    setMatterFlowText('')
+    setDraftPicker(null)
+    setTemplatePicker({ open: false, templates: null })
+    setModelMenuOpen(false)
     closeBuildSession('abandoned') // Phase 5: a new chat never continues the old build session
     setStreaming(null)
     setError(null)
@@ -1173,6 +1270,10 @@ export function UnifiedAssistantChat({
   function enterBuildMode() {
     if (!buildWizard || busy || !modelId) return
     setBuildMode(true)
+    setApprovedPhases(new Set()) // fresh build ⇒ the strip starts at phase 1
+    setMatterFlow(null)
+    setMatterFlowText('')
+    setDraftPicker(null)
     setSettingsOpen(false)
     setHistoryOpen(false)
     setFeedbackMode(false)
@@ -1313,13 +1414,144 @@ export function UnifiedAssistantChat({
     }
   }
 
-  // Paperclip: when a matter document is available, open a small source menu;
-  // otherwise jump straight to the file picker.
+  // Paperclip: open the comp's attach menu (Upload from computer / Attach from a
+  // matter [matter scope] / Insert a template).
   function onAttachClick() {
+    setAttachMenuOpen((o) => !o)
+    setTemplatePicker((p) => ({ ...p, open: false }))
+  }
+
+  // WP-L "Insert a template": pick a firm template and attach its body to the
+  // conversation the same way a matter document attaches (the assistant backend
+  // has no separate template channel — an attachment IS the context mechanism).
+  function openTemplatePicker() {
+    setAttachMenuOpen(false)
+    setTemplatePicker((p) => ({ ...p, open: true }))
+    if (templatePicker.templates === null) {
+      callAttorneyMcp<{ templates: TemplateOpt[] }>({ toolName: 'legal.template.list' })
+        .then((r) => setTemplatePicker((p) => ({ ...p, templates: r.templates })))
+        .catch(() => setTemplatePicker((p) => ({ ...p, templates: [] })))
+    }
+  }
+
+  function insertTemplate(t: TemplateOpt) {
+    setTemplatePicker((p) => ({ ...p, open: false }))
+    if (attachments.length >= MAX_ATTACHMENTS) {
+      setAttachError(`You can attach up to ${MAX_ATTACHMENTS} documents at a time.`)
+      return
+    }
+    const name = `Template — ${t.name}`
+    setAttachments((a) =>
+      a.some((x) => x.source === 'template' && x.name === name)
+        ? a // already attached
+        : [...a, { name, text: t.body, source: 'template' }],
+    )
+    setTimeout(() => composerRef.current?.focus(), 0)
+  }
+
+  // ── WP-L starter cards (empty state) ───────────────────────────────────────
+
+  // Draft a document: in a matter scope, prefill a real matter-grounded draft
+  // request (the attorney completes + sends); in the general scope, first ask
+  // which matter via the same chip walk the new-matter flow uses.
+  const DRAFT_PROMPT = 'Draft a document for this matter: '
+  function startDraftFlow() {
     if (activeScope.matterEntityId) {
-      setAttachMenuOpen((o) => !o)
-    } else {
-      fileInputRef.current?.click()
+      setInput(DRAFT_PROMPT)
+      setTimeout(() => composerRef.current?.focus(), 0)
+      return
+    }
+    // General scope: pick the matter first (real matters via legal.matter.list),
+    // then re-ground the chat on it and prefill the draft prompt.
+    setMatterFlow(null)
+    setDraftPicker({ matters: null })
+    void callAttorneyMcp<{
+      matters: Array<{ matterEntityId: string; matterNumber?: string; serviceLabel?: string }>
+    }>({ toolName: 'legal.matter.list' })
+      .then((r) => setDraftPicker({ matters: r.matters.slice(0, 8) }))
+      .catch(() => setDraftPicker({ matters: [] }))
+  }
+
+  function pickDraftMatter(m: { matterEntityId: string; matterNumber?: string }) {
+    setDraftPicker(null)
+    // Re-ground the conversation on the chosen matter (loads its thread, same as
+    // the history picker), then prefill the draft prompt for the attorney to send.
+    selectThread({ matterEntityId: m.matterEntityId })
+    setInput(DRAFT_PROMPT)
+  }
+
+  // Summarize this matter (matter scope only): a REAL grounded send, immediately.
+  function startSummarize() {
+    if (!activeScope.matterEntityId || busy) return
+    void send('Summarize this matter — key facts, current status, and next steps.')
+  }
+
+  // Create a new matter: the guided chip walk (see MatterFlow above).
+  function startMatterFlow() {
+    setDraftPicker(null)
+    setMatterFlow({ step: 'service', services: null })
+    callAttorneyMcp<{ services: ServiceOpt[] }>({ toolName: 'legal.service.list' })
+      .then((r) => {
+        // Booking honesty (same filter as NewMatterModal): a service with no active
+        // workflow cannot open matters — don't offer it.
+        const openable = r.services.filter((s) => s.bookable !== false)
+        setMatterFlow((f) => (f && f.step === 'service' ? { ...f, services: openable } : f))
+      })
+      .catch((e) =>
+        setMatterFlow((f) =>
+          f ? { ...f, step: 'error', error: e instanceof Error ? e.message : String(e) } : f,
+        ),
+      )
+  }
+
+  function matterFlowPickService(s: ServiceOpt) {
+    setMatterFlowText('')
+    setMatterFlow((f) =>
+      f ? { ...f, step: 'name', serviceKey: s.serviceKey, serviceName: s.displayName } : f,
+    )
+  }
+
+  function matterFlowSubmitText() {
+    const v = matterFlowText.trim()
+    if (!v || !matterFlow) return
+    if (matterFlow.step === 'name') {
+      setMatterFlowText('')
+      setMatterFlow({ ...matterFlow, step: 'email', clientFullName: v })
+      return
+    }
+    if (matterFlow.step === 'email') {
+      // Light shape check so legal.matter.open doesn't reject a typo'd email.
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+        setMatterFlow({ ...matterFlow, error: 'That doesn’t look like an email — try again.' })
+        return
+      }
+      const flow = { ...matterFlow, step: 'creating' as const, clientEmail: v, error: undefined }
+      setMatterFlowText('')
+      setMatterFlow(flow)
+      void callAttorneyMcp<{ matterEntityId: string }>({
+        toolName: 'legal.matter.open',
+        input: {
+          serviceKey: flow.serviceKey,
+          clientFullName: flow.clientFullName,
+          clientEmail: v,
+        },
+      })
+        .then((r) =>
+          setMatterFlow((cur) =>
+            cur ? { ...cur, step: 'done', matterEntityId: r.matterEntityId } : cur,
+          ),
+        )
+        .catch((e) =>
+          setMatterFlow((cur) =>
+            cur
+              ? {
+                  ...cur,
+                  step: 'email',
+                  error: e instanceof Error ? e.message : String(e),
+                }
+              : cur,
+          ),
+        )
     }
   }
 
@@ -1938,6 +2170,13 @@ export function UnifiedAssistantChat({
       const key = `${info.serviceKey}:${info.artifact}`
       if (continuedRef.current.has(key)) return // already continued from this approval
       continuedRef.current.add(key)
+      // WP-L: advance the build-mode progress strip (phase = approved artifact).
+      setApprovedPhases((prev) => {
+        if (prev.has(info.artifact)) return prev
+        const next = new Set(prev)
+        next.add(info.artifact)
+        return next
+      })
       // Remember which service this build is assembling — every subsequent message
       // carries it so the server injects the live BUILD BRIEF (WP4.2).
       if (info.serviceKey) buildServiceKeyRef.current = info.serviceKey
@@ -2080,84 +2319,111 @@ export function UnifiedAssistantChat({
     }
   }
 
+  // WP-L: the comp's six-phase progress strip — the first not-yet-approved phase
+  // is the one in progress.
+  const buildStageIdxRaw = BUILD_PHASES.findIndex((p) => !approvedPhases.has(p.artifact))
+  const buildStageIdx = buildStageIdxRaw === -1 ? BUILD_PHASES.length - 1 : buildStageIdxRaw
+  // Turns the transcript actually shows (hidden drivers excluded).
+  const visibleTurns = turns.filter((t) => !t.hiddenFromUi)
+  // The comp's model menu lists only connected, available models.
+  const connectedModels = models?.filter((m) => m.available && m.connected) ?? []
+
   return (
-    <div className="uac">
-      {/* ── Toolbar: settings, beta, model name + context toggle ───────────── */}
-      <div className="uac-toolbar">
-        <button
-          type="button"
-          className={`uac-iconbtn${settingsOpen ? ' active' : ''}`}
-          onClick={() => {
-            setSettingsOpen((o) => !o)
-            setHistoryOpen(false)
-          }}
-          aria-label="Assistant settings"
-          title="Settings — model, work rate, web search"
-        >
-          <SettingsIcon size={16} />
-        </button>
-        <button
-          type="button"
-          className={`uac-iconbtn${feedbackMode ? ' active' : ''}`}
-          onClick={() => {
-            setFeedbackMode((m) => !m)
-            setSettingsOpen(false)
-            setHistoryOpen(false)
-            setFbDone(false)
-            setFbRef(null)
-            setFbError(null)
-          }}
-          aria-label="Feedback mode"
-          aria-pressed={feedbackMode}
-          title="Feedback mode — talk it through, then log the whole thread"
-        >
-          <MegaphoneIcon size={16} />
-        </button>
-        <button
-          type="button"
-          className={`uac-iconbtn${historyOpen ? ' active' : ''}`}
-          onClick={openHistory}
-          aria-label="Chat history"
-          aria-expanded={historyOpen}
-          aria-haspopup="menu"
-          title="History — reopen a prior conversation"
-        >
-          <ClockIcon size={16} />
-        </button>
-        {turns.length > 0 && (
+    <div className="uac li-uac">
+      {/* ── WP-L header (comp): gemstar + title + model status; settings /
+          feedback / history / new / close as translucent icon buttons ───────── */}
+      <div className="li-uac-head">
+        <div className="li-uac-head-id">
+          <GemSparkle size={28} />
+          <div className="li-uac-head-text">
+            <div className="li-uac-head-title">Legal Assistant</div>
+            <div className="li-uac-head-status">
+              <span className="li-uac-head-dot" aria-hidden="true" />
+              <span className="li-uac-head-model">{selected ? selected.label : 'Connecting…'}</span>
+              {effectiveWebSearch && (
+                <span className="li-uac-head-web" title="Answers cite live web sources">
+                  <SearchIcon size={10} /> web
+                </span>
+              )}
+              {scoped && (
+                <button
+                  type="button"
+                  className={`li-uac-scopechip${useContext ? ' on' : ''}`}
+                  onClick={() => setUseContext((v) => !v)}
+                  title={
+                    useContext
+                      ? `Grounded in ${scopeLabel}. Click for a general question.`
+                      : 'General question — not grounded in this matter/client.'
+                  }
+                >
+                  {useContext ? `Using ${scopeLabel}` : 'General'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="li-uac-head-btns">
           <button
             type="button"
-            className="uac-iconbtn"
+            className={`li-uac-headbtn${settingsOpen ? ' active' : ''}`}
+            onClick={() => {
+              setSettingsOpen((o) => !o)
+              setHistoryOpen(false)
+            }}
+            aria-label="Assistant settings"
+            title="Settings — work rate, web search, research"
+          >
+            <SettingsIcon size={16} />
+          </button>
+          <button
+            type="button"
+            className={`li-uac-headbtn${feedbackMode ? ' active' : ''}`}
+            onClick={() => {
+              setFeedbackMode((m) => !m)
+              setSettingsOpen(false)
+              setHistoryOpen(false)
+              setFbDone(false)
+              setFbRef(null)
+              setFbError(null)
+            }}
+            aria-label="Feedback mode"
+            aria-pressed={feedbackMode}
+            title="Feedback mode — talk it through, then log the whole thread"
+          >
+            <MegaphoneIcon size={16} />
+          </button>
+          <button
+            type="button"
+            className={`li-uac-headbtn${historyOpen ? ' active' : ''}`}
+            onClick={openHistory}
+            aria-label="Chat history"
+            aria-expanded={historyOpen}
+            aria-haspopup="menu"
+            title="History — reopen a prior conversation"
+          >
+            <ClockIcon size={17} />
+          </button>
+          <button
+            type="button"
+            className="li-uac-headbtn"
             onClick={newChat}
             aria-label="New chat"
             title="New chat — clear this conversation"
           >
-            <PlusIcon size={16} />
+            <PlusIcon size={17} />
           </button>
-        )}
-
-        <div className="uac-toolbar-spacer" />
-
-        {selected && <span className="uac-model-name">{selected.label}</span>}
-        {effectiveWebSearch && (
-          <span className="badge uac-web-badge" title="Answers cite live web sources">
-            <SearchIcon size={11} /> web
-          </span>
-        )}
-        {scoped && (
-          <button
-            type="button"
-            className={`uac-ctx${useContext ? ' on' : ''}`}
-            onClick={() => setUseContext((v) => !v)}
-            title={
-              useContext
-                ? `Grounded in ${scopeLabel}. Click for a general question.`
-                : 'General question — not grounded in this matter/client.'
-            }
-          >
-            {useContext ? `Using ${scopeLabel}` : 'General'}
-          </button>
-        )}
+          {onClose && (
+            <button
+              type="button"
+              className="li-uac-headbtn"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close"
+            >
+              <XIcon size={17} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── History popover (reopen a prior conversation) ─────────────────── */}
@@ -2261,30 +2527,9 @@ export function UnifiedAssistantChat({
         </div>
       )}
 
-      {/* ── Settings popover ──────────────────────────────────────────────── */}
+      {/* ── Settings popover (model now lives in the composer's comp pill) ──── */}
       {settingsOpen && (
         <div className="uac-popover">
-          <div className="uac-setting">
-            <label className="uac-setting-label">Model</label>
-            <select
-              value={modelId}
-              onChange={(e) => {
-                setModelId(e.target.value)
-                storeModelId(e.target.value) // remember it for next session
-              }}
-              disabled={!models}
-              aria-label="AI model"
-            >
-              {!models && <option>Loading models…</option>}
-              {models?.map((m) => (
-                <option key={m.id} value={m.id} disabled={!m.available || !m.connected}>
-                  {m.label}
-                  {!m.available ? ' — coming soon' : !m.connected ? ' — connect in Settings' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div className="uac-setting">
             <label className="uac-setting-label">Work rate</label>
             <div className="uac-segmented" role="group" aria-label="Work rate">
@@ -2410,26 +2655,38 @@ export function UnifiedAssistantChat({
         />
       )}
 
-      {/* ── Build-mode banner (Phase 7) ───────────────────────────────────── */}
+      {/* ── WP-L build-mode progress strip (comp): "Building a service ·
+          <phase>", "Step n of 6", six gradient segments, exit ─────────────── */}
       {buildMode && (
-        <div className="uac-buildmode" role="region" aria-label="Building a service">
-          <span className="uac-buildmode-pill">
-            <WandIcon size={13} /> Building a service
-          </span>
-          <span className="uac-buildmode-sub">
-            I’ll walk you through it step by step — answer each question below.
-          </span>
-          <button
-            type="button"
-            className="uac-buildmode-exit"
-            onClick={() => {
-              setBuildMode(false)
-              closeBuildSession('abandoned') // Phase 5: exiting build seals the session
-            }}
-            title="Leave build mode (the conversation stays)"
-          >
-            Exit
-          </button>
+        <div className="li-uac-buildstrip" role="region" aria-label="Building a service">
+          <div className="li-uac-buildstrip-row">
+            <GemSparkle size={18} />
+            <span className="li-uac-buildstrip-title">Building a service</span>
+            <span className="li-uac-buildstrip-phase">
+              ·&nbsp;{BUILD_PHASES[buildStageIdx]!.label}
+            </span>
+            <span className="li-uac-buildstrip-step">Step {buildStageIdx + 1} of 6</span>
+            <button
+              type="button"
+              className="li-uac-buildstrip-exit"
+              onClick={() => {
+                setBuildMode(false)
+                closeBuildSession('abandoned') // Phase 5: exiting build seals the session
+              }}
+              title="Exit builder (the conversation stays)"
+              aria-label="Exit builder"
+            >
+              <XIcon size={14} />
+            </button>
+          </div>
+          <div className="li-uac-buildstrip-segs" aria-hidden="true">
+            {BUILD_PHASES.map((p, i) => (
+              <span
+                key={p.artifact}
+                className={`li-uac-buildstrip-seg${i <= buildStageIdx ? ' is-on' : ''}`}
+              />
+            ))}
+          </div>
         </div>
       )}
 
@@ -2520,202 +2777,421 @@ export function UnifiedAssistantChat({
         aria-atomic="false"
         aria-label="Conversation"
       >
-        {/* Greeting: render as the assistant's first message bubble (not a centered
-            header), so an empty chat already reads like the assistant opened it.
-            Ephemeral — it isn't a stored turn; it clears once the attorney replies. */}
-        {intro && turns.length === 0 && !streaming && (
-          <div className="feedback-bubble feedback-bubble-assistant">
-            <div className="assistant-md">{intro}</div>
+        {/* WP-L empty state (comp): serif greeting + starter suggestion cards.
+            Each card is a REAL flow — no dead controls (see WIRING §WP-L). */}
+        {visibleTurns.length === 0 && !streaming && !matterFlow && !draftPicker && (
+          <div className="li-uac-empty">
+            <div className="li-uac-empty-title">{intro ?? 'How can I serve you, Counselor?'}</div>
+            {!feedbackMode && (
+              <div className="li-uac-starters">
+                <button
+                  type="button"
+                  className="li-uac-starter"
+                  onClick={startDraftFlow}
+                  disabled={busy}
+                >
+                  <span className="li-uac-starter-icon">
+                    <FileTextIcon size={17} />
+                  </span>
+                  Draft a document
+                </button>
+                {activeScope.matterEntityId && (
+                  <button
+                    type="button"
+                    className="li-uac-starter"
+                    onClick={startSummarize}
+                    disabled={busy || !modelId}
+                  >
+                    <span className="li-uac-starter-icon">
+                      <ListIcon size={17} />
+                    </span>
+                    Summarize this matter
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="li-uac-starter"
+                  onClick={startMatterFlow}
+                  disabled={busy}
+                >
+                  <span className="li-uac-starter-icon">
+                    <CheckCircleIcon size={17} />
+                  </span>
+                  Create a new matter
+                </button>
+                {isClaude && buildWizard && (
+                  <button
+                    type="button"
+                    className="li-uac-starter"
+                    onClick={enterBuildMode}
+                    disabled={busy || !modelId}
+                  >
+                    <span className="li-uac-starter-icon">
+                      <WandIcon size={17} />
+                    </span>
+                    Create a new service
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
+
+        {/* WP-L "Draft a document" (general scope): pick the matter to ground on,
+            then the composer is prefilled with the draft request. */}
+        {draftPicker && (
+          <div className="li-uac-flow">
+            <div className="li-uac-msg li-uac-msg-assistant">Which matter should I draft for?</div>
+            {draftPicker.matters === null ? (
+              <div className="li-uac-flow-loading">
+                <GemSparkle size={16} /> Loading matters…
+              </div>
+            ) : draftPicker.matters.length === 0 ? (
+              <div className="li-uac-msg li-uac-msg-assistant">
+                No matters yet — open one first (try “Create a new matter”).
+              </div>
+            ) : (
+              <div className="li-uac-opts">
+                {draftPicker.matters.map((m) => (
+                  <button
+                    key={m.matterEntityId}
+                    type="button"
+                    className="li-uac-opt"
+                    onClick={() => pickDraftMatter(m)}
+                  >
+                    <span className="li-uac-opt-radio" aria-hidden="true" />
+                    {m.matterNumber ?? m.matterEntityId.slice(0, 8)}
+                    {m.serviceLabel ? ` — ${m.serviceLabel}` : ''}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              className="li-uac-flow-cancel"
+              onClick={() => setDraftPicker(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* WP-L "Create a new matter" — the guided chip walk. Ends in a REAL
+            matter via legal.matter.open (the same operation NewMatterModal uses). */}
+        {matterFlow && (
+          <div className="li-uac-flow">
+            <div className="li-uac-msg li-uac-msg-assistant">
+              Let’s open a new matter. Which service is it for?
+            </div>
+            {matterFlow.step === 'service' &&
+              (matterFlow.services === null ? (
+                <div className="li-uac-flow-loading">
+                  <GemSparkle size={16} /> Loading services…
+                </div>
+              ) : matterFlow.services.length === 0 ? (
+                <div className="li-uac-msg li-uac-msg-assistant">
+                  No bookable services yet — create one first (try “Create a new service”).
+                </div>
+              ) : (
+                <div className="li-uac-opts">
+                  {matterFlow.services.map((s) => (
+                    <button
+                      key={s.serviceKey}
+                      type="button"
+                      className="li-uac-opt"
+                      onClick={() => matterFlowPickService(s)}
+                    >
+                      <span className="li-uac-opt-radio" aria-hidden="true" />
+                      {s.displayName}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            {matterFlow.serviceName && (
+              <div className="li-uac-answered">
+                <CheckIcon size={13} /> {matterFlow.serviceName}
+              </div>
+            )}
+
+            {(matterFlow.step === 'name' ||
+              matterFlow.step === 'email' ||
+              matterFlow.step === 'creating' ||
+              matterFlow.step === 'done') && (
+              <div className="li-uac-msg li-uac-msg-assistant">What’s the client’s full name?</div>
+            )}
+            {matterFlow.clientFullName && (
+              <div className="li-uac-answered">
+                <CheckIcon size={13} /> {matterFlow.clientFullName}
+              </div>
+            )}
+            {(matterFlow.step === 'email' ||
+              matterFlow.step === 'creating' ||
+              matterFlow.step === 'done') && (
+              <div className="li-uac-msg li-uac-msg-assistant">And the client’s email?</div>
+            )}
+            {matterFlow.clientEmail && (
+              <div className="li-uac-answered">
+                <CheckIcon size={13} /> {matterFlow.clientEmail}
+              </div>
+            )}
+
+            {(matterFlow.step === 'name' || matterFlow.step === 'email') && (
+              <div className="li-uac-flow-inputrow">
+                <input
+                  className="li-uac-flow-input"
+                  value={matterFlowText}
+                  onChange={(e) => setMatterFlowText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      matterFlowSubmitText()
+                    }
+                  }}
+                  placeholder={
+                    matterFlow.step === 'name' ? 'e.g. Jane Doe' : 'e.g. jane@example.com'
+                  }
+                  type={matterFlow.step === 'email' ? 'email' : 'text'}
+                  aria-label={matterFlow.step === 'name' ? 'Client full name' : 'Client email'}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="li-uac-flow-submit"
+                  onClick={matterFlowSubmitText}
+                  disabled={!matterFlowText.trim()}
+                  aria-label="Submit answer"
+                >
+                  <ArrowRightIcon size={15} />
+                </button>
+              </div>
+            )}
+
+            {matterFlow.step === 'creating' && (
+              <div className="li-uac-flow-loading">
+                <GemSparkle size={16} /> Opening the matter…
+              </div>
+            )}
+            {matterFlow.step === 'done' && matterFlow.matterEntityId && (
+              <>
+                <div className="li-uac-msg li-uac-msg-assistant">
+                  Done — I’ve opened <strong>{matterFlow.serviceName}</strong> for{' '}
+                  {matterFlow.clientFullName} and queued the intake questionnaire for the client.
+                </div>
+                <button
+                  type="button"
+                  className="li-uac-done-primary"
+                  onClick={() => router.push(`/attorney/matters/${matterFlow.matterEntityId}`)}
+                >
+                  View matter
+                </button>
+              </>
+            )}
+            {matterFlow.error && (
+              <div role="alert" className="alert alert-error">
+                {matterFlow.error}
+              </div>
+            )}
+            {matterFlow.step !== 'done' && matterFlow.step !== 'creating' && (
+              <button
+                type="button"
+                className="li-uac-flow-cancel"
+                onClick={() => {
+                  setMatterFlow(null)
+                  setMatterFlowText('')
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Hidden continuations stay in `turns` (the model must re-see them in the
             next request's history) but render no bubble — the cards already show
             their outcome. Filtering is key-stable: turns only append, and
             hiddenFromUi never changes after commit. */}
-        {turns
-          .filter((t) => !t.hiddenFromUi)
-          .map((t, i) => (
-            <div
-              key={i}
-              className={`feedback-bubble feedback-bubble-${t.role}`}
-              // A failed send stays visible but dimmed: the attorney sees what
-              // didn't go through, and "Try again" (in the error alert) revives it.
-              style={t.failed ? { opacity: 0.55 } : undefined}
-              title={t.failed ? 'This message didn’t send — use Try again below.' : undefined}
-            >
-              {/* Assistant replies are markdown — render so **bold**, lists and
+        {visibleTurns.map((t, i) => (
+          <div
+            key={i}
+            className={`li-uac-msg li-uac-msg-${t.role}`}
+            // A failed send stays visible but dimmed: the attorney sees what
+            // didn't go through, and "Try again" (in the error alert) revives it.
+            style={t.failed ? { opacity: 0.55 } : undefined}
+            title={t.failed ? 'This message didn’t send — use Try again below.' : undefined}
+          >
+            {/* Assistant replies are markdown — render so **bold**, lists and
                 headings display formatted (not as raw syntax). renderMarkdown
                 escapes HTML before formatting, so model output can't inject
                 markup. User turns stay verbatim. */}
-              {t.role === 'assistant' ? (
-                <>
-                  {stripMachinery(t.content).trim() && (
-                    <div
-                      className="assistant-md"
-                      dangerouslySetInnerHTML={{
-                        __html: renderMarkdown(stripMachinery(t.content)),
-                      }}
-                    />
-                  )}
-                  {/* The model's reasoning/process — relocated out of the reply into a
+            {t.role === 'assistant' ? (
+              <>
+                {stripMachinery(t.content).trim() && (
+                  <div
+                    className="assistant-md"
+                    dangerouslySetInnerHTML={{
+                      __html: renderMarkdown(stripMachinery(t.content)),
+                    }}
+                  />
+                )}
+                {/* The model's reasoning/process — relocated out of the reply into a
                     collapsed disclosure the attorney can expand on demand. */}
-                  {t.reasoning?.trim() && <ReasoningDisclosure reasoning={t.reasoning} />}
-                  {/* Documents the assistant produced — downloadable deliverables
+                {t.reasoning?.trim() && <ReasoningDisclosure reasoning={t.reasoning} />}
+                {/* Documents the assistant produced — downloadable deliverables
                     (PDF/Word + save to matter), not the prose. Downloads attach
                     here, never to an ordinary reply. */}
-                  {t.documents?.map((doc, di) => (
-                    <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
-                  ))}
-                  {/* Billing proposals — rendered ABOVE the workflow card so a
+                {t.documents?.map((doc, di) => (
+                  <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
+                ))}
+                {/* Billing proposals — rendered ABOVE the workflow card so a
                     same-turn pair reads in approve order (pricing first: the
                     workflow's approve validates against the approved billing). */}
-                  {t.costProposals?.map((p, pi) => (
-                    <CostProposalCard
-                      key={pi}
-                      proposal={p}
-                      onApproved={handleApproved}
-                      onEdited={handleProposalEdited}
-                    />
-                  ))}
-                  {/* Workflow proposals (PR5) — inline approval cards. Approving is the
+                {t.costProposals?.map((p, pi) => (
+                  <CostProposalCard
+                    key={pi}
+                    proposal={p}
+                    onApproved={handleApproved}
+                    onEdited={handleProposalEdited}
+                  />
+                ))}
+                {/* Workflow proposals (PR5) — inline approval cards. Approving is the
                     live write; nothing was saved by the turn that proposed them. */}
-                  {t.workflowProposals?.map((p, pi) => (
-                    <WorkflowProposalCard
-                      key={pi}
-                      proposal={p}
-                      onApproved={handleApproved}
-                      onRevise={handleRevise}
-                      onEdited={handleProposalEdited}
-                    />
-                  ))}
-                  {/* New-service proposals (Build-Wizard Phase 1) — inline approval
+                {t.workflowProposals?.map((p, pi) => (
+                  <WorkflowProposalCard
+                    key={pi}
+                    proposal={p}
+                    onApproved={handleApproved}
+                    onRevise={handleRevise}
+                    onEdited={handleProposalEdited}
+                  />
+                ))}
+                {/* New-service proposals (Build-Wizard Phase 1) — inline approval
                     cards. Approving creates the (disabled) service; nothing was saved
                     by the turn that proposed it. */}
-                  {t.serviceProposals?.map((p, pi) => (
-                    <ServiceProposalCard
-                      key={pi}
-                      proposal={p}
-                      onApproved={handleApproved}
-                      onEdited={handleProposalEdited}
-                    />
-                  ))}
-                  {/* Questionnaire proposals (Build-Wizard Phase 2) — inline approval
+                {t.serviceProposals?.map((p, pi) => (
+                  <ServiceProposalCard
+                    key={pi}
+                    proposal={p}
+                    onApproved={handleApproved}
+                    onEdited={handleProposalEdited}
+                  />
+                ))}
+                {/* Questionnaire proposals (Build-Wizard Phase 2) — inline approval
                     cards surfacing the variable-contract coverage. Approving writes
                     the service's intake form; nothing was saved by the proposing turn. */}
-                  {t.questionnaireProposals?.map((p, pi) => (
-                    <QuestionnaireProposalCard
-                      key={pi}
-                      proposal={p}
-                      onApproved={handleApproved}
-                      onEdited={handleProposalEdited}
-                    />
-                  ))}
-                  {/* Template proposals (Build-Wizard Phase 3) — inline approval cards
+                {t.questionnaireProposals?.map((p, pi) => (
+                  <QuestionnaireProposalCard
+                    key={pi}
+                    proposal={p}
+                    onApproved={handleApproved}
+                    onEdited={handleProposalEdited}
+                  />
+                ))}
+                {/* Template proposals (Build-Wizard Phase 3) — inline approval cards
                     flagging orphan tokens. Approving writes the service's document
                     template; nothing was saved by the proposing turn. */}
-                  {t.templateProposals?.map((p, pi) => (
-                    <TemplateProposalCard
-                      key={pi}
-                      proposal={p}
-                      onApproved={handleApproved}
-                      onEdited={handleProposalEdited}
-                    />
-                  ))}
-                  {/* Enable proposals (Build-Wizard Phase 6, terminal) — the final card.
+                {t.templateProposals?.map((p, pi) => (
+                  <TemplateProposalCard
+                    key={pi}
+                    proposal={p}
+                    onApproved={handleApproved}
+                    onEdited={handleProposalEdited}
+                  />
+                ))}
+                {/* Enable proposals (Build-Wizard Phase 6, terminal) — the final card.
                     Approving flips the service to active/bookable; this ends the build. */}
-                  {t.enableProposals?.map((p, pi) => (
-                    <EnableProposalCard
-                      key={pi}
-                      proposal={p}
-                      onApproved={handleApproved}
-                      onDone={handleBuildDone}
-                    />
-                  ))}
-                  {/* New data-kind proposals (Tier 1 data-as-schema) — approval cards.
+                {t.enableProposals?.map((p, pi) => (
+                  <EnableProposalCard
+                    key={pi}
+                    proposal={p}
+                    onApproved={handleApproved}
+                    onDone={handleBuildDone}
+                  />
+                ))}
+                {/* New data-kind proposals (Tier 1 data-as-schema) — approval cards.
                     Approving mints the kind via kind.define; the proposing turn wrote
                     nothing. */}
-                  {t.kindProposals?.map((p, pi) => (
-                    <KindProposalCard key={pi} proposal={p} onApproved={handleApproved} />
-                  ))}
-                  {/* Structured interview questions (Phase 7) — walked ONE AT A TIME as
+                {t.kindProposals?.map((p, pi) => (
+                  <KindProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                ))}
+                {/* Structured interview questions (Phase 7) — walked ONE AT A TIME as
                     a click-through (QuestionBatch), not a stack. Answering sends a
                     HIDDEN continuation (no fake user bubble). */}
-                  {t.buildQuestions && t.buildQuestions.length > 0 && (
-                    <QuestionBatch questions={t.buildQuestions} onAnswer={handleQuestionAnswer} />
-                  )}
-                  {/* Non-fatal warnings (e.g. the tool-round cap cut a step off) —
+                {t.buildQuestions && t.buildQuestions.length > 0 && (
+                  <QuestionBatch questions={t.buildQuestions} onAnswer={handleQuestionAnswer} />
+                )}
+                {/* Non-fatal warnings (e.g. the tool-round cap cut a step off) —
                     visible on the turn, never rendered as a failure (WP5.1).
                     tone 'status' renders muted (a progress line, no glyph). */}
-                  {t.notices?.map((n, ni) =>
-                    n.tone === 'status' ? (
-                      <div
-                        key={ni}
-                        role="status"
-                        className="text-muted"
-                        style={{ marginTop: 8, fontSize: 13 }}
-                      >
-                        {n.message}
-                      </div>
-                    ) : (
-                      <div
-                        key={ni}
-                        role="status"
-                        style={{
-                          marginTop: 8,
-                          padding: '6px 10px',
-                          borderRadius: 8,
-                          fontSize: 13,
-                          background: 'rgba(245, 158, 11, 0.12)',
-                          border: '1px solid rgba(245, 158, 11, 0.35)',
-                        }}
-                      >
-                        ⚠️ {n.message}
-                      </div>
-                    ),
-                  )}
-                  {stripMachinery(t.content).trim() && (
-                    <div className="uac-reply-actions">
-                      <CopyButton text={stripMachinery(t.content)} />
+                {t.notices?.map((n, ni) =>
+                  n.tone === 'status' ? (
+                    <div
+                      key={ni}
+                      role="status"
+                      className="text-muted"
+                      style={{ marginTop: 8, fontSize: 13 }}
+                    >
+                      {n.message}
                     </div>
-                  )}
-                </>
-              ) : (
-                // User bubbles strip machinery too (UI-BUILDER-FIX-1 item 9): a
-                // persisted driver/continuation turn must never render its ⟦…⟧
-                // payload — structural, not reliant on the model's discipline.
-                <div style={{ whiteSpace: 'pre-wrap' }}>{stripMachinery(t.content)}</div>
-              )}
-              {t.citations && t.citations.length > 0 && (
-                <ol className="uac-citations">
-                  {t.citations.map((c, j) => (
-                    <li key={j}>
-                      {isHttpUrl(c) ? (
-                        <a href={c} target="_blank" rel="noopener noreferrer">
-                          {c}
-                        </a>
-                      ) : (
-                        <span className="text-muted">{c}</span>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              )}
-              {t.role === 'user' && t.attachments && t.attachments.length > 0 && (
-                <div className="uac-bubble-attachments">
-                  {t.attachments.map((name, k) => (
-                    <span key={k} className="uac-attach-chip uac-attach-chip-static" title={name}>
-                      <FileTextIcon size={11} />
-                      <span className="uac-attach-chip-name">{name}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+                  ) : (
+                    <div
+                      key={ni}
+                      role="status"
+                      style={{
+                        marginTop: 8,
+                        padding: '6px 10px',
+                        borderRadius: 8,
+                        fontSize: 13,
+                        background: 'rgba(245, 158, 11, 0.12)',
+                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                      }}
+                    >
+                      ⚠️ {n.message}
+                    </div>
+                  ),
+                )}
+                {stripMachinery(t.content).trim() && (
+                  <div className="uac-reply-actions">
+                    <CopyButton text={stripMachinery(t.content)} />
+                  </div>
+                )}
+              </>
+            ) : (
+              // User bubbles strip machinery too (UI-BUILDER-FIX-1 item 9): a
+              // persisted driver/continuation turn must never render its ⟦…⟧
+              // payload — structural, not reliant on the model's discipline.
+              <div style={{ whiteSpace: 'pre-wrap' }}>{stripMachinery(t.content)}</div>
+            )}
+            {t.citations && t.citations.length > 0 && (
+              <ol className="uac-citations">
+                {t.citations.map((c, j) => (
+                  <li key={j}>
+                    {isHttpUrl(c) ? (
+                      <a href={c} target="_blank" rel="noopener noreferrer">
+                        {c}
+                      </a>
+                    ) : (
+                      <span className="text-muted">{c}</span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
+            {t.role === 'user' && t.attachments && t.attachments.length > 0 && (
+              <div className="uac-bubble-attachments">
+                {t.attachments.map((name, k) => (
+                  <span key={k} className="uac-attach-chip uac-attach-chip-static" title={name}>
+                    <FileTextIcon size={11} />
+                    <span className="uac-attach-chip-name">{name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
 
         {/* The in-flight reply: thinking animation → streamed markdown w/ caret. */}
         {streaming && (
-          <div className="feedback-bubble feedback-bubble-assistant">
+          <div className="li-uac-msg li-uac-msg-assistant">
             {/* "Using <skill>" chips are process signals, not the reply — a live
                 progress affordance only. They clear the moment answer text arrives so
                 the reply channel reads clean (BUILDER-REASONING-CHANNEL-1). */}
@@ -2999,32 +3475,102 @@ export function UnifiedAssistantChat({
           </div>
         )}
         <div className="uac-composer">
+          {/* WP-L attach menu (comp): Upload from computer / Attach from a matter
+              (matter scope) / Insert a template — icon tile + label + description. */}
           {attachMenuOpen && canAttach && (
-            <div className="uac-attach-menu" role="menu">
+            <div className="li-uac-menu li-uac-attachmenu" role="menu">
               <button
                 type="button"
                 role="menuitem"
-                className="uac-attach-menu-item"
+                className="li-uac-menu-item"
                 onClick={() => {
                   setAttachMenuOpen(false)
                   fileInputRef.current?.click()
                 }}
               >
-                <PaperclipIcon size={14} /> Upload a file
+                <span className="li-uac-menu-tile">
+                  <UploadIcon size={16} />
+                </span>
+                <span className="li-uac-menu-text">
+                  <span className="li-uac-menu-label">Upload from computer</span>
+                  <span className="li-uac-menu-desc">PDF, Word, or text</span>
+                </span>
               </button>
               {activeScope.matterEntityId && (
                 <button
                   type="button"
                   role="menuitem"
-                  className="uac-attach-menu-item"
+                  className="li-uac-menu-item"
                   onClick={() => {
                     setAttachMenuOpen(false)
                     void attachMatterDocument()
                   }}
                 >
-                  <FileTextIcon size={14} /> This matter’s document
+                  <span className="li-uac-menu-tile">
+                    <FileTextIcon size={16} />
+                  </span>
+                  <span className="li-uac-menu-text">
+                    <span className="li-uac-menu-label">Attach from this matter</span>
+                    <span className="li-uac-menu-desc">The document already on file</span>
+                  </span>
                 </button>
               )}
+              <button
+                type="button"
+                role="menuitem"
+                className="li-uac-menu-item"
+                onClick={openTemplatePicker}
+              >
+                <span className="li-uac-menu-tile">
+                  <LayersIcon size={16} />
+                </span>
+                <span className="li-uac-menu-text">
+                  <span className="li-uac-menu-label">Insert a template</span>
+                  <span className="li-uac-menu-desc">Start from a saved template</span>
+                </span>
+              </button>
+            </div>
+          )}
+          {/* WP-L "Insert a template" picker — the firm's real template library. */}
+          {templatePicker.open && canAttach && (
+            <div className="li-uac-menu li-uac-tplmenu" role="menu" aria-label="Insert a template">
+              <div className="li-uac-menu-head">Insert a template</div>
+              {templatePicker.templates === null ? (
+                <div className="li-uac-menu-empty">
+                  <span className="spinner" /> Loading templates…
+                </div>
+              ) : templatePicker.templates.length === 0 ? (
+                <div className="li-uac-menu-empty">No templates in the library yet.</div>
+              ) : (
+                <div className="li-uac-tplmenu-list">
+                  {templatePicker.templates.map((t) => (
+                    <button
+                      key={t.templateEntityId}
+                      type="button"
+                      role="menuitem"
+                      className="li-uac-menu-item"
+                      onClick={() => insertTemplate(t)}
+                    >
+                      <span className="li-uac-menu-tile">
+                        <FileTextIcon size={16} />
+                      </span>
+                      <span className="li-uac-menu-text">
+                        <span className="li-uac-menu-label">{t.name}</span>
+                        {t.docKind && (
+                          <span className="li-uac-menu-desc">{t.docKind.replace(/_/g, ' ')}</span>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                className="li-uac-flow-cancel"
+                onClick={() => setTemplatePicker((p) => ({ ...p, open: false }))}
+              >
+                Cancel
+              </button>
             </div>
           )}
           {/* The textarea grows upward with content; the toolbar row stays pinned
@@ -3131,15 +3677,62 @@ export function UnifiedAssistantChat({
                 </button>
               )}
             </div>
-            <button
-              type="button"
-              className="uac-send"
-              onClick={() => void send()}
-              disabled={busy || !input.trim() || !modelId}
-              aria-label="Send"
-            >
-              <SendIcon size={16} />
-            </button>
+            <div className="li-uac-composer-right">
+              {/* WP-L model pill + menu (comp): only connected providers listed. */}
+              <div className="li-uac-modelwrap">
+                <button
+                  type="button"
+                  className="li-uac-modelpill"
+                  onClick={() => setModelMenuOpen((o) => !o)}
+                  aria-haspopup="menu"
+                  aria-expanded={modelMenuOpen}
+                  aria-label="AI model"
+                  title="Choose the AI model"
+                  disabled={!models}
+                >
+                  {selected?.label ?? 'Model'}
+                  <ChevronDownIcon size={12} />
+                </button>
+                {modelMenuOpen && (
+                  <div className="li-uac-menu li-uac-modelmenu" role="menu" aria-label="Model">
+                    <div className="li-uac-menu-head">Model</div>
+                    {connectedModels.length === 0 && (
+                      <div className="li-uac-menu-empty">
+                        No connected models — connect one in Settings → Integrations.
+                      </div>
+                    )}
+                    {connectedModels.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={m.id === modelId}
+                        className="li-uac-menu-item li-uac-modelitem"
+                        onClick={() => {
+                          setModelId(m.id)
+                          storeModelId(m.id) // remember it for next session
+                          setModelMenuOpen(false)
+                        }}
+                      >
+                        <span className="li-uac-menu-check">
+                          {m.id === modelId ? <CheckIcon size={14} /> : null}
+                        </span>
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="uac-send li-uac-send"
+                onClick={() => void send()}
+                disabled={busy || !input.trim() || !modelId}
+                aria-label="Send"
+              >
+                <SendIcon size={17} />
+              </button>
+            </div>
           </div>
         </div>
         <input

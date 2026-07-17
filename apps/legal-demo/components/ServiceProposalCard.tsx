@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { ServiceEditorModal } from '@/components/ServiceEditorModal'
-import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
+import { ProposalCardShell, ProposalFacts } from '@/components/ProposalCardShell'
+import { CheckIcon, EditIcon } from '@/components/icons'
 
 // CONSTRAINT (mirrors WorkflowProposalCard): no server-package imports. This shape
 // is a structural mirror of verticals/legal/src/api/serviceAuthoring.ts's
@@ -179,107 +180,92 @@ export function ServiceProposalCard({
     }
   }
 
+  // BUILDER-UX-1 WP-1.2 (kept): the two copies stay LABELED — "Client sees" (the
+  // public booking tile) vs "Internal" — now as comp facts-grid cells (WP-L).
+  const facts: Array<{ label: string; value: React.ReactNode }> = []
+  if (current.clientDisplayName || current.clientDescription) {
+    facts.push({
+      label: 'Client sees',
+      value: `${current.clientDisplayName ?? ''}${
+        current.clientDescription ? ` — ${current.clientDescription}` : ''
+      }`,
+    })
+  }
+  if (current.clientDisplayNameEs || current.clientDescriptionEs) {
+    facts.push({
+      label: 'Client sees (Español)',
+      value: `${current.clientDisplayNameEs ?? ''}${
+        current.clientDescriptionEs ? ` — ${current.clientDescriptionEs}` : ''
+      }`,
+    })
+  }
+  if (current.description) facts.push({ label: 'Internal', value: current.description })
+  facts.push({ label: 'Route', value: current.route === 'auto' ? 'Automatic' : 'Manual' })
+  facts.push({
+    label: 'Documents',
+    value: current.generationMode === 'ai_draft' ? 'AI draft' : 'Template merge',
+  })
+
   return (
-    <div className="uac-doc-card">
-      <div className="uac-doc-head">
-        <span className="uac-doc-title">
-          <LayersIcon size={14} /> Proposed service — {current.displayName}
-        </span>
-        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-          key: {current.derivedKey}
-        </span>
+    <ProposalCardShell
+      kind="New service"
+      title={current.displayName}
+      meta={`key: ${current.derivedKey}`}
+      actions={
+        <>
+          <button
+            type="button"
+            className={`li-uac-prop-btn primary${approveState === 'approved' ? ' done' : ''}`}
+            onClick={approve}
+            disabled={approveState === 'approving' || approveState === 'approved'}
+            title="Approve this service — this creates the (disabled) service"
+          >
+            <CheckIcon size={14} />{' '}
+            {approveState === 'approving'
+              ? 'Creating…'
+              : approveState === 'approved'
+                ? serviceKey
+                  ? `Created (${serviceKey})`
+                  : 'Created'
+                : 'Approve'}
+          </button>
+          <button
+            type="button"
+            className="li-uac-prop-btn"
+            onClick={() => void openEditor()}
+            disabled={
+              approveState === 'approving' ||
+              editLoading ||
+              (approveState === 'approved' && !serviceKey)
+            }
+            title={
+              approveState === 'approved'
+                ? 'Edit the created service — saves a new version'
+                : 'Edit the proposed service shell before approving'
+            }
+          >
+            <EditIcon size={14} /> {editLoading ? 'Loading…' : 'Open & edit'}
+          </button>
+          {link && (
+            <a className="li-uac-prop-btn" href={link} target="_blank" rel="noopener noreferrer">
+              View service →
+            </a>
+          )}
+        </>
+      }
+      footer={
+        approveError ? (
+          <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+            {approveError}
+          </div>
+        ) : undefined
+      }
+    >
+      <ProposalFacts facts={facts} />
+      {/* Set expectations: a created service starts disabled until it's completed. */}
+      <div className="li-uac-prop-note">
+        Created disabled — finish setting it up, then enable it.
       </div>
-
-      {/* BUILDER-UX-1 WP-1.2: the two copies are LABELED, never two unlabeled
-          paragraphs — "Client sees" (the public booking tile) above "Internal"
-          (the attorney-facing description). */}
-      {(current.clientDisplayName || current.clientDescription) && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
-            Client sees
-          </div>
-          <div>
-            {current.clientDisplayName}
-            {current.clientDescription ? ` — ${current.clientDescription}` : ''}
-          </div>
-        </div>
-      )}
-      {/* WP-7: the Spanish tile copy the wizard authored alongside the English —
-          shown labeled so the attorney reviews BOTH before approving. */}
-      {(current.clientDisplayNameEs || current.clientDescriptionEs) && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
-            Client sees (Español)
-          </div>
-          <div>
-            {current.clientDisplayNameEs}
-            {current.clientDescriptionEs ? ` — ${current.clientDescriptionEs}` : ''}
-          </div>
-        </div>
-      )}
-      {current.description && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          <div className="text-muted" style={{ fontSize: 'var(--text-xs)', fontWeight: 600 }}>
-            Internal
-          </div>
-          <div>{current.description}</div>
-        </div>
-      )}
-
-      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-        <div>
-          <strong>Route:</strong> {current.route} · <strong>Documents:</strong>{' '}
-          {current.generationMode === 'ai_draft' ? 'AI draft' : 'template merge'}
-        </div>
-        {/* Set expectations: a created service starts disabled until it's completed. */}
-        <div className="text-muted">Created disabled — finish setting it up, then enable it.</div>
-      </div>
-
-      <div className="uac-doc-actions">
-        <button
-          type="button"
-          className="uac-reply-btn"
-          onClick={() => void openEditor()}
-          disabled={
-            approveState === 'approving' ||
-            editLoading ||
-            (approveState === 'approved' && !serviceKey)
-          }
-          title={
-            approveState === 'approved'
-              ? 'Edit the created service — saves a new version'
-              : 'Edit the proposed service shell before approving'
-          }
-        >
-          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
-        </button>
-        <button
-          type="button"
-          className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
-          onClick={approve}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Approve this service — this creates the (disabled) service"
-        >
-          {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-          {approveState === 'approving'
-            ? 'Creating…'
-            : approveState === 'approved'
-              ? serviceKey
-                ? `Created (${serviceKey})`
-                : 'Created'
-              : 'Approve & create service'}
-        </button>
-        {link && (
-          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
-            View service →
-          </a>
-        )}
-      </div>
-      {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-          {approveError}
-        </div>
-      )}
       {editing && (
         <ServiceEditorModal
           title={
@@ -356,6 +342,6 @@ export function ServiceProposalCard({
           onClose={() => setEditing(false)}
         />
       )}
-    </div>
+    </ProposalCardShell>
   )
 }

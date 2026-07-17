@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { ProposalCardShell } from '@/components/ProposalCardShell'
+import { CheckIcon, EyeIcon, Share2Icon, MailIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is a
@@ -97,105 +98,122 @@ export function EnableProposalCard({
     }
   }
 
+  // WP-L: the ABSOLUTE booking URL the comp's Share/Email actions carry — always
+  // the real link (server-provided path made absolute), never a model-typed href.
+  const absBookingUrl =
+    bookingLink && typeof window !== 'undefined'
+      ? new URL(bookingLink, window.location.origin).toString()
+      : bookingLink
+
+  function shareBooking() {
+    if (!absBookingUrl) return
+    void navigator.clipboard?.writeText(absBookingUrl).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2200)
+      },
+      () => {},
+    )
+  }
+
   return (
-    <div className="uac-doc-card">
-      <div className="uac-doc-head">
-        <span className="uac-doc-title">
-          <LayersIcon size={14} /> Enable service — {proposal.serviceKey}
-        </span>
-        <span className="text-muted" style={{ fontSize: 12 }}>
-          final step
-        </span>
-      </div>
+    <ProposalCardShell
+      kind="Review & publish"
+      title={proposal.serviceKey}
+      meta="final step"
+      footer={
+        approveError ? (
+          <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
+            {approveError}
+          </div>
+        ) : undefined
+      }
+    >
+      {proposal.summary && <div className="li-uac-prop-summary">{proposal.summary}</div>}
 
-      {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 13 }}>
-          {proposal.summary}
-        </div>
-      )}
-
-      {/* WP-5 (BUILDER-UX-2) — the "here's how it runs" step recap is GONE: the
-          completion card is a confirmation line + the two links, nothing more. Before
-          enabling, one line sets expectations; after, the summary + links speak. */}
+      {/* WP-5 (BUILDER-UX-2, kept) — no step recap. Before enabling, one line sets
+          expectations; after, the comp's post-publish actions speak. */}
       {approveState !== 'approved' && (
-        <div className="uac-doc-body text-muted" style={{ fontSize: 12 }}>
-          Approving makes this service live and bookable. Until you approve, it stays a draft.
+        <div className="li-uac-prop-note">
+          Publishing makes this service live and bookable. Until then, it stays a draft.
         </div>
       )}
 
-      <div className="uac-doc-actions">
+      {approveState !== 'approved' ? (
         <button
           type="button"
-          className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
+          className="li-uac-publish"
           onClick={approve}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Enable this service — this makes it live and bookable"
+          disabled={approveState === 'approving'}
+          title="Publish this service — this makes it live and bookable"
         >
-          {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-          {approveState === 'approving'
-            ? 'Enabling…'
-            : approveState === 'approved'
-              ? 'Live'
-              : 'Approve & enable (go live)'}
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 19V5" />
+            <path d="m5 12 7-7 7 7" />
+          </svg>
+          {approveState === 'approving' ? 'Publishing…' : 'Publish service'}
         </button>
-        {link && (
-          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
-            View live service →
-          </a>
-        )}
-        {/* WP4: the real client booking link — open it, or copy the absolute URL to
-            share. Never a model-generated href, so it can't route to "/". */}
-        {bookingLink && approveState === 'approved' && (
-          <>
-            <a
-              className="uac-reply-btn"
-              href={bookingLink}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Open booking page →
+      ) : (
+        // WP-L (comp isDone): View service / Share link / Email link + the
+        // "Booking link copied" confirmation chip; Done closes the build thread.
+        <div className="li-uac-done">
+          {link && (
+            <a className="li-uac-done-primary" href={link}>
+              <EyeIcon size={15} /> View service
             </a>
+          )}
+          <div className="li-uac-done-row">
             <button
               type="button"
-              className={`uac-reply-btn${copied ? ' copied' : ''}`}
-              onClick={() => {
-                const abs =
-                  typeof window !== 'undefined'
-                    ? new URL(bookingLink, window.location.origin).toString()
-                    : bookingLink
-                void navigator.clipboard?.writeText(abs).then(
-                  () => {
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 1500)
-                  },
-                  () => {},
-                )
-              }}
+              className="li-uac-prop-btn"
+              onClick={shareBooking}
+              disabled={!absBookingUrl}
               title="Copy the client booking link to share"
             >
-              {copied ? <CheckIcon size={12} /> : null} {copied ? 'Copied' : 'Copy booking link'}
+              <Share2Icon size={14} /> Share link
             </button>
-          </>
-        )}
-        {/* WP-5: the formal end of the build. Sealing the session + leaving build mode
-            already happen on approve; this is the attorney's explicit "I'm done here"
-            that returns them to normal chat. */}
-        {approveState === 'approved' && onDone && (
-          <button
-            type="button"
-            className="uac-reply-btn uac-reply-btn-primary"
-            onClick={onDone}
-            title="Finish setup and return to the assistant"
-          >
-            <CheckIcon size={12} /> Done · Close setup
-          </button>
-        )}
-      </div>
-      {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
-          {approveError}
+            <a
+              className={`li-uac-prop-btn${absBookingUrl ? '' : ' is-disabled'}`}
+              href={
+                absBookingUrl
+                  ? `mailto:?subject=${encodeURIComponent('Book with us')}&body=${encodeURIComponent(
+                      `You can book this service here: ${absBookingUrl}`,
+                    )}`
+                  : undefined
+              }
+              title="Email the booking link"
+            >
+              <MailIcon size={14} /> Email link
+            </a>
+          </div>
+          {copied && (
+            <div className="li-uac-copied" role="status">
+              <CheckIcon size={12} /> Booking link copied
+            </div>
+          )}
+          {/* WP-5 (kept): the formal end of the build — returns to normal chat. */}
+          {onDone && (
+            <button
+              type="button"
+              className="li-uac-prop-btn"
+              onClick={onDone}
+              title="Finish setup and return to the assistant"
+            >
+              <CheckIcon size={14} /> Done · Close setup
+            </button>
+          )}
         </div>
       )}
-    </div>
+    </ProposalCardShell>
   )
 }

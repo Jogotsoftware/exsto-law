@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
-import { CheckIcon, LayersIcon, EditIcon } from '@/components/icons'
+import { CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { ProposalCardShell } from '@/components/ProposalCardShell'
+import { GemSparkle } from '@/components/GemSparkle'
 import { WorkflowEditorModal } from '@/components/WorkflowEditorModal'
-import { WorkflowStepList } from '@/components/WorkflowStepList'
 import type { WfLifecycle as LibWfLifecycle } from '@/lib/workflowBuilderModel'
 
 // CONSTRAINT (mirrors the workflow builder page): no server-package imports. These
@@ -299,27 +300,108 @@ export function WorkflowProposalCard({
   }
 
   return (
-    <div className="uac-doc-card">
-      <div className="uac-doc-head">
-        <span className="uac-doc-title">
-          <LayersIcon size={14} /> Proposed workflow — {proposal.serviceKey}
-        </span>
-        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-          {ordered.length} steps
-        </span>
-      </div>
-
-      {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {proposal.summary}
-        </div>
-      )}
+    <ProposalCardShell
+      kind="Workflow"
+      title={`${proposal.serviceKey} workflow`}
+      meta={`${ordered.length} steps`}
+      actions={
+        <>
+          <button
+            type="button"
+            className={`li-uac-prop-btn primary${approveState === 'approved' ? ' done' : ''}`}
+            onClick={approve}
+            disabled={approveState === 'approving' || approveState === 'approved'}
+            title="Approve this workflow — this is the live write to the service"
+          >
+            <CheckIcon size={14} />{' '}
+            {approveState === 'approving'
+              ? 'Approving…'
+              : approveState === 'approved'
+                ? version != null
+                  ? `Approved (v${version})`
+                  : 'Approved'
+                : 'Approve'}
+          </button>
+          <button
+            type="button"
+            className="li-uac-prop-btn"
+            onClick={() => void openEditor()}
+            disabled={approveState === 'approving' || editLoading}
+            title={
+              approveState === 'approved'
+                ? 'Edit the saved workflow — saves a new version'
+                : 'Edit the proposed workflow before approving'
+            }
+          >
+            <EditIcon size={14} /> {editLoading ? 'Loading…' : 'Open & edit'}
+          </button>
+          {onRevise && approveState !== 'approved' && (
+            <button
+              type="button"
+              className="li-uac-prop-btn"
+              onClick={() => setReviseOpen((v) => !v)}
+              disabled={approveState === 'approving' || reviseSent}
+              title="Ask for a change to this proposal before approving"
+            >
+              <EditIcon size={14} /> {reviseSent ? 'Revising…' : 'Revise'}
+            </button>
+          )}
+          {link && (
+            <a className="li-uac-prop-btn" href={link} target="_blank" rel="noopener noreferrer">
+              View workflow →
+            </a>
+          )}
+        </>
+      }
+      footer={
+        <>
+          {/* 5c: the revise instruction input. Submit hands the FULL live proposal +
+              the instruction to the chat; the model regenerates as a diff and a new
+              card (with this graph as its previousGraph) replaces the conversation's
+              working proposal. */}
+          {reviseOpen && !reviseSent && (
+            <form
+              style={{ display: 'flex', gap: 6, marginTop: 6 }}
+              onSubmit={(e) => {
+                e.preventDefault()
+                const instruction = reviseText.trim()
+                if (!instruction || !onRevise) return
+                const accepted = onRevise({ proposal, instruction })
+                if (accepted) {
+                  setReviseSent(true)
+                  setReviseOpen(false)
+                }
+              }}
+            >
+              <input
+                type="text"
+                className="li-uac-flow-input"
+                style={{ flex: 1, fontSize: 'var(--text-sm)' }}
+                placeholder="What should change? (e.g. add an attorney review step before the invoice)"
+                value={reviseText}
+                onChange={(e) => setReviseText(e.target.value)}
+                autoFocus
+              />
+              <button type="submit" className="li-uac-prop-btn" disabled={!reviseText.trim()}>
+                Send
+              </button>
+            </form>
+          )}
+          {approveError && (
+            <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
+              {approveError}
+            </div>
+          )}
+        </>
+      }
+    >
+      {proposal.summary && <div className="li-uac-prop-summary">{proposal.summary}</div>}
 
       {/* Diff vs the current workflow — removed/reordered only: removed steps
           don't render in the step list below, so they must be said here; added
           steps are the list itself (P7). */}
       {(diff.removed.length > 0 || diff.reordered) && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
+        <div style={{ fontSize: 'var(--text-xs)' }}>
           {diff.removed.length > 0 && (
             <div>
               <strong>Removed:</strong> {diff.removed.join(', ')}
@@ -329,116 +411,55 @@ export function WorkflowProposalCard({
         </div>
       )}
 
-      {/* The proposed steps, in run order — the SAME visual a live matter's
-          Workflow window renders (5b). No run-state pill: a proposal isn't
-          running (no-simulate), so every row reads as a plain step. */}
-      <WorkflowStepList
-        showStatePill={false}
-        items={ordered.map((s) => {
+      {/* WP-L (comp): numbered steps — navy number tile + connector, gemstar on
+          automatic steps, route pill (purple = automatic). The meta line keeps the
+          real detail (action · gate · documents) the attorney reviews. */}
+      <div className="li-uac-steps">
+        {ordered.map((s, i) => {
+          const gate = s.terminal ? undefined : s.advances_to[0]?.gate
+          const auto = gate === 'automatic' || gate === 'system'
+          const route = s.terminal
+            ? 'Final step'
+            : gate === 'attorney'
+              ? 'Waits for you'
+              : gate === 'client'
+                ? 'Waits for the client'
+                : gate
+                  ? 'Automatic'
+                  : ''
           const metaBits: string[] = []
           if (s.action && stageActionLabel(s) !== s.label) metaBits.push(stageActionLabel(s))
-          if (!s.terminal && s.advances_to[0]) metaBits.push(gateLabel(s.advances_to[0].gate))
-          if (s.terminal) metaBits.push('final step')
+          if (gate === 'system') metaBits.push(gateLabel(gate))
+          if (s.client_label && s.client_label !== s.label) metaBits.push(s.client_label)
           if (s.documents && s.documents.length > 0) {
             metaBits.push(
               `docs: ${s.documents.map((d) => d.label || d.docKind || d.templateEntityId).join(', ')}`,
             )
           }
-          return {
-            key: s.key,
-            title: s.label,
-            subtitle: s.client_label && s.client_label !== s.label ? s.client_label : undefined,
-            state: 'pending' as const,
-            meta: metaBits.length ? metaBits.join(' · ') : undefined,
-          }
+          return (
+            <div key={s.key} className="li-uac-step">
+              <div className="li-uac-step-rail">
+                <span className="li-uac-step-num">{i + 1}</span>
+                {i !== ordered.length - 1 && (
+                  <span className="li-uac-step-line" aria-hidden="true" />
+                )}
+              </div>
+              <div className="li-uac-step-main">
+                <div className="li-uac-step-toprow">
+                  <span className="li-uac-step-name">{s.label}</span>
+                  {auto && <GemSparkle size={14} secondary={false} title="Runs automatically" />}
+                  {route && (
+                    <span className={`li-uac-step-route${auto ? ' is-auto' : ''}`}>{route}</span>
+                  )}
+                </div>
+                {metaBits.length > 0 && (
+                  <div className="li-uac-step-meta">{metaBits.join(' · ')}</div>
+                )}
+              </div>
+            </div>
+          )
         })}
-      />
-
-      <div className="uac-doc-actions">
-        <button
-          type="button"
-          className="uac-reply-btn"
-          onClick={() => void openEditor()}
-          disabled={approveState === 'approving' || editLoading}
-          title={
-            approveState === 'approved'
-              ? 'Edit the saved workflow — saves a new version'
-              : 'Edit the proposed workflow before approving'
-          }
-        >
-          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
-        </button>
-        <button
-          type="button"
-          className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
-          onClick={approve}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Approve this workflow — this is the live write to the service"
-        >
-          {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-          {approveState === 'approving'
-            ? 'Approving…'
-            : approveState === 'approved'
-              ? version != null
-                ? `Approved (v${version})`
-                : 'Approved'
-              : 'Approve & save workflow'}
-        </button>
-        {onRevise && approveState !== 'approved' && (
-          <button
-            type="button"
-            className="uac-reply-btn"
-            onClick={() => setReviseOpen((v) => !v)}
-            disabled={approveState === 'approving' || reviseSent}
-            title="Ask for a change to this proposal before approving"
-          >
-            <EditIcon size={12} /> {reviseSent ? 'Revising…' : 'Revise'}
-          </button>
-        )}
-        {link && (
-          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
-            View workflow →
-          </a>
-        )}
       </div>
-
-      {/* 5c: the revise instruction input. Submit hands the FULL live proposal +
-          the instruction to the chat; the model regenerates as a diff and a new
-          card (with this graph as its previousGraph) replaces the conversation's
-          working proposal. */}
-      {reviseOpen && !reviseSent && (
-        <form
-          style={{ display: 'flex', gap: 6, marginTop: 6 }}
-          onSubmit={(e) => {
-            e.preventDefault()
-            const instruction = reviseText.trim()
-            if (!instruction || !onRevise) return
-            const accepted = onRevise({ proposal, instruction })
-            if (accepted) {
-              setReviseSent(true)
-              setReviseOpen(false)
-            }
-          }}
-        >
-          <input
-            type="text"
-            className="uac-qcard-text"
-            style={{ flex: 1, fontSize: 'var(--text-sm)' }}
-            placeholder="What should change? (e.g. add an attorney review step before the invoice)"
-            value={reviseText}
-            onChange={(e) => setReviseText(e.target.value)}
-            autoFocus
-          />
-          <button type="submit" className="uac-reply-btn" disabled={!reviseText.trim()}>
-            Send
-          </button>
-        </form>
-      )}
-      {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 6 }}>
-          {approveError}
-        </div>
-      )}
       {editing && (
         <WorkflowEditorModal
           title={
@@ -477,7 +498,7 @@ export function WorkflowProposalCard({
           onClose={() => setEditing(false)}
         />
       )}
-    </div>
+    </ProposalCardShell>
   )
 }
 

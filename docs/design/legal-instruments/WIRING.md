@@ -461,23 +461,84 @@ pooler 500s hit this run — retry wrapper was in place, unused):
   kebab menu, 05 questions list, 06 edit action, 07 new-question, 08
   service-questions section).
 
-## WP-L · Assistant + service builder ★ flagship
+## WP-L · Assistant + service builder ★ flagship — SHIPPED (branch li/wp-l-assistant)
 
-Superset rule — ALL current capability survives:
-- [ ] history (builds/saved/matter threads), new chat, skills menu, attach (upload / matter doc), model select,
-      question batches + Back, proposal cards opening REAL editors, prompt caching + retry, Thinking disclosure,
-      `scopeForPath()` grounding + `exsto:assistant:prime`, markdown, feedback mode, persisted resize
-BUILD (comp's hardcoded demos become real):
-- [ ] empty-state starter cards: Draft a document (real, matter-grounded) / Summarize this matter / Create a new
-      matter (guided chips → real matter via action layer) / Create a new service (→ real wizard)
-- [ ] "Insert a template" attach option
-- [ ] build-mode progress strip ("step n of 6", gradient segments, exit) mapped to REAL wizard phases
-- [ ] proposal previews (facts / sections / proportional doc / workflow steps) rendered from real wizard payloads
-- [ ] Publish = real enable step; post-publish View service / Share link (copies real `/book/{slug}` + "copied"
-      confirmation) / Email link (mailto with real URL)
-- [ ] comp FAB icon + gemstar/shimmer treatment; model picker as comp pill+menu listing only connected providers
-- [ ] D8: `LEGAL_BUILD_WIZARD` ON in prod
-- [ ] GATE: full conversation → published, bookable service, certified on the new UI before merge
+Superset rule — ALL current capability survives (regression-walked live, 22/22 Playwright checks
+on `?demo_user=juan-carlos`, 2026-07-17):
+- [x] history (builds/saved/matter threads — all three sections render + a thread reopens with its
+      transcript), new chat, skills menu (100 items, search, pick → pill), attach (upload → chip;
+      matter doc — surfaced honest "no document yet" on a doc-less matter), model select (now the
+      comp pill+menu), question batches + Back (proven in a dedicated build walk: a 4-question
+      batch stepped 1→2, Back returned to 1 re-interactive; build abandoned, no writes), proposal cards
+      opening REAL editors (ServiceEditorModal from the restyled card), prompt caching (server-side,
+      untouched) + auto-retry + Try-again (proven by aborting the stream route: dimmed bubble +
+      error + Try again → re-send answered with full context), Thinking disclosure (expands to the
+      real reasoning), `scopeForPath()` grounding ("Using this matter" chip in the comp header;
+      toggle → General → back) + `exsto:assistant:prime` (seeds the composer, never auto-sends),
+      markdown replies, feedback mode (banner + category + submit → substrate event reference;
+      walk's test event resolved same-session through the action layer), persisted resize (drag the
+      comp corner → localStorage → survives close/reopen)
+BUILD (comp's hardcoded demos became real):
+- [x] empty-state starter cards: Draft a document (matter scope ⇒ prefills a matter-grounded draft
+      prompt; general scope ⇒ real matter chips from `legal.matter.list`, picking one re-grounds the
+      chat on that matter and prefills) / Summarize this matter (matter scope only — real grounded
+      send) / Create a new matter (guided chips → REAL matter, see note below) / Create a new
+      service (→ the real build wizard, `enterBuildMode`)
+- [x] "Insert a template" attach option — real library via `legal.template.list`; picking a template
+      attaches its body to the conversation exactly the way a matter document attaches (the
+      assistant backend's one context channel)
+- [x] build-mode progress strip — "Building a service · <phase>" + "Step n of 6" + six gradient
+      segments + exit; phases mapped to the REAL wizard artifacts (service / questionnaire /
+      template / workflow / billing / enable), n derived from which proposal kinds have been
+      APPROVED this build (first-unapproved-in-canonical-order; approvals can land out of order)
+- [x] proposal previews from real wizard payloads — shared `ProposalCardShell` (gradient header +
+      uppercase kind + gemstar): New service ⇒ comp facts grid; Questionnaire ⇒ comp sections with
+      gold-dot fields; Document template ⇒ proportional `DocumentSheet` thumb with `TokenChip`s
+      (full body still opens in the real editor); Workflow ⇒ comp numbered steps with
+      gemstar-on-automatic + route pills (card-local — the matter Workflow window keeps the shared
+      `WorkflowStepList`); Billing ⇒ fee title + per-document facts. All real editors, diffs,
+      Revise, coherence guards and error paths preserved.
+- [x] Publish = the real enable step (comp "Publish service" button on the Review & publish card);
+      post-publish View service (navigates) / Share link (copies the real absolute `/book?firm=…`
+      URL + "Booking link copied" chip) / Email link (mailto with the real URL); "Done · Close
+      setup" (BUILDER-UX-2's explicit build end) retained
+- [x] comp FAB icon (chat bubble + animated gemstar cluster, blue drop-shadow, hover
+      scale/rotate) + comp panel (navy-gradient header w/ gemstar + model-status line +
+      History/New/Close, resizable corner w/ comp arrow); GemSparkle everywhere AI works
+      (WorkingIndicator phrase line, Thinking disclosure, build strip, proposal headers)
+- [x] model picker as comp pill+menu listing ONLY connected providers (5 connected models listed
+      in the walk; unavailable/unconnected ones no longer render as disabled options)
+- [x] D8: `LEGAL_BUILD_WIZARD` default ON (`flags.ts`: off only via explicit `0`/`false`;
+      instrumentation.ts boot log updated to mirror the new default — it had its own copy of the
+      old `'1'/'true'` logic and would have lied "OFF")
+- [x] GATE: full conversation → published, bookable service, certified on the new UI (see below)
+
+### WP-L notes (as built)
+
+- **Create a new matter — mapping.** A real create-matter operation EXISTS through the core:
+  `legal.matter.open` (serviceKey + clientFullName + clientEmail — the same call NewMatterModal
+  makes). The comp's demo questions (matter type / how found / turnaround) correspond to no
+  substrate fields, so the guided flow asks exactly what the real operation needs: service (chips
+  from `legal.service.list`, bookable-only per the MACHINE-COMMS honesty filter) → client name →
+  client email (validated), then creates the matter and offers "View matter". No dead flow, no
+  fabricated fields.
+- **Panel/FAB token scope.** The floating panel + FAB mount OUTSIDE `.li-shell` (fixed overlays,
+  siblings of the shell in the attorney layout), so the `--li-*` token block's selector was
+  extended to `.li-shell, .li-uac-panel, .li-uac-fab` — without it every `var(--li-*)` in the
+  panel silently resolved empty (found live: transparent user bubbles).
+- **Retired CSS.** 74 now-unused rule blocks removed after verifying zero TSX/TS references:
+  `.feedback-fab/-panel/-bubble*`, `.uac-toolbar/-iconbtn/-model-name/-web-badge/-ctx`,
+  `.uac-buildmode*`, `.uac-qcard*`, `.uac-qbatch*`, `.uac-attach-menu*`,
+  `.uac-beta-(head|title|sub|text|send|done)`, `.uac-skillbar`, `.uac-skilltrigger`. Everything
+  else in `uac-` (doc cards, skills menu, history list, fbmode, composer, thinking) is still live
+  and untouched. New styles are ONE family `li-uac-*` appended at the end of globals.css.
+- **Settings popover** keeps work rate / web search / research; the model `<select>` moved to the
+  comp pill (capability preserved, one control). The old "Open booking page →" link on the enable
+  card is subsumed by Share link (same URL, comp's action set).
+- **CERTIFIED**: builder certification walk (Playwright, real Anthropic calls via tenant Vault,
+  live DB): "Create a new service" → guided interview (question chips + Back) → all six phases
+  approved with the strip advancing → Publish → service live + listed in /attorney/services →
+  Share link copied the real booking URL. See scratchpad/wp-l screenshots + the WP-L PR notes.
 
 ## WP-N · eSign (feature build) — SHIPPED
 

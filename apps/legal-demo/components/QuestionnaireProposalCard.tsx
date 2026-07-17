@@ -3,8 +3,9 @@
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { LayersIcon, CheckIcon, EditIcon } from '@/components/icons'
+import { CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { ProposalCardShell, ProposalSections } from '@/components/ProposalCardShell'
 import { QuestionnaireEditorModal } from '@/components/QuestionnaireEditorModal'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
@@ -149,93 +150,79 @@ export function QuestionnaireProposalCard({
   }
 
   return (
-    <div className="uac-doc-card">
-      <div className="uac-doc-head">
-        <span className="uac-doc-title">
-          <LayersIcon size={14} /> Proposed questionnaire — {proposal.serviceKey}
-        </span>
-        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-          {fieldCount} field{fieldCount === 1 ? '' : 's'}
-        </span>
-      </div>
-
-      {current.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {current.summary}
-        </div>
-      )}
-
-      {/* BUILDER-UX-1 WP-2.1: each section is a bolded header with its fields as a
-          BULLETED list, never a comma-run. */}
-      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-        {sections.map((s, si) => (
-          <div key={s.id ?? si} style={{ marginBottom: 'var(--space-2)' }}>
-            <strong>{s.title || s.id || `Section ${si + 1}`}</strong>
-            {s.fields && s.fields.length > 0 && (
-              <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.1rem' }}>
-                {s.fields.map((f, fi) => (
-                  <li key={f.id ?? fi}>
-                    {fieldLabel(f)}
-                    {f.internal ? <span className="text-muted"> (you fill in review)</span> : null}
-                  </li>
-                ))}
-              </ul>
-            )}
+    <ProposalCardShell
+      kind="Questionnaire"
+      title={(current.schema as ProposalSchema)?.title || `Intake — ${proposal.serviceKey}`}
+      meta={`${fieldCount} field${fieldCount === 1 ? '' : 's'}`}
+      actions={
+        <>
+          <button
+            type="button"
+            className={`li-uac-prop-btn primary${approveState === 'approved' ? ' done' : ''}`}
+            onClick={approve}
+            disabled={approveState === 'approving' || approveState === 'approved'}
+            title="Approve this questionnaire — this writes the service's intake form"
+          >
+            <CheckIcon size={14} />{' '}
+            {approveState === 'approving'
+              ? 'Saving…'
+              : approveState === 'approved'
+                ? 'Saved'
+                : 'Approve'}
+          </button>
+          <button
+            type="button"
+            className="li-uac-prop-btn"
+            onClick={() => void openEditor()}
+            disabled={approveState === 'approving' || editLoading}
+            title={
+              approveState === 'approved'
+                ? 'Edit the saved questionnaire — saves a new version'
+                : 'Edit the proposed questionnaire before approving'
+            }
+          >
+            <EditIcon size={14} /> {editLoading ? 'Loading…' : 'Open & edit'}
+          </button>
+          {link && (
+            <a className="li-uac-prop-btn" href={link} target="_blank" rel="noopener noreferrer">
+              View questionnaire →
+            </a>
+          )}
+        </>
+      }
+      footer={
+        approveError ? (
+          <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+            {approveError}
           </div>
-        ))}
-      </div>
+        ) : undefined
+      }
+    >
+      {current.summary && <div className="li-uac-prop-summary">{current.summary}</div>}
+
+      {/* BUILDER-UX-1 WP-2.1 (kept): every field listed under its section — now
+          in the comp's sections preview (uppercase title + gold-dot items). */}
+      <ProposalSections
+        sections={sections.map((s, si) => ({
+          title: s.title || s.id || `Section ${si + 1}`,
+          items: (s.fields ?? []).map((f, fi) => (
+            <span key={f.id ?? fi}>
+              {fieldLabel(f)}
+              {f.internal ? <span className="text-muted"> (you fill in review)</span> : null}
+            </span>
+          )),
+        }))}
+      />
 
       {/* The variable contract — a token with no field renders [[MISSING]]. Only the
           actionable GAP is shown; the positive "no gaps" outro (WP-2.2 redundant
           second blurb) is removed — the section list above already says what it
           collects. */}
       {missing.length > 0 && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-          <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
-            Doesn&rsquo;t yet collect {missing.length} thing{missing.length === 1 ? '' : 's'} the
-            document needs: <strong>{missing.map((m) => fieldLabel({ id: m })).join(', ')}</strong>.
-            The document would leave {missing.length === 1 ? 'it' : 'them'} blank until added.
-          </div>
-        </div>
-      )}
-
-      <div className="uac-doc-actions">
-        <button
-          type="button"
-          className="uac-reply-btn"
-          onClick={() => void openEditor()}
-          disabled={approveState === 'approving' || editLoading}
-          title={
-            approveState === 'approved'
-              ? 'Edit the saved questionnaire — saves a new version'
-              : 'Edit the proposed questionnaire before approving'
-          }
-        >
-          <EditIcon size={12} /> {editLoading ? 'Loading…' : 'Edit'}
-        </button>
-        <button
-          type="button"
-          className={`uac-reply-btn uac-reply-btn-primary${approveState === 'approved' ? ' copied' : ''}`}
-          onClick={approve}
-          disabled={approveState === 'approving' || approveState === 'approved'}
-          title="Approve this questionnaire — this writes the service's intake form"
-        >
-          {approveState === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-          {approveState === 'approving'
-            ? 'Saving…'
-            : approveState === 'approved'
-              ? 'Saved'
-              : 'Approve & save questionnaire'}
-        </button>
-        {link && (
-          <a className="uac-reply-btn" href={link} target="_blank" rel="noopener noreferrer">
-            View questionnaire →
-          </a>
-        )}
-      </div>
-      {approveError && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-          {approveError}
+        <div role="alert" className="alert alert-warn" style={{ fontSize: 'var(--text-xs)' }}>
+          Doesn&rsquo;t yet collect {missing.length} thing{missing.length === 1 ? '' : 's'} the
+          document needs: <strong>{missing.map((m) => fieldLabel({ id: m })).join(', ')}</strong>.
+          The document would leave {missing.length === 1 ? 'it' : 'them'} blank until added.
         </div>
       )}
       {editing && (
@@ -270,6 +257,6 @@ export function QuestionnaireProposalCard({
           onClose={() => setEditing(false)}
         />
       )}
-    </div>
+    </ProposalCardShell>
   )
 }

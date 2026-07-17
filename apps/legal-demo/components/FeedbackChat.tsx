@@ -1,9 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { UnifiedAssistantChat } from '@/components/UnifiedAssistantChat'
-import { MessageCircleIcon, XIcon } from '@/components/icons'
 
 const INTRO_GLOBAL = 'How can I serve you, Counselor?'
 const INTRO_MATTER = 'How can I serve you, Counselor? Grounded in the matter you’re viewing.'
@@ -33,10 +32,68 @@ function scopeForPath(pathname: string): {
   return {}
 }
 
+// The comp's FAB icon (WP-L): a navy chat-bubble outline with the gemstar cluster
+// twinkling through its open corner. The gradient is the shared GemSparkle cycle
+// (per-instance id — SVG ids are document-global).
+function AssistantFabIcon(): React.ReactElement {
+  const gradientId = `li-uac-fabgem-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const stars =
+    'M16.40 0.80L17.85 3.75L20.80 5.20L17.85 6.65L16.40 9.60L14.95 6.65L12.00 5.20L14.95 3.75ZM11.60 8.30L12.42 9.98L14.10 10.80L12.42 11.63L11.60 13.30L10.78 11.63L9.10 10.80L10.78 9.98ZM14.70 11.80L15.23 12.87L16.30 13.40L15.23 13.93L14.70 15.00L14.17 13.93L13.10 13.40L14.17 12.87Z'
+  return (
+    <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true">
+      <defs>
+        <linearGradient
+          id={gradientId}
+          x1="2"
+          y1="2"
+          x2="22"
+          y2="22"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0">
+            <animate
+              attributeName="stop-color"
+              values="#F3A6E4;#B79BF7;#7FB8FF;#54E6DE;#93EFB9;#F1EE9E;#F3A6E4"
+              dur="15s"
+              repeatCount="indefinite"
+            />
+          </stop>
+          <stop offset=".5">
+            <animate
+              attributeName="stop-color"
+              values="#7FB8FF;#54E6DE;#93EFB9;#F1EE9E;#F3A6E4;#B79BF7;#7FB8FF"
+              dur="15s"
+              repeatCount="indefinite"
+            />
+          </stop>
+          <stop offset="1">
+            <animate
+              attributeName="stop-color"
+              values="#93EFB9;#F1EE9E;#F3A6E4;#B79BF7;#7FB8FF;#54E6DE;#93EFB9"
+              dur="15s"
+              repeatCount="indefinite"
+            />
+          </stop>
+        </linearGradient>
+      </defs>
+      <path
+        d="M6 3H13.2M19 9.3V15A3 3 0 0 1 16 18H15V21L11.5 18H6A3 3 0 0 1 3 15V6A3 3 0 0 1 6 3"
+        fill="none"
+        stroke="#1E2E4E"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d={stars} fill={`url(#${gradientId})`} />
+    </svg>
+  )
+}
+
 // Floating assistant FAB, mounted once in the attorney layout. It hosts the unified
-// assistant chat and now picks up the CURRENT PAGE's context when opened: a matter
-// or a client/contact, else global app-help + beta feedback. (Replaces the
-// separate per-matter embedded chat — the one assistant follows the attorney.)
+// assistant chat and picks up the CURRENT PAGE's context when opened: a matter
+// or a client/contact, else global app-help + beta feedback. WP-L: the FAB and the
+// panel chrome (navy header, resizable corner) follow the Legal Instruments comp;
+// the header itself lives inside UnifiedAssistantChat (it needs the model state).
 export function FeedbackChat() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
@@ -134,12 +191,12 @@ export function FeedbackChat() {
     return (
       <button
         type="button"
-        className="feedback-fab"
+        className="li-uac-fab"
         onClick={openChat}
-        aria-label="Open assistant"
-        title="Assistant"
+        aria-label="Ask the Legal Assistant"
+        title="Ask the Legal Assistant"
       >
-        <MessageCircleIcon size={24} />
+        <AssistantFabIcon />
       </button>
     )
   }
@@ -154,30 +211,33 @@ export function FeedbackChat() {
   return (
     <div
       ref={panelRef}
-      className="feedback-panel"
+      className="li-uac-panel"
       role="dialog"
-      aria-label="Assistant"
+      aria-label="Legal Assistant"
       style={size ? { width: `${size.w}px`, height: `${size.h}px` } : undefined}
     >
       <div
-        className="feedback-panel-resize"
+        className="li-uac-resize"
         onPointerDown={startResize}
         role="separator"
         aria-label="Resize chat (drag the top-left corner)"
         title="Drag to resize"
-      />
-      <div className="feedback-panel-head">
-        <div className="feedback-panel-title">Assistant</div>
-        <button
-          type="button"
-          className="feedback-panel-close"
-          onClick={() => setOpen(false)}
-          aria-label="Close"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          aria-hidden="true"
         >
-          <XIcon size={16} />
-        </button>
+          <path d="M4 10V4h6" />
+          <path d="M4 4l7 7" />
+        </svg>
       </div>
-      <div className="feedback-panel-body" ref={inputFocusRef}>
+      <div className="li-uac-panel-body" ref={inputFocusRef}>
         {/* Keyed by scope so opening on a different page starts a fresh, correctly
             grounded chat (and loads that matter/contact's thread). */}
         <UnifiedAssistantChat
@@ -188,8 +248,9 @@ export function FeedbackChat() {
           contactEntityId={scope.contactEntityId}
           loadThread={scoped}
           intro={intro}
-          placeholder="Ask a question or share feedback…"
+          placeholder="Something else..? Tell me how I can help"
           initialInput={primed?.text}
+          onClose={() => setOpen(false)}
         />
       </div>
     </div>

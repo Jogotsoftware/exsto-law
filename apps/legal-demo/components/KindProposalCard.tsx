@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { LayersIcon, CheckIcon } from '@/components/icons'
+import { ProposalCardShell, ProposalFacts } from '@/components/ProposalCardShell'
+import { CheckIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 
 // Structural mirror of verticals/legal/src/api/kindAuthoring.ts's KindProposal —
@@ -83,57 +84,40 @@ export function KindProposalCard({
   }
 
   return (
-    <div className="uac-doc-card">
-      <div className="uac-doc-head">
-        <span className="uac-doc-title">
-          <LayersIcon size={14} /> Proposed {proposal.registry} kind — {proposal.displayName}
-        </span>
-        <span className="text-muted" style={{ fontSize: 'var(--text-xs)' }}>
-          {proposal.kindName}
-        </span>
-      </div>
-
-      {proposal.summary && (
-        <div className="uac-doc-body" style={{ fontSize: 'var(--text-sm)' }}>
-          {proposal.summary}
-        </div>
-      )}
-
-      <div className="uac-doc-body" style={{ fontSize: 'var(--text-xs)' }}>
-        {proposal.description && (
-          <div>
-            <strong>Captures:</strong> {proposal.description}
-          </div>
-        )}
-        <div>
-          <strong>Type:</strong> {detail}
-        </div>
-        <div className="text-muted">
-          A new data concept for this firm — created as a definition row, no code.
-        </div>
-      </div>
-
-      <div className="uac-doc-actions">
+    <ProposalCardShell
+      kind={`New ${proposal.registry} kind`}
+      title={proposal.displayName}
+      meta={proposal.kindName}
+      actions={
         <button
           type="button"
-          className={`uac-reply-btn uac-reply-btn-primary${state === 'approved' ? ' copied' : ''}`}
+          className={`li-uac-prop-btn primary${state === 'approved' ? ' done' : ''}`}
           onClick={approve}
           disabled={state === 'approving' || state === 'approved'}
           title="Approve — this defines the new data kind"
         >
-          {state === 'approved' ? <CheckIcon size={12} /> : <LayersIcon size={12} />}{' '}
-          {state === 'approving'
-            ? 'Defining…'
-            : state === 'approved'
-              ? 'Defined'
-              : 'Approve & define kind'}
+          <CheckIcon size={14} />{' '}
+          {state === 'approving' ? 'Defining…' : state === 'approved' ? 'Defined' : 'Approve'}
         </button>
+      }
+      footer={
+        error ? (
+          <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+            {error}
+          </div>
+        ) : undefined
+      }
+    >
+      {proposal.summary && <div className="li-uac-prop-summary">{proposal.summary}</div>}
+      <ProposalFacts
+        facts={[
+          ...(proposal.description ? [{ label: 'Captures', value: proposal.description }] : []),
+          { label: 'Type', value: detail },
+        ]}
+      />
+      <div className="li-uac-prop-note">
+        A new data concept for this firm — created as a definition row, no code.
       </div>
-      {error && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
-          {error}
-        </div>
-      )}
-    </div>
+    </ProposalCardShell>
   )
 }
