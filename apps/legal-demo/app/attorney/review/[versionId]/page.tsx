@@ -12,7 +12,8 @@ import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { DocumentSheet, DocumentCanvas } from '@/components/DocumentSheet'
 import { GemCluster, GemShimmer } from '@/components/GemSparkle'
-import { XIcon } from '@/components/icons'
+import { SendIcon, XIcon } from '@/components/icons'
+import { SendToClientModal, type SendToClientMatter } from '@/components/SendToClientModal'
 
 // Step-through review session (started from the queue's "Begin review"): the ordered
 // draft ids to walk, in sessionStorage, flagged on the URL with ?review=session.
@@ -181,6 +182,11 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   const [regenOpen, setRegenOpen] = useState(false)
   const [regenGuidance, setRegenGuidance] = useState('')
 
+  // "Send to client" (unified send modal). DraftDetail has no clientEmail, so
+  // opening fetches the matter first; sendMatter non-null = modal open.
+  const [sendMatter, setSendMatter] = useState<SendToClientMatter | null>(null)
+  const [sendOpening, setSendOpening] = useState(false)
+
   const [sessionIds, setSessionIds] = useState<string[] | null>(null)
 
   async function load() {
@@ -204,6 +210,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     setEditing(false)
     setMcOpen(false)
     setNotice(null)
+    setSendMatter(null)
   }, [versionId])
 
   useEffect(() => {
@@ -447,6 +454,33 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(null)
+    }
+  }
+
+  // "Send to client" — fetch the matter (for the client's email) then open the
+  // unified send modal, grounded on THIS loaded draft version.
+  async function openSendToClient() {
+    if (!draft || sendOpening) return
+    setSendOpening(true)
+    setError(null)
+    try {
+      const res = await callAttorneyMcp<{
+        matter: { clientName: string | null; clientEmail: string | null } | null
+      }>({
+        toolName: 'legal.matter.get',
+        input: { matterEntityId: draft.matterEntityId },
+      })
+      if (!res.matter) throw new Error('Matter not found for this draft.')
+      setSendMatter({
+        entityId: draft.matterEntityId,
+        matterNumber: draft.matterNumber,
+        clientName: res.matter.clientName ?? draft.clientName,
+        clientEmail: res.matter.clientEmail,
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSendOpening(false)
     }
   }
 
@@ -695,6 +729,15 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
                 </svg>
                 Word
               </button>
+              <button
+                type="button"
+                className="li-rev-tbtn"
+                onClick={() => void openSendToClient()}
+                disabled={busy !== null || editing || sendOpening}
+              >
+                {sendOpening ? <span className="spinner" /> : <SendIcon size={15} />}
+                Send to client
+              </button>
               <DocumentActionBar
                 context={{
                   documentVersionId: draft.documentVersionId,
@@ -816,6 +859,20 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
 
       {error && <div className="alert alert-error li-rev-alert">{error}</div>}
       {notice && <div className="alert alert-success li-rev-alert">{notice}</div>}
+
+      {sendMatter && (
+        <SendToClientModal
+          matter={sendMatter}
+          doc={{
+            documentVersionId: draft.documentVersionId,
+            documentKind: draft.documentKind,
+            versionNumber: draft.versionNumber,
+            status: draft.status,
+          }}
+          onClose={() => setSendMatter(null)}
+          onSent={(msg) => setNotice(msg)}
+        />
+      )}
 
       {/* Matter context — the reasoning trace, inline (comp panel). */}
       {mcOpen && hasTrace && (

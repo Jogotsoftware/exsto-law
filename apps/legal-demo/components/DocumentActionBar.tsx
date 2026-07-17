@@ -10,7 +10,9 @@ import { useConfirm } from '@/components/ConfirmModal'
 import { getDocumentActions, type DocumentActionContext } from '@/lib/documentActions/registry'
 // Bundled action — explicit import guarantees registration even if the webpack
 // require.context discovery is unavailable (e.g. a non-webpack test runner).
-import '@/lib/documentActions/actions/send-via-email.action'
+// (send-via-email retired: the founder's unified SendToClientModal is now the
+// one email affordance; the review page opens it beside PDF/Word.)
+import '@/lib/documentActions/actions/send-for-signature.action'
 
 export function DocumentActionBar({ context }: { context: DocumentActionContext }) {
   const actions = useMemo(() => getDocumentActions(), [])

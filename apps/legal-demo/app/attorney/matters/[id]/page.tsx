@@ -17,7 +17,8 @@ import {
   EditIcon,
 } from '@/components/icons'
 import { GemCluster } from '@/components/GemSparkle'
-import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { SendToClientModal, type SendToClientDoc } from '@/components/SendToClientModal'
 import {
   humanizeService,
   humanizeStatus,
@@ -42,7 +43,7 @@ import {
   CompleteMatterStep,
 } from './RunnerReview'
 import { skipStep } from '@/lib/stepRunner'
-import { useConfirm, usePrompt } from '@/components/ConfirmModal'
+import { useConfirm } from '@/components/ConfirmModal'
 import { NotesSection } from '@/components/NotesSection'
 
 const GENERATABLE: Array<{ kind: string; label: string }> = [
@@ -1327,64 +1328,62 @@ function ClientStep({
 
 // The Send-to-client body + its send action, NO Modal wrapper, so the legacy
 // ClientStep and the data-driven review_send_document window share one UI.
+// The send itself happens in the unified SendToClientModal (founder comp) —
+// this body just gates on approval and opens it on the latest draft.
 function ClientBody({ matter }: { matter: MatterDetail }) {
   const versionId = matter.latestDraftVersionId
   const approved = matter.latestDraftStatus === 'approved'
-  const [busy, setBusy] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const [sendDoc, setSendDoc] = useState<SendToClientDoc | null>(null)
   const [status, setStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
-  const { confirm, confirmElement } = useConfirm()
-  const { prompt, promptElement } = usePrompt()
 
-  async function send() {
-    if (!versionId) return
-    let to = matter.clientEmail ?? ''
-    if (!to) {
-      const entered = await prompt({
-        title: 'Send to which email?',
-        body: 'No client email is on file for this matter.',
-        label: 'Recipient email',
-        placeholder: 'client@example.com',
-        confirmLabel: 'Continue',
-      })
-      to = entered ?? ''
-    }
-    if (!to) {
-      setStatus({
-        kind: 'err',
-        msg: 'No recipient — add a client email or enter one when prompted.',
-      })
-      return
-    }
-    const ok = await confirm({
-      title: 'Email the document?',
-      body: `Emails the client a link to this document at ${to}.`,
-      confirmLabel: 'Send',
-    })
-    if (!ok) return
-    setBusy(true)
+  // MatterDetail carries only the latest version id + status; the modal's
+  // attachment card needs the kind + version number too — fetch on open.
+  async function openSendModal() {
+    if (!versionId || opening) return
+    setOpening(true)
     setStatus(null)
     try {
-      const r = await callAttorneyMcp<{ to?: string }>({
-        toolName: 'legal.email.send_draft_link',
-        input: {
-          matterEntityId: matter.matterEntityId,
-          documentVersionId: versionId,
-          shareUrl: shareUrlFor(versionId),
-          to,
-        },
+      const res = await callAttorneyMcp<{
+        draft: {
+          documentVersionId: string
+          documentKind: string
+          versionNumber: number
+          status: string
+        } | null
+      }>({
+        toolName: 'legal.draft.get',
+        input: { documentVersionId: versionId },
       })
-      setStatus({ kind: 'ok', msg: `Sent to ${r.to ?? to}.` })
+      if (!res.draft) throw new Error('Draft not found.')
+      setSendDoc({
+        documentVersionId: res.draft.documentVersionId,
+        documentKind: res.draft.documentKind,
+        versionNumber: res.draft.versionNumber,
+        status: res.draft.status,
+      })
     } catch (e) {
       setStatus({ kind: 'err', msg: e instanceof Error ? e.message : String(e) })
     } finally {
-      setBusy(false)
+      setOpening(false)
     }
   }
 
   return (
     <>
-      {confirmElement}
-      {promptElement}
+      {sendDoc && (
+        <SendToClientModal
+          matter={{
+            entityId: matter.matterEntityId,
+            matterNumber: matter.matterNumber,
+            clientName: matter.clientName,
+            clientEmail: matter.clientEmail,
+          }}
+          doc={sendDoc}
+          onClose={() => setSendDoc(null)}
+          onSent={(msg) => setStatus({ kind: 'ok', msg })}
+        />
+      )}
       {status && (
         <div className={`alert ${status.kind === 'ok' ? 'alert-success' : 'alert-error'}`}>
           {status.msg}
@@ -1404,18 +1403,18 @@ function ClientBody({ matter }: { matter: MatterDetail }) {
                 at <strong>{matter.clientEmail}</strong>
               </>
             ) : (
-              ' (no client email on file — you’ll be prompted)'
+              ' (no client email on file — enter one in the send window)'
             )}
             .
           </p>
           <button
             className="primary"
-            onClick={() => void send()}
-            disabled={busy}
+            onClick={() => void openSendModal()}
+            disabled={opening}
             style={{ marginTop: 'var(--space-3)' }}
           >
-            {busy && <span className="spinner" />}
-            {busy ? 'Sending…' : 'Email document to client'}
+            {opening && <span className="spinner" />}
+            {opening ? 'Opening…' : 'Email document to client'}
           </button>
         </>
       )}

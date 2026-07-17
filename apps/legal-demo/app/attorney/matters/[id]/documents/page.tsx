@@ -7,8 +7,8 @@
 import { use, useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { useConfirm, usePrompt } from '@/components/ConfirmModal'
-import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
+import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { SendToClientModal } from '@/components/SendToClientModal'
 import { formatDate } from '@/lib/datetime'
 import { MoreVerticalIcon, UploadIcon } from '@/components/icons'
 import { readDevSession } from '@/lib/auth'
@@ -25,11 +25,6 @@ interface DraftPayload {
   status: string
   recordedAt: string
   bodyMarkdown: string
-}
-interface SendDraftLinkResult {
-  messageId: string
-  from: string
-  to: string
 }
 interface UploadedDoc {
   documentVersionId: string
@@ -160,14 +155,12 @@ function DocIcon({ kind }: { kind: DocGlyph }): ReactElement {
 }
 
 export default function MatterDocumentsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { confirm, confirmElement } = useConfirm()
-  const { prompt, promptElement } = usePrompt()
   const { id } = use(params)
   const [matter, setMatter] = useState<MatterDetail | null>(null)
   const [draft, setDraft] = useState<DraftPayload | null>(null)
   const [uploads, setUploads] = useState<UploadedDoc[]>([])
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState<string | null>(null)
+  const [showSend, setShowSend] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [emailStatus, setEmailStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
@@ -263,53 +256,6 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
     }
   }
 
-  async function emailDraftLink() {
-    if (!draft || !matter) return
-    let to = matter.clientEmail ?? ''
-    if (!to) {
-      const entered = await prompt({
-        title: 'Send draft link to which email?',
-        body: 'No client email is on file for this matter.',
-        label: 'Recipient email',
-        placeholder: 'client@example.com',
-        confirmLabel: 'Continue',
-      })
-      to = entered ?? ''
-    }
-    if (!to) {
-      setEmailStatus({
-        kind: 'err',
-        msg: 'No recipient. Add a client email to the contact or enter one when prompted.',
-      })
-      return
-    }
-    const ok = await confirm({
-      title: 'Send the draft link?',
-      body: `Emails the client a secure link to this draft at ${to}.`,
-      confirmLabel: 'Send',
-    })
-    if (!ok) return
-    setBusy('email')
-    setEmailStatus(null)
-    try {
-      const result = await callAttorneyMcp<SendDraftLinkResult>({
-        toolName: 'legal.email.send_draft_link',
-        input: {
-          matterEntityId: id,
-          documentVersionId: draft.documentVersionId,
-          shareUrl: shareUrlFor(draft.documentVersionId),
-          to,
-        },
-      })
-      setEmailStatus({ kind: 'ok', msg: `Sent to ${result.to}` })
-      setTimeout(() => setEmailStatus(null), 6000)
-    } catch (err) {
-      setEmailStatus({ kind: 'err', msg: err instanceof Error ? err.message : String(err) })
-    } finally {
-      setBusy(null)
-    }
-  }
-
   // ── Uploaded-document actions (WP-B2: the full comp menu, real conversions) ──
   async function viewUpload(u: UploadedDoc) {
     setUploadError(null)
@@ -392,8 +338,27 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
 
   return (
     <>
-      {confirmElement}
-      {promptElement}
+      {showSend && draft && matter && (
+        <SendToClientModal
+          matter={{
+            entityId: id,
+            matterNumber: matter.matterNumber,
+            clientName: matter.clientName,
+            clientEmail: matter.clientEmail,
+          }}
+          doc={{
+            documentVersionId: draft.documentVersionId,
+            documentKind: draft.documentKind,
+            versionNumber: draft.versionNumber,
+            status: draft.status,
+          }}
+          onClose={() => setShowSend(false)}
+          onSent={(msg) => {
+            setEmailStatus({ kind: 'ok', msg })
+            setTimeout(() => setEmailStatus(null), 6000)
+          }}
+        />
+      )}
 
       <div className="li-mat-card li-mat-doccard">
         <div className="li-mat-doccard-head">
@@ -472,13 +437,12 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
                         <button
                           type="button"
                           className="li-mat-menu-item"
-                          disabled={busy === 'email'}
                           onClick={() => {
                             setOpenMenuId(null)
-                            void emailDraftLink()
+                            setShowSend(true)
                           }}
                         >
-                          {busy === 'email' ? 'Sending…' : 'Email'}
+                          Email
                         </button>
                       </div>
                     </>

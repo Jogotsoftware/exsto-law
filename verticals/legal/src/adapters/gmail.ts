@@ -22,6 +22,10 @@ export interface EmailAttachment {
 
 export interface SendEmailArgs {
   to: string
+  // Optional Cc recipients (comma-separated, RFC 5322 address-list). Policy note:
+  // Contract B (enqueueClientEmail) restricts Cc to FIRM STAFF — validation lives
+  // there, not here; this adapter just writes the header.
+  cc?: string
   subject: string
   body: string
   // Optional branded HTML alternative. When present the message body becomes a
@@ -83,6 +87,12 @@ function buildRawMessage(args: SendEmailArgs, fromHeader: string): string {
     `From: ${fromHeader}`,
     `Subject: ${encodeHeaderIfNeeded(args.subject)}`,
   ]
+  if (args.cc?.trim()) {
+    // Sanitize at the MIME boundary regardless of upstream (same discipline as
+    // attachment filenames): strip CR/LF so a crafted value can't smuggle extra
+    // headers (e.g. an injected Bcc) into the raw message.
+    headers.splice(1, 0, `Cc: ${args.cc.replace(/[\r\n]+/g, ' ').trim()}`)
+  }
   if (args.inReplyToMessageIdHeader) {
     headers.push(`In-Reply-To: ${args.inReplyToMessageIdHeader}`)
     headers.push(`References: ${args.inReplyToMessageIdHeader}`)

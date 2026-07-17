@@ -159,6 +159,10 @@ interface MailSendPayload {
   gmail_message_id: string
   subject: string
   to: string
+  // Optional Cc (firm staff only — validated in enqueueClientEmail). Carried on
+  // the action payload for the audit record; Cc addresses also appear in
+  // participant_emails so the thread projection includes them.
+  cc?: string | null
   from: string
   body_text: string
   matter_entity_id: string | null
