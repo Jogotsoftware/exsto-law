@@ -156,39 +156,32 @@ export function AiRegenerateRail({
         >
           <input
             type="text"
-            className="input"
+            className="li-modal-input"
             style={{ flex: 1 }}
             placeholder="What should change? The AI revises the current version."
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={busy}
           />
-          <button type="submit" className="button" disabled={busy || !prompt.trim()}>
+          <button type="submit" className="li-modal-btn-ghost" disabled={busy || !prompt.trim()}>
             {busy ? 'Working…' : 'Regenerate'}
           </button>
         </form>
       )}
       {error && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 8 }}>
+        <div role="alert" className="li-modal-alert" style={{ marginTop: 8 }}>
           {error}
         </div>
       )}
       {proposal !== null && (
-        <div
-          style={{
-            border: '1px solid var(--border, rgba(127,127,127,0.35))',
-            borderRadius: 8,
-            padding: 10,
-            marginTop: 8,
-          }}
-        >
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+        <div className="li-modal-proposal" style={{ marginTop: 8 }}>
+          <div className="li-modal-proposal-head">
             <strong>AI proposal</strong>
-            <span className="text-muted text-sm">review, then use it or discard</span>
+            <span className="li-modal-muted">review, then use it or discard</span>
             <span style={{ flex: 1 }} />
             <button
               type="button"
-              className="button"
+              className="li-modal-btn-ghost"
               onClick={() => {
                 try {
                   onUse(proposal)
@@ -200,7 +193,7 @@ export function AiRegenerateRail({
             >
               Use this
             </button>
-            <button type="button" className="button" onClick={() => setProposal(null)}>
+            <button type="button" className="li-modal-btn-ghost" onClick={() => setProposal(null)}>
               Discard
             </button>
           </div>

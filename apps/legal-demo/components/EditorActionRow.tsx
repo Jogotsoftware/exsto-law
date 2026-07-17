@@ -35,15 +35,20 @@ export function EditorActionRow({
     <>
       <div className="editor-action-row">
         <div className="editor-action-row-ai">{ai}</div>
-        <button type="button" className="button" onClick={onCancel} disabled={busy}>
+        <button type="button" className="li-modal-btn-ghost" onClick={onCancel} disabled={busy}>
           Cancel
         </button>
-        <button type="button" className="primary" onClick={onSave} disabled={busy || !canSave}>
+        <button
+          type="button"
+          className="li-modal-btn-primary"
+          onClick={onSave}
+          disabled={busy || !canSave}
+        >
           {busy ? 'Saving…' : saveLabel}
         </button>
       </div>
       {error && (
-        <div role="alert" className="alert alert-error" style={{ marginBottom: 10 }}>
+        <div role="alert" className="li-modal-alert" style={{ marginBottom: 10 }}>
           {errorItems.length > 1 ? (
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {errorItems.map((item, i) => (

@@ -170,17 +170,17 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
 
   return (
     <Modal title={props.title} onClose={props.onClose} size="wide">
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+      <div className="li-modal-seg-row">
         <button
           type="button"
-          className={`button${mode === 'view' ? ' button-active' : ''}`}
+          className={`li-modal-seg${mode === 'view' ? ' is-active' : ''}`}
           onClick={() => setMode('view')}
         >
           View
         </button>
         <button
           type="button"
-          className={`button${mode === 'edit' ? ' button-active' : ''}`}
+          className={`li-modal-seg${mode === 'edit' ? ' is-active' : ''}`}
           onClick={() => setMode('edit')}
         >
           <EditIcon size={14} /> Edit
@@ -188,7 +188,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
         {props.aiRegenerate !== false && (
           <button
             type="button"
-            className="button"
+            className="li-modal-seg"
             onClick={() => setAiOpen((v) => !v)}
             aria-expanded={aiOpen}
           >
@@ -197,7 +197,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
         )}
         <span style={{ flex: 1 }} />
         {savedFlash && (
-          <span className="text-muted" role="status">
+          <span className="li-modal-muted" role="status">
             <CheckIcon size={13} /> {savedFlash}
           </span>
         )}
@@ -213,35 +213,32 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
         >
           <input
             type="text"
-            className="input"
+            className="li-modal-input"
             style={{ flex: 1 }}
             placeholder="What should change? The AI regenerates against the current version."
             value={aiPrompt}
             onChange={(e) => setAiPrompt(e.target.value)}
             disabled={aiBusy}
           />
-          <button type="submit" className="button" disabled={aiBusy || !aiPrompt.trim()}>
+          <button
+            type="submit"
+            className="li-modal-btn-ghost"
+            disabled={aiBusy || !aiPrompt.trim()}
+          >
             {aiBusy ? 'Working…' : 'Regenerate'}
           </button>
         </form>
       )}
 
       {proposal !== null && (
-        <div
-          style={{
-            border: '1px solid var(--border, rgba(127,127,127,0.35))',
-            borderRadius: 8,
-            padding: 10,
-            marginBottom: 10,
-          }}
-        >
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+        <div className="li-modal-proposal">
+          <div className="li-modal-proposal-head">
             <strong>AI proposal</strong>
-            <span className="text-muted text-sm">review, then use it or discard</span>
+            <span className="li-modal-muted">review, then use it or discard</span>
             <span style={{ flex: 1 }} />
             <button
               type="button"
-              className="button"
+              className="li-modal-btn-ghost"
               onClick={() => {
                 setContent(proposal)
                 setProposal(null)
@@ -250,7 +247,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
             >
               Use this
             </button>
-            <button type="button" className="button" onClick={() => setProposal(null)}>
+            <button type="button" className="li-modal-btn-ghost" onClick={() => setProposal(null)}>
               Discard
             </button>
           </div>
@@ -261,7 +258,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
       {mode === 'view' ? props.renderView(content) : props.renderEdit(content, setContent)}
 
       {error && (
-        <div role="alert" className="alert alert-error" style={{ marginTop: 8 }}>
+        <div role="alert" className="li-modal-alert" style={{ marginTop: 8 }}>
           {error}
         </div>
       )}
@@ -271,7 +268,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
           <>
             <button
               type="button"
-              className="button"
+              className="li-modal-btn-ghost"
               onClick={() => void persist('save')}
               disabled={busy !== null}
             >
@@ -279,7 +276,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
             </button>
             <button
               type="button"
-              className="primary"
+              className="li-modal-btn-primary"
               onClick={() => void persist('approve')}
               disabled={busy !== null}
             >
@@ -289,7 +286,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
         ) : (
           <button
             type="button"
-            className="primary"
+            className="li-modal-btn-primary"
             onClick={() => void persist('save')}
             disabled={busy !== null}
           >

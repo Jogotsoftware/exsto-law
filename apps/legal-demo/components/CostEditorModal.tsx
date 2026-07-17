@@ -42,10 +42,9 @@ export function CostForm({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span className="text-muted text-sm">How is this billed?</span>
+      <label className="li-modal-field">
+        <span>How is this billed?</span>
         <select
-          className="input"
           value={value.costType}
           onChange={(e) => patch({ costType: e.target.value as CostType })}
         >
@@ -54,12 +53,9 @@ export function CostForm({
         </select>
       </label>
 
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span className="text-muted text-sm">
-          {value.costType === 'hourly' ? 'Hourly rate ($)' : 'Flat fee ($)'}
-        </span>
+      <label className="li-modal-field">
+        <span>{value.costType === 'hourly' ? 'Hourly rate ($)' : 'Flat fee ($)'}</span>
         <input
-          className="input"
           inputMode="decimal"
           value={value.amount}
           onChange={(e) => patch({ amount: e.target.value })}
@@ -68,10 +64,9 @@ export function CostForm({
       </label>
 
       {value.costType === 'hourly' && (
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span className="text-muted text-sm">Estimated hours (optional)</span>
+        <label className="li-modal-field">
+          <span>Estimated hours (optional)</span>
           <input
-            className="input"
             inputMode="numeric"
             value={value.hours ?? ''}
             onChange={(e) => {
@@ -84,19 +79,19 @@ export function CostForm({
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span className="text-muted text-sm">Per-document fees (optional)</span>
+        <span className="li-modal-muted">Per-document fees (optional)</span>
         {Object.entries(docFees).map(([kind, amt]) => (
           <div key={kind} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <span style={{ flex: 1 }}>{kind.replace(/_/g, ' ')}</span>
             <input
-              className="input"
+              className="li-modal-input"
               style={{ width: 120 }}
               inputMode="decimal"
               value={amt}
               onChange={(e) => setDocFee(kind, e.target.value)}
               placeholder="0.00"
             />
-            <button type="button" className="button" onClick={() => removeDocFee(kind)}>
+            <button type="button" className="li-modal-btn-ghost" onClick={() => removeDocFee(kind)}>
               Remove
             </button>
           </div>

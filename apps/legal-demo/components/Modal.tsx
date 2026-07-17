@@ -1,9 +1,8 @@
 'use client'
 
 // A focused detail "window" over the page — the dialog beta feedback asks for when
-// clicking into a matter workflow step. Mirrors the settings dialog markup (the
-// shared .modal-* CSS) and closes on backdrop click or Escape; locks body scroll
-// while open.
+// clicking into a matter workflow step. Renders the comp modal chrome (li-modal-*,
+// WP-M) and closes on backdrop click or Escape; locks body scroll while open.
 import { useEffect, useId, useRef } from 'react'
 
 // Open-modal stack so Escape closes only the TOPMOST dialog. Modals now stack
@@ -54,9 +53,9 @@ export function Modal({
   }, [onClose])
 
   return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
+    <div className="li-modal-backdrop" onClick={onClose} role="presentation">
       <div
-        className={size === 'wide' ? 'modal-card modal-card-wide' : 'modal-card'}
+        className={size === 'wide' ? 'li-modal-card li-modal-card-wide' : 'li-modal-card'}
         ref={cardRef}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
@@ -64,16 +63,16 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <div className="modal-head">
+        <div className="li-modal-head">
           <h2 id={titleId} style={{ margin: 0 }}>
             {title}
           </h2>
-          <button onClick={onClose} aria-label="Close" className="modal-close" type="button">
+          <button onClick={onClose} aria-label="Close" className="li-modal-close" type="button">
             ×
           </button>
         </div>
-        <div className="modal-body">{children}</div>
-        {footer && <div className="modal-foot">{footer}</div>}
+        <div className="li-modal-body">{children}</div>
+        {footer && <div className="li-modal-foot">{footer}</div>}
       </div>
     </div>
   )

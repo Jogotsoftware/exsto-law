@@ -170,37 +170,6 @@ export function WorkflowView({ content }: { content: string }) {
   )
 }
 
-export function WorkflowConfigModal({
-  serviceKey,
-  graph,
-  onClose,
-  onChanged,
-}: {
-  serviceKey: string
-  graph: unknown[]
-  onClose: () => void
-  onChanged?: () => void
-}) {
-  return (
-    <ConfigEditModal
-      artifactKind="workflow"
-      targetId={serviceKey}
-      title={`Workflow — ${serviceKey}`}
-      initialContent={JSON.stringify(graph ?? [], null, 2)}
-      renderView={(content) => <WorkflowView content={content} />}
-      renderEdit={jsonEditor}
-      onSave={async (content) => {
-        await callAttorneyMcp({
-          toolName: 'legal.service.lifecycle.set',
-          input: { serviceKey, graph: JSON.parse(content) },
-        })
-      }}
-      onClose={onClose}
-      onChanged={onChanged}
-    />
-  )
-}
-
 // ── Billing config: cost summary + JSON editor over the service's cost ───────
 interface CostDoc {
   costType?: 'fixed' | 'hourly'
@@ -231,62 +200,5 @@ export function BillingView({ content }: { content: string }) {
         </li>
       )}
     </ul>
-  )
-}
-
-export function BillingConfigModal({
-  serviceKey,
-  meta,
-  cost,
-  onClose,
-  onChanged,
-}: {
-  serviceKey: string
-  // Identity fields resent so legal.service.update preserves them (its contract).
-  meta: {
-    displayName: string
-    description: string | null
-    route?: string
-    documents?: string[]
-    sortOrder?: number
-  }
-  cost: CostDoc | null
-  onClose: () => void
-  onChanged?: () => void
-}) {
-  return (
-    <ConfigEditModal
-      artifactKind="billing"
-      targetId={serviceKey}
-      title={`Billing — ${meta.displayName}`}
-      initialContent={JSON.stringify(
-        cost ?? { costType: 'fixed', amount: '0.00', hours: null },
-        null,
-        2,
-      )}
-      renderView={(content) => <BillingView content={content} />}
-      renderEdit={jsonEditor}
-      onSave={async (content) => {
-        const parsed = JSON.parse(content) as CostDoc
-        await callAttorneyMcp({
-          toolName: 'legal.service.update',
-          input: {
-            serviceKey,
-            displayName: meta.displayName,
-            description: meta.description,
-            route: meta.route,
-            documents: meta.documents,
-            sortOrder: meta.sortOrder,
-            cost: {
-              type: parsed.costType ?? 'fixed',
-              amount: (parsed.amount ?? '0.00').trim(),
-              hours: parsed.costType === 'hourly' ? (parsed.hours ?? null) : null,
-            },
-          },
-        })
-      }}
-      onClose={onClose}
-      onChanged={onChanged}
-    />
   )
 }
