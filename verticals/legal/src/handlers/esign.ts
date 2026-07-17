@@ -448,6 +448,57 @@ registerActionHandler('esign.decline', async (ctx, client, payload, actionId) =>
   return { envelopeId: p.envelope_entity_id, status: 'declined' as const }
 })
 
+interface EsignVoidPayload {
+  envelope_entity_id: string
+  reason?: string | null
+}
+
+// esign.void — the FIRM pulls an active envelope back before completion. Sets the
+// envelope to 'voided' and closes every still-open signer request (pending |
+// delivered | opened) → 'voided', so assertSignerTurn rejects any further sign
+// from a stale link. Completed / declined / already-voided envelopes are refused.
+registerActionHandler('esign.void', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as EsignVoidPayload
+  const tenantId = ctx.tenantId
+  const sourceRef = ctx.actorId
+
+  await assertEnvelopeExists(client, tenantId, p.envelope_entity_id)
+  const current = await latestEnvelopeStatus(client, tenantId, p.envelope_entity_id)
+  if (current === 'completed' || current === 'declined' || current === 'voided') {
+    throw new Error(`Envelope is already ${current} and cannot be voided.`)
+  }
+
+  const reqs = await loadRoutingRequests(client, tenantId, p.envelope_entity_id)
+  const openRequestIds = reqs
+    .filter((r) => r.status !== 'signed' && r.status !== 'declined' && r.status !== 'voided')
+    .map((r) => r.requestId)
+  for (const requestId of openRequestIds) {
+    await setAttr(client, tenantId, actionId, requestId, 'signer_status', 'voided', {
+      sourceType: 'system',
+      sourceRef,
+    })
+  }
+  await setAttr(client, tenantId, actionId, p.envelope_entity_id, 'envelope_status', 'voided', {
+    sourceRef,
+  })
+
+  await insertEvent(client, {
+    tenantId,
+    actionId,
+    eventKindName: 'esign.voided',
+    primaryEntityId: p.envelope_entity_id,
+    secondaryEntityIds: openRequestIds,
+    data: { reason: p.reason ?? null, closed_request_count: openRequestIds.length },
+    sourceType: 'human',
+    sourceRef,
+  })
+  return {
+    envelopeId: p.envelope_entity_id,
+    status: 'voided' as const,
+    voidedRequestIds: openRequestIds,
+  }
+})
+
 // ── External provider callback (dormant) ─────────────────────────────────────
 
 interface EsignRecordStatusPayload {
@@ -625,6 +676,21 @@ async function latestStatus(
     [tenantId, requestId],
   )
   return res.rows[0]?.status ?? 'pending'
+}
+
+async function latestEnvelopeStatus(
+  client: DbClient,
+  tenantId: string,
+  envelopeId: string,
+): Promise<string> {
+  const res = await client.query<{ status: string }>(
+    `SELECT a.value #>> '{}' AS status FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+      WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'envelope_status'
+      ORDER BY a.valid_from DESC LIMIT 1`,
+    [tenantId, envelopeId],
+  )
+  return res.rows[0]?.status ?? 'pending_dispatch'
 }
 
 async function resolveEnvelopeDocument(

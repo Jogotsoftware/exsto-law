@@ -29,6 +29,7 @@ import {
   ListIcon,
   CopyIcon,
   MessageCircleIcon,
+  SignatureIcon,
   Share2Icon,
   UsersIcon,
   DollarSignIcon,
@@ -57,6 +58,7 @@ const NAV: NavNode[] = [
   { kind: 'leaf', href: '/attorney/matters', label: 'Matters', Icon: BriefcaseIcon },
   { kind: 'leaf', href: '/attorney/crm', label: 'CRM', Icon: Building2Icon },
   { kind: 'leaf', href: '/attorney/review', label: 'Review', Icon: CheckCircleIcon },
+  { kind: 'leaf', href: '/attorney/esign', label: 'eSign', Icon: SignatureIcon },
   { kind: 'leaf', href: '/attorney/requests', label: 'Requests', Icon: HelpCircleIcon },
   { kind: 'leaf', href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
   { kind: 'leaf', href: '/attorney/mail', label: 'Mail', Icon: MailIcon },
@@ -110,7 +112,7 @@ const MODULE_AREAS: Record<string, string[]> = {
     '/attorney/services',
   ],
   'client-portal': ['/attorney/requests'],
-  'e-sign': [],
+  'e-sign': ['/attorney/esign'],
 }
 
 const PIN_STORAGE_KEY = 'exsto.li.railPinned'
