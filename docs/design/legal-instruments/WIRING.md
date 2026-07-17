@@ -103,9 +103,9 @@ Audited against `origin/main` @ c26b3ae (2026-07-16, three code audits). This is
 
 ## WP-F · Billing — fully WIRED, pure restyle
 
-- [ ] Unbilled groups / per-entry checkboxes / select-all / Generate invoice
-- [ ] Reported-payment verify ("Verified — mark paid") / Dismiss, explorer + screenshot links
-- [ ] View (PDF) / Mark paid / Send per invoice; firm default + client rates + service fixed fees
+- [x] Unbilled groups / per-entry checkboxes / select-all / Generate invoice
+- [x] Reported-payment verify ("Verified — mark paid") / Dismiss, explorer + screenshot links
+- [x] View (PDF) / Mark paid / Send per invoice; firm default + client rates + service fixed fees
 
 ## WP-G · Settings → rail-routed sections
 

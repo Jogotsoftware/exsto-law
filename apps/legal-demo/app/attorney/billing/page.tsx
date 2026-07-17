@@ -1,6 +1,8 @@
 'use client'
 
-// Billing (Session 4). Three tabs over the billing read/write MCP tools:
+// Billing (Session 4; WP-F restyled to legal-instruments.dc.html's BILLING
+// section — chrome only, no behavior changes). Three tabs over the billing
+// read/write MCP tools:
 //   Unbilled — unbilled time + expense ledger entries grouped by client → matter,
 //              select entries and generate an invoice.
 //   Invoices — issued invoices with lines; send (activation-gated in v1).
@@ -8,10 +10,9 @@
 //              screens (S2) persist; the editor is NOT reimplemented here.
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Tabs } from '@/components/Tabs'
-import { PageHead } from '@/components/PageHead'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDate } from '@/lib/datetime'
+import { CheckIcon } from '@/components/icons'
 
 // A select-all checkbox for a table/group header: checked when every row is
 // selected, indeterminate when only some are. The attorney asked for one plain
@@ -27,7 +28,7 @@ function SelectAllCheckbox({
   indeterminate: boolean
   onChange: (checked: boolean) => void
   title: string
-}) {
+}): React.ReactElement {
   return (
     <input
       type="checkbox"
@@ -133,10 +134,18 @@ function kindLabel(kind: string): string {
       return kind.replace(/_/g, ' ')
   }
 }
-function kindBadgeClass(kind: string): string {
-  if (kind === 'time') return 'badge info'
-  if (kind === 'service_fee' || kind === 'document_fee') return 'badge ok'
-  return 'badge'
+// Comp kind-chip colors: Time blue, Expense gray, Service/Document fee green.
+function kindChipClass(kind: string): string {
+  if (kind === 'time') return 'li-bill-chip li-bill-chip--sm li-bill-chip--blue'
+  if (kind === 'service_fee' || kind === 'document_fee')
+    return 'li-bill-chip li-bill-chip--sm li-bill-chip--green'
+  return 'li-bill-chip li-bill-chip--sm li-bill-chip--gray'
+}
+// Comp status-chip colors: paid/sent green, everything else blue.
+function statusChipClass(status: string): string {
+  return status === 'paid' || status === 'sent'
+    ? 'li-bill-chip li-bill-chip--sm li-bill-chip--green'
+    : 'li-bill-chip li-bill-chip--sm li-bill-chip--blue'
 }
 // A base64 PDF → object URL we can show in an <iframe> and offer as a download.
 function base64ToBlobUrl(base64: string, type = 'application/pdf'): string {
@@ -147,7 +156,7 @@ function base64ToBlobUrl(base64: string, type = 'application/pdf'): string {
 }
 
 // ── Unbilled tab ───────────────────────────────────────────────────────────────
-function UnbilledTab({ onIssued }: { onIssued: () => void }) {
+function UnbilledTab({ onIssued }: { onIssued: () => void }): React.ReactElement {
   const [clients, setClients] = useState<UnbilledClient[] | null>(null)
   const [currency, setCurrency] = useState('USD')
   const [error, setError] = useState<string | null>(null)
@@ -283,138 +292,95 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
         <div className="empty-block">Nothing unbilled — every time/expense entry is invoiced.</div>
       )}
 
-      {billable.map((c) => (
-        <section key={c.clientEntityId} style={{ marginBottom: 'var(--space-5)' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-3)',
-              flexWrap: 'wrap',
-              marginBottom: 'var(--space-3)',
-            }}
-          >
-            <h3 style={{ margin: 0 }}>{c.clientName}</h3>
-            <span className="badge info">
-              {c.billableRate ? `${money(c.billableRate, currency)}/hr` : 'no rate set'}
-              {c.billingType ? ` · ${c.billingType}` : ''}
-            </span>
-            <strong style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
-              Unbilled {money(c.total, currency)}
-            </strong>
-            {/* A LABELED select-all, not a bare floating checkbox (beta: read as a
-                "stray empty text box" at the top of the page). */}
-            {(() => {
-              const ids = clientEntryIds(c)
-              const allSelected = ids.length > 0 && ids.every((id) => selected[id])
-              const someSelected = ids.some((id) => selected[id])
-              return (
-                <label
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 'var(--space-1)',
-                    fontSize: 'var(--text-sm)',
-                    color: 'var(--muted)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  <SelectAllCheckbox
-                    checked={allSelected}
-                    indeterminate={someSelected}
-                    onChange={(v) => setClientSelection(c, v)}
-                    title={`Select all unbilled entries for ${c.clientName}`}
-                  />
-                  Select all
-                </label>
-              )
-            })()}
-            <button
-              className="primary"
-              disabled={busy === c.clientEntityId}
-              onClick={() => generate(c)}
-            >
-              {busy === c.clientEntityId ? '…' : 'Generate invoice'}
-            </button>
-          </div>
-          {c.matters.map((m) => (
-            <div key={m.matterEntityId} style={{ marginBottom: 'var(--space-3)' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 'var(--space-2)',
-                  marginBottom: 'var(--space-1)',
-                }}
+      {billable.map((c) => {
+        const ids = clientEntryIds(c)
+        const allSelected = ids.length > 0 && ids.every((id) => selected[id])
+        const someSelected = ids.some((id) => selected[id])
+        return (
+          <section key={c.clientEntityId} className="li-bill-client-section">
+            <div className="li-bill-client-head">
+              <h3 className="li-bill-client-name">{c.clientName}</h3>
+              <span className="li-bill-chip li-bill-chip--blue">
+                {c.billableRate ? `${money(c.billableRate, currency)}/hr` : 'no rate set'}
+                {c.billingType ? ` · ${c.billingType}` : ''}
+              </span>
+              <strong className="li-bill-unbilled-total">
+                Unbilled {money(c.total, currency)}
+              </strong>
+              {/* A LABELED select-all, not a bare floating checkbox (beta: read as a
+                  "stray empty text box" at the top of the page). */}
+              <label className="li-bill-selectall">
+                <SelectAllCheckbox
+                  checked={allSelected}
+                  indeterminate={someSelected}
+                  onChange={(v) => setClientSelection(c, v)}
+                  title={`Select all unbilled entries for ${c.clientName}`}
+                />
+                Select all
+              </label>
+              <button
+                className="li-bill-btn-primary"
+                disabled={!someSelected || busy === c.clientEntityId}
+                onClick={() => generate(c)}
               >
-                {m.matterSummary ? (
-                  <>
-                    <span style={{ fontWeight: 600 }}>{m.matterSummary}</span>
-                    <span style={{ color: 'var(--muted)', fontSize: 'var(--text-xs)' }}>
-                      {m.matterNumber}
-                    </span>
-                  </>
-                ) : (
-                  <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
-                    {m.matterNumber}
-                  </span>
-                )}
-                <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
-                  · {money(m.total, currency)}
-                </span>
-              </div>
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: '2rem' }}>
-                        {(() => {
-                          const allSelected =
-                            m.entries.length > 0 &&
-                            m.entries.every((e) => selected[e.sourceEventId])
-                          const someSelected = m.entries.some((e) => selected[e.sourceEventId])
-                          return (
-                            <SelectAllCheckbox
-                              checked={allSelected}
-                              indeterminate={someSelected}
-                              onChange={(v) => setMatterSelection(m, v)}
-                              title="Select all entries in this matter"
-                            />
-                          )
-                        })()}
-                      </th>
-                      <th>Date</th>
-                      <th>Kind</th>
-                      <th>Description</th>
-                      <th style={{ textAlign: 'right' }}>Qty</th>
-                      <th style={{ textAlign: 'right' }}>Rate</th>
-                      <th style={{ textAlign: 'right' }}>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                {busy === c.clientEntityId ? '…' : 'Generate invoice'}
+              </button>
+            </div>
+            {c.matters.map((m) => {
+              const mAllSelected =
+                m.entries.length > 0 && m.entries.every((e) => selected[e.sourceEventId])
+              const mSomeSelected = m.entries.some((e) => selected[e.sourceEventId])
+              return (
+                <div key={m.matterEntityId} className="li-bill-matter">
+                  <div className="li-bill-matter-head">
+                    {m.matterSummary ? (
+                      <>
+                        <span className="li-bill-matter-summary">{m.matterSummary}</span>
+                        <span className="li-bill-matter-number">{m.matterNumber}</span>
+                      </>
+                    ) : (
+                      <span className="li-bill-matter-number">{m.matterNumber}</span>
+                    )}
+                    <span className="li-bill-matter-total">· {money(m.total, currency)}</span>
+                  </div>
+                  <div className="li-bill-table">
+                    <div className="li-bill-thead li-bill-thead--entries">
+                      <span>
+                        <SelectAllCheckbox
+                          checked={mAllSelected}
+                          indeterminate={mSomeSelected}
+                          onChange={(v) => setMatterSelection(m, v)}
+                          title="Select all entries in this matter"
+                        />
+                      </span>
+                      <span>DATE</span>
+                      <span>KIND</span>
+                      <span>DESCRIPTION</span>
+                      <span className="li-bill-td-right">QTY</span>
+                      <span className="li-bill-td-right">RATE</span>
+                      <span className="li-bill-td-right">AMOUNT</span>
+                    </div>
                     {m.entries.map((e) => (
-                      <tr key={e.sourceEventId}>
-                        <td>
+                      <div key={e.sourceEventId} className="li-bill-trow li-bill-trow--entries">
+                        <label className="li-bill-td-check">
                           <input
                             type="checkbox"
                             checked={!!selected[e.sourceEventId]}
                             onChange={() => toggle(e.sourceEventId)}
                             aria-label="select entry"
                           />
-                        </td>
-                        <td>{fmtDate(e.date)}</td>
-                        <td>
-                          <span className={kindBadgeClass(e.kind)}>{kindLabel(e.kind)}</span>
-                        </td>
-                        <td>{e.description}</td>
-                        <td style={{ textAlign: 'right' }}>
+                        </label>
+                        <span className="li-bill-td-muted">{fmtDate(e.date)}</span>
+                        <span className={kindChipClass(e.kind)}>{kindLabel(e.kind)}</span>
+                        <span>{e.description}</span>
+                        <span className="li-bill-td-right li-bill-td-muted">
                           {e.kind === 'time'
                             ? `${e.quantity}h`
                             : e.kind === 'service_fee' || e.kind === 'document_fee'
                               ? '—'
                               : e.quantity}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
+                        </span>
+                        <span className="li-bill-td-right li-bill-td-muted">
                           {e.rate ? (
                             money(e.rate, currency)
                           ) : e.kind === 'time' ? (
@@ -429,64 +395,61 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
                                   [e.sourceEventId]: ev.target.value,
                                 }))
                               }
-                              style={{ width: '5rem', textAlign: 'right' }}
+                              className="li-bill-input li-bill-input--sm"
+                              style={{ width: '5.5rem' }}
                             />
                           ) : (
                             '—'
                           )}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>{money(e.amount, currency)}</td>
-                      </tr>
+                        </span>
+                        <span className="li-bill-td-right li-bill-amount">
+                          {money(e.amount, currency)}
+                        </span>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
-        </section>
-      ))}
+                  </div>
+                </div>
+              )
+            })}
+          </section>
+        )
+      })}
 
       {orphans.map((c) => (
-        <section key="__none__" style={{ marginBottom: 'var(--space-5)', opacity: 0.9 }}>
-          <h3 style={{ marginTop: 0 }}>{c.clientName}</h3>
-          <p style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)', marginTop: 0 }}>
+        <section key="__none__" className="li-bill-client-section" style={{ opacity: 0.9 }}>
+          <h3 className="li-bill-client-name">{c.clientName}</h3>
+          <p className="li-bill-orphan-intro">
             These matters aren’t linked to a client yet, so they can’t be invoiced. Set up billing
             to create the client from the matter’s contact and make it invoiceable. Unbilled{' '}
             {money(c.total, currency)}.
           </p>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Matter</th>
-                  <th>Contact</th>
-                  <th style={{ textAlign: 'right' }}>Unbilled</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {c.matters.map((m) => (
-                  <tr key={m.matterEntityId}>
-                    <td>{m.matterNumber}</td>
-                    <td>{m.contactName ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{money(m.total, currency)}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      {m.contactEntityId ? (
-                        <button
-                          className="primary"
-                          disabled={setupBusy === m.matterEntityId}
-                          onClick={() => setupBilling(m)}
-                        >
-                          {setupBusy === m.matterEntityId ? '…' : 'Set up billing'}
-                        </button>
-                      ) : (
-                        <span style={{ color: 'var(--muted)' }}>no contact</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="li-bill-table">
+            <div className="li-bill-thead li-bill-thead--orphan">
+              <span>MATTER</span>
+              <span>CONTACT</span>
+              <span className="li-bill-td-right">UNBILLED</span>
+              <span className="li-bill-td-right">ACTIONS</span>
+            </div>
+            {c.matters.map((m) => (
+              <div key={m.matterEntityId} className="li-bill-trow li-bill-trow--orphan">
+                <span>{m.matterNumber}</span>
+                <span className="li-bill-td-muted">{m.contactName ?? '—'}</span>
+                <span className="li-bill-td-right li-bill-amount">{money(m.total, currency)}</span>
+                <span className="li-bill-td-right">
+                  {m.contactEntityId ? (
+                    <button
+                      className="li-bill-btn-primary li-bill-btn-primary--sm"
+                      disabled={setupBusy === m.matterEntityId}
+                      onClick={() => setupBilling(m)}
+                    >
+                      {setupBusy === m.matterEntityId ? '…' : 'Set up billing'}
+                    </button>
+                  ) : (
+                    <span className="li-bill-td-muted">no contact</span>
+                  )}
+                </span>
+              </div>
+            ))}
           </div>
         </section>
       ))}
@@ -495,7 +458,7 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }) {
 }
 
 // ── Invoices tab ─────────────────────────────────────────────────────────────
-function InvoicesTab({ reloadKey }: { reloadKey: number }) {
+function InvoicesTab({ reloadKey }: { reloadKey: number }): React.ReactElement {
   const [invoices, setInvoices] = useState<InvoiceSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -505,14 +468,6 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
   const [paying, setPaying] = useState<string | null>(null)
   // Client-reported Zelle/crypto payments (migration 0115) awaiting verification.
   const [reports, setReports] = useState<PaymentReport[]>([])
-  const linkStyle: React.CSSProperties = {
-    background: 'none',
-    border: 'none',
-    color: 'var(--accent)',
-    cursor: 'pointer',
-    padding: 0,
-    font: 'inherit',
-  }
 
   const refresh = useCallback(async () => {
     setError(null)
@@ -678,43 +633,41 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
           the same invoice.pay action as Mark paid, carrying the report's method +
           reference; Dismiss records an append-only correction. */}
       {reports.some((r) => r.status === 'open') && (
-        <section style={{ marginBottom: 'var(--space-4)' }}>
-          <h3 style={{ margin: '0 0 var(--space-2)' }}>Payments reported by clients</h3>
-          <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+        <section className="li-bill-reports">
+          <h3 className="li-bill-section-title li-bill-section-title--lg">
+            Payments reported by clients
+          </h3>
+          <div className="li-bill-reports-grid">
             {reports
               .filter((r) => r.status === 'open')
               .map((r) => {
                 const explorer = explorerUrl(r)
                 return (
-                  <div
-                    key={r.eventId}
-                    style={{
-                      border: '1px solid var(--border)',
-                      borderRadius: 8,
-                      padding: 'var(--space-3)',
-                      display: 'grid',
-                      gap: '0.35rem',
-                    }}
-                  >
-                    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-                      <strong>{r.invoiceNumber}</strong>
-                      <span className="badge info">
+                  <div key={r.eventId} className="li-bill-report-card">
+                    <div className="li-bill-report-head">
+                      <strong className="li-bill-report-number">{r.invoiceNumber}</strong>
+                      <span className="li-bill-chip li-bill-chip--sm li-bill-chip--blue">
                         {r.method === 'crypto'
                           ? `crypto${r.wallet?.currency ? ` · ${r.wallet.currency}` : ''}`
                           : 'Zelle'}
                       </span>
-                      <span className="text-sm" style={{ color: 'var(--muted)' }}>
+                      <span className="li-bill-report-meta">
                         {fmtDate(r.reportedAt)}
                         {r.payerName ? ` · from ${r.payerName}` : ''}
                       </span>
                     </div>
-                    <div className="text-sm" style={{ wordBreak: 'break-all' }}>
+                    <div className="li-bill-report-conf">
                       {r.method === 'crypto' ? 'Transaction ID: ' : 'Confirmation #: '}
-                      <code>{r.reference}</code>
+                      <code className="li-bill-code">{r.reference}</code>
                       {explorer && (
                         <>
                           {' · '}
-                          <a href={explorer} target="_blank" rel="noreferrer noopener">
+                          <a
+                            className="li-bill-link"
+                            href={explorer}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
                             View on block explorer ↗
                           </a>
                         </>
@@ -723,6 +676,7 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                         <>
                           {' · '}
                           <a
+                            className="li-bill-link"
                             href={`/api/attorney/payments/report-screenshot?key=${encodeURIComponent(r.screenshotKey)}`}
                             target="_blank"
                             rel="noreferrer noopener"
@@ -732,18 +686,20 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
                         </>
                       )}
                     </div>
-                    {r.note && <div className="text-sm text-muted">“{r.note}”</div>}
-                    <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: '0.2rem' }}>
+                    {r.note && <div className="li-bill-report-note">“{r.note}”</div>}
+                    <div className="li-bill-report-actions">
                       <button
                         type="button"
-                        className="primary"
+                        className="li-bill-btn-ok"
                         disabled={paying === r.invoiceEntityId}
                         onClick={() => confirmReport(r)}
                       >
+                        <CheckIcon size={14} />
                         {paying === r.invoiceEntityId ? '…' : 'Verified — mark paid'}
                       </button>
                       <button
                         type="button"
+                        className="li-bill-btn"
                         disabled={busy === r.eventId}
                         onClick={() => dismissReport(r)}
                       >
@@ -762,115 +718,102 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }) {
           <p className="text-muted">No invoices yet. Generate one from the Unbilled tab.</p>
         </section>
       ) : (
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Invoice</th>
-                <th>Client</th>
-                <th>Status</th>
-                <th>Issued</th>
-                <th style={{ textAlign: 'right' }}>Lines</th>
-                <th style={{ textAlign: 'right' }}>Total</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map((inv) => (
-                <Fragment key={inv.invoiceEntityId}>
-                  <tr>
-                    <td>
-                      <button
-                        style={linkStyle}
-                        onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
-                      >
-                        <strong>{inv.invoiceNumber}</strong>
-                      </button>
-                    </td>
-                    <td>{inv.clientName}</td>
-                    <td>
+        <div className="li-bill-table li-bill-table--lg">
+          <div className="li-bill-thead li-bill-thead--inv">
+            <span>INVOICE</span>
+            <span>CLIENT</span>
+            <span>STATUS</span>
+            <span>ISSUED</span>
+            <span className="li-bill-td-right">LINES</span>
+            <span className="li-bill-td-right">TOTAL</span>
+            <span className="li-bill-td-right">ACTIONS</span>
+          </div>
+          {invoices.map((inv) => {
+            const reported = reports.some(
+              (r) => r.status === 'open' && r.invoiceEntityId === inv.invoiceEntityId,
+            )
+            return (
+              <Fragment key={inv.invoiceEntityId}>
+                <div className="li-bill-trow li-bill-trow--inv">
+                  <button
+                    className="li-bill-inv-number"
+                    onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
+                  >
+                    {inv.invoiceNumber}
+                  </button>
+                  <span>{inv.clientName}</span>
+                  <span>
+                    <span className={statusChipClass(inv.status)}>
+                      {inv.status === 'paid' ? '✓ paid' : inv.status}
+                    </span>
+                    {reported && (
                       <span
-                        className={`badge ${inv.status === 'paid' || inv.status === 'sent' ? 'ok' : 'info'}`}
+                        className="li-bill-chip li-bill-chip--sm li-bill-chip--gray"
+                        style={{ marginLeft: 6 }}
                       >
-                        {inv.status === 'paid' ? '✓ paid' : inv.status}
+                        payment reported
                       </span>
-                      {reports.some(
-                        (r) => r.status === 'open' && r.invoiceEntityId === inv.invoiceEntityId,
-                      ) && (
-                        <span className="badge info" style={{ marginLeft: 6 }}>
-                          payment reported
-                        </span>
-                      )}
-                    </td>
-                    <td>{fmtDate(inv.issuedDate)}</td>
-                    <td style={{ textAlign: 'right' }}>{inv.lineCount}</td>
-                    <td style={{ textAlign: 'right' }}>{money(inv.total, inv.currency)}</td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button
-                        style={{ ...linkStyle, marginRight: 'var(--space-3)' }}
-                        onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
-                      >
-                        {openId === inv.invoiceEntityId ? 'Hide' : 'View'}
-                      </button>
-                      {inv.status === 'paid' ? (
-                        <span style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
-                          Paid
-                        </span>
-                      ) : (
-                        <>
-                          <button
-                            style={{ ...linkStyle, marginRight: 'var(--space-3)' }}
-                            disabled={paying === inv.invoiceEntityId}
-                            onClick={() => markPaid(inv)}
-                          >
-                            {paying === inv.invoiceEntityId ? '…' : 'Mark paid'}
-                          </button>
-                          <button
-                            className="primary"
-                            disabled={busy === inv.invoiceEntityId}
-                            onClick={() => send(inv)}
-                          >
-                            {busy === inv.invoiceEntityId ? '…' : 'Send'}
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                  {openId === inv.invoiceEntityId && (
-                    <tr key={`${inv.invoiceEntityId}-detail`}>
-                      <td
-                        colSpan={7}
-                        style={{ background: 'var(--surface-2)', padding: 'var(--space-3)' }}
-                      >
-                        {pdf === null ? (
-                          <div className="loading-block" role="status">
-                            <span className="spinner" /> Rendering invoice…
-                          </div>
-                        ) : (
-                          <div>
-                            <div style={{ marginBottom: 'var(--space-2)' }}>
-                              <a href={pdf.url} download={pdf.filename} style={linkStyle}>
-                                Download PDF
-                              </a>
-                            </div>
-                            <iframe
-                              title={`Invoice ${inv.invoiceNumber}`}
-                              src={pdf.url}
-                              style={{
-                                width: '100%',
-                                height: 560,
-                                border: '1px solid var(--border)',
-                              }}
-                            />
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+                    )}
+                  </span>
+                  <span className="li-bill-td-muted">{fmtDate(inv.issuedDate)}</span>
+                  <span className="li-bill-td-right li-bill-td-muted">{inv.lineCount}</span>
+                  <span className="li-bill-td-right li-bill-amount">
+                    {money(inv.total, inv.currency)}
+                  </span>
+                  <span className="li-bill-inv-actions">
+                    <button
+                      className="li-bill-link"
+                      onClick={() => open(inv.invoiceEntityId, inv.invoiceNumber)}
+                    >
+                      {openId === inv.invoiceEntityId ? 'Hide' : 'View'}
+                    </button>
+                    {inv.status === 'paid' ? (
+                      <span className="li-bill-paid-label">Paid</span>
+                    ) : (
+                      <>
+                        <button
+                          className="li-bill-link-muted"
+                          disabled={paying === inv.invoiceEntityId}
+                          onClick={() => markPaid(inv)}
+                        >
+                          {paying === inv.invoiceEntityId ? '…' : 'Mark paid'}
+                        </button>
+                        <button
+                          className="li-bill-btn-primary li-bill-btn-primary--sm"
+                          disabled={busy === inv.invoiceEntityId}
+                          onClick={() => send(inv)}
+                        >
+                          {busy === inv.invoiceEntityId ? '…' : 'Send'}
+                        </button>
+                      </>
+                    )}
+                  </span>
+                </div>
+                {openId === inv.invoiceEntityId && (
+                  <div className="li-bill-detail">
+                    {pdf === null ? (
+                      <div className="loading-block" role="status">
+                        <span className="spinner" /> Rendering invoice…
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ marginBottom: 'var(--space-2)' }}>
+                          <a className="li-bill-link" href={pdf.url} download={pdf.filename}>
+                            Download PDF
+                          </a>
+                        </div>
+                        <iframe
+                          title={`Invoice ${inv.invoiceNumber}`}
+                          src={pdf.url}
+                          className="li-bill-iframe"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Fragment>
+            )
+          })}
         </div>
       )}
     </div>
@@ -901,7 +844,7 @@ interface RatesView {
   services: RateServiceRow[]
 }
 
-function RatesTab() {
+function RatesTab(): React.ReactElement {
   const [view, setView] = useState<RatesView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -957,26 +900,19 @@ function RatesTab() {
       {error && <div className="alert alert-error">{error}</div>}
       {notice && <div className="alert">{notice}</div>}
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          gap: 'var(--space-3)',
-          marginBottom: 'var(--space-2)',
-        }}
-      >
-        <label style={{ flex: '0 0 auto' }}>
-          <span>Firm default hourly rate (USD)</span>
+      <div className="li-bill-rate-row">
+        <label className="li-bill-field">
+          Firm default hourly rate (USD)
           <input
             type="number"
             inputMode="decimal"
             value={firmDraft}
             onChange={(e) => setFirmDraft(e.target.value)}
-            style={{ maxWidth: '12rem' }}
+            className="li-bill-input"
           />
         </label>
         <button
-          className="primary"
+          className="li-bill-btn-primary li-bill-btn-primary--tall"
           disabled={busy === 'firm' || !firmDirty}
           onClick={() =>
             run(
@@ -993,190 +929,177 @@ function RatesTab() {
           {busy === 'firm' ? 'Saving…' : 'Save'}
         </button>
       </div>
-      <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-        The fallback hourly rate billed when a client has no explicit rate. Set per-client rates and
-        per-service fixed fees below — every edit here is the single source of truth and applies
-        everywhere.
+      <p className="li-bill-hint">
+        The fallback hourly rate billed when a client has no explicit rate. Per-client rates and
+        per-service fixed fees below are the single source of truth and apply everywhere.
       </p>
 
-      <h3 style={{ marginBottom: 'var(--space-1)' }}>Client hourly rates</h3>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Client</th>
-              <th style={{ textAlign: 'right' }}>Rate (USD/hr)</th>
-              <th style={{ textAlign: 'right', width: '8rem' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {view.clients.length === 0 && (
-              <tr>
-                <td colSpan={3} style={{ color: 'var(--muted)' }}>
-                  No clients yet.
-                </td>
-              </tr>
-            )}
-            {view.clients.map((c) => {
-              const current = c.ownRate ?? ''
-              const val = clientDraft[c.clientEntityId] ?? current
-              const dirty = val.trim() !== current && val.trim() !== ''
-              return (
-                <tr key={c.clientEntityId}>
-                  <td>
-                    <strong>{c.name}</strong>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      placeholder={
-                        c.inheritsFirmDefault ? `${view.firmDefaultRate ?? '—'} (firm default)` : ''
-                      }
-                      value={val}
-                      onChange={(e) =>
-                        setClientDraft((s) => ({ ...s, [c.clientEntityId]: e.target.value }))
-                      }
-                      style={{ width: '8rem', textAlign: 'right' }}
-                    />
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button
-                      disabled={busy === `c:${c.clientEntityId}` || !dirty}
-                      onClick={() =>
-                        run(
-                          `c:${c.clientEntityId}`,
-                          () =>
-                            callAttorneyMcp({
-                              toolName: 'legal.rates.set_client',
-                              input: { clientEntityId: c.clientEntityId, rate: val.trim() },
-                            }),
-                          `Saved rate for ${c.name}.`,
-                        )
-                      }
-                    >
-                      {busy === `c:${c.clientEntityId}` ? '…' : 'Save'}
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+      <h3 className="li-bill-section-title">Client hourly rates</h3>
+      <div className="li-bill-table li-bill-table--lg">
+        <div className="li-bill-thead li-bill-thead--rate">
+          <span>CLIENT</span>
+          <span className="li-bill-td-right">RATE (USD/HR)</span>
+          <span className="li-bill-td-right">ACTIONS</span>
+        </div>
+        {view.clients.length === 0 && <div className="li-bill-trow-empty">No clients yet.</div>}
+        {view.clients.map((c) => {
+          const current = c.ownRate ?? ''
+          const val = clientDraft[c.clientEntityId] ?? current
+          const dirty = val.trim() !== current && val.trim() !== ''
+          return (
+            <div key={c.clientEntityId} className="li-bill-trow li-bill-trow--rate">
+              <span style={{ fontWeight: 600 }}>{c.name}</span>
+              <span className="li-bill-td-right">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  placeholder={
+                    c.inheritsFirmDefault ? `${view.firmDefaultRate ?? '—'} (firm default)` : ''
+                  }
+                  value={val}
+                  onChange={(e) =>
+                    setClientDraft((s) => ({ ...s, [c.clientEntityId]: e.target.value }))
+                  }
+                  className="li-bill-input li-bill-input--sm"
+                />
+              </span>
+              <span className="li-bill-td-right">
+                <button
+                  className="li-bill-btn li-bill-btn--sm"
+                  disabled={busy === `c:${c.clientEntityId}` || !dirty}
+                  onClick={() =>
+                    run(
+                      `c:${c.clientEntityId}`,
+                      () =>
+                        callAttorneyMcp({
+                          toolName: 'legal.rates.set_client',
+                          input: { clientEntityId: c.clientEntityId, rate: val.trim() },
+                        }),
+                      `Saved rate for ${c.name}.`,
+                    )
+                  }
+                >
+                  {busy === `c:${c.clientEntityId}` ? '…' : 'Save'}
+                </button>
+              </span>
+            </div>
+          )
+        })}
       </div>
 
-      <h3 style={{ marginTop: 'var(--space-5)', marginBottom: 'var(--space-1)' }}>
+      <h3 className="li-bill-section-title li-bill-section-title--tight">
         Service &amp; document fees
       </h3>
-      <p style={{ color: 'var(--muted)', marginTop: 0, fontSize: 'var(--text-sm)' }}>
+      <p className="li-bill-hint li-bill-hint--tight">
         A service’s fixed fee bills when the service is marked complete. Per-document fees (billed
         when a document is approved) are set on each service’s Billing tab and shown here.
       </p>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Service</th>
-              <th style={{ textAlign: 'right' }}>Fixed fee (USD)</th>
-              <th style={{ textAlign: 'right', width: '8rem' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {view.services.length === 0 && (
-              <tr>
-                <td colSpan={3} style={{ color: 'var(--muted)' }}>
-                  No services configured.
-                </td>
-              </tr>
-            )}
-            {view.services.map((s) => {
-              const current = s.fixedFee ?? ''
-              const val = serviceDraft[s.serviceKey] ?? current
-              const dirty = val.trim() !== current && val.trim() !== ''
-              return (
-                <tr key={s.serviceKey}>
-                  <td>
-                    <strong>{s.displayName}</strong>
-                    <div
-                      style={{
-                        color: 'var(--muted)',
-                        fontSize: 'var(--text-xs)',
-                        marginTop: 'var(--space-1)',
-                      }}
-                    >
-                      {Object.keys(s.documentFees).length > 0
-                        ? `Document fees: ${Object.entries(s.documentFees)
-                            .map(([k, v]) => `${k.replace(/_/g, ' ')} ${money(v)}`)
-                            .join(', ')} · `
-                        : ''}
-                      <Link
-                        href={`/attorney/services/${s.serviceKey}/billing`}
-                        style={{ color: 'var(--accent)' }}
-                      >
-                        {Object.keys(s.documentFees).length > 0
-                          ? 'edit document fees'
-                          : 'set document fees →'}
-                      </Link>
-                    </div>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      placeholder="—"
-                      value={val}
-                      onChange={(e) =>
-                        setServiceDraft((st) => ({ ...st, [s.serviceKey]: e.target.value }))
-                      }
-                      style={{ width: '8rem', textAlign: 'right' }}
-                    />
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button
-                      disabled={busy === `s:${s.serviceKey}` || !dirty}
-                      onClick={() =>
-                        run(
-                          `s:${s.serviceKey}`,
-                          () =>
-                            callAttorneyMcp({
-                              toolName: 'legal.rates.set_service',
-                              input: { serviceKey: s.serviceKey, fixedFee: val.trim() },
-                            }),
-                          `Saved fee for ${s.displayName}.`,
-                        )
-                      }
-                    >
-                      {busy === `s:${s.serviceKey}` ? '…' : 'Save'}
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+      <div className="li-bill-table li-bill-table--lg">
+        <div className="li-bill-thead li-bill-thead--rate">
+          <span>SERVICE</span>
+          <span className="li-bill-td-right">FIXED FEE (USD)</span>
+          <span className="li-bill-td-right">ACTIONS</span>
+        </div>
+        {view.services.length === 0 && (
+          <div className="li-bill-trow-empty">No services configured.</div>
+        )}
+        {view.services.map((s) => {
+          const current = s.fixedFee ?? ''
+          const val = serviceDraft[s.serviceKey] ?? current
+          const dirty = val.trim() !== current && val.trim() !== ''
+          return (
+            <div key={s.serviceKey} className="li-bill-trow li-bill-trow--rate">
+              <span>
+                <span style={{ fontWeight: 600 }}>{s.displayName}</span>
+                <div className="li-bill-doc-fee-note">
+                  {Object.keys(s.documentFees).length > 0
+                    ? `Document fees: ${Object.entries(s.documentFees)
+                        .map(([k, v]) => `${k.replace(/_/g, ' ')} ${money(v)}`)
+                        .join(', ')} · `
+                    : ''}
+                  <Link href={`/attorney/services/${s.serviceKey}/billing`}>
+                    {Object.keys(s.documentFees).length > 0
+                      ? 'edit document fees'
+                      : 'set document fees →'}
+                  </Link>
+                </div>
+              </span>
+              <span className="li-bill-td-right">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="—"
+                  value={val}
+                  onChange={(e) =>
+                    setServiceDraft((st) => ({ ...st, [s.serviceKey]: e.target.value }))
+                  }
+                  className="li-bill-input li-bill-input--sm"
+                />
+              </span>
+              <span className="li-bill-td-right">
+                <button
+                  className="li-bill-btn li-bill-btn--sm"
+                  disabled={busy === `s:${s.serviceKey}` || !dirty}
+                  onClick={() =>
+                    run(
+                      `s:${s.serviceKey}`,
+                      () =>
+                        callAttorneyMcp({
+                          toolName: 'legal.rates.set_service',
+                          input: { serviceKey: s.serviceKey, fixedFee: val.trim() },
+                        }),
+                      `Saved fee for ${s.displayName}.`,
+                    )
+                  }
+                >
+                  {busy === `s:${s.serviceKey}` ? '…' : 'Save'}
+                </button>
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
-export default function BillingPage() {
+type BillTabKey = 'unbilled' | 'invoices' | 'rates'
+const BILL_TABS: Array<{ key: BillTabKey; label: string }> = [
+  { key: 'unbilled', label: 'Unbilled' },
+  { key: 'invoices', label: 'Invoices' },
+  { key: 'rates', label: 'Rates' },
+]
+
+export default function BillingPage(): React.ReactElement {
   // Bump to re-pull the Invoices tab after issuing from the Unbilled tab.
   const [reloadKey, setReloadKey] = useState(0)
+  const [tab, setTab] = useState<BillTabKey>('unbilled')
 
   return (
     <main>
-      <PageHead title="Billing" />
-      <Tabs
-        tabs={[
-          {
-            key: 'unbilled',
-            label: 'Unbilled',
-            content: <UnbilledTab onIssued={() => setReloadKey((k) => k + 1)} />,
-          },
-          { key: 'invoices', label: 'Invoices', content: <InvoicesTab reloadKey={reloadKey} /> },
-          { key: 'rates', label: 'Rates', content: <RatesTab /> },
-        ]}
-      />
+      <h1 className="li-bill-title">Billing</h1>
+      <p className="li-bill-subtitle">
+        Unbilled work, issued invoices, and the firm rates they draw from.
+      </p>
+      <div className="li-bill-tabs" role="tablist">
+        {BILL_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            className={`li-bill-tab ${tab === t.key ? 'is-active' : ''}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel">
+        {tab === 'unbilled' && <UnbilledTab onIssued={() => setReloadKey((k) => k + 1)} />}
+        {tab === 'invoices' && <InvoicesTab reloadKey={reloadKey} />}
+        {tab === 'rates' && <RatesTab />}
+      </div>
     </main>
   )
 }
