@@ -3,16 +3,16 @@
 import { use, useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, shareUrlFor, watermarkForStatus } from '@/lib/draftExport'
 import { formatDateTime } from '@/lib/datetime'
 import { lineDiff, diffStats, type DiffOp } from '@/lib/lineDiff'
+import { buildRedline, toReadableText } from '@/lib/wordDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
-import { BackButton } from '@/components/BackButton'
-import { PageHead } from '@/components/PageHead'
-import { SparklesIcon, XIcon } from '@/components/icons'
+import { DocumentSheet, DocumentCanvas } from '@/components/DocumentSheet'
+import { GemSparkle, GemShimmer } from '@/components/GemSparkle'
+import { XIcon } from '@/components/icons'
 
 // Step-through review session (started from the queue's "Begin review"): the ordered
 // draft ids to walk, in sessionStorage, flagged on the URL with ?review=session.
@@ -23,12 +23,12 @@ interface DraftDetail {
   documentEntityId: string
   matterEntityId: string
   matterNumber: string
+  clientName: string
+  serviceKey: string
   documentKind: string
   versionNumber: number
   status: string
   recordedAt: string
-  // MACHINE-COMMS-1: 'communication' = an email draft. Approving it SENDS it;
-  // document-only affordances (downloads, share link, e-sign) are hidden.
   channel: 'document' | 'communication'
   emailSubject: string | null
   emailToRole: string | null
@@ -38,7 +38,6 @@ interface DraftDetail {
   conclusion: string | null
   confidence: number | null
   reviewNotes: string | null
-  // Present only for AI document-review memos (generation_mode 'ai_review').
   aiReview: {
     reviewedDocumentVersionId: string | null
     reviewedDocumentEntityId: string | null
@@ -49,8 +48,6 @@ interface DraftDetail {
 }
 
 interface ReasoningTrace {
-  prompt_id?: string
-  model_identity?: string
   evidence?: EvidenceItem[]
   alternatives_considered?: Alternative[]
   conclusion?: string
@@ -58,7 +55,6 @@ interface ReasoningTrace {
   ambiguities?: Ambiguity[]
   [k: string]: unknown
 }
-
 interface EvidenceItem {
   source?: string
   field?: string
@@ -66,63 +62,54 @@ interface EvidenceItem {
   used_in?: string
   confidence?: number
 }
-
 interface Alternative {
   decision_point?: string
   alternatives?: string[]
   selected?: string
   rationale?: string
 }
-
 interface Ambiguity {
   topic?: string
   explanation?: string
   needs_input_from?: string
 }
 
-interface SkillCatalogItem {
-  slug: string
-  name: string
-  practiceArea: string
-  whenToUse: string
-  userInvocable: boolean
+// The AI proposal currently under review as tracked changes (not yet persisted).
+interface Revision {
+  markdown: string
+  instruction: string
+  reasoningTraceId: string
 }
 
-function statusBadge(status: string): string {
-  if (status === 'approved') return 'badge ok'
-  if (status === 'rejected') return 'badge danger'
-  if (status === 'revision_requested') return 'badge warn'
-  return 'badge info'
+const KIND_LABEL: Record<string, string> = {
+  approved: 'Approved',
+  executed: 'Executed',
+  rejected: 'Rejected',
+  revision_requested: 'Revision requested',
+  pending_review: 'Pending review',
+}
+function statusChipClass(status: string): string {
+  if (status === 'approved' || status === 'executed') return 'li-rev-chip li-rev-chip--ok'
+  if (status === 'rejected') return 'li-rev-chip li-rev-chip--danger'
+  if (status === 'revision_requested') return 'li-rev-chip li-rev-chip--warn'
+  return 'li-rev-chip li-rev-chip--info'
 }
 
 function humanizeKind(kind: string): string {
   return kind.replace(/_/g, ' ')
 }
-
-interface VersionSummary {
-  documentVersionId: string
-  versionNumber: number
-  status: string
-  recordedAt: string
-  source: 'original' | 'generated' | 'edited'
-  note: string | null
+function humanizeService(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-// Short label for where a version came from, shown in the compare picker.
-function versionSourceLabel(s: VersionSummary['source']): string {
-  if (s === 'original') return 'original'
-  if (s === 'edited') return 'edited'
-  return 'regenerated'
-}
-
-// Renders a line diff: removed lines (red), added lines (green), and — unless
-// hidden — unchanged lines (muted), with a "···" marker standing in for a
-// collapsed run of unchanged lines.
-function VersionDiff({ ops, showUnchanged }: { ops: DiffOp[]; showUnchanged: boolean }) {
+// Line diff for AI-review MEMOS (client's doc vs the model's suggested redline) —
+// a distinct, non-comp draft type kept working. The comp's word-level tracked
+// changes (buildRedline) power the AI-revision flagship below.
+function VersionDiff({ ops }: { ops: DiffOp[] }) {
   const rows: ReactNode[] = []
   let collapsed = false
   ops.forEach((op, i) => {
-    if (op.type === 'same' && !showUnchanged) {
+    if (op.type === 'same') {
       if (!collapsed) {
         rows.push(
           <div key={`gap-${i}`} className="vdiff-gap" aria-hidden>
@@ -134,57 +121,58 @@ function VersionDiff({ ops, showUnchanged }: { ops: DiffOp[]; showUnchanged: boo
       return
     }
     collapsed = false
-    const cls = op.type === 'add' ? 'vdiff-add' : op.type === 'del' ? 'vdiff-del' : 'vdiff-same'
-    const sign = op.type === 'add' ? '+' : op.type === 'del' ? '−' : ' '
+    const cls = op.type === 'add' ? 'vdiff-add' : 'vdiff-del'
+    const sign = op.type === 'add' ? '+' : '−'
     rows.push(
       <div key={i} className={`vdiff-line ${cls}`}>
         <span className="vdiff-sign" aria-hidden>
           {sign}
         </span>
-        <span className="vdiff-text">{op.line || ' '}</span>
+        <span className="vdiff-text">{op.line || ' '}</span>
       </div>,
     )
   })
   return <>{rows}</>
 }
 
+// The four preset revision chips (comp-exact) — each runs immediately.
+const REVISE_CHIPS = [
+  'Make the tone firmer',
+  'Shorten the deadline',
+  'Add a confidentiality clause',
+  'Simplify the language',
+]
+
 export default function DraftReviewPage({ params }: { params: Promise<{ versionId: string }> }) {
   const { versionId } = use(params)
   const router = useRouter()
   const [draft, setDraft] = useState<DraftDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
-  // Reasoning trace lives in a drawer now (it's attorney context, not part of the
-  // document) — opened from a toolbar button instead of crowding the page.
-  const [traceOpen, setTraceOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  // Compare-versions drawer: the document's version history + a line diff of a
-  // chosen earlier version against this one.
-  const [compareOpen, setCompareOpen] = useState(false)
-  // AI-review redline panel (diff of the client's document vs the suggestion).
-  const [redlineOpen, setRedlineOpen] = useState(false)
-  const [versions, setVersions] = useState<VersionSummary[] | null>(null)
-  const [baseVersionId, setBaseVersionId] = useState<string | null>(null)
-  const [baseMarkdown, setBaseMarkdown] = useState<string | null>(null)
-  const [showUnchanged, setShowUnchanged] = useState(true)
-  // Regenerate modal: an editable prompt (prefilled with the revision notes) + a
-  // skills picker, so the redraft acts on exactly what the attorney asked.
-  const [regenOpen, setRegenOpen] = useState(false)
-  const [regenGuidance, setRegenGuidance] = useState('')
-  const [regenSkills, setRegenSkills] = useState<Set<string>>(new Set())
-  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[] | null>(null)
-  const [skillQuery, setSkillQuery] = useState('')
-  // After "Request revision", nudge the attorney to regenerate now with those very
-  // notes — closing the loop between asking for changes and producing them.
-  const [revisionNudge, setRevisionNudge] = useState(false)
-  // Inline edit: swap the rendered document for a markdown editor so the attorney
-  // can fix a clause/name directly. Saving creates a NEW version (document.edit).
+
+  // Matter context — the reasoning trace, inline below the toolbar (comp panel).
+  const [mcOpen, setMcOpen] = useState(false)
+  // AI-review memo suggested redline (memo drafts only).
+  const [memoRedlineOpen, setMemoRedlineOpen] = useState(false)
+
+  // Toolbar Edit → inline markdown editor over the sheet; save = new version.
   const [editing, setEditing] = useState(false)
   const [editMarkdown, setEditMarkdown] = useState('')
   const [editNote, setEditNote] = useState('')
-  // The ordered ids of an in-progress step-through review, or null for a normal
-  // single visit. Loaded only when the URL carries ?review=session.
+
+  // The AI-revision flagship.
+  const [reviseOpen, setReviseOpen] = useState(false)
+  const [revisePrompt, setRevisePrompt] = useState('')
+  const [reviseWorking, setReviseWorking] = useState(false)
+  const [revision, setRevision] = useState<Revision | null>(null)
+  const [redlineEditing, setRedlineEditing] = useState(false)
+  const [redlineEditText, setRedlineEditText] = useState('')
+
+  // Email drafts keep their existing regenerate (async legal.email.draft) path.
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [regenGuidance, setRegenGuidance] = useState('')
+
   const [sessionIds, setSessionIds] = useState<string[] | null>(null)
 
   async function load() {
@@ -195,7 +183,6 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         input: { documentVersionId: versionId },
       })
       setDraft(res.draft)
-      if (res.draft?.reviewNotes) setNotes(res.draft.reviewNotes)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -203,9 +190,14 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
 
   useEffect(() => {
     load()
+    // A fresh version: drop any stale proposal / editor state.
+    setRevision(null)
+    setRedlineEditing(false)
+    setEditing(false)
+    setMcOpen(false)
+    setNotice(null)
   }, [versionId])
 
-  // Pick up an in-progress step-through session for this draft (queue → Begin review).
   useEffect(() => {
     if (typeof window === 'undefined') return
     const inSession = new URLSearchParams(window.location.search).get('review') === 'session'
@@ -222,69 +214,6 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     }
   }, [versionId])
 
-  // Esc closes whichever drawer is open.
-  useEffect(() => {
-    if (!traceOpen && !compareOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setTraceOpen(false)
-        setCompareOpen(false)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [traceOpen, compareOpen])
-
-  // Open the compare drawer: load the version history (once) and default the
-  // base to the immediate predecessor of the version being viewed.
-  async function openCompare() {
-    setCompareOpen(true)
-    if (versions) return
-    try {
-      const res = await callAttorneyMcp<{ versions: VersionSummary[] }>({
-        toolName: 'legal.draft.versions',
-        input: { documentVersionId: versionId },
-      })
-      setVersions(res.versions)
-      const current = res.versions.find((v) => v.documentVersionId === versionId)
-      const predecessor = res.versions
-        .filter((v) => !current || v.versionNumber < current.versionNumber)
-        .sort((a, b) => b.versionNumber - a.versionNumber)[0]
-      if (predecessor) setBaseVersionId(predecessor.documentVersionId)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  // Fetch the chosen base version's markdown whenever the selection changes.
-  useEffect(() => {
-    if (!baseVersionId) {
-      setBaseMarkdown(null)
-      return
-    }
-    let live = true
-    callAttorneyMcp<{ draft: { bodyMarkdown: string } | null }>({
-      toolName: 'legal.draft.get',
-      input: { documentVersionId: baseVersionId },
-    })
-      .then((res) => {
-        if (live) setBaseMarkdown(res.draft?.bodyMarkdown ?? null)
-      })
-      .catch(() => {
-        if (live) setBaseMarkdown(null)
-      })
-    return () => {
-      live = false
-    }
-  }, [baseVersionId])
-
-  // The line diff of the base version against the one being viewed.
-  const diffOps = useMemo(
-    () => (baseMarkdown != null && draft ? lineDiff(baseMarkdown, draft.bodyMarkdown) : []),
-    [baseMarkdown, draft],
-  )
-  const diffSummary = useMemo(() => diffStats(diffOps), [diffOps])
-
   const sessionPos = sessionIds ? sessionIds.indexOf(versionId) : -1
 
   function exitSession() {
@@ -296,22 +225,29 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     router.push('/attorney/review')
   }
 
-  async function review(toolName: string, label: string, requireNotes: boolean) {
-    if (requireNotes && !notes.trim()) {
-      setError('Review notes are required for this action.')
-      return
-    }
+  function goSession(delta: number) {
+    if (!sessionIds || sessionPos < 0) return
+    const next = sessionPos + delta
+    if (next < 0 || next >= sessionIds.length) return
+    window.sessionStorage.setItem(
+      REVIEW_SESSION_KEY,
+      JSON.stringify({ ids: sessionIds, index: next }),
+    )
+    router.push(`/attorney/review/${sessionIds[next]}?review=session`)
+  }
+
+  // Approve / Reject (the comp's two dispositions; request-revision + standalone
+  // regenerate are subsumed by AI revision). In a step-through session, a
+  // disposition auto-advances to the next selected draft.
+  async function dispose(toolName: string, label: string) {
     setBusy(label)
     setError(null)
     setNotice(null)
-    setRevisionNudge(false)
     try {
       const res = await callAttorneyMcp<{ approvedDocumentVersionId?: string }>({
         toolName,
-        input: { documentVersionId: versionId, reviewNotes: notes.trim() || undefined },
+        input: { documentVersionId: versionId },
       })
-      // In a step-through session, auto-advance to the next selected draft once this
-      // one is dispositioned; finish back at the queue when the list is exhausted.
       if (sessionIds && sessionPos >= 0) {
         const next = sessionPos + 1
         if (next < sessionIds.length) {
@@ -326,19 +262,13 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
         }
         return
       }
-      // Approving may have minted + approved a token-resolved version n+1 (the
-      // input version is now superseded). Swap the page to the APPROVED id so the
-      // status badge and every follow-on action (send, e-sign, client view) hold
-      // the approved body, never the stale unresolved version.
+      // Approve may have minted + approved a token-resolved version n+1; swap to it.
       const approvedId = res?.approvedDocumentVersionId
       if (approvedId && approvedId !== versionId) {
         router.replace(`/attorney/review/${approvedId}`)
         return
       }
       await load()
-      // Outside a step-through session, requesting a revision leaves the attorney on
-      // this page — so nudge them to regenerate now with the notes they just wrote.
-      if (toolName === 'legal.draft.request_revision') setRevisionNudge(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -346,102 +276,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     }
   }
 
-  // Open the regenerate prompt window: prefill the editable instructions with the
-  // current review notes (so "request revision" notes carry straight into the
-  // redraft), reset the skill selection, and lazy-load the skills catalog.
-  function openRegen() {
-    setRegenGuidance(notes)
-    setRegenSkills(new Set())
-    setError(null)
-    setRevisionNudge(false)
-    setRegenOpen(true)
-    if (!skillCatalog) {
-      callAttorneyMcp<{ skills: SkillCatalogItem[] }>({ toolName: 'legal.skill.list' })
-        .then((r) => setSkillCatalog(r.skills.filter((s) => s.userInvocable && s.slug)))
-        .catch(() => setSkillCatalog([]))
-    }
-  }
-
-  function toggleSkill(slug: string) {
-    setRegenSkills((prev) => {
-      const next = new Set(prev)
-      if (next.has(slug)) next.delete(slug)
-      else next.add(slug)
-      return next
-    })
-  }
-
-  // Drafting is async (enqueues a worker job), so we confirm + return the attorney
-  // to the queue where the regenerated version will appear, rather than waiting.
-  async function runRegenerate() {
-    if (!draft) return
-    setBusy('regenerate')
-    setError(null)
-    setNotice(null)
-    try {
-      if (draft.channel === 'communication') {
-        // Email draft (MACHINE-COMMS-1): regenerating means re-drafting the SAME
-        // email entity (version n+1) via legal.email.draft, with the attorney's
-        // notes as guidance — NOT the document drafting flow.
-        await callAttorneyMcp({
-          toolName: 'legal.email.draft',
-          input: {
-            matterEntityId: draft.matterEntityId,
-            purpose: 'Regenerate this email',
-            supersedesDocumentEntityId: draft.documentEntityId,
-            guidance: regenGuidance.trim() || undefined,
-          },
-        })
-        setRegenOpen(false)
-        setNotice(
-          'Regenerating this email with your instructions — the new version will appear in the review queue shortly.',
-        )
-        return
-      }
-      if (draft.aiReview?.reviewedDocumentVersionId) {
-        // This is an AI review MEMO, not a drafted document. Re-running it means
-        // re-reviewing the SAME client-uploaded document with the attorney's
-        // focus notes — NOT running the operating-agreement drafting flow (which
-        // would drop an irrelevant OA into the queue). Routes through the same
-        // legal.document.review.run tool as the Documents-tab "AI review" button.
-        await callAttorneyMcp({
-          toolName: 'legal.document.review.run',
-          input: {
-            matterEntityId: draft.matterEntityId,
-            documentVersionId: draft.aiReview.reviewedDocumentVersionId,
-            guidance: regenGuidance.trim() || undefined,
-          },
-        })
-        setRegenOpen(false)
-        setNotice(
-          'Re-running the AI review with your instructions — the new memo will appear in the review queue shortly.',
-        )
-        return
-      }
-      await callAttorneyMcp({
-        toolName: 'legal.draft.generate',
-        input: {
-          matterEntityId: draft.matterEntityId,
-          documentKind:
-            draft.documentKind === 'engagement_letter'
-              ? 'engagement_letter'
-              : 'operating_agreement',
-          guidance: regenGuidance.trim() || undefined,
-          skillSlugs: [...regenSkills],
-        },
-      })
-      setRegenOpen(false)
-      setNotice(
-        'Regenerating with your instructions — the updated draft will appear in the review queue shortly.',
-      )
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  // Enter the inline editor, seeded with the current document markdown.
+  // Toolbar Edit — inline markdown editor, seeded with the current body.
   function openEdit() {
     if (!draft) return
     setEditMarkdown(draft.bodyMarkdown)
@@ -450,18 +285,12 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     setNotice(null)
     setEditing(true)
   }
-
-  // Save the edited markdown as a NEW version (document.edit), then open that
-  // version — append-only, so the original is preserved and lands in history.
   async function saveEdit() {
     if (!draft || !editMarkdown.trim()) return
     setBusy('edit')
     setError(null)
-    setNotice(null)
     try {
-      const result = await callAttorneyMcp<{
-        effects: Array<{ documentVersionId?: string }>
-      }>({
+      const result = await callAttorneyMcp<{ effects: Array<{ documentVersionId?: string }> }>({
         toolName: 'legal.draft.edit',
         input: {
           documentVersionId: versionId,
@@ -471,12 +300,141 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       })
       const newId = result.effects?.find((e) => e.documentVersionId)?.documentVersionId
       setEditing(false)
-      if (newId && newId !== versionId) {
-        // Drop any step-through session: this edit is a deliberate detour.
-        router.push(`/attorney/review/${newId}`)
-      } else {
-        await load()
-      }
+      if (newId && newId !== versionId) router.push(`/attorney/review/${newId}`)
+      else await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // ── The AI-revision flagship ─────────────────────────────────────────────
+  function openRevise() {
+    setRevisePrompt('')
+    setError(null)
+    setReviseOpen(true)
+  }
+
+  // Generate the tracked-changes revision (sync AI). preset chips run immediately.
+  async function runRevision(preset?: string) {
+    const instruction = (preset ?? revisePrompt).trim()
+    if (!instruction || reviseWorking) return
+    setReviseWorking(true)
+    setError(null)
+    setRevisePrompt(instruction)
+    try {
+      const res = await callAttorneyMcp<{
+        revisedMarkdown: string
+        reasoningTraceId: string
+        instruction: string
+      }>({
+        toolName: 'legal.draft.revise',
+        input: { documentVersionId: versionId, instruction },
+      })
+      setRevision({
+        markdown: res.revisedMarkdown,
+        instruction: res.instruction,
+        reasoningTraceId: res.reasoningTraceId,
+      })
+      setRedlineEditing(false)
+      setReviseOpen(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setReviseWorking(false)
+    }
+  }
+
+  // Discard — no version was ever written; just drop the in-memory proposal.
+  function discardRevision() {
+    setRevision(null)
+    setRedlineEditing(false)
+  }
+
+  // Accept all — persist the revised text as version n+1 (append-only draft.edit).
+  async function acceptRevision() {
+    if (!draft || !revision) return
+    setBusy('accept')
+    setError(null)
+    try {
+      const result = await callAttorneyMcp<{ effects: Array<{ documentVersionId?: string }> }>({
+        toolName: 'legal.draft.edit',
+        input: {
+          documentVersionId: versionId,
+          documentMarkdown: revision.markdown,
+          note: `AI revision: ${revision.instruction}`,
+        },
+      })
+      const newId = result.effects?.find((e) => e.documentVersionId)?.documentVersionId
+      setRevision(null)
+      if (newId && newId !== versionId) router.push(`/attorney/review/${newId}`)
+      else await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function enterRedlineEdit() {
+    if (!revision) return
+    setRedlineEditText(revision.markdown)
+    setRedlineEditing(true)
+  }
+  function cancelRedlineEdit() {
+    setRedlineEditing(false)
+  }
+  // Accept edits — persist the attorney-tweaked revised text as version n+1.
+  async function acceptRedlineEdits() {
+    if (!draft || !revision || !redlineEditText.trim()) return
+    setBusy('accept')
+    setError(null)
+    try {
+      const result = await callAttorneyMcp<{ effects: Array<{ documentVersionId?: string }> }>({
+        toolName: 'legal.draft.edit',
+        input: {
+          documentVersionId: versionId,
+          documentMarkdown: redlineEditText,
+          note: `AI revision (edited): ${revision.instruction}`,
+        },
+      })
+      const newId = result.effects?.find((e) => e.documentVersionId)?.documentVersionId
+      setRevision(null)
+      setRedlineEditing(false)
+      if (newId && newId !== versionId) router.push(`/attorney/review/${newId}`)
+      else await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Email regenerate (existing variant behavior — async).
+  function openRegen() {
+    setRegenGuidance('')
+    setError(null)
+    setRegenOpen(true)
+  }
+  async function runRegenerateEmail() {
+    if (!draft) return
+    setBusy('regenerate')
+    setError(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.email.draft',
+        input: {
+          matterEntityId: draft.matterEntityId,
+          purpose: 'Regenerate this email',
+          supersedesDocumentEntityId: draft.documentEntityId,
+          guidance: regenGuidance.trim() || undefined,
+        },
+      })
+      setRegenOpen(false)
+      setNotice(
+        'Regenerating this email with your instructions — the new version will appear in the review queue shortly.',
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -487,20 +445,25 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   const evidence = useMemo(() => draft?.reasoningTrace?.evidence ?? [], [draft])
   const alternatives = useMemo(() => draft?.reasoningTrace?.alternatives_considered ?? [], [draft])
   const ambiguities = useMemo(() => draft?.reasoningTrace?.ambiguities ?? [], [draft])
-  // AI review memos: diff of the client's document against the model's
-  // suggested redline (both ride the memo version's metadata blobs).
-  const redlineOps = useMemo(
+  const redlineParas = useMemo(
+    () =>
+      draft && revision && !redlineEditing
+        ? buildRedline(toReadableText(draft.bodyMarkdown), toReadableText(revision.markdown))
+        : [],
+    [draft, revision, redlineEditing],
+  )
+  const memoRedlineOps = useMemo(
     () =>
       draft?.aiReview?.sourceText && draft.aiReview.redlineText
         ? lineDiff(draft.aiReview.sourceText, draft.aiReview.redlineText)
         : [],
     [draft],
   )
-  const redlineSummary = useMemo(() => diffStats(redlineOps), [redlineOps])
+  const memoRedlineSummary = useMemo(() => diffStats(memoRedlineOps), [memoRedlineOps])
 
   if (!draft && !error) {
     return (
-      <main>
+      <main className="li-rev">
         <div className="loading-block" role="status">
           <span className="spinner" /> Loading draft…
         </div>
@@ -509,22 +472,22 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   }
   if (error && !draft) {
     return (
-      <main>
+      <main className="li-rev">
         <div className="alert alert-error">{error}</div>
       </main>
     )
   }
   if (!draft) {
     return (
-      <main>
+      <main className="li-rev">
         <p>Draft not found.</p>
       </main>
     )
   }
 
-  // MACHINE-COMMS-1: an email draft — approving sends it; hide the affordances
-  // that only make sense for a document (downloads, share link, e-sign send).
   const isEmail = draft.channel === 'communication'
+  const isMemo = Boolean(draft.aiReview)
+  const canRevise = !isEmail && !isMemo
   const hasTrace = Boolean(
     draft.reasoningTrace ||
     draft.modelIdentity ||
@@ -534,612 +497,736 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     ambiguities.length,
   )
   const docFileBase = `${humanizeKind(draft.documentKind).replace(/\s+/g, '-').toLowerCase()}-${draft.matterNumber}`
+  const watermark = watermarkForStatus(draft.status)?.toUpperCase()
+  const title = isEmail ? draft.emailSubject || 'Email draft' : humanizeKind(draft.documentKind)
+  const subParts = [
+    draft.clientName,
+    isEmail ? 'Email' : draft.serviceKey ? humanizeService(draft.serviceKey) : '',
+  ].filter(Boolean)
+
+  const prevDisabled = !sessionIds || sessionPos <= 0
+  const nextDisabled = !sessionIds || sessionPos < 0 || sessionPos >= sessionIds.length - 1
 
   return (
-    <main className="review-page">
-      <div className="review-topbar">
-        {sessionPos >= 0 && sessionIds ? (
-          <BackButton
-            label={`Exit review (${sessionPos + 1} of ${sessionIds.length})`}
-            onBack={exitSession}
-            className="review-back"
-            style={{ marginBottom: 0 }}
-          />
-        ) : (
-          <BackButton
-            fallback="/attorney/review"
-            className="review-back"
-            style={{ marginBottom: 0 }}
-          />
-        )}
-        <Link href={`/attorney/matters/${draft.matterEntityId}`} className="review-back">
-          Matter {draft.matterNumber}
+    <main className="li-rev">
+      {/* top toolbar: exit / matter pills + prev / next */}
+      <div className="li-rev-top">
+        <div className="li-rev-top-left">
+          {sessionPos >= 0 && sessionIds ? (
+            <button type="button" className="li-rev-pill" onClick={exitSession}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <polyline
+                  points="15 18 9 12 15 6"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Exit review ({sessionPos + 1} of {sessionIds.length})
+            </button>
+          ) : (
+            <Link href="/attorney/review" className="li-rev-pill">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <polyline
+                  points="15 18 9 12 15 6"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Review queue
+            </Link>
+          )}
+          <Link
+            href={`/attorney/matters/${draft.matterEntityId}`}
+            className="li-rev-pill li-rev-pill--matter"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M4 4h9l5 5v11H4z"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+              />
+              <path d="M13 4v5h5" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+            </svg>
+            Matter&nbsp;<span className="li-rev-mono">{draft.matterNumber}</span>
+          </Link>
+        </div>
+        <div className="li-rev-top-right">
+          <button
+            type="button"
+            className="li-rev-nav"
+            onClick={() => goSession(-1)}
+            disabled={prevDisabled}
+            title="Previous draft"
+            aria-label="Previous draft"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <polyline
+                points="15 18 9 12 15 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="li-rev-nav"
+            onClick={() => goSession(1)}
+            disabled={nextDisabled}
+            title="Next draft"
+            aria-label="Next draft"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <polyline
+                points="9 18 15 12 9 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* title row + meta */}
+      <div className="li-rev-titlerow">
+        <h1 className="li-rev-doctitle">{title}</h1>
+        <div className="li-rev-meta">
+          <span className="li-rev-generated">Generated {formatDateTime(draft.recordedAt)}</span>
+          <span className="li-rev-vbadge">v{draft.versionNumber}</span>
+          <span className={statusChipClass(draft.status)}>
+            {KIND_LABEL[draft.status] ?? humanizeKind(draft.status)}
+          </span>
+        </div>
+      </div>
+      <div className="li-rev-subline">
+        {subParts.join(' · ')}
+        {subParts.length > 0 ? ' · ' : ''}
+        <Link href={`/attorney/matters/${draft.matterEntityId}`} className="li-rev-openmatter">
+          Open matter
         </Link>
       </div>
 
-      <PageHead
-        title={isEmail ? 'Email draft' : humanizeKind(draft.documentKind)}
-        actions={
-          <>
-            <span className="text-muted review-generated">
-              Generated {formatDateTime(draft.recordedAt)}
-            </span>
-            <span className="review-version">v{draft.versionNumber}</span>
-            <span className={statusBadge(draft.status)}>{draft.status.replace(/_/g, ' ')}</span>
-            {isEmail && (
-              <span className="badge info" title="Approving this draft sends the email.">
-                Email
-              </span>
-            )}
-            {draft.aiReview && (
-              <span
-                className="badge info"
-                title={`AI review of ${draft.aiReview.reviewedOriginalFilename ?? 'a client-uploaded document'}`}
+      {/* action toolbar */}
+      <div className="li-rev-toolbar">
+        <div className="li-rev-toolbar-group">
+          <button
+            type="button"
+            className="li-rev-tbtn"
+            onClick={openEdit}
+            disabled={busy !== null || editing}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M12 20h9"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Edit
+          </button>
+          {!isEmail && (
+            <>
+              <button
+                type="button"
+                className="li-rev-tbtn li-rev-tbtn--pdf"
+                onClick={() =>
+                  downloadAsPdf(draft.bodyMarkdown, docFileBase, { status: draft.status })
+                }
               >
-                AI review
-              </span>
-            )}
-          </>
-        }
-      />
-
-      {isEmail && (
-        <div style={{ marginBottom: 'var(--space-3)' }}>
-          <div>
-            <strong>Subject:</strong> {draft.emailSubject || humanizeKind(draft.documentKind)}
-          </div>
-          <div className="text-muted text-sm">To: the matter&apos;s client</div>
-        </div>
-      )}
-
-      <div className="review-toolbar">
-        <button
-          onClick={openEdit}
-          disabled={busy !== null || editing}
-          title="Edit the document text directly — saves as a new version; the original is kept."
-        >
-          Edit document
-        </button>
-        {/* Document-only affordances (downloads, share-link / e-sign actions) make
-            no sense for an email draft — the email IS the delivery. */}
-        {!isEmail && (
-          <>
-            <button
-              onClick={() =>
-                downloadAsPdf(draft.bodyMarkdown, docFileBase, { status: draft.status })
-              }
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4 4h9l5 5v11H4z"
+                    stroke="#c4443b"
+                    strokeWidth="1.7"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M13 4v5h5" stroke="#c4443b" strokeWidth="1.7" strokeLinejoin="round" />
+                </svg>
+                PDF
+              </button>
+              <button
+                type="button"
+                className="li-rev-tbtn li-rev-tbtn--word"
+                onClick={() =>
+                  downloadAsWord(draft.bodyMarkdown, docFileBase, { status: draft.status })
+                }
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4 4h9l5 5v11H4z"
+                    stroke="#2b579a"
+                    strokeWidth="1.7"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M13 4v5h5" stroke="#2b579a" strokeWidth="1.7" strokeLinejoin="round" />
+                </svg>
+                Word
+              </button>
+              <DocumentActionBar
+                context={{
+                  documentVersionId: draft.documentVersionId,
+                  documentEntityId: draft.documentEntityId,
+                  matterEntityId: draft.matterEntityId,
+                  matterNumber: draft.matterNumber,
+                  documentKind: draft.documentKind,
+                  shareUrl: shareUrlFor(draft.documentVersionId),
+                }}
+              />
+            </>
+          )}
+          {isMemo && draft.aiReview?.reviewedDocumentVersionId && (
+            <a
+              className="li-rev-tbtn"
+              href={`/api/attorney/matters/${draft.matterEntityId}/documents/${draft.aiReview.reviewedDocumentVersionId}/download`}
             >
-              Download PDF
-            </button>
-            <button
-              onClick={() =>
-                downloadAsWord(draft.bodyMarkdown, docFileBase, { status: draft.status })
-              }
-            >
-              Download Word
-            </button>
-            {/* Contract J: auto-discovered document actions (Send via email; the
-                e-signature session's Send for signature appears here automatically). */}
-            <DocumentActionBar
-              context={{
-                documentVersionId: draft.documentVersionId,
-                documentEntityId: draft.documentEntityId,
-                matterEntityId: draft.matterEntityId,
-                matterNumber: draft.matterNumber,
-                documentKind: draft.documentKind,
-                shareUrl: shareUrlFor(draft.documentVersionId),
-              }}
-            />
-          </>
-        )}
-        {draft.versionNumber > 1 && (
-          <button
-            type="button"
-            className="review-trace-btn"
-            onClick={openCompare}
-            title="See what changed between this version and an earlier one."
-          >
-            ⇄ Compare versions
-          </button>
-        )}
-        {hasTrace && (
-          <button
-            type="button"
-            className="review-trace-btn"
-            onClick={() => setTraceOpen(true)}
-            title="How the AI drafted this — your context, not part of the document."
-          >
-            <SparklesIcon size={14} /> Reasoning trace
-          </button>
-        )}
-        {draft.aiReview?.reviewedDocumentVersionId && (
-          <a
-            href={`/api/attorney/matters/${draft.matterEntityId}/documents/${draft.aiReview.reviewedDocumentVersionId}/download`}
-          >
+              Reviewed file ↓
+            </a>
+          )}
+          {isMemo && memoRedlineOps.length > 0 && (
             <button
               type="button"
-              title="Download the client's original document this memo reviews."
+              className="li-rev-tbtn"
+              onClick={() => setMemoRedlineOpen((v) => !v)}
             >
-              Reviewed file
-              {draft.aiReview.reviewedOriginalFilename
-                ? `: ${draft.aiReview.reviewedOriginalFilename}`
-                : ''}{' '}
-              ↓
+              Suggested redline ({memoRedlineSummary.added}+ / {memoRedlineSummary.removed}−)
             </button>
-          </a>
-        )}
-        {redlineOps.length > 0 && (
+          )}
+          {hasTrace && (
+            <button
+              type="button"
+              className={`li-rev-tbtn li-rev-tbtn--ai${mcOpen ? ' is-on' : ''}`}
+              onClick={() => setMcOpen((v) => !v)}
+            >
+              <GemSparkle size={15} />
+              Matter context
+            </button>
+          )}
+        </div>
+        <div className="li-rev-toolbar-group">
           <button
             type="button"
-            className="review-trace-btn"
-            onClick={() => setRedlineOpen((v) => !v)}
-            title="The AI's suggested revision of the client's document, as a line-by-line comparison."
-          >
-            ⇄ Suggested redline ({redlineSummary.added} added, {redlineSummary.removed} removed)
-          </button>
-        )}
-        {!isEmail && (
-          <a
-            href={shareUrlFor(draft.documentVersionId)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="review-toolbar-end"
-          >
-            <button>Open client view ↗</button>
-          </a>
-        )}
-      </div>
-
-      {/* AI-review redline: the client's document vs the model's suggested
-          revision, line by line. Rendered above the memo so the attorney can
-          eyeball both without leaving the page. */}
-      {redlineOpen && redlineOps.length > 0 && draft.aiReview && (
-        <section className="review-canvas" aria-label="Suggested redline">
-          <div className="doc-paper" style={{ overflowX: 'auto' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'baseline',
-                gap: 'var(--space-2)',
-                marginBottom: 'var(--space-2)',
-              }}
-            >
-              <strong>
-                Suggested redline
-                {draft.aiReview.reviewedOriginalFilename
-                  ? ` — ${draft.aiReview.reviewedOriginalFilename}`
-                  : ''}
-              </strong>
-              <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
-                AI-suggested changes; nothing is applied until you act on them.
-              </span>
-              <button
-                type="button"
-                style={{ marginLeft: 'auto' }}
-                onClick={() => setRedlineOpen(false)}
-              >
-                Hide
-              </button>
-            </div>
-            <VersionDiff ops={redlineOps} showUnchanged={false} />
-          </div>
-        </section>
-      )}
-
-      {/* The document, as a page — or the inline editor when editing. */}
-      <div className="review-canvas">
-        {editing ? (
-          <div className="doc-editor doc-paper">
-            <textarea
-              className="doc-editor-area"
-              value={editMarkdown}
-              onChange={(e) => setEditMarkdown(e.target.value)}
-              spellCheck
-              aria-label="Document markdown"
-            />
-            <input
-              type="text"
-              className="doc-editor-note"
-              value={editNote}
-              onChange={(e) => setEditNote(e.target.value)}
-              placeholder="Optional: note what you changed (kept in version history)"
-              disabled={busy === 'edit'}
-            />
-            <div className="doc-editor-actions">
-              <button
-                className="primary"
-                onClick={saveEdit}
-                disabled={busy === 'edit' || !editMarkdown.trim()}
-              >
-                {busy === 'edit' && <span className="spinner" />}
-                {busy === 'edit' ? 'Saving…' : 'Save as new version'}
-              </button>
-              <button onClick={() => setEditing(false)} disabled={busy === 'edit'}>
-                Cancel
-              </button>
-              <span className="doc-editor-hint">
-                Saving creates a new version; the original is preserved.
-              </span>
-            </div>
-          </div>
-        ) : (
-          // P13 — a not-yet-approved version renders with the draft watermark
-          // (render state; never text inside the template/draft body).
-          <article
-            className={`doc-rendered doc-paper${watermarkForStatus(draft.status) ? ' doc-watermark' : ''}`}
-            data-watermark={watermarkForStatus(draft.status) ?? undefined}
-            dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
-          />
-        )}
-      </div>
-
-      <section className="review-decision">
-        <h2>
-          Review
-          {sessionPos >= 0 && sessionIds && (
-            <span className="review-decision-sub">
-              {' '}
-              · {sessionPos + 1} of {sessionIds.length} — a disposition advances to the next
-            </span>
-          )}
-        </h2>
-        {error && <div className="alert alert-error">{error}</div>}
-        {notice && <div className="alert alert-success">{notice}</div>}
-        {revisionNudge && (
-          <div className="review-nudge">
-            <span>
-              Revision requested. Regenerate the draft now with these notes — or keep editing them
-              first.
-            </span>
-            <span className="review-nudge-actions">
-              <button className="primary" onClick={openRegen}>
-                Regenerate now…
-              </button>
-              <button onClick={() => setRevisionNudge(false)}>Not now</button>
-            </span>
-          </div>
-        )}
-        <label>
-          Notes (required for revision; optional otherwise)
-          <textarea
-            rows={3}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="What needs to change, or anything to flag for the client?"
-            style={{ marginTop: 'var(--space-1)' }}
-          />
-        </label>
-        <div className="review-actions">
-          <button
-            className="ok"
-            disabled={busy !== null || editing || draft.status === 'approved'}
-            onClick={() => review('legal.draft.approve', 'approve', false)}
-          >
-            {busy === 'approve' && <span className="spinner" />}
-            {busy === 'approve'
-              ? isEmail
-                ? 'Approving & sending…'
-                : 'Approving…'
-              : isEmail
-                ? 'Approve & send email'
-                : 'Approve'}
-          </button>
-          <button
-            className="warn"
-            disabled={busy !== null || editing}
-            onClick={() => review('legal.draft.request_revision', 'revision', true)}
-          >
-            {busy === 'revision' && <span className="spinner" />}
-            {busy === 'revision' ? 'Requesting…' : 'Request revision'}
-          </button>
-          <button
-            className="danger"
+            className="li-rev-tbtn li-rev-tbtn--reject"
+            onClick={() => dispose('legal.draft.reject', 'reject')}
             disabled={busy !== null || editing || draft.status === 'rejected'}
-            onClick={() => review('legal.draft.reject', 'reject', false)}
           >
-            {busy === 'reject' && <span className="spinner" />}
-            {busy === 'reject' ? 'Rejecting…' : 'Reject'}
+            {busy === 'reject' ? (
+              <span className="spinner" />
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <line
+                  x1="18"
+                  y1="6"
+                  x2="6"
+                  y2="18"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                />
+                <line
+                  x1="6"
+                  y1="6"
+                  x2="18"
+                  y2="18"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
+            Reject
           </button>
-          <span style={{ marginLeft: 'auto' }} />
+          {canRevise && (
+            <button
+              type="button"
+              className="li-rev-tbtn li-rev-tbtn--revise"
+              onClick={openRevise}
+              disabled={busy !== null || editing || Boolean(revision)}
+            >
+              <GemSparkle size={16} />
+              AI revision
+            </button>
+          )}
+          {isEmail && (
+            <button
+              type="button"
+              className="li-rev-tbtn"
+              onClick={openRegen}
+              disabled={busy !== null || editing}
+            >
+              <GemSparkle size={16} />
+              Regenerate email
+            </button>
+          )}
           <button
-            disabled={busy !== null || editing}
-            onClick={openRegen}
-            title={
-              isEmail
-                ? 'Redraft this email with the live model — add instructions first. The new version appears in the queue.'
-                : 'Redraft this document with the live model — add instructions and pick legal skills first.'
-            }
+            type="button"
+            className="li-rev-tbtn li-rev-tbtn--approve"
+            onClick={() => dispose('legal.draft.approve', 'approve')}
+            disabled={busy !== null || editing || draft.status === 'approved'}
           >
-            {isEmail ? 'Regenerate email…' : 'Regenerate draft…'}
+            {busy === 'approve' ? (
+              <span className="spinner" />
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <polyline
+                  points="20 6 9 17 4 12"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+            {isEmail ? 'Approve & send email' : 'Approve'}
           </button>
         </div>
-      </section>
+      </div>
 
-      {/* Reasoning trace — a drawer, not part of the page. */}
-      {traceOpen && (
-        <div
-          className="trace-drawer-backdrop"
-          onClick={() => setTraceOpen(false)}
-          role="presentation"
-        >
-          <aside
-            className="trace-drawer"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="Reasoning trace"
-          >
-            <div className="trace-drawer-head">
-              <h2>Reasoning trace</h2>
+      {error && <div className="alert alert-error li-rev-alert">{error}</div>}
+      {notice && <div className="alert alert-success li-rev-alert">{notice}</div>}
+
+      {/* Matter context — the reasoning trace, inline (comp panel). */}
+      {mcOpen && hasTrace && (
+        <div className="li-rev-mc">
+          <div className="li-rev-mc-head">
+            <GemSparkle size={15} />
+            <span>Matter context</span>
+          </div>
+          <p className="li-rev-mc-intro">
+            How the assistant drafted this — the inputs it used and the choices it made. Your
+            context for the review; the client never sees it.
+          </p>
+          <div className="li-rev-mc-summary">
+            <span>
+              <strong>Model</strong> {draft.modelIdentity ?? '(unknown)'}
+            </span>
+            {draft.confidence !== null && (
+              <span>
+                <strong>Confidence</strong> {(draft.confidence * 100).toFixed(0)}%
+              </span>
+            )}
+          </div>
+          {draft.conclusion && <p className="li-rev-mc-conclusion">{draft.conclusion}</p>}
+          {evidence.length > 0 && (
+            <div className="li-rev-mc-group">
+              <h3>Evidence ({evidence.length})</h3>
+              {evidence.map((e, i) => (
+                <div key={i} className="li-rev-mc-card">
+                  <div className="li-rev-mc-card-head">
+                    <span
+                      className={`source-badge ${e.source === 'questionnaire' || e.source === 'transcript' ? e.source : 'system'}`}
+                    >
+                      {e.source ?? 'system'}
+                    </span>
+                    {e.field && <span className="li-rev-mc-field">{e.field}</span>}
+                  </div>
+                  {e.value !== undefined && e.value !== null && e.value !== '' && (
+                    <div className="li-rev-mc-value">{stringifyValue(e.value)}</div>
+                  )}
+                  {e.used_in && <div className="li-rev-mc-usedin">{e.used_in}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {alternatives.length > 0 && (
+            <div className="li-rev-mc-group">
+              <h3>Alternatives considered ({alternatives.length})</h3>
+              {alternatives.map((a, i) => (
+                <div key={i} className="li-rev-mc-card">
+                  <strong>{a.decision_point ?? 'Decision'}</strong>
+                  {a.rationale && <div className="li-rev-mc-usedin">{a.rationale}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {ambiguities.length > 0 && (
+            <div className="li-rev-mc-group">
+              <h3>Ambiguities flagged ({ambiguities.length})</h3>
+              {ambiguities.map((a, i) => (
+                <div key={i} className="li-rev-mc-card">
+                  <strong>{a.topic ?? 'Ambiguity'}</strong>
+                  {a.explanation && <div className="li-rev-mc-usedin">{a.explanation}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI-review memo: source vs suggested redline (memo drafts only). */}
+      {isMemo && memoRedlineOpen && memoRedlineOps.length > 0 && (
+        <div className="li-rev-mc">
+          <div className="li-rev-mc-head">
+            <span>
+              Suggested redline
+              {draft.aiReview?.reviewedOriginalFilename
+                ? ` — ${draft.aiReview.reviewedOriginalFilename}`
+                : ''}
+            </span>
+          </div>
+          <div className="vdiff">
+            <VersionDiff ops={memoRedlineOps} />
+          </div>
+        </div>
+      )}
+
+      {/* Tracked-changes banner (redline mode / edit mode). */}
+      {revision && (
+        <div className="li-rev-redline-banner">
+          <GemSparkle size={24} />
+          <div className="li-rev-redline-copy">
+            <div className="li-rev-redline-head">
+              AI revision — {redlineEditing ? 'edit the revised draft' : 'tracked changes'}
+            </div>
+            <div className="li-rev-redline-sub">
+              “{revision.instruction}” ·{' '}
+              {redlineEditing ? (
+                'tweak the accepted text, then save your edits'
+              ) : (
+                <>
+                  <span className="li-rev-redline-del">deletions</span> and{' '}
+                  <span className="li-rev-redline-ins">insertions</span> shown inline
+                </>
+              )}
+            </div>
+          </div>
+          {redlineEditing ? (
+            <div className="li-rev-redline-btns">
               <button
                 type="button"
-                className="trace-drawer-close"
-                onClick={() => setTraceOpen(false)}
+                className="li-rev-rbtn"
+                onClick={cancelRedlineEdit}
+                disabled={busy !== null}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="li-rev-rbtn li-rev-rbtn--accept"
+                onClick={acceptRedlineEdits}
+                disabled={busy !== null || !redlineEditText.trim()}
+              >
+                {busy === 'accept' ? <span className="spinner" /> : '✓'} Accept edits
+              </button>
+            </div>
+          ) : (
+            <div className="li-rev-redline-btns">
+              <button
+                type="button"
+                className="li-rev-rbtn li-rev-rbtn--discard"
+                onClick={discardRevision}
+                disabled={busy !== null}
+              >
+                Discard changes
+              </button>
+              <button
+                type="button"
+                className="li-rev-rbtn"
+                onClick={enterRedlineEdit}
+                disabled={busy !== null}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 20h9"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"
+                    stroke="currentColor"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Edit
+              </button>
+              <button
+                type="button"
+                className="li-rev-rbtn li-rev-rbtn--accept"
+                onClick={acceptRevision}
+                disabled={busy !== null}
+              >
+                {busy === 'accept' ? <span className="spinner" /> : '✓'} Accept all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* the document, as a proportional letter page */}
+      <DocumentCanvas>
+        <DocumentSheet variant="full" watermark={editing ? undefined : watermark}>
+          {editing ? (
+            <div className="li-rev-editor">
+              <textarea
+                className="li-rev-editor-area"
+                value={editMarkdown}
+                onChange={(e) => setEditMarkdown(e.target.value)}
+                spellCheck
+                aria-label="Document markdown"
+              />
+              <input
+                type="text"
+                className="li-rev-editor-note"
+                value={editNote}
+                onChange={(e) => setEditNote(e.target.value)}
+                placeholder="Optional: note what you changed (kept in version history)"
+                disabled={busy === 'edit'}
+              />
+              <div className="li-rev-editor-actions">
+                <button
+                  className="li-rev-rbtn li-rev-rbtn--accept"
+                  onClick={saveEdit}
+                  disabled={busy === 'edit' || !editMarkdown.trim()}
+                >
+                  {busy === 'edit' && <span className="spinner" />}
+                  {busy === 'edit' ? 'Saving…' : 'Save as new version'}
+                </button>
+                <button
+                  className="li-rev-rbtn"
+                  onClick={() => setEditing(false)}
+                  disabled={busy === 'edit'}
+                >
+                  Cancel
+                </button>
+                <span className="li-rev-editor-hint">
+                  Saving creates a new version; the original is preserved.
+                </span>
+              </div>
+            </div>
+          ) : revision && redlineEditing ? (
+            <textarea
+              className="li-rev-redline-editarea"
+              value={redlineEditText}
+              onChange={(e) => setRedlineEditText(e.target.value)}
+              spellCheck
+              aria-label="Revised document text"
+            />
+          ) : revision ? (
+            <div className="li-rev-redline-doc">
+              {redlineParas.map((p, i) =>
+                p.runs.length === 0 ? (
+                  <p key={i} className="li-rev-redline-blank">
+                    &nbsp;
+                  </p>
+                ) : (
+                  <p key={i}>
+                    {p.runs.map((r, j) => (
+                      <span key={j} className={`li-rev-run li-rev-run--${r.kind}`}>
+                        {r.text}
+                      </span>
+                    ))}
+                  </p>
+                ),
+              )}
+            </div>
+          ) : (
+            <div
+              className="doc-rendered li-rev-doc"
+              dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
+            />
+          )}
+          {reviseWorking && <GemShimmer />}
+        </DocumentSheet>
+      </DocumentCanvas>
+
+      {/* Revise with AI modal (the flagship). */}
+      {reviseOpen && (
+        <div
+          className="li-rev-modal-backdrop"
+          onClick={() => !reviseWorking && setReviseOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="li-rev-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Revise with AI"
+          >
+            {reviseWorking && <GemShimmer />}
+            <div className="li-rev-modal-head">
+              <GemSparkle size={20} />
+              <div className="li-rev-modal-titles">
+                <h2>Revise with AI</h2>
+                <div className="li-rev-modal-sub">
+                  {humanizeKind(draft.documentKind)}
+                  {draft.clientName ? ` · ${draft.clientName}` : ''}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="li-rev-modal-close"
+                onClick={() => setReviseOpen(false)}
+                disabled={reviseWorking}
                 aria-label="Close"
               >
                 <XIcon size={16} />
               </button>
             </div>
-            <p className="trace-drawer-intro">
-              How the assistant drafted this — the inputs it used, the choices it made, and anything
-              it flagged. This is your context for the review; the client never sees it.
-            </p>
-
-            <div className="trace-summary">
-              <div className="trace-summary-row">
+            <div className="li-rev-modal-body">
+              <label className="li-rev-modal-label">What should change?</label>
+              <textarea
+                className="li-rev-modal-textarea"
+                value={revisePrompt}
+                onChange={(e) => setRevisePrompt(e.target.value)}
+                placeholder="e.g. Make the tone firmer and shorten the response deadline."
+                disabled={reviseWorking}
+                autoFocus
+              />
+              <div className="li-rev-chips">
+                {REVISE_CHIPS.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    className="li-rev-chip-btn"
+                    onClick={() => runRevision(chip)}
+                    disabled={reviseWorking}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <line
+                        x1="12"
+                        y1="5"
+                        x2="12"
+                        y2="19"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                      <line
+                        x1="5"
+                        y1="12"
+                        x2="19"
+                        y2="12"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    {chip}
+                  </button>
+                ))}
+              </div>
+              <div className="li-rev-modal-note">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
+                  <line
+                    x1="12"
+                    y1="11"
+                    x2="12"
+                    y2="16"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="currentColor" />
+                </svg>
                 <span>
-                  <strong>Model</strong> {draft.modelIdentity ?? '(unknown)'}
+                  The AI drafts tracked changes on the current version. Nothing is sent to the
+                  client — you review the redlines and accept or reject.
                 </span>
               </div>
-              {draft.confidence !== null && (
-                <>
-                  <div className="trace-summary-row">
-                    <span>
-                      <strong>Overall confidence</strong> {(draft.confidence * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                  <div className="trace-confidence-bar">
-                    <div
-                      className="trace-confidence-fill"
-                      style={{ width: `${draft.confidence * 100}%` }}
-                    />
-                  </div>
-                </>
-              )}
-              {draft.conclusion && <p className="trace-conclusion">{draft.conclusion}</p>}
             </div>
-
-            {evidence.length > 0 && (
-              <div className="trace-group">
-                <h3>Evidence ({evidence.length})</h3>
-                <div className="trace-cards">
-                  {evidence.map((e, i) => (
-                    <EvidenceCardView key={i} item={e} />
-                  ))}
-                </div>
-              </div>
-            )}
-            {alternatives.length > 0 && (
-              <div className="trace-group">
-                <h3>Alternatives considered ({alternatives.length})</h3>
-                <div className="trace-cards">
-                  {alternatives.map((a, i) => (
-                    <AlternativeCardView key={i} item={a} />
-                  ))}
-                </div>
-              </div>
-            )}
-            {ambiguities.length > 0 && (
-              <div className="trace-group">
-                <h3>Ambiguities flagged ({ambiguities.length})</h3>
-                <div className="trace-cards">
-                  {ambiguities.map((a, i) => (
-                    <AmbiguityCardView key={i} item={a} />
-                  ))}
-                </div>
-              </div>
-            )}
-          </aside>
-        </div>
-      )}
-
-      {/* Compare-versions drawer: pick an earlier version, see a line diff. */}
-      {compareOpen && (
-        <div
-          className="trace-drawer-backdrop"
-          onClick={() => setCompareOpen(false)}
-          role="presentation"
-        >
-          <aside
-            className="trace-drawer vcmp-drawer"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-label="Compare versions"
-          >
-            <div className="trace-drawer-head">
-              <h2>Compare versions</h2>
+            <div className="li-rev-modal-foot">
               <button
                 type="button"
-                className="trace-drawer-close"
-                onClick={() => setCompareOpen(false)}
-                aria-label="Close"
+                className="li-rev-rbtn"
+                onClick={() => setReviseOpen(false)}
+                disabled={reviseWorking}
               >
-                <X size={18} aria-hidden />
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="li-rev-modal-generate"
+                onClick={() => runRevision()}
+                disabled={reviseWorking || !revisePrompt.trim()}
+              >
+                <GemSparkle size={16} />
+                {reviseWorking ? 'Drafting…' : 'Generate revision'}
               </button>
             </div>
-
-            {versions === null ? (
-              <p className="trace-drawer-intro">
-                <span className="spinner" /> Loading version history…
-              </p>
-            ) : versions.length < 2 ? (
-              <p className="trace-drawer-intro">
-                This document has only one version — nothing to compare yet.
-              </p>
-            ) : (
-              <>
-                <div className="vcmp-controls">
-                  <label className="vcmp-pick">
-                    <span>Compare</span>
-                    <select
-                      value={baseVersionId ?? ''}
-                      onChange={(e) => setBaseVersionId(e.target.value || null)}
-                      aria-label="Earlier version to compare"
-                    >
-                      {versions
-                        .filter((v) => v.documentVersionId !== versionId)
-                        .map((v) => (
-                          <option key={v.documentVersionId} value={v.documentVersionId}>
-                            v{v.versionNumber} · {versionSourceLabel(v.source)} ·{' '}
-                            {formatDateTime(v.recordedAt)}
-                          </option>
-                        ))}
-                    </select>
-                    <span>with v{draft.versionNumber} (this one)</span>
-                  </label>
-                  <div className="vcmp-meta">
-                    <label className="vcmp-toggle">
-                      <input
-                        type="checkbox"
-                        checked={showUnchanged}
-                        onChange={(e) => setShowUnchanged(e.target.checked)}
-                      />
-                      Show unchanged
-                    </label>
-                    <span className="vcmp-stat">
-                      <span className="vcmp-stat-add">+{diffSummary.added}</span>{' '}
-                      <span className="vcmp-stat-del">−{diffSummary.removed}</span>
-                    </span>
-                  </div>
-                </div>
-
-                {baseMarkdown === null ? (
-                  <p className="trace-drawer-intro">
-                    <span className="spinner" /> Loading…
-                  </p>
-                ) : diffSummary.added === 0 && diffSummary.removed === 0 ? (
-                  <p className="trace-drawer-intro">These two versions are identical.</p>
-                ) : (
-                  <div className="vdiff">
-                    <VersionDiff ops={diffOps} showUnchanged={showUnchanged} />
-                  </div>
-                )}
-              </>
-            )}
-          </aside>
+          </div>
         </div>
       )}
 
-      {/* Regenerate prompt window: editable instructions (prefilled with the
-          revision notes) + a legal-skills picker, then redraft. */}
+      {/* Email regenerate modal (existing variant behavior). */}
       {regenOpen && (
-        <div className="modal-backdrop" onClick={() => setRegenOpen(false)} role="presentation">
+        <div
+          className="li-rev-modal-backdrop"
+          onClick={() => setRegenOpen(false)}
+          role="presentation"
+        >
           <div
-            className="modal-card"
+            className="li-rev-modal"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
-            aria-label="Regenerate draft"
+            aria-label="Regenerate email"
           >
-            <div className="modal-head">
-              <h2>{isEmail ? 'Regenerate email' : 'Regenerate draft'}</h2>
+            <div className="li-rev-modal-head">
+              <GemSparkle size={20} />
+              <div className="li-rev-modal-titles">
+                <h2>Regenerate email</h2>
+                <div className="li-rev-modal-sub">{draft.emailSubject || 'Email draft'}</div>
+              </div>
               <button
                 type="button"
-                className="modal-close"
+                className="li-rev-modal-close"
                 onClick={() => setRegenOpen(false)}
                 aria-label="Close"
               >
                 <XIcon size={16} />
               </button>
             </div>
-            <div className="modal-body">
-              <p className="text-muted" style={{ marginTop: 0 }}>
-                {isEmail ? (
-                  <>
-                    Redraft this email with the live model. Your instructions guide the new version,
-                    which appears in the review queue — approving it sends it.
-                  </>
-                ) : (
-                  <>
-                    Redraft this {humanizeKind(draft.documentKind)} with the live model. Your
-                    instructions and any selected legal skills guide the new version; the
-                    matter&apos;s questionnaire and transcript are always included.
-                  </>
-                )}
-              </p>
-              <label>
-                <span>Instructions for this draft</span>
-                <textarea
-                  rows={4}
-                  value={regenGuidance}
-                  onChange={(e) => setRegenGuidance(e.target.value)}
-                  placeholder="e.g. Make the indemnification clause mutual and add a 30-day cure period."
-                  autoFocus
-                />
-              </label>
-
-              {/* Legal skills steer document drafting only — hidden for emails. */}
-              {!isEmail && (
-                <div className="regen-skills">
-                  <div className="regen-skills-head">
-                    <span>
-                      Legal skills{' '}
-                      {regenSkills.size > 0 && (
-                        <span className="badge info">{regenSkills.size} selected</span>
-                      )}
-                    </span>
-                    {skillCatalog && skillCatalog.length > 6 && (
-                      <input
-                        type="text"
-                        value={skillQuery}
-                        onChange={(e) => setSkillQuery(e.target.value)}
-                        placeholder="Search skills…"
-                        style={{ width: 'auto', flex: '1 1 10rem', minWidth: '9rem' }}
-                      />
-                    )}
-                  </div>
-                  {skillCatalog === null ? (
-                    <p className="text-muted text-sm">
-                      <span className="spinner" /> Loading skills…
-                    </p>
-                  ) : skillCatalog.length === 0 ? (
-                    <p className="text-muted text-sm">No legal skills configured.</p>
-                  ) : (
-                    <div className="regen-skills-list">
-                      {skillCatalog
-                        .filter((s) => {
-                          const q = skillQuery.trim().toLowerCase()
-                          return (
-                            !q ||
-                            s.name.toLowerCase().includes(q) ||
-                            s.slug.toLowerCase().includes(q) ||
-                            s.practiceArea.toLowerCase().includes(q)
-                          )
-                        })
-                        .map((s) => (
-                          <label key={s.slug} className="regen-skill" title={s.whenToUse}>
-                            <input
-                              type="checkbox"
-                              checked={regenSkills.has(s.slug)}
-                              onChange={() => toggleSkill(s.slug)}
-                              style={{ width: 'auto' }}
-                            />
-                            <span>
-                              <strong>{s.name}</strong>
-                              <span className="text-muted text-sm"> · {s.practiceArea}</span>
-                            </span>
-                          </label>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {error && <div className="alert alert-error">{error}</div>}
+            <div className="li-rev-modal-body">
+              <label className="li-rev-modal-label">Instructions for the new draft</label>
+              <textarea
+                className="li-rev-modal-textarea"
+                value={regenGuidance}
+                onChange={(e) => setRegenGuidance(e.target.value)}
+                placeholder="e.g. Warmer opening; confirm the consultation time."
+                autoFocus
+              />
+              <div className="li-rev-modal-note">
+                <span>
+                  Redraft this email with the live model. The new version lands in the review queue
+                  — approving it sends it.
+                </span>
+              </div>
             </div>
-            <div className="modal-foot">
-              <button onClick={() => setRegenOpen(false)} disabled={busy === 'regenerate'}>
+            <div className="li-rev-modal-foot">
+              <button
+                type="button"
+                className="li-rev-rbtn"
+                onClick={() => setRegenOpen(false)}
+                disabled={busy === 'regenerate'}
+              >
                 Cancel
               </button>
-              <button className="primary" onClick={runRegenerate} disabled={busy === 'regenerate'}>
-                {busy === 'regenerate' && <span className="spinner" />}
+              <button
+                type="button"
+                className="li-rev-modal-generate"
+                onClick={runRegenerateEmail}
+                disabled={busy === 'regenerate'}
+              >
                 {busy === 'regenerate' ? 'Regenerating…' : 'Regenerate'}
               </button>
             </div>
@@ -1150,65 +1237,12 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
   )
 }
 
-function EvidenceCardView({ item }: { item: EvidenceItem }) {
-  const source = item.source ?? 'system'
-  const sourceClass = source === 'questionnaire' || source === 'transcript' ? source : 'system'
-  return (
-    <div className="evidence-card">
-      <div className="evidence-card-head">
-        <span className={`source-badge ${sourceClass}`}>{source}</span>
-        {item.field && <span className="evidence-field">{item.field}</span>}
-        {typeof item.confidence === 'number' && (
-          <span className="evidence-confidence">
-            {(item.confidence * 100).toFixed(0)}% confident
-          </span>
-        )}
-      </div>
-      {item.value !== undefined && item.value !== null && item.value !== '' && (
-        <div className="evidence-value">{stringifyValue(item.value)}</div>
-      )}
-      {item.used_in && <div className="evidence-used-in">{item.used_in}</div>}
-    </div>
-  )
-}
-
-function AlternativeCardView({ item }: { item: Alternative }) {
-  return (
-    <div className="alt-card">
-      <h3>{item.decision_point ?? 'Decision'}</h3>
-      <div className="alt-options">
-        {item.alternatives?.map((opt, i) => (
-          <span key={i} className={opt === item.selected ? 'selected' : ''}>
-            {opt}
-            {i < (item.alternatives?.length ?? 0) - 1 ? ' · ' : ''}
-          </span>
-        ))}
-      </div>
-      {item.rationale && <div className="alt-rationale">{item.rationale}</div>}
-    </div>
-  )
-}
-
-function AmbiguityCardView({ item }: { item: Ambiguity }) {
-  return (
-    <div className="amb-card">
-      <div className="amb-card-head">
-        <span className="amb-card-topic">{item.topic ?? 'Ambiguity'}</span>
-        {item.needs_input_from && (
-          <span className="needs-input">needs {item.needs_input_from}</span>
-        )}
-      </div>
-      {item.explanation && <div className="amb-card-body">{item.explanation}</div>}
-    </div>
-  )
-}
-
 function stringifyValue(value: unknown): string {
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (value === null || value === undefined) return ''
   try {
-    return JSON.stringify(value, null, 2)
+    return JSON.stringify(value)
   } catch {
     return String(value)
   }

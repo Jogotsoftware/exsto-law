@@ -6,6 +6,9 @@ export interface PendingDraftSummary {
   documentEntityId: string
   matterEntityId: string
   matterNumber: string
+  // The matter's client (via client_of → full_name). '' when unresolved or on
+  // reads that don't fetch it. WP-C adds the CLIENT column to the review queue.
+  clientName: string
   documentKind: string
   versionNumber: number
   status: string
@@ -25,6 +28,9 @@ export interface PendingDraftSummary {
 }
 
 export interface DraftDetail extends PendingDraftSummary {
+  // The matter's service key (e.g. 'attorney_letter'), for the reader sub-line
+  // "client · service · Open matter". '' when the matter has no service.
+  serviceKey: string
   bodyMarkdown: string
   reasoningTrace: Record<string, unknown> | null
   modelIdentity: string | null
@@ -51,6 +57,7 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
       document_entity_id: string
       matter_entity_id: string
       matter_number: string
+      client_name: string | null
       document_kind: string
       version_number: number
       status: string
@@ -65,6 +72,14 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
          dv.document_entity_id,
          r.target_entity_id AS matter_entity_id,
          e_matter.name AS matter_number,
+         (SELECT a2.value #>> '{}'
+            FROM relationship rc
+            JOIN relationship_kind_definition rkdc ON rkdc.id = rc.relationship_kind_id
+            JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = rc.source_entity_id
+            JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
+            WHERE rc.tenant_id = $1 AND rc.target_entity_id = r.target_entity_id AND rkdc.kind_name = 'client_of'
+            ORDER BY a2.valid_from DESC
+            LIMIT 1) AS client_name,
          coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
          dv.version_number,
          dv.status,
@@ -89,6 +104,7 @@ export async function listPendingDraftVersions(ctx: ActionContext): Promise<Pend
       documentEntityId: row.document_entity_id,
       matterEntityId: row.matter_entity_id,
       matterNumber: row.matter_number,
+      clientName: row.client_name ?? '',
       documentKind: row.document_kind,
       versionNumber: row.version_number,
       status: row.status,
@@ -149,6 +165,7 @@ export async function listMatterDraftVersions(
       documentEntityId: row.document_entity_id,
       matterEntityId: row.matter_entity_id,
       matterNumber: row.matter_number,
+      clientName: '',
       documentKind: row.document_kind,
       versionNumber: row.version_number,
       status: row.status,
@@ -280,6 +297,7 @@ export async function getSharedDraftVersion(
       documentEntityId: row.document_entity_id,
       matterEntityId: row.matter_entity_id,
       matterNumber: row.matter_number,
+      clientName: '',
       documentKind: row.document_kind,
       versionNumber: row.version_number,
       status: row.status,
@@ -303,6 +321,8 @@ export async function getDraftVersion(
       document_entity_id: string
       matter_entity_id: string
       matter_number: string
+      client_name: string | null
+      service_key: string | null
       document_kind: string
       version_number: number
       status: string
@@ -326,6 +346,20 @@ export async function getDraftVersion(
          dv.document_entity_id,
          r.target_entity_id AS matter_entity_id,
          e_matter.name AS matter_number,
+         (SELECT a2.value #>> '{}'
+            FROM relationship rc
+            JOIN relationship_kind_definition rkdc ON rkdc.id = rc.relationship_kind_id
+            JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = rc.source_entity_id
+            JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
+            WHERE rc.tenant_id = $1 AND rc.target_entity_id = r.target_entity_id AND rkdc.kind_name = 'client_of'
+            ORDER BY a2.valid_from DESC
+            LIMIT 1) AS client_name,
+         (SELECT a3.value #>> '{}'
+            FROM attribute a3
+            JOIN attribute_kind_definition akd3 ON akd3.id = a3.attribute_kind_id
+            WHERE a3.tenant_id = $1 AND a3.entity_id = r.target_entity_id AND akd3.kind_name = 'service_key'
+            ORDER BY a3.valid_from DESC
+            LIMIT 1) AS service_key,
          coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
          dv.version_number,
          dv.status,
@@ -427,6 +461,8 @@ export async function getDraftVersion(
       documentEntityId: row.document_entity_id,
       matterEntityId: row.matter_entity_id,
       matterNumber: row.matter_number,
+      clientName: row.client_name ?? '',
+      serviceKey: row.service_key ?? '',
       documentKind: row.document_kind,
       versionNumber: row.version_number,
       status: row.status,
