@@ -1,6 +1,6 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import {
-  getCalendarCategories,
+  getCalendarCategoriesState,
   updateCalendarCategories,
   categorizeBooking,
   type CalendarCategory,
@@ -8,13 +8,18 @@ import {
 import type { ActionContext } from '@exsto/substrate'
 
 // Read the firm's calendar category palette (color-coding call types).
+// `configured` is false when the firm has never saved a palette — the
+// categories returned are then just the built-in starter defaults, not a
+// persisted row (see legal.calendar.categories.set for how a client should
+// seed a real row the first time it sees `configured: false`).
 registerTool({
   name: 'legal.calendar.categories.get',
-  description: 'Get the firm’s configurable calendar category palette ({key,label,color}[]).',
+  description:
+    'Get the firm’s configurable calendar category palette ({key,label,color}[]). `configured` is false when the firm has never saved one (the categories are then just starter defaults, not a persisted row).',
   mode: 'read',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-  handler: async (ctx: ActionContext) => ({ categories: await getCalendarCategories(ctx) }),
-} satisfies Tool<Record<string, never>, { categories: CalendarCategory[] }>)
+  handler: async (ctx: ActionContext) => await getCalendarCategoriesState(ctx),
+} satisfies Tool<Record<string, never>, { categories: CalendarCategory[]; configured: boolean }>)
 
 // Set the firm's calendar category palette (versioned + audited).
 registerTool({

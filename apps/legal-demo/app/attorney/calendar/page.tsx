@@ -1,16 +1,16 @@
 'use client'
 
-// Calendar tab (WP7, REQ-CALMAIL-01): the attorney's real calendar in day / week
-// / month / list views, with in-app create/reschedule/cancel that write through
-// the action layer and round-trip to Google. Matter-linked events deep-link to
-// their matters; events created directly in Google appear here (live read) as
-// read-only. The fetch window follows the active view, so month pulls the whole
-// month grid, day pulls a single day, etc.
+// Calendar tab (WP7, REQ-CALMAIL-01; restyled to the Legal Instruments comp in
+// WP-H): the attorney's real calendar in day / week / month / list views, with
+// in-app create/edit/duplicate/cancel that write through the action layer and
+// round-trip to Google. Matter-linked events deep-link to their matters; events
+// created directly in Google appear here (live read) as read-only; tasks with a
+// due date ride along as read-only "task due" entries. The fetch window follows
+// the active view, so month pulls the whole month grid, day pulls a single day.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon, EditIcon, XIcon } from '@/components/icons'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { PageHead } from '@/components/PageHead'
 import { Modal } from '@/components/Modal'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ActionsMenu, type ActionItem } from '@/components/ActionsMenu'
@@ -61,9 +61,25 @@ interface Category {
   color: string
 }
 
+// A task (any matter) whose due date falls in the visible window — rendered as
+// a read-only "task due" entry (BUILD, WP-H). Pulled from legal.task.list_due,
+// the firm-wide sibling of the existing per-matter legal.task.list.
+interface DueTaskItem {
+  taskId: string
+  matterEntityId: string
+  matterNumber: string
+  title: string
+  status: string
+  dueDate: string
+}
+
 type View = 'day' | 'week' | 'month' | 'list'
 
 const DAY_MS = 24 * 3600 * 1000
+// Not in the firm's calendar_categories palette — the comp's two fixed legend
+// entries for events this page renders but the firm doesn't configure.
+const GOOGLE_EVENT_COLOR = 'var(--li-muted-3)'
+const TASK_DUE_COLOR = 'var(--li-cal-teal)'
 
 function startOfDay(d: Date): Date {
   const x = new Date(d)
@@ -85,10 +101,16 @@ function addMonths(d: Date, n: number): Date {
   x.setMonth(x.getMonth() + n)
   return x
 }
-// Format a Date for a <input type="datetime-local"> value (local, no seconds/TZ).
-function toLocalInput(d: Date): string {
+// Plain local YYYY-MM-DD (no time zone shift) — matches how due dates are
+// stored (date-only) and how the visible window's boundaries are sent to
+// legal.task.list_due.
+function toLocalDateStr(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+function toLocalTimeStr(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 // The visible window for a view: what to fetch, which day cells to draw, and the
@@ -145,25 +167,36 @@ function formatHourLabel(h: number): string {
   return h < 12 ? `${h} AM` : `${h - 12} PM`
 }
 
-// Position a day's timed events: top/height in px from midnight, plus a small
-// cascading inset for events that overlap an earlier one so concurrent meetings
-// stay individually visible (full lane-splitting is overkill at firm scale).
+// Position a day's timed events with SIDE-BY-SIDE lanes for anything that
+// overlaps (comp: CALENDAR's `layout()` — replaces the old cascading inset).
+// Each event's lane group is every OTHER event it directly overlaps in time;
+// within that group it gets an equal-width column (leftPct/widthPct).
 function layoutTimed(
   dayEvents: WorkspaceEvent[],
-): Array<{ e: WorkspaceEvent; top: number; height: number; inset: number }> {
-  const sorted = [...dayEvents].sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1))
-  return sorted.map((e, i) => {
-    const day0 = startOfDay(new Date(e.startIso!)).getTime()
-    const s = new Date(e.startIso!).getTime()
-    const en = e.endIso ? new Date(e.endIso).getTime() : s + 3600_000
-    const top = Math.max(0, ((s - day0) / 3600_000) * HOUR_PX)
-    const height = Math.max(22, ((Math.max(en, s + 600_000) - s) / 3600_000) * HOUR_PX)
-    const inset = sorted.slice(0, i).filter((o) => {
-      const os = new Date(o.startIso!).getTime()
-      const oe = o.endIso ? new Date(o.endIso).getTime() : os + 3600_000
-      return os < en && oe > s
-    }).length
-    return { e, top, height, inset }
+): Array<{ e: WorkspaceEvent; top: number; height: number; leftPct: number; widthPct: number }> {
+  const its = [...dayEvents]
+    .sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1))
+    .map((e) => {
+      const day0 = startOfDay(new Date(e.startIso!)).getTime()
+      const s = new Date(e.startIso!).getTime()
+      const en = e.endIso ? new Date(e.endIso).getTime() : s + 3600_000
+      return {
+        e,
+        startMin: (s - day0) / 60_000,
+        endMin: (Math.max(en, s + 600_000) - day0) / 60_000,
+      }
+    })
+  return its.map((it) => {
+    const overlapping = its.filter((o) => o.startMin < it.endMin && o.endMin > it.startMin)
+    const n = overlapping.length
+    const i = overlapping.indexOf(it)
+    return {
+      e: it.e,
+      top: Math.max(0, (it.startMin / 60) * HOUR_PX),
+      height: Math.max(22, ((it.endMin - it.startMin) / 60) * HOUR_PX),
+      leftPct: n > 1 ? (i * 100) / n : 0,
+      widthPct: n > 1 ? 100 / n : 100,
+    }
   })
 }
 
@@ -173,6 +206,7 @@ function layoutTimed(
 // in LOCAL time, matching layoutTimed).
 const SNAP_MIN = 15
 const MIN_DUR_MIN = 15
+const PRESET_DURATIONS_MIN = [15, 30, 45, 60, 90, 120]
 const snapMin = (min: number) => Math.round(min / SNAP_MIN) * SNAP_MIN
 const clampTopPx = (px: number) => Math.max(0, Math.min(px, 24 * HOUR_PX))
 const pxToMin = (px: number) => (px / HOUR_PX) * 60
@@ -181,6 +215,11 @@ function dayAtMinutes(day: Date, minutes: number): Date {
   const d = startOfDay(day)
   d.setMinutes(Math.max(0, Math.min(24 * 60, minutes)))
   return d
+}
+function formatDuration(min: number): string {
+  if (min < 60) return `${min} min`
+  const hrs = min / 60
+  return Number.isInteger(hrs) ? `${hrs} hr` : `${hrs.toFixed(1)} hr`
 }
 
 // An in-progress grid drag: paint a new event (create), move an event to a new
@@ -199,44 +238,56 @@ type DragState =
     }
   | { kind: 'resize'; e: WorkspaceEvent; day: Date; top: number; height: number; moved: boolean }
 
+// The unified create/edit panel — one modal for both (comp: CALENDAR EVENT
+// MODAL is reused for "New" and for editing). `create` carries the chosen mode
+// (matter / contact / personal); `edit` carries the event being edited.
+type Panel =
+  | {
+      kind: 'create'
+      mode: CreateMode
+      summary: string
+      matterEntityId?: string
+      contactEntityId?: string
+      date: string
+      time: string
+      durationMin: number
+      categoryKey: string
+    }
+  | {
+      kind: 'edit'
+      e: WorkspaceEvent
+      date: string
+      time: string
+      durationMin: number
+      categoryKey: string
+    }
+
 export default function CalendarPage() {
   const { confirm, confirmElement } = useConfirm()
   const [anchor, setAnchor] = useState(() => new Date())
   const [view, setView] = useState<View>('week')
   const [events, setEvents] = useState<WorkspaceEvent[]>([])
+  const [dueTasks, setDueTasks] = useState<DueTaskItem[]>([])
   const [source, setSource] = useState<'google' | 'disconnected' | 'error' | null>(null)
   const [googleError, setGoogleError] = useState<string | null>(null)
   const [matters, setMatters] = useState<MatterOption[]>([])
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // Dialog state for create/reschedule. create carries the chosen mode (matter /
-  // contact / personal) + a title (for contact/personal — consultations auto-title)
-  // and the picked matter/contact. reschedule carries the event's identity so the
-  // submit routes to booking.reschedule (consultations) or meeting.reschedule
-  // (app-created meetings).
-  const [panel, setPanel] = useState<{
-    kind: 'create' | 'reschedule'
-    mode?: CreateMode
-    summary?: string
-    matterEntityId?: string
-    contactEntityId?: string
-    meeting?: { calendarEventEntityId: string; googleEventId: string | null }
-    start: string
-    end: string
-  } | null>(null)
+  const [panel, setPanel] = useState<Panel | null>(null)
   // Which unlinked Google event is mid-assignment, and the chosen matter.
   const [assignFor, setAssignFor] = useState<{ eventId: string; matterEntityId: string } | null>(
     null,
   )
-  // The firm's call-type palette (color-coding) + the two per-event modals it
-  // feeds: categorize (set call-type) and email-guests (invite attendees).
+  // The firm's call-type palette (color-coding), fed by the config-as-data
+  // legal.calendar.categories.* actions. seededRef guards the one-time write
+  // that turns the read-time starter defaults into a REAL firm-category row
+  // the first time this tenant is seen to have none (BUILD, WP-H) — never
+  // hardcoded as a kind, just an ordinary save through the existing action.
   const [categories, setCategories] = useState<Category[]>([])
-  const [categorizeFor, setCategorizeFor] = useState<{
-    matterEntityId: string
-    matterNumber: string
-    categoryKey: string
-  } | null>(null)
+  const seededRef = useRef(false)
+  // The right-click / pencil context menu (comp: CALENDAR CONTEXT MENU).
+  const [calMenu, setCalMenu] = useState<{ x: number; y: number; e: WorkspaceEvent } | null>(null)
   const [attendeesFor, setAttendeesFor] = useState<{
     matterEntityId: string
     matterNumber: string
@@ -287,13 +338,40 @@ export default function CalendarPage() {
     // The palette is only color-coding — a hiccup here must not error the whole
     // calendar, so it loads independently and degrades to no colors.
     try {
-      const cats = await callAttorneyMcp<{ categories: Category[] }>({
+      const cats = await callAttorneyMcp<{ categories: Category[]; configured: boolean }>({
         toolName: 'legal.calendar.categories.get',
         input: {},
       })
       setCategories(cats.categories)
+      // Seed a REAL firm-category row the first time this tenant has none —
+      // config-as-data through the existing write action, not a hardcoded kind.
+      // Fire-and-forget so a slow/failed save never blocks the calendar; on
+      // failure the guard resets so the next load() retries.
+      if (!cats.configured && !seededRef.current) {
+        seededRef.current = true
+        callAttorneyMcp({
+          toolName: 'legal.calendar.categories.set',
+          input: { categories: cats.categories },
+        }).catch(() => {
+          seededRef.current = false
+        })
+      }
     } catch {
       setCategories([])
+    }
+    // Task-due events (BUILD, WP-H) — a hiccup here degrades to no task chips,
+    // never breaks the calendar.
+    try {
+      const dt = await callAttorneyMcp<{ tasks: DueTaskItem[] }>({
+        toolName: 'legal.task.list_due',
+        input: {
+          fromDate: toLocalDateStr(period.start),
+          toDateExclusive: toLocalDateStr(period.end),
+        },
+      })
+      setDueTasks(dt.tasks)
+    } catch {
+      setDueTasks([])
     }
   }
 
@@ -320,6 +398,7 @@ export default function CalendarPage() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('create') !== '1') return
     const matterId = params.get('matterId') ?? undefined
+    const now = new Date()
     setPanel((prev) =>
       prev
         ? prev
@@ -330,8 +409,11 @@ export default function CalendarPage() {
             matterEntityId:
               (matterId && matters.find((m) => m.matterEntityId === matterId)?.matterEntityId) ||
               matters[0]?.matterEntityId,
-            start: '',
-            end: '',
+            contactEntityId: contacts[0]?.contactEntityId,
+            date: toLocalDateStr(now),
+            time: toLocalTimeStr(now),
+            durationMin: 60,
+            categoryKey: '',
           },
     )
   }, [matters])
@@ -382,58 +464,133 @@ export default function CalendarPage() {
   }, [categories])
 
   // The palette color for an event (by its matter's call-type), or null when
-  // uncategorized — callers fall back to the app-managed gold / external grey.
+  // uncategorized — callers fall back to the app-managed navy / external grey.
   function eventColor(e: WorkspaceEvent): string | null {
     return e.categoryKey ? (categoryColor.get(e.categoryKey) ?? null) : null
   }
 
+  function tasksOnDay(day: Date): DueTaskItem[] {
+    const key = toLocalDateStr(day)
+    return dueTasks.filter((t) => t.dueDate === key)
+  }
+
+  // ── Context menu (comp: CALENDAR CONTEXT MENU — Edit event / Duplicate / Delete) ──
+  function openCalMenu(ev: React.MouseEvent, e: WorkspaceEvent) {
+    ev.preventDefault()
+    const MENU_W = 178
+    setCalMenu({
+      x: Math.min(ev.clientX, window.innerWidth - MENU_W - 8),
+      y: Math.min(ev.clientY, window.innerHeight - 140),
+      e,
+    })
+  }
+  function closeCalMenu() {
+    setCalMenu(null)
+  }
+
+  // Open the unified modal for an existing event (comp: pencil icon + context
+  // menu's "Edit event" both land here).
+  function openEdit(e: WorkspaceEvent) {
+    closeCalMenu()
+    const s = e.startIso ? new Date(e.startIso) : new Date()
+    const en = e.endIso ? new Date(e.endIso) : new Date(s.getTime() + 3600_000)
+    setPanel({
+      kind: 'edit',
+      e,
+      date: toLocalDateStr(s),
+      time: toLocalTimeStr(s),
+      durationMin: Math.max(MIN_DUR_MIN, Math.round((en.getTime() - s.getTime()) / 60_000)),
+      categoryKey: e.categoryKey ?? '',
+    })
+  }
+
+  // Open the unified modal for a new event; `start`/`end` come from a drag (a
+  // painted range) or are omitted (the header "+ New" button — defaults to now,
+  // 1 hour).
+  function openCreate(start?: Date, end?: Date) {
+    const s = start ?? new Date()
+    const durationMin =
+      start && end
+        ? Math.max(MIN_DUR_MIN, Math.round((end.getTime() - start.getTime()) / 60_000))
+        : 60
+    setPanel({
+      kind: 'create',
+      mode: matters.length > 0 ? 'matter' : 'personal',
+      summary: '',
+      matterEntityId: matters[0]?.matterEntityId,
+      contactEntityId: contacts[0]?.contactEntityId,
+      date: toLocalDateStr(s),
+      time: toLocalTimeStr(s),
+      durationMin,
+      categoryKey: '',
+    })
+  }
+
+  // Duplicate = create a copy via the existing create action, same time (BUILD,
+  // WP-H) — the attorney can then drag it to a new slot.
+  async function duplicateEvent(e: WorkspaceEvent) {
+    closeCalMenu()
+    if (!e.startIso) return
+    const endIso = e.endIso ?? e.startIso
+    if (e.matterEntityId) {
+      await run('legal.booking.create_for_matter', {
+        matterEntityId: e.matterEntityId,
+        startIso: e.startIso,
+        endIso,
+      })
+    } else if (e.meetingEntityId) {
+      await run('legal.meeting.create', {
+        summary: e.summary,
+        startIso: e.startIso,
+        endIso,
+        contactEntityId: e.contactEntityId ?? undefined,
+      })
+    }
+  }
+
+  // Delete = the existing cancel action, shared by the context menu, the edit
+  // modal's footer, and the Actions-menu "Cancel event" item.
+  function deleteEvent(e: WorkspaceEvent) {
+    closeCalMenu()
+    setPanel(null)
+    const isMeeting = Boolean(e.meetingEntityId)
+    const who = e.contactName ? ` with ${e.contactName}` : ''
+    void confirm({
+      title: isMeeting ? 'Cancel this meeting?' : 'Cancel the consultation?',
+      body: isMeeting
+        ? `Cancels the meeting${who} and removes it from the calendar.`
+        : `Cancels the consultation for ${e.matterNumber} and removes it from the calendar.`,
+      confirmLabel: isMeeting ? 'Cancel meeting' : 'Cancel consultation',
+      cancelLabel: 'Keep it',
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return
+      if (isMeeting) {
+        run('legal.meeting.cancel', {
+          calendarEventEntityId: e.meetingEntityId,
+          googleEventId: e.eventId,
+        })
+      } else if (e.matterEntityId) {
+        run('legal.booking.cancel', { matterEntityId: e.matterEntityId })
+      }
+    })
+  }
+
   // The consolidated per-event action menu (beta feedback: every event should have
-  // an edit menu). Two flavors: an app-created MEETING (contact/personal — routes to
-  // the meeting actions) vs a matter CONSULTATION (the booking actions, with email
-  // guests + categorize). Reschedule opens the dialog carrying the event's identity.
+  // an edit menu) — the day/week agenda + list-view rows. Two flavors: an
+  // app-created MEETING (contact/personal — the meeting actions) vs a matter
+  // CONSULTATION (the booking actions, with email guests). Reschedule/Categorize
+  // both open the same unified edit modal the grid's pencil/right-click use.
   function eventMenuItems(e: WorkspaceEvent): ActionItem[] {
     if (e.meetingEntityId) {
-      const items: ActionItem[] = [
-        {
-          label: 'Reschedule',
-          onClick: () =>
-            setPanel({
-              kind: 'reschedule',
-              meeting: { calendarEventEntityId: e.meetingEntityId!, googleEventId: e.eventId },
-              start: '',
-              end: '',
-            }),
-        },
-      ]
+      const items: ActionItem[] = [{ label: 'Edit event', onClick: () => openEdit(e) }]
       if (e.matterEntityId)
         items.push({ label: 'View matter', href: `/attorney/matters/${e.matterEntityId}` })
-      items.push({
-        label: 'Cancel event',
-        onClick: () => {
-          const who = e.contactName ? ` with ${e.contactName}` : ''
-          void confirm({
-            title: 'Cancel this meeting?',
-            body: `Cancels the meeting${who} and removes it from the calendar.`,
-            confirmLabel: 'Cancel meeting',
-            cancelLabel: 'Keep it',
-            danger: true,
-          }).then((ok) => {
-            if (ok)
-              run('legal.meeting.cancel', {
-                calendarEventEntityId: e.meetingEntityId,
-                googleEventId: e.eventId,
-              })
-          })
-        },
-      })
+      items.push({ label: 'Cancel event', danger: true, onClick: () => deleteEvent(e) })
       return items
     }
     return [
-      {
-        label: 'Reschedule',
-        onClick: () =>
-          setPanel({ kind: 'reschedule', matterEntityId: e.matterEntityId!, start: '', end: '' }),
-      },
+      { label: 'Edit event', onClick: () => openEdit(e) },
       {
         label: 'Email guests',
         onClick: () => {
@@ -441,74 +598,83 @@ export default function CalendarPage() {
           setAttendeesFor({ matterEntityId: e.matterEntityId!, matterNumber: e.matterNumber ?? '' })
         },
       },
-      {
-        label: 'Categorize',
-        onClick: () =>
-          setCategorizeFor({
-            matterEntityId: e.matterEntityId!,
-            matterNumber: e.matterNumber ?? '',
-            categoryKey: e.categoryKey ?? '',
-          }),
-      },
       { label: 'View matter', href: `/attorney/matters/${e.matterEntityId}` },
-      {
-        label: 'Cancel event',
-        onClick: () => {
-          void confirm({
-            title: 'Cancel the consultation?',
-            body: `Cancels the consultation for ${e.matterNumber} and removes it from the calendar.`,
-            confirmLabel: 'Cancel consultation',
-            cancelLabel: 'Keep it',
-            danger: true,
-          }).then((ok) => {
-            if (ok) run('legal.booking.cancel', { matterEntityId: e.matterEntityId })
-          })
-        },
-      },
+      { label: 'Cancel event', danger: true, onClick: () => deleteEvent(e) },
     ]
   }
 
-  // Submit the create dialog: matter → booking (a consultation); contact/personal →
-  // a calendar_event meeting (contact invites them, personal is a private hold).
-  async function submitCreate() {
-    if (!panel || panel.kind !== 'create' || !panel.start || !panel.end) return
-    const startIso = new Date(panel.start).toISOString()
-    const endIso = new Date(panel.end).toISOString()
-    if (panel.mode === 'matter') {
-      await run('legal.booking.create_for_matter', {
-        matterEntityId: panel.matterEntityId,
-        startIso,
-        endIso,
-      })
-    } else {
-      await run('legal.meeting.create', {
-        summary: panel.summary?.trim() || (panel.mode === 'contact' ? 'Meeting' : 'Personal block'),
-        startIso,
-        endIso,
-        contactEntityId: panel.mode === 'contact' ? panel.contactEntityId : undefined,
-      })
-    }
-  }
+  // Submit the unified modal: create books/creates via the existing actions
+  // (+ an optional categorize follow-up); edit reschedules (if the time moved)
+  // and/or re-categorizes (if the category changed) — both existing actions.
+  async function submitPanel() {
+    if (!panel || !panel.date || !panel.time) return
+    const start = new Date(`${panel.date}T${panel.time}`)
+    if (Number.isNaN(start.getTime())) return
+    const startIso = start.toISOString()
+    const endIso = new Date(start.getTime() + panel.durationMin * 60_000).toISOString()
 
-  // Submit the reschedule dialog: route to the matching action by the event's
-  // identity captured when the dialog opened.
-  async function submitReschedule() {
-    if (!panel || panel.kind !== 'reschedule' || !panel.start || !panel.end) return
-    const startIso = new Date(panel.start).toISOString()
-    const endIso = new Date(panel.end).toISOString()
-    if (panel.meeting) {
-      await run('legal.meeting.reschedule', {
-        calendarEventEntityId: panel.meeting.calendarEventEntityId,
-        googleEventId: panel.meeting.googleEventId,
-        startIso,
-        endIso,
-      })
-    } else {
-      await run('legal.booking.reschedule', {
-        matterEntityId: panel.matterEntityId,
-        startIso,
-        endIso,
-      })
+    setBusy(true)
+    setError(null)
+    try {
+      if (panel.kind === 'create') {
+        if (panel.mode === 'matter') {
+          if (!panel.matterEntityId) throw new Error('Pick a matter.')
+          await callAttorneyMcp({
+            toolName: 'legal.booking.create_for_matter',
+            input: { matterEntityId: panel.matterEntityId, startIso, endIso },
+          })
+          if (panel.categoryKey) {
+            await callAttorneyMcp({
+              toolName: 'legal.booking.categorize',
+              input: { matterEntityId: panel.matterEntityId, categoryKey: panel.categoryKey },
+            }).catch(() => {
+              // Booking created; the category is cosmetic — don't fail the create over it.
+            })
+          }
+        } else {
+          if (panel.mode === 'contact' && !panel.contactEntityId) throw new Error('Pick a contact.')
+          await callAttorneyMcp({
+            toolName: 'legal.meeting.create',
+            input: {
+              summary:
+                panel.summary.trim() || (panel.mode === 'contact' ? 'Meeting' : 'Personal block'),
+              startIso,
+              endIso,
+              contactEntityId: panel.mode === 'contact' ? panel.contactEntityId : undefined,
+            },
+          })
+        }
+      } else {
+        const e = panel.e
+        if (e.meetingEntityId) {
+          await callAttorneyMcp({
+            toolName: 'legal.meeting.reschedule',
+            input: {
+              calendarEventEntityId: e.meetingEntityId,
+              googleEventId: e.eventId,
+              startIso,
+              endIso,
+            },
+          })
+        } else if (e.matterEntityId) {
+          await callAttorneyMcp({
+            toolName: 'legal.booking.reschedule',
+            input: { matterEntityId: e.matterEntityId, startIso, endIso },
+          })
+          if (panel.categoryKey !== (e.categoryKey ?? '')) {
+            await callAttorneyMcp({
+              toolName: 'legal.booking.categorize',
+              input: { matterEntityId: e.matterEntityId, categoryKey: panel.categoryKey },
+            })
+          }
+        }
+      }
+      setPanel(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -530,34 +696,9 @@ export default function CalendarPage() {
     }
   }
 
-  async function submitCategorize(categoryKey: string) {
-    if (!categorizeFor) return
-    if (
-      await run('legal.booking.categorize', {
-        matterEntityId: categorizeFor.matterEntityId,
-        categoryKey,
-      })
-    ) {
-      setCategorizeFor(null)
-    }
-  }
-
-  // Open the create dialog with a default mode: matter when the firm has matters,
-  // else a personal block (which needs none). Pre-selects the first matter/contact.
-  function openCreate(start: string, end: string) {
-    setPanel({
-      kind: 'create',
-      mode: matters.length > 0 ? 'matter' : 'personal',
-      summary: '',
-      matterEntityId: matters[0]?.matterEntityId,
-      contactEntityId: contacts[0]?.contactEntityId,
-      start,
-      end,
-    })
-  }
-
   // Reschedule by the event's identity: a meeting (calendar_event) goes through the
-  // meeting action, a consultation through booking — same split as the menu.
+  // meeting action, a consultation through booking — used by drag move/resize,
+  // which commits immediately without opening the modal.
   async function rescheduleEventTo(e: WorkspaceEvent, startIso: string, endIso: string) {
     if (e.meetingEntityId) {
       await run('legal.meeting.reschedule', {
@@ -576,7 +717,7 @@ export default function CalendarPage() {
   // a scroll; movedRef is reset so a no-move "drag" still counts as a click.
   function beginCreateDrag(ev: React.MouseEvent, day: Date) {
     if (source !== 'google') return
-    if ((ev.target as HTMLElement).closest('.cal-event')) return // the event handles itself
+    if ((ev.target as HTMLElement).closest('.li-cal-event')) return // the event handles itself
     ev.preventDefault()
     const col = ev.currentTarget as HTMLElement
     const relY = clampTopPx(ev.clientY - col.getBoundingClientRect().top)
@@ -594,7 +735,7 @@ export default function CalendarPage() {
     height: number,
   ) {
     ev.stopPropagation() // don't also start a create-drag on the column
-    const col = (ev.currentTarget as HTMLElement).closest('.cal-grid-col') as HTMLElement | null
+    const col = (ev.currentTarget as HTMLElement).closest('.li-cal-col') as HTMLElement | null
     if (!col) return
     const relY = clampTopPx(ev.clientY - col.getBoundingClientRect().top)
     dragColRef.current = col
@@ -612,7 +753,7 @@ export default function CalendarPage() {
   ) {
     ev.stopPropagation()
     ev.preventDefault()
-    const col = (ev.currentTarget as HTMLElement).closest('.cal-grid-col') as HTMLElement | null
+    const col = (ev.currentTarget as HTMLElement).closest('.li-cal-col') as HTMLElement | null
     if (!col) return
     dragColRef.current = col
     movedRef.current = false
@@ -622,7 +763,7 @@ export default function CalendarPage() {
   }
 
   // Global move/up listeners while a drag is active (so it keeps tracking outside
-  // the column). On drop, times snap to 15m: create opens the dialog prefilled to
+  // the column). On drop, times snap to 15m: create opens the modal prefilled to
   // the painted range (a plain click → a 1h block); move/resize reschedule.
   const dragging = drag !== null
   useEffect(() => {
@@ -649,8 +790,8 @@ export default function CalendarPage() {
       if (d.kind === 'create') {
         const a = snapMin(pxToMin(Math.min(d.y0, d.y1)))
         const b = snapMin(pxToMin(Math.max(d.y0, d.y1)))
-        const end = b - a < MIN_DUR_MIN ? a + 60 : b // a plain click → a default 1h block
-        openCreate(toLocalInput(dayAtMinutes(d.day, a)), toLocalInput(dayAtMinutes(d.day, end)))
+        const endMin = b - a < MIN_DUR_MIN ? a + 60 : b // a plain click → a default 1h block
+        openCreate(dayAtMinutes(d.day, a), dayAtMinutes(d.day, endMin))
         return
       }
       if (!d.moved) return // a click on the block — its own onClick handles it
@@ -704,28 +845,15 @@ export default function CalendarPage() {
       .filter((e) => e.startIso && new Date(e.startIso).toDateString() === day.toDateString())
       .sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1))
 
-  // Full event card — used by day and week views (month uses a compact chip).
-  // Matter-linked events are color-coded by call-type (palette), falling back to a
-  // gold left border; the attorney's other Google events use a muted border.
+  // Full event card — used by the day agenda, week's "Manage events", and list
+  // view. Matter-linked events are color-coded by call-type (palette), falling
+  // back to a navy left bar; the attorney's other Google events use a muted bar.
   function renderEvent(e: WorkspaceEvent) {
     const color = eventColor(e)
-    const borderLeft = color
-      ? `3px solid ${color}`
-      : e.managedByApp
-        ? '3px solid var(--navy)'
-        : '3px solid var(--border)'
+    const barColor = color ?? (e.managedByApp ? 'var(--li-navy)' : GOOGLE_EVENT_COLOR)
     return (
-      <div
-        key={e.eventId}
-        style={{
-          border: '1px solid var(--border)',
-          borderLeft,
-          borderRadius: 6,
-          padding: 'var(--space-2)',
-          fontSize: '0.85rem',
-        }}
-      >
-        <div style={{ fontWeight: 600 }}>
+      <div key={e.eventId} className="li-cal-agenda-card" style={{ borderLeftColor: barColor }}>
+        <div className="li-cal-agenda-time">
           {e.allDay
             ? 'All day'
             : new Date(e.startIso!).toLocaleTimeString(undefined, {
@@ -733,25 +861,19 @@ export default function CalendarPage() {
                 minute: '2-digit',
               })}
         </div>
-        <div>{e.summary}</div>
+        <div className="li-cal-agenda-title2">{e.summary}</div>
         {e.matterEntityId ? (
-          <div
-            className="row"
-            style={{ marginTop: 4, gap: 'var(--space-2)', alignItems: 'center' }}
-          >
+          <div className="li-cal-agenda-row">
             <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
             <ActionsMenu label="Actions" align="left" items={eventMenuItems(e)} />
           </div>
         ) : e.meetingEntityId ? (
-          <div
-            className="row"
-            style={{ marginTop: 4, gap: 'var(--space-2)', alignItems: 'center' }}
-          >
-            {e.contactName && <span className="text-muted text-sm">with {e.contactName}</span>}
+          <div className="li-cal-agenda-row">
+            {e.contactName && <span className="li-cal-agenda-meta">with {e.contactName}</span>}
             <ActionsMenu label="Actions" align="left" items={eventMenuItems(e)} />
           </div>
         ) : (
-          <div className="text-muted text-sm" style={{ marginTop: 4 }}>
+          <div className="li-cal-agenda-meta">
             <div>
               Google event{' '}
               {e.htmlLink && (
@@ -763,10 +885,7 @@ export default function CalendarPage() {
             {!e.managedByApp &&
               matters.length > 0 &&
               (assignFor?.eventId === e.eventId ? (
-                <div
-                  className="row"
-                  style={{ gap: 'var(--space-1)', marginTop: 4, flexWrap: 'wrap' }}
-                >
+                <div className="li-cal-assign-row">
                   <div style={{ minWidth: 180 }}>
                     <Combobox
                       ariaLabel="Matter to assign"
@@ -776,14 +895,16 @@ export default function CalendarPage() {
                     />
                   </div>
                   <button
-                    style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
+                    type="button"
+                    className="li-cal-btn-ghost"
                     disabled={busy || !assignFor.matterEntityId}
                     onClick={() => assignToMatter(e, assignFor.matterEntityId)}
                   >
                     Assign
                   </button>
                   <button
-                    style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem' }}
+                    type="button"
+                    className="li-cal-btn-ghost"
                     onClick={() => setAssignFor(null)}
                   >
                     Cancel
@@ -791,7 +912,8 @@ export default function CalendarPage() {
                 </div>
               ) : (
                 <button
-                  style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem', marginTop: 4 }}
+                  type="button"
+                  className="li-cal-btn-ghost li-cal-assign-btn"
                   onClick={() =>
                     setAssignFor({ eventId: e.eventId, matterEntityId: matters[0].matterEntityId })
                   }
@@ -805,38 +927,41 @@ export default function CalendarPage() {
     )
   }
 
-  // Column of events for one day, used by day and week views.
+  // A read-only task-due card — the day agenda / week manage-events variant.
+  function renderTaskAgendaRow(t: DueTaskItem) {
+    return (
+      <Link
+        key={t.taskId}
+        href={`/attorney/matters/${t.matterEntityId}/tasks/${t.taskId}`}
+        className="li-cal-agenda-card li-cal-agenda-task"
+        style={{ borderLeftColor: TASK_DUE_COLOR }}
+      >
+        <div className="li-cal-agenda-time">Task due</div>
+        <div className="li-cal-agenda-title2">{t.title}</div>
+        <div className="li-cal-agenda-meta">{t.matterNumber}</div>
+      </Link>
+    )
+  }
+
+  // Column of events (+ due tasks) for one day, used by week's "Manage events".
   function dayColumn(day: Date, opts: { headerWeekday?: boolean } = {}) {
     const isToday = day.toDateString() === new Date().toDateString()
+    const dayEvents = eventsByDay(day)
+    const dayTasks = tasksOnDay(day)
     return (
       <div key={day.toISOString()}>
-        <div
-          className="kv-label"
-          style={{
-            padding: 'var(--space-2)',
-            borderBottom: '2px solid var(--border)',
-            fontWeight: isToday ? 700 : 500,
-          }}
-        >
+        <div className={isToday ? 'li-cal-daycol-head is-today' : 'li-cal-daycol-head'}>
           {opts.headerWeekday
             ? day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })
             : day.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
           {isToday ? ' · today' : ''}
         </div>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-2)',
-            padding: 'var(--space-2) 0',
-          }}
-        >
-          {eventsByDay(day).length === 0 && (
-            <span className="text-muted text-sm" style={{ padding: 'var(--space-2)' }}>
-              —
-            </span>
+        <div className="li-cal-daycol-body">
+          {dayEvents.length === 0 && dayTasks.length === 0 && (
+            <span className="li-cal-empty">—</span>
           )}
-          {eventsByDay(day).map((e) => renderEvent(e))}
+          {dayTasks.map((t) => renderTaskAgendaRow(t))}
+          {dayEvents.map((e) => renderEvent(e))}
         </div>
       </div>
     )
@@ -845,43 +970,70 @@ export default function CalendarPage() {
   // A positioned event block in the hourly grid. App-managed events (a matter
   // consultation or a contact/personal meeting) are DRAGGABLE — drag the body to
   // reschedule the time, drag the bottom edge to change the end. Matter blocks still
-  // deep-link to the matter on a plain click; the attorney's other Google events
-  // open in Google (not draggable — we don't own them). Color = call-type palette,
-  // falling back to the gold "managed" border.
+  // deep-link to the matter on a plain click; a contact/personal meeting opens the
+  // edit modal on a plain click (it has no better default — no matter to jump to).
+  // The pencil + right-click both open the comp's context menu (Edit / Duplicate /
+  // Delete); the attorney's other Google events open in Google (not owned by the
+  // app — no menu). Color = call-type palette, falling back to the navy "managed"
+  // bar. `leftPct`/`widthPct` come from layoutTimed's side-by-side lane split.
   function renderGridEvent(
     e: WorkspaceEvent,
     day: Date,
     top: number,
     height: number,
-    inset: number,
+    leftPct: number,
+    widthPct: number,
   ) {
     const color = eventColor(e)
-    const draggable = Boolean(e.matterEntityId || e.meetingEntityId) && source === 'google'
+    const owned = Boolean(e.matterEntityId || e.meetingEntityId)
+    const draggable = owned && source === 'google'
     const d = drag
     const isThis = !!d && (d.kind === 'move' || d.kind === 'resize') && d.e.eventId === e.eventId
     const dispTop = isThis ? d.top : top
     const dispHeight = isThis ? d.height : height
-    const cls = `cal-event${e.managedByApp ? ' managed' : ''}${isThis ? ' dragging' : ''}`
-    const style = {
+    const barColor = color ?? (e.managedByApp ? 'var(--li-navy)' : GOOGLE_EVENT_COLOR)
+    const cls = `li-cal-event${e.managedByApp ? ' is-managed' : ''}${isThis ? ' is-dragging' : ''}`
+    const style: React.CSSProperties = {
       top: dispTop,
       height: dispHeight,
-      left: `calc(3px + ${inset * 12}px)`,
-      zIndex: isThis ? 50 : 2 + inset,
-      ...(color ? { borderLeft: `3px solid ${color}`, background: `${color}1a` } : {}),
+      left: `calc(${leftPct}% + 2px)`,
+      width: `calc(${widthPct}% - 4px)`,
+      zIndex: isThis ? 50 : 2,
+      borderLeftColor: barColor,
+      background: color
+        ? `${color}1a`
+        : e.managedByApp
+          ? 'var(--li-info-bg)'
+          : 'var(--li-border-soft)',
       ...(draggable ? { cursor: isThis ? 'grabbing' : 'grab' } : {}),
     }
     const inner = (
       <>
-        <span className="cal-event-time">
+        <span className="li-cal-event-time">
           {new Date(e.startIso!).toLocaleTimeString(undefined, {
             hour: 'numeric',
             minute: '2-digit',
           })}
         </span>
-        <span className="cal-event-title">{e.summary || '(no title)'}</span>
+        <span className="li-cal-event-title">{e.summary || '(no title)'}</span>
+        {owned && (
+          <button
+            type="button"
+            className="li-cal-event-edit"
+            title="Edit / duplicate / delete"
+            onMouseDown={(ev) => ev.stopPropagation()}
+            onClick={(ev) => {
+              ev.preventDefault()
+              ev.stopPropagation()
+              openCalMenu(ev, e)
+            }}
+          >
+            <EditIcon size={12} />
+          </button>
+        )}
         {draggable && (
           <span
-            className="cal-event-resize"
+            className="li-cal-event-resize"
             onMouseDown={(ev) => beginResizeDrag(ev, e, day, dispTop, dispHeight)}
             title="Drag to change the end time"
           />
@@ -898,6 +1050,7 @@ export default function CalendarPage() {
           title={`${e.summary} — ${e.matterNumber} · drag to reschedule`}
           draggable={false}
           onMouseDown={(ev) => beginMoveDrag(ev, e, day, dispTop, dispHeight)}
+          onContextMenu={(ev) => openCalMenu(ev, e)}
           onClick={(ev) => {
             // Suppress the deep-link navigation when this was a drag, not a click.
             if (movedRef.current) {
@@ -911,14 +1064,23 @@ export default function CalendarPage() {
       )
     }
     if (draggable) {
-      // A contact/personal meeting — draggable, but no navigation target.
+      // A contact/personal meeting — draggable; a plain click opens the edit modal
+      // (there's no matter to deep-link to).
       return (
         <div
           key={e.eventId}
           className={cls}
           style={style}
-          title={`${e.summary} · drag to reschedule`}
+          title={`${e.summary} · drag to reschedule, click to edit`}
           onMouseDown={(ev) => beginMoveDrag(ev, e, day, dispTop, dispHeight)}
+          onContextMenu={(ev) => openCalMenu(ev, e)}
+          onClick={() => {
+            if (movedRef.current) {
+              movedRef.current = false
+              return
+            }
+            openEdit(e)
+          }}
         >
           {inner}
         </div>
@@ -948,7 +1110,7 @@ export default function CalendarPage() {
 
   // All-day / dateless event chip for the strip above the grid.
   function renderGridChip(e: WorkspaceEvent) {
-    const cls = `cal-allday-chip${e.managedByApp ? ' managed' : ''}`
+    const cls = `li-cal-allday-chip${e.managedByApp ? ' is-managed' : ''}`
     if (e.matterEntityId) {
       return (
         <Link key={e.eventId} href={`/attorney/matters/${e.matterEntityId}`} className={cls}>
@@ -963,6 +1125,20 @@ export default function CalendarPage() {
     )
   }
 
+  // A task-due chip for the all-day strip / month cell — read-only, click → task.
+  function renderTaskChip(t: DueTaskItem) {
+    return (
+      <Link
+        key={t.taskId}
+        href={`/attorney/matters/${t.matterEntityId}/tasks/${t.taskId}`}
+        className="li-cal-task-chip"
+        title={`${t.title} — ${t.matterNumber}`}
+      >
+        {t.title}
+      </Link>
+    )
+  }
+
   // Hourly time-grid day/week view (beta feedback: "see full calendar with times").
   // Rows = hours (full 24h, scrollable); events are absolutely positioned by their
   // start/end. `days` is one day (Day view) or seven (Week view).
@@ -974,47 +1150,55 @@ export default function CalendarPage() {
       Boolean(e.startIso) && new Date(e.startIso!).toDateString() === day.toDateString()
     const timed = (day: Date) => layoutTimed(events.filter((e) => !e.allDay && sameDay(e, day)))
     const allDay = (day: Date) => events.filter((e) => e.allDay && sameDay(e, day))
-    const anyAllDay = days.some((d) => allDay(d).length > 0)
+    const anyAllDay = days.some((d) => allDay(d).length > 0 || tasksOnDay(d).length > 0)
 
     return (
-      <div className="cal-grid">
-        <div className="cal-grid-head" style={{ gridTemplateColumns: cols }}>
-          <div className="cal-grid-corner" />
+      <div className="li-cal-card">
+        <div className="li-cal-daysrow" style={{ gridTemplateColumns: cols }}>
+          <div className="li-cal-daysrow-corner" />
           {days.map((day) => {
             const isToday = day.toDateString() === now.toDateString()
             return (
-              <div key={day.toISOString()} className={`cal-grid-dayhead${isToday ? ' today' : ''}`}>
-                {days.length === 1
-                  ? day.toLocaleDateString(undefined, {
-                      weekday: 'long',
-                      month: 'long',
-                      day: 'numeric',
-                    })
-                  : day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}
+              <div key={day.toISOString()} className="li-cal-daycell">
+                <div className="li-cal-daycell-dow">
+                  {days.length === 1
+                    ? day.toLocaleDateString(undefined, {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                      })
+                    : day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}
+                </div>
+                {days.length === 1 ? null : (
+                  <div className={isToday ? 'li-cal-daycell-num is-today' : 'li-cal-daycell-num'}>
+                    {day.getDate()}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
 
         {anyAllDay && (
-          <div className="cal-grid-allday" style={{ gridTemplateColumns: cols }}>
-            <div className="cal-grid-corner cal-grid-allday-label">all-day</div>
+          <div className="li-cal-allday" style={{ gridTemplateColumns: cols }}>
+            <div className="li-cal-allday-label">all-day</div>
             {days.map((day) => (
-              <div key={day.toISOString()} className="cal-grid-allday-col">
+              <div key={day.toISOString()} className="li-cal-allday-col">
                 {allDay(day).map((e) => renderGridChip(e))}
+                {tasksOnDay(day).map((t) => renderTaskChip(t))}
               </div>
             ))}
           </div>
         )}
 
-        <div className="cal-grid-scroll" ref={gridScrollRef}>
+        <div className="li-cal-scroll" ref={gridScrollRef}>
           <div
-            className={`cal-grid-body${dragging ? ' dragging' : ''}`}
+            className={`li-cal-body${dragging ? ' is-dragging' : ''}`}
             style={{ gridTemplateColumns: cols, height: 24 * HOUR_PX }}
           >
-            <div className="cal-grid-axis">
+            <div className="li-cal-axis">
               {hours.map((h) => (
-                <div key={h} className="cal-grid-hour" style={{ height: HOUR_PX }}>
+                <div key={h} className="li-cal-hour" style={{ height: HOUR_PX }}>
                   <span>{formatHourLabel(h)}</span>
                 </div>
               ))}
@@ -1032,24 +1216,24 @@ export default function CalendarPage() {
               return (
                 <div
                   key={day.toISOString()}
-                  className={`cal-grid-col${canCreate ? ' cal-grid-col-clickable' : ''}`}
+                  className={`li-cal-col${canCreate ? ' li-cal-col-clickable' : ''}`}
                   // Mouse DOWN starts a create-drag; a plain click (no movement) still
                   // opens the creator with a default 1h block (handled on mouseup).
                   onMouseDown={(ev) => beginCreateDrag(ev, day)}
                   title={canCreate ? 'Click or drag an empty slot to add an event' : undefined}
                 >
                   {hours.map((h) => (
-                    <div key={h} className="cal-grid-hline" style={{ height: HOUR_PX }} />
+                    <div key={h} className="li-cal-hline" style={{ height: HOUR_PX }} />
                   ))}
-                  {nowTop !== null && <div className="cal-grid-now" style={{ top: nowTop }} />}
+                  {nowTop !== null && <div className="li-cal-now" style={{ top: nowTop }} />}
                   {ghost && (
                     <div
-                      className="cal-grid-ghost"
+                      className="li-cal-ghost"
                       style={{ top: ghost.top, height: ghost.height }}
                     />
                   )}
-                  {timed(day).map(({ e, top, height, inset }) =>
-                    renderGridEvent(e, day, top, height, inset),
+                  {timed(day).map(({ e, top, height, leftPct, widthPct }) =>
+                    renderGridEvent(e, day, top, height, leftPct, widthPct),
                   )}
                 </div>
               )
@@ -1060,15 +1244,32 @@ export default function CalendarPage() {
     )
   }
 
-  const sortedEvents = useMemo(
-    () =>
-      [...events].filter((e) => e.startIso).sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1)),
-    [events],
-  )
+  // Unified chronological entries (events + due tasks) for the List view.
+  type ListEntry =
+    | { kind: 'event'; e: WorkspaceEvent; at: number }
+    | { kind: 'task'; t: DueTaskItem; at: number }
+  const sortedEntries: ListEntry[] = useMemo(() => {
+    const out: ListEntry[] = []
+    for (const e of events) {
+      if (e.startIso) out.push({ kind: 'event', e, at: new Date(e.startIso).getTime() })
+    }
+    for (const t of dueTasks) {
+      out.push({ kind: 'task', t, at: new Date(`${t.dueDate}T00:00:00`).getTime() })
+    }
+    return out.sort((a, b) => a.at - b.at)
+  }, [events, dueTasks])
+
+  // Duration options: the common presets, plus the panel's current value if it
+  // isn't one of them (e.g. a drag-created 37-minute block) — otherwise editing
+  // it would silently snap to the nearest preset without the select reflecting it.
+  const currentDuration = panel?.durationMin ?? null
+  const durationOptions =
+    currentDuration !== null && !PRESET_DURATIONS_MIN.includes(currentDuration)
+      ? [...PRESET_DURATIONS_MIN, currentDuration].sort((a, b) => a - b)
+      : PRESET_DURATIONS_MIN
 
   return (
     <main>
-      <PageHead title="Calendar" />
       {confirmElement}
       {source === 'disconnected' && (
         <div className="alert alert-error">
@@ -1085,79 +1286,309 @@ export default function CalendarPage() {
       )}
       {error && <div className="alert alert-error">{error}</div>}
 
-      <section>
-        <div
-          className="row"
-          style={{ gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}
-        >
-          <button
-            onClick={() => shift(-1)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
-          >
-            <ChevronLeft size={16} aria-hidden /> Previous
+      <div className="li-cal-header">
+        <div className="li-cal-header-left">
+          <h1 className="li-cal-title">Calendar</h1>
+          <div className="li-cal-nav">
+            <button
+              type="button"
+              className="li-cal-nav-btn"
+              aria-label="Previous"
+              onClick={() => shift(-1)}
+            >
+              <ChevronLeftIcon size={18} />
+            </button>
+            <button
+              type="button"
+              className="li-cal-nav-btn"
+              aria-label="Next"
+              onClick={() => shift(1)}
+            >
+              <ChevronRightIcon size={18} />
+            </button>
+            <span className="li-cal-range">{period.label}</span>
+          </div>
+        </div>
+        <div className="li-cal-header-right">
+          <button type="button" className="li-cal-today-btn" onClick={() => setAnchor(new Date())}>
+            Today
           </button>
-          <button onClick={() => setAnchor(new Date())}>Today</button>
-          <button
-            onClick={() => shift(1)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
-          >
-            Next <ChevronRight size={16} aria-hidden />
-          </button>
-          <strong style={{ marginLeft: 'var(--space-3)' }}>{period.label}</strong>
-          <div className="row" style={{ gap: 0, marginLeft: 'var(--space-3)' }}>
-            {(['day', 'week', 'month', 'list'] as const).map((v) => (
-              <button key={v} className={view === v ? 'primary' : ''} onClick={() => setView(v)}>
+          <div className="li-cal-viewswitch" role="tablist" aria-label="Calendar view">
+            {(['month', 'week', 'day', 'list'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={view === v}
+                className={view === v ? 'li-cal-view-btn is-active' : 'li-cal-view-btn'}
+                onClick={() => setView(v)}
+              >
                 {v[0]!.toUpperCase() + v.slice(1)}
               </button>
             ))}
           </div>
           <button
-            className="primary"
-            style={{ marginLeft: 'auto' }}
+            type="button"
+            className="li-cal-new-btn"
             disabled={source !== 'google'}
-            onClick={() => openCreate('', '')}
+            onClick={() => openCreate()}
           >
-            + Event
+            <PlusIcon size={15} /> New
           </button>
         </div>
-      </section>
+      </div>
 
+      <div className="li-cal-legend">
+        {categories.map((c) => (
+          <div key={c.key} className="li-cal-legend-item">
+            <span className="li-cal-legend-dot" style={{ background: c.color }} />
+            {c.label}
+          </div>
+        ))}
+        <div className="li-cal-legend-item">
+          <span className="li-cal-legend-dot" style={{ background: GOOGLE_EVENT_COLOR }} />
+          Google event
+        </div>
+        <div className="li-cal-legend-item">
+          <span className="li-cal-legend-dot" style={{ background: TASK_DUE_COLOR }} />
+          Task due
+        </div>
+      </div>
+
+      {view === 'day' && (
+        <section>
+          {renderTimeGrid(period.days)}
+          <h3 className="li-cal-agenda-heading">Agenda</h3>
+          <div className="li-cal-agenda">
+            {eventsByDay(period.days[0]!).length === 0 &&
+              tasksOnDay(period.days[0]!).length === 0 && (
+                <span className="li-cal-empty">No events this day.</span>
+              )}
+            {tasksOnDay(period.days[0]!).map((t) => renderTaskAgendaRow(t))}
+            {eventsByDay(period.days[0]!).map((e) => renderEvent(e))}
+          </div>
+          <p className="li-cal-hint">
+            The grid is your real calendar. Use the agenda to edit or duplicate a consultation, or
+            assign a Google event to a matter.
+          </p>
+        </section>
+      )}
+
+      {view === 'week' && (
+        <section>
+          {renderTimeGrid(period.days)}
+          <details className="li-cal-manage">
+            <summary className="li-cal-manage-summary">
+              Manage events (edit, duplicate, cancel, assign)
+            </summary>
+            <div className="li-cal-manage-grid">
+              {period.days.map((day) => dayColumn(day, { headerWeekday: true }))}
+            </div>
+          </details>
+        </section>
+      )}
+
+      {view === 'month' && (
+        <section>
+          <div className="li-cal-month">
+            <div className="li-cal-month-dow-row">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+                <div key={d} className="li-cal-month-dow">
+                  {d}
+                </div>
+              ))}
+            </div>
+            <div className="li-cal-month-grid">
+              {period.days.map((day) => {
+                const inMonth = day.getMonth() === startOfMonth(anchor).getMonth()
+                const isToday = day.toDateString() === new Date().toDateString()
+                const dayEvents = eventsByDay(day)
+                const dayTasks = tasksOnDay(day)
+                const shownEvents = dayEvents.slice(0, 3)
+                const shownTasks = dayTasks.slice(0, Math.max(0, 3 - shownEvents.length))
+                const overflow =
+                  dayEvents.length + dayTasks.length - shownEvents.length - shownTasks.length
+                return (
+                  <div
+                    key={day.toISOString()}
+                    className={inMonth ? 'li-cal-month-cell' : 'li-cal-month-cell is-out'}
+                  >
+                    <button
+                      type="button"
+                      className={isToday ? 'li-cal-month-daybtn is-today' : 'li-cal-month-daybtn'}
+                      title="Open this day"
+                      onClick={() => {
+                        setAnchor(day)
+                        setView('day')
+                      }}
+                    >
+                      {day.getDate()}
+                    </button>
+                    <div className="li-cal-month-chips">
+                      {shownEvents.map((e) => (
+                        <button
+                          key={e.eventId}
+                          type="button"
+                          className="li-cal-month-chip"
+                          style={{
+                            borderLeftColor:
+                              eventColor(e) ??
+                              (e.managedByApp ? 'var(--li-navy)' : GOOGLE_EVENT_COLOR),
+                          }}
+                          title={e.summary}
+                          onClick={() => {
+                            setAnchor(day)
+                            setView('day')
+                          }}
+                        >
+                          {!e.allDay &&
+                            `${new Date(e.startIso!).toLocaleTimeString(undefined, {
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            })} `}
+                          {e.summary}
+                        </button>
+                      ))}
+                      {shownTasks.map((t) => (
+                        <Link
+                          key={t.taskId}
+                          href={`/attorney/matters/${t.matterEntityId}/tasks/${t.taskId}`}
+                          className="li-cal-month-chip is-task"
+                          style={{ borderLeftColor: TASK_DUE_COLOR }}
+                          title={t.title}
+                        >
+                          {t.title}
+                        </Link>
+                      ))}
+                      {overflow > 0 && <span className="li-cal-month-more">+{overflow} more</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          <p className="li-cal-hint">
+            Click a day to open it. Right-click (or the pencil) on an event opens Edit / Duplicate /
+            Delete; task-due chips jump straight to the task.
+          </p>
+        </section>
+      )}
+
+      {view === 'list' && (
+        <section>
+          <div className="li-cal-list">
+            {sortedEntries.map((entry) =>
+              entry.kind === 'task' ? (
+                <Link
+                  key={`task-${entry.t.taskId}`}
+                  href={`/attorney/matters/${entry.t.matterEntityId}/tasks/${entry.t.taskId}`}
+                  className="li-cal-list-row"
+                  style={{ borderLeftColor: TASK_DUE_COLOR }}
+                >
+                  <div>
+                    <div className="li-cal-list-title">{entry.t.title}</div>
+                    <div className="li-cal-list-meta">
+                      Due{' '}
+                      {new Date(`${entry.t.dueDate}T00:00:00`).toLocaleDateString(undefined, {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </div>
+                  </div>
+                  <span className="li-cal-list-badge">Task due · {entry.t.matterNumber}</span>
+                </Link>
+              ) : (
+                <div
+                  key={entry.e.eventId}
+                  className="li-cal-list-row"
+                  style={{
+                    borderLeftColor:
+                      eventColor(entry.e) ??
+                      (entry.e.managedByApp ? 'var(--li-navy)' : GOOGLE_EVENT_COLOR),
+                  }}
+                >
+                  <div>
+                    <div className="li-cal-list-title">{entry.e.summary}</div>
+                    <div className="li-cal-list-meta">
+                      {new Date(entry.e.startIso!).toLocaleString(undefined, {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </div>
+                  </div>
+                  <div className="li-cal-list-actions">
+                    {entry.e.matterEntityId ? (
+                      <>
+                        <Link href={`/attorney/matters/${entry.e.matterEntityId}`}>
+                          {entry.e.matterNumber} →
+                        </Link>
+                        <ActionsMenu
+                          label="Actions"
+                          align="right"
+                          items={eventMenuItems(entry.e)}
+                        />
+                      </>
+                    ) : entry.e.meetingEntityId ? (
+                      <>
+                        {entry.e.contactName && (
+                          <span className="li-cal-list-meta">{entry.e.contactName}</span>
+                        )}
+                        <ActionsMenu
+                          label="Actions"
+                          align="right"
+                          items={eventMenuItems(entry.e)}
+                        />
+                      </>
+                    ) : (
+                      entry.e.htmlLink && (
+                        <a href={entry.e.htmlLink} target="_blank" rel="noreferrer">
+                          Google event ↗
+                        </a>
+                      )
+                    )}
+                  </div>
+                </div>
+              ),
+            )}
+            {sortedEntries.length === 0 && <p className="li-cal-hint">No events in this window.</p>}
+          </div>
+          <p className="li-cal-hint">
+            Chronological list of this window&apos;s events and task due dates. Switch to Day or
+            Week view to drag, or right-click an event to edit, duplicate, or delete it.
+          </p>
+        </section>
+      )}
+
+      {/* ── Unified create/edit modal (comp: CALENDAR EVENT MODAL) ─────────────── */}
       {panel && (
-        <Modal
-          title={panel.kind === 'create' ? 'New event' : 'Reschedule'}
-          onClose={() => setPanel(null)}
-          footer={
-            <>
-              <button onClick={() => setPanel(null)}>Cancel</button>
+        <div className="li-cal-modal-backdrop" onClick={() => !busy && setPanel(null)}>
+          <div className="li-cal-modal" onClick={(ev) => ev.stopPropagation()}>
+            <div className="li-cal-modal-head">
+              <h2>{panel.kind === 'create' ? 'New event' : 'Event details'}</h2>
               <button
-                className="primary"
-                disabled={
-                  busy ||
-                  !panel.start ||
-                  !panel.end ||
-                  (panel.kind === 'create' && panel.mode === 'matter' && !panel.matterEntityId) ||
-                  (panel.kind === 'create' && panel.mode === 'contact' && !panel.contactEntityId)
-                }
-                onClick={() => (panel.kind === 'create' ? submitCreate() : submitReschedule())}
+                type="button"
+                className="li-cal-modal-x"
+                onClick={() => setPanel(null)}
+                disabled={busy}
+                aria-label="Close"
               >
-                {busy
-                  ? 'Saving…'
-                  : panel.kind === 'create'
-                    ? 'Create + sync to Google'
-                    : 'Reschedule'}
+                <XIcon size={16} />
               </button>
-            </>
-          }
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-            {panel.kind === 'create' && (
-              <>
-                {/* Mode: tie to a matter, a contact, or neither (personal block). */}
-                <div className="row" style={{ gap: 0 }}>
+            </div>
+            <div className="li-cal-modal-body">
+              {error && <div className="alert alert-error">{error}</div>}
+
+              {panel.kind === 'create' && (
+                <div className="li-cal-seg-row">
                   {(['matter', 'contact', 'personal'] as const).map((mode) => (
                     <button
                       key={mode}
-                      className={panel.mode === mode ? 'primary' : ''}
+                      type="button"
+                      className={panel.mode === mode ? 'li-cal-seg is-active' : 'li-cal-seg'}
                       disabled={mode === 'matter' && matters.length === 0}
                       title={
                         mode === 'matter' && matters.length === 0
@@ -1174,134 +1605,216 @@ export default function CalendarPage() {
                     </button>
                   ))}
                 </div>
+              )}
 
-                {panel.mode === 'matter' && (
-                  <div>
-                    <div className="kv-label" style={{ marginBottom: 4 }}>
-                      Matter
-                    </div>
-                    <Combobox
-                      ariaLabel="Matter"
-                      options={matterOptions}
-                      value={panel.matterEntityId ?? null}
-                      onChange={(v) => setPanel({ ...panel, matterEntityId: v })}
-                      placeholder="Search matters or clients…"
-                    />
-                  </div>
-                )}
+              {panel.kind === 'create' && panel.mode === 'matter' && (
+                <label className="li-cal-field">
+                  <span>Matter</span>
+                  <Combobox
+                    ariaLabel="Matter"
+                    options={matterOptions}
+                    value={panel.matterEntityId ?? null}
+                    onChange={(v) => setPanel({ ...panel, matterEntityId: v })}
+                    placeholder="Search matters or clients…"
+                  />
+                </label>
+              )}
 
-                {panel.mode === 'contact' && (
-                  <div>
-                    <div className="kv-label" style={{ marginBottom: 4 }}>
-                      Contact
-                    </div>
-                    <Combobox
-                      ariaLabel="Contact"
-                      options={contactOptions}
-                      value={panel.contactEntityId ?? null}
-                      onChange={(v) => setPanel({ ...panel, contactEntityId: v })}
-                      placeholder="Search contacts…"
-                    />
-                  </div>
-                )}
+              {panel.kind === 'create' && panel.mode === 'contact' && (
+                <label className="li-cal-field">
+                  <span>Contact</span>
+                  <Combobox
+                    ariaLabel="Contact"
+                    options={contactOptions}
+                    value={panel.contactEntityId ?? null}
+                    onChange={(v) => setPanel({ ...panel, contactEntityId: v })}
+                    placeholder="Search contacts…"
+                  />
+                </label>
+              )}
 
-                {panel.mode !== 'matter' && (
-                  <div>
-                    <div className="kv-label" style={{ marginBottom: 4 }}>
-                      Title
-                    </div>
-                    <input
-                      type="text"
-                      style={{ width: '100%' }}
-                      placeholder={panel.mode === 'contact' ? 'Meeting' : 'Personal block'}
-                      value={panel.summary ?? ''}
-                      onChange={(e) => setPanel({ ...panel, summary: e.target.value })}
-                    />
-                  </div>
-                )}
-              </>
-            )}
-            <div>
-              <div className="kv-label" style={{ marginBottom: 4 }}>
-                Start
+              {panel.kind === 'create' && panel.mode !== 'matter' && (
+                <label className="li-cal-field">
+                  <span>Title</span>
+                  <input
+                    type="text"
+                    placeholder={panel.mode === 'contact' ? 'Meeting' : 'Personal block'}
+                    value={panel.summary}
+                    onChange={(e) => setPanel({ ...panel, summary: e.target.value })}
+                  />
+                </label>
+              )}
+
+              {panel.kind === 'edit' && (
+                <label className="li-cal-field">
+                  <span>Title</span>
+                  <input
+                    type="text"
+                    value={panel.e.summary}
+                    readOnly
+                    disabled
+                    className="li-cal-field-readonly"
+                  />
+                </label>
+              )}
+
+              {panel.kind === 'edit' && panel.e.matterEntityId && (
+                <label className="li-cal-field">
+                  <span>Matter</span>
+                  <Link
+                    href={`/attorney/matters/${panel.e.matterEntityId}`}
+                    className="li-cal-modal-link"
+                  >
+                    {panel.e.matterNumber} →
+                  </Link>
+                </label>
+              )}
+              {panel.kind === 'edit' && !panel.e.matterEntityId && panel.e.contactName && (
+                <label className="li-cal-field">
+                  <span>Contact</span>
+                  <div className="li-cal-modal-static">{panel.e.contactName}</div>
+                </label>
+              )}
+
+              <div className="li-cal-field-row">
+                <label className="li-cal-field">
+                  <span>Date</span>
+                  <input
+                    type="date"
+                    value={panel.date}
+                    onChange={(e) => setPanel({ ...panel, date: e.target.value })}
+                  />
+                </label>
+                <label className="li-cal-field">
+                  <span>Time</span>
+                  <input
+                    type="time"
+                    value={panel.time}
+                    onChange={(e) => setPanel({ ...panel, time: e.target.value })}
+                  />
+                </label>
               </div>
-              <input
-                type="datetime-local"
-                style={{ width: '100%' }}
-                value={panel.start}
-                onChange={(e) => setPanel({ ...panel, start: e.target.value })}
-              />
+              <label className="li-cal-field">
+                <span>Duration</span>
+                <select
+                  value={panel.durationMin}
+                  onChange={(e) => setPanel({ ...panel, durationMin: Number(e.target.value) })}
+                >
+                  {durationOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {formatDuration(m)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {((panel.kind === 'create' && panel.mode === 'matter') ||
+                (panel.kind === 'edit' && panel.e.matterEntityId)) && (
+                <div className="li-cal-field">
+                  <span>Category</span>
+                  <div className="li-cal-chip-row">
+                    {categories.map((c) => {
+                      const active = panel.categoryKey === c.key
+                      return (
+                        <button
+                          key={c.key}
+                          type="button"
+                          className={active ? 'li-cal-chip is-active' : 'li-cal-chip'}
+                          style={
+                            active
+                              ? { background: `${c.color}1a`, color: c.color, borderColor: c.color }
+                              : { color: c.color }
+                          }
+                          onClick={() => setPanel({ ...panel, categoryKey: active ? '' : c.key })}
+                        >
+                          {c.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
-            <div>
-              <div className="kv-label" style={{ marginBottom: 4 }}>
-                End
+            <div className="li-cal-modal-foot">
+              {panel.kind === 'edit' ? (
+                <button
+                  type="button"
+                  className="li-cal-btn-danger-text"
+                  disabled={busy}
+                  onClick={() => deleteEvent(panel.e)}
+                >
+                  Delete
+                </button>
+              ) : (
+                <span />
+              )}
+              <div className="li-cal-modal-foot-right">
+                <button
+                  type="button"
+                  className="li-cal-btn-ghost"
+                  disabled={busy}
+                  onClick={() => setPanel(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="li-cal-btn-primary"
+                  disabled={
+                    busy ||
+                    !panel.date ||
+                    !panel.time ||
+                    (panel.kind === 'create' && panel.mode === 'matter' && !panel.matterEntityId) ||
+                    (panel.kind === 'create' && panel.mode === 'contact' && !panel.contactEntityId)
+                  }
+                  onClick={submitPanel}
+                >
+                  {busy
+                    ? 'Saving…'
+                    : panel.kind === 'create'
+                      ? 'Create + sync to Google'
+                      : 'Save event'}
+                </button>
               </div>
-              <input
-                type="datetime-local"
-                style={{ width: '100%' }}
-                value={panel.end}
-                onChange={(e) => setPanel({ ...panel, end: e.target.value })}
-              />
             </div>
           </div>
-        </Modal>
+        </div>
       )}
 
-      {categorizeFor && (
-        <Modal
-          title={`Categorize — ${categorizeFor.matterNumber}`}
-          onClose={() => setCategorizeFor(null)}
-          footer={<button onClick={() => setCategorizeFor(null)}>Done</button>}
+      {/* ── Right-click / pencil context menu (comp: CALENDAR CONTEXT MENU) ─────── */}
+      {calMenu && (
+        <div
+          className="li-cal-menu-overlay"
+          onClick={closeCalMenu}
+          onContextMenu={(ev) => {
+            ev.preventDefault()
+            closeCalMenu()
+          }}
         >
-          <p className="text-muted text-sm" style={{ marginTop: 0 }}>
-            Pick the call-type. It color-codes the event everywhere it appears.
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-            {categories.map((c) => (
-              <button
-                key={c.key}
-                className="row"
-                style={{
-                  justifyContent: 'flex-start',
-                  gap: 'var(--space-2)',
-                  alignItems: 'center',
-                  padding: 'var(--space-2)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  background:
-                    categorizeFor.categoryKey === c.key ? 'var(--surface, #f6f6f6)' : 'transparent',
-                  fontWeight: categorizeFor.categoryKey === c.key ? 700 : 400,
-                  cursor: 'pointer',
-                }}
-                disabled={busy}
-                onClick={() => submitCategorize(c.key)}
-              >
-                <span
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 3,
-                    background: c.color,
-                    flex: '0 0 auto',
-                  }}
-                />
-                {c.label}
-                {categorizeFor.categoryKey === c.key ? (
-                  <Check size={14} aria-hidden style={{ marginLeft: 4 }} />
-                ) : null}
-              </button>
-            ))}
-            {categorizeFor.categoryKey && (
-              <button
-                style={{ marginTop: 'var(--space-1)' }}
-                disabled={busy}
-                onClick={() => submitCategorize('')}
-              >
-                Clear category
-              </button>
-            )}
+          <div
+            className="li-cal-menu"
+            style={{ left: calMenu.x, top: calMenu.y }}
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <button type="button" className="li-cal-menu-item" onClick={() => openEdit(calMenu.e)}>
+              Edit event
+            </button>
+            <button
+              type="button"
+              className="li-cal-menu-item"
+              onClick={() => duplicateEvent(calMenu.e)}
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              className="li-cal-menu-item is-danger"
+              onClick={() => deleteEvent(calMenu.e)}
+            >
+              Delete
+            </button>
           </div>
-        </Modal>
+        </div>
       )}
 
       {attendeesFor && (
@@ -1333,208 +1846,6 @@ export default function CalendarPage() {
             onChange={(e) => setAttendeeInput(e.target.value)}
           />
         </Modal>
-      )}
-
-      {view === 'day' && (
-        <section>
-          {renderTimeGrid(period.days)}
-          <h3 style={{ marginTop: 'var(--space-4)' }}>Agenda</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            {eventsByDay(period.days[0]!).length === 0 && (
-              <span className="text-muted text-sm">No events this day.</span>
-            )}
-            {eventsByDay(period.days[0]!).map((e) => renderEvent(e))}
-          </div>
-          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-            The grid is your real calendar. Use the agenda to reschedule or cancel consultations or
-            assign a Google event to a matter.
-          </p>
-        </section>
-      )}
-
-      {view === 'week' && (
-        <section>
-          {renderTimeGrid(period.days)}
-          <details style={{ marginTop: 'var(--space-4)' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-              Manage events (reschedule, cancel, assign)
-            </summary>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(7, minmax(120px, 1fr))',
-                gap: 'var(--space-2)',
-                overflowX: 'auto',
-                marginTop: 'var(--space-3)',
-              }}
-            >
-              {period.days.map((day) => dayColumn(day, { headerWeekday: true }))}
-            </div>
-          </details>
-        </section>
-      )}
-
-      {view === 'month' && (
-        <section>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(7, minmax(90px, 1fr))',
-              gap: 1,
-              background: 'var(--border)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-              <div
-                key={d}
-                className="kv-label"
-                style={{ padding: 'var(--space-1) var(--space-2)', background: 'var(--bg, #fff)' }}
-              >
-                {d}
-              </div>
-            ))}
-            {period.days.map((day) => {
-              const inMonth = day.getMonth() === startOfMonth(anchor).getMonth()
-              const isToday = day.toDateString() === new Date().toDateString()
-              const dayEvents = eventsByDay(day)
-              return (
-                <div
-                  key={day.toISOString()}
-                  style={{
-                    background: 'var(--bg, #fff)',
-                    minHeight: 96,
-                    padding: 'var(--space-1)',
-                    opacity: inMonth ? 1 : 0.45,
-                  }}
-                >
-                  <button
-                    className="text-sm"
-                    title="Open this day"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: 2,
-                      cursor: 'pointer',
-                      fontWeight: isToday ? 700 : 500,
-                      textDecoration: isToday ? 'underline' : 'none',
-                    }}
-                    onClick={() => {
-                      setAnchor(day)
-                      setView('day')
-                    }}
-                  >
-                    {day.getDate()}
-                  </button>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 2 }}>
-                    {dayEvents.slice(0, 3).map((e) => (
-                      <button
-                        key={e.eventId}
-                        title={e.summary}
-                        onClick={() => {
-                          setAnchor(day)
-                          setView('day')
-                        }}
-                        style={{
-                          textAlign: 'left',
-                          border: 'none',
-                          borderLeft: `3px solid ${
-                            eventColor(e) ?? (e.managedByApp ? 'var(--navy)' : 'var(--border)')
-                          }`,
-                          borderRadius: 3,
-                          background: 'var(--surface, #f6f6f6)',
-                          padding: '1px 4px',
-                          fontSize: '0.72rem',
-                          cursor: 'pointer',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                      >
-                        {!e.allDay &&
-                          `${new Date(e.startIso!).toLocaleTimeString(undefined, {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                          })} `}
-                        {e.summary}
-                      </button>
-                    ))}
-                    {dayEvents.length > 3 && (
-                      <span className="text-muted" style={{ fontSize: '0.7rem' }}>
-                        +{dayEvents.length - 3} more
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-            Click a day to open it. Matter-linked consultations are highlighted; click an event to
-            jump to its day, where you can reschedule, cancel, or assign.
-          </p>
-        </section>
-      )}
-
-      {view === 'list' && (
-        <section>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-            {sortedEvents.map((e) => (
-              <div
-                key={e.eventId}
-                className="row"
-                style={{
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 'var(--space-3)',
-                  border: '1px solid var(--border)',
-                  borderLeft: `3px solid ${
-                    eventColor(e) ?? (e.managedByApp ? 'var(--navy)' : 'var(--border)')
-                  }`,
-                  borderRadius: 6,
-                  padding: 'var(--space-2) var(--space-3)',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600 }}>{e.summary}</div>
-                  <div className="text-muted text-sm">
-                    {new Date(e.startIso!).toLocaleString(undefined, {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </div>
-                </div>
-                <div className="row" style={{ gap: 'var(--space-2)', alignItems: 'center' }}>
-                  {e.matterEntityId ? (
-                    <>
-                      <Link href={`/attorney/matters/${e.matterEntityId}`}>{e.matterNumber} →</Link>
-                      <ActionsMenu label="Actions" align="right" items={eventMenuItems(e)} />
-                    </>
-                  ) : e.meetingEntityId ? (
-                    <>
-                      {e.contactName && <span className="text-muted text-sm">{e.contactName}</span>}
-                      <ActionsMenu label="Actions" align="right" items={eventMenuItems(e)} />
-                    </>
-                  ) : (
-                    e.htmlLink && (
-                      <a href={e.htmlLink} target="_blank" rel="noreferrer" className="text-sm">
-                        Google event ↗
-                      </a>
-                    )
-                  )}
-                </div>
-              </div>
-            ))}
-            {sortedEvents.length === 0 && <p className="text-muted">No events in this window.</p>}
-          </div>
-          <p className="text-muted text-sm" style={{ marginTop: 'var(--space-3)' }}>
-            Chronological list of this window&apos;s events. Switch to Day or Week view to book,
-            reschedule, or cancel.
-          </p>
-        </section>
       )}
     </main>
   )

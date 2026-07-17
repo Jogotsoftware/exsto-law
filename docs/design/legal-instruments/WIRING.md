@@ -212,17 +212,60 @@ pathname-prefix match.
 - [ ] .docx invoice-template upload with merge fields
 - [ ] Stripe manage panel (payout account / schedule / fee / balance / open-dashboard via Stripe API)
 
-## WP-H · Calendar
+## WP-H · Calendar — SHIPPED (branch li/wp-h-calendar)
 
-- [ ] WIRED: Day/Week/Month(+List) views; prev/next/today; create/edit modal + matter binding; drag
-      create/move/resize; Google events (read-only + assign-to-matter); per-event menu; firm categories
-- [ ] BUILD: full-page legend
-- [ ] BUILD: task-due events in the feed
-- [ ] BUILD: right-click context menu incl. Duplicate
-- [ ] BUILD: side-by-side lanes for overlapping events (today: cascading inset)
-- [ ] BUILD: seed default categories (Consultation / Follow-up / Court / Internal) as firm-category rows
-      (config-as-data, no hardcoded kinds)
-- [ ] CONFLICT (Joe): List view + drag interactions (richer than comp — presumably keep)
+- [x] WIRED: Day/Week/Month(+List) views; prev/next/today; create/edit modal + matter binding; drag
+      create/move/resize; Google events (read-only + assign-to-matter); per-event menu; firm categories —
+      restyled to `li-cal-*`; all regression-walked live (views, drag-create, matter/contact/personal
+      create, assign-to-matter still present in the agenda)
+- [x] BUILD: full-page legend — `li-cal-legend` row above the grid: one dot per live firm category
+      (`legal.calendar.categories.get`, data-driven, not hardcoded) + the two fixed entries the comp's
+      demo data hardcodes (Google event #9AA4B8, Task due #1F9E8F — new `--li-cal-teal` token, the one
+      comp color with no firm-category equivalent)
+- [x] BUILD: task-due events in the feed — new query `listDueTasks` (`verticals/legal/src/queries/tasks.ts`,
+      reuses the existing `TASK_SELECT` firm-wide instead of per-matter) + new read-only MCP tool
+      `legal.task.list_due({fromDate, toDateExclusive})`; rendered teal in the all-day strip / month cells
+      / List view (badge row) / day-agenda; click → `/attorney/matters/{id}/tasks/{taskId}`. Verified live:
+      created a real task with today's due date, chip rendered + click navigated to the task.
+- [x] BUILD: right-click context menu incl. Duplicate — comp-exact 3-item menu (Edit event / Duplicate /
+      Delete) via a pencil icon OR right-click on any APP-OWNED grid event (matter consultation or
+      contact/personal meeting); Duplicate calls the SAME existing create action
+      (`legal.booking.create_for_matter` / `legal.meeting.create`) at the same time — no new capability.
+      Verified live: duplicated a personal block, got two overlapping events, deleted both via the menu
+      and via the modal's Delete button.
+- [x] BUILD: side-by-side lanes for overlapping events (replaces cascading inset) — ported the comp's exact
+      `layout()` algorithm (pairwise-overlap group → equal-width columns) into `layoutTimed`. Verified live
+      with a duplicated event: both blocks render as two equal-width side-by-side columns.
+- [x] BUILD: seed default categories (Consultation / Follow-up / Court / Internal) as firm-category rows —
+      `legal.calendar.categories.get` now also returns `configured: boolean` (was the read ever persisted,
+      vs. just the in-memory starter defaults); the Calendar page seeds a REAL row via the EXISTING
+      `legal.calendar.categories.set` the first time it sees `configured: false`. `DEFAULT_CALENDAR_CATEGORIES`
+      recolored to the comp's exact legend hex so the seeded row and the comp match pixel-for-pixel.
+      Verified live: fresh tenant load → `configured` flipped `false → true`, row confirmed via direct MCP call.
+- [x] CONFLICT (Joe) RESOLVED — **keep, restyled**: List view (`li-cal-list`) and all drag interactions
+      (create/move/resize) fully preserved, restyled to the comp's card language.
+
+### Deviations (documented, not unilateral cuts)
+
+- The comp's Event modal shows an editable Title input; no capability exists to rename an existing
+  consultation or meeting (no `legal.meeting.update`-title action), so Title is a disabled/read-only field
+  when editing (same "don't fake a dead control" call WP-B made for the service-subline pencil). Title stays
+  editable at CREATE time for contact/personal events (unchanged existing behavior).
+- The comp's modal has no end-time/duration control (its demo assumes a fixed length). Added a compact
+  Duration select (common presets + the event's actual value if it's a non-preset drag-created length) —
+  required for the create/reschedule actions, which need a real end time.
+- A plain click on a contact/personal grid event now opens the edit modal (previously a dead end — no
+  matter to deep-link to); matter-consultation clicks still navigate to the matter (WIRED, unchanged) —
+  editing those is via the pencil/right-click, matching the comp's own split between click-to-navigate and
+  a dedicated edit affordance.
+- Found, not fixed (pre-existing, out of WP-H scope): `legal.booking.cancel`/`reschedule` resolve "the"
+  Google event for a matter via `matterGoogleEventId` (latest-wins), not a specific booking instance. Since
+  a matter consultation is architecturally a singleton per matter, Duplicating one and then cancelling a
+  specific copy can leave an earlier duplicate's Google-side event orphaned (the substrate side always
+  reflects the latest booking correctly; only the external Google artifact can go stale). Contact/personal
+  meetings have no such issue (each is its own `calendar_event` id, cancelled precisely). Not fixed here —
+  it's a characteristic of the existing singleton booking model, not a WP-H regression, and WIRING directed
+  Duplicate to use the existing create action as-is.
 
 ## WP-I · Mail — SHIPPED (branch li/wp-i-mail)
 
