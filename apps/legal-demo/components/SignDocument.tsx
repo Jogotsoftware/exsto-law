@@ -6,6 +6,7 @@
 // caller supplies onSign/onDecline (portal MCP vs /api/sign routes).
 import { useState } from 'react'
 import { useConfirm } from '@/components/ConfirmModal'
+import { ScaleIcon } from '@/components/icons'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 
 export interface SignField {
@@ -84,7 +85,12 @@ export function SignDocument({
     return (
       <div className="public-draft-head">
         <div>
-          <div className="public-draft-firm">Pacheco Law</div>
+          <div className="pd-brandrow">
+            <span className="cp-crest" aria-hidden>
+              <ScaleIcon size={18} />
+            </span>
+            <div className="public-draft-firm">Pacheco Law</div>
+          </div>
           <h1 style={{ margin: 'var(--space-1) 0 0' }}>{doc.documentTitle}</h1>
         </div>
       </div>

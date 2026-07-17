@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from 'react'
 import { callClientMcp } from '@/lib/mcpClient'
+import { ScaleIcon } from '@/components/icons'
 import { callClientPortalMcp } from '@/lib/mcpClientPortal'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, watermarkForStatus } from '@/lib/draftExport'
@@ -92,7 +93,12 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
     <div className="public-draft">
       <div className="public-draft-head">
         <div>
-          <div className="public-draft-firm">Pacheco Law</div>
+          <div className="pd-brandrow">
+            <span className="cp-crest" aria-hidden>
+              <ScaleIcon size={18} />
+            </span>
+            <div className="public-draft-firm">Pacheco Law</div>
+          </div>
           <h1 style={{ margin: 'var(--space-1) 0 0' }}>{title}</h1>
           <div className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>
             Matter {draft.matterNumber} · v{draft.versionNumber} · generated{' '}
