@@ -6,14 +6,21 @@
 // bound intake form (read via legal.service.questionnaire.get; edited in the
 // service builder). Beta feedback: listing only the standalone forms made the
 // page claim "no questionnaires exist" while a live service had one.
+//
+// WP-K (Legal Instruments redesign): the table became a visual card gallery —
+// each card is a DocumentSheet thumb-form mini rendering of the REAL form
+// (icon + decorative title bar, then each real field as a proportional label
+// bar + input box, first four fields) plus a status badge. Per D6: no usage
+// counts, no "Feeds" column on the card — that data is still real and still
+// editable inside the questionnaire itself, just not shown as gallery chrome.
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
-import { formatDate } from '@/lib/datetime'
-import { PageHead } from '@/components/PageHead'
 import { QuestionnaireConfigModal } from '@/components/configEditors'
+import { DocumentSheet } from '@/components/DocumentSheet'
+import { FileTextIcon, MoreHorizontalIcon, PlusIcon } from '@/components/icons'
 import {
   QuestionnaireBuilder,
   schemaToSections,
@@ -27,7 +34,7 @@ import {
 // BUILDER-UX-1 WP-4: the field-editing builder, its types, helpers, and the
 // question-library picker moved to components/QuestionnaireBuilder.tsx so this
 // page and the wizard-proposal pop-up share ONE editor. This page keeps only the
-// list, the name/description + associated-templates chrome, and the save
+// gallery, the name/description + associated-templates chrome, and the save
 // orchestration (create/update + set_templates).
 interface AssocTemplate {
   templateEntityId: string
@@ -67,13 +74,67 @@ interface ServiceIntakeForm {
   isActive: boolean
   title: string
   fieldCount: number
+  // Real field labels (first few used for the gallery card's mini thumbnail).
+  fields: string[]
   updatedAt: string
 }
 
-export default function QuestionnaireLibraryPage() {
+// One field on a gallery card's mini form thumbnail: a proportional label bar
+// (width derived from the REAL field's label length, not a decorative
+// placeholder) + an input box, per the comp's intake-forms gallery.
+interface ThumbField {
+  key: string
+  widthPct: number
+}
+
+function thumbFields(labels: string[]): ThumbField[] {
+  return labels.slice(0, 4).map((label, i) => ({
+    key: `${i}-${label}`,
+    widthPct: Math.max(34, Math.min(92, label.length * 3)),
+  }))
+}
+
+function IntakeThumb({ fields }: { fields: ThumbField[] }): ReactElement {
+  return (
+    <div className="li-int-card-thumbwrap">
+      <DocumentSheet variant="thumb-form" className="li-int-card-thumb">
+        <div className="li-int-thumb-head">
+          <span className="li-int-thumb-icon">
+            <FileTextIcon size={12} />
+          </span>
+          <span className="li-int-thumb-title" />
+        </div>
+        <div className="li-int-thumb-fields">
+          {fields.map((f) => (
+            <div key={f.key} className="li-int-thumb-field">
+              <div className="li-int-thumb-field-label" style={{ width: `${f.widthPct}%` }} />
+              <div className="li-int-thumb-field-input" />
+            </div>
+          ))}
+        </div>
+      </DocumentSheet>
+    </div>
+  )
+}
+
+// Library questionnaires are always active entities (the list query already
+// filters entity.status = 'active'; archived ones never reach this page), so
+// their badge is always Active. A service-bound form's badge follows the
+// service's own live/disabled state — the one real signal this app has for
+// "active vs draft" on an intake form.
+function StatusBadge({ active }: { active: boolean }): ReactElement {
+  return (
+    <span className={`li-int-status ${active ? 'li-int-status--active' : 'li-int-status--draft'}`}>
+      <span className="li-int-status-dot" />
+      {active ? 'Active' : 'Draft'}
+    </span>
+  )
+}
+
+export default function QuestionnaireLibraryPage(): ReactElement {
   const { confirm, confirmElement } = useConfirm()
   const [items, setItems] = useState<QuestionnaireTemplate[] | null>(null)
-  // Phase 9: the shared edit-in-modal, opened per library questionnaire row.
+  // Phase 9: the shared edit-in-modal, opened per library questionnaire card.
   const [modalQuestionnaire, setModalQuestionnaire] = useState<QuestionnaireTemplate | null>(null)
   const [svcForms, setSvcForms] = useState<ServiceIntakeForm[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -81,6 +142,11 @@ export default function QuestionnaireLibraryPage() {
   const [saving, setSaving] = useState(false)
   // The firm's document templates, for the "Associated templates" picker.
   const [templates, setTemplates] = useState<{ templateEntityId: string; name: string }[]>([])
+  // The gallery card kebab menu (Edit in window / Archive) — only one open at a
+  // time; the comp's card is a single "open the editor" click target, so these
+  // two existing actions live behind a small per-card overflow instead (WP-E
+  // precedent, templates gallery).
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
 
   function load() {
     setError(null)
@@ -115,6 +181,9 @@ export default function QuestionnaireLibraryPage() {
                       fieldCount: (q.questionnaire.sections ?? []).reduce(
                         (n, sec) => n + (sec.fields ?? []).length,
                         0,
+                      ),
+                      fields: (q.questionnaire.sections ?? []).flatMap((sec) =>
+                        (sec.fields ?? []).map((f) => f.label?.trim() || f.id || '(untitled)'),
                       ),
                       updatedAt: s.updatedAt,
                     }
@@ -220,22 +289,132 @@ export default function QuestionnaireLibraryPage() {
   return (
     <main>
       {confirmElement}
-      <PageHead
-        title="Questionnaires"
-        actions={
-          !draft ? (
-            <button className="primary" onClick={() => setDraft(EMPTY_DRAFT())}>
-              New questionnaire
-            </button>
-          ) : undefined
-        }
-      />
-      <p className="text-muted">
-        Manage the reusable single questions in the{' '}
-        <a href="/attorney/questions">question library →</a>
-      </p>
+      {error && <div className="alert alert-error li-int-alert">{error}</div>}
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {!draft && (
+        <>
+          <div className="li-int-gallery-head">
+            <div>
+              <h1 className="li-int-title">Intake Forms</h1>
+              <p className="li-int-sub">Forms clients complete before a matter opens.</p>
+            </div>
+            <button
+              type="button"
+              className="li-int-new-btn"
+              onClick={() => setDraft(EMPTY_DRAFT())}
+            >
+              <PlusIcon size={16} />
+              New intake form
+            </button>
+          </div>
+          <p className="li-int-sublink">
+            Manage the reusable single questions in the{' '}
+            <a href="/attorney/questions">question library →</a>
+          </p>
+
+          {items === null && !error && (
+            <div className="loading-block" role="status">
+              <span className="spinner" /> Loading…
+            </div>
+          )}
+          {items && items.length === 0 && (svcForms?.length ?? 0) === 0 && (
+            <p className="li-int-empty">
+              No questionnaires yet. Build your first reusable intake form.
+            </p>
+          )}
+          {items && (items.length > 0 || (svcForms?.length ?? 0) > 0) && (
+            <div className="li-int-grid">
+              {items.map((t) => {
+                const fields = thumbFields(
+                  (t.schema.sections ?? [])
+                    .flatMap((s) => s.fields ?? [])
+                    .map((f) => f.label?.trim() || 'Field'),
+                )
+                const menuOpen = openMenuId === t.questionnaireTemplateId
+                return (
+                  <div key={t.questionnaireTemplateId} className="li-int-card-wrap">
+                    <button
+                      type="button"
+                      className="li-int-card"
+                      onClick={() => editFrom(t)}
+                      aria-label={`Open ${t.name || 'untitled intake form'}`}
+                    >
+                      <IntakeThumb fields={fields} />
+                      <div className="li-int-card-meta">
+                        <div className="li-int-card-row">
+                          <span className="li-int-card-name">{t.name || '(untitled)'}</span>
+                          <StatusBadge active />
+                        </div>
+                        <div className="li-int-card-sub">
+                          {t.fieldCount} question{t.fieldCount === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      className="li-int-card-menu-btn"
+                      aria-label={`More actions for ${t.name || 'untitled intake form'}`}
+                      aria-expanded={menuOpen}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setOpenMenuId(menuOpen ? null : t.questionnaireTemplateId)
+                      }}
+                    >
+                      <MoreHorizontalIcon size={16} />
+                    </button>
+                    {menuOpen && (
+                      <div className="li-int-card-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            setModalQuestionnaire(t)
+                          }}
+                        >
+                          Edit in window
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="li-int-card-menu-danger"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            void archive(t)
+                          }}
+                        >
+                          Archive
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {/* Service-bound intake forms — every service's questionnaire, so
+                  this page is the full inventory. Edited in the service builder. */}
+              {(svcForms ?? []).map((f) => (
+                <Link
+                  key={`svc-${f.serviceKey}`}
+                  href={`/attorney/services/${encodeURIComponent(f.serviceKey)}/questionnaire`}
+                  className="li-int-card li-int-card--link"
+                  aria-label={`Open ${f.title} (edited in the ${f.serviceName} service)`}
+                >
+                  <IntakeThumb fields={thumbFields(f.fields)} />
+                  <div className="li-int-card-meta">
+                    <div className="li-int-card-row">
+                      <span className="li-int-card-name">{f.title}</span>
+                      <StatusBadge active={f.isActive} />
+                    </div>
+                    <div className="li-int-card-sub">
+                      {f.fieldCount} question{f.fieldCount === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
       {draft && (
         <section style={{ marginBottom: 'var(--space-5)' }}>
@@ -333,82 +512,6 @@ export default function QuestionnaireLibraryPage() {
             sections={draft.sections}
             onChange={(next) => setDraft({ ...draft, sections: next })}
           />
-        </section>
-      )}
-
-      {items === null && !error && (
-        <div className="loading-block" role="status">
-          <span className="spinner" /> Loading…
-        </div>
-      )}
-      {items && items.length === 0 && (svcForms?.length ?? 0) === 0 && !draft && (
-        <section>
-          <p className="text-muted">
-            No questionnaires yet. Build your first reusable intake form.
-          </p>
-        </section>
-      )}
-      {items && (items.length > 0 || (svcForms?.length ?? 0) > 0) && (
-        <section>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th style={{ textAlign: 'right' }}>Fields</th>
-                  <th>Feeds</th>
-                  <th>Updated</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((t) => (
-                  <tr key={t.questionnaireTemplateId}>
-                    <td>
-                      <strong>{t.name || '(untitled)'}</strong>
-                    </td>
-                    <td className="text-muted">{t.description ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{t.fieldCount}</td>
-                    <td className="text-muted">
-                      {(t.associatedTemplates ?? []).length > 0
-                        ? (t.associatedTemplates ?? []).map((a) => a.name || 'untitled').join(', ')
-                        : '—'}
-                    </td>
-                    <td>{formatDate(t.updatedAt)}</td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <button onClick={() => setModalQuestionnaire(t)}>Edit in window</button>{' '}
-                      <button onClick={() => editFrom(t)}>Edit</button>{' '}
-                      <button onClick={() => archive(t)}>Archive</button>
-                    </td>
-                  </tr>
-                ))}
-                {/* Service-bound intake forms — every service's questionnaire, so
-                    this page is the full inventory. Edited in the service builder. */}
-                {(svcForms ?? []).map((f) => (
-                  <tr key={`svc-${f.serviceKey}`}>
-                    <td>
-                      <strong>{f.title}</strong>{' '}
-                      <span className={`badge ${f.isActive ? 'ok' : ''}`}>
-                        {f.isActive ? 'Live service' : 'Service (disabled)'}
-                      </span>
-                    </td>
-                    <td className="text-muted">Intake form for the {f.serviceName} service</td>
-                    <td style={{ textAlign: 'right' }}>{f.fieldCount}</td>
-                    <td className="text-muted">{f.serviceName}</td>
-                    <td>{formatDate(f.updatedAt)}</td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <Link
-                        href={`/attorney/services/${encodeURIComponent(f.serviceKey)}/questionnaire`}
-                      >
-                        <button>Edit in service</button>
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </section>
       )}
       {/* UI-BUILDER-FIX-1 Phase 9: the shared edit-in-modal (view / edit /
