@@ -136,8 +136,10 @@ const UNTRUSTED_GUARD =
 
 // Stop untrusted content from forging the data-block fence to break out of it
 // (a client email body containing the literal end-marker, then "ignore the
-// above"). Applied to the whole assembled block in wrapData.
-function neutralizeDelimiters(s: string): string {
+// above"). Applied to the whole assembled block in wrapData. Exported so other
+// untrusted-data assemblers (briefEvidence.ts's EvidenceBundle sections) apply
+// the SAME guard instead of forking their own — one fencing implementation.
+export function neutralizeDelimiters(s: string): string {
   return s.split(DATA_BEGIN).join('[BEGIN MATTER DATA]').split(DATA_END).join('[END MATTER DATA]')
 }
 
@@ -152,13 +154,16 @@ export function safeField(s: string | null | undefined): string {
     .trim()
 }
 
-function clip(s: string, max: number): string {
+// Exported: the ONE char-budget clip used everywhere untrusted/bulky matter
+// content gets capped (chat prompts here, EvidenceBundle sections in
+// briefEvidence.ts) — reuse, don't fork a second truncation convention.
+export function clip(s: string, max: number): string {
   const t = s.trim()
   if (t.length <= max) return t
   return `${t.slice(0, max).trimEnd()} …[truncated]`
 }
 
-function renderEmails(bodies: MatterMessageBody[]): string {
+export function renderEmails(bodies: MatterMessageBody[]): string {
   return bodies
     .map((m) => {
       const who =
@@ -170,11 +175,11 @@ function renderEmails(bodies: MatterMessageBody[]): string {
     .join('\n\n')
 }
 
-function fmtDate(iso: string | null | undefined): string {
+export function fmtDate(iso: string | null | undefined): string {
   return iso ? iso.slice(0, 10) : ''
 }
 
-function renderTasks(tasks: Awaited<ReturnType<typeof listTasksByMatter>>): string {
+export function renderTasks(tasks: Awaited<ReturnType<typeof listTasksByMatter>>): string {
   return tasks
     .map((t) => {
       const due = t.dueDate ? `, due ${fmtDate(t.dueDate)}` : ''
@@ -189,7 +194,7 @@ function renderTasks(tasks: Awaited<ReturnType<typeof listTasksByMatter>>): stri
     .join('\n')
 }
 
-function renderDocuments(docs: Awaited<ReturnType<typeof listMatterDraftVersions>>): string {
+export function renderDocuments(docs: Awaited<ReturnType<typeof listMatterDraftVersions>>): string {
   return docs
     .map(
       (d) =>
@@ -198,7 +203,9 @@ function renderDocuments(docs: Awaited<ReturnType<typeof listMatterDraftVersions
     .join('\n')
 }
 
-function renderMeetings(meetings: Awaited<ReturnType<typeof listMeetingsForMatter>>): string {
+export function renderMeetings(
+  meetings: Awaited<ReturnType<typeof listMeetingsForMatter>>,
+): string {
   return meetings
     .map((m) => {
       const when = m.startIso ? fmtDate(m.startIso) : 'unscheduled'
@@ -210,7 +217,7 @@ function renderMeetings(meetings: Awaited<ReturnType<typeof listMeetingsForMatte
     .join('\n')
 }
 
-function renderInvoiced(items: MatterInvoicedItemLite[]): string {
+export function renderInvoiced(items: MatterInvoicedItemLite[]): string {
   return items
     .map(
       (i) =>
@@ -219,7 +226,7 @@ function renderInvoiced(items: MatterInvoicedItemLite[]): string {
     .join('\n')
 }
 
-type MatterInvoicedItemLite = {
+export type MatterInvoicedItemLite = {
   kind: string
   description: string
   quantity: string
@@ -229,7 +236,7 @@ type MatterInvoicedItemLite = {
   invoiceStatus: string
 }
 
-function renderIntake(responses: Record<string, unknown>, maxChars: number): string {
+export function renderIntake(responses: Record<string, unknown>, maxChars: number): string {
   const lines: string[] = []
   for (const [k, v] of Object.entries(responses)) {
     if (v === null || v === undefined || v === '') continue

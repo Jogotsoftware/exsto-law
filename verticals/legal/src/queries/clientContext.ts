@@ -344,7 +344,10 @@ export function formatClientContext(
   return `${text.slice(0, Math.max(0, maxChars - 60))}\n…[client context truncated at ${maxChars} chars]`
 }
 
-function oneLine(s: string, cap: number): string {
+// Exported so other assemblers over this same client/matter material (e.g.
+// briefEvidence.ts's Client Brief evidence) collapse/cap one-line excerpts the
+// SAME way formatClientContext does — one implementation, not a fork.
+export function oneLine(s: string, cap: number): string {
   const flat = s.replace(/\s+/g, ' ').trim()
   return flat.length > cap ? `${flat.slice(0, cap)}…` : flat
 }
