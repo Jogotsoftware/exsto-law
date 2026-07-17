@@ -91,7 +91,7 @@ export function UsersRolesSection() {
   }
 
   return (
-    <CollapsibleSection title="Users & roles">
+    <CollapsibleSection id="settings-section-users" title="Users & roles">
       {error && <div className="alert alert-error">{error}</div>}
 
       {me && !me.isAdmin && (

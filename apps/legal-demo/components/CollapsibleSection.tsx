@@ -7,18 +7,22 @@ import type { ReactNode } from 'react'
 // and needs no open/close state. Collapsed by default (no `open` attribute);
 // pass defaultOpen to start expanded.
 export function CollapsibleSection({
+  id,
   title,
   subtitle,
   defaultOpen = false,
   children,
 }: {
+  // Optional anchor id so the rail's Settings sub-items can deep-link/scroll to
+  // a section via /attorney/settings?section=<key>.
+  id?: string
   title: string
   subtitle?: ReactNode
   defaultOpen?: boolean
   children: ReactNode
 }) {
   return (
-    <details className="settings-section" {...(defaultOpen ? { open: true } : {})}>
+    <details className="settings-section" id={id} {...(defaultOpen ? { open: true } : {})}>
       <summary className="settings-section-summary">
         <span className="settings-section-chevron" aria-hidden>
           ▸

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
@@ -263,6 +263,23 @@ export default function SettingsPage() {
     }
   }, [refreshSettings, refreshIntegrations, refreshGoogle, refreshSignature, refreshBookingRules])
 
+  // Rail deep-link support: /attorney/settings?section=<key> opens and scrolls
+  // to that section. Query-only navigations don't remount this page, so we scan
+  // window.location each render and act when the section changes (avoids
+  // useSearchParams, which would force a Suspense boundary at build). A future
+  // WP splits Settings into real sub-routes.
+  const lastSectionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const section = new URLSearchParams(window.location.search).get('section')
+    if (!section || section === lastSectionRef.current) return
+    lastSectionRef.current = section
+    const el = document.getElementById(`settings-section-${section}`)
+    if (!el) return
+    if (el instanceof HTMLDetailsElement) el.open = true
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+
   function updateField<K extends keyof TenantSettings>(key: K, value: TenantSettings[K]) {
     setSettings((s) => (s ? { ...s, [key]: value } : s))
     setSavedSettings(false)
@@ -462,7 +479,7 @@ export default function SettingsPage() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <CollapsibleSection title="Integrations">
+      <CollapsibleSection id="settings-section-integrations" title="Integrations">
         {integrations === null ? (
           <div className="loading-block" role="status">
             <span className="spinner" /> Loading…
@@ -495,7 +512,7 @@ export default function SettingsPage() {
         )}
       </CollapsibleSection>
 
-      <CollapsibleSection title="Firm details">
+      <CollapsibleSection id="settings-section-firm" title="Firm details">
         {!settings ? (
           <div className="loading-block" role="status">
             <span className="spinner" /> Loading…
@@ -595,11 +612,11 @@ export default function SettingsPage() {
         )}
       </CollapsibleSection>
 
-      <CollapsibleSection title="Invoice template">
+      <CollapsibleSection id="settings-section-invoice_template" title="Invoice template">
         <InvoiceTemplateSection />
       </CollapsibleSection>
 
-      <CollapsibleSection title="Email signature">
+      <CollapsibleSection id="settings-section-signature" title="Email signature">
         {savedSig && (
           <div className="alert alert-success">Saved. New emails will use this signature.</div>
         )}
@@ -676,7 +693,7 @@ export default function SettingsPage() {
         <SignatureCapture />
       </CollapsibleSection>
 
-      <CollapsibleSection title="Booking rules">
+      <CollapsibleSection id="settings-section-booking" title="Booking rules">
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           The public booking page offers times that fit these rules and the real Google calendar.
           Per-service durations (set on each service) override the default below.

@@ -31,17 +31,24 @@ type Result =
   | { type: 'matter'; id: string; primary: string; secondary: string }
   | { type: 'client'; id: string; primary: string; secondary: string }
 
-export function SearchBar() {
+// `default` renders the legacy inline search (still used by the retired
+// AttorneyTopNav); `topbar` renders the Legal Instruments comp's expandable
+// navy search — a 40px icon that grows to a 360px field. Both share the exact
+// same query + routing logic below.
+export function SearchBar({ variant = 'default' }: { variant?: 'default' | 'topbar' }) {
   const router = useRouter()
   const wrapRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  // topbar only: whether the pill is expanded to reveal the input.
+  const [expanded, setExpanded] = useState(false)
   const [contacts, setContacts] = useState<ContactRow[]>([])
   const [matters, setMatters] = useState<MatterRow[]>([])
   const [clients, setClients] = useState<ClientRow[]>([])
   const [loaded, setLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
+  const isTopbar = variant === 'topbar'
 
   async function ensureLoaded() {
     if (loaded || loading) return
@@ -64,13 +71,17 @@ export function SearchBar() {
   }
 
   useEffect(() => {
-    if (!open) return
+    if (!open && !expanded) return
     function onDoc(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false)
+        setExpanded(false)
+      }
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         setOpen(false)
+        setExpanded(false)
         inputRef.current?.blur()
       }
     }
@@ -80,7 +91,7 @@ export function SearchBar() {
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open])
+  }, [open, expanded])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -88,6 +99,7 @@ export function SearchBar() {
       const tag = target?.tagName
       if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA' && !target?.isContentEditable) {
         e.preventDefault()
+        setExpanded(true)
         inputRef.current?.focus()
       }
     }
@@ -143,10 +155,82 @@ export function SearchBar() {
 
   function go(r: Result) {
     setOpen(false)
+    setExpanded(false)
     setQuery('')
     if (r.type === 'contact') router.push(`/attorney/crm/contacts/${r.id}`)
     else if (r.type === 'client') router.push(`/attorney/crm/${r.id}`)
     else router.push(`/attorney/matters/${r.id}`)
+  }
+
+  if (isTopbar) {
+    return (
+      <div className="li-top-search-wrap" ref={wrapRef}>
+        <div className={`li-top-search${expanded ? ' li-top-search--open' : ''}`}>
+          <button
+            type="button"
+            className="li-top-search-btn"
+            aria-label="Search"
+            aria-expanded={expanded}
+            onClick={() => {
+              const next = !expanded
+              setExpanded(next)
+              if (next) {
+                ensureLoaded()
+                // Focus after the width transition begins so the caret lands.
+                requestAnimationFrame(() => inputRef.current?.focus())
+              } else {
+                setOpen(false)
+              }
+            }}
+          >
+            <SearchIcon size={19} />
+          </button>
+          <input
+            ref={inputRef}
+            type="search"
+            placeholder="Search matters, clients, documents…"
+            aria-label="Search matters, clients, documents"
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setOpen(true)
+              ensureLoaded()
+            }}
+            onFocus={() => {
+              setOpen(true)
+              ensureLoaded()
+            }}
+            className="li-top-search-input"
+          />
+        </div>
+        {expanded && open && q && (
+          <div className="li-top-search-results" aria-live="polite">
+            {loading && !loaded ? (
+              <div className="li-top-search-empty">
+                <span className="spinner" /> Loading…
+              </div>
+            ) : results.length === 0 ? (
+              <div className="li-top-search-empty">No matches.</div>
+            ) : (
+              results.map((r, i) => (
+                <button
+                  key={`${r.type}-${r.id}-${i}`}
+                  type="button"
+                  className="li-top-search-result"
+                  onClick={() => go(r)}
+                >
+                  <span className={`li-top-search-tag tag-${r.type}`}>{r.type}</span>
+                  <span className="li-top-search-primary">{r.primary}</span>
+                  <span className="li-top-search-secondary">{r.secondary}</span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
