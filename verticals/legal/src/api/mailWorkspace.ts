@@ -227,6 +227,11 @@ export interface MailThreadSummary extends GmailThreadSummary {
 export async function listMailThreads(
   ctx: ActionContext,
   search?: string,
+  // Optional: restrict to threads matched to one matter (a matter's Activity
+  // tab Emails card, WP-B). Matching reuses the SAME clientEmailIndex →
+  // participantEmails join every thread already computes for `matters` below —
+  // no parallel lookup path, just a post-filter on that result.
+  matterEntityId?: string,
 ): Promise<{
   threads: MailThreadSummary[]
   clientEmailCount: number
@@ -238,13 +243,16 @@ export async function listMailThreads(
     listClientThreads(ctx.tenantId, emails, 50, ctx.actorId, search),
     clientNameIndex(ctx),
   ])
+  const mapped = threads.map((t) => ({
+    ...t,
+    matters: dedupeMatters(t.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? [])),
+    participantNames: namesForParticipants(t.participantEmails, names),
+  }))
   return {
     clientEmailCount: emails.length,
-    threads: threads.map((t) => ({
-      ...t,
-      matters: dedupeMatters(t.participantEmails.flatMap((e) => index.get(e.toLowerCase()) ?? [])),
-      participantNames: namesForParticipants(t.participantEmails, names),
-    })),
+    threads: matterEntityId
+      ? mapped.filter((t) => t.matters.some((m) => m.matterEntityId === matterEntityId))
+      : mapped,
   }
 }
 

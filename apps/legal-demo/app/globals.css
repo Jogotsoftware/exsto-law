@@ -15517,3 +15517,1451 @@ fieldset.li-svc-fieldset legend {
 .li-svc-wf-connector svg {
   color: var(--li-border-input);
 }
+
+/* ==========================================================================
+   li-mat-* — Legal Instruments redesign, WP-B (Matters list + matter detail)
+   One family for the matters list page + the whole matter-detail workspace
+   (chrome, Overview, Activity, Documents, Tasks, Billing + their modals).
+   Reuses the shared --li-* tokens (globals.css ~11040) and the shared
+   GemSparkle/DocumentSheet components; does not modify any other family.
+   ========================================================================== */
+
+/* ── Matters list ─────────────────────────────────────────────────────────── */
+.li-mat-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.li-mat-list-title {
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--li-navy);
+}
+.li-mat-list-newbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-mat-list-newbtn:hover {
+  background: var(--li-navy-hover);
+}
+
+.li-mat-toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.li-mat-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--li-card);
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  padding: 0 12px;
+  height: 40px;
+  flex: 1 1 260px;
+  max-width: 320px;
+  color: var(--li-muted-2);
+}
+.li-mat-search input {
+  border: none;
+  outline: none;
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 14px;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--li-navy);
+  background: transparent;
+}
+.li-mat-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--li-card);
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  padding: 0 30px 0 14px;
+  height: 40px;
+  cursor: pointer;
+}
+.li-mat-filter:hover {
+  border-color: #b9c4da;
+}
+.li-mat-filter select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--li-body);
+  outline: none;
+  cursor: pointer;
+}
+.li-mat-filter svg {
+  position: absolute;
+  right: 12px;
+  pointer-events: none;
+  color: var(--li-muted-2);
+}
+.li-mat-clear {
+  background: none;
+  border: none;
+  color: var(--li-link);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.li-mat-table {
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-card);
+  overflow: hidden;
+  box-shadow: var(--li-shadow-card);
+}
+.li-mat-thead,
+.li-mat-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1.4fr 1.6fr 0.9fr 0.8fr;
+  gap: 12px;
+  align-items: center;
+}
+.li-mat-thead {
+  padding: 13px 22px;
+  background: var(--li-bg);
+  border-bottom: 1px solid var(--li-border);
+}
+.li-mat-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--li-muted-2);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.li-mat-tbody {
+  display: flex;
+  flex-direction: column;
+}
+.li-mat-row {
+  padding: 15px 22px;
+  border-bottom: 1px solid var(--li-border-soft);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.li-mat-row:last-child {
+  border-bottom: none;
+}
+.li-mat-row:hover {
+  background: var(--li-bg);
+  text-decoration: none;
+}
+.li-mat-cell-number {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 15px;
+  color: var(--li-navy);
+  min-width: 0;
+}
+.li-mat-cell-summary {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--li-muted-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-mat-cell-client {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--li-navy);
+}
+.li-mat-cell-service {
+  font-size: 13.5px;
+  color: var(--li-muted);
+}
+.li-mat-cell-opened {
+  font-size: 13px;
+  color: var(--li-muted-2);
+}
+.li-mat-status {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--li-radius-chip);
+}
+.li-mat-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.li-mat-empty {
+  color: var(--li-muted-2);
+  font-size: 14px;
+  padding: 32px 4px;
+  text-align: center;
+}
+
+/* ── Matter detail chrome (layout.tsx) ───────────────────────────────────── */
+.li-mat-back {
+  display: inline-flex;
+  align-items: center;
+  background: var(--li-card);
+  border: 1px solid var(--li-border-input);
+  border-radius: 20px;
+  padding: 6px 14px 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-mat-back:hover {
+  border-color: #b9c4da;
+}
+.li-mat-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.li-mat-detail-titles h1 {
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 29px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--li-navy);
+}
+.li-mat-detail-dash {
+  color: var(--li-muted-3);
+}
+.li-mat-detail-service {
+  font-size: 14.5px;
+  color: var(--li-muted);
+  margin-top: 5px;
+}
+.li-mat-actionsbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 10px 15px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-mat-actionsbtn:hover {
+  background: var(--li-navy-hover);
+}
+.li-mat-actionsbtn svg {
+  transition: transform 0.16s ease;
+}
+.li-mat-actionsbtn.active svg {
+  transform: rotate(180deg);
+}
+
+/* Tab strip — scoped to .nav-tabs.li-mat-tabs so the CRM/service-editor's
+   .nav-tabs default look is untouched (NavTabs className is additive). */
+.nav-tabs.li-mat-tabs {
+  gap: 2px;
+  border-bottom: 1px solid var(--li-border-input);
+  margin-bottom: 22px;
+}
+.nav-tabs.li-mat-tabs a {
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--li-muted);
+  border-bottom: 2px solid transparent;
+}
+.nav-tabs.li-mat-tabs a.is-active {
+  color: var(--li-navy);
+  font-weight: 700;
+  border-bottom-color: var(--li-navy);
+}
+
+/* ── Shared card shell (Overview / Activity / Documents / Tasks / Billing) ── */
+.li-mat-ov-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.li-mat-card {
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-card);
+  padding: 22px 24px;
+  box-shadow: var(--li-shadow-card);
+}
+.li-mat-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--li-navy);
+}
+.li-mat-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.li-mat-card-head .li-mat-card-title {
+  margin: 0;
+}
+.li-mat-pencil {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--li-muted-3);
+  cursor: pointer;
+}
+.li-mat-pencil:hover {
+  background: var(--li-bg);
+  color: var(--li-navy);
+}
+
+/* ── Overview: facts card ────────────────────────────────────────────────── */
+.li-mat-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+.li-mat-facts-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--li-muted-2);
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+.li-mat-facts-value {
+  font-size: 15px;
+  color: var(--li-navy);
+}
+.li-mat-facts-link {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--li-link);
+}
+
+/* ── Overview: workflow card ─────────────────────────────────────────────── */
+.li-mat-wf-list {
+  display: flex;
+  flex-direction: column;
+}
+.li-mat-wf-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--li-border-soft);
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.li-mat-wf-row:last-child {
+  border-bottom: none;
+}
+.li-mat-wf-row:hover {
+  background: var(--li-bg);
+}
+.li-mat-wf-ico {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.li-mat-wf-ico-automatic {
+  background: var(--li-purple-bg);
+  color: var(--li-purple);
+}
+.li-mat-wf-ico-attorney {
+  background: var(--li-gold-bg);
+  color: var(--li-gold-text);
+}
+.li-mat-wf-ico-client {
+  background: var(--li-info-bg);
+  color: var(--li-info);
+}
+.li-mat-wf-ico-system {
+  background: var(--li-border-soft);
+  color: var(--li-muted);
+}
+.li-mat-wf-name {
+  flex: 1 1 auto;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+}
+.li-mat-wf-check {
+  color: var(--li-ok);
+  flex: 0 0 auto;
+}
+.li-mat-wf-status {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--li-radius-chip);
+  flex: 0 0 auto;
+}
+.li-mat-wf-status-current {
+  background: var(--li-gold-bg-soft);
+  color: var(--li-gold-text);
+}
+.li-mat-wf-status-upcoming {
+  background: var(--li-border-soft);
+  color: var(--li-muted-2);
+}
+
+/* ── Overview: Notes card (NotesSection variant="card") ──────────────────── */
+.li-mat-notes {
+  padding: 0;
+  overflow: hidden;
+}
+.li-mat-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 18px 24px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.li-mat-notes-head h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--li-navy);
+}
+.li-mat-notes-chevron {
+  color: var(--li-muted-2);
+  transition: transform 0.18s ease;
+  flex: 0 0 auto;
+}
+.li-mat-notes-chevron.is-open {
+  transform: rotate(180deg);
+}
+.li-mat-notes-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.22s ease;
+}
+.li-mat-notes-body.is-open {
+  max-height: 2400px;
+}
+.li-mat-notes-body-inner {
+  padding: 0 24px 20px;
+}
+
+/* ── Activity tab ─────────────────────────────────────────────────────────── */
+/* .li-mat-week is just the li-mat-card shell around the existing WeeklyCalendar
+   (.wcal-* — untouched, its own family); no rule needed here. */
+
+.li-mat-actor {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-mat-actor-ai {
+  background: var(--li-purple-bg);
+}
+.li-mat-actor-system {
+  background: var(--li-border-soft);
+  color: var(--li-muted);
+}
+.li-mat-actor-attorney {
+  background: var(--li-gold-bg);
+  color: var(--li-gold-text);
+}
+.li-mat-actor-client {
+  background: var(--li-info-bg);
+  color: var(--li-info);
+}
+.li-mat-actor-shared {
+  background: var(--li-ok-bg);
+  color: var(--li-ok);
+}
+
+.li-mat-timeline {
+  display: flex;
+  flex-direction: column;
+}
+.li-mat-tl-row {
+  display: flex;
+  gap: 14px;
+  padding-bottom: 18px;
+}
+.li-mat-tl-row:last-child {
+  padding-bottom: 0;
+}
+.li-mat-tl-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.li-mat-tl-line {
+  width: 2px;
+  flex: 1 1 auto;
+  background: var(--li-border);
+  margin-top: 3px;
+}
+.li-mat-tl-body {
+  flex: 1 1 auto;
+  margin-top: 2px;
+  min-width: 0;
+}
+.li-mat-tl-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.li-mat-tl-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--li-navy);
+}
+.li-mat-tl-when {
+  font-size: 12px;
+  color: var(--li-muted-3);
+}
+.li-mat-tl-detail {
+  display: block;
+  font-size: 13px;
+  color: var(--li-muted);
+  margin-top: 2px;
+}
+.li-mat-tl-detail code {
+  font-size: 12px;
+}
+
+.li-mat-portal-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.li-mat-portal-row {
+  display: flex;
+  flex-direction: column;
+  max-width: 76%;
+}
+.li-mat-portal-row.is-attorney {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.li-mat-portal-row.is-client {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+.li-mat-portal-bubble {
+  border-radius: 14px;
+  padding: 10px 14px;
+}
+.li-mat-portal-row.is-attorney .li-mat-portal-bubble {
+  background: var(--li-info-bg);
+  color: var(--li-navy);
+  border: 1px solid #dde6f5;
+}
+.li-mat-portal-row.is-client .li-mat-portal-bubble {
+  background: var(--li-bg);
+  color: var(--li-body);
+  border: 1px solid var(--li-border);
+}
+.li-mat-portal-who {
+  font-size: 11.5px;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-bottom: 2px;
+}
+.li-mat-portal-text {
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.li-mat-portal-time {
+  font-size: 11.5px;
+  color: var(--li-muted-3);
+  margin-top: 3px;
+}
+.li-mat-portal-replyrow {
+  display: flex;
+  gap: 10px;
+}
+.li-mat-portal-input {
+  flex: 1 1 auto;
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  padding: 10px 12px;
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 14px;
+  outline: none;
+}
+.li-mat-portal-send {
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.li-mat-portal-send:hover {
+  background: var(--li-navy-hover);
+}
+.li-mat-portal-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── Emails card (Activity, B2) ──────────────────────────────────────────── */
+.li-mat-emails-list {
+  display: flex;
+  flex-direction: column;
+}
+.li-mat-email-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 8px;
+  border-bottom: 1px solid var(--li-border-soft);
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+}
+.li-mat-email-row:last-child {
+  border-bottom: none;
+}
+.li-mat-email-row:hover {
+  background: var(--li-bg);
+}
+.li-mat-email-ico {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--li-info-bg);
+  color: var(--li-link);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.li-mat-email-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.li-mat-email-subject {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--li-navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-mat-email-meta {
+  font-size: 12.5px;
+  color: var(--li-muted);
+}
+.li-mat-email-chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--li-radius-chip);
+  background: var(--li-border-soft);
+  color: var(--li-muted);
+  flex: 0 0 auto;
+}
+.li-mat-draftemail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--li-card);
+  color: var(--li-navy);
+  border: 1px solid var(--li-border-input);
+  border-radius: 9px;
+  padding: 7px 13px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-mat-draftemail-btn:hover {
+  border-color: #b7c2d6;
+  background: var(--li-bg);
+}
+
+/* ── Documents tab ────────────────────────────────────────────────────────── */
+.li-mat-doccard {
+  overflow: visible;
+}
+.li-mat-doccard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.li-mat-doccard-head .li-mat-card-title {
+  margin: 0;
+}
+.li-mat-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--li-card);
+  border: 1px solid var(--li-border-input);
+  border-radius: 9px;
+  padding: 8px 14px;
+  color: var(--li-muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-mat-upload-btn:hover {
+  border-color: var(--li-gold);
+  color: var(--li-navy);
+}
+.li-mat-doclist {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -24px;
+}
+.li-mat-docrow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 24px;
+  border-bottom: 1px solid var(--li-border-soft);
+  position: relative;
+}
+.li-mat-docrow:last-child {
+  border-bottom: none;
+}
+.li-mat-docrow:hover {
+  background: var(--li-bg);
+}
+.li-mat-docrow-icon {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-mat-docrow-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-mat-docrow-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--li-border-soft);
+  color: var(--li-muted);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.li-mat-docrow-date {
+  font-size: 12.5px;
+  color: var(--li-muted-3);
+  flex: 0 0 auto;
+}
+.li-mat-docrow-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+.li-mat-kebab {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  color: var(--li-muted-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-mat-kebab:hover {
+  border-color: var(--li-gold);
+  color: var(--li-navy);
+}
+.li-mat-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+}
+.li-mat-menu {
+  position: absolute;
+  right: 0;
+  top: 38px;
+  z-index: 25;
+  width: 190px;
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: 11px;
+  box-shadow: var(--li-shadow-pop);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+}
+.li-mat-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--li-navy);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+}
+.li-mat-menu-item:hover {
+  background: var(--li-bg);
+  text-decoration: none;
+}
+.li-mat-menu-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ── Shared: comp modal chrome (upload / task) — NOT portaled, so it inherits
+   --li-* normally. Reuses the same visual language as the other li-mat modals. */
+.li-mat-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+.li-mat-upload-modal,
+.li-mat-task-modal {
+  width: 100%;
+  max-width: 520px;
+  background: var(--li-card);
+  border-radius: 18px;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.4);
+  overflow: hidden;
+}
+.li-mat-task-modal {
+  max-width: 460px;
+  border-radius: 16px;
+}
+.li-mat-upload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--li-border-soft);
+}
+.li-mat-upload-head h2 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--li-navy);
+}
+.li-mat-modal-x {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  color: var(--li-muted-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-mat-modal-x:hover {
+  border-color: var(--li-gold);
+  color: var(--li-navy);
+}
+.li-mat-upload-body {
+  padding: 24px;
+}
+.li-mat-dropzone {
+  border: 2px dashed var(--li-muted-3);
+  border-radius: 14px;
+  padding: 40px 24px;
+  text-align: center;
+  background: var(--li-bg);
+}
+.li-mat-dropzone.is-over {
+  border-color: var(--li-link);
+  background: var(--li-info-bg);
+}
+.li-mat-dropzone-ico {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+  border-radius: 12px;
+  background: var(--li-info-bg);
+  color: var(--li-link);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-mat-dropzone-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--li-navy);
+}
+.li-mat-dropzone-sub {
+  font-size: 13px;
+  color: var(--li-muted-2);
+  margin-top: 4px;
+}
+.li-mat-browse-btn {
+  margin-top: 16px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-mat-browse-btn:hover {
+  background: var(--li-navy-hover);
+}
+.li-mat-pendingfile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--li-border);
+  border-radius: 11px;
+  background: var(--li-card);
+}
+.li-mat-pendingfile-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-mat-pendingfile-bar {
+  display: block;
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  margin-top: 5px;
+  background: linear-gradient(
+    90deg,
+    var(--li-border-soft) 25%,
+    var(--li-ok) 50%,
+    var(--li-border-soft) 75%
+  );
+  background-size: 200% 100%;
+  animation: li-mat-indeterminate 1.1s linear infinite;
+}
+@keyframes li-mat-indeterminate {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.li-mat-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 20px;
+}
+.li-mat-btn-ghost {
+  background: var(--li-card);
+  border: 1px solid var(--li-border-input);
+  border-radius: 9px;
+  padding: 10px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-mat-btn-ghost:hover {
+  border-color: var(--li-gold);
+  color: var(--li-navy);
+}
+.li-mat-btn-ghost:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.li-mat-btn-primary {
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-mat-btn-primary:hover {
+  background: var(--li-navy-hover);
+}
+.li-mat-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ── Tasks tab ────────────────────────────────────────────────────────────── */
+.li-mat-tasklist {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -24px;
+}
+.li-mat-task-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 24px;
+  border-bottom: 1px solid var(--li-border-soft);
+}
+.li-mat-task-row:last-child {
+  border-bottom: none;
+}
+.li-mat-task-check {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  border: 2px solid var(--li-border-input);
+  background: var(--li-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+}
+.li-mat-task-check.is-done {
+  border-color: var(--li-ok);
+  background: var(--li-ok);
+}
+.li-mat-task-check.is-disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.li-mat-task-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+}
+.li-mat-task-main:hover {
+  text-decoration: none;
+}
+.li-mat-task-role {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: var(--li-gold-bg);
+  color: var(--li-gold-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-mat-task-role.is-shared {
+  background: var(--li-ok-bg);
+  color: var(--li-ok);
+}
+.li-mat-task-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--li-navy);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-mat-task-title.is-done {
+  color: var(--li-muted-3);
+  text-decoration: line-through;
+}
+.li-mat-task-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.li-mat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--li-radius-chip);
+  background: var(--li-border-soft);
+  color: var(--li-muted);
+  white-space: nowrap;
+}
+.li-mat-chip-danger {
+  background: var(--li-danger-bg);
+  color: var(--li-danger);
+}
+.li-mat-chip-info {
+  background: var(--li-info-bg);
+  color: var(--li-info);
+}
+.li-mat-chip-purple {
+  background: var(--li-purple-bg);
+  color: var(--li-purple);
+}
+.li-mat-chip-ok {
+  background: var(--li-ok-bg);
+  color: var(--li-ok);
+}
+
+.li-mat-task-modal-body {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.li-mat-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.li-mat-field > span:first-child {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-muted);
+}
+.li-mat-field input,
+.li-mat-field select {
+  width: 100%;
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  padding: 11px 13px;
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 14px;
+  outline: none;
+  color: var(--li-navy);
+  background: var(--li-card);
+}
+.li-mat-segrow {
+  display: flex;
+  gap: 8px;
+}
+.li-mat-seg {
+  flex: 1;
+  text-align: center;
+  padding: 10px;
+  border-radius: 9px;
+  border: 1px solid var(--li-border-input);
+  background: var(--li-card);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-mat-seg.is-active {
+  border: 1.5px solid var(--li-link);
+  background: var(--li-info-bg);
+  font-weight: 600;
+  color: #2e5ab0;
+}
+.li-mat-cost-input {
+  margin-top: 8px;
+  width: 100%;
+  border: 1px solid var(--li-border-input);
+  border-radius: var(--li-radius-btn);
+  padding: 11px 13px;
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 14px;
+  outline: none;
+}
+.li-mat-checkrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14px;
+  color: var(--li-navy);
+  cursor: pointer;
+}
+
+/* ── Task detail: stepper (restyled lightly, 4-state status kept a plain
+   <select>, styled by the shared .li-mat-field rules above) ────────────────── */
+.li-mat-taskstep-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0 var(--space-3);
+}
+.li-mat-taskstep {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: var(--li-radius-chip);
+  background: var(--li-border-soft);
+  color: var(--li-muted);
+}
+.li-mat-taskstep.is-done {
+  background: var(--li-ok-bg);
+  color: var(--li-ok);
+}
+.li-mat-taskstep.is-current {
+  background: var(--li-gold-bg-soft);
+  color: var(--li-gold-text);
+}
+
+/* ── Billing tab ──────────────────────────────────────────────────────────── */
+.li-mat-billcard {
+  padding: 0;
+  overflow: hidden;
+}
+.li-mat-billtabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--li-border-soft);
+  background: var(--li-bg);
+}
+.li-mat-billtab {
+  background: none;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 16px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--li-muted);
+  cursor: pointer;
+}
+.li-mat-billtab.is-active {
+  background: var(--li-card);
+  font-weight: 700;
+  color: var(--li-navy);
+  box-shadow: var(--li-shadow-card);
+}
+.li-mat-billpanel {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.li-mat-billactions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.li-mat-feeform {
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-panel);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 460px;
+}
+.li-mat-billempty {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--li-muted);
+}
+.li-mat-billempty-ico {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+  border-radius: 14px;
+  background: var(--li-border-soft);
+  color: var(--li-muted-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.li-mat-billlines {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -24px;
+}
+.li-mat-billline {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 15px 24px;
+  border-bottom: 1px solid var(--li-border-soft);
+}
+.li-mat-billline:last-child {
+  border-bottom: none;
+}
+.li-mat-billline-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.li-mat-billline-desc {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--li-navy);
+}
+.li-mat-billline-meta {
+  font-size: 12.5px;
+  color: var(--li-muted-2);
+}
+.li-mat-billline-amount {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--li-navy);
+  font-variant-numeric: tabular-nums;
+  min-width: 74px;
+  text-align: right;
+  flex: 0 0 auto;
+}
+.li-mat-billvoid {
+  background: none;
+  border: none;
+  color: var(--li-danger);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.li-mat-billvoid:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.li-mat-billfooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 24px;
+  margin: 0 -24px -20px;
+  background: var(--li-bg);
+  flex-wrap: wrap;
+}
+.li-mat-billsend {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 17px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.li-mat-billsend:hover {
+  background: var(--li-navy-hover);
+  text-decoration: none;
+}
+.li-mat-billsend:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.li-mat-billtotal {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-left: auto;
+}
+.li-mat-billtotal-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--li-muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.li-mat-billtotal-amount {
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--li-navy);
+}

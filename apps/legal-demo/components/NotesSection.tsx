@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
+import { ChevronDownIcon } from '@/components/icons'
 
 interface NoteRow {
   noteEntityId: string
@@ -34,11 +35,17 @@ function isAiNote(n: NoteRow): boolean {
 export function NotesSection({
   targetEntityId,
   createInput,
+  variant = 'plain',
 }: {
   targetEntityId: string
   // The create tool's anchor: { matterEntityId } on a matter, { clientEntityId }
   // on a client — spread into legal.note.create alongside the body.
   createInput: Record<string, string>
+  // 'plain' (default): the original bare <section> — used by the CRM client page,
+  // unchanged. 'card' (LI matters restyle): a collapsible li-mat-card shell with a
+  // chevron header, matching the comp's Overview Notes card. Note-row internals are
+  // identical in both — only the outer chrome differs.
+  variant?: 'plain' | 'card'
 }) {
   const [notes, setNotes] = useState<NoteRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -48,6 +55,8 @@ export function NotesSection({
   // confirms), and the id whose retire call is in flight.
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [retiringId, setRetiringId] = useState<string | null>(null)
+  // Card variant only: open by default (notes are primary Overview content).
+  const [open, setOpen] = useState(true)
 
   const load = useCallback(async () => {
     try {
@@ -98,12 +107,13 @@ export function NotesSection({
     }
   }
 
-  return (
-    <section>
-      <h2>Notes</h2>
-      <p className="text-muted text-sm">
-        Working notes — yours, plus AI summaries and facts extracted from transcripts.
-      </p>
+  const body_ = (
+    <>
+      {variant === 'plain' && (
+        <p className="text-muted text-sm">
+          Working notes — yours, plus AI summaries and facts extracted from transcripts.
+        </p>
+      )}
       {error && <div className="alert alert-error">{error}</div>}
 
       {notes === null ? (
@@ -209,6 +219,35 @@ export function NotesSection({
           {busy && <span className="spinner" />}
           {busy ? 'Adding…' : 'Add note'}
         </button>
+      </div>
+    </>
+  )
+
+  if (variant === 'plain') {
+    return (
+      <section>
+        <h2>Notes</h2>
+        {body_}
+      </section>
+    )
+  }
+
+  return (
+    <section className="li-mat-card li-mat-notes">
+      <button
+        type="button"
+        className="li-mat-notes-head"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <h2>Notes</h2>
+        <ChevronDownIcon
+          size={18}
+          className={open ? 'li-mat-notes-chevron is-open' : 'li-mat-notes-chevron'}
+        />
+      </button>
+      <div className={open ? 'li-mat-notes-body is-open' : 'li-mat-notes-body'}>
+        <div className="li-mat-notes-body-inner">{body_}</div>
       </div>
     </section>
   )

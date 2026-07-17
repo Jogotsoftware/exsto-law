@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { formatDate } from '@/lib/datetime'
+import { BackButton } from '@/components/BackButton'
 import { PrepareSignature, type SendResult } from '@/components/PrepareSignature'
 import { EnvelopeStatusView, type EnvelopeStatus } from '@/components/EnvelopeStatusView'
 
@@ -29,20 +30,30 @@ const STEPS = ['Prepare & send', 'Signatures', 'Review & complete']
 
 function Stepper({ current }: { current: number }) {
   return (
-    <div
-      className="row"
-      style={{ gap: 'var(--space-2)', flexWrap: 'wrap', margin: 'var(--space-3) 0' }}
-    >
+    <div className="li-mat-taskstep-row">
       {STEPS.map((label, i) => (
         <span
           key={label}
-          className={`badge ${i < current ? 'ok' : i === current ? 'warn' : 'muted'}`}
+          className={
+            i < current
+              ? 'li-mat-taskstep is-done'
+              : i === current
+                ? 'li-mat-taskstep is-current'
+                : 'li-mat-taskstep is-pending'
+          }
         >
           {i + 1}. {label}
         </span>
       ))}
     </div>
   )
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  open: 'Open',
+  in_progress: 'In progress',
+  blocked: 'Blocked',
+  done: 'Done',
 }
 
 export default function TaskWindowPage({
@@ -119,10 +130,25 @@ export default function TaskWindowPage({
     }
   }
 
+  // HYBRID status model (WP-B): the tasks LIST is a fast done/undone checkbox;
+  // the full 4-state status lives here, on the detail page.
+  async function setStatus(status: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      await callAttorneyMcp({ toolName: 'legal.task.update', input: { taskId, status } })
+      await loadTask()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (error && !task)
     return (
       <div className="alert alert-error">
-        {error} <Link href={`/attorney/matters/${id}/tasks`}>Back to tasks</Link>
+        {error} <BackButton fallback={`/attorney/matters/${id}/tasks`} className="li-mat-back" />
       </div>
     )
   if (!task)
@@ -132,22 +158,37 @@ export default function TaskWindowPage({
       </div>
     )
 
-  const backLink = (
-    <Link href={`/attorney/matters/${id}/tasks`} className="text-sm">
-      ← Back to tasks
-    </Link>
+  const backButton = (
+    <BackButton
+      fallback={`/attorney/matters/${id}/tasks`}
+      className="li-mat-back"
+      style={{ gap: 6, paddingLeft: 10, marginBottom: 16 }}
+    />
   )
 
   // ── Plain task ──────────────────────────────────────────────────────────────
   if (task.kind !== 'signature' || !task.documentVersionId) {
     return (
-      <section>
-        {backLink}
-        <h2 style={{ marginTop: 'var(--space-2)' }}>{task.title}</h2>
-        <p className="text-muted">
-          {task.dueDate ? `Due ${formatDate(task.dueDate)} · ` : ''}Status: {task.status}
-        </p>
-        <p className="text-sm text-muted">
+      <section className="li-mat-card">
+        {backButton}
+        <h2 className="li-mat-card-title">{task.title}</h2>
+        {task.dueDate && (
+          <p className="text-muted text-sm" style={{ marginTop: 0 }}>
+            Due {formatDate(task.dueDate)}
+          </p>
+        )}
+        <label className="li-mat-field" style={{ maxWidth: 220 }}>
+          <span>Status</span>
+          <select value={task.status} disabled={busy} onChange={(e) => setStatus(e.target.value)}>
+            {Object.entries(STATUS_LABEL).map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {error && <div className="alert alert-error">{error}</div>}
+        <p className="text-sm text-muted" style={{ marginTop: 'var(--space-3)' }}>
           This is a plain task. Attach a document from the Tasks list to send it for signature.
         </p>
       </section>
@@ -163,9 +204,9 @@ export default function TaskWindowPage({
   const showPrepare = !completed && (!task.esignEnvelopeId || resend)
 
   return (
-    <section>
-      {backLink}
-      <h2 style={{ marginTop: 'var(--space-2)' }}>{task.title}</h2>
+    <section className="li-mat-card">
+      {backButton}
+      <h2 className="li-mat-card-title">{task.title}</h2>
       <Stepper current={current} />
       {error && <div className="alert alert-error">{error}</div>}
 

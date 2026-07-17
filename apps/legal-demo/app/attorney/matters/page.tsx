@@ -4,9 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { PageHead } from '@/components/PageHead'
 import { Modal } from '@/components/Modal'
-import { ClockIcon, PlusIcon } from '@/components/icons'
+import { PlusIcon, SearchIcon, ChevronDownIcon } from '@/components/icons'
 
 interface MatterSummary {
   matterEntityId: string
@@ -31,27 +30,68 @@ function humanizeStatus(status: string): string {
   return status.replace(/_/g, ' ')
 }
 
-function statusBadgeClass(status: string): string {
-  if (['consultation_scheduled', 'consultation_completed'].includes(status)) return 'badge info'
-  if (['drafting', 'review_pending'].includes(status)) return 'badge warn'
-  if (['engagement_signed', 'matter_active'].includes(status)) return 'badge ok'
-  return 'badge'
+// Status→color buckets for the MATTER chip (li-mat-status), matching the Home
+// dashboard's matters table (attorney/page.tsx STATUS_GROUPS) so the same status
+// reads the same color everywhere. Duplicated rather than imported — each surface
+// in this redesign owns its own small helpers (see matters/[id]/page.tsx).
+const STATUS_GROUPS: Array<{
+  key: string
+  chipLabel: string
+  matches: (s: string) => boolean
+  fg: string
+  bg: string
+}> = [
+  {
+    key: 'inquiry',
+    chipLabel: 'New inquiry',
+    matches: (s) =>
+      s === 'inquiry' || s === 'questionnaire_pending' || s === 'questionnaire_submitted',
+    fg: 'var(--li-purple)',
+    bg: 'var(--li-purple-bg)',
+  },
+  {
+    key: 'scheduled',
+    chipLabel: 'Consultation booked',
+    matches: (s) => s === 'consultation_scheduled' || s === 'consultation_completed',
+    fg: 'var(--li-info)',
+    bg: 'var(--li-info-bg)',
+  },
+  {
+    key: 'drafting',
+    chipLabel: 'Drafting',
+    matches: (s) => s === 'drafting' || s === 'review_pending',
+    fg: 'var(--li-warn)',
+    bg: 'var(--li-warn-bg)',
+  },
+  {
+    key: 'active',
+    chipLabel: 'Active',
+    matches: (s) => s === 'engagement_signed' || s === 'matter_active',
+    fg: 'var(--li-ok)',
+    bg: 'var(--li-ok-bg)',
+  },
+  {
+    key: 'closed',
+    chipLabel: 'Closed',
+    matches: (s) => s === 'matter_closed',
+    fg: 'var(--li-muted)',
+    bg: 'var(--li-border-soft)',
+  },
+]
+function matterStatusGroup(status: string): (typeof STATUS_GROUPS)[number] {
+  return STATUS_GROUPS.find((g) => g.matches(status)) ?? STATUS_GROUPS[0]!
 }
 
-function timeAgo(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!Number.isFinite(t)) return '—'
-  const ms = Date.now() - t
-  const m = Math.round(ms / 60000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.round(h / 24)
-  if (d < 30) return `${d}d ago`
-  const mo = Math.round(d / 30)
-  if (mo < 12) return `${mo}mo ago`
-  return `${Math.round(mo / 12)}y ago`
+function formatDateShort(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const sameYear = d.getFullYear() === new Date().getFullYear()
+  return d.toLocaleDateString(
+    undefined,
+    sameYear
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' },
+  )
 }
 
 type SortKey = 'matterNumber' | 'clientName' | 'practiceArea' | 'status' | 'createdAt'
@@ -131,14 +171,21 @@ export default function MattersPage() {
   function SortHeader({ label, sortKey: key }: { label: string; sortKey: SortKey }) {
     const active = sortKey === key
     return (
-      <th
-        className="sortable-th"
+      <button
+        type="button"
+        className="li-mat-th"
         onClick={() => toggleSort(key)}
         aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
       >
         {label}
-        <span className="sort-arrow">{active ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
-      </th>
+        <ChevronDownIcon
+          size={12}
+          style={{
+            opacity: active ? 1 : 0.35,
+            transform: active && sortDir === 'asc' ? 'rotate(180deg)' : 'none',
+          }}
+        />
+      </button>
     )
   }
 
@@ -146,133 +193,136 @@ export default function MattersPage() {
 
   return (
     <main>
-      <PageHead
-        title="Matters"
-        actions={
-          <button type="button" className="primary" onClick={() => setShowNew(true)}>
-            <span className="icon-inline">
-              <PlusIcon size={16} /> New matter
-            </span>
-          </button>
-        }
-      />
+      <div className="li-mat-list-head">
+        <h1 className="li-mat-list-title">Matters</h1>
+        <button type="button" className="li-mat-list-newbtn" onClick={() => setShowNew(true)}>
+          <PlusIcon size={16} />
+          New matter
+        </button>
+      </div>
 
       {showNew && <NewMatterModal onClose={() => setShowNew(false)} />}
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      <section style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="client-search-row">
+      <div className="li-mat-toolbar">
+        <div className="li-mat-search">
+          <SearchIcon size={16} />
           <input
             type="search"
-            placeholder="Search by matter #, client, service, or summary…"
+            placeholder="Search matters"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
+        </div>
+        <label className="li-mat-filter">
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             aria-label="Filter by status"
           >
-            <option value="">All statuses</option>
+            <option value="">Status</option>
             {statusOptions.map((s) => (
               <option key={s} value={s}>
                 {humanizeStatus(s)}
               </option>
             ))}
           </select>
+          <ChevronDownIcon size={14} />
+        </label>
+        <label className="li-mat-filter">
           <select
             value={serviceFilter}
             onChange={(e) => setServiceFilter(e.target.value)}
             aria-label="Filter by service"
           >
-            <option value="">All services</option>
+            <option value="">Service</option>
             {serviceOptions.map((s) => (
               <option key={s} value={s}>
                 {humanizeService(s)}
               </option>
             ))}
           </select>
+          <ChevronDownIcon size={14} />
+        </label>
+        <label className="li-mat-filter">
           <select
             value={clientFilter}
             onChange={(e) => setClientFilter(e.target.value)}
             aria-label="Filter by client"
           >
-            <option value="">All clients</option>
+            <option value="">Client</option>
             {clientOptions.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
             ))}
           </select>
-          {hasFilters && (
-            <button
-              type="button"
-              onClick={() => {
-                setQuery('')
-                setStatusFilter('')
-                setServiceFilter('')
-                setClientFilter('')
-              }}
-            >
-              Clear
-            </button>
-          )}
+          <ChevronDownIcon size={14} />
+        </label>
+        {hasFilters && (
+          <button
+            type="button"
+            className="li-mat-clear"
+            onClick={() => {
+              setQuery('')
+              setStatusFilter('')
+              setServiceFilter('')
+              setClientFilter('')
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      {view === null && !error && (
+        <div className="loading-block" role="status">
+          <span className="spinner" /> Loading…
         </div>
-        {view === null && !error && (
-          <div className="loading-block" role="status">
-            <span className="spinner" /> Loading…
+      )}
+
+      {view && view.length === 0 && (
+        <div className="li-mat-empty">
+          {matters && matters.length === 0 ? 'No matters yet.' : 'No matches.'}
+        </div>
+      )}
+
+      {view && view.length > 0 && (
+        <div className="li-mat-table">
+          <div className="li-mat-thead">
+            <SortHeader label="Matter" sortKey="matterNumber" />
+            <SortHeader label="Client" sortKey="clientName" />
+            <SortHeader label="Service" sortKey="practiceArea" />
+            <SortHeader label="Status" sortKey="status" />
+            <SortHeader label="Opened" sortKey="createdAt" />
           </div>
-        )}
-        {view && view.length === 0 && (
-          <div className="empty-block">
-            {matters && matters.length === 0 ? 'No matters yet.' : 'No matches.'}
+          <div className="li-mat-tbody">
+            {view.map((m) => {
+              const group = matterStatusGroup(m.status)
+              return (
+                <Link
+                  key={m.matterEntityId}
+                  href={`/attorney/matters/${m.matterEntityId}`}
+                  className="li-mat-row"
+                >
+                  <span className="li-mat-cell-number">
+                    {m.matterNumber}
+                    {m.summary && <span className="li-mat-cell-summary">{m.summary}</span>}
+                  </span>
+                  <span className="li-mat-cell-client">{m.clientName || '—'}</span>
+                  <span className="li-mat-cell-service">{humanizeService(m.practiceArea)}</span>
+                  <span className="li-mat-status" style={{ background: group.bg, color: group.fg }}>
+                    <span className="li-mat-status-dot" style={{ background: group.fg }} />
+                    {group.chipLabel}
+                  </span>
+                  <span className="li-mat-cell-opened">{formatDateShort(m.createdAt)}</span>
+                </Link>
+              )
+            })}
           </div>
-        )}
-        {view && view.length > 0 && (
-          <table className="client-table">
-            <thead>
-              <tr>
-                <SortHeader label="Matter" sortKey="matterNumber" />
-                <SortHeader label="Client" sortKey="clientName" />
-                <SortHeader label="Service" sortKey="practiceArea" />
-                <SortHeader label="Status" sortKey="status" />
-                <SortHeader label="Opened" sortKey="createdAt" />
-              </tr>
-            </thead>
-            <tbody>
-              {view.map((m) => (
-                <tr key={m.matterEntityId}>
-                  <td>
-                    <Link
-                      href={`/attorney/matters/${m.matterEntityId}`}
-                      className="client-name-link"
-                    >
-                      {m.matterNumber}
-                    </Link>
-                    {m.summary && (
-                      <div className="text-xs text-muted" style={{ marginTop: 2 }}>
-                        {m.summary}
-                      </div>
-                    )}
-                  </td>
-                  <td>{m.clientName || '—'}</td>
-                  <td className="text-muted">{humanizeService(m.practiceArea)}</td>
-                  <td>
-                    <span className={statusBadgeClass(m.status)}>{humanizeStatus(m.status)}</span>
-                  </td>
-                  <td className="text-muted">
-                    <span className="icon-inline">
-                      <ClockIcon size={12} />
-                      {timeAgo(m.createdAt)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+        </div>
+      )}
     </main>
   )
 }

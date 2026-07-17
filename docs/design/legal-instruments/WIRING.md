@@ -30,18 +30,55 @@ Audited against `origin/main` @ c26b3ae (2026-07-16, three code audits). This is
 - [ ] WIRED: embedded week calendar (live Google+app feed), Recently booked, share-booking-link button
 - [ ] BUILD: matters TABLE with date-sort toggle + status filter dropdown (today: status tabs)
 
-## WP-B · Matters list + matter detail
+## WP-B · Matters list + matter detail — SHIPPED (B1 + B2)
 
-- [ ] WIRED: notes (add/list/retire); Actions menu (draft email / schedule / log time / log expense / add fee)
-- [ ] WIRED: portal thread + inline reply; merged timeline; matter calendar embed
-- [ ] WIRED: generated-doc actions (PDF / Word / email-link / open review); tasks (due, billing, signature stepper)
-- [ ] BUILD: "New task" + "Close matter" in Actions menu (close routes to complete-matter workflow step)
-- [ ] BUILD: per-matter Emails card on Activity (Gmail threads already auto-associate — filter by matter)
-- [ ] BUILD: client/attorney actor icons on timeline (today only AI/system badged)
-- [ ] BUILD: in-place Send invoice on matter Billing tab (today links out)
-- [ ] VERIFY: "New matter" button — manual create flow; if absent, wire to assistant create-matter (WP-L)
-- [ ] CONFLICT (Joe): task checkbox (comp) vs 4-state status select (app)
-- [ ] CONFLICT (Joe): uploaded-doc menu — download+AI-review today vs comp's full Edit/Word/PDF/Email
+- [x] WIRED: notes (add/list/retire); Actions menu (draft email / schedule / log time / log expense / add fee) —
+      restyled to the comp li-mat-* chrome; NotesSection gained an additive `variant="card"` (CRM's plain usage
+      unchanged)
+- [x] WIRED: portal thread + inline reply; merged timeline; matter calendar embed — "This week" wraps the existing
+      WeeklyCalendar unchanged; Portal messages restyled to comp bubbles
+- [x] WIRED: generated-doc actions (PDF / Word / email-link / open review); tasks (due, billing, signature stepper)
+      — folded into the comp kebab menu; billing/signature chips now actually render (billingMode/hours/feeAmount
+      were captured on create but never shown before this WP)
+- [x] BUILD: "New task" + "Close matter" in Actions menu — New task opens the new comp TASK MODAL (Tasks tab,
+      `?new=1`); Close matter (danger-styled) routes to the workflow's complete_matter stage window, and is
+      OMITTED (no dead control) on matters whose workflow has no such stage (e.g. legacy/no-workflow matters)
+- [x] BUILD: per-matter Emails card on Activity — `legal.mail.threads` now accepts an optional `matterEntityId`
+      (extends the existing tool/handler, no parallel path); row click deep-links into Mail (`?thread=`, new);
+      "Draft email" reuses `launchCompose`. Verified live: real Gmail threads, correctly matter-filtered (proven
+      via direct MCP call + UI render, 8 rows). Note: Gmail search latency can run ~5–10s on a cold call — real
+      external API time, not a bug.
+- [x] BUILD: client/attorney actor icons on timeline — the substrate has no client-vs-attorney signal on
+      `legal.matter.history` (client portal actors are provisioned as `actor_type='human'`, same as attorney
+      actors — see `clientPortalActor.ts`), so a human actor here reads as Attorney (honest for THIS feed); the
+      real client/attorney split lives in Portal messages, which already has it (`PortalMessage.author`). System
+      and AI/agent actors get their own icons too (agent was text-only before).
+- [x] BUILD: in-place Send invoice on matter Billing tab — `legal.invoice.issue` already accepts an optional
+      `matterEntityId` (same call the Overview workflow's BillStep makes), so this is a real issue+send in place,
+      no dashboard hop. Verified live end-to-end: fee → Send invoice → moved from Accrued to Invoiced, status
+      "sent", real invoice number.
+- [x] VERIFIED: "New matter" button — a manual create flow already existed (`legal.matter.open` via the existing
+      `NewMatterModal`); kept and restyled, no WP-L dependency needed.
+- [x] RESOLVED (Joe's founder decisions, both applied): task checkbox = HYBRID — list rows get a real done/undone
+      checkbox (disabled for signature tasks, gated by the review flow instead); the task detail page gained the
+      4-state status select it was missing (status editing had lived only in the list before this WP). Uploaded-doc
+      menu = FULL comp set (Edit/View → View, Download Word, Download PDF, Email) with REAL server-side conversion
+      — new `.../documents/[versionId]/extract` (JSON text) and `.../convert-word` (returns the .doc directly)
+      routes, reusing the same extractor `legal.document.review.run` already uses and the same markdown→HTML
+      drafts use; PDF-native uploads download as-is, everything else round-trips through extraction. AI review
+      kept as a 5th item (real, pre-existing capability the comp doesn't show).
+
+Deferred (explicitly out of scope, not forgotten): the comp's service-subline edit pencil is DROPPED — there is no
+`matter.update`-type capability to edit a matter's summary/service today (only `legal.matter.set_workflow` /
+`set_owner` / `set_company` exist), so it would be a dead control; simpler wins. If that capability ships later,
+wire the pencil then.
+
+Found + fixed along the way (not scope creep — both are real capabilities this WP touches directly): a raw
+`fetch()` to the matter-documents upload route never forwarded the dev-only `x-actor-id`/`x-tenant-id` shim
+(unlike `callAttorneyMcp`), so local `?demo_user=` upload testing always 401'd; same fix applied to the new
+extract/convert-word client calls and to View/Download Word (now fetch+Blob downloads instead of plain `<a href>`
+navigations, so the dev shim reaches them and the real filename survives). Production is cookie-only and
+unaffected either way.
 
 ## WP-C · Review queue + reader ★ flagship — SHIPPED (branch li/wp-c-review)
 
