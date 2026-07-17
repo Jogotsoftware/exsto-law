@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { launchCompose } from '@/lib/contractD'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 import { MailIcon } from '@/components/icons'
 
 interface ThreadSummary {
@@ -90,7 +90,7 @@ export function MatterEmailsCard({ matterEntityId }: { matterEntityId: string })
           className="li-mat-draftemail-btn"
           onClick={() => launchCompose({ matterId: matterEntityId, to: clientEmail })}
         >
-          <GemSparkle size={15} secondary={false} />
+          <GemCluster size={17} />
           Draft email
         </button>
       </div>

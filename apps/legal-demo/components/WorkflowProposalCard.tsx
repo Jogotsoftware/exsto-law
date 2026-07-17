@@ -6,7 +6,7 @@ import { readDevSession } from '@/lib/auth'
 import { CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 import { ProposalCardShell } from '@/components/ProposalCardShell'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 import { WorkflowEditorModal } from '@/components/WorkflowEditorModal'
 import type { WfLifecycle as LibWfLifecycle } from '@/lib/workflowBuilderModel'
 
@@ -447,7 +447,7 @@ export function WorkflowProposalCard({
               <div className="li-uac-step-main">
                 <div className="li-uac-step-toprow">
                   <span className="li-uac-step-name">{s.label}</span>
-                  {auto && <GemSparkle size={14} secondary={false} title="Runs automatically" />}
+                  {auto && <GemCluster size={16} title="Runs automatically" />}
                   {route && (
                     <span className={`li-uac-step-route${auto ? ' is-auto' : ''}`}>{route}</span>
                   )}

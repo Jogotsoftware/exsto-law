@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactElement, ReactNode } from 'react'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 
 // WP-L — the ONE visual shell for every assistant proposal card (comp:
 // legal-instruments.dc.html § ASSISTANT FAB + PANEL, `hasProposal`). Gradient
@@ -33,7 +33,7 @@ export function ProposalCardShell({
   return (
     <div className="li-uac-prop">
       <div className="li-uac-prop-head">
-        <GemSparkle size={14} />
+        <GemCluster size={16} />
         <span className="li-uac-prop-kind">{kind}</span>
         {meta ? <span className="li-uac-prop-meta">{meta}</span> : null}
       </div>

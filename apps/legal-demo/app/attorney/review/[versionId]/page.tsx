@@ -11,7 +11,7 @@ import { buildRedline, toReadableText } from '@/lib/wordDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { DocumentSheet, DocumentCanvas } from '@/components/DocumentSheet'
-import { GemSparkle, GemShimmer } from '@/components/GemSparkle'
+import { GemCluster, GemShimmer } from '@/components/GemSparkle'
 import { XIcon } from '@/components/icons'
 
 // Step-through review session (started from the queue's "Begin review"): the ordered
@@ -714,7 +714,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
               className={`li-rev-tbtn li-rev-tbtn--ai${mcOpen ? ' is-on' : ''}`}
               onClick={() => setMcOpen((v) => !v)}
             >
-              <GemSparkle size={15} />
+              <GemCluster size={17} />
               Matter context
             </button>
           )}
@@ -759,7 +759,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
               onClick={openRevise}
               disabled={busy !== null || editing || Boolean(revision)}
             >
-              <GemSparkle size={16} />
+              <GemCluster size={18} />
               AI revision
             </button>
           )}
@@ -770,7 +770,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
               onClick={openRegen}
               disabled={busy !== null || editing}
             >
-              <GemSparkle size={16} />
+              <GemCluster size={18} />
               Regenerate email
             </button>
           )}
@@ -805,7 +805,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       {mcOpen && hasTrace && (
         <div className="li-rev-mc">
           <div className="li-rev-mc-head">
-            <GemSparkle size={15} />
+            <GemCluster size={17} />
             <span>Matter context</span>
           </div>
           <p className="li-rev-mc-intro">
@@ -889,7 +889,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
       {/* Tracked-changes banner (redline mode / edit mode). */}
       {revision && (
         <div className="li-rev-redline-banner">
-          <GemSparkle size={24} />
+          <GemCluster size={26} />
           <div className="li-rev-redline-copy">
             <div className="li-rev-redline-head">
               AI revision — {redlineEditing ? 'edit the revised draft' : 'tracked changes'}
@@ -1064,7 +1064,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
           >
             {reviseWorking && <GemShimmer />}
             <div className="li-rev-modal-head">
-              <GemSparkle size={20} />
+              <GemCluster size={22} />
               <div className="li-rev-modal-titles">
                 <h2>Revise with AI</h2>
                 <div className="li-rev-modal-sub">
@@ -1160,7 +1160,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
                 onClick={() => runRevision()}
                 disabled={reviseWorking || !revisePrompt.trim()}
               >
-                <GemSparkle size={16} />
+                <GemCluster size={18} />
                 {reviseWorking ? 'Drafting…' : 'Generate revision'}
               </button>
             </div>
@@ -1182,7 +1182,7 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
             aria-label="Regenerate email"
           >
             <div className="li-rev-modal-head">
-              <GemSparkle size={20} />
+              <GemCluster size={22} />
               <div className="li-rev-modal-titles">
                 <h2>Regenerate email</h2>
                 <div className="li-rev-modal-sub">{draft.emailSubject || 'Email draft'}</div>

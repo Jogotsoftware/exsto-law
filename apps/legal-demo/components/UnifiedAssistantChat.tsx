@@ -35,7 +35,7 @@ import { QuestionBatch } from '@/components/QuestionBatch'
 import type { BuildQuestionEvent } from '@/lib/assistantStream'
 import { readDevSession } from '@/lib/auth'
 import { renderMarkdown, downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
-import { GemCluster, GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 import {
   SendIcon,
   SettingsIcon,
@@ -468,7 +468,7 @@ function ReasoningDisclosure({ reasoning }: { reasoning: string }) {
         aria-expanded={open}
       >
         {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
-        <GemSparkle size={12} secondary={false} />
+        <GemCluster size={14} />
         <span>Thinking</span>
       </button>
       {open && <div className="uac-reasoning-body">{reasoning}</div>}
@@ -2691,7 +2691,7 @@ export function UnifiedAssistantChat({
       {buildMode && (
         <div className="li-uac-buildstrip" role="region" aria-label="Building a service">
           <div className="li-uac-buildstrip-row">
-            <GemSparkle size={18} />
+            <GemCluster size={20} />
             <span className="li-uac-buildstrip-title">Building a service</span>
             <span className="li-uac-buildstrip-phase">
               ·&nbsp;{BUILD_PHASES[buildStageIdx]!.label}
@@ -2875,7 +2875,7 @@ export function UnifiedAssistantChat({
             <div className="li-uac-msg li-uac-msg-assistant">Which matter should I draft for?</div>
             {draftPicker.matters === null ? (
               <div className="li-uac-flow-loading">
-                <GemSparkle size={16} /> Loading matters…
+                <GemCluster size={18} /> Loading matters…
               </div>
             ) : draftPicker.matters.length === 0 ? (
               <div className="li-uac-msg li-uac-msg-assistant">
@@ -2917,7 +2917,7 @@ export function UnifiedAssistantChat({
             {matterFlow.step === 'service' &&
               (matterFlow.services === null ? (
                 <div className="li-uac-flow-loading">
-                  <GemSparkle size={16} /> Loading services…
+                  <GemCluster size={18} /> Loading services…
                 </div>
               ) : matterFlow.services.length === 0 ? (
                 <div className="li-uac-msg li-uac-msg-assistant">
@@ -2999,7 +2999,7 @@ export function UnifiedAssistantChat({
 
             {matterFlow.step === 'creating' && (
               <div className="li-uac-flow-loading">
-                <GemSparkle size={16} /> Opening the matter…
+                <GemCluster size={18} /> Opening the matter…
               </div>
             )}
             {matterFlow.step === 'done' && matterFlow.matterEntityId && (

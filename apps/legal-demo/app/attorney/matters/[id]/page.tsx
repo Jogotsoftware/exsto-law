@@ -16,7 +16,7 @@ import {
   FileTextIcon,
   EditIcon,
 } from '@/components/icons'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 import { downloadAsPdf, downloadAsWord, shareUrlFor } from '@/lib/draftExport'
 import {
   humanizeService,
@@ -721,7 +721,7 @@ function WorkflowWindow({
                 onClick={() => setOpenKey(stage.key)}
               >
                 <span className={`li-mat-wf-ico li-mat-wf-ico-${role}`}>
-                  {role === 'automatic' ? <GemSparkle size={16} secondary={false} /> : i + 1}
+                  {role === 'automatic' ? <GemCluster size={18} /> : i + 1}
                 </span>
                 <span className="li-mat-wf-name">{stage.label}</span>
                 {state === 'done' ? (
