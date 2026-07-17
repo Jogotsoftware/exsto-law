@@ -13,7 +13,7 @@ import {
   type CalendarItem,
   type CalendarCategory,
 } from '@/components/WeeklyCalendar'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 import { BriefcaseIcon, ChevronDownIcon, SettingsIcon } from '@/components/icons'
 import { humanizeKind } from '../shared'
 import { MatterEmailsCard } from './MatterEmailsCard'
@@ -54,7 +54,7 @@ function ActorBadge({ actorType, actorName }: { actorType: string; actorName: st
   if (actorType === 'agent') {
     return (
       <span className="li-mat-actor li-mat-actor-ai" title="Automated">
-        <GemSparkle size={14} secondary={false} />
+        <GemCluster size={16} />
       </span>
     )
   }

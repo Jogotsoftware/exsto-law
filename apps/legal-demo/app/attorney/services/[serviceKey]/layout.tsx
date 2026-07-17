@@ -14,7 +14,7 @@ import Link from 'next/link'
 import { useParams, usePathname } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { ServiceTabs } from '@/components/ServiceTabs'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 import { ChevronLeftIcon } from '@/components/icons'
 
 type GenerationMode = 'template_merge' | 'ai_draft'
@@ -218,7 +218,7 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
       </div>
       <div className="li-svc-airail">
         <div className="li-svc-airail-copy">
-          <GemSparkle size={20} />
+          <GemCluster size={22} />
           <span>Describe a change and the assistant edits this service for you.</span>
         </div>
         <button type="button" className="li-svc-airail-btn" onClick={editWithAi}>

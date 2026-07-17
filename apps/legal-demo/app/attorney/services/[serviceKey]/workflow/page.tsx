@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 import {
   WorkflowBuilder,
   stepToStage,
@@ -235,7 +235,7 @@ export default function ServiceWorkflowPage() {
           service's workflow. */}
       <div className="li-svc-wf-buildrow">
         <button type="button" className="li-svc-wf-buildbtn" onClick={buildWithAi}>
-          <GemSparkle size={16} />
+          <GemCluster size={18} />
           Build with AI
         </button>
         <span className="li-svc-wf-buildhint">

@@ -26,7 +26,7 @@ import { TemplateEditor, type TemplateEditorHandle } from '@/components/template
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
 import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
 import { buildPreview } from '@/lib/templatePreview'
 import { streamTemplateAi } from '@/lib/templateAiStream'
@@ -1055,7 +1055,7 @@ export default function TemplatesPage() {
 
           {/* Persistent inline AI-edit bar (comp: always visible under the header). */}
           <div className="li-tpl-ai-bar">
-            <GemSparkle size={18} />
+            <GemCluster size={20} />
             <input
               type="text"
               className="li-tpl-ai-input"

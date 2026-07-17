@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { GemSparkle } from '@/components/GemSparkle'
+import { GemCluster } from '@/components/GemSparkle'
 
 // UI-BUILDER-FIX-1 Phase 8 → HARDENING-RESIDUALS-1 (WP-D3) → BUILDER-UX-1 (WP-6):
 // THE one loading indicator, Claude-Code style. Exactly ONE status line is ever
@@ -104,7 +104,7 @@ export function WorkingIndicator({ neutral = false }: { neutral?: boolean }) {
       <div className="uac-thinking-head">
         {/* WP-L: the shared animated gemstar is THE "AI is working" affordance
             (comp Thinking state) — never a bespoke glyph. */}
-        <GemSparkle size={18} /> {phrase}…
+        <GemCluster size={20} /> {phrase}…
         <span className="uac-typing" aria-hidden="true">
           <span />
           <span />
