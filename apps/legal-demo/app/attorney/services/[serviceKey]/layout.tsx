@@ -10,10 +10,12 @@
 // the Settings panel. The create flow (/attorney/services/new) has no service yet,
 // so it shows just the create form.
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useParams, usePathname } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { ServiceTabs } from '@/components/ServiceTabs'
-import { BackButton } from '@/components/BackButton'
+import { GemSparkle } from '@/components/GemSparkle'
+import { ChevronLeftIcon } from '@/components/icons'
 
 type GenerationMode = 'template_merge' | 'ai_draft'
 interface ServiceHead {
@@ -116,15 +118,28 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
     else setShowGates(true)
   }
 
+  // Universal "Edit with AI" chrome (comp: every tab shows the same banner below
+  // the tab strip) — reuses the exsto:assistant:prime mechanism already wired for
+  // the Workflow tab's "Build with AI" button: opens the assistant, grounded in
+  // this page, with a starter prompt the attorney reviews before sending.
+  function editWithAi(): void {
+    const name = svc?.displayName ?? serviceKey
+    window.dispatchEvent(
+      new CustomEvent('exsto:assistant:prime', {
+        detail: { prompt: `Edit the service "${name}": ` },
+      }),
+    )
+  }
+
   if (isNew) {
     return (
       <main>
-        <BackButton fallback="/attorney/services" forceFallback />
-        <div
-          className="attorney-page-head"
-          style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}
-        >
-          <h1 style={{ margin: 0 }}>New service</h1>
+        <Link href="/attorney/services" className="li-svc-back">
+          <ChevronLeftIcon size={16} />
+          Back to services
+        </Link>
+        <div className="li-svc-head">
+          <h1 className="li-svc-title">New service</h1>
         </div>
         {children}
       </main>
@@ -133,11 +148,11 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
 
   return (
     <main>
-      <BackButton fallback="/attorney/services" forceFallback />
-      <div
-        className="attorney-page-head"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}
-      >
+      <Link href="/attorney/services" className="li-svc-back">
+        <ChevronLeftIcon size={16} />
+        Back to services
+      </Link>
+      <div className="li-svc-head">
         {editingName ? (
           <input
             autoFocus
@@ -150,15 +165,15 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
             }}
             disabled={savingName}
             aria-label="Service display name"
-            className="svc-name-edit"
+            className="li-svc-name-edit"
           />
         ) : (
-          <h1 style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+          <h1 className="li-svc-title">
             {svc?.displayName ?? 'Service'}
             {svc && (
               <button
                 type="button"
-                className="svc-rename-btn"
+                className="li-svc-rename"
                 title="Rename service"
                 aria-label="Rename service"
                 onClick={() => {
@@ -172,33 +187,45 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
           </h1>
         )}
         {svc && (
-          <span className={`badge ${svc.isActive ? 'ok' : ''}`}>
-            {svc.isActive ? 'Enabled' : 'Disabled'}
+          <span className={`li-svc-badge${svc.isActive ? ' is-active' : ''}`}>
+            <span className="li-svc-badge-dot" aria-hidden="true" />
+            {svc.isActive ? 'Active' : 'Inactive'}
           </span>
         )}
         {svc && (
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
+          <div className="li-svc-headtail">
             {svc.isActive ? (
               <button
-                className="danger outline"
+                className="li-svc-disablebtn"
                 onClick={() => void setActive(false)}
                 disabled={enabling}
               >
                 {enabling ? '…' : 'Disable service'}
               </button>
             ) : (
-              <button className="primary" onClick={onEnableClick} disabled={enabling}>
+              <button className="li-svc-enablebtn" onClick={onEnableClick} disabled={enabling}>
                 {enabling ? 'Enabling…' : 'Enable service'}
               </button>
             )}
           </div>
         )}
       </div>
-      <ServiceTabs
-        serviceKey={serviceKey}
-        generationMode={svc?.generationMode ?? 'template_merge'}
-      />
-      {children}
+      <div className="li-svc-tabs">
+        <ServiceTabs
+          serviceKey={serviceKey}
+          generationMode={svc?.generationMode ?? 'template_merge'}
+        />
+      </div>
+      <div className="li-svc-airail">
+        <div className="li-svc-airail-copy">
+          <GemSparkle size={20} />
+          <span>Describe a change and the assistant edits this service for you.</span>
+        </div>
+        <button type="button" className="li-svc-airail-btn" onClick={editWithAi}>
+          Edit with AI
+        </button>
+      </div>
+      <div className="li-svc-body">{children}</div>
       {showGates && (
         <div
           role="dialog"

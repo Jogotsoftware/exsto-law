@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { GemSparkle } from '@/components/GemSparkle'
 import {
   WorkflowBuilder,
   stepToStage,
@@ -223,8 +224,8 @@ export default function ServiceWorkflowPage() {
   }
 
   return (
-    <section>
-      <p style={{ color: 'var(--muted)', marginTop: '-0.4rem' }}>
+    <div className="li-svc-body">
+      <p className="li-svc-hint">
         Compose this service&apos;s workflow as an ordered set of steps. New matters run these steps
         in order. Saving creates a new immutable workflow version
         {version != null ? ` (currently v${version})` : ''}; matters already in flight keep theirs.
@@ -232,18 +233,12 @@ export default function ServiceWorkflowPage() {
 
       {/* Discoverable AI entry point: open the assistant primed to author this
           service's workflow. */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.6rem',
-          margin: '0.2rem 0 0.8rem',
-        }}
-      >
-        <button type="button" className="outline" onClick={buildWithAi}>
-          ✨ Build with AI
+      <div className="li-svc-wf-buildrow">
+        <button type="button" className="li-svc-wf-buildbtn" onClick={buildWithAi}>
+          <GemSparkle size={16} />
+          Build with AI
         </button>
-        <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+        <span className="li-svc-wf-buildhint">
           Describe the workflow to the assistant and it&apos;ll draft the steps for you to review.
         </span>
       </div>
@@ -278,7 +273,7 @@ export default function ServiceWorkflowPage() {
 
       {steps.length === 0 && (
         <div style={{ margin: '0 0 0.7rem' }}>
-          <button type="button" className="outline" onClick={startFromSmllc}>
+          <button type="button" className="li-svc-btn" onClick={startFromSmllc}>
             Start from the SMLLC template
           </button>
         </div>
@@ -293,16 +288,16 @@ export default function ServiceWorkflowPage() {
         onSaveToLibrary={(step, name) => void saveStepToLibrary(step, name)}
       />
 
-      <div style={{ marginTop: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
-        <button className="primary" onClick={save} disabled={busy || steps.length === 0}>
+      <div className="li-svc-wf-footrow">
+        <button className="li-svc-btn-primary" onClick={save} disabled={busy || steps.length === 0}>
           {busy ? 'Saving…' : 'Save workflow'}
         </button>
-        <span style={{ color: 'var(--muted)', fontSize: '0.82rem' }}>
+        <span className="li-svc-wf-buildhint">
           The last step is the terminal step (closes the matter); every earlier step advances to the
           one below it.
         </span>
       </div>
-    </section>
+    </div>
   )
 }
 

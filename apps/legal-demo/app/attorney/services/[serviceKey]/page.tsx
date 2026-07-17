@@ -275,7 +275,7 @@ export default function ServiceSettingsPage() {
   return (
     <>
       {!isNew && (
-        <p style={{ color: 'var(--muted)', marginTop: 'calc(var(--space-2) * -1)' }}>
+        <p className="li-svc-hint">
           Saving creates a new immutable version. Pricing (Billing tab), documents and questionnaire
           (their tabs) carry forward unless changed there.
         </p>
@@ -289,7 +289,7 @@ export default function ServiceSettingsPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : (
-        <section>
+        <div className="li-svc-panel">
           {/* BUILDER-UX-2 WP-2: the identity + client-copy + generation fields are the
               SHARED ServiceSettingsFields — the same form the wizard's ServiceEditorModal
               renders (one editor, no fork). The booking-schedule fieldset below is
@@ -325,9 +325,9 @@ export default function ServiceSettingsPage() {
             }
           />
 
-          <fieldset className="svc-fieldset">
+          <fieldset className="li-svc-fieldset">
             <legend>Bookings</legend>
-            <label className="svc-check">
+            <label className="li-svc-check">
               <input
                 type="checkbox"
                 checked={form.appointmentRequired}
@@ -336,18 +336,12 @@ export default function ServiceSettingsPage() {
               <span>Clients schedule a consultation when they book this service</span>
             </label>
             {!form.appointmentRequired && (
-              <p
-                style={{
-                  color: 'var(--muted)',
-                  fontSize: 'var(--text-sm)',
-                  margin: '0 0 var(--space-2)',
-                }}
-              >
+              <p className="li-svc-hint" style={{ margin: '0 0 10px' }}>
                 Intake only — clients submit the questionnaire and the matter opens without an
                 appointment. Great for document-review services.
               </p>
             )}
-            <label className="svc-check">
+            <label className="li-svc-check">
               <input
                 type="checkbox"
                 checked={form.bookingEnabled}
@@ -355,7 +349,7 @@ export default function ServiceSettingsPage() {
               />
               <span>Offer this service for online booking</span>
             </label>
-            <label className="svc-check">
+            <label className="li-svc-check">
               <input
                 type="checkbox"
                 checked={form.bookingSendInvite}
@@ -364,14 +358,25 @@ export default function ServiceSettingsPage() {
               />
               <span>Send a calendar invite when a consultation is booked</span>
             </label>
-            <label style={{ maxWidth: 240, opacity: form.appointmentRequired ? 1 : 0.5 }}>
-              <span>Consultation length</span>
+            <label
+              className="li-svc-check"
+              style={{ maxWidth: 260, opacity: form.appointmentRequired ? 1 : 0.5 }}
+            >
+              <span style={{ color: '#48546e' }}>Consultation length</span>
               <select
                 value={form.bookingDuration}
                 disabled={!form.appointmentRequired}
                 onChange={(e) =>
                   update('bookingDuration', Number(e.target.value) as BookingDuration)
                 }
+                style={{
+                  border: '1px solid var(--li-border-input)',
+                  borderRadius: 8,
+                  padding: '6px 10px',
+                  fontFamily: 'inherit',
+                  fontSize: 13,
+                  color: 'var(--li-fg)',
+                }}
               >
                 <option value={15}>15 minutes</option>
                 <option value={30}>30 minutes</option>
@@ -386,13 +391,7 @@ export default function ServiceSettingsPage() {
                 url={bookingUrl}
               />
             )}
-            <p
-              style={{
-                color: 'var(--muted)',
-                fontSize: 'var(--text-sm)',
-                margin: 'var(--space-2) 0 0',
-              }}
-            >
+            <p className="li-svc-hint" style={{ marginTop: 10 }}>
               Days, hours and buffer are firm-wide —{' '}
               <Link href="/attorney/settings" className="back-link">
                 edit booking hours in Settings
@@ -401,12 +400,16 @@ export default function ServiceSettingsPage() {
             </p>
           </fieldset>
 
-          <div style={{ marginTop: 'var(--space-3)' }}>
-            <button className="primary" onClick={save} disabled={busy || !form.displayName.trim()}>
+          <div className="li-svc-actions">
+            <button
+              className="li-svc-btn-primary"
+              onClick={save}
+              disabled={busy || !form.displayName.trim()}
+            >
               {busy ? 'Saving…' : isNew ? 'Create service' : 'Save new version'}
             </button>
           </div>
-        </section>
+        </div>
       )}
     </>
   )

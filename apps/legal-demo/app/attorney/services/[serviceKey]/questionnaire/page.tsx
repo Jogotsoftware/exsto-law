@@ -449,29 +449,35 @@ export default function QuestionnaireEditorPage() {
   return (
     <>
       {promptElement}
+      <p className="li-svc-hint">
+        Each question&rsquo;s <strong style={{ color: '#48546e' }}>variable</strong> is the{' '}
+        <code>{'{{token}}'}</code> its answer fills in the bound document. Leave it blank to default
+        to the question label.
+      </p>
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 'var(--space-2)',
-          justifyContent: 'flex-end',
-          marginBottom: 'var(--space-4)',
+          flexWrap: 'wrap',
         }}
       >
-        <button type="button" onClick={() => void saveToLibrary()} disabled={busy || !doc}>
+        <StartFromLibrary
+          onApply={(schema) => {
+            setDoc(wireToEditor(schema))
+            setSaved(false)
+          }}
+        />
+        <button
+          type="button"
+          className="li-svc-btn"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => void saveToLibrary()}
+          disabled={busy || !doc}
+        >
           Save to library
         </button>
-        <button className="primary" onClick={save} disabled={busy || !doc}>
-          {busy ? 'Saving…' : 'Save'}
-        </button>
       </div>
-
-      <StartFromLibrary
-        onApply={(schema) => {
-          setDoc(wireToEditor(schema))
-          setSaved(false)
-        }}
-      />
 
       {error && <div className="alert alert-error">{error}</div>}
       {saved && <div className="alert alert-success">Saved a new version.</div>}
@@ -482,8 +488,8 @@ export default function QuestionnaireEditorPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : (
-        <div className="qb-builder">
-          <div className="qb-card">
+        <div className="li-svc-body">
+          <div className="li-svc-panel li-svc-panel--accent">
             <div className="form-grid">
               <label>
                 <span>Form title</span>
@@ -507,7 +513,7 @@ export default function QuestionnaireEditorPage() {
           {doc.sections.map((section, si) => (
             <section
               key={si}
-              className="qb-card qb-section-card"
+              className="li-svc-qsec"
               onDragOver={(e) => {
                 if (drag && drag.fi === null) e.preventDefault()
               }}
@@ -518,9 +524,9 @@ export default function QuestionnaireEditorPage() {
                 setDrag(null)
               }}
             >
-              <div className="qb-card-head">
+              <div className="li-svc-qsec-head">
                 <span
-                  className="qb-grip"
+                  className="li-svc-grip"
                   draggable
                   onDragStart={() => setDrag({ si, fi: null })}
                   onDragEnd={() => setDrag(null)}
@@ -529,17 +535,16 @@ export default function QuestionnaireEditorPage() {
                 >
                   ⠿
                 </span>
-                <span className="qb-num">Section {si + 1}</span>
                 <input
-                  className="qb-title-input"
+                  className="li-svc-qsec-title"
                   value={section.title}
                   onChange={(e) => patchSection(si, (s) => ({ ...s, title: e.target.value }))}
                   placeholder="Section title — e.g. About the company"
                   aria-label={`Section ${si + 1} title`}
                 />
-                <span className="qb-actions">
+                <span className="li-svc-qsec-actions">
                   <button
-                    className="qb-iconbtn"
+                    className="li-svc-iconbtn"
                     onClick={() =>
                       patch((d) => ({ ...d, sections: moveTo(d.sections, si, si - 1) }))
                     }
@@ -550,7 +555,7 @@ export default function QuestionnaireEditorPage() {
                     ↑
                   </button>
                   <button
-                    className="qb-iconbtn"
+                    className="li-svc-iconbtn"
                     onClick={() =>
                       patch((d) => ({ ...d, sections: moveTo(d.sections, si, si + 1) }))
                     }
@@ -561,14 +566,14 @@ export default function QuestionnaireEditorPage() {
                     ↓
                   </button>
                   <button
-                    className="qb-iconbtn qb-danger"
+                    className="li-svc-remove-section"
                     onClick={() =>
                       patch((d) => ({ ...d, sections: d.sections.filter((_, i) => i !== si) }))
                     }
                     title="Remove section"
                     aria-label="Remove section"
                   >
-                    <XIcon size={15} />
+                    Remove section
                   </button>
                 </span>
               </div>
@@ -604,15 +609,15 @@ export default function QuestionnaireEditorPage() {
                 />
               ))}
 
-              <div className="qb-add-row">
+              <div className="li-svc-addrow">
                 <button
-                  className="qb-add qb-add-q"
+                  type="button"
+                  className="li-svc-addbtn"
                   onClick={() =>
                     patchSection(si, (s) => ({ ...s, fields: [...s.fields, emptyField()] }))
                   }
                 >
-                  <PlusIcon size={16} />
-                  Add question
+                  + Add field
                 </button>
                 <AddFromLibrary
                   onPick={(q) =>
@@ -626,13 +631,23 @@ export default function QuestionnaireEditorPage() {
             </section>
           ))}
 
-          <button
-            className="qb-add"
-            onClick={() => patch((d) => ({ ...d, sections: [...d.sections, emptySection()] }))}
-          >
-            <PlusIcon size={16} />
-            Add section
-          </button>
+          <div className="li-svc-footrow">
+            <button
+              type="button"
+              className="li-svc-addbtn"
+              onClick={() => patch((d) => ({ ...d, sections: [...d.sections, emptySection()] }))}
+            >
+              + Add section
+            </button>
+            <button
+              type="button"
+              className="li-svc-btn-primary"
+              onClick={save}
+              disabled={busy || !doc}
+            >
+              {busy ? 'Saving…' : 'Save intake form'}
+            </button>
+          </div>
         </div>
       )}
     </>
@@ -689,8 +704,8 @@ function AddFromLibrary({ onPick }: { onPick: (q: LibQuestion) => void }) {
     : items
 
   return (
-    <div className="qlib-picker">
-      <button className="qb-add qb-add-lib" type="button" onClick={() => setOpen((o) => !o)}>
+    <div className="qlib-picker li-svc-addlib">
+      <button className="li-svc-addbtn" type="button" onClick={() => setOpen((o) => !o)}>
         <LayersIcon size={16} />
         Add from library
       </button>
@@ -828,7 +843,8 @@ function FieldEditor({
 }) {
   return (
     <fieldset
-      className="qb-q"
+      className="li-svc-q"
+      style={{ border: 'none', margin: 0, padding: 0 }}
       onDragOver={(e) => {
         if (dragActive) {
           e.preventDefault()
@@ -842,10 +858,11 @@ function FieldEditor({
         }
       }}
     >
-      <legend className="qb-q-head">
+      <legend style={{ display: 'none' }}>Question {index + 1}</legend>
+      <div className="li-svc-qrow">
         {draggable && (
           <span
-            className="qb-grip"
+            className="li-svc-grip"
             draggable
             onDragStart={(e) => {
               e.stopPropagation()
@@ -858,114 +875,103 @@ function FieldEditor({
             ⠿
           </span>
         )}
-        <span className="qb-q-num">Question {index + 1}</span>
-        <span className="qb-actions">
-          {onSaveToLibrary && (
-            <button
-              className="qb-iconbtn"
-              onClick={onSaveToLibrary}
-              disabled={saveBusy}
-              title="Save this question to the library"
-              aria-label="Save this question to the library"
-            >
-              <CopyIcon size={14} />
-            </button>
-          )}
-          <button
-            className="qb-iconbtn"
-            onClick={() => onMove(-1)}
-            disabled={index === 0}
-            title="Move question up"
-            aria-label="Move question up"
-          >
-            ↑
-          </button>
-          <button
-            className="qb-iconbtn"
-            onClick={() => onMove(1)}
-            disabled={index === count - 1}
-            title="Move question down"
-            aria-label="Move question down"
-          >
-            ↓
-          </button>
-          <button
-            className="qb-iconbtn qb-danger"
-            onClick={onRemove}
-            title="Remove question"
-            aria-label="Remove question"
-          >
-            <XIcon size={15} />
-          </button>
-        </span>
-      </legend>
-      <div className="form-grid">
-        <label>
-          <span>Question</span>
-          <input
-            value={field.label}
-            onChange={(e) => onChange((f) => ({ ...f, label: e.target.value }))}
-            placeholder="e.g. Proposed LLC name"
-          />
-        </label>
-        <label>
-          <span>
-            Variable{' '}
-            <span className="text-muted" style={{ fontWeight: 400 }}>
-              — the <code>{'{{token}}'}</code> this fills in the template
-            </span>
-          </span>
+        <input
+          className="li-svc-qrow-label"
+          value={field.label}
+          onChange={(e) => onChange((f) => ({ ...f, label: e.target.value }))}
+          placeholder="e.g. Proposed LLC name"
+          aria-label={`Question ${index + 1} label`}
+        />
+        <span className="li-svc-token" title="The {{token}} this fills in the template">
+          <span>{'{{'}</span>
           <input
             value={field.id}
             onChange={(e) => onChange((f) => ({ ...f, id: normToken(e.target.value) }))}
             placeholder={slugify(field.label) || 'variable'}
             spellCheck={false}
-            style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+            aria-label={`Question ${index + 1} variable`}
           />
-        </label>
-        <label>
-          <span>Answer type</span>
-          <select
-            value={field.type}
-            onChange={(e) => onChange((f) => ({ ...f, type: e.target.value as FieldType }))}
-          >
-            {FIELD_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {FIELD_TYPE_LABELS[t]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="qb-switches">
-        <label className="qb-switch">
+          <span>{'}}'}</span>
+        </span>
+        <select
+          className="li-svc-qrow-type"
+          value={field.type}
+          onChange={(e) => onChange((f) => ({ ...f, type: e.target.value as FieldType }))}
+          aria-label={`Question ${index + 1} answer type`}
+        >
+          {FIELD_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {FIELD_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
+        <label className="li-svc-qrow-req">
           <input
             type="checkbox"
             checked={field.required}
             onChange={(e) => onChange((f) => ({ ...f, required: e.target.checked }))}
           />
-          <span>Required</span>
+          Required
         </label>
+        {onSaveToLibrary && (
+          <button
+            className="li-svc-iconbtn"
+            onClick={onSaveToLibrary}
+            disabled={saveBusy}
+            title="Save this question to the library"
+            aria-label="Save this question to the library"
+          >
+            <CopyIcon size={14} />
+          </button>
+        )}
+        <button
+          className="li-svc-iconbtn"
+          onClick={() => onMove(-1)}
+          disabled={index === 0}
+          title="Move question up"
+          aria-label="Move question up"
+        >
+          ↑
+        </button>
+        <button
+          className="li-svc-iconbtn"
+          onClick={() => onMove(1)}
+          disabled={index === count - 1}
+          title="Move question down"
+          aria-label="Move question down"
+        >
+          ↓
+        </button>
+        <button
+          className="li-svc-iconbtn danger"
+          onClick={onRemove}
+          title="Remove question"
+          aria-label="Remove question"
+        >
+          <XIcon size={15} />
+        </button>
+      </div>
+
+      <div className="li-svc-qrow-extra">
         {/* "I don't know" has no sensible rendering for an attachment control —
             the /book renderer ignores it there, so don't author dead config. */}
         {field.type !== 'file_upload' && (
-          <label className="qb-switch">
+          <label>
             <input
               type="checkbox"
               checked={field.allow_unknown}
               onChange={(e) => onChange((f) => ({ ...f, allow_unknown: e.target.checked }))}
             />
-            <span>Allow “I don’t know”</span>
+            Allow “I don’t know”
           </label>
         )}
-        <label className="qb-switch">
+        <label>
           <input
             type="checkbox"
             checked={field.ask_attorney}
             onChange={(e) => onChange((f) => ({ ...f, ask_attorney: e.target.checked }))}
           />
-          <span>Flag for attorney follow-up</span>
+          Flag for attorney follow-up
         </label>
       </div>
 

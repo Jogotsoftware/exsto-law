@@ -1,12 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
-import { SettingsIcon } from '@/components/icons'
-import { PageHead } from '@/components/PageHead'
+import { PlusIcon, SettingsIcon } from '@/components/icons'
 
 interface ServiceDefinition {
   id: string
@@ -137,14 +135,17 @@ export default function ServicesPage() {
   return (
     <main>
       {confirmElement}
-      <PageHead
-        title="Services"
-        actions={
-          <button className="primary" onClick={() => router.push('/attorney/services/new')}>
-            + New service
-          </button>
-        }
-      />
+      <div className="li-svc-list-head">
+        <h1>Services</h1>
+        <button
+          type="button"
+          className="li-svc-newbtn"
+          onClick={() => router.push('/attorney/services/new')}
+        >
+          <PlusIcon size={15} />
+          New service
+        </button>
+      </div>
 
       {error && <div className="alert alert-error">{error}</div>}
 
@@ -153,102 +154,91 @@ export default function ServicesPage() {
           <span className="spinner" /> Loading…
         </div>
       ) : services.length === 0 ? (
-        <section>
-          <p className="text-muted">No services yet. Create your first offering.</p>
-        </section>
+        <p className="li-svc-empty">No services yet. Create your first offering.</p>
       ) : (
-        <section style={{ padding: 0, overflow: 'visible' }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Service</th>
-                <th style={{ width: '9rem' }}>Status</th>
-                <th style={{ width: '3rem' }} aria-label="Actions"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {services.map((svc) => (
-                <tr key={svc.id}>
-                  <td style={{ verticalAlign: 'middle' }}>
-                    <Link
-                      href={`/attorney/services/${svc.serviceKey}`}
-                      className="client-name-link"
-                    >
-                      <strong>{svc.displayName}</strong>
-                    </Link>
-                    {svc.description && (
-                      <div style={{ color: 'var(--muted)', fontSize: 'var(--text-sm)' }}>
-                        {svc.description}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ verticalAlign: 'middle' }}>
+        <div className="li-svc-listcard">
+          {services.map((svc) => (
+            <div
+              key={svc.id}
+              role="button"
+              tabIndex={0}
+              className="li-svc-row"
+              onClick={() => router.push(`/attorney/services/${svc.serviceKey}`)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  router.push(`/attorney/services/${svc.serviceKey}`)
+                }
+              }}
+            >
+              <div className="li-svc-row-main">
+                <div className="li-svc-row-name">{svc.displayName}</div>
+                {svc.description && <div className="li-svc-row-desc">{svc.description}</div>}
+              </div>
+              <button
+                type="button"
+                className={`li-svc-badge${svc.isActive ? ' is-active' : ''}`}
+                disabled={busy === svc.serviceKey}
+                aria-pressed={svc.isActive}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleActive(svc)
+                }}
+                title={
+                  svc.isActive
+                    ? 'Active — shown on the booking page. Click to disable.'
+                    : 'Inactive — hidden from booking. Click to enable.'
+                }
+              >
+                <span className="li-svc-badge-dot" aria-hidden="true" />
+                {svc.isActive ? 'Active' : 'Inactive'}
+              </button>
+              {/* The menu anchors to this span (which wraps only the gear), not the
+                  full-height row — otherwise on a two-line row its `top: 100%` drops
+                  it an inch below the gear. */}
+              <span style={{ position: 'relative', display: 'inline-block' }}>
+                <button
+                  type="button"
+                  className="li-svc-row-gear"
+                  aria-label="Service actions"
+                  aria-haspopup="menu"
+                  disabled={busy === svc.serviceKey}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setMenuFor(menuFor === svc.serviceKey ? null : svc.serviceKey)
+                  }}
+                >
+                  <SettingsIcon size={18} />
+                </button>
+                {menuFor === svc.serviceKey && (
+                  <div className="row-menu" role="menu" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
-                      className={`status-pill ${svc.isActive ? 'is-active' : 'is-inactive'}`}
-                      disabled={busy === svc.serviceKey}
-                      aria-pressed={svc.isActive}
-                      onClick={() => toggleActive(svc)}
-                      title={
-                        svc.isActive
-                          ? 'Active — shown on the booking page. Click to disable.'
-                          : 'Inactive — hidden from booking. Click to enable.'
-                      }
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuFor(null)
+                        router.push(`/attorney/services/${svc.serviceKey}`)
+                      }}
                     >
-                      <span className="status-dot" aria-hidden="true" />
-                      {svc.isActive ? 'Active' : 'Inactive'}
+                      Edit
                     </button>
-                  </td>
-                  <td style={{ textAlign: 'right', verticalAlign: 'middle' }}>
-                    {/* The menu anchors to this span (which wraps only the gear),
-                        not the full-height cell — otherwise on a two-line row its
-                        `top: 100%` drops it an inch below the gear. */}
-                    <span style={{ position: 'relative', display: 'inline-block' }}>
-                      <button
-                        className="icon-btn"
-                        style={{ verticalAlign: 'middle' }}
-                        aria-label="Service actions"
-                        aria-haspopup="menu"
-                        disabled={busy === svc.serviceKey}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setMenuFor(menuFor === svc.serviceKey ? null : svc.serviceKey)
-                        }}
-                      >
-                        <SettingsIcon size={26} />
-                      </button>
-                      {menuFor === svc.serviceKey && (
-                        <div className="row-menu" role="menu" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setMenuFor(null)
-                              router.push(`/attorney/services/${svc.serviceKey}`)
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button type="button" role="menuitem" onClick={() => clone(svc)}>
-                            Clone
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="row-menu-danger"
-                            onClick={() => remove(svc)}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+                    <button type="button" role="menuitem" onClick={() => clone(svc)}>
+                      Clone
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="row-menu-danger"
+                      onClick={() => remove(svc)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </main>
   )
