@@ -28,6 +28,8 @@ jobs:
         run: pnpm lint
       - name: Format check
         run: pnpm format:check
+      - name: CSS structure check
+        run: pnpm css:check
       - name: Build
         run: pnpm build
       - name: Unit tests (no DB)
