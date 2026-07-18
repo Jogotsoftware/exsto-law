@@ -108,6 +108,9 @@ import './tools/moduleTools.js'
 // email drafting, transcript extraction into notes).
 import './tools/notesTools.js'
 import './tools/commsTools.js'
+// Brief engine WP2 — Matter Brief get/generate (attorney-only; deliberately NOT
+// in the clientPolicy.ts portal allowlists — founder decision: never portal).
+import './tools/briefTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

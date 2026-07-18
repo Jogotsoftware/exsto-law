@@ -22114,3 +22114,183 @@ a.li-uac-done-primary:hover {
   color: var(--li-navy);
   font-size: 14px;
 }
+
+/* ==========================================================================
+   BRIEF ENGINE (li-brief-). Matter Brief door + window (WP2; design:
+   docs/design/briefs/DESIGN.md section 6). The header button next to Actions,
+   the wrapper that keeps it beside the Actions trigger, and the modal-body
+   states inside the shared li-modal chrome: loading, first-run empty state
+   with the Generate affordance, the GemSparkle working state, the amber
+   out-of-date strip (manual Refresh only - founder decision), the
+   generated-at meta line, and the rendered markdown body. Own family,
+   appended last (after li-modal); consumes the shared --li-* tokens set on
+   .li-shell. Does NOT touch other families.
+   ========================================================================== */
+
+.li-brief-headwrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.li-brief-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--li-card);
+  color: var(--li-navy);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-btn);
+  padding: 10px 15px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-brief-btn:hover {
+  border-color: var(--li-navy);
+}
+
+.li-brief-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--li-text-muted);
+  font-size: 14px;
+  margin: 0;
+  padding: 28px 4px;
+}
+
+/* First-run: no brief exists yet. Honest empty state + the one AI affordance. */
+.li-brief-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 26px 6px 14px;
+  max-width: 560px;
+}
+.li-brief-empty-lead {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--li-navy);
+}
+.li-brief-empty-sub {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--li-text-muted);
+}
+.li-brief-generate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  background: var(--li-navy);
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-brief-generate-btn:hover {
+  background: var(--li-navy-hover);
+}
+
+/* Working state while the model synthesizes (generation runs only on click). */
+.li-brief-working {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 30px 6px;
+}
+.li-brief-working-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--li-navy);
+}
+.li-brief-working-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--li-text-muted);
+  max-width: 520px;
+}
+
+/* Cached view: amber stale strip (manual refresh), meta line, markdown body. */
+.li-brief-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #fdf6e3;
+  border: 1px solid #f0dfae;
+  color: #8a6d1d;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  margin-bottom: 14px;
+}
+.li-brief-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #8a6d1d;
+  color: #fff;
+  border: none;
+  border-radius: var(--li-radius-btn);
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.li-brief-refresh-btn:hover {
+  background: #6f5716;
+}
+.li-brief-meta {
+  font-size: 12.5px;
+  color: var(--li-text-muted);
+  margin-bottom: 14px;
+}
+.li-brief-body {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--li-text);
+}
+.li-brief-body h1,
+.li-brief-body h2,
+.li-brief-body h3 {
+  color: var(--li-navy);
+  margin: 18px 0 8px;
+  line-height: 1.3;
+}
+.li-brief-body h1 {
+  font-size: 18px;
+}
+.li-brief-body h2 {
+  font-size: 16px;
+}
+.li-brief-body h3 {
+  font-size: 14.5px;
+}
+.li-brief-body p {
+  margin: 0 0 10px;
+}
+.li-brief-body ul,
+.li-brief-body ol {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+.li-brief-body li {
+  margin-bottom: 4px;
+}
+.li-brief-body blockquote {
+  margin: 0 0 10px;
+  padding: 6px 14px;
+  border-left: 3px solid var(--li-border);
+  color: var(--li-text-muted);
+}

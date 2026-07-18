@@ -122,3 +122,4 @@ export type { AvailabilitySlot, CreatedEvent, BusyInterval } from '../adapters/g
 export type { GenerationMode } from './generateDraft.js'
 export * from './engagement.js'
 export * from './permissionScope.js'
+export * from './briefEngine.js'

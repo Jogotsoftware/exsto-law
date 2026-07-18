@@ -21,6 +21,7 @@ import {
   ChevronDownIcon,
 } from '@/components/icons'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
+import { BriefButton } from '@/components/BriefButton'
 import { humanizeService, type MatterDetail } from './shared'
 
 export default function MatterLayout({
@@ -87,64 +88,70 @@ export default function MatterLayout({
             <div className="li-mat-detail-service">{humanizeService(matter.practiceArea)}</div>
           )}
         </div>
-        <ActionsMenu
-          triggerClassName="li-mat-actionsbtn"
-          triggerContent={
-            <>
-              Actions
-              <ChevronDownIcon size={15} />
-            </>
-          }
-          items={[
-            {
-              label: 'New task',
-              icon: <ListIcon size={16} />,
-              href: `/attorney/matters/${id}/tasks?new=1`,
-              title: 'Add a task to this matter',
-            },
-            {
-              label: 'Draft email',
-              icon: <MailIcon size={16} />,
-              onClick: () => launchCompose({ matterId: id, to: matter?.clientEmail ?? undefined }),
-              title: matter?.clientEmail ? `Email ${matter.clientEmail}` : 'Compose an email',
-            },
-            {
-              label: 'Schedule',
-              icon: <CalendarIcon size={16} />,
-              onClick: () => launchScheduler({ matterId: id }),
-              title: 'Schedule a meeting',
-            },
-            {
-              label: 'Add time',
-              icon: <ClockIcon size={16} />,
-              href: `/attorney/matters/${id}/billing?add=time`,
-              title: 'Log time on this matter',
-            },
-            {
-              label: 'Add expense',
-              icon: <DollarSignIcon size={16} />,
-              href: `/attorney/matters/${id}/billing?add=expense`,
-              title: 'Log an expense on this matter',
-            },
-            {
-              label: 'Add fee',
-              icon: <DollarSignIcon size={16} />,
-              href: `/attorney/matters/${id}/billing?add=fee`,
-              title: 'Add a service or document fee to this matter',
-            },
-            ...(closeMatterStageKey
-              ? [
-                  {
-                    label: 'Close matter',
-                    icon: <CheckCircleIcon size={16} />,
-                    href: `/attorney/matters/${id}?closeMatter=1`,
-                    title: 'Complete and close this matter',
-                    danger: true,
-                  },
-                ]
-              : []),
-          ]}
-        />
+        <div className="li-brief-headwrap">
+          {/* Brief engine WP2: the Matter Brief door — modal does get-on-open,
+              generation only on an explicit click (never automatic). */}
+          <BriefButton matterEntityId={id} />
+          <ActionsMenu
+            triggerClassName="li-mat-actionsbtn"
+            triggerContent={
+              <>
+                Actions
+                <ChevronDownIcon size={15} />
+              </>
+            }
+            items={[
+              {
+                label: 'New task',
+                icon: <ListIcon size={16} />,
+                href: `/attorney/matters/${id}/tasks?new=1`,
+                title: 'Add a task to this matter',
+              },
+              {
+                label: 'Draft email',
+                icon: <MailIcon size={16} />,
+                onClick: () =>
+                  launchCompose({ matterId: id, to: matter?.clientEmail ?? undefined }),
+                title: matter?.clientEmail ? `Email ${matter.clientEmail}` : 'Compose an email',
+              },
+              {
+                label: 'Schedule',
+                icon: <CalendarIcon size={16} />,
+                onClick: () => launchScheduler({ matterId: id }),
+                title: 'Schedule a meeting',
+              },
+              {
+                label: 'Add time',
+                icon: <ClockIcon size={16} />,
+                href: `/attorney/matters/${id}/billing?add=time`,
+                title: 'Log time on this matter',
+              },
+              {
+                label: 'Add expense',
+                icon: <DollarSignIcon size={16} />,
+                href: `/attorney/matters/${id}/billing?add=expense`,
+                title: 'Log an expense on this matter',
+              },
+              {
+                label: 'Add fee',
+                icon: <DollarSignIcon size={16} />,
+                href: `/attorney/matters/${id}/billing?add=fee`,
+                title: 'Add a service or document fee to this matter',
+              },
+              ...(closeMatterStageKey
+                ? [
+                    {
+                      label: 'Close matter',
+                      icon: <CheckCircleIcon size={16} />,
+                      href: `/attorney/matters/${id}?closeMatter=1`,
+                      title: 'Complete and close this matter',
+                      danger: true,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        </div>
       </div>
 
       <MatterTabs matterEntityId={id} />
