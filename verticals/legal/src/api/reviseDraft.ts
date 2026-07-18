@@ -12,6 +12,11 @@ export interface ReviseDraftInput {
   documentVersionId: string
   // The attorney's plain-language instruction ("Make the tone firmer", …).
   instruction: string
+  // Optional: revise THIS text instead of the stored version body. The tracked-
+  // changes editor (li-edtr) sends its current accepted working text so a
+  // revision composes with changes the attorney accepted but has not saved yet.
+  // Everything else is unchanged — same trace, still no version written.
+  baseMarkdown?: string
 }
 
 export interface ReviseDraftResult {
@@ -43,12 +48,16 @@ export async function reviseDraftText(
   const instruction = input.instruction.trim()
   if (!instruction) throw new Error('A revision instruction is required.')
 
+  // The stored version is still loaded first — it authenticates the id under the
+  // tenant and supplies the document kind — even when a working-text override is
+  // supplied.
   const base = await getDraftVersion(ctx, input.documentVersionId)
   if (!base) throw new Error(`Draft version not found: ${input.documentVersionId}`)
-  if (!base.bodyMarkdown.trim()) throw new Error('The document to revise is empty.')
+  const currentMarkdown = input.baseMarkdown?.trim() ? input.baseMarkdown : base.bodyMarkdown
+  if (!currentMarkdown.trim()) throw new Error('The document to revise is empty.')
 
   const prompt = buildRevisionPrompt({
-    currentMarkdown: base.bodyMarkdown,
+    currentMarkdown,
     documentKind: base.documentKind,
     instruction,
   })
