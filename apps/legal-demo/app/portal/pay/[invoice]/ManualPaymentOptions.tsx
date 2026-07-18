@@ -83,7 +83,7 @@ function CopyButton({ text, what }: { text: string; what: string }) {
   return (
     <button
       type="button"
-      className="pdash-btn pdash-btn-sm"
+      className="li-cp-btn li-cp-btn--ghost li-cp-btn--sm"
       onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
           setCopied(true)
@@ -204,10 +204,10 @@ export function ManualPaymentOptions({
       <h2 style={{ margin: 0, fontSize: '1.05rem' }}>Other ways to pay</h2>
 
       {hasZelle && methods.zelle && (
-        <div className="pdash-card">
-          <div className="pdash-card-head">
+        <div className="li-cp-card">
+          <div className="li-cp-card-head">
             <h3 style={{ margin: 0 }}>Pay with Zelle</h3>
-            <span className="pdash-badge">No fees</span>
+            <span className="li-cp-chip li-cp-chip--neutral li-cp-chip--plain">No fees</span>
           </div>
           <div
             style={{
@@ -245,13 +245,15 @@ export function ManualPaymentOptions({
       )}
 
       {wallets.map((w, i) => (
-        <div key={i} className="pdash-card">
-          <div className="pdash-card-head">
+        <div key={i} className="li-cp-card">
+          <div className="li-cp-card-head">
             <h3 style={{ margin: 0 }}>
               Pay with {w.currency}
               {w.label ? ` — ${w.label}` : ''}
             </h3>
-            {w.network && <span className="pdash-badge">{w.network}</span>}
+            {w.network && (
+              <span className="li-cp-chip li-cp-chip--neutral li-cp-chip--plain">{w.network}</span>
+            )}
           </div>
           <div className="alert" role="note" style={{ marginTop: 'var(--space-2)' }}>
             Send <strong>only {w.currency}</strong>
@@ -303,8 +305,8 @@ export function ManualPaymentOptions({
         </div>
       ))}
 
-      <div className="pdash-card">
-        <div className="pdash-card-head">
+      <div className="li-cp-card">
+        <div className="li-cp-card-head">
           <h3 style={{ margin: 0 }}>Already paid? Report it</h3>
         </div>
         {reported ? (
@@ -404,7 +406,7 @@ export function ManualPaymentOptions({
             <div>
               <button
                 type="button"
-                className="pdash-btn"
+                className="li-cp-btn"
                 disabled={busy || !method || reference.trim().length < 4}
                 onClick={() => void submitReport()}
               >

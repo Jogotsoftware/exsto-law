@@ -188,21 +188,19 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
   }
 
   return (
-    <main className="public-draft">
+    <main className="li-cp-pay">
       <BackButton fallback="/portal" forceFallback />
-      <div className="public-draft-head">
+      <div className="li-cp-pay-head">
+        <span className="li-cp-pay-crest" aria-hidden>
+          <ScaleIcon size={20} />
+        </span>
         <div>
-          <div className="pd-brandrow">
-            <span className="cp-crest" aria-hidden>
-              <ScaleIcon size={18} />
-            </span>
-            <div className="public-draft-firm">Pacheco Law</div>
-          </div>
-          <h1 style={{ margin: 'var(--space-1) 0 0' }}>Invoice {invoiceNumber}</h1>
+          <div className="li-cp-pay-firm">Pacheco Law</div>
+          <h1 className="li-cp-pay-h1">Invoice {invoiceNumber}</h1>
         </div>
       </div>
 
-      <section style={{ marginTop: 'var(--space-4)' }}>
+      <section>
         {state === 'loading' && (
           <div className="loading-block" role="status">
             <span className="spinner" /> Loading invoice…
@@ -224,43 +222,47 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
 
         {state === 'ready' && data && (
           <>
-            <div className="pdash-card">
-              <div className="pdash-card-head">
-                <h2>{money(data.total, data.currency)}</h2>
+            <div className="li-cp-card">
+              <div className="li-cp-pay-amt">
+                <span className="li-cp-pay-total">{money(data.total, data.currency)}</span>
                 <span
-                  className={`pdash-badge ${data.status === 'paid' ? 'pdash-badge-ok' : 'pdash-badge-warn'}`}
+                  className={`li-cp-chip li-cp-chip--plain ${data.status === 'paid' ? 'li-cp-chip--ok' : 'li-cp-chip--warn'}`}
                 >
                   {data.status === 'paid' ? 'Paid' : 'Amount due'}
                 </span>
               </div>
-              <div className="text-sm text-muted">
+              <div className="li-cp-muted li-cp-small" style={{ marginTop: 6 }}>
                 {data.issuedDate && <>Issued {formatDate(data.issuedDate)} · </>}
                 {data.dueDate && data.status !== 'paid' && <>Due {formatDate(data.dueDate)}</>}
               </div>
 
               {data.lines.length > 0 && (
-                <ul className="pdash-docs" style={{ marginTop: 'var(--space-3)' }}>
+                <div className="li-cp-pay-lines">
                   {data.lines.map((l, i) => (
-                    <li key={i} className="pdash-doc">
-                      <div className="pdash-doc-title">{l.description || 'Service'}</div>
-                      <div>{money(l.amount, data.currency)}</div>
-                    </li>
+                    <div key={i} className="li-cp-pay-line">
+                      <span>{l.description || 'Service'}</span>
+                      <span>{money(l.amount, data.currency)}</span>
+                    </div>
                   ))}
-                </ul>
+                </div>
               )}
 
               <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
                 {payToken ? null : !pdf ? (
                   <button
                     type="button"
-                    className="pdash-btn pdash-btn-sm"
+                    className="li-cp-btn li-cp-btn--ghost li-cp-btn--sm"
                     disabled={pdfBusy}
                     onClick={viewPdf}
                   >
                     {pdfBusy ? 'Preparing PDF…' : 'View / download PDF'}
                   </button>
                 ) : (
-                  <a className="pdash-btn pdash-btn-sm" href={pdf.url} download={pdf.filename}>
+                  <a
+                    className="li-cp-btn li-cp-btn--ghost li-cp-btn--sm"
+                    href={pdf.url}
+                    download={pdf.filename}
+                  >
                     Download PDF
                   </a>
                 )}
@@ -291,20 +293,24 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
             )}
 
             {data.status === 'paid' ? (
-              <p className="text-muted" style={{ marginTop: 'var(--space-4)' }}>
+              <p className="li-cp-muted" style={{ marginTop: 'var(--space-4)' }}>
                 This invoice has been paid. Thank you!
               </p>
             ) : (
               <div style={{ marginTop: 'var(--space-4)' }}>
                 {payToken && (
-                  <p className="text-sm text-muted">
+                  <p className="li-cp-muted li-cp-small">
                     Viewing via your emailed payment link.{' '}
                     <a href="/portal/login">Sign in to your portal</a> for downloads and more
                     payment options.
                   </p>
                 )}
                 {payState === 'idle' && (
-                  <button type="button" className="pdash-btn" onClick={startPayment}>
+                  <button
+                    type="button"
+                    className="li-cp-btn li-cp-btn--gold"
+                    onClick={startPayment}
+                  >
                     Pay {money(data.total, data.currency)} online
                   </button>
                 )}
