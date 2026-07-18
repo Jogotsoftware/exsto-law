@@ -9263,6 +9263,80 @@ input[type='number'] {
   align-items: center;
   gap: 0.9rem;
 }
+/* MULTI-FIRM (referrals-tenancy P1): header firm switcher — only rendered when
+   the signed-in client belongs to more than one firm. */
+.cp-firmswitch {
+  position: relative;
+  margin-right: auto;
+}
+.cp-firmswitch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  appearance: none;
+  background: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.cp-firmswitch-btn:hover {
+  color: var(--navy-900, #0b1b3a);
+  border-color: var(--border-strong, var(--border));
+}
+.cp-firmswitch-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(11, 27, 58, 0.14);
+  padding: 0.3rem;
+  z-index: 60;
+}
+.cp-firmswitch-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.88rem;
+  color: var(--navy-900, #0b1b3a);
+  cursor: pointer;
+  text-align: left;
+}
+.cp-firmswitch-item:hover {
+  background: var(--surface-2, #f4f6fb);
+}
+.cp-firmswitch-item.current {
+  font-weight: 700;
+}
+.cp-firmswitch-name {
+  flex: 1;
+}
+.cp-firmswitch-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold-700, #8a6d1d);
+  background: var(--gold-100, #f6efd9);
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+}
+.cp-firmswitch-check {
+  color: var(--gold-700, #8a6d1d);
+  font-weight: 700;
+}
 .cp-who {
   font-weight: 600;
   font-size: 0.9rem;

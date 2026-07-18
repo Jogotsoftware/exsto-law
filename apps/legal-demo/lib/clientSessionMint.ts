@@ -3,6 +3,7 @@ import {
   isClientContactActive,
   resolveClientMatterIds,
   resolvePortalActorId,
+  resolvePublicIntakeActor,
   provisionClientPortalActor,
 } from '@exsto/legal'
 import { withSuperuser } from '@exsto/shared'
@@ -18,11 +19,6 @@ import { signClientSession, buildClientSessionCookie } from '@/lib/clientSession
 // a verified Supabase session); this function does the substrate-side binding.
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-// The firm's public-intake SYSTEM actor — the submitter of the lazy actor
-// backfill above (same default as the client MCP routes).
-const PUBLIC_INTAKE_ACTOR_ID =
-  process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
 // Fetch the contact's current display name + email for the session's display
 // fields. Tenant-scoped via withSuperuser (the tenant is already known).
@@ -88,12 +84,13 @@ export async function mintClientSession(
   // PORTAL-1: the session carries the client's OWN actor. Accounts provisioned
   // before this change (or via paths that pre-date it) get the actor lazily on
   // their next sign-in — the provision action is idempotent. The SUBMITTING
-  // actor for the backfill is the public-intake system actor; the resulting
-  // actor is what the session acts as.
+  // actor for the backfill is THIS TENANT's public-intake system actor —
+  // resolved per tenant, never the tenant-zero constant, or the first sign-in
+  // into any other firm FK-fails on the provision action.
   let clientActorId = await resolvePortalActorId(tenantId, clientContactId)
   if (!clientActorId) {
     const provisioned = await provisionClientPortalActor(
-      { tenantId, actorId: PUBLIC_INTAKE_ACTOR_ID },
+      { tenantId, actorId: await resolvePublicIntakeActor(tenantId) },
       { clientContactId, matterEntityIds: matterIds, trigger: 'login_backfill' },
     )
     clientActorId = provisioned.actorId

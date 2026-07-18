@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { ScaleIcon } from '@/components/icons'
 import { FeeConsentCard } from '@/components/FeeConsentCard'
 import { LanguageToggle } from '@/components/LanguageToggle'
@@ -15,10 +16,39 @@ import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
 // kind keys, or attorney verbiage — the server projections only hand us
 // client-safe fields to begin with).
 
+interface MeFirm {
+  tenantId: string
+  firmName: string
+  slug: string | null
+  current: boolean
+  main: boolean
+}
 interface MeResponse {
   email: string
   displayName: string
   matterCount: number
+  // MULTI-FIRM (referrals-tenancy P1): the CURRENT firm's name (header brand)
+  // and the person's firm memberships (firms[0] = main firm) for the switcher.
+  firmName: string | null
+  firms: MeFirm[]
+}
+
+// The current firm's display name, provided by the page shell once /me loads —
+// child views label the attorney side of message threads with it instead of a
+// hardcoded firm name.
+const FirmNameContext = createContext<string>('')
+function useFirmName(): string {
+  return useContext(FirmNameContext) || 'Your firm'
+}
+function firmInitials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]!.toUpperCase())
+      .join('') || 'F'
+  )
 }
 interface MatterListItem {
   matterEntityId: string
@@ -243,139 +273,225 @@ export default function ClientPortalPage() {
   const locked = home ? !home.engagement.accepted : false
 
   return (
-    <div className="cp-shell">
-      <header className="cp-top">
-        <div className="cp-top-inner">
-          <button
-            type="button"
-            className="cp-brand cp-brand-btn"
-            onClick={() => setView({ kind: 'home' })}
-            aria-label={t('portal.nav.home', undefined, 'Home')}
-          >
-            <span className="cp-crest" aria-hidden>
-              <ScaleIcon size={18} />
-            </span>
-            <span className="cp-brand-text">
-              <span className="cp-brand-name">Pacheco Law</span>
-              <span className="cp-brand-sub">Client Portal</span>
-            </span>
-          </button>
-          <div className="cp-top-right">
-            <LanguageToggle />
-            {me && (
-              <span className="cp-who" title={me.email}>
-                {me.displayName}
-              </span>
-            )}
-            <a href="/api/client/auth/logout" className="cp-signout">
-              {t('portal.signout', undefined, 'Sign out')}
-            </a>
-          </div>
-        </div>
-        <nav className="cp-nav" aria-label="Portal sections">
-          <div className="cp-nav-inner">
+    <FirmNameContext.Provider value={me?.firmName ?? ''}>
+      <div className="cp-shell">
+        <header className="cp-top">
+          <div className="cp-top-inner">
             <button
               type="button"
-              className={`cp-tab ${view.kind === 'home' ? 'active' : ''}`}
-              aria-current={view.kind === 'home' ? 'page' : undefined}
+              className="cp-brand cp-brand-btn"
               onClick={() => setView({ kind: 'home' })}
+              aria-label={t('portal.nav.home', undefined, 'Home')}
             >
-              {t('portal.nav.home', undefined, 'Home')}
+              <span className="cp-crest" aria-hidden>
+                <ScaleIcon size={18} />
+              </span>
+              <span className="cp-brand-text">
+                <span className="cp-brand-name">{me?.firmName ?? ' '}</span>
+                <span className="cp-brand-sub">Client Portal</span>
+              </span>
             </button>
-            <button
-              type="button"
-              className={`cp-tab ${view.kind === 'documents' ? 'active' : ''}`}
-              aria-current={view.kind === 'documents' ? 'page' : undefined}
-              onClick={() => setView({ kind: 'documents' })}
-            >
-              {t('portal.nav.documents', undefined, 'Documents')}
-            </button>
-            <button
-              type="button"
-              className={`cp-tab cp-tab-bell ${view.kind === 'notifications' ? 'active' : ''}`}
-              aria-current={view.kind === 'notifications' ? 'page' : undefined}
-              aria-label={t('portal.nav.notifications', undefined, 'Notifications')}
-              onClick={() => setView({ kind: 'notifications' })}
-            >
-              <BellIcon />
-              {badge > 0 && <span className="cph-badge">{badge > 9 ? '9+' : badge}</span>}
-            </button>
+            {me && me.firms.length > 1 && <FirmSwitcher firms={me.firms} />}
+            <div className="cp-top-right">
+              <LanguageToggle />
+              {me && (
+                <span className="cp-who" title={me.email}>
+                  {me.displayName}
+                </span>
+              )}
+              <a href="/api/client/auth/logout" className="cp-signout">
+                {t('portal.signout', undefined, 'Sign out')}
+              </a>
+            </div>
           </div>
-        </nav>
-      </header>
+          <nav className="cp-nav" aria-label="Portal sections">
+            <div className="cp-nav-inner">
+              <button
+                type="button"
+                className={`cp-tab ${view.kind === 'home' ? 'active' : ''}`}
+                aria-current={view.kind === 'home' ? 'page' : undefined}
+                onClick={() => setView({ kind: 'home' })}
+              >
+                {t('portal.nav.home', undefined, 'Home')}
+              </button>
+              <button
+                type="button"
+                className={`cp-tab ${view.kind === 'documents' ? 'active' : ''}`}
+                aria-current={view.kind === 'documents' ? 'page' : undefined}
+                onClick={() => setView({ kind: 'documents' })}
+              >
+                {t('portal.nav.documents', undefined, 'Documents')}
+              </button>
+              <button
+                type="button"
+                className={`cp-tab cp-tab-bell ${view.kind === 'notifications' ? 'active' : ''}`}
+                aria-current={view.kind === 'notifications' ? 'page' : undefined}
+                aria-label={t('portal.nav.notifications', undefined, 'Notifications')}
+                onClick={() => setView({ kind: 'notifications' })}
+              >
+                <BellIcon />
+                {badge > 0 && <span className="cph-badge">{badge > 9 ? '9+' : badge}</span>}
+              </button>
+            </div>
+          </nav>
+        </header>
 
-      <main className="cp-main">
-        {error && (
-          <div className="alert alert-error" role="alert">
-            {error}
-          </div>
+        <main className="cp-main">
+          {error && (
+            <div className="alert alert-error" role="alert">
+              {error}
+            </div>
+          )}
+
+          {!me || !home ? (
+            <div className="loading-block" role="status">
+              <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
+            </div>
+          ) : (
+            <>
+              {view.kind === 'home' && (
+                <HomeView
+                  home={home}
+                  locked={locked}
+                  onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
+                  onOpenBilling={() => setView({ kind: 'billing' })}
+                  onOpenSchedule={() => setView({ kind: 'schedule' })}
+                  onOpenGate={() => setGateOpen(true)}
+                />
+              )}
+              {view.kind === 'documents' && <DocumentsView matters={home.matters} />}
+              {view.kind === 'notifications' && (
+                <NotificationsView
+                  onBadge={setBadge}
+                  onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
+                  onOpenBilling={() => setView({ kind: 'billing' })}
+                  onOpenDocuments={() => setView({ kind: 'documents' })}
+                />
+              )}
+              {view.kind === 'billing' && (
+                <>
+                  <BackHome onBack={() => setView({ kind: 'home' })} />
+                  <InvoicesPanel />
+                </>
+              )}
+              {view.kind === 'schedule' && (
+                <>
+                  <BackHome onBack={() => setView({ kind: 'home' })} />
+                  <SchedulePanel />
+                </>
+              )}
+              {view.kind === 'matter' && (
+                <MatterView
+                  matterEntityId={view.matterEntityId}
+                  matters={home.matters}
+                  locked={locked}
+                  onBack={() => setView({ kind: 'home' })}
+                  onOpenGate={() => setGateOpen(true)}
+                />
+              )}
+            </>
+          )}
+        </main>
+
+        {gateOpen && home && (
+          <EngagementGateModal
+            rate={home.engagement.rate}
+            configured={home.engagement.configured}
+            onClose={() => setGateOpen(false)}
+            onAccepted={() => {
+              setGateOpen(false)
+              loadHome()
+            }}
+          />
         )}
 
-        {!me || !home ? (
-          <div className="loading-block" role="status">
-            <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
-          </div>
-        ) : (
-          <>
-            {view.kind === 'home' && (
-              <HomeView
-                home={home}
-                locked={locked}
-                onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
-                onOpenBilling={() => setView({ kind: 'billing' })}
-                onOpenSchedule={() => setView({ kind: 'schedule' })}
-                onOpenGate={() => setGateOpen(true)}
-              />
-            )}
-            {view.kind === 'documents' && <DocumentsView matters={home.matters} />}
-            {view.kind === 'notifications' && (
-              <NotificationsView
-                onBadge={setBadge}
-                onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
-                onOpenBilling={() => setView({ kind: 'billing' })}
-                onOpenDocuments={() => setView({ kind: 'documents' })}
-              />
-            )}
-            {view.kind === 'billing' && (
-              <>
-                <BackHome onBack={() => setView({ kind: 'home' })} />
-                <InvoicesPanel />
-              </>
-            )}
-            {view.kind === 'schedule' && (
-              <>
-                <BackHome onBack={() => setView({ kind: 'home' })} />
-                <SchedulePanel />
-              </>
-            )}
-            {view.kind === 'matter' && (
-              <MatterView
-                matterEntityId={view.matterEntityId}
-                matters={home.matters}
-                locked={locked}
-                onBack={() => setView({ kind: 'home' })}
-                onOpenGate={() => setGateOpen(true)}
-              />
-            )}
-          </>
-        )}
-      </main>
-
-      {gateOpen && home && (
-        <EngagementGateModal
-          rate={home.engagement.rate}
-          configured={home.engagement.configured}
-          onClose={() => setGateOpen(false)}
-          onAccepted={() => {
-            setGateOpen(false)
-            loadHome()
-          }}
-        />
-      )}
-
-      {/* WP-7 — the assistant is a floating control, rendered ONLY for enabled
+        {/* WP-7 — the assistant is a floating control, rendered ONLY for enabled
           clients (flag off ⇒ absent from the DOM, not hidden). */}
-      {home?.assistantEnabled && <AssistantBubble />}
+        {home?.assistantEnabled && <AssistantBubble />}
+      </div>
+    </FirmNameContext.Provider>
+  )
+}
+
+// MULTI-FIRM (referrals-tenancy P1): compact header dropdown listing every firm
+// this person is a client of. Picking one POSTs /api/client/auth/switch-firm
+// (server re-proves membership, re-mints the single-tenant session) and reloads
+// the portal so every per-firm view starts fresh.
+function FirmSwitcher({ firms }: { firms: MeFirm[] }) {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  async function pick(firm: MeFirm) {
+    if (firm.current || switching) {
+      setOpen(false)
+      return
+    }
+    setSwitching(true)
+    try {
+      const res = await fetch('/api/client/auth/switch-firm', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tenantId: firm.tenantId }),
+      })
+      if (!res.ok) throw new Error('switch failed')
+      window.location.assign('/portal')
+    } catch {
+      setSwitching(false)
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div className="cp-firmswitch" ref={wrapRef}>
+      <button
+        type="button"
+        className="cp-firmswitch-btn"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        disabled={switching}
+      >
+        {t('portal.firm_switch', undefined, 'Switch firm')}
+        <ChevronDown size={14} aria-hidden />
+      </button>
+      {open && (
+        <div className="cp-firmswitch-menu" role="listbox" aria-label="Your firms">
+          {firms.map((f) => (
+            <button
+              key={f.tenantId}
+              type="button"
+              role="option"
+              aria-selected={f.current}
+              className={`cp-firmswitch-item ${f.current ? 'current' : ''}`}
+              onClick={() => pick(f)}
+            >
+              <span className="cp-firmswitch-name">{f.firmName}</span>
+              {f.main && (
+                <span className="cp-firmswitch-tag">
+                  {t('portal.firm_main', undefined, 'Main')}
+                </span>
+              )}
+              {f.current && (
+                <span className="cp-firmswitch-check" aria-hidden>
+                  ✓
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -426,6 +542,7 @@ function HomeView({
   onOpenGate: () => void
 }) {
   const { t } = useI18n()
+  const firmName = useFirmName()
   const hour = new Date().getHours()
   const greetKey =
     hour < 12
@@ -631,11 +748,13 @@ function HomeView({
                   onClick={() => onOpenMatter(msg.matterEntityId)}
                 >
                   <span className="cph-msg-av" aria-hidden>
-                    {msg.author === 'attorney' ? 'PL' : t('portal.messages.you').slice(0, 2)}
+                    {msg.author === 'attorney'
+                      ? firmInitials(firmName)
+                      : t('portal.messages.you').slice(0, 2)}
                   </span>
                   <span className="cph-msg-body">
                     <span className="cph-msg-from">
-                      {msg.author === 'attorney' ? 'Pacheco Law' : t('portal.messages.you')}
+                      {msg.author === 'attorney' ? firmName : t('portal.messages.you')}
                     </span>
                     <span className="cph-msg-snip">
                       {msg.body.length > 90 ? `${msg.body.slice(0, 90)}…` : msg.body}
@@ -1806,6 +1925,7 @@ function DocStateBadge({ state }: { state: ClientDocument['state'] }) {
 
 // Two-way messaging with the attorney for the selected matter.
 function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
+  const firmName = useFirmName()
   const [messages, setMessages] = useState<PortalMessage[] | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1882,7 +2002,7 @@ function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
             >
               <div className="pdash-msg-body">{m.body}</div>
               <div className="pdash-msg-meta">
-                {m.author === 'client' ? 'You' : 'Pacheco Law'} · {formatDateTime(m.sentAt)}
+                {m.author === 'client' ? 'You' : firmName} · {formatDateTime(m.sentAt)}
               </div>
             </div>
           ))}

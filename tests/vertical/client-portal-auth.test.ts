@@ -285,3 +285,194 @@ dbRun('client portal auth + authorization (live DB)', { timeout: 90_000 }, () =>
     expect(ids).not.toContain(matterBId)
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// MULTI-FIRM (referrals-tenancy P1): one email active as a client_contact at
+// TWO firms. Proves:
+//   • findClientContactMembershipsByEmail returns both firms, MAIN (oldest
+//     contact) first, with tenant name + slug and nothing else;
+//   • the singular findClientContactByEmail stays fail-closed (null) at N=2 —
+//     single-firm-only callers keep their old behavior;
+//   • findClientContactByEmailInTenant resolves the right contact per firm
+//     (the e-sign channel auto-detect no longer downgrades multi-firm clients);
+//   • POST /api/client/auth/switch-firm re-proves membership from the DB and
+//     re-mints a single-tenant session for the target firm; a non-member
+//     tenant gets a generic 403 (no oracle).
+// Firm B is a REAL runtime-provisioned tenant (private.cp_bootstrap_tenant —
+// the same path that created Pacheco Law), with the contact fixture written as
+// substrate rows anchored to a system.bootstrap action.
+// ───────────────────────────────────────────────────────────────────────────
+dbRun('multi-firm portal memberships (live DB)', { timeout: 90_000 }, () => {
+  let restore: () => void
+  const ctx = { tenantId: TENANT, actorId: PUBLIC_INTAKE_ACTOR }
+
+  const FIRM_B = randomUUID()
+  const PLATFORM_ACTOR = '00000000-0000-0000-00ff-00000000000a'
+  let db: import('pg').Pool
+  let sharedEmail = ''
+  let zeroContactId = ''
+  let firmBContactId = ''
+
+  function slot() {
+    const daysAhead = 60 + Math.floor(Math.random() * 200000)
+    const start = new Date(Date.now() + daysAhead * 24 * 3600 * 1000)
+    start.setUTCHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 2) * 30, 0, 0)
+    const end = new Date(start.getTime() + 30 * 60 * 1000)
+    return { startIso: start.toISOString(), endIso: end.toISOString() }
+  }
+
+  beforeAll(async () => {
+    restore = withSecret()
+    const pg = (await import('pg')).default
+    db = new pg.Pool({ connectionString: url })
+
+    // Firm A (tenant zero): a real booking creates the contact + a matter.
+    const { submitBooking } = await import('@exsto/legal')
+    sharedEmail = `two-firm-${randomUUID().slice(0, 8)}@example.test`
+    const s = slot()
+    const res = await submitBooking(ctx, {
+      clientFullName: 'Two Firm Client',
+      clientEmail: sharedEmail,
+      attributionSource: 'multi-firm-test',
+      serviceKey: 'something_else',
+      intakeResponses: { matter_description: 'multi-firm A' },
+      scheduledAtIso: s.startIso,
+      scheduledEndIso: s.endIso,
+    })
+    expect(res.effects.length).toBeGreaterThan(0)
+
+    // Firm B: runtime-provisioned tenant (clones all kind registries).
+    await db.query(`SELECT private.cp_bootstrap_tenant($1, $2, $3, $4, $5)`, [
+      PLATFORM_ACTOR,
+      FIRM_B,
+      `Firm B ${FIRM_B.slice(0, 8)}`,
+      `owner-${FIRM_B.slice(0, 8)}@example.test`,
+      'Firm B Owner',
+    ])
+
+    // The SAME email as an active client_contact in firm B, created strictly
+    // later than the firm-A contact (so firm A is the MAIN firm).
+    const ids = await db.query<{ what: string; id: string }>(
+      `SELECT 'entity_kind' AS what, id::text FROM entity_kind_definition
+        WHERE tenant_id = $1 AND kind_name = 'client_contact'
+       UNION ALL
+       SELECT 'email_kind', id::text FROM attribute_kind_definition
+        WHERE tenant_id = $1 AND kind_name = 'email'
+       UNION ALL
+       SELECT 'action_kind', id::text FROM action_kind_definition
+        WHERE tenant_id = $1 AND kind_name = 'system.bootstrap'
+       UNION ALL
+       SELECT 'sys_actor', id::text FROM actor
+        WHERE tenant_id = $1 AND actor_type = 'system' AND status = 'active'`,
+      [FIRM_B],
+    )
+    const idOf = (what: string) => {
+      const row = ids.rows.find((r) => r.what === what)
+      if (!row) throw new Error(`firm B missing ${what}`)
+      return row.id
+    }
+    const actionId = randomUUID()
+    firmBContactId = randomUUID()
+    await db.query(
+      `INSERT INTO action (id, tenant_id, action_kind_id, actor_id, intent_kind, autonomy_tier,
+                           hlc_physical_time, hlc_logical_counter, hlc_source_id, payload)
+       VALUES ($1, $2, $3, $4, 'enforcement', 'autonomous', now(), 0, $4, '{"fixture":"multi-firm-test"}'::jsonb)`,
+      [actionId, FIRM_B, idOf('action_kind'), idOf('sys_actor')],
+    )
+    await db.query(
+      `INSERT INTO entity (id, tenant_id, action_id, entity_kind_id, name, status)
+       VALUES ($1, $2, $3, $4, 'Two Firm Client', 'active')`,
+      [firmBContactId, FIRM_B, actionId, idOf('entity_kind')],
+    )
+    await db.query(
+      `INSERT INTO attribute (id, tenant_id, action_id, entity_id, attribute_kind_id, value,
+                              confidence, source_type)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, 1.0, 'system')`,
+      [
+        randomUUID(),
+        FIRM_B,
+        actionId,
+        firmBContactId,
+        idOf('email_kind'),
+        JSON.stringify(sharedEmail),
+      ],
+    )
+  })
+
+  afterAll(async () => {
+    restore()
+    await db.end()
+    const { closeDbPool } = await import('@exsto/shared')
+    await closeDbPool()
+  })
+
+  it('memberships lists BOTH firms, main (oldest contact) first, names + slugs only', async () => {
+    const { findClientContactMembershipsByEmail } = await import('@exsto/legal')
+    const memberships = await findClientContactMembershipsByEmail(sharedEmail)
+    expect(memberships.length).toBe(2)
+    expect(memberships[0].tenantId).toBe(TENANT) // booked first → main firm
+    expect(memberships[1].tenantId).toBe(FIRM_B)
+    expect(memberships[1].firmName).toContain('Firm B')
+    zeroContactId = memberships[0].clientContactId
+    expect(zeroContactId).toBeTruthy()
+    expect(memberships[1].clientContactId).toBe(firmBContactId)
+  })
+
+  it('the singular lookup stays fail-closed at two firms (single-firm callers unchanged)', async () => {
+    const { findClientContactByEmail } = await import('@exsto/legal')
+    expect(await findClientContactByEmail(sharedEmail)).toBeNull()
+  })
+
+  it('the tenant-scoped lookup resolves the right contact inside each firm', async () => {
+    const { findClientContactByEmailInTenant } = await import('@exsto/legal')
+    const inZero = await findClientContactByEmailInTenant(TENANT, sharedEmail)
+    const inB = await findClientContactByEmailInTenant(FIRM_B, sharedEmail)
+    expect(inZero?.clientContactId).toBe(zeroContactId)
+    expect(inB?.clientContactId).toBe(firmBContactId)
+  })
+
+  it('switch-firm re-mints the session for a member firm; non-member → 403 (no oracle)', async () => {
+    const { signClientSession, CLIENT_SESSION_COOKIE_NAME } = await import('@/lib/clientSession')
+    const token = signClientSession({
+      clientContactId: zeroContactId,
+      tenantId: TENANT,
+      clientActorId: PUBLIC_INTAKE_ACTOR,
+      matterIds: [],
+      email: sharedEmail,
+      displayName: 'Two Firm Client',
+    })
+    const cookie = `${CLIENT_SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`
+    const { POST } = await import('@/app/api/client/auth/switch-firm/route')
+
+    const ok = await POST(
+      new Request('https://app.test/api/client/auth/switch-firm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ tenantId: FIRM_B }),
+      }),
+    )
+    expect(ok.status).toBe(200)
+    const setCookie = ok.headers.get('set-cookie') ?? ''
+    expect(setCookie).toContain(CLIENT_SESSION_COOKIE_NAME)
+
+    // Non-member target: a random (well-formed) tenant id → generic 403.
+    const bad = await POST(
+      new Request('https://app.test/api/client/auth/switch-firm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ tenantId: randomUUID() }),
+      }),
+    )
+    expect(bad.status).toBe(403)
+
+    // No session at all → 401.
+    const anon = await POST(
+      new Request('https://app.test/api/client/auth/switch-firm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tenantId: FIRM_B }),
+      }),
+    )
+    expect(anon.status).toBe(401)
+  })
+})

@@ -17,7 +17,7 @@ import { getMatter } from '../queries/matters.js'
 import { loadConnection } from '../adapters/connectionStore.js'
 import { ingestionContext } from './granolaIngestion.js'
 import { queueNotification } from './notifications.js'
-import { findClientContactByEmail } from './clientIdentity.js'
+import { findClientContactByEmailInTenant } from './clientIdentity.js'
 import { assertCanSendOnMatter } from './matterAccess.js'
 import {
   DEFAULT_ESIGN_PROVIDER,
@@ -157,10 +157,15 @@ export async function sendForSignature(
     }
   }
 
-  // Auto-detect the signing channel: known active client → portal; else link.
+  // Auto-detect the signing channel: known active client OF THIS FIRM → portal;
+  // else link. Tenant-scoped (the sender's tenant is the only one that matters):
+  // the old cross-tenant single-firm lookup silently downgraded a person who is
+  // also a client at another firm from portal to emailed link.
   const withChannel = await Promise.all(
     signers.map(async (s) => {
-      const contact = await findClientContactByEmail(s.email).catch(() => null)
+      const contact = await findClientContactByEmailInTenant(ctx.tenantId, s.email).catch(
+        () => null,
+      )
       return { ...s, channel: (contact ? 'portal' : 'link') as 'portal' | 'link' }
     }),
   )
