@@ -243,8 +243,10 @@ function wasClipped(s: string): boolean {
 
 // The max of a set of ISO timestamps (any offset — compared numerically via
 // Date.parse, not lexically, so differing TZ offsets never mis-order). Null
-// input entries are ignored; returns null when nothing parses.
-function maxTimestamp(values: Array<string | null | undefined>): string | null {
+// input entries are ignored; returns null when nothing parses. EXPORTED (WP3):
+// clientBriefEngine's computeClientWatermark needs the exact same numeric-max
+// semantics for its lighter (matters-list-only, no full ClientContext) read.
+export function maxTimestamp(values: Array<string | null | undefined>): string | null {
   let bestStr: string | null = null
   let bestMs = -Infinity
   for (const v of values) {

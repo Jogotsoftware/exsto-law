@@ -196,7 +196,9 @@ export interface ParsedBriefOutput {
   }
 }
 
-function clampBelowOne(value: unknown, fallback: number): number {
+// EXPORTED (WP3): clientBriefEngine's getOrRefreshClientBrief needs the exact
+// same honest-confidence clamp for the client-scope in-memory view it returns.
+export function clampBelowOne(value: unknown, fallback: number): number {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return fallback
   // Honest confidence: never 1.0 for real inference (exsto-ai-operation).
@@ -205,8 +207,11 @@ function clampBelowOne(value: unknown, fallback: number): number {
 
 // Sections from markdown "## " headings — the degraded path when the model
 // omitted or garbled the JSON fence. Confidence 0.5 (we genuinely don't know),
-// no sourceRefs, quoted false.
-function sectionsFromMarkdown(markdown: string): BriefSection[] {
+// no sourceRefs, quoted false. `fallbackHeading` names the single section when
+// the model's output has NO "## " headings at all — 'Matter brief' by default
+// (unchanged behavior); the client-scope caller passes 'Client brief' so a
+// fully-degraded client synthesis never mislabels itself as a matter brief.
+function sectionsFromMarkdown(markdown: string, fallbackHeading = 'Matter brief'): BriefSection[] {
   const parts = markdown.split(/^##\s+(.+)$/m)
   // parts = [preamble, heading1, body1, heading2, body2, ...]
   const sections: BriefSection[] = []
@@ -221,7 +226,7 @@ function sectionsFromMarkdown(markdown: string): BriefSection[] {
   }
   if (sections.length === 0 && markdown.trim()) {
     sections.push({
-      heading: 'Matter brief',
+      heading: fallbackHeading,
       body: markdown.trim(),
       confidence: 0.5,
       sourceRefs: [],
@@ -236,7 +241,11 @@ function sectionsFromMarkdown(markdown: string): BriefSection[] {
 // contain a fence of its own earlier in the prose). Missing/unparseable fence →
 // the whole output is the markdown and sections degrade from its headings —
 // the brief still ships, just with a thin structure (never a throw).
-export function parseBriefSynthesisOutput(raw: string): ParsedBriefOutput {
+// `fallbackHeading` — see sectionsFromMarkdown; defaults to the pre-WP3 behavior.
+export function parseBriefSynthesisOutput(
+  raw: string,
+  fallbackHeading = 'Matter brief',
+): ParsedBriefOutput {
   const fences = [...raw.matchAll(/```json\s*\n([\s\S]*?)\n```/g)]
   const last = fences.length ? fences[fences.length - 1]! : null
 
@@ -261,7 +270,7 @@ export function parseBriefSynthesisOutput(raw: string): ParsedBriefOutput {
   const sections = parsed ? parseStoredSections(parsed.sections) : []
   const effectiveSections = sections.length
     ? sections.map((s) => ({ ...s, confidence: clampBelowOne(s.confidence, 0.5) }))
-    : sectionsFromMarkdown(markdown)
+    : sectionsFromMarkdown(markdown, fallbackHeading)
 
   return {
     markdown: markdown.trim(),
@@ -308,6 +317,11 @@ export interface PersistBriefInput {
   // brief_source_watermark, the staleness key future reads compare against.
   sourceWatermark: string
   generatedAt?: string
+  // WP3 (Client Brief only): the external-research record — exact outbound
+  // queries + findings (api/briefResearchGuard.ts). Written to brief_research_json
+  // ONLY when present (undefined for matter briefs), so the attribute stays
+  // genuinely absent rather than a null row for a brief type that never researches.
+  researchJson?: unknown
 }
 
 // Injectable seams so the unit test pins the write SHAPE (trace-before-action,
@@ -425,6 +439,7 @@ export async function persistBrief(
       brief_model_identity: s.modelIdentity,
       brief_confidence: confidence,
       reasoning_trace_id: reasoningTraceId,
+      ...(input.researchJson !== undefined ? { brief_research_json: input.researchJson } : {}),
     },
   })
 
@@ -435,7 +450,9 @@ export async function persistBrief(
 
 // ── Read path (never generates) ──────────────────────────────────────────────
 
-function toView(stored: StoredBrief): BriefView {
+// EXPORTED (WP3): clientBriefEngine's toClientView wraps this and adds the
+// `research` field — one implementation of the stored→view mapping, not a fork.
+export function toView(stored: StoredBrief): BriefView {
   return {
     briefEntityId: stored.briefEntityId,
     briefType: stored.briefType,

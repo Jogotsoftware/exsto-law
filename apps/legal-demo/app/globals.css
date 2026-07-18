@@ -22936,3 +22936,66 @@ a.li-uac-done-primary:hover {
     border-top: 1px solid #e1e6f0;
   }
 }
+
+/* ==========================================================================
+   BRIEF ENGINE WP3 — CLIENT BRIEF research disclosure (li-brief-research-).
+   Appended addition to the li-brief- family (design: docs/design/briefs/
+   DESIGN.md §4/§6). The external-research audit strip inside BriefModal: a
+   quiet "not run" line when Perplexity isn't connected/nothing was
+   researchable, or a collapsible <details> disclosure of every outbound query
+   string when research did run — the attorney-auditable "what left the firm"
+   record. Own block, does NOT touch li-brief- rules above.
+   ========================================================================== */
+
+.li-brief-research {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--li-text-muted);
+  margin-bottom: 14px;
+}
+.li-brief-research-skipped {
+  font-style: italic;
+}
+details.li-brief-research {
+  display: block;
+}
+details.li-brief-research summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  list-style: none;
+}
+details.li-brief-research summary::-webkit-details-marker {
+  display: none;
+}
+details.li-brief-research summary:hover {
+  color: var(--li-navy);
+}
+.li-brief-research-queries {
+  margin: 8px 0 0 20px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.li-brief-research-query {
+  font-size: 12.5px;
+  color: var(--li-text);
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.li-brief-research-kind {
+  display: inline-block;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--li-text-muted);
+  margin-right: 8px;
+}
