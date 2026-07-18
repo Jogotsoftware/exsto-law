@@ -42,7 +42,9 @@ interface EnvelopeListItem {
 // One color language across the stat-card dot, filter pill, and row chip.
 const BUCKET_META: Record<EnvelopeBucket, { label: string; fg: string; bg: string }> = {
   action_needed: { label: 'Action needed', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
-  out: { label: 'Out for signature', fg: 'var(--li-info)', bg: 'var(--li-info-bg)' },
+  // Comp's "Out for signature" chip (esignData().stMap.sent) is the warn amber/tan
+  // pair, not blue.
+  out: { label: 'Out for signature', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
   completed: { label: 'Completed', fg: 'var(--li-ok)', bg: 'var(--li-ok-bg)' },
   declined: { label: 'Declined', fg: 'var(--li-danger)', bg: 'var(--li-danger-bg)' },
   voided: { label: 'Voided', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
@@ -51,6 +53,16 @@ const BUCKET_META: Record<EnvelopeBucket, { label: string; fg: string; bg: strin
 export function humanizeDocKind(kind: string | null): string {
   if (!kind) return 'Document'
   return kind.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+// The stored envelope subject carries a "Signature requested: " lead-in written at
+// send time (verticals/legal/src/api/esign.ts, sendEnvelope) so the string reads
+// well as an email subject line. The comp shows a clean document title instead —
+// strip the lead-in here, at render time only. Never touch the stored subject or
+// the send/create path.
+const SUBJECT_PREFIX_RE = /^Signature requested:\s*/i
+export function cleanEnvelopeSubject(subject: string | null): string | null {
+  return subject ? subject.replace(SUBJECT_PREFIX_RE, '') : subject
 }
 
 function signerNames(signers: EnvelopeSigner[]): string {
@@ -221,7 +233,7 @@ export default function EsignPage() {
                     </span>
                     <span className="li-esign-doc-text">
                       <span className="li-esign-doc-subject">
-                        {e.subject || humanizeDocKind(e.documentKind)}
+                        {cleanEnvelopeSubject(e.subject) || humanizeDocKind(e.documentKind)}
                       </span>
                       <span className="li-esign-doc-sub">
                         {(e.matterNumber || '—') + ' · ' + humanizeDocKind(e.documentKind)}

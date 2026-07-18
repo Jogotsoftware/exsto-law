@@ -46,8 +46,10 @@ const STATUS_GROUPS: Array<{
     chipLabel: 'New inquiry',
     matches: (s) =>
       s === 'inquiry' || s === 'questionnaire_pending' || s === 'questionnaire_submitted',
-    fg: 'var(--li-purple)',
-    bg: 'var(--li-purple-bg)',
+    // Comp's matters table (legal-instruments.dc.html stBadge) pairs "New inquiry"
+    // with a neutral gray, not the purple used for a genuine in-review status.
+    fg: 'var(--li-neutral)',
+    bg: 'var(--li-neutral-bg)',
   },
   {
     key: 'scheduled',

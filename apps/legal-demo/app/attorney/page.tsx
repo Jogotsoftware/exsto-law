@@ -79,8 +79,10 @@ const STATUS_GROUPS: Array<{
     chipLabel: 'New inquiry',
     matches: (s) =>
       s === 'inquiry' || s === 'questionnaire_pending' || s === 'questionnaire_submitted',
-    fg: 'var(--li-purple)',
-    bg: 'var(--li-purple-bg)',
+    // Neutral gray per the comp's matters table (stBadge); matches the matters
+    // list chip (attorney/matters/page.tsx) so the status reads the same everywhere.
+    fg: 'var(--li-neutral)',
+    bg: 'var(--li-neutral-bg)',
   },
   {
     key: 'scheduled',
