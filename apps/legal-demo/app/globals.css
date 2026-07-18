@@ -10237,6 +10237,8 @@ svg.lucide {
   --li-danger-bg: #fbe9e7;
   --li-purple: #7a5ad1;
   --li-purple-bg: #f1ecfb;
+  --li-neutral: #6b7690;
+  --li-neutral-bg: #eef1f6;
   /* shape */
   --li-radius-card: 16px;
   --li-radius-panel: 14px;

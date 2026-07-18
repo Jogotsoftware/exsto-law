@@ -16,7 +16,7 @@ import {
   FileTextIcon,
   ShieldCheckIcon,
 } from '@/components/icons'
-import { humanizeDocKind } from '../page'
+import { cleanEnvelopeSubject, humanizeDocKind } from '../page'
 
 type EnvelopeBucket = 'action_needed' | 'out' | 'completed' | 'declined' | 'voided'
 
@@ -47,7 +47,9 @@ interface EnvelopeStatus {
 
 const BUCKET_META: Record<EnvelopeBucket, { label: string; fg: string; bg: string }> = {
   action_needed: { label: 'Action needed', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
-  out: { label: 'Out for signature', fg: 'var(--li-info)', bg: 'var(--li-info-bg)' },
+  // Comp's "Out for signature" chip (esignData().stMap.sent) is the warn amber/tan
+  // pair, not blue — kept in sync with the list page's BUCKET_META.
+  out: { label: 'Out for signature', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
   completed: { label: 'Completed', fg: 'var(--li-ok)', bg: 'var(--li-ok-bg)' },
   declined: { label: 'Declined', fg: 'var(--li-danger)', bg: 'var(--li-danger-bg)' },
   voided: { label: 'Voided', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
@@ -167,7 +169,7 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
       })
       const body = r.draft?.bodyMarkdown
       if (!body) throw new Error('Executed copy is unavailable.')
-      const base = env.subject || humanizeDocKind(env.documentKind)
+      const base = cleanEnvelopeSubject(env.subject) || humanizeDocKind(env.documentKind)
       downloadAsPdf(body, `${base} — Executed`, { status: 'executed' })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -203,7 +205,7 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
 
       <div className="li-esign-detail-head">
         <div>
-          <h1 className="li-esign-detail-title">{env.subject || docLabel}</h1>
+          <h1 className="li-esign-detail-title">{cleanEnvelopeSubject(env.subject) || docLabel}</h1>
           <div className="li-esign-detail-meta">
             <span className="li-esign-chip" style={{ background: meta.bg, color: meta.fg }}>
               {meta.label}
@@ -293,7 +295,7 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
             <DocumentSheet variant="thumb" className="li-esign-preview-sheet">
               <div className="li-esign-preview-title">
                 <FileTextIcon size={15} />
-                {env.subject || docLabel}
+                {cleanEnvelopeSubject(env.subject) || docLabel}
               </div>
               <div className="li-esign-preview-body">
                 This is the document sent for signature. Signature and date fields are placed at the
