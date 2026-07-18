@@ -11,6 +11,10 @@ const INTRO_CONTACT = 'How can I serve you, Counselor? Grounded in the client yo
 // The attorney's preferred panel size, remembered across sessions (beta ask:
 // "resizable, larger default"). Per-browser UI state, so localStorage.
 const PANEL_SIZE_KEY = 'exsto.assistant.panelSize'
+// ASSISTANT-ACTS-1 (WP5): the panel survives a full page load (an OAuth redirect,
+// a hard refresh, a stray non-client-side link). Per-tab state, so sessionStorage
+// — a new tab starts closed as before.
+const PANEL_OPEN_KEY = 'exsto.assistant.open'
 // Floor the resize near the default size (≈440×660) — the attorney can grow the
 // panel but never shrink it much below where it starts (beta ask).
 const MIN_W = 420
@@ -129,8 +133,10 @@ function AssistantFabIcon(): React.ReactElement {
 export function FeedbackChat() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
-  // Snapshot the scope when the panel opens, so an in-progress chat doesn't reset
-  // mid-conversation if the attorney navigates while it's open.
+  // The scope FOLLOWS the page (ASSISTANT-ACTS-1 WP5): navigate while the panel
+  // is open and the chat re-grounds in the new matter/contact WITHOUT remounting
+  // — the conversation itself continues (UnifiedAssistantChat handles the switch
+  // in place; prior pages' turns stay in the thread).
   const [scope, setScope] = useState<{ matterEntityId?: string; contactEntityId?: string }>({})
   // A prompt another surface primed the chat with (via the exsto:assistant:prime
   // window event) + a nonce so re-priming the same text re-seeds the composer. The
@@ -174,6 +180,37 @@ export function FeedbackChat() {
       // ignore — falls back to the CSS default
     }
   }, [])
+
+  // WP5 — reopen after a full page load if the panel was open in this tab (an
+  // effect, not initial state, so SSR markup matches). The conversation itself is
+  // restored by UnifiedAssistantChat from its persisted chat session.
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(PANEL_OPEN_KEY) === '1') {
+        setScope(scopeForPath(window.location.pathname))
+        setOpen(true)
+      }
+    } catch {
+      // ignore — the panel just starts closed
+    }
+    // Mount-only: later opens/closes write the flag themselves.
+  }, [])
+
+  // WP5 — the panel follows navigation: while open, a route change re-derives the
+  // scope so the chat grounds in the page the attorney is NOW on. The chat is not
+  // remounted (see the render below) — it re-grounds in place.
+  useEffect(() => {
+    if (open) setScope(scopeForPath(pathname))
+  }, [open, pathname])
+
+  // WP5 — remember open/closed per tab so a full page load restores the panel.
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(PANEL_OPEN_KEY, open ? '1' : '0')
+    } catch {
+      // ignore — persistence is a nicety
+    }
+  }, [open])
 
   function openChat() {
     setScope(scopeForPath(pathname))
@@ -270,12 +307,11 @@ export function FeedbackChat() {
         </svg>
       </div>
       <div className="li-uac-panel-body" ref={inputFocusRef}>
-        {/* Keyed by scope so opening on a different page starts a fresh, correctly
-            grounded chat (and loads that matter/contact's thread). */}
+        {/* NOT keyed by scope (WP5): navigating re-grounds the SAME chat in place
+            — the conversation survives page changes. Only re-priming remounts (it
+            must re-seed the composer). */}
         <UnifiedAssistantChat
-          key={`${scope.matterEntityId ?? scope.contactEntityId ?? 'global'}${
-            primed ? `:primed:${primed.nonce}` : ''
-          }`}
+          key={primed ? `primed:${primed.nonce}` : 'chat'}
           matterEntityId={scope.matterEntityId}
           contactEntityId={scope.contactEntityId}
           loadThread={scoped}

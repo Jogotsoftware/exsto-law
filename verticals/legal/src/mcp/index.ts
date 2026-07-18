@@ -111,6 +111,10 @@ import './tools/commsTools.js'
 // Brief engine WP2 — Matter Brief get/generate (attorney-only; deliberately NOT
 // in the clientPolicy.ts portal allowlists — founder decision: never portal).
 import './tools/briefTools.js'
+// House-voice check (READ): exposes the pure checker in api/emailVoiceChecks.ts
+// so client code (e.g. the compose/reply modal) can call it without importing
+// @exsto/legal values directly.
+import './tools/emailVoiceTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

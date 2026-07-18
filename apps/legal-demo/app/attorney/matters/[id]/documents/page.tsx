@@ -6,6 +6,7 @@
 // tab; uploads POST to the dedicated upload route and download via the proxy route.
 import { use, useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import { SendToClientModal } from '@/components/SendToClientModal'
@@ -156,6 +157,7 @@ function DocIcon({ kind }: { kind: DocGlyph }): ReactElement {
 
 export default function MatterDocumentsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const router = useRouter()
   const [matter, setMatter] = useState<MatterDetail | null>(null)
   const [draft, setDraft] = useState<DraftPayload | null>(null)
   const [uploads, setUploads] = useState<UploadedDoc[]>([])
@@ -320,7 +322,9 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
       attachLabel: u.originalFilename,
       matterId: id,
     })
-    window.location.href = `/attorney/mail?${params.toString()}`
+    // Client-side nav (WP5): a full-page load here would tear down the floating
+    // assistant panel; router.push keeps the layout (and the panel) alive.
+    router.push(`/attorney/mail?${params.toString()}`)
   }
 
   if (loading) {

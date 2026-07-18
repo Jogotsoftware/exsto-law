@@ -62,15 +62,21 @@ export function renderMarkdown(md: string): string {
       continue
     }
 
-    const ol = line.match(/^\d+\.\s+(.+)$/)
+    // Capture the item number to support start= attribute when restarting a list
+    // after a blank line (which closes the ol). This fixes numbered lists that are
+    // interrupted by blank lines, e.g. "1. item\n\n2. item" now renders as two
+    // separate lists where the second starts at 2, not both at 1.
+    const ol = line.match(/^(\d+)\.\s+(.+)$/)
     if (ol) {
       flushParagraph()
       if (inList !== 'ol') {
         closeList()
-        out.push('<ol>')
+        const startNum = parseInt(ol[1]!, 10)
+        const olTag = startNum !== 1 ? `<ol start="${startNum}">` : '<ol>'
+        out.push(olTag)
         inList = 'ol'
       }
-      out.push(`<li>${inlineFormat(ol[1]!)}</li>`)
+      out.push(`<li>${inlineFormat(ol[2]!)}</li>`)
       continue
     }
 

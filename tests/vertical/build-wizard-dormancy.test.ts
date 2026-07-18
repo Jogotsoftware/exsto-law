@@ -61,18 +61,13 @@ const WIZARD_ONLY_TOOLS = [
   'ask_build_question',
 ]
 
-// The orchestrator block's load-bearing heading — present only when the wizard is on.
-const ORCHESTRATOR_MARKER = 'BUILDING A SERVICE (the guided wizard)'
-
-// Phase 6 load-bearing orchestrator text — the continuous-flow + Enable instructions
-// that make the build self-driving and actually go live. Present only flag-on.
-const CONTINUOUS_FLOW_MARKER = 'CONTINUOUS, SELF-DRIVING FLOW'
-const ENABLE_MARKER = 'CALL propose_enable'
-
-// Phase 7 load-bearing orchestrator text — the structured-interview + ask-don't-assume
-// rules (the headline UX fix: every question via ask_build_question, no defaulted
-// automation choices). Present only flag-on.
-const ASK_DONT_ASSUME_MARKER = "ASK, DON'T ASSUME"
+// The orchestrator block's load-bearing heading — present only when the wizard is
+// on. WORKFLOW-AUTHORING-1 consolidated the inline flow text into the
+// firm-admin.build-service skill (single source of truth), so the prompt now
+// carries a short POINTER plus the non-negotiable behaviors — the old inline
+// markers (continuous-flow, propose_enable, ask-don't-assume prose) moved to the
+// skill and are asserted there, not here.
+const ORCHESTRATOR_MARKER = 'BUILDING A WHOLE SERVICE (the guided wizard)'
 const ASK_TOOL_MARKER = 'ask_build_question'
 
 describe('build wizard dormancy (LEGAL_BUILD_WIZARD off)', () => {
@@ -80,29 +75,26 @@ describe('build wizard dormancy (LEGAL_BUILD_WIZARD off)', () => {
     delete process.env.LEGAL_BUILD_WIZARD
   })
 
+  // D8 (#369) flipped the default ON — "off" now means explicitly LEGAL_BUILD_WIZARD=0,
+  // so these tests set it rather than delete it (deleting tests the ON default).
   it('registers NONE of the wizard tools when the flag is off', () => {
-    delete process.env.LEGAL_BUILD_WIZARD
+    process.env.LEGAL_BUILD_WIZARD = '0'
     const names = toolNames()
     for (const t of WIZARD_ONLY_TOOLS) expect(names).not.toContain(t)
   })
 
   it('omits the orchestrator system-prompt block when the flag is off', () => {
-    delete process.env.LEGAL_BUILD_WIZARD
+    process.env.LEGAL_BUILD_WIZARD = '0'
     const system = buildClaudeSystem('global', null, null)
     expect(system).not.toContain(ORCHESTRATOR_MARKER)
     // And it teaches nothing about creating services at all (Phase 1 note absent too).
     expect(system).not.toContain('CREATING A NEW SERVICE')
-    // Phase 6 — the continuous-flow + Enable instructions are gated too.
-    expect(system).not.toContain(CONTINUOUS_FLOW_MARKER)
-    expect(system).not.toContain(ENABLE_MARKER)
-    // Phase 7 — the structured-interview + ask-don't-assume rules are gated too, and
-    // the ask_build_question tool is never even named with the flag off.
-    expect(system).not.toContain(ASK_DONT_ASSUME_MARKER)
+    // The ask_build_question tool is never even named with the flag off.
     expect(system).not.toContain(ASK_TOOL_MARKER)
   })
 
   it('keeps the always-on, non-wizard tools regardless of the flag (no regression)', () => {
-    delete process.env.LEGAL_BUILD_WIZARD
+    process.env.LEGAL_BUILD_WIZARD = '0'
     const names = toolNames()
     // log_feedback + produce_document + the always-on workflow pair + load_skill.
     expect(names).toContain('log_feedback')
@@ -130,19 +122,12 @@ describe('build wizard activation (LEGAL_BUILD_WIZARD on)', () => {
     process.env.LEGAL_BUILD_WIZARD = 'true'
     const system = buildClaudeSystem('global', null, null)
     expect(system).toContain(ORCHESTRATOR_MARKER)
-    // It points the model at the playbook skill and encodes the load-bearing order.
+    // It points the model at the AUTHORITATIVE playbook skill (the flow itself
+    // lives there — single source of truth) and keeps the two non-negotiables
+    // inline: interview via ask_build_question cards, no platform vocabulary.
     expect(system).toContain('firm-admin.build-service')
-    expect(system).toContain('DOCUMENTS → VARIABLES → QUESTIONNAIRE')
-    expect(system).toContain('get_service_completeness')
-    // Phase 6 — the continuous-flow + billing + terminal Enable instructions, the
-    // headline fixes (never stall after an approval; the service must end ACTIVE).
-    expect(system).toContain(CONTINUOUS_FLOW_MARKER)
-    expect(system).toContain('propose_cost')
-    expect(system).toContain(ENABLE_MARKER)
-    // Phase 7 — the structured-interview + ask-don't-assume rules (the headline UX
-    // fix): every interview question via ask_build_question, no defaulted automation.
-    expect(system).toContain(ASK_DONT_ASSUME_MARKER)
     expect(system).toContain(ASK_TOOL_MARKER)
+    expect(system).toContain('NEVER use platform vocabulary')
   })
 
   it('frames the documents→questionnaire flow as forward-looking + reuse-aware (Phase 7)', () => {

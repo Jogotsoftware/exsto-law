@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import {
@@ -8,10 +9,15 @@ import {
   type WorkRate,
   type ContextDepth,
   type EditorLaunchEvent,
+  type EmailComposeEvent,
+  type EnvelopePrepareEvent,
 } from '@/lib/assistantStream'
 import { QuestionnaireEditorModal } from '@/components/QuestionnaireEditorModal'
 import { TemplateEditorModal } from '@/components/TemplateEditorModal'
 import { WorkflowEditorModal } from '@/components/WorkflowEditorModal'
+import { EmailComposeModal } from '@/components/EmailComposeModal'
+import { PrepareSignature, type SendResult } from '@/components/PrepareSignature'
+import { Modal } from '@/components/Modal'
 import type { QuestionnaireSchema } from '@/components/QuestionnaireBuilder'
 import type { WfLifecycle } from '@/lib/workflowBuilderModel'
 import { assistantHistoryContent } from '@/lib/buildHistoryContent'
@@ -58,6 +64,8 @@ import {
   CheckCircleIcon,
   UploadIcon,
   ArrowRightIcon,
+  MailIcon,
+  SignatureIcon,
 } from '@/components/icons'
 
 // One chat the attorney can point at any connected AI model, that picks up the
@@ -86,6 +94,15 @@ interface AssistantModel {
   supportsWebSearch: boolean
   webSearchInherent: boolean
 }
+
+// WP5 (ASSISTANT-ACTS-1) — the conversation survives a full page load: the open
+// chat session id is remembered per tab and the thread reloads from it on mount.
+// sessionStorage (not localStorage) so a new tab still starts fresh.
+const CHAT_SESSION_KEY = 'exsto.assistant.chatSession'
+
+// WP4 — the "Auto" picker entry routes each turn server-side (Haiku for ordinary
+// turns, Sonnet for heavy ones); the header shows which model actually answered.
+const AUTO_MODEL_ID = 'anthropic:auto'
 
 // A finished document the assistant produced (a deliverable to download/save),
 // distinct from the prose reply.
@@ -146,6 +163,13 @@ interface DisplayTurn {
   // Non-fatal warnings surfaced on this turn (e.g. the tool-round cap cut a pending
   // step off) — rendered as a visible notice line, never as a turn failure (WP5.1).
   notices?: TurnNotice[]
+  // ASSISTANT-ACTS-1: client emails the assistant composed this turn (compose_email)
+  // — shown as EmailDraftCards; "Edit & send" reopens the real edit/send modal.
+  emailDrafts?: EmailComposeEvent[]
+  // WP5 — a scope-switch divider ("Now grounded in the matter you're viewing"),
+  // rendered as a muted line between messages. content stays '' so the history
+  // builder's empty-turn backstop keeps it out of the model's transcript.
+  contextNote?: string
 }
 
 // A non-fatal notice on a turn (BUILDER-UX-3 P3). tone 'warning' (the default)
@@ -184,6 +208,9 @@ interface ThreadTurn {
   costProposals?: CostProposal[]
   enableProposals?: EnableProposal[]
   kindProposals?: KindProposal[]
+  // ASSISTANT-ACTS-1: client emails composed on this turn — persisted so a
+  // reopened thread re-shows the Edit & send card (sent-state is not persisted).
+  emailDrafts?: EmailComposeEvent[]
 }
 
 // A document attached to the next message: an uploaded file (parsed to text), a
@@ -582,8 +609,36 @@ function StreamingMarkdown({ text }: { text: string }) {
 // it reads as a deliverable, not a chat bubble) with the document preview and the
 // download/save actions. This is where downloads live now: on a real produced
 // document, never on every reply.
-function DocumentCard({ doc, matterEntityId }: { doc: ProducedDoc; matterEntityId?: string }) {
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+//
+// ASSISTANT-ACTS-1: the card now remembers its OWN draftVersionId once saved
+// (previously discarded) so a second click is a no-op, and gained two act-in-
+// place actions — attach this doc to a client email, or send it for signature
+// (saving first if it hasn't been saved yet).
+function DocumentCard({
+  doc,
+  matterEntityId,
+  knownDraftVersionId,
+  onSaved,
+  onAttachToEmail,
+  onSendForSignature,
+  onOpenEditor,
+}: {
+  doc: ProducedDoc
+  matterEntityId?: string
+  // A draftVersionId already known for this doc (e.g. the email compose modal
+  // saved it) — seeds the card as already-saved.
+  knownDraftVersionId?: string
+  onSaved?: (draftVersionId: string) => void
+  onAttachToEmail?: (info: { title: string; markdown: string; draftVersionId?: string }) => void
+  onSendForSignature?: (draftVersionId: string) => void
+  // ASSISTANT-ACTS-1: open the doc in the real rich-text editor (a local edit —
+  // saving to the matter stays the card's explicit action).
+  onOpenEditor?: (doc: ProducedDoc) => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(false)
+  const [signing, setSigning] = useState(false)
+  const [draftVersionId, setDraftVersionId] = useState<string | null>(knownDraftVersionId ?? null)
   const [expanded, setExpanded] = useState(true)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
@@ -592,12 +647,23 @@ function DocumentCard({ doc, matterEntityId }: { doc: ProducedDoc; matterEntityI
     },
     [],
   )
+  // A draftVersionId learned elsewhere (this doc was saved from the email
+  // compose modal) updates the card without a duplicate save.
+  useEffect(() => {
+    if (knownDraftVersionId && !draftVersionId) setDraftVersionId(knownDraftVersionId)
+  }, [knownDraftVersionId, draftVersionId])
   const filename = slugifyTitle(doc.title)
-  async function save() {
-    if (!matterEntityId) return
-    setSaveState('saving')
+  const saved = Boolean(draftVersionId)
+
+  // Save to the matter's drafts — a no-op once already saved: returns the
+  // existing id instead of writing a duplicate draft version.
+  async function save(): Promise<string | null> {
+    if (!matterEntityId) return null
+    if (draftVersionId) return draftVersionId
+    setSaving(true)
+    setSaveError(false)
     try {
-      await callAttorneyMcp({
+      const r = await callAttorneyMcp<{ draftVersionId: string | null }>({
         toolName: 'legal.assistant.save_reply',
         input: {
           matterEntityId,
@@ -605,13 +671,29 @@ function DocumentCard({ doc, matterEntityId }: { doc: ProducedDoc; matterEntityI
           documentKind: filename.replace(/-/g, '_'),
         },
       })
-      setSaveState('saved')
+      if (r.draftVersionId) {
+        setDraftVersionId(r.draftVersionId)
+        onSaved?.(r.draftVersionId)
+      }
+      return r.draftVersionId
     } catch {
-      setSaveState('error')
+      setSaveError(true)
+      if (timer.current) clearTimeout(timer.current)
+      timer.current = setTimeout(() => setSaveError(false), 2200)
+      return null
+    } finally {
+      setSaving(false)
     }
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => setSaveState('idle'), 2200)
   }
+
+  async function handleSendForSignature() {
+    if (signing) return
+    setSigning(true)
+    const id = draftVersionId ?? (await save())
+    setSigning(false)
+    if (id) onSendForSignature?.(id)
+  }
+
   return (
     <div className="uac-doc-card">
       <div className="uac-doc-head">
@@ -651,22 +733,142 @@ function DocumentCard({ doc, matterEntityId }: { doc: ProducedDoc; matterEntityI
           <FileTextIcon size={12} /> Word
         </button>
         <CopyButton text={doc.markdown} />
-        {matterEntityId && (
+        {onOpenEditor && (
           <button
             type="button"
-            className={`uac-reply-btn${saveState === 'saved' ? ' copied' : ''}`}
-            onClick={save}
-            disabled={saveState === 'saving'}
-            title="Save this document to the matter's drafts (for review)"
+            className="uac-reply-btn"
+            onClick={() => onOpenEditor(doc)}
+            title="Edit this document in the rich-text editor"
           >
-            {saveState === 'saved' ? <CheckIcon size={12} /> : <FileTextIcon size={12} />}{' '}
-            {saveState === 'saving'
-              ? 'Saving…'
-              : saveState === 'saved'
-                ? 'Saved'
-                : saveState === 'error'
-                  ? 'Failed'
-                  : 'Save to matter'}
+            <FileTextIcon size={12} /> Open in editor
+          </button>
+        )}
+        {matterEntityId && (
+          <>
+            <button
+              type="button"
+              className={`uac-reply-btn${saved ? ' copied' : ''}`}
+              onClick={() => void save()}
+              disabled={saving}
+              title="Save this document to the matter's drafts (for review)"
+            >
+              {saved ? <CheckIcon size={12} /> : <FileTextIcon size={12} />}{' '}
+              {saving ? 'Saving…' : saveError ? 'Failed' : saved ? 'Saved' : 'Save to matter'}
+            </button>
+            <button
+              type="button"
+              className="uac-reply-btn"
+              onClick={() =>
+                onAttachToEmail?.({
+                  title: doc.title,
+                  markdown: doc.markdown,
+                  draftVersionId: draftVersionId ?? undefined,
+                })
+              }
+              title="Attach this document to an email to the client"
+            >
+              <MailIcon size={12} /> Attach to email
+            </button>
+            <button
+              type="button"
+              className="uac-reply-btn"
+              onClick={() => void handleSendForSignature()}
+              disabled={signing}
+              title="Send this document for e-signature"
+            >
+              <SignatureIcon size={12} /> {signing ? 'Saving…' : 'Send for signature'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ASSISTANT-ACTS-1 — match a compose_email draft's attachDocumentTitles against
+// this turn's produced documents (exact title, case-insensitive). Unmatched
+// titles are reported (not silently dropped) so the compose modal can note them.
+// A doc already saved (from a prior send or a DocumentCard "Save to matter")
+// rides its known draftVersionId so the modal doesn't save it again.
+function buildPendingDocs(
+  attachTitles: string[],
+  turnDocuments: ProducedDoc[],
+  savedDraftVersions: Record<string, string>,
+): {
+  pendingDocs: Array<{ title: string; markdown: string; draftVersionId?: string }>
+  unmatchedTitles: string[]
+} {
+  const pendingDocs: Array<{ title: string; markdown: string; draftVersionId?: string }> = []
+  const unmatchedTitles: string[] = []
+  for (const title of attachTitles) {
+    const doc = turnDocuments.find((d) => d.title.toLowerCase() === title.toLowerCase())
+    if (!doc) {
+      unmatchedTitles.push(title)
+      continue
+    }
+    pendingDocs.push({
+      title: doc.title,
+      markdown: doc.markdown,
+      draftVersionId: savedDraftVersions[doc.title.toLowerCase()],
+    })
+  }
+  return { pendingDocs, unmatchedTitles }
+}
+
+// "attorney_letter" → "Attorney letter" — mirrors PrepareSignature's own kind
+// formatting; used only for the hidden driver line after an envelope send.
+function humanizeDocKind(kind: string): string {
+  const s = kind.replace(/_/g, ' ').trim() || 'document'
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+// A stable identity for an EmailComposeEvent, content-derived rather than
+// position-derived — the SAME draft renders first from `streaming.emailDrafts`
+// and then, once the turn commits, from the persisted turn's `emailDrafts` at a
+// different array position. Keying sent-state by content (not index) means the
+// "Sent to …" flip survives that transition instead of the card resetting the
+// instant the turn finishes streaming.
+function emailDraftKey(draft: { subject: string; bodyMarkdown: string }): string {
+  return `${draft.subject}::${draft.bodyMarkdown.length}::${draft.bodyMarkdown.slice(0, 60)}`
+}
+
+// A client email the assistant composed this turn — same visual family as
+// DocumentCard (uac-doc-card): a subject line + a clamped body preview and one
+// primary action. "Edit & send" reopens the real edit/send modal on this draft;
+// after a send the card flips to a quiet confirmation. Sent-state is SESSION-only
+// (not persisted) — a reload shows Edit & send again, which is acceptable v1.
+function EmailDraftCard({
+  draft,
+  sentTo,
+  onEditAndSend,
+}: {
+  draft: EmailComposeEvent
+  sentTo?: string
+  onEditAndSend: () => void
+}) {
+  return (
+    <div className="uac-doc-card">
+      <div className="uac-doc-head">
+        <span className="uac-doc-title">
+          <MailIcon size={14} /> Email to client — {draft.subject || '(no subject)'}
+        </span>
+      </div>
+      <div
+        className="uac-doc-body assistant-md li-uac-email-preview"
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(draft.bodyMarkdown) }}
+      />
+      <div className="uac-doc-actions">
+        {sentTo ? (
+          <span className="uac-reply-btn copied">
+            <CheckIcon size={12} /> Sent to {sentTo}
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="uac-reply-btn uac-reply-btn-primary"
+            onClick={onEditAndSend}
+          >
+            <MailIcon size={12} /> Edit &amp; send
           </button>
         )}
       </div>
@@ -739,6 +941,7 @@ export function UnifiedAssistantChat({
     buildQuestions: BuildQuestionEvent[]
     kindProposals: KindProposal[]
     notices: TurnNotice[]
+    emailDrafts: EmailComposeEvent[]
   } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -794,6 +997,39 @@ export function UnifiedAssistantChat({
   // WP-H2: an editor launch the assistant resolved this turn — renders the real
   // Config*Modal pre-loaded on the existing artifact. Cleared on close.
   const [editorLaunch, setEditorLaunch] = useState<EditorLaunchEvent | null>(null)
+  // ASSISTANT-ACTS-1 — the email compose modal: a chat-level singleton (only one
+  // open at a time). cardKey correlates back to the EmailDraftCard that opened it
+  // (undefined for an ad-hoc "Attach to email" start with no card of its own) so
+  // onSent can flip that ONE card to its sent state.
+  const [emailCompose, setEmailCompose] = useState<{
+    subject: string
+    bodyMarkdown: string
+    pendingDocs: Array<{ title: string; markdown: string; draftVersionId?: string }>
+    unmatchedTitles: string[]
+    cardKey?: string
+  } | null>(null)
+  // Sent-state per EmailDraftCard, keyed by "<turn index>:<draft index>" for a
+  // committed turn or "streaming:<draft index>" for the in-flight one — SESSION
+  // only (a reload shows Edit & send again; acceptable v1).
+  const [sentEmailByCard, setSentEmailByCard] = useState<Record<string, string>>({})
+  // Doc title (lowercased) → draftVersionId, learned when the compose modal saves
+  // a pending doc that hadn't been saved yet, so the originating DocumentCard
+  // picks it up without a duplicate save.
+  const [savedDraftVersions, setSavedDraftVersions] = useState<Record<string, string>>({})
+  // ASSISTANT-ACTS-1 — a produced doc open in the rich-text editor. A LOCAL edit:
+  // saving in the editor rewrites the card's markdown in the turn; the matter save
+  // stays the card's explicit action. `turn` is held by identity so the update
+  // lands on the right committed turn regardless of index shifts.
+  const [docEditor, setDocEditor] = useState<{ turn: DisplayTurn; doc: ProducedDoc } | null>(null)
+  // ASSISTANT-ACTS-1 — the assistant resolved a matter document to send for
+  // signature (prepare_envelope): opens the real wizard on it. Transient, like
+  // editorLaunch — never persisted.
+  const [envelopePrepare, setEnvelopePrepare] = useState<EnvelopePrepareEvent | null>(null)
+  // A brief inline confirmation after the wizard sends an envelope from chat.
+  const [envelopeSentNotice, setEnvelopeSentNotice] = useState<{
+    envelopeId: string
+    label: string
+  } | null>(null)
   // Secure mode: a lock the attorney sets before pasting sensitive matter/client
   // info — forces web search OFF for the turn so that context can't be put into an
   // outbound search (beta ask). Stays on until toggled off.
@@ -850,6 +1086,15 @@ export function UnifiedAssistantChat({
   const scope = activeScope
 
   const selected = models?.find((m) => m.id === modelId) ?? null
+  // WP4 — with "Auto" selected, the header shows which Claude actually answered
+  // the last turn ("Auto · Claude Haiku 4.5"). Fed by the stream's meta event;
+  // null until the first routed turn.
+  const [autoResolvedLabel, setAutoResolvedLabel] = useState<string | null>(null)
+  const headerModelLabel = selected
+    ? selected.id === AUTO_MODEL_ID && autoResolvedLabel
+      ? `Auto · ${autoResolvedLabel}`
+      : selected.label
+    : 'Connecting…'
   // Skills run on the Claude path only (the catalog + load_skill tool); the
   // /skills affordance and any picked skills are hidden/ignored for Perplexity.
   const isClaude = selected?.provider === 'anthropic'
@@ -1068,6 +1313,7 @@ export function UnifiedAssistantChat({
                 costProposals: t.costProposals,
                 enableProposals: t.enableProposals,
                 kindProposals: t.kindProposals,
+                emailDrafts: t.emailDrafts,
               },
         )
         setTurns(display)
@@ -1079,13 +1325,60 @@ export function UnifiedAssistantChat({
     [],
   )
 
-  // Seed the initial scope's thread on mount (matter/contact chats). The picker
-  // loads other scopes explicitly via selectThread.
+  // Seed the thread on mount. A chat session persisted this tab (WP5) wins —
+  // the conversation the attorney had open comes back even across a full page
+  // load or a panel close/reopen; otherwise the initial scope's legacy thread
+  // loads as before. The picker loads other scopes explicitly via selectThread.
   useEffect(() => {
+    let restored: string | null = null
+    try {
+      restored = window.sessionStorage.getItem(CHAT_SESSION_KEY)
+    } catch {
+      // ignore — behaves like a fresh open
+    }
+    if (restored) {
+      chatSessionIdRef.current = restored
+      void loadHistory({ chatSessionId: restored })
+      return
+    }
     if (loadThread) void loadHistory(activeScope)
     // Mount-only: activeScope's initial value is the prop-derived scope; later
-    // scope switches load explicitly via selectThread.
+    // scope switches load explicitly via selectThread / the follow-the-page effect.
   }, [])
+
+  // WP5 (ASSISTANT-ACTS-1) — follow the page WITHOUT remounting: when the host
+  // re-derives the scope from a route change, the SAME conversation re-grounds in
+  // the new matter/contact. Mid-conversation, prior turns stay (the model keeps
+  // what it learned on earlier pages via history; the server injects the NEW
+  // page's context per turn) and a muted divider marks the switch. Before the
+  // first exchange there is nothing to keep, so it rebinds like a fresh open.
+  const prevScopePropsRef = useRef({ matterEntityId, contactEntityId })
+  useEffect(() => {
+    const prev = prevScopePropsRef.current
+    if (prev.matterEntityId === matterEntityId && prev.contactEntityId === contactEntityId) return
+    prevScopePropsRef.current = { matterEntityId, contactEntityId }
+    const next = matterEntityId ? { matterEntityId } : contactEntityId ? { contactEntityId } : {}
+    // The history picker may have already re-pointed the conversation here.
+    if (
+      next.matterEntityId === activeScope.matterEntityId &&
+      next.contactEntityId === activeScope.contactEntityId
+    ) {
+      return
+    }
+    // No exchange yet (no saved session, nothing in flight): a full rebind — the
+    // loaded thread (if any) belongs to the page just left, not this one.
+    if (!chatSessionIdRef.current && !busy && !buildMode) {
+      selectThread(next)
+      return
+    }
+    setActiveScope(next)
+    const label = next.matterEntityId
+      ? 'Now grounded in the matter you’re viewing.'
+      : next.contactEntityId
+        ? 'Now grounded in the client you’re viewing.'
+        : 'Left the matter — continuing as a general chat.'
+    setTurns((t) => [...t, { role: 'assistant', content: '', contextNote: label }])
+  }, [matterEntityId, contactEntityId])
 
   // Reopen a prior conversation: re-point the active scope, clear the current
   // exchange, and load that thread. Re-grounds context in the chosen scope.
@@ -1094,6 +1387,11 @@ export function UnifiedAssistantChat({
     setHistoryOpen(false)
     setActiveScope(target)
     chatSessionIdRef.current = null // a legacy scope thread is not a saved conversation
+    try {
+      window.sessionStorage.removeItem(CHAT_SESSION_KEY)
+    } catch {
+      // ignore
+    }
     setTurns([])
     continuedRef.current.clear() // fresh thread ⇒ forget which approvals already auto-continued
     setBuildMode(false) // a different thread is not the in-progress build
@@ -1108,6 +1406,10 @@ export function UnifiedAssistantChat({
     setInput('')
     setBusy(false)
     setUseContext(true)
+    // A different thread's cards are gone — any open act-in-place modal/state
+    // belonged to the one just left.
+    setEmailCompose(null)
+    setEnvelopePrepare(null)
     setFeedbackMode(false)
     setFbDone(false)
     setFbRef(null)
@@ -1167,6 +1469,8 @@ export function UnifiedAssistantChat({
     retryRef.current = null
     setInput('')
     setBusy(false)
+    setEmailCompose(null)
+    setEnvelopePrepare(null)
     setTurns([])
     const gen = genRef.current
     void callAttorneyMcp<{ turns: Array<{ role: 'user' | 'assistant'; content: string }> }>({
@@ -1235,6 +1539,11 @@ export function UnifiedAssistantChat({
     genRef.current++ // abandon any in-flight stream
     setEditorLaunch(null)
     chatSessionIdRef.current = null // WP-D2: a new chat is a new saved conversation
+    try {
+      window.sessionStorage.removeItem(CHAT_SESSION_KEY)
+    } catch {
+      // ignore
+    }
     setTurns([])
     continuedRef.current.clear() // new conversation ⇒ forget which approvals already auto-continued
     buildServiceKeyRef.current = null // …and which service was under construction
@@ -1295,10 +1604,12 @@ export function UnifiedAssistantChat({
         (m) =>
           m.provider === 'anthropic' && m.available && m.connected && m.supportsWorkRate && pred(m),
       )
+    // WP4 note: the anthropic default is now the Auto tier, which doesn't carry
+    // the work-rate knob — so the fallback is simply "any work-rate Claude"
+    // (Sonnet), not the picker default.
     const strong =
       claudeWorkRate((m) => m.model === 'claude-opus-4-8') ?? // strongest
-      claudeWorkRate((m) => m.isDefault) ?? // recommended (Sonnet)
-      claudeWorkRate(() => true) // any capable Claude model
+      claudeWorkRate(() => true) // any capable Claude model (Sonnet)
     const buildModelId = strong?.id ?? modelId
     if (buildModelId !== modelId) setModelId(buildModelId)
     // A fresh build: forget any prior build's service key and queued continuation.
@@ -1692,6 +2003,7 @@ export function UnifiedAssistantChat({
       buildQuestions: [] as BuildQuestionEvent[],
       kindProposals: [] as KindProposal[],
       notices: [] as TurnNotice[],
+      emailDrafts: [] as EmailComposeEvent[],
     }
     setStreaming({ ...partial })
     let finished = false
@@ -1721,6 +2033,7 @@ export function UnifiedAssistantChat({
         partial.buildQuestions = []
         partial.kindProposals = []
         partial.notices = []
+        partial.emailDrafts = []
         setStreaming({ ...partial })
         // Brief pause so a momentary blip (overload spike, dropped socket) has a
         // chance to clear before the re-send.
@@ -1873,14 +2186,54 @@ export function UnifiedAssistantChat({
               // WP-H2: open the real editor pop-up on the resolved artifact.
               setEditorLaunch(l)
             },
+            onEmailCompose: (draft) => {
+              if (!live()) return
+              partial.emailDrafts.push(draft)
+              setStreaming({ ...partial, emailDrafts: [...partial.emailDrafts] })
+              // ASSISTANT-ACTS-1: acts in place — the edit/send modal pops the moment
+              // the draft arrives, prefilled; matched against THIS turn's documents
+              // produced so far (a document can stream in before or after the email).
+              const { pendingDocs, unmatchedTitles } = buildPendingDocs(
+                draft.attachDocumentTitles,
+                partial.documents,
+                savedDraftVersions,
+              )
+              setEmailCompose({
+                subject: draft.subject,
+                bodyMarkdown: draft.bodyMarkdown,
+                pendingDocs,
+                unmatchedTitles,
+                cardKey: emailDraftKey(draft),
+              })
+            },
+            onEnvelopePrepare: (l) => {
+              if (!live()) return
+              setEnvelopePrepare(l)
+            },
+            // WP4 — surface the Auto tier's routing decision. meta.model is the
+            // CONCRETE model the server resolved this turn; map it to its catalog
+            // label so the header can show "Auto · Claude Haiku 4.5".
+            onMeta: (meta) => {
+              if (!live() || turnModelId !== AUTO_MODEL_ID) return
+              const hit = models?.find((m) => m.provider === 'anthropic' && m.model === meta.model)
+              setAutoResolvedLabel(hit?.label ?? meta.model)
+            },
             onDone: (d) => {
               if (!live()) return
               finished = true
               // Phase 5: the server minted (or confirmed) this build's session on
               // the turn — resend it on every later turn of the same build.
               if (d.buildSessionId) buildSessionIdRef.current = d.buildSessionId
-              // WP-D2: resend the conversation id on every later turn.
-              if (d.chatSessionId) chatSessionIdRef.current = d.chatSessionId
+              // WP-D2: resend the conversation id on every later turn. WP5:
+              // remember it per tab so a reload/reopen restores this conversation.
+              if (d.chatSessionId) {
+                chatSessionIdRef.current = d.chatSessionId
+                try {
+                  window.sessionStorage.setItem(CHAT_SESSION_KEY, d.chatSessionId)
+                } catch {
+                  // ignore — restore is a nicety
+                }
+              }
               // This turn's cards define the CURRENT answer batch (answers to a
               // multi-card turn buffer and return together; see handleQuestionAnswer).
               batchRef.current = {
@@ -1923,6 +2276,7 @@ export function UnifiedAssistantChat({
                     ? partial.buildQuestions
                     : undefined,
                   kindProposals: partial.kindProposals.length ? partial.kindProposals : undefined,
+                  emailDrafts: partial.emailDrafts.length ? partial.emailDrafts : undefined,
                   // Status-tone notices are transient progress lines — dropped on
                   // commit. A warning whose text the server also persisted into the
                   // reply (the workflow-exhaust line) is dropped too: the committed
@@ -2200,6 +2554,107 @@ export function UnifiedAssistantChat({
     closeBuildSession('completed')
   }, [closeBuildSession])
 
+  // ASSISTANT-ACTS-1 — reopen the edit/send modal on an already-composed draft
+  // (EmailDraftCard's "Edit & send"), re-deriving pendingDocs against the
+  // ORIGINATING turn's documents (a doc produced this turn may since have been
+  // saved elsewhere, so its known draftVersionId rides along).
+  function openEmailCompose(draft: EmailComposeEvent, turnDocuments: ProducedDoc[]) {
+    const { pendingDocs, unmatchedTitles } = buildPendingDocs(
+      draft.attachDocumentTitles,
+      turnDocuments,
+      savedDraftVersions,
+    )
+    setEmailCompose({
+      subject: draft.subject,
+      bodyMarkdown: draft.bodyMarkdown,
+      pendingDocs,
+      unmatchedTitles,
+      cardKey: emailDraftKey(draft),
+    })
+  }
+
+  // DocumentCard's "Attach to email" (item 6b): add to whatever compose modal is
+  // CURRENTLY open (it's a chat-level singleton), or start a fresh blank one.
+  function attachDocToEmail(doc: { title: string; markdown: string; draftVersionId?: string }) {
+    setEmailCompose((prev) =>
+      prev
+        ? { ...prev, pendingDocs: [...prev.pendingDocs.filter((d) => d.title !== doc.title), doc] }
+        : { subject: '', bodyMarkdown: '', pendingDocs: [doc], unmatchedTitles: [] },
+    )
+  }
+
+  // Learned once the compose modal saves a pendingDoc that had no draftVersionId
+  // yet — lets the originating DocumentCard pick it up (no duplicate save).
+  function onDocSavedFromEmail(info: { title: string; draftVersionId: string }) {
+    setSavedDraftVersions((m) => ({ ...m, [info.title.toLowerCase()]: info.draftVersionId }))
+  }
+
+  // ASSISTANT-ACTS-1 — commit a local editor pass on a produced doc: rewrite the
+  // card's markdown in its turn and forget any saved version id for it, so the
+  // next "Save to matter" writes the EDITED text as a fresh draft (not the stale
+  // pre-edit version). The turn/doc are matched by identity, not index.
+  function saveDocEdit(markdown: string): void {
+    if (!docEditor) return
+    const { turn, doc } = docEditor
+    setTurns((prev) =>
+      prev.map((t) =>
+        t === turn
+          ? { ...t, documents: t.documents?.map((d) => (d === doc ? { ...d, markdown } : d)) }
+          : t,
+      ),
+    )
+    setSavedDraftVersions((m) => {
+      const key = doc.title.toLowerCase()
+      if (!(key in m)) return m
+      const next = { ...m }
+      delete next[key]
+      return next
+    })
+    setDocEditor(null)
+  }
+
+  function onEmailSent(info: { to: string; subject: string; attachmentLabels: string[] }) {
+    if (emailCompose?.cardKey) {
+      const key = emailCompose.cardKey
+      setSentEmailByCard((m) => ({ ...m, [key]: info.to }))
+    }
+    setEmailCompose(null)
+    const attachNote = info.attachmentLabels.length
+      ? ` (attached: ${info.attachmentLabels.join(', ')})`
+      : ''
+    // The model must know the send happened so later turns don't re-offer it —
+    // mirrors the approval-nudge pattern (a hidden continuation, no user bubble).
+    void send(
+      driver(`The attorney sent the composed email "${info.subject}" to ${info.to}${attachNote}.`),
+      { hidden: true },
+    )
+  }
+
+  // DocumentCard's "Send for signature" (item 6c): the card saves itself first
+  // when it has no draftVersionId yet, then opens the wizard on the result. A
+  // manually-saved reply has no assistant-resolved kind/version/status, so a
+  // reasonable stand-in seeds the wizard's own "not yet approved" line (it is
+  // never pre-approved fresh out of chat) and the driver line's wording.
+  function openEnvelopeForDoc(draftVersionId: string, doc: ProducedDoc) {
+    setEnvelopePrepare({
+      documentVersionId: draftVersionId,
+      documentKind: doc.title,
+      versionNumber: 1,
+      status: 'draft',
+    })
+  }
+
+  function onEnvelopeSent(result: SendResult) {
+    const label = envelopePrepare ? humanizeDocKind(envelopePrepare.documentKind) : 'document'
+    const version = envelopePrepare?.versionNumber ?? 1
+    setEnvelopePrepare(null)
+    setEnvelopeSentNotice({ envelopeId: result.envelopeId, label: `${label} v${version}` })
+    setTimeout(() => setEnvelopeSentNotice(null), 8000)
+    void send(driver(`The attorney sent the ${label} v${version} for signature from the wizard.`), {
+      hidden: true,
+    })
+  }
+
   const handleApproved = useCallback<OnApproved>(
     (info) => {
       const key = `${info.serviceKey}:${info.artifact}`
@@ -2393,7 +2848,7 @@ export function UnifiedAssistantChat({
             <div className="li-uac-head-title">Legal Assistant</div>
             <div className="li-uac-head-status">
               <span className="li-uac-head-dot" aria-hidden="true" />
-              <span className="li-uac-head-model">{selected ? selected.label : 'Connecting…'}</span>
+              <span className="li-uac-head-model">{headerModelLabel}</span>
               {effectiveWebSearch && (
                 <span className="li-uac-head-web" title="Answers cite live web sources">
                   <SearchIcon size={10} /> web
@@ -2710,6 +3165,65 @@ export function UnifiedAssistantChat({
         />
       )}
 
+      {/* ── ASSISTANT-ACTS-1: the chat "acts in place" — the assistant composed a
+          client email (compose_email) opens this edit/send modal immediately;
+          the attorney's review here IS the approval. ─────────────────────────── */}
+      {emailCompose && (
+        <EmailComposeModal
+          // Force a fresh mount when the underlying draft changes (e.g. the model
+          // calls compose_email twice in one turn) rather than reusing state across
+          // a subject/body swap the attorney never asked for.
+          key={emailCompose.cardKey ?? emailCompose.subject}
+          matterEntityId={activeScope.matterEntityId}
+          contactEntityId={activeScope.contactEntityId}
+          initialSubject={emailCompose.subject}
+          initialBodyMarkdown={emailCompose.bodyMarkdown}
+          pendingDocs={emailCompose.pendingDocs}
+          unmatchedTitles={emailCompose.unmatchedTitles}
+          onDocSaved={onDocSavedFromEmail}
+          onSent={onEmailSent}
+          onClose={() => setEmailCompose(null)}
+        />
+      )}
+
+      {/* ── ASSISTANT-ACTS-1: the assistant resolved a matter document to send
+          for signature (prepare_envelope) — the REAL wizard opens on it directly;
+          the attorney confirms signers/fields and clicks Send there. ─────────── */}
+      {envelopePrepare && (
+        <Modal title="Send for signature" onClose={() => setEnvelopePrepare(null)} size="wide">
+          {envelopePrepare.status !== 'approved' && (
+            <p className="li-modal-muted" style={{ marginTop: 0 }}>
+              This version is not yet approved — you can still send it for signature.
+            </p>
+          )}
+          <PrepareSignature
+            documentVersionId={envelopePrepare.documentVersionId}
+            onSent={onEnvelopeSent}
+          />
+        </Modal>
+      )}
+      {envelopeSentNotice && (
+        <div className="alert alert-success" role="status">
+          Sent {envelopeSentNotice.label} for signature.{' '}
+          {/* Client-side nav (WP5): a plain <a> would full-page-load and tear
+              down the panel that just reported the send. */}
+          <Link href={`/attorney/esign/${envelopeSentNotice.envelopeId}`}>View envelope</Link>
+        </div>
+      )}
+
+      {/* ── ASSISTANT-ACTS-1: a produced doc open in the rich-text editor. A
+          LOCAL edit — Save rewrites the card's markdown; saving to the matter
+          stays the card's own explicit action. No AI rail (the doc has no
+          persisted target for the revise worker until it's saved). ─────────── */}
+      {docEditor && (
+        <TemplateEditorModal
+          title={`Edit — ${docEditor.doc.title}`}
+          initialBody={docEditor.doc.markdown}
+          onSave={(body) => saveDocEdit(body)}
+          onClose={() => setDocEditor(null)}
+        />
+      )}
+
       {/* ── WP-L build-mode progress strip (comp): "Building a service ·
           <phase>", "Step n of 6", six gradient segments, exit ─────────────── */}
       {buildMode && (
@@ -2823,6 +3337,18 @@ export function UnifiedAssistantChat({
         aria-live="polite"
         aria-atomic="false"
         aria-label="Conversation"
+        // WP5 — assistant replies render in-app links as plain <a> (renderMarkdown);
+        // a real navigation would full-page-load and tear down this layout-mounted
+        // panel. Intercept internal links and go client-side; external links keep
+        // their native behavior (renderMarkdown gives them target="_blank").
+        onClick={(e) => {
+          const a = (e.target as HTMLElement).closest?.('a')
+          if (!a) return
+          const href = a.getAttribute('href') ?? ''
+          if (!href.startsWith('/')) return
+          e.preventDefault()
+          router.push(href)
+        }}
       >
         {/* WP-L empty state (comp): serif greeting + starter suggestion cards.
             Each card is a REAL flow — no dead controls (see WIRING §WP-L). */}
@@ -3068,193 +3594,223 @@ export function UnifiedAssistantChat({
             next request's history) but render no bubble — the cards already show
             their outcome. Filtering is key-stable: turns only append, and
             hiddenFromUi never changes after commit. */}
-        {visibleTurns.map((t, i) => (
-          <div
-            key={i}
-            className={`li-uac-msg li-uac-msg-${t.role}`}
-            // A failed send stays visible but dimmed: the attorney sees what
-            // didn't go through, and "Try again" (in the error alert) revives it.
-            style={t.failed ? { opacity: 0.55 } : undefined}
-            title={t.failed ? 'This message didn’t send — use Try again below.' : undefined}
-          >
-            {/* Assistant replies are markdown — render so **bold**, lists and
+        {visibleTurns.map((t, i) =>
+          // WP5 — a scope-switch divider is a muted status line, not a bubble.
+          t.contextNote ? (
+            <div key={i} className="li-uac-ctxnote" role="status">
+              {t.contextNote}
+            </div>
+          ) : (
+            <div
+              key={i}
+              className={`li-uac-msg li-uac-msg-${t.role}`}
+              // A failed send stays visible but dimmed: the attorney sees what
+              // didn't go through, and "Try again" (in the error alert) revives it.
+              style={t.failed ? { opacity: 0.55 } : undefined}
+              title={t.failed ? 'This message didn’t send — use Try again below.' : undefined}
+            >
+              {/* Assistant replies are markdown — render so **bold**, lists and
                 headings display formatted (not as raw syntax). renderMarkdown
                 escapes HTML before formatting, so model output can't inject
                 markup. User turns stay verbatim. */}
-            {t.role === 'assistant' ? (
-              <>
-                {/* Founder walk 2026-07-17: on interview turns the question card IS
+              {t.role === 'assistant' ? (
+                <>
+                  {/* Founder walk 2026-07-17: on interview turns the question card IS
                     the message — the lead-in prose duplicated it and the Thinking
                     tab added chrome, so both are suppressed when the turn carries
                     build questions. */}
-                {!t.buildQuestions?.length && stripMachinery(t.content).trim() && (
-                  <div
-                    className="assistant-md"
-                    dangerouslySetInnerHTML={{
-                      __html: renderMarkdown(stripMachinery(t.content)),
-                    }}
-                  />
-                )}
-                {/* The model's reasoning/process — a collapsed disclosure in normal
+                  {!t.buildQuestions?.length && stripMachinery(t.content).trim() && (
+                    <div
+                      className="assistant-md"
+                      dangerouslySetInnerHTML={{
+                        __html: renderMarkdown(stripMachinery(t.content)),
+                      }}
+                    />
+                  )}
+                  {/* The model's reasoning/process — a collapsed disclosure in normal
                     chat. Hidden throughout BUILD MODE (founder walk): the progress
                     strip is the activity signal there, so the "Thinking" tab was just
                     chrome on every builder turn (interview cards and proposal cards
                     alike). */}
-                {!buildMode && !t.buildQuestions?.length && t.reasoning?.trim() && (
-                  <ReasoningDisclosure reasoning={t.reasoning} />
-                )}
-                {/* Documents the assistant produced — downloadable deliverables
+                  {!buildMode && !t.buildQuestions?.length && t.reasoning?.trim() && (
+                    <ReasoningDisclosure reasoning={t.reasoning} />
+                  )}
+                  {/* Documents the assistant produced — downloadable deliverables
                     (PDF/Word + save to matter), not the prose. Downloads attach
                     here, never to an ordinary reply. */}
-                {t.documents?.map((doc, di) => (
-                  <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
-                ))}
-                {/* Billing proposals — rendered ABOVE the workflow card so a
+                  {t.documents?.map((doc, di) => (
+                    <DocumentCard
+                      // Content-keyed so an editor pass remounts the card fresh —
+                      // its internal saved-state must not survive a body rewrite.
+                      key={`${di}:${doc.markdown.length}`}
+                      doc={doc}
+                      matterEntityId={activeScope.matterEntityId}
+                      knownDraftVersionId={savedDraftVersions[doc.title.toLowerCase()]}
+                      onSaved={(id) =>
+                        onDocSavedFromEmail({ title: doc.title, draftVersionId: id })
+                      }
+                      onAttachToEmail={attachDocToEmail}
+                      onSendForSignature={(id) => openEnvelopeForDoc(id, doc)}
+                      onOpenEditor={(d) => setDocEditor({ turn: t, doc: d })}
+                    />
+                  ))}
+                  {/* ASSISTANT-ACTS-1: a client email the assistant composed this turn
+                    (compose_email) — "Edit & send" reopens the real modal on it. */}
+                  {t.emailDrafts?.map((draft, di) => (
+                    <EmailDraftCard
+                      key={di}
+                      draft={draft}
+                      sentTo={sentEmailByCard[emailDraftKey(draft)]}
+                      onEditAndSend={() => openEmailCompose(draft, t.documents ?? [])}
+                    />
+                  ))}
+                  {/* Billing proposals — rendered ABOVE the workflow card so a
                     same-turn pair reads in approve order (pricing first: the
                     workflow's approve validates against the approved billing). */}
-                {t.costProposals?.map((p, pi) => (
-                  <CostProposalCard
-                    key={pi}
-                    proposal={p}
-                    onApproved={handleApproved}
-                    onEdited={handleProposalEdited}
-                  />
-                ))}
-                {/* Workflow proposals (PR5) — inline approval cards. Approving is the
+                  {t.costProposals?.map((p, pi) => (
+                    <CostProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onEdited={handleProposalEdited}
+                    />
+                  ))}
+                  {/* Workflow proposals (PR5) — inline approval cards. Approving is the
                     live write; nothing was saved by the turn that proposed them. */}
-                {t.workflowProposals?.map((p, pi) => (
-                  <WorkflowProposalCard
-                    key={pi}
-                    proposal={p}
-                    onApproved={handleApproved}
-                    onRevise={handleRevise}
-                    onEdited={handleProposalEdited}
-                  />
-                ))}
-                {/* New-service proposals (Build-Wizard Phase 1) — inline approval
+                  {t.workflowProposals?.map((p, pi) => (
+                    <WorkflowProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onRevise={handleRevise}
+                      onEdited={handleProposalEdited}
+                    />
+                  ))}
+                  {/* New-service proposals (Build-Wizard Phase 1) — inline approval
                     cards. Approving creates the (disabled) service; nothing was saved
                     by the turn that proposed it. */}
-                {t.serviceProposals?.map((p, pi) => (
-                  <ServiceProposalCard
-                    key={pi}
-                    proposal={p}
-                    onApproved={handleApproved}
-                    onEdited={handleProposalEdited}
-                  />
-                ))}
-                {/* Questionnaire proposals (Build-Wizard Phase 2) — inline approval
+                  {t.serviceProposals?.map((p, pi) => (
+                    <ServiceProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onEdited={handleProposalEdited}
+                    />
+                  ))}
+                  {/* Questionnaire proposals (Build-Wizard Phase 2) — inline approval
                     cards surfacing the variable-contract coverage. Approving writes
                     the service's intake form; nothing was saved by the proposing turn. */}
-                {t.questionnaireProposals?.map((p, pi) => (
-                  <QuestionnaireProposalCard
-                    key={pi}
-                    proposal={p}
-                    onApproved={handleApproved}
-                    onEdited={handleProposalEdited}
-                  />
-                ))}
-                {/* Template proposals (Build-Wizard Phase 3) — inline approval cards
+                  {t.questionnaireProposals?.map((p, pi) => (
+                    <QuestionnaireProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onEdited={handleProposalEdited}
+                    />
+                  ))}
+                  {/* Template proposals (Build-Wizard Phase 3) — inline approval cards
                     flagging orphan tokens. Approving writes the service's document
                     template; nothing was saved by the proposing turn. */}
-                {t.templateProposals?.map((p, pi) => (
-                  <TemplateProposalCard
-                    key={pi}
-                    proposal={p}
-                    onApproved={handleApproved}
-                    onEdited={handleProposalEdited}
-                  />
-                ))}
-                {/* Enable proposals (Build-Wizard Phase 6, terminal) — the final card.
+                  {t.templateProposals?.map((p, pi) => (
+                    <TemplateProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onEdited={handleProposalEdited}
+                    />
+                  ))}
+                  {/* Enable proposals (Build-Wizard Phase 6, terminal) — the final card.
                     Approving flips the service to active/bookable; this ends the build. */}
-                {t.enableProposals?.map((p, pi) => (
-                  <EnableProposalCard
-                    key={pi}
-                    proposal={p}
-                    onApproved={handleApproved}
-                    onDone={handleBuildDone}
-                  />
-                ))}
-                {/* New data-kind proposals (Tier 1 data-as-schema) — approval cards.
+                  {t.enableProposals?.map((p, pi) => (
+                    <EnableProposalCard
+                      key={pi}
+                      proposal={p}
+                      onApproved={handleApproved}
+                      onDone={handleBuildDone}
+                    />
+                  ))}
+                  {/* New data-kind proposals (Tier 1 data-as-schema) — approval cards.
                     Approving mints the kind via kind.define; the proposing turn wrote
                     nothing. */}
-                {t.kindProposals?.map((p, pi) => (
-                  <KindProposalCard key={pi} proposal={p} onApproved={handleApproved} />
-                ))}
-                {/* Structured interview questions (Phase 7) — walked ONE AT A TIME as
+                  {t.kindProposals?.map((p, pi) => (
+                    <KindProposalCard key={pi} proposal={p} onApproved={handleApproved} />
+                  ))}
+                  {/* Structured interview questions (Phase 7) — walked ONE AT A TIME as
                     a click-through (QuestionBatch), not a stack. Answering sends a
                     HIDDEN continuation (no fake user bubble). */}
-                {t.buildQuestions && t.buildQuestions.length > 0 && (
-                  <QuestionBatch questions={t.buildQuestions} onAnswer={handleQuestionAnswer} />
-                )}
-                {/* Non-fatal warnings (e.g. the tool-round cap cut a step off) —
+                  {t.buildQuestions && t.buildQuestions.length > 0 && (
+                    <QuestionBatch questions={t.buildQuestions} onAnswer={handleQuestionAnswer} />
+                  )}
+                  {/* Non-fatal warnings (e.g. the tool-round cap cut a step off) —
                     visible on the turn, never rendered as a failure (WP5.1).
                     tone 'status' renders muted (a progress line, no glyph). */}
-                {t.notices?.map((n, ni) =>
-                  n.tone === 'status' ? (
-                    <div
-                      key={ni}
-                      role="status"
-                      className="text-muted"
-                      style={{ marginTop: 8, fontSize: 13 }}
-                    >
-                      {n.message}
-                    </div>
-                  ) : (
-                    <div
-                      key={ni}
-                      role="status"
-                      style={{
-                        marginTop: 8,
-                        padding: '6px 10px',
-                        borderRadius: 8,
-                        fontSize: 13,
-                        background: 'rgba(245, 158, 11, 0.12)',
-                        border: '1px solid rgba(245, 158, 11, 0.35)',
-                      }}
-                    >
-                      ⚠️ {n.message}
-                    </div>
-                  ),
-                )}
-                {stripMachinery(t.content).trim() && (
-                  <div className="uac-reply-actions">
-                    <CopyButton text={stripMachinery(t.content)} />
-                  </div>
-                )}
-              </>
-            ) : (
-              // User bubbles strip machinery too (UI-BUILDER-FIX-1 item 9): a
-              // persisted driver/continuation turn must never render its ⟦…⟧
-              // payload — structural, not reliant on the model's discipline.
-              <div style={{ whiteSpace: 'pre-wrap' }}>{stripMachinery(t.content)}</div>
-            )}
-            {t.citations && t.citations.length > 0 && (
-              <ol className="uac-citations">
-                {t.citations.map((c, j) => (
-                  <li key={j}>
-                    {isHttpUrl(c) ? (
-                      <a href={c} target="_blank" rel="noopener noreferrer">
-                        {c}
-                      </a>
+                  {t.notices?.map((n, ni) =>
+                    n.tone === 'status' ? (
+                      <div
+                        key={ni}
+                        role="status"
+                        className="text-muted"
+                        style={{ marginTop: 8, fontSize: 13 }}
+                      >
+                        {n.message}
+                      </div>
                     ) : (
-                      <span className="text-muted">{c}</span>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            )}
-            {t.role === 'user' && t.attachments && t.attachments.length > 0 && (
-              <div className="uac-bubble-attachments">
-                {t.attachments.map((name, k) => (
-                  <span key={k} className="uac-attach-chip uac-attach-chip-static" title={name}>
-                    <FileTextIcon size={11} />
-                    <span className="uac-attach-chip-name">{name}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+                      <div
+                        key={ni}
+                        role="status"
+                        style={{
+                          marginTop: 8,
+                          padding: '6px 10px',
+                          borderRadius: 8,
+                          fontSize: 13,
+                          background: 'rgba(245, 158, 11, 0.12)',
+                          border: '1px solid rgba(245, 158, 11, 0.35)',
+                        }}
+                      >
+                        ⚠️ {n.message}
+                      </div>
+                    ),
+                  )}
+                  {stripMachinery(t.content).trim() && (
+                    <div className="uac-reply-actions">
+                      <CopyButton text={stripMachinery(t.content)} />
+                    </div>
+                  )}
+                </>
+              ) : (
+                // User bubbles strip machinery too (UI-BUILDER-FIX-1 item 9): a
+                // persisted driver/continuation turn must never render its ⟦…⟧
+                // payload — structural, not reliant on the model's discipline.
+                <div style={{ whiteSpace: 'pre-wrap' }}>{stripMachinery(t.content)}</div>
+              )}
+              {t.citations && t.citations.length > 0 && (
+                <ol className="uac-citations">
+                  {t.citations.map((c, j) => (
+                    <li key={j}>
+                      {isHttpUrl(c) ? (
+                        <a href={c} target="_blank" rel="noopener noreferrer">
+                          {c}
+                        </a>
+                      ) : (
+                        <span className="text-muted">{c}</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {t.role === 'user' && t.attachments && t.attachments.length > 0 && (
+                <div className="uac-bubble-attachments">
+                  {t.attachments.map((name, k) => (
+                    <span key={k} className="uac-attach-chip uac-attach-chip-static" title={name}>
+                      <FileTextIcon size={11} />
+                      <span className="uac-attach-chip-name">{name}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ),
+        )}
 
         {/* The in-flight reply: thinking animation → streamed markdown w/ caret. */}
         {streaming && (
@@ -3289,10 +3845,29 @@ export function UnifiedAssistantChat({
               streaming.costProposals.length === 0 &&
               streaming.enableProposals.length === 0 &&
               streaming.buildQuestions.length === 0 &&
-              streaming.kindProposals.length === 0 && <WorkingIndicator />}
+              streaming.kindProposals.length === 0 &&
+              streaming.emailDrafts.length === 0 && <WorkingIndicator />}
             {/* A document produced mid-stream appears as a card right away. */}
             {streaming.documents.map((doc, di) => (
-              <DocumentCard key={di} doc={doc} matterEntityId={activeScope.matterEntityId} />
+              <DocumentCard
+                key={di}
+                doc={doc}
+                matterEntityId={activeScope.matterEntityId}
+                knownDraftVersionId={savedDraftVersions[doc.title.toLowerCase()]}
+                onSaved={(id) => onDocSavedFromEmail({ title: doc.title, draftVersionId: id })}
+                onAttachToEmail={attachDocToEmail}
+                onSendForSignature={(id) => openEnvelopeForDoc(id, doc)}
+              />
+            ))}
+            {/* ASSISTANT-ACTS-1: a client email composed mid-stream appears as a
+                card right away — the edit/send modal has already auto-opened. */}
+            {streaming.emailDrafts.map((draft, di) => (
+              <EmailDraftCard
+                key={di}
+                draft={draft}
+                sentTo={sentEmailByCard[emailDraftKey(draft)]}
+                onEditAndSend={() => openEmailCompose(draft, streaming.documents)}
+              />
             ))}
             {/* A billing proposal mid-stream — above the workflow card so a same-turn
               pair reads in approve order (pricing first). */}
