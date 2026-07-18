@@ -22999,3 +22999,250 @@ details.li-brief-research summary:hover {
   color: var(--li-text-muted);
   margin-right: 8px;
 }
+
+/* ==========================================================================
+   LI CALENDAR COMP-FIDELITY — WeeklyCalendar.tsx hourly grid (the dashboard
+   "This week" widget + the matter detail page's calendar embed; the still-
+   open WP-A "embedded week calendar" item). Side-by-side overlap lanes, the
+   comp's pencil menu (Edit event / Duplicate / Delete), and drag-to-move with
+   a confirm-before-persist modal — the same interaction model as the main
+   attorney calendar's own hourly grid (app/attorney/calendar/page.tsx,
+   `.li-cal-*`, WP-H), sized compact for a dashboard card. New family
+   `.wcal-hg-*` (hour-grid), layered alongside the existing `.wcal-*` wrapper/
+   header/legend/mobile-list rules (untouched — the old `.wcal-week-grid` /
+   `.wcal-day-*` desktop-grid rules are no longer rendered by the component
+   but are left in place per the append-only convention, not hand-edited/
+   removed). Also two small additions shared with the main calendar's own
+   drag-confirm modal: `.li-modal-btn-danger-text` and `.li-cal-confirm-range`.
+   ========================================================================== */
+
+/* Text-only danger footer button — the li-modal-* family has ghost/primary/
+   filled-danger but no danger-TEXT variant; the Edit event modal's "Delete"
+   wants the lighter weight (matches the main calendar's own
+   .li-cal-btn-danger-text look). */
+.li-modal-btn-danger-text {
+  background: transparent;
+  border: none;
+  color: var(--li-danger);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 9px 4px;
+}
+.li-modal-btn-danger-text:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.li-modal-btn-danger-text:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* "Old time → new time" line inside a drag-confirm modal (both calendars). */
+.li-cal-confirm-range {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--li-muted);
+}
+
+.wcal-error {
+  margin-bottom: 0.65rem;
+}
+
+/* ── Hourly grid card ────────────────────────────────────────────────────── */
+.wcal-hg-card {
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-card);
+  overflow: hidden;
+}
+.wcal-hg-daysrow {
+  display: grid;
+  border-bottom: 1px solid var(--li-border);
+}
+.wcal-hg-daycell {
+  padding: 6px 4px;
+  text-align: center;
+  border-right: 1px solid var(--li-border-soft);
+}
+.wcal-hg-daycell-dow {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--li-muted-2);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.wcal-hg-daycell-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-navy);
+  margin-top: 2px;
+}
+.wcal-hg-daycell-num.is-today {
+  background: var(--li-gold);
+  color: #fff;
+}
+
+/* ── All-day strip ───────────────────────────────────────────────────────── */
+.wcal-hg-allday {
+  display: grid;
+  border-bottom: 1px solid var(--li-border-soft);
+  padding: 4px 0;
+}
+.wcal-hg-allday-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--li-muted-3);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 3px 6px 0 0;
+  text-align: right;
+}
+.wcal-hg-allday-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 3px;
+}
+.wcal-hg-allday-chip {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: none;
+  background: var(--li-border-soft);
+  color: var(--li-body);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wcal-hg-allday-chip.is-external {
+  background: var(--li-info-bg);
+  color: var(--li-link);
+}
+
+/* ── Scrollable hourly body ──────────────────────────────────────────────── */
+.wcal-hg-scroll {
+  position: relative;
+  overflow-y: auto;
+  max-height: 320px;
+}
+.wcal-hg-body {
+  position: relative;
+  display: grid;
+}
+.wcal-hg-body.is-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+.wcal-hg-axis {
+  border-right: 1px solid var(--li-border-soft);
+}
+.wcal-hg-hour {
+  text-align: right;
+  padding-right: 5px;
+  font-size: 9.5px;
+  color: var(--li-muted-3);
+  transform: translateY(-6px);
+}
+.wcal-hg-col {
+  position: relative;
+  border-right: 1px solid var(--li-border-soft);
+}
+.wcal-hg-hline {
+  border-bottom: 1px solid var(--li-border-soft);
+}
+.wcal-hg-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1.5px;
+  background: var(--li-danger);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* ── Event blocks (side-by-side lanes) ──────────────────────────────────── */
+.wcal-hg-event {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 5px;
+  border-left: 3px solid var(--li-navy);
+  padding: 2px 4px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.wcal-hg-event:hover {
+  filter: brightness(0.97);
+  text-decoration: none;
+}
+.wcal-hg-event.is-dragging {
+  filter: brightness(0.94);
+  box-shadow: var(--li-shadow-pop);
+}
+.wcal-hg-event-time {
+  display: block;
+  font-size: 9px;
+  color: var(--li-muted);
+  opacity: 0.85;
+}
+.wcal-hg-event-title {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--li-navy);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 14px;
+}
+/* Positioned on the WRAPPER (see WeeklyCalendar.tsx comment) — ActionsMenu's
+   own `.att-pop-anchor` is `display:flex` and sizes to its child, so putting
+   position:absolute on the button itself collapses the anchor to 0×0. */
+.wcal-hg-event-edit-wrap {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  z-index: 3;
+  line-height: 0;
+}
+.wcal-hg-event-edit {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--li-navy);
+  opacity: 0.55;
+  cursor: pointer;
+}
+.wcal-hg-event-edit:hover:not(:disabled),
+.wcal-hg-event-edit.active {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+/* ── Desktop/mobile toggle (mirrors the pre-existing .wcal-week-grid /
+   .wcal-mobile-list breakpoint — this wraps the new HourGrid instead) ──── */
+@media (max-width: 720px) {
+  .wcal-hg-desktop {
+    display: none;
+  }
+}
