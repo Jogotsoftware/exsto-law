@@ -91,7 +91,7 @@ export default function MatterLayout({
         <div className="li-brief-headwrap">
           {/* Brief engine WP2: the Matter Brief door — modal does get-on-open,
               generation only on an explicit click (never automatic). */}
-          <BriefButton matterEntityId={id} />
+          <BriefButton scope={{ kind: 'matter', matterEntityId: id }} />
           <ActionsMenu
             triggerClassName="li-mat-actionsbtn"
             triggerContent={

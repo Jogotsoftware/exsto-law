@@ -35,6 +35,13 @@ export interface StoredBrief {
   sourceWatermark: string | null
   modelIdentity: string | null
   confidence: number | null
+  // Client Brief only (WP3) — the raw brief_research_json attribute value,
+  // RAW/untyped here (this is the read-only substrate layer; api/
+  // briefResearchGuard.ts owns the typed BriefResearchRecord shape + its
+  // tolerant parser, matching how parseStoredSections/BriefSection stay local
+  // to this file while the api layer owns richer semantics). Optional so the
+  // pre-WP3 matter-brief fixtures/tests need no change: absent ⇒ untouched.
+  researchJson?: unknown | null
 }
 
 // Latest-open attribute value subselect (the notes.ts shape). Kept as a helper
@@ -94,6 +101,7 @@ export async function getBriefForTarget(
       watermark: unknown
       model_identity: unknown
       confidence: unknown
+      research_json: unknown
     }>(
       `SELECT
          b.id AS brief_id,
@@ -102,7 +110,8 @@ export async function getBriefForTarget(
          ${attr('brief_generated_at')} AS generated_at,
          ${attr('brief_source_watermark')} AS watermark,
          ${attr('brief_model_identity')} AS model_identity,
-         ${attr('brief_confidence')} AS confidence
+         ${attr('brief_confidence')} AS confidence,
+         ${attr('brief_research_json')} AS research_json
        FROM entity b
        JOIN entity_kind_definition ekd ON ekd.id = b.entity_kind_id AND ekd.kind_name = 'brief'
        JOIN relationship r ON r.source_entity_id = b.id AND r.target_entity_id = $2
@@ -126,6 +135,7 @@ export async function getBriefForTarget(
       sourceWatermark: asText(row.watermark),
       modelIdentity: asText(row.model_identity),
       confidence: asNumber(row.confidence),
+      researchJson: row.research_json ?? null,
     }
   })
 }

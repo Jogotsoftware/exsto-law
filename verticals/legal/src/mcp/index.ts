@@ -111,6 +111,8 @@ import './tools/commsTools.js'
 // Brief engine WP2 — Matter Brief get/generate (attorney-only; deliberately NOT
 // in the clientPolicy.ts portal allowlists — founder decision: never portal).
 import './tools/briefTools.js'
+// Brief engine WP3 — Client Brief get/generate (same attorney-only contract).
+import './tools/clientBriefTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

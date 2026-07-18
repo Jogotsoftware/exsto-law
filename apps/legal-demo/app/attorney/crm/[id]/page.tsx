@@ -20,6 +20,7 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { BackButton } from '@/components/BackButton'
 import { NotesSection } from '@/components/NotesSection'
+import { BriefButton } from '@/components/BriefButton'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
 import { MailIcon, CalendarIcon, EditIcon } from '@/components/icons'
 import { CRM_STATUS_META, crmInitials, formatCrmDate, type CrmBucket } from '@/lib/crmStatus'
@@ -215,6 +216,10 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           </div>
         </div>
         <div className="li-crm-actions">
+          {/* Brief engine WP3: the Client Brief door — same shared modal WP2
+              uses on the matter header, get-on-open + explicit generate/refresh
+              only (never automatic). */}
+          <BriefButton scope={{ kind: 'client', clientEntityId: id }} className="li-crm-btn" />
           <button
             type="button"
             className="li-crm-btn"
