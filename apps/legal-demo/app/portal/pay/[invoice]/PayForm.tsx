@@ -107,7 +107,7 @@ function InnerForm({ amountLabel, returnUrl, onPaid }: PayFormProps): React.Reac
       )}
       <button
         type="submit"
-        className="pdash-btn"
+        className="li-cp-btn li-cp-btn--gold"
         disabled={!stripe || busy}
         style={{ marginTop: 'var(--space-3)' }}
       >

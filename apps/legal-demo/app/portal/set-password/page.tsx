@@ -64,7 +64,7 @@ export default function SetPasswordPage() {
 
   return (
     <Shell title="Set your password">
-      <p className="cauth-lead">
+      <p className="li-cp-auth-lead">
         Choose a password for your Pacheco Law client portal. You&apos;ll use your email and this
         password to sign in.
       </p>
@@ -75,8 +75,8 @@ export default function SetPasswordPage() {
         </div>
       )}
 
-      <form onSubmit={submit} className="cauth-form">
-        <label className="cauth-label" htmlFor="cauth-pass">
+      <form onSubmit={submit} className="li-cp-auth-form">
+        <label className="li-cp-label" htmlFor="cauth-pass">
           New password
         </label>
         <input
@@ -88,9 +88,9 @@ export default function SetPasswordPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="At least 8 characters"
-          className="cauth-input"
+          className="li-cp-input"
         />
-        <label className="cauth-label" htmlFor="cauth-confirm">
+        <label className="li-cp-label" htmlFor="cauth-confirm">
           Confirm password
         </label>
         <input
@@ -102,14 +102,18 @@ export default function SetPasswordPage() {
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           placeholder="Re-enter your password"
-          className="cauth-input"
+          className="li-cp-input"
         />
-        <button type="submit" className="cauth-primary" disabled={submitting}>
+        <button
+          type="submit"
+          className="li-cp-btn li-cp-btn--block li-cp-auth-submit"
+          disabled={submitting}
+        >
           {submitting ? 'Please wait…' : 'Set password & sign in'}
         </button>
       </form>
 
-      <p className="cauth-foot">
+      <p className="li-cp-auth-foot">
         Already set this up? <a href="/portal/login">Sign in</a>
       </p>
     </Shell>
@@ -124,15 +128,15 @@ function Shell({
   children: React.ReactNode
 }) {
   return (
-    <main className="public-draft cauth-shell">
-      <div className="cauth-card">
-        <div className="pd-brandrow">
-          <span className="cp-crest" aria-hidden>
+    <main className="li-cp-auth">
+      <div className="li-cp-auth-card">
+        <div className="li-cp-auth-brand">
+          <span className="li-cp-auth-crest" aria-hidden>
             <ScaleIcon size={18} />
           </span>
-          <div className="public-draft-firm">Pacheco Law</div>
+          <div className="li-cp-auth-firm">Pacheco Law</div>
         </div>
-        <h1 className="cauth-title">{title}</h1>
+        <h1 className="li-cp-auth-title">{title}</h1>
         {children}
       </div>
     </main>

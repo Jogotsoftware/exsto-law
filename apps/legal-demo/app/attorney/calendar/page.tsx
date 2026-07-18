@@ -15,6 +15,7 @@ import { Modal } from '@/components/Modal'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ActionsMenu, type ActionItem } from '@/components/ActionsMenu'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
+import { layoutOverlappingEvents, overlapResultToPct } from '@/lib/calendarOverlapLayout'
 
 interface WorkspaceEvent {
   eventId: string
@@ -169,33 +170,37 @@ function formatHourLabel(h: number): string {
 
 // Position a day's timed events with SIDE-BY-SIDE lanes for anything that
 // overlaps (comp: CALENDAR's `layout()` — replaces the old cascading inset).
-// Each event's lane group is every OTHER event it directly overlaps in time;
-// within that group it gets an equal-width column (leftPct/widthPct).
+// Column geometry comes from the shared cluster+greedy-column algorithm
+// (lib/calendarOverlapLayout — unit tested there), which fixes the original
+// comp-ported "pairwise overlap group" approach: a 3-event chain where the
+// first and last don't overlap each other used to get inconsistent per-event
+// widths (each end saw only 2 neighbors, the middle saw 3). Same visual
+// result for the simple 2-event case (comp's 9:00 + 9:15 pair).
 function layoutTimed(
   dayEvents: WorkspaceEvent[],
 ): Array<{ e: WorkspaceEvent; top: number; height: number; leftPct: number; widthPct: number }> {
-  const its = [...dayEvents]
-    .sort((a, b) => (a.startIso! < b.startIso! ? -1 : 1))
-    .map((e) => {
-      const day0 = startOfDay(new Date(e.startIso!)).getTime()
-      const s = new Date(e.startIso!).getTime()
-      const en = e.endIso ? new Date(e.endIso).getTime() : s + 3600_000
-      return {
-        e,
-        startMin: (s - day0) / 60_000,
-        endMin: (Math.max(en, s + 600_000) - day0) / 60_000,
-      }
-    })
+  const its = dayEvents.map((e) => {
+    const day0 = startOfDay(new Date(e.startIso!)).getTime()
+    const s = new Date(e.startIso!).getTime()
+    const en = e.endIso ? new Date(e.endIso).getTime() : s + 3600_000
+    return {
+      e,
+      startMin: (s - day0) / 60_000,
+      endMin: (Math.max(en, s + 600_000) - day0) / 60_000,
+    }
+  })
+  const layout = layoutOverlappingEvents(
+    its.map((it) => ({ id: it.e.eventId, startMin: it.startMin, endMin: it.endMin })),
+  )
+  const layoutById = new Map(layout.map((l) => [l.id, l]))
   return its.map((it) => {
-    const overlapping = its.filter((o) => o.startMin < it.endMin && o.endMin > it.startMin)
-    const n = overlapping.length
-    const i = overlapping.indexOf(it)
+    const { leftPct, widthPct } = overlapResultToPct(layoutById.get(it.e.eventId)!)
     return {
       e: it.e,
       top: Math.max(0, (it.startMin / 60) * HOUR_PX),
       height: Math.max(22, ((it.endMin - it.startMin) / 60) * HOUR_PX),
-      leftPct: n > 1 ? (i * 100) / n : 0,
-      widthPct: n > 1 ? 100 / n : 100,
+      leftPct,
+      widthPct,
     }
   })
 }
@@ -220,6 +225,15 @@ function formatDuration(min: number): string {
   if (min < 60) return `${min} min`
   const hrs = min / 60
   return Number.isInteger(hrs) ? `${hrs} hr` : `${hrs.toFixed(1)} hr`
+}
+// "Jul 17, 1:00 – 1:30 PM" — the drag-confirm modal's old/new time display.
+function fmtRange(start: Date, end: Date | null): string {
+  const day = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const startT = start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const endT = end
+    ? end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : null
+  return `${day}, ${startT}${endT ? ` – ${endT}` : ''}`
 }
 
 // An in-progress grid drag: paint a new event (create), move an event to a new
@@ -697,8 +711,8 @@ export default function CalendarPage() {
   }
 
   // Reschedule by the event's identity: a meeting (calendar_event) goes through the
-  // meeting action, a consultation through booking — used by drag move/resize,
-  // which commits immediately without opening the modal.
+  // meeting action, a consultation through booking — called only after the drag's
+  // confirm modal (below) is accepted.
   async function rescheduleEventTo(e: WorkspaceEvent, startIso: string, endIso: string) {
     if (e.meetingEntityId) {
       await run('legal.meeting.reschedule', {
@@ -710,6 +724,39 @@ export default function CalendarPage() {
     } else if (e.matterEntityId) {
       await run('legal.booking.reschedule', { matterEntityId: e.matterEntityId, startIso, endIso })
     }
+  }
+
+  // Drag-to-move/resize on the time grid must NOT commit on drop by itself — a
+  // confirm modal shows the change (old time → new time) and only Confirm
+  // persists it (founder ask: "click and drag events with edit confirmation
+  // modal popping up"). Cancel needs no explicit revert: `drag` is already
+  // cleared by the time this runs (onUp below), so the block re-renders from
+  // the untouched source data at its original position.
+  async function confirmReschedule(
+    e: WorkspaceEvent,
+    newStart: Date,
+    newEnd: Date,
+    kind: 'move' | 'resize',
+  ) {
+    const oldStart = e.startIso ? new Date(e.startIso) : null
+    const oldEnd = e.endIso ? new Date(e.endIso) : null
+    const ok = await confirm({
+      title: kind === 'resize' ? 'Change the event length?' : 'Move this event?',
+      body: (
+        <>
+          <strong>{e.summary || '(no title)'}</strong>
+          <div className="li-cal-confirm-range">
+            <span>{oldStart ? fmtRange(oldStart, oldEnd) : '—'}</span>
+            <span aria-hidden="true"> → </span>
+            <span>{fmtRange(newStart, newEnd)}</span>
+          </div>
+        </>
+      ),
+      confirmLabel: kind === 'resize' ? 'Save new length' : 'Move event',
+      cancelLabel: 'Cancel',
+    })
+    if (!ok) return
+    await rescheduleEventTo(e, newStart.toISOString(), newEnd.toISOString())
   }
 
   // Start a drag: paint a new range on empty grid (create), move an event block, or
@@ -797,10 +844,11 @@ export default function CalendarPage() {
       if (!d.moved) return // a click on the block — its own onClick handles it
       const startMin = snapMin(pxToMin(d.top))
       const endMin = startMin + Math.max(MIN_DUR_MIN, snapMin(pxToMin(d.height)))
-      await rescheduleEventTo(
+      await confirmReschedule(
         d.e,
-        dayAtMinutes(d.day, startMin).toISOString(),
-        dayAtMinutes(d.day, endMin).toISOString(),
+        dayAtMinutes(d.day, startMin),
+        dayAtMinutes(d.day, endMin),
+        d.kind,
       )
     }
     window.addEventListener('mousemove', onMove)

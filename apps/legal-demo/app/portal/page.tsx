@@ -9,12 +9,15 @@ import { useI18n } from '@/lib/i18n'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
 
-// CLIENT-PORTAL-UI-1 — the portal home is a CROSS-MATTER dashboard (greeting,
-// attention band, matters list, rail), nav reduces to Home · Documents · a
-// notifications bell, and everything else is reached from home cards. All copy
-// goes through the i18n layer (client-copy doctrine: no internal step names,
-// kind keys, or attorney verbiage — the server projections only hand us
-// client-safe fields to begin with).
+// LI PORTAL RESTYLE — the client portal reshaped to the Legal Instruments comp
+// (docs/design/legal-instruments/legal-instruments.dc.html, Client Portal
+// section). Navy header + navy tab bar (Home · Documents · Invoices · Signatures
+// · Assistant · Settings) + light content, matching the comp; a notifications
+// bell lives in the header (the comp has no notif tab, but #344 shipped it, so it
+// survives as a bell). Every capability from CLIENT-PORTAL-UI-1 / PORTAL-1 / #384
+// is preserved — this is a restyle + reshape, not a removal. Copy goes through the
+// i18n layer (client-copy doctrine: no internal step names or attorney verbiage).
+// New CSS family: li-cp-* (globals.css tail).
 
 interface MeFirm {
   tenantId: string
@@ -193,11 +196,10 @@ interface NotificationItem {
   unread: boolean
 }
 
+type TabKind = 'home' | 'documents' | 'invoices' | 'signatures' | 'assistant' | 'settings'
 type View =
-  | { kind: 'home' }
-  | { kind: 'documents' }
+  | { kind: TabKind }
   | { kind: 'notifications' }
-  | { kind: 'billing' }
   | { kind: 'schedule' }
   | { kind: 'matter'; matterEntityId: string }
 
@@ -271,72 +273,91 @@ export default function ClientPortalPage() {
   }, [me, loadHome])
 
   const locked = home ? !home.engagement.accepted : false
+  const assistantEnabled = home?.assistantEnabled ?? false
+
+  // The six comp tabs. Assistant only appears for clients whose firm enabled it
+  // (WP-7) — no empty/dead tab.
+  const tabs: Array<{ kind: TabKind; label: string }> = [
+    { kind: 'home', label: t('portal.nav.home', undefined, 'Home') },
+    { kind: 'documents', label: t('portal.nav.documents', undefined, 'Documents') },
+    { kind: 'invoices', label: t('portal.nav.invoices', undefined, 'Invoices') },
+    { kind: 'signatures', label: t('portal.nav.signatures', undefined, 'Signatures') },
+    ...(assistantEnabled
+      ? [{ kind: 'assistant' as const, label: t('portal.nav.assistant', undefined, 'Assistant') }]
+      : []),
+    { kind: 'settings', label: t('portal.nav.settings', undefined, 'Settings') },
+  ]
 
   return (
     <FirmNameContext.Provider value={me?.firmName ?? ''}>
-      <div className="cp-shell">
-        <header className="cp-top">
-          <div className="cp-top-inner">
-            <button
-              type="button"
-              className="cp-brand cp-brand-btn"
-              onClick={() => setView({ kind: 'home' })}
-              aria-label={t('portal.nav.home', undefined, 'Home')}
-            >
-              <span className="cp-crest" aria-hidden>
-                <ScaleIcon size={18} />
-              </span>
-              <span className="cp-brand-text">
-                <span className="cp-brand-name">{me?.firmName ?? ' '}</span>
-                <span className="cp-brand-sub">Client Portal</span>
-              </span>
-            </button>
-            {me && me.firms.length > 1 && <FirmSwitcher firms={me.firms} />}
-            <div className="cp-top-right">
-              <LanguageToggle />
-              {me && (
-                <span className="cp-who" title={me.email}>
-                  {me.displayName}
+      <div className="li-cp-shell">
+        <header>
+          <div className="li-cp-top">
+            <div className="li-cp-top-inner">
+              <button
+                type="button"
+                className="li-cp-brand"
+                onClick={() => setView({ kind: 'home' })}
+                aria-label={t('portal.nav.home', undefined, 'Home')}
+              >
+                <span className="li-cp-brand-crest" aria-hidden>
+                  <ScaleIcon size={24} />
                 </span>
-              )}
-              <a href="/api/client/auth/logout" className="cp-signout">
-                {t('portal.signout', undefined, 'Sign out')}
-              </a>
+                <span className="li-cp-brand-text">
+                  <span className="li-cp-brand-name">{me?.firmName ?? ' '}</span>
+                  <span className="li-cp-brand-sub">
+                    {t('portal.brand_sub', undefined, 'Client Portal')}
+                  </span>
+                </span>
+              </button>
+              {me && me.firms.length > 1 && <FirmSwitcher firms={me.firms} />}
+              <div className="li-cp-top-right">
+                <div className="li-cp-lang">
+                  <LanguageToggle />
+                </div>
+                <button
+                  type="button"
+                  className={`li-cp-bell ${view.kind === 'notifications' ? 'active' : ''}`}
+                  aria-label={t('portal.nav.notifications', undefined, 'Notifications')}
+                  onClick={() => setView({ kind: 'notifications' })}
+                >
+                  <BellIcon />
+                  {badge > 0 && (
+                    <span className="li-cp-bell-badge">{badge > 9 ? '9+' : badge}</span>
+                  )}
+                </button>
+                {me && (
+                  <span className="li-cp-who" title={me.email}>
+                    <span className="li-cp-avatar" aria-hidden>
+                      {firmInitials(me.displayName)}
+                    </span>
+                    <span className="li-cp-who-name">{me.displayName}</span>
+                  </span>
+                )}
+                <a href="/api/client/auth/logout" className="li-cp-signout">
+                  {t('portal.signout', undefined, 'Sign out')}
+                </a>
+              </div>
             </div>
           </div>
-          <nav className="cp-nav" aria-label="Portal sections">
-            <div className="cp-nav-inner">
-              <button
-                type="button"
-                className={`cp-tab ${view.kind === 'home' ? 'active' : ''}`}
-                aria-current={view.kind === 'home' ? 'page' : undefined}
-                onClick={() => setView({ kind: 'home' })}
-              >
-                {t('portal.nav.home', undefined, 'Home')}
-              </button>
-              <button
-                type="button"
-                className={`cp-tab ${view.kind === 'documents' ? 'active' : ''}`}
-                aria-current={view.kind === 'documents' ? 'page' : undefined}
-                onClick={() => setView({ kind: 'documents' })}
-              >
-                {t('portal.nav.documents', undefined, 'Documents')}
-              </button>
-              <button
-                type="button"
-                className={`cp-tab cp-tab-bell ${view.kind === 'notifications' ? 'active' : ''}`}
-                aria-current={view.kind === 'notifications' ? 'page' : undefined}
-                aria-label={t('portal.nav.notifications', undefined, 'Notifications')}
-                onClick={() => setView({ kind: 'notifications' })}
-              >
-                <BellIcon />
-                {badge > 0 && <span className="cph-badge">{badge > 9 ? '9+' : badge}</span>}
-              </button>
+          <nav className="li-cp-nav" aria-label="Portal sections">
+            <div className="li-cp-nav-inner">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.kind}
+                  type="button"
+                  className={`li-cp-tab ${view.kind === tab.kind ? 'active' : ''}`}
+                  aria-current={view.kind === tab.kind ? 'page' : undefined}
+                  onClick={() => setView({ kind: tab.kind })}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
           </nav>
         </header>
 
-        <main className="cp-main">
+        <main className="li-cp-main">
           {error && (
             <div className="alert alert-error" role="alert">
               {error}
@@ -354,30 +375,28 @@ export default function ClientPortalPage() {
                   home={home}
                   locked={locked}
                   onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
-                  onOpenBilling={() => setView({ kind: 'billing' })}
+                  onOpenInvoices={() => setView({ kind: 'invoices' })}
                   onOpenSchedule={() => setView({ kind: 'schedule' })}
                   onOpenGate={() => setGateOpen(true)}
                 />
               )}
               {view.kind === 'documents' && <DocumentsView matters={home.matters} />}
+              {view.kind === 'invoices' && <InvoicesView />}
+              {view.kind === 'signatures' && <SignaturesView />}
+              {view.kind === 'assistant' && assistantEnabled && <AssistantView />}
+              {view.kind === 'settings' && <SettingsView me={me} />}
               {view.kind === 'notifications' && (
                 <NotificationsView
                   onBadge={setBadge}
                   onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
-                  onOpenBilling={() => setView({ kind: 'billing' })}
-                  onOpenDocuments={() => setView({ kind: 'documents' })}
+                  onOpenInvoices={() => setView({ kind: 'invoices' })}
+                  onOpenSignatures={() => setView({ kind: 'signatures' })}
                 />
-              )}
-              {view.kind === 'billing' && (
-                <>
-                  <BackHome onBack={() => setView({ kind: 'home' })} />
-                  <InvoicesPanel />
-                </>
               )}
               {view.kind === 'schedule' && (
                 <>
                   <BackHome onBack={() => setView({ kind: 'home' })} />
-                  <SchedulePanel />
+                  <ScheduleView />
                 </>
               )}
               {view.kind === 'matter' && (
@@ -404,10 +423,6 @@ export default function ClientPortalPage() {
             }}
           />
         )}
-
-        {/* WP-7 — the assistant is a floating control, rendered ONLY for enabled
-          clients (flag off ⇒ absent from the DOM, not hidden). */}
-        {home?.assistantEnabled && <AssistantBubble />}
       </div>
     </FirmNameContext.Provider>
   )
@@ -415,8 +430,7 @@ export default function ClientPortalPage() {
 
 // MULTI-FIRM (referrals-tenancy P1): compact header dropdown listing every firm
 // this person is a client of. Picking one POSTs /api/client/auth/switch-firm
-// (server re-proves membership, re-mints the single-tenant session) and reloads
-// the portal so every per-firm view starts fresh.
+// (server re-proves membership, re-mints the single-tenant session) and reloads.
 function FirmSwitcher({ firms }: { firms: MeFirm[] }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
@@ -454,10 +468,10 @@ function FirmSwitcher({ firms }: { firms: MeFirm[] }) {
   }
 
   return (
-    <div className="cp-firmswitch" ref={wrapRef}>
+    <div className="li-cp-firmswitch" ref={wrapRef}>
       <button
         type="button"
-        className="cp-firmswitch-btn"
+        className="li-cp-firmswitch-btn"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
@@ -467,24 +481,24 @@ function FirmSwitcher({ firms }: { firms: MeFirm[] }) {
         <ChevronDown size={14} aria-hidden />
       </button>
       {open && (
-        <div className="cp-firmswitch-menu" role="listbox" aria-label="Your firms">
+        <div className="li-cp-firmswitch-menu" role="listbox" aria-label="Your firms">
           {firms.map((f) => (
             <button
               key={f.tenantId}
               type="button"
               role="option"
               aria-selected={f.current}
-              className={`cp-firmswitch-item ${f.current ? 'current' : ''}`}
+              className={`li-cp-firmswitch-item ${f.current ? 'current' : ''}`}
               onClick={() => pick(f)}
             >
-              <span className="cp-firmswitch-name">{f.firmName}</span>
+              <span className="li-cp-firmswitch-name">{f.firmName}</span>
               {f.main && (
-                <span className="cp-firmswitch-tag">
+                <span className="li-cp-firmswitch-tag">
                   {t('portal.firm_main', undefined, 'Main')}
                 </span>
               )}
               {f.current && (
-                <span className="cp-firmswitch-check" aria-hidden>
+                <span className="li-cp-firmswitch-check" aria-hidden>
                   ✓
                 </span>
               )}
@@ -499,8 +513,8 @@ function FirmSwitcher({ firms }: { firms: MeFirm[] }) {
 function BellIcon() {
   return (
     <svg
-      width="17"
-      height="17"
+      width="18"
+      height="18"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -518,26 +532,94 @@ function BellIcon() {
 function BackHome({ onBack }: { onBack: () => void }) {
   const { t } = useI18n()
   return (
-    <button type="button" className="cph-back" onClick={onBack}>
-      ← {t('portal.back_home', undefined, 'Back to home')}
+    <button type="button" className="li-cp-back" onClick={onBack}>
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <polyline points="15 18 9 12 15 6" />
+      </svg>
+      {t('portal.back_home', undefined, 'Back to home')}
     </button>
   )
 }
 
-// ── Home (WP-1) ──────────────────────────────────────────────────────────────
+// Small inline icons reused across the portal views.
+function SigIcon() {
+  return (
+    <svg
+      width="19"
+      height="19"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </svg>
+  )
+}
+function CalIcon() {
+  return (
+    <svg
+      width="19"
+      height="19"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+    </svg>
+  )
+}
+function ChevRight() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+}
+
+// ── Home ─────────────────────────────────────────────────────────────────────
 
 function HomeView({
   home,
   locked,
   onOpenMatter,
-  onOpenBilling,
+  onOpenInvoices,
   onOpenSchedule,
   onOpenGate,
 }: {
   home: HomeSummary
   locked: boolean
   onOpenMatter: (id: string) => void
-  onOpenBilling: () => void
+  onOpenInvoices: () => void
   onOpenSchedule: () => void
   onOpenGate: () => void
 }) {
@@ -566,250 +648,220 @@ function HomeView({
 
   return (
     <>
-      <h1 className="cph-greeting">{t(greetKey, { name }, `Good afternoon${name}.`)}</h1>
+      <h1 className="li-cp-h1">{t(greetKey, { name }, `Good afternoon${name}.`)}</h1>
+
+      {locked && (
+        <section className="li-cp-card li-cp-gate">
+          <div className="li-cp-gate-lock" aria-hidden>
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="4" y="10" width="16" height="11" rx="2" />
+              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+            </svg>
+          </div>
+          <div className="li-cp-gate-txt">
+            <h3>{t('portal.gate.title')}</h3>
+            <p>{t('portal.gate.body')}</p>
+            {home.engagement.rate && (
+              <div className="li-cp-gate-rate">
+                {t('portal.gate.rate', { rate: home.engagement.rate })}
+              </div>
+            )}
+          </div>
+          <button type="button" className="li-cp-btn" onClick={onOpenGate}>
+            {t('portal.gate.cta')}
+          </button>
+        </section>
+      )}
 
       {home.attention.length > 0 && (
-        <section className="pdash-card cph-attention" aria-label={t('portal.attention.label')}>
+        <div className="li-cp-attn" aria-label={t('portal.attention.label')}>
           {home.attention.map((item, i) =>
             item.kind === 'consultation' ? (
-              <div className="cph-attn-row" key={`c-${i}`}>
-                <div className="cph-attn-ico" aria-hidden>
-                  <svg
-                    width="19"
-                    height="19"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="4" width="18" height="17" rx="2" />
-                    <path d="M16 2v4M8 2v4M3 10h18" />
-                  </svg>
-                </div>
-                <div className="cph-attn-txt">
-                  <div className="cph-attn-k">{t('portal.attention.consultation')}</div>
-                  <div className="cph-attn-v">
+              <div className="li-cp-attn-row li-cp-attn-row--ok" key={`c-${i}`}>
+                <span className="li-cp-attn-ico li-cp-attn-ico--ok" aria-hidden>
+                  <CalIcon />
+                </span>
+                <div className="li-cp-attn-txt">
+                  <div className="li-cp-attn-k li-cp-attn-k--ok">
+                    {t('portal.attention.consultation')}
+                  </div>
+                  <div className="li-cp-attn-v">
                     {parseTimestamp(item.scheduledAt)?.toLocaleString(undefined, {
                       dateStyle: 'full',
                       timeStyle: 'short',
                     })}
                   </div>
-                  <div className="cph-attn-m">{item.matterNumber}</div>
+                  <div className="li-cp-attn-m">{item.matterNumber}</div>
                 </div>
                 {item.manageUrl && (
-                  <a className="pdash-btn pdash-btn-sm" href={item.manageUrl}>
+                  <a className="li-cp-btn" href={item.manageUrl}>
                     {t('portal.attention.manage')}
                   </a>
                 )}
               </div>
             ) : (
-              <div className="cph-attn-row" key={`s-${i}`}>
-                <div className="cph-attn-ico" aria-hidden>
-                  <svg
-                    width="19"
-                    height="19"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                  </svg>
+              <div className="li-cp-attn-row li-cp-attn-row--warn" key={`s-${i}`}>
+                <span className="li-cp-attn-ico li-cp-attn-ico--warn" aria-hidden>
+                  <SigIcon />
+                </span>
+                <div className="li-cp-attn-txt">
+                  <div className="li-cp-attn-k li-cp-attn-k--warn">
+                    {t('portal.attention.signature')}
+                  </div>
+                  <div className="li-cp-attn-v">{item.documentTitle ?? t('portal.docs.title')}</div>
+                  {item.matterNumber && <div className="li-cp-attn-m">{item.matterNumber}</div>}
                 </div>
-                <div className="cph-attn-txt">
-                  <div className="cph-attn-k">{t('portal.attention.signature')}</div>
-                  <div className="cph-attn-v">{item.documentTitle ?? t('portal.docs.title')}</div>
-                  {item.matterNumber && <div className="cph-attn-m">{item.matterNumber}</div>}
-                </div>
-                <a
-                  className="pdash-btn pdash-btn-sm cph-btn-accent"
-                  href={`/portal/sign/${item.requestId}`}
-                >
+                <a className="li-cp-btn" href={`/portal/sign/${item.requestId}`}>
                   {t('portal.attention.sign')}
                 </a>
               </div>
             ),
           )}
-        </section>
+        </div>
       )}
 
-      <div className="cph-grid">
-        <section aria-label={t('portal.matters.label')}>
-          <p className="cph-section-label">{t('portal.matters.label')}</p>
-          {home.matters.length === 0 ? (
-            <div className="pdash-card pdash-empty">{t('portal.matters.empty')}</div>
-          ) : (
-            <div className="pdash-card cph-matters">
-              {home.matters.map((m) => (
+      <section className="li-cp-block">
+        <div className="li-cp-section-label">{t('portal.matters.label')}</div>
+        {home.matters.length === 0 ? (
+          <div className="li-cp-card li-cp-empty">{t('portal.matters.empty')}</div>
+        ) : (
+          <div className="li-cp-card li-cp-matters">
+            {home.matters.map((m) => {
+              const variant =
+                m.statusChip === 'completed'
+                  ? 'neutral'
+                  : signatureMatters.has(m.matterNumber)
+                    ? 'warn'
+                    : consultationMatters.has(m.matterNumber)
+                      ? 'ok'
+                      : 'info'
+              return (
                 <button
                   type="button"
                   key={m.matterEntityId}
-                  className="cph-matter"
+                  className="li-cp-matter"
                   onClick={() => onOpenMatter(m.matterEntityId)}
                 >
-                  <span className="cph-matter-main">
-                    <span className="cph-matter-title">
+                  <span className="li-cp-matter-main">
+                    <span className="li-cp-matter-title">
                       {m.serviceLabel ?? t('portal.matter.generic')}
                     </span>
-                    <span className="cph-matter-meta">
+                    <span className="li-cp-matter-meta">
                       {formatOpened(m.openedAt)} · {m.matterNumber}
                     </span>
                   </span>
-                  {/* S2: exactly ONE status chip, driven by live entity status
-                      (statusChip). The old build rendered this pill from the
-                      workflow stage AND a separate "Closed" badge — an archived
-                      matter showed "In progress" next to "Closed". Active matters
-                      keep the signature/consultation accent; completed is neutral. */}
-                  <span
-                    className={`cph-chip ${
-                      m.statusChip === 'completed'
-                        ? ''
-                        : signatureMatters.has(m.matterNumber)
-                          ? 'cph-chip-warn'
-                          : consultationMatters.has(m.matterNumber)
-                            ? 'cph-chip-ok'
-                            : ''
-                    }`}
-                  >
-                    {t(`portal.matter.status.${m.statusChip}`)}
+                  <StatusChip variant={variant} label={t(`portal.matter.status.${m.statusChip}`)} />
+                  <span className="li-cp-chev" aria-hidden>
+                    <ChevRight />
                   </span>
-                  <span className="cph-chev" aria-hidden>
-                    ›
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </section>
+
+      <div className="li-cp-grid3">
+        <div className="li-cp-tile">
+          <h3 className="li-cp-tile-h3">{t('portal.rail.book.title')}</h3>
+          <p className="li-cp-tile-p">{t('portal.rail.book.body')}</p>
+          <button
+            type="button"
+            className="li-cp-btn li-cp-btn--block"
+            onClick={onOpenSchedule}
+            disabled={locked}
+          >
+            {t('portal.rail.book.cta')}
+          </button>
+        </div>
+
+        <div
+          className="li-cp-tile"
+          style={locked ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+        >
+          <h3 className="li-cp-tile-h3">{t('portal.messages.label')}</h3>
+          {home.messagesPreview.length === 0 ? (
+            <p className="li-cp-tile-p">{t('portal.messages.empty')}</p>
+          ) : (
+            <div className="li-cp-msglist">
+              {home.messagesPreview.map((msg, i) => (
+                <button
+                  type="button"
+                  key={i}
+                  className="li-cp-msg"
+                  onClick={() => onOpenMatter(msg.matterEntityId)}
+                >
+                  <span className="li-cp-msg-av" aria-hidden>
+                    {msg.author === 'attorney'
+                      ? firmInitials(firmName)
+                      : t('portal.messages.you').slice(0, 2)}
+                  </span>
+                  <span className="li-cp-msg-body">
+                    <span className="li-cp-msg-from">
+                      {msg.author === 'attorney' ? firmName : t('portal.messages.you')}
+                    </span>
+                    <span className="li-cp-msg-snip">
+                      {msg.body.length > 90 ? `${msg.body.slice(0, 90)}…` : msg.body}
+                    </span>
                   </span>
                 </button>
               ))}
             </div>
           )}
-        </section>
+        </div>
 
-        <aside className="cph-rail">
-          {locked ? (
-            <div className="pdash-card cph-gate">
-              <div className="cph-gate-lock" aria-hidden>
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <rect x="4" y="10" width="16" height="11" rx="2" />
-                  <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-                </svg>
-              </div>
-              <h3>{t('portal.gate.title')}</h3>
-              <p>{t('portal.gate.body')}</p>
-              {home.engagement.rate && (
-                <div className="cph-gate-rate">
-                  {t('portal.gate.rate', { rate: home.engagement.rate })}
-                </div>
-              )}
-              <button type="button" className="pdash-btn pdash-btn-primary" onClick={onOpenGate}>
-                {t('portal.gate.cta')}
-              </button>
-              <div className="cph-gate-note">{t('portal.gate.note')}</div>
-            </div>
+        <div className="li-cp-tile">
+          <h3 className="li-cp-tile-h3">{t('portal.billing.label')}</h3>
+          {home.billing.dueCount === 0 ? (
+            <p className="li-cp-tile-p">{t('portal.billing.clear')}</p>
           ) : (
-            <div className="pdash-card cph-cta">
-              <h3>{t('portal.rail.book.title')}</h3>
-              <p>{t('portal.rail.book.body')}</p>
+            <>
+              <div className="li-cp-amt">
+                {formatMoney(home.billing.dueTotal, home.billing.currency)}
+              </div>
+              <div className="li-cp-amt-sub">
+                {t(
+                  home.billing.dueCount === 1
+                    ? 'portal.billing.due_one'
+                    : 'portal.billing.due_many',
+                  {
+                    count: home.billing.dueCount,
+                    date: home.billing.nextDueDate
+                      ? ` · ${formatDate(home.billing.nextDueDate)}`
+                      : '',
+                  },
+                )}
+              </div>
               <button
                 type="button"
-                className="pdash-btn pdash-btn-primary"
-                style={{ width: '100%' }}
-                onClick={onOpenSchedule}
+                className="li-cp-btn li-cp-btn--gold li-cp-btn--block"
+                onClick={onOpenInvoices}
               >
-                {t('portal.rail.book.cta')}
+                {t('portal.billing.cta')}
               </button>
-            </div>
+            </>
           )}
-
-          <div
-            className="pdash-card cph-mini"
-            style={locked ? { opacity: 0.45, pointerEvents: 'none' } : undefined}
-          >
-            <h3>{t('portal.messages.label')}</h3>
-            {home.messagesPreview.length === 0 ? (
-              <p className="text-muted text-sm">{t('portal.messages.empty')}</p>
-            ) : (
-              home.messagesPreview.map((msg, i) => (
-                <button
-                  type="button"
-                  key={i}
-                  className="cph-msg"
-                  onClick={() => onOpenMatter(msg.matterEntityId)}
-                >
-                  <span className="cph-msg-av" aria-hidden>
-                    {msg.author === 'attorney'
-                      ? firmInitials(firmName)
-                      : t('portal.messages.you').slice(0, 2)}
-                  </span>
-                  <span className="cph-msg-body">
-                    <span className="cph-msg-from">
-                      {msg.author === 'attorney' ? firmName : t('portal.messages.you')}
-                    </span>
-                    <span className="cph-msg-snip">
-                      {msg.body.length > 90 ? `${msg.body.slice(0, 90)}…` : msg.body}
-                    </span>
-                  </span>
-                </button>
-              ))
-            )}
-            {home.messagesPreview.length > 0 && (
-              <button
-                type="button"
-                className="cph-link"
-                onClick={() => onOpenMatter(home.messagesPreview[0]!.matterEntityId)}
-              >
-                {t('portal.messages.open')}
-              </button>
-            )}
-          </div>
-
-          <div className="pdash-card cph-mini">
-            <h3>{t('portal.billing.label')}</h3>
-            {home.billing.dueCount === 0 ? (
-              <p className="text-muted text-sm">{t('portal.billing.clear')}</p>
-            ) : (
-              <>
-                <div className="cph-bill-amt">
-                  {formatMoney(home.billing.dueTotal, home.billing.currency)}
-                </div>
-                <div className="cph-bill-sub">
-                  {t(
-                    home.billing.dueCount === 1
-                      ? 'portal.billing.due_one'
-                      : 'portal.billing.due_many',
-                    {
-                      count: home.billing.dueCount,
-                      date: home.billing.nextDueDate
-                        ? ` · ${formatDate(home.billing.nextDueDate)}`
-                        : '',
-                    },
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="pdash-btn pdash-btn-primary"
-                  style={{ width: '100%' }}
-                  onClick={onOpenBilling}
-                >
-                  {t('portal.billing.cta')}
-                </button>
-              </>
-            )}
-          </div>
-        </aside>
+        </div>
       </div>
     </>
+  )
+}
+
+function StatusChip({ variant, label }: { variant: string; label: string }) {
+  return (
+    <span className={`li-cp-chip li-cp-chip--${variant}`}>
+      <span className="li-cp-chip-dot" aria-hidden />
+      {label}
+    </span>
   )
 }
 
@@ -859,45 +911,63 @@ function EngagementGateModal({
 
   return (
     <div
-      className="cph-modal-overlay"
+      className="li-cp-modal-overlay"
       role="dialog"
       aria-modal="true"
       aria-label={t('portal.gate.terms_title')}
+      onClick={onClose}
     >
-      <div className="cph-modal">
-        <h2>{t('portal.gate.terms_title')}</h2>
-        {!configured ? (
-          <p className="text-muted">{t('portal.gate.unavailable')}</p>
-        ) : (
-          <>
-            {terms && <div className="cph-terms">{terms}</div>}
-            <FeeConsentCard
-              quote={{
-                basis: 'hourly-rate',
-                amount: null,
-                rate,
-                currency: 'USD',
-                description: t('portal.gate.desc'),
-              }}
-              accepted={accepted}
-              onAccept={setAccepted}
-              t={t}
-            />
-          </>
-        )}
-        {error && (
-          <div className="alert alert-error" role="alert">
-            {error}
-          </div>
-        )}
-        <div className="cph-modal-actions">
-          <button type="button" className="pdash-btn" onClick={onClose} disabled={busy}>
+      <div className="li-cp-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="li-cp-modal-head">
+          <h2 className="li-cp-modal-title">{t('portal.gate.terms_title')}</h2>
+          <button
+            type="button"
+            className="li-cp-modal-x"
+            aria-label={t('portal.gate.cancel')}
+            onClick={onClose}
+          >
+            <CloseIcon />
+          </button>
+        </div>
+        <div className="li-cp-modal-body">
+          {!configured ? (
+            <p className="li-cp-muted">{t('portal.gate.unavailable')}</p>
+          ) : (
+            <>
+              {terms && <div className="li-cp-terms">{terms}</div>}
+              <FeeConsentCard
+                quote={{
+                  basis: 'hourly-rate',
+                  amount: null,
+                  rate,
+                  currency: 'USD',
+                  description: t('portal.gate.desc'),
+                }}
+                accepted={accepted}
+                onAccept={setAccepted}
+                t={t}
+              />
+            </>
+          )}
+          {error && (
+            <div className="alert alert-error" role="alert">
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="li-cp-modal-foot">
+          <button
+            type="button"
+            className="li-cp-btn li-cp-btn--ghost"
+            onClick={onClose}
+            disabled={busy}
+          >
             {t('portal.gate.cancel')}
           </button>
           {configured && (
             <button
               type="button"
-              className="pdash-btn pdash-btn-primary"
+              className="li-cp-btn"
               disabled={!accepted || busy}
               onClick={confirm}
             >
@@ -910,18 +980,36 @@ function EngagementGateModal({
   )
 }
 
+function CloseIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  )
+}
+
 // ── Notifications (WP-3) ─────────────────────────────────────────────────────
 
 function NotificationsView({
   onBadge,
   onOpenMatter,
-  onOpenBilling,
-  onOpenDocuments,
+  onOpenInvoices,
+  onOpenSignatures,
 }: {
   onBadge: (n: number) => void
   onOpenMatter: (id: string) => void
-  onOpenBilling: () => void
-  onOpenDocuments: () => void
+  onOpenInvoices: () => void
+  onOpenSignatures: () => void
 }) {
   const { t } = useI18n()
   const [items, setItems] = useState<NotificationItem[] | null>(null)
@@ -961,63 +1049,191 @@ function NotificationsView({
       return
     }
     if (item.type === 'esign_request') {
-      onOpenDocuments()
+      onOpenSignatures()
       return
     }
     if (item.matterEntityId) {
       onOpenMatter(item.matterEntityId)
       return
     }
-    if (item.type === 'invoice') onOpenBilling()
+    if (item.type === 'invoice') onOpenInvoices()
   }
 
   return (
-    <section className="pdash-card">
-      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
-        {t('portal.notif.title')}
-      </h3>
-      {items === null ? (
-        <div className="loading-block" role="status">
-          <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
-        </div>
-      ) : items.length === 0 ? (
-        <p className="text-muted">{t('portal.notif.empty')}</p>
-      ) : (
-        <ul className="cph-notifs">
-          {items.map((item) => (
-            <li key={item.id}>
-              <button type="button" className="cph-notif" onClick={() => open(item)}>
-                {item.unread && <span className="cph-notif-dot" aria-hidden />}
-                <span className="cph-notif-body">
-                  <span className="cph-notif-label">
-                    {t(`portal.notif.${item.type}`, { ref: item.ref ?? '' })}
-                  </span>
-                  <span className="cph-notif-meta">
-                    {/* S6: human matter name, never the raw M-… id. */}
-                    {item.matterLabel ? `${item.matterLabel} · ` : ''}
-                    {formatDateTime(item.occurredAt)}
-                  </span>
+    <>
+      <h1 className="li-cp-h1">{t('portal.notif.title')}</h1>
+      <section className="li-cp-card li-cp-list">
+        {items === null ? (
+          <div className="loading-block" role="status">
+            <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="li-cp-empty-row">{t('portal.notif.empty')}</div>
+        ) : (
+          items.map((item) => (
+            <button type="button" key={item.id} className="li-cp-notif" onClick={() => open(item)}>
+              {item.unread && <span className="li-cp-notif-dot" aria-hidden />}
+              <span className="li-cp-notif-body">
+                <span className="li-cp-notif-label">
+                  {t(`portal.notif.${item.type}`, { ref: item.ref ?? '' })}
                 </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+                <span className="li-cp-notif-meta">
+                  {item.matterLabel ? `${item.matterLabel} · ` : ''}
+                  {formatDateTime(item.occurredAt)}
+                </span>
+              </span>
+              <span className="li-cp-chev" aria-hidden>
+                <ChevRight />
+              </span>
+            </button>
+          ))
+        )}
+      </section>
+    </>
   )
 }
 
-// ── Documents (WP-4) — global view, grouped per matter, search per matter ───
+// ── Documents — flat cross-matter list, From attorney / You uploaded (comp) ──
 
 const UPLOAD_ACCEPT = '.pdf,.doc,.docx,.png,.jpg,.jpeg,.tif,.tiff,.txt'
 const INLINE_VIEW_MIMES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'text/plain'])
+
+type DocTag = { label: string; variant: string }
+function approvedTag(kind: string): DocTag {
+  const k = kind.toLowerCase()
+  if (k.includes('agreement')) return { label: 'Agreement', variant: 'purple' }
+  if (k.includes('memo')) return { label: 'Memo', variant: 'info' }
+  return { label: 'Letter', variant: 'info' }
+}
+
+// A unified row model so From-attorney (approved + e-sign) and You-uploaded rows
+// render through one comp row. `kind` drives the file-type icon.
+interface DocRowModel {
+  key: string
+  name: string
+  tag: DocTag
+  matterLabel: string
+  date: string | null
+  icon: 'word' | 'pdf'
+  actions: Array<{ label: string; href?: string; download?: string; external?: boolean }>
+}
+
+function DocFileIcon({ icon }: { icon: 'word' | 'pdf' }) {
+  if (icon === 'pdf') {
+    return (
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M5 3h9l5 5v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"
+          fill="#FBECEA"
+          stroke="#C4443B"
+          strokeWidth="1.3"
+        />
+        <path d="M14 3v5h5" stroke="#C4443B" strokeWidth="1.3" fill="none" />
+        <text
+          x="12"
+          y="18"
+          fontSize="5.4"
+          fontFamily="Public Sans"
+          fontWeight="800"
+          fill="#C4443B"
+          textAnchor="middle"
+        >
+          PDF
+        </text>
+      </svg>
+    )
+  }
+  return (
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M5 3h9l5 5v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"
+        fill="#EAF0FB"
+        stroke="#2B579A"
+        strokeWidth="1.3"
+      />
+      <path d="M14 3v5h5" stroke="#2B579A" strokeWidth="1.3" fill="none" />
+      <text
+        x="12"
+        y="18"
+        fontSize="6.5"
+        fontFamily="Public Sans"
+        fontWeight="800"
+        fill="#2B579A"
+        textAnchor="middle"
+      >
+        W
+      </text>
+    </svg>
+  )
+}
+
+function DocRow({ row }: { row: DocRowModel }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [menuOpen])
+
+  return (
+    <div className="li-cp-doc-row">
+      <span className="li-cp-doc-icon">
+        <DocFileIcon icon={row.icon} />
+      </span>
+      <div className="li-cp-doc-main">
+        <span className="li-cp-doc-name">{row.name}</span>
+        <span className={`li-cp-doc-tag li-cp-doc-tag--${row.tag.variant}`}>{row.tag.label}</span>
+      </div>
+      <span className="li-cp-doc-matter">{row.matterLabel}</span>
+      <span className="li-cp-doc-date">{row.date ?? ''}</span>
+      <div className="li-cp-doc-actions" ref={wrapRef}>
+        <button
+          type="button"
+          className="li-cp-doc-kebab"
+          aria-label="Actions"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((o) => !o)}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <circle cx="12" cy="5" r="1.7" />
+            <circle cx="12" cy="12" r="1.7" />
+            <circle cx="12" cy="19" r="1.7" />
+          </svg>
+        </button>
+        {menuOpen && (
+          <div className="li-cp-doc-menu" role="menu">
+            {row.actions.map((a, i) => (
+              <a
+                key={i}
+                className="li-cp-doc-menu-item"
+                href={a.href}
+                download={a.download}
+                target={a.external ? '_blank' : undefined}
+                rel={a.external ? 'noopener noreferrer' : undefined}
+                role="menuitem"
+                onClick={() => setMenuOpen(false)}
+              >
+                {a.label}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function DocumentsView({ matters }: { matters: MatterListItem[] }) {
   const { t } = useI18n()
   const [esign, setEsign] = useState<ClientDocument[] | null>(null)
   const [approved, setApproved] = useState<ApprovedDocument[] | null>(null)
   const [uploads, setUploads] = useState<UploadedDocument[] | null>(null)
-  const [search, setSearch] = useState<Record<string, string>>({})
+  const [tab, setTab] = useState<'attorney' | 'uploaded'>('attorney')
+  const [search, setSearch] = useState('')
   const [uploadingFor, setUploadingFor] = useState<string | null>(null)
   const [uploadErr, setUploadErr] = useState<string | null>(null)
 
@@ -1043,10 +1259,7 @@ function DocumentsView({ matters }: { matters: MatterListItem[] }) {
     loadUploads()
   }, [loadUploads])
 
-  async function onFile(matterEntityId: string, e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
+  async function onFile(matterEntityId: string, file: File) {
     setUploadingFor(matterEntityId)
     setUploadErr(null)
     try {
@@ -1064,6 +1277,7 @@ function DocumentsView({ matters }: { matters: MatterListItem[] }) {
       const data = (await res.json().catch(() => null)) as { error?: string } | null
       if (!res.ok) throw new Error(data?.error ?? 'Upload failed.')
       loadUploads()
+      setTab('uploaded')
     } catch (err) {
       setUploadErr(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1072,203 +1286,537 @@ function DocumentsView({ matters }: { matters: MatterListItem[] }) {
   }
 
   const loading = esign === null || approved === null || uploads === null
+  const matterLabel = (num: string | null, id: string | null) => {
+    const m = matters.find((mm) => mm.matterNumber === num || mm.matterEntityId === id)
+    return m?.matterNumber ?? num ?? ''
+  }
+  const q = search.trim().toLowerCase()
+  const match = (s: string | null | undefined) => !q || (s ?? '').toLowerCase().includes(q)
 
-  // Group STRICTLY by the matter each document is attached to in the ledger —
-  // the cross-matter render defect was the old view fetching client-wide lists
-  // and captioning them with whatever matter was selected.
-  const groups = matters.map((m) => {
-    const q = (search[m.matterEntityId] ?? '').trim().toLowerCase()
-    const match = (s: string | null | undefined) => !q || (s ?? '').toLowerCase().includes(q)
-    return {
-      matter: m,
-      approved: (approved ?? []).filter(
-        (d) => d.matterEntityId === m.matterEntityId && match(humanizeKind(d.documentKind)),
-      ),
-      esign: (esign ?? []).filter(
-        (d) => d.matterEntityId === m.matterEntityId && match(d.documentTitle),
-      ),
-      uploads: (uploads ?? []).filter(
-        (d) => d.matterEntityId === m.matterEntityId && match(d.originalFilename),
-      ),
-    }
-  })
+  // From attorney = approved letters + e-sign envelopes (tagged). Data stays
+  // matter-scoped per row (WP-4 correctness) even though the list is flat (comp).
+  const attorneyRows: DocRowModel[] = [
+    ...(approved ?? [])
+      .filter((d) => match(humanizeKind(d.documentKind)))
+      .map<DocRowModel>((d) => ({
+        key: `a-${d.documentVersionId}`,
+        name: humanizeKind(d.documentKind),
+        tag: approvedTag(d.documentKind),
+        matterLabel: matterLabel(d.matterNumber, d.matterEntityId),
+        date: formatDate(d.approvedAt),
+        icon: 'word',
+        actions: [
+          { label: t('portal.docs.view'), href: `/d/${d.documentVersionId}`, external: true },
+        ],
+      })),
+    ...(esign ?? [])
+      .filter((d) => match(d.documentTitle))
+      .map<DocRowModel>((d) => ({
+        key: `e-${d.requestId}`,
+        name: d.documentTitle ?? t('portal.docs.title'),
+        tag:
+          d.state === 'signed'
+            ? { label: t('portal.docs.tag_signed', undefined, 'Signed'), variant: 'ok' }
+            : d.state === 'awaiting_you'
+              ? {
+                  label: t('portal.docs.tag_awaiting', undefined, 'Awaiting signature'),
+                  variant: 'warn',
+                }
+              : { label: t('portal.docs.tag_document', undefined, 'Document'), variant: 'neutral' },
+        matterLabel: matterLabel(d.matterNumber, d.matterEntityId),
+        date: null,
+        icon: 'pdf',
+        actions: [
+          {
+            label: d.state === 'awaiting_you' ? t('portal.attention.sign') : t('portal.docs.view'),
+            href: `/portal/sign/${d.requestId}`,
+          },
+        ],
+      })),
+  ]
+
+  const uploadedRows: DocRowModel[] = (uploads ?? [])
+    .filter((u) => match(u.originalFilename))
+    .map<DocRowModel>((u) => {
+      const mime = (u.contentType ?? '').toLowerCase().split(';')[0]?.trim()
+      const canInline = INLINE_VIEW_MIMES.has(mime ?? '')
+      const actions: DocRowModel['actions'] = u.available
+        ? [
+            ...(canInline
+              ? [
+                  {
+                    label: t('portal.docs.view'),
+                    href: `/api/client/portal/documents/${u.documentVersionId}/content`,
+                    external: true,
+                  },
+                ]
+              : []),
+            {
+              label: t('portal.docs.download'),
+              href: `/api/client/portal/documents/${u.documentVersionId}/content?download=1`,
+            },
+          ]
+        : []
+      return {
+        key: `u-${u.documentVersionId}`,
+        name: u.originalFilename,
+        tag: { label: t('portal.docs.tag_upload', undefined, 'Upload'), variant: 'neutral' },
+        matterLabel: matterLabel(u.matterNumber, u.matterEntityId),
+        date: `${formatBytes(u.sizeBytes)} · ${formatDate(u.uploadedAt)}`,
+        icon: mime === 'application/pdf' || (mime ?? '').startsWith('image/') ? 'pdf' : 'word',
+        actions: actions.length > 0 ? actions : [{ label: t('portal.docs.unavailable') }],
+      }
+    })
+
+  const rows = tab === 'attorney' ? attorneyRows : uploadedRows
 
   return (
     <>
-      <h1 className="cph-greeting">{t('portal.docs.title')}</h1>
+      <h1 className="li-cp-h1">{t('portal.docs.title')}</h1>
       {uploadErr && (
         <div className="alert alert-error" role="alert">
           {uploadErr}
         </div>
       )}
-      {loading ? (
+      <section className="li-cp-card li-cp-docs">
+        <div className="li-cp-docs-head">
+          <div className="li-cp-seg">
+            <button
+              type="button"
+              className={`li-cp-seg-btn ${tab === 'attorney' ? 'active' : ''}`}
+              onClick={() => setTab('attorney')}
+            >
+              {t('portal.docs.from_attorney')}
+              <span className="li-cp-seg-n">{attorneyRows.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`li-cp-seg-btn ${tab === 'uploaded' ? 'active' : ''}`}
+              onClick={() => setTab('uploaded')}
+            >
+              {t('portal.docs.uploaded')}
+              <span className="li-cp-seg-n">{uploadedRows.length}</span>
+            </button>
+          </div>
+          <div className="li-cp-docs-tools">
+            <div className="li-cp-search">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                aria-hidden
+              >
+                <circle cx="11" cy="11" r="7" />
+                <line x1="21" y1="21" x2="16.5" y2="16.5" />
+              </svg>
+              <input
+                placeholder={t('portal.docs.search_all', undefined, 'Search')}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <UploadButton matters={matters} uploading={uploadingFor !== null} onFile={onFile} />
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="loading-block" role="status">
+            <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="li-cp-doc-empty">
+            {q
+              ? t('portal.docs.none_match_all', undefined, 'Nothing matches your search.')
+              : t('portal.docs.empty')}
+          </div>
+        ) : (
+          rows.map((row) => <DocRow key={row.key} row={row} />)
+        )}
+      </section>
+    </>
+  )
+}
+
+// Upload button — the comp has one "Upload" control. Uploads need a matter, so
+// with a single matter we upload straight to it; with several the client picks.
+function UploadButton({
+  matters,
+  uploading,
+  onFile,
+}: {
+  matters: MatterListItem[]
+  uploading: boolean
+  onFile: (matterEntityId: string, file: File) => void
+}) {
+  const { t } = useI18n()
+  const [pickOpen, setPickOpen] = useState(false)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const [pendingMatter, setPendingMatter] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!pickOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setPickOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [pickOpen])
+
+  function chooseFor(matterEntityId: string) {
+    setPendingMatter(matterEntityId)
+    setPickOpen(false)
+    // Defer so the hidden input is mounted with the chosen matter.
+    requestAnimationFrame(() => fileRef.current?.click())
+  }
+
+  const label = uploading
+    ? t('portal.docs.uploading')
+    : t('portal.docs.upload_short', undefined, 'Upload')
+
+  if (matters.length === 0) return null
+
+  return (
+    <div className="li-cp-upload" ref={wrapRef}>
+      <input
+        ref={fileRef}
+        type="file"
+        accept={UPLOAD_ACCEPT}
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (file && pendingMatter) onFile(pendingMatter, file)
+        }}
+      />
+      <button
+        type="button"
+        className="li-cp-btn li-cp-btn--sm"
+        disabled={uploading}
+        onClick={() => {
+          if (matters.length === 1) chooseFor(matters[0]!.matterEntityId)
+          else setPickOpen((o) => !o)
+        }}
+      >
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        {label}
+      </button>
+      {pickOpen && (
+        <div className="li-cp-upload-menu" role="menu">
+          <div className="li-cp-upload-menu-head">
+            {t('portal.docs.upload_to', undefined, 'Upload to which matter?')}
+          </div>
+          {matters.map((m) => (
+            <button
+              key={m.matterEntityId}
+              type="button"
+              className="li-cp-upload-menu-item"
+              role="menuitem"
+              onClick={() => chooseFor(m.matterEntityId)}
+            >
+              <span className="li-cp-upload-menu-title">
+                {m.serviceLabel ?? t('portal.matter.generic')}
+              </span>
+              <span className="li-cp-upload-menu-meta">{m.matterNumber}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Invoices — comp list + real Stripe/manual pay (navigates to the pay page) ─
+
+interface BillingSummary {
+  matters: Array<{
+    matterEntityId: string
+    matterNumber: string
+    invoices: ClientInvoice[]
+    accrued: Array<{ kind: string; date: string | null; description: string; amount: string }>
+    accruedTotal: string
+    dueTotal: string
+    paidTotal: string
+    runningTotal: string
+  }>
+  currency: string
+  totals: { due: string; paid: string; accrued: string; running: string }
+}
+
+function InvoicesView() {
+  const { t } = useI18n()
+  const [invoices, setInvoices] = useState<ClientInvoice[] | null>(null)
+  const [billing, setBilling] = useState<BillingSummary | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    callClientPortalMcp<{ invoices: ClientInvoice[] }>({ toolName: 'legal.client.invoices' })
+      .then((r) => {
+        setInvoices(r.invoices)
+        // A prior transient failure (e.g. the shared-pooler EMAXCONNSESSION) must
+        // not leave a stale error banner over freshly-loaded data.
+        setError(null)
+      })
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return
+        setError(e instanceof Error ? e.message : String(e))
+        setInvoices([])
+      })
+    // Accrued not-yet-invoiced fees + running total — same computed source as
+    // the firm's own billing panel. Best-effort: the invoices list stands alone.
+    callClientPortalMcp<{ billing: BillingSummary }>({ toolName: 'legal.client.billing_summary' })
+      .then((r) => setBilling(r.billing))
+      .catch(() => setBilling(null))
+  }, [])
+
+  const showAccruing =
+    billing &&
+    (billing.matters.some((m) => m.accrued.length > 0) || Number(billing.totals.running) > 0)
+
+  return (
+    <>
+      <h1 className="li-cp-h1">{t('portal.nav.invoices', undefined, 'Invoices')}</h1>
+      {error && (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
+      {invoices === null ? (
         <div className="loading-block" role="status">
           <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
         </div>
+      ) : invoices.length === 0 ? (
+        <section className="li-cp-card li-cp-list">
+          <div className="li-cp-empty-row">
+            {t(
+              'portal.invoices.empty',
+              undefined,
+              'No invoices yet. They’ll appear here once the firm sends one.',
+            )}
+          </div>
+        </section>
       ) : (
-        groups.map(({ matter, approved: appr, esign: sign, uploads: ups }) => {
-          const q = (search[matter.matterEntityId] ?? '').trim()
-          const empty = appr.length === 0 && sign.length === 0 && ups.length === 0
-          return (
-            <section className="pdash-card cph-docgroup" key={matter.matterEntityId}>
-              <div className="cph-docgroup-head">
-                <div>
-                  <div className="cph-matter-title">
-                    {matter.serviceLabel ?? matter.matterNumber}
-                  </div>
-                  <div className="cph-matter-meta">
-                    {formatOpened(matter.openedAt)} · {matter.matterNumber}
-                  </div>
-                </div>
-                <div className="cph-docgroup-tools">
-                  <input
-                    type="search"
-                    className="pdash-input cph-doc-search"
-                    placeholder={t('portal.docs.search')}
-                    value={search[matter.matterEntityId] ?? ''}
-                    onChange={(e) =>
-                      setSearch((prev) => ({ ...prev, [matter.matterEntityId]: e.target.value }))
-                    }
-                  />
-                  <label
-                    className={`pdash-btn pdash-btn-sm ${uploadingFor === matter.matterEntityId ? 'is-disabled' : ''}`}
-                  >
-                    {uploadingFor === matter.matterEntityId
-                      ? t('portal.docs.uploading')
-                      : t('portal.docs.upload')}
-                    <input
-                      type="file"
-                      accept={UPLOAD_ACCEPT}
-                      onChange={(e) => onFile(matter.matterEntityId, e)}
-                      disabled={uploadingFor !== null}
-                      style={{ display: 'none' }}
-                    />
-                  </label>
-                </div>
+        <section className="li-cp-card li-cp-list">
+          {invoices.map((inv) => (
+            <div key={inv.invoiceEntityId} className="li-cp-inv-row">
+              <span className="li-cp-inv-icon" aria-hidden>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 4h9l5 5v11H4z" />
+                  <path d="M13 4v5h5" />
+                  <line x1="8" y1="13" x2="14" y2="13" />
+                  <line x1="8" y1="17" x2="12" y2="17" />
+                </svg>
+              </span>
+              <div className="li-cp-inv-main">
+                <span className="li-cp-inv-num">{inv.invoiceNumber}</span>
+                <span className="li-cp-inv-total">{formatMoney(inv.total, inv.currency)}</span>
+                {inv.dueDate && inv.status !== 'paid' && (
+                  <span className="li-cp-inv-due">
+                    {t(
+                      'portal.invoices.due',
+                      { date: formatDate(inv.dueDate) },
+                      `Due ${formatDate(inv.dueDate)}`,
+                    )}
+                  </span>
+                )}
               </div>
-
-              {empty ? (
-                <p className="text-muted">
-                  {q ? t('portal.docs.none_match') : t('portal.docs.empty')}
-                </p>
+              <span
+                className={`li-cp-chip li-cp-chip--${inv.status === 'paid' ? 'ok' : 'warn'} li-cp-chip--plain`}
+              >
+                {inv.status === 'paid'
+                  ? t('portal.invoices.paid', undefined, 'Paid')
+                  : t('portal.invoices.due_label', undefined, 'Due')}
+              </span>
+              {inv.status === 'paid' ? (
+                <a
+                  className="li-cp-btn li-cp-btn--ghost li-cp-btn--sm"
+                  href={`/portal/pay/${encodeURIComponent(inv.invoiceNumber)}`}
+                >
+                  {t('portal.invoices.receipt', undefined, 'Receipt')}
+                </a>
               ) : (
-                <>
-                  {appr.length > 0 && (
-                    <>
-                      <h4 className="pdash-subhead">{t('portal.docs.from_attorney')}</h4>
-                      <ul className="pdash-docs">
-                        {appr.map((d) => (
-                          <li key={d.documentVersionId} className="pdash-doc">
-                            <div>
-                              <div className="pdash-doc-title">{humanizeKind(d.documentKind)}</div>
-                              <span className="text-sm text-muted">{formatDate(d.approvedAt)}</span>
-                            </div>
-                            <a
-                              className="pdash-btn pdash-btn-sm"
-                              href={`/d/${d.documentVersionId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              {t('portal.docs.view')}
-                            </a>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-
-                  {sign.length > 0 && (
-                    <>
-                      <h4 className="pdash-subhead">{t('portal.docs.to_sign')}</h4>
-                      <ul className="pdash-docs">
-                        {sign.map((d) => (
-                          <li key={d.requestId} className="pdash-doc">
-                            <div>
-                              <div className="pdash-doc-title">
-                                {d.documentTitle ?? t('portal.docs.title')}
-                              </div>
-                              <DocStateBadge state={d.state} />
-                            </div>
-                            {d.state === 'awaiting_you' ? (
-                              <a
-                                className="pdash-btn pdash-btn-sm"
-                                href={`/portal/sign/${d.requestId}`}
-                              >
-                                {t('portal.attention.sign')}
-                              </a>
-                            ) : (
-                              <a
-                                className="pdash-btn pdash-btn-sm"
-                                href={`/portal/sign/${d.requestId}`}
-                              >
-                                {t('portal.docs.view')}
-                              </a>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-
-                  {ups.length > 0 && (
-                    <>
-                      <h4 className="pdash-subhead">{t('portal.docs.uploaded')}</h4>
-                      <ul className="pdash-docs">
-                        {ups.map((u) => {
-                          const mime = (u.contentType ?? '').toLowerCase().split(';')[0]?.trim()
-                          const canInline = INLINE_VIEW_MIMES.has(mime ?? '')
-                          return (
-                            <li key={u.documentVersionId} className="pdash-doc">
-                              <div>
-                                <div className="pdash-doc-title">{u.originalFilename}</div>
-                                <span className="text-sm text-muted">
-                                  {formatBytes(u.sizeBytes)} · {formatDate(u.uploadedAt)}
-                                </span>
-                              </div>
-                              {/* S1: only resolvable uploads get live View/Download.
-                                  An upload whose bytes no longer exist shows an
-                                  honest message instead of a dead button. */}
-                              {u.available ? (
-                                <div style={{ display: 'flex', gap: 8 }}>
-                                  {canInline && (
-                                    <a
-                                      className="pdash-btn pdash-btn-sm"
-                                      href={`/api/client/portal/documents/${u.documentVersionId}/content`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                    >
-                                      {t('portal.docs.view')}
-                                    </a>
-                                  )}
-                                  <a
-                                    className="pdash-btn pdash-btn-sm"
-                                    href={`/api/client/portal/documents/${u.documentVersionId}/content?download=1`}
-                                  >
-                                    {t('portal.docs.download')}
-                                  </a>
-                                </div>
-                              ) : (
-                                <span className="text-sm text-muted">
-                                  {t('portal.docs.unavailable')}
-                                </span>
-                              )}
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    </>
-                  )}
-                </>
+                <a
+                  className="li-cp-btn li-cp-btn--gold li-cp-btn--sm"
+                  href={`/portal/pay/${encodeURIComponent(inv.invoiceNumber)}`}
+                >
+                  {t('portal.invoices.pay', undefined, 'Pay')}
+                </a>
               )}
-            </section>
-          )
-        })
+            </div>
+          ))}
+        </section>
+      )}
+
+      {showAccruing && billing && (
+        <>
+          <div className="li-cp-section-label">
+            {t('portal.invoices.accruing', undefined, 'Accruing fees (not yet invoiced)')}
+          </div>
+          <section className="li-cp-card">
+            {billing.matters.filter((m) => m.accrued.length > 0).length === 0 ? (
+              <p className="li-cp-muted">
+                {t('portal.invoices.accruing_none', undefined, 'No fees accruing right now.')}
+              </p>
+            ) : (
+              billing.matters
+                .filter((m) => m.accrued.length > 0)
+                .map((m) => (
+                  <div key={m.matterEntityId} className="li-cp-accrue">
+                    <div className="li-cp-accrue-title">Matter {m.matterNumber}</div>
+                    {m.accrued.map((e, i) => (
+                      <div key={i} className="li-cp-accrue-row">
+                        <div>
+                          <div>{e.description}</div>
+                          {e.date && (
+                            <span className="li-cp-muted li-cp-small">{formatDate(e.date)}</span>
+                          )}
+                        </div>
+                        <strong>{formatMoney(e.amount, billing.currency)}</strong>
+                      </div>
+                    ))}
+                    <div className="li-cp-accrue-sub">
+                      {t('portal.invoices.accrued', undefined, 'Accrued')}:{' '}
+                      <strong>{formatMoney(m.accruedTotal, billing.currency)}</strong> ·{' '}
+                      {t('portal.invoices.running', undefined, 'Running total')}:{' '}
+                      <strong>{formatMoney(m.runningTotal, billing.currency)}</strong>
+                    </div>
+                  </div>
+                ))
+            )}
+            <div className="li-cp-accrue-total">
+              {t('portal.invoices.total_open', undefined, 'Total open')}{' '}
+              {formatMoney(billing.totals.due, billing.currency)} ·{' '}
+              {t('portal.invoices.accrued', undefined, 'Accrued')}{' '}
+              {formatMoney(billing.totals.accrued, billing.currency)} ·{' '}
+              {t('portal.invoices.running', undefined, 'Running total')}{' '}
+              <strong>{formatMoney(billing.totals.running, billing.currency)}</strong>
+            </div>
+          </section>
+        </>
       )}
     </>
   )
 }
 
-// ── Matter detail — the existing per-matter view, reached from a home row ───
+// ── Signatures — the client's e-sign requests (comp Signatures screen) ───────
+
+function SignaturesView() {
+  const { t } = useI18n()
+  const [docs, setDocs] = useState<ClientDocument[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    callClientPortalMcp<{ documents: ClientDocument[] }>({
+      toolName: 'legal.esign.portal.documents',
+    })
+      .then((r) => {
+        setDocs(r.documents)
+        // Clear any stale transient-failure banner once data is in.
+        setError(null)
+      })
+      .catch((e) => {
+        if (e instanceof PortalSessionExpiredError) return
+        setError(e instanceof Error ? e.message : String(e))
+        setDocs([])
+      })
+  }, [])
+
+  const stateChip = (state: ClientDocument['state']): { variant: string; label: string } => {
+    switch (state) {
+      case 'signed':
+        return { variant: 'ok', label: t('portal.sig.signed', undefined, 'Signed') }
+      case 'declined':
+        return { variant: 'neutral', label: t('portal.sig.declined', undefined, 'Declined') }
+      case 'in_progress':
+        return { variant: 'info', label: t('portal.sig.in_progress', undefined, 'In progress') }
+      default:
+        return {
+          variant: 'warn',
+          label: t('portal.sig.awaiting', undefined, 'Awaiting your signature'),
+        }
+    }
+  }
+
+  return (
+    <>
+      <h1 className="li-cp-h1">{t('portal.nav.signatures', undefined, 'Signatures')}</h1>
+      {error && (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
+      {docs === null ? (
+        <div className="loading-block" role="status">
+          <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
+        </div>
+      ) : docs.length === 0 ? (
+        <section className="li-cp-card li-cp-list">
+          <div className="li-cp-empty-row">
+            {t('portal.sig.empty', undefined, 'You have no documents awaiting your signature.')}
+          </div>
+        </section>
+      ) : (
+        <section className="li-cp-card li-cp-list">
+          {docs.map((d) => {
+            const chip = stateChip(d.state)
+            const awaiting = d.state === 'awaiting_you'
+            return (
+              <div key={d.requestId} className="li-cp-sig-row">
+                <span className="li-cp-sig-icon" aria-hidden>
+                  <SigIcon />
+                </span>
+                <div className="li-cp-sig-main">
+                  <span className="li-cp-sig-title">
+                    {d.documentTitle ?? t('portal.docs.title')}
+                  </span>
+                  <span className="li-cp-sig-meta">{d.matterNumber ?? ''}</span>
+                </div>
+                <span className={`li-cp-chip li-cp-chip--${chip.variant} li-cp-chip--plain`}>
+                  {chip.label}
+                </span>
+                <a
+                  className={`li-cp-btn li-cp-btn--sm ${awaiting ? '' : 'li-cp-btn--ghost'}`}
+                  href={`/portal/sign/${d.requestId}`}
+                >
+                  {awaiting ? t('portal.attention.sign') : t('portal.docs.view')}
+                </a>
+              </div>
+            )
+          })}
+        </section>
+      )}
+    </>
+  )
+}
+
+// ── Matter detail — timeline + requests + messages (reached from home) ───────
 
 function MatterView({
   matterEntityId,
@@ -1307,28 +1855,28 @@ function MatterView({
       ) : (
         <>
           {timeline.scheduledAt && <UpcomingEventCard timeline={timeline} />}
-          <section className="pdash-card">
-            <div className="pdash-card-head">
-              <h2>
+          <section className="li-cp-card">
+            <div className="li-cp-card-head">
+              <h2 className="li-cp-card-title">
                 {matter?.serviceLabel
                   ? `${matter.serviceLabel} · ${timeline.matterNumber}`
                   : t('portal.matter.generic')}
               </h2>
-              {/* S2: single status chip from live entity status (see home list). */}
-              <span className="pdash-badge">
-                {t(`portal.matter.status.${timeline.statusChip}`)}
-              </span>
+              <StatusChip
+                variant={timeline.statusChip === 'completed' ? 'neutral' : 'info'}
+                label={t(`portal.matter.status.${timeline.statusChip}`)}
+              />
             </div>
             {timeline.milestones.length === 0 ? (
-              <p className="text-muted">{t('portal.notif.empty')}</p>
+              <p className="li-cp-muted">{t('portal.notif.empty')}</p>
             ) : (
-              <ol className="pdash-timeline">
+              <ol className="li-cp-timeline">
                 {timeline.milestones.map((m, i) => (
                   <li key={`${m.key}-${i}`}>
-                    <span className="pdash-dot" aria-hidden />
+                    <span className="li-cp-timeline-dot" aria-hidden />
                     <div>
                       <div>{m.label}</div>
-                      <div className="text-sm text-muted">{formatDate(m.occurredAt)}</div>
+                      <div className="li-cp-muted li-cp-small">{formatDate(m.occurredAt)}</div>
                     </div>
                   </li>
                 ))}
@@ -1339,10 +1887,27 @@ function MatterView({
       )}
 
       {locked ? (
-        <section className="pdash-card cph-gate" style={{ marginTop: 'var(--space-3)' }}>
-          <h3>{t('portal.gate.title')}</h3>
-          <p>{t('portal.gate.body')}</p>
-          <button type="button" className="pdash-btn pdash-btn-primary" onClick={onOpenGate}>
+        <section className="li-cp-card li-cp-gate">
+          <div className="li-cp-gate-lock" aria-hidden>
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="4" y="10" width="16" height="11" rx="2" />
+              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+            </svg>
+          </div>
+          <div className="li-cp-gate-txt">
+            <h3>{t('portal.gate.title')}</h3>
+            <p>{t('portal.gate.body')}</p>
+          </div>
+          <button type="button" className="li-cp-btn" onClick={onOpenGate}>
             {t('portal.gate.cta')}
           </button>
         </section>
@@ -1356,8 +1921,6 @@ function MatterView({
   )
 }
 
-// Upcoming consultation with a self-service reschedule/cancel link (the same
-// token-gated /book/manage page the confirmation email uses).
 function UpcomingEventCard({ timeline }: { timeline: Timeline }) {
   const { t } = useI18n()
   const whenDate = timeline.scheduledAt ? parseTimestamp(timeline.scheduledAt) : null
@@ -1365,15 +1928,18 @@ function UpcomingEventCard({ timeline }: { timeline: Timeline }) {
     ? whenDate.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' })
     : null
   return (
-    <section className="pdash-card pdash-upcoming">
-      <div>
-        <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
+    <section className="li-cp-card li-cp-upcoming">
+      <span className="li-cp-attn-ico li-cp-attn-ico--ok" aria-hidden>
+        <CalIcon />
+      </span>
+      <div className="li-cp-upcoming-txt">
+        <div className="li-cp-section-label" style={{ marginBottom: 2 }}>
           {t('portal.attention.consultation')}
-        </h3>
-        <div className="pdash-when">{when}</div>
+        </div>
+        <div className="li-cp-upcoming-when">{when}</div>
       </div>
       {timeline.canManageEvent && timeline.manageUrl && (
-        <a className="pdash-btn" href={timeline.manageUrl}>
+        <a className="li-cp-btn li-cp-btn--ghost li-cp-btn--sm" href={timeline.manageUrl}>
           {t('portal.attention.manage')}
         </a>
       )}
@@ -1381,146 +1947,8 @@ function UpcomingEventCard({ timeline }: { timeline: Timeline }) {
   )
 }
 
-// ── Billing (unchanged panel, reached from the home billing card) ───────────
-
-interface BillingSummary {
-  matters: Array<{
-    matterEntityId: string
-    matterNumber: string
-    invoices: ClientInvoice[]
-    accrued: Array<{ kind: string; date: string | null; description: string; amount: string }>
-    accruedTotal: string
-    dueTotal: string
-    paidTotal: string
-    runningTotal: string
-  }>
-  currency: string
-  totals: { due: string; paid: string; accrued: string; running: string }
-}
-
-function InvoicesPanel() {
-  const [invoices, setInvoices] = useState<ClientInvoice[] | null>(null)
-  const [billing, setBilling] = useState<BillingSummary | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    callClientPortalMcp<{ invoices: ClientInvoice[] }>({ toolName: 'legal.client.invoices' })
-      .then((r) => setInvoices(r.invoices))
-      .catch((e) => {
-        if (e instanceof PortalSessionExpiredError) return
-        setError(e instanceof Error ? e.message : String(e))
-        setInvoices([])
-      })
-    // Accrued not-yet-invoiced fees + running total — same computed source as
-    // the firm's own billing panel. Best-effort: the invoices list stands alone.
-    callClientPortalMcp<{ billing: BillingSummary }>({ toolName: 'legal.client.billing_summary' })
-      .then((r) => setBilling(r.billing))
-      .catch(() => setBilling(null))
-  }, [])
-
-  return (
-    <section className="pdash-card">
-      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
-        Invoices
-      </h3>
-      {error && (
-        <div className="alert alert-error" role="alert">
-          {error}
-        </div>
-      )}
-      {invoices === null ? (
-        <div className="loading-block" role="status">
-          <span className="spinner" /> Loading invoices…
-        </div>
-      ) : invoices.length === 0 ? (
-        <p className="text-muted">
-          No invoices yet. They&apos;ll appear here once the firm sends one.
-        </p>
-      ) : (
-        <ul className="pdash-docs">
-          {invoices.map((inv) => (
-            <li key={inv.invoiceEntityId} className="pdash-doc">
-              <div>
-                <div className="pdash-doc-title">
-                  {inv.invoiceNumber} · {formatMoney(inv.total, inv.currency)}
-                </div>
-                <span
-                  className={`pdash-badge-sm ${
-                    inv.status === 'paid' ? 'pdash-badge-ok' : 'pdash-badge-warn'
-                  }`}
-                >
-                  {inv.status === 'paid' ? 'Paid' : 'Due'}
-                </span>
-                {inv.dueDate && inv.status !== 'paid' && (
-                  <span className="text-sm text-muted" style={{ marginLeft: 'var(--space-2)' }}>
-                    due {formatDate(inv.dueDate)}
-                  </span>
-                )}
-              </div>
-              <a
-                className="pdash-btn pdash-btn-sm"
-                href={`/portal/pay/${encodeURIComponent(inv.invoiceNumber)}`}
-              >
-                View
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {billing &&
-        (billing.matters.some((m) => m.accrued.length > 0) ||
-          Number(billing.totals.running) > 0) && (
-          <>
-            <h3 className="pdash-subhead">Accruing fees (not yet invoiced)</h3>
-            {billing.matters.filter((m) => m.accrued.length > 0).length === 0 ? (
-              <p className="text-muted">No fees accruing right now.</p>
-            ) : (
-              billing.matters
-                .filter((m) => m.accrued.length > 0)
-                .map((m) => (
-                  <div key={m.matterEntityId} style={{ marginBottom: 'var(--space-3)' }}>
-                    <div className="pdash-doc-title">Matter {m.matterNumber}</div>
-                    <ul className="pdash-docs">
-                      {m.accrued.map((e, i) => (
-                        <li key={i} className="pdash-doc">
-                          <div>
-                            <div>{e.description}</div>
-                            {e.date && (
-                              <span className="text-sm text-muted">{formatDate(e.date)}</span>
-                            )}
-                          </div>
-                          <strong>{formatMoney(e.amount, billing.currency)}</strong>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="text-sm" style={{ textAlign: 'right' }}>
-                      Accrued: <strong>{formatMoney(m.accruedTotal, billing.currency)}</strong>
-                      {' · '}Running total (open + accrued):{' '}
-                      <strong>{formatMoney(m.runningTotal, billing.currency)}</strong>
-                    </div>
-                  </div>
-                ))
-            )}
-            <div
-              className="pdash-doc-title"
-              style={{ textAlign: 'right', marginTop: 'var(--space-2)' }}
-            >
-              Total open {formatMoney(billing.totals.due, billing.currency)} · accrued{' '}
-              {formatMoney(billing.totals.accrued, billing.currency)} · running{' '}
-              <strong>{formatMoney(billing.totals.running, billing.currency)}</strong>
-            </div>
-          </>
-        )}
-    </section>
-  )
-}
-
 // ── Schedule (reached from the home Book CTA) ────────────────────────────────
-// PORTAL-1 (WP4) — book another service (prefilled /book) + schedule time on the
-// firm's real availability. The fee consent renders through the ONE shared
-// FeeConsentCard (no inline fork).
-function SchedulePanel() {
+function ScheduleView() {
   const { t } = useI18n()
   const [availability, setAvailability] = useState<{
     configured: boolean
@@ -1590,12 +2018,22 @@ function SchedulePanel() {
       })
       if (r.feeConsentRequired && r.quote) {
         setQuote(r.quote)
-        setError('Please review and accept the fee below, then confirm again.')
+        setError(
+          t(
+            'portal.schedule.consent_first',
+            undefined,
+            'Please review and accept the fee below, then confirm again.',
+          ),
+        )
         return
       }
       if (r.result) {
         setNotice(
-          `Booked for ${new Date(r.result.startIso).toLocaleString()} — a calendar invitation and confirmation email are on the way.`,
+          t(
+            'portal.schedule.booked',
+            { when: new Date(r.result.startIso).toLocaleString() },
+            `Booked for ${new Date(r.result.startIso).toLocaleString()} — a calendar invitation and confirmation email are on the way.`,
+          ),
         )
         setSelectedSlot(null)
       }
@@ -1608,23 +2046,25 @@ function SchedulePanel() {
 
   return (
     <>
-      <section className="pdash-card" style={{ marginBottom: 'var(--space-3)' }}>
-        <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
-          {t('portal.rail.book.title')}
-        </h3>
-        <p className="text-muted">
-          Book another service — signed in, your details and previous answers are prefilled.
+      <h1 className="li-cp-h1">{t('portal.rail.book.title')}</h1>
+      <section className="li-cp-card">
+        <p className="li-cp-muted" style={{ marginTop: 0 }}>
+          {t(
+            'portal.schedule.book_lead',
+            undefined,
+            'Book another service — signed in, your details and previous answers are prefilled.',
+          )}
         </p>
-        <a className="pdash-btn" href="/book">
-          Book a service
+        <a className="li-cp-btn li-cp-btn--ghost" href="/book">
+          {t('portal.schedule.book_service', undefined, 'Book a service')}
         </a>
       </section>
 
-      <section className="pdash-card">
-        <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
-          Schedule time with the firm
-        </h3>
-        {notice && <div className="alert">{notice}</div>}
+      <section className="li-cp-card">
+        <h2 className="li-cp-card-title">
+          {t('portal.schedule.title', undefined, 'Schedule time with the firm')}
+        </h2>
+        {notice && <div className="alert alert-success">{notice}</div>}
         {error && (
           <div className="alert alert-error" role="alert">
             {error}
@@ -1632,22 +2072,26 @@ function SchedulePanel() {
         )}
         {availability === null ? (
           <div className="loading-block" role="status">
-            <span className="spinner" /> Checking availability…
+            <span className="spinner" />{' '}
+            {t('portal.schedule.checking', undefined, 'Checking availability…')}
           </div>
         ) : !availability.configured ? (
-          <p className="text-muted">
-            Online scheduling isn&apos;t available right now — message the firm and they&apos;ll
-            find a time with you.
+          <p className="li-cp-muted">
+            {t(
+              'portal.schedule.unavailable',
+              undefined,
+              'Online scheduling isn’t available right now — message the firm and they’ll find a time with you.',
+            )}
           </p>
         ) : (
           <>
             {availability.meetingLengthsMinutes.length > 1 && (
-              <label
-                className="text-sm"
-                style={{ display: 'block', marginBottom: 'var(--space-2)' }}
-              >
-                Length{' '}
+              <div className="li-cp-field">
+                <label className="li-cp-label">
+                  {t('portal.schedule.length', undefined, 'Length')}
+                </label>
                 <select
+                  className="li-cp-select"
                   value={duration ?? availability.durationMinutes}
                   onChange={(e) => setDuration(Number(e.target.value))}
                 >
@@ -1657,23 +2101,19 @@ function SchedulePanel() {
                     </option>
                   ))}
                 </select>
-              </label>
+              </div>
             )}
             {availability.slots.length === 0 ? (
-              <p className="text-muted">No open times in the next few weeks.</p>
+              <p className="li-cp-muted">
+                {t('portal.schedule.no_slots', undefined, 'No open times in the next few weeks.')}
+              </p>
             ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 8,
-                  marginBottom: 'var(--space-2)',
-                }}
-              >
+              <div className="li-cp-slots">
                 {availability.slots.slice(0, 24).map((slot) => (
                   <button
                     key={slot.startIso}
-                    className={`pdash-btn pdash-btn-sm ${selectedSlot?.startIso === slot.startIso ? 'pdash-btn-primary' : ''}`}
+                    type="button"
+                    className={`li-cp-slot ${selectedSlot?.startIso === slot.startIso ? 'active' : ''}`}
                     onClick={() => setSelectedSlot(slot)}
                   >
                     {new Date(slot.startIso).toLocaleString(undefined, {
@@ -1702,11 +2142,14 @@ function SchedulePanel() {
               />
             )}
             <button
-              className="pdash-btn pdash-btn-primary"
+              type="button"
+              className="li-cp-btn"
               disabled={!selectedSlot || busy || (Boolean(quote) && !feeAccepted)}
               onClick={book}
             >
-              {busy ? 'Booking…' : 'Confirm time'}
+              {busy
+                ? t('portal.schedule.booking', undefined, 'Booking…')
+                : t('portal.schedule.confirm', undefined, 'Confirm time')}
             </button>
           </>
         )}
@@ -1732,6 +2175,7 @@ const REQUEST_STATUS_LABEL: Record<string, string> = {
 // it, and submits. The attorney then works it. The price is recomputed server-side
 // on submit; the quote here is just the preview the client agrees to.
 function RequestsPanel({ matterEntityId }: { matterEntityId: string }) {
+  const { t } = useI18n()
   const [requests, setRequests] = useState<ClientRequest[] | null>(null)
   const [type, setType] = useState<RequestType>('meeting')
   const [duration, setDuration] = useState(60)
@@ -1754,7 +2198,6 @@ function RequestsPanel({ matterEntityId }: { matterEntityId: string }) {
     load()
   }, [load])
 
-  // Re-quote whenever the inputs that affect price change; clears a stale quote.
   useEffect(() => {
     setQuote(null)
   }, [type, duration])
@@ -1803,13 +2246,16 @@ function RequestsPanel({ matterEntityId }: { matterEntityId: string }) {
   }
 
   return (
-    <section className="pdash-card">
-      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
-        Make a request
-      </h3>
-      <p className="text-muted" style={{ marginTop: 0 }}>
-        Request a meeting, a document, or an attorney review. You&apos;ll see the cost and accept it
-        before it&apos;s submitted.
+    <section className="li-cp-card">
+      <h2 className="li-cp-card-title">
+        {t('portal.requests.title', undefined, 'Make a request')}
+      </h2>
+      <p className="li-cp-muted" style={{ marginTop: 0 }}>
+        {t(
+          'portal.requests.lead',
+          undefined,
+          'Request a meeting, a document, or an attorney review. You’ll see the cost and accept it before it’s submitted.',
+        )}
       </p>
 
       {error && (
@@ -1818,71 +2264,85 @@ function RequestsPanel({ matterEntityId }: { matterEntityId: string }) {
         </div>
       )}
 
-      <div className="cauth-form" style={{ maxWidth: 460 }}>
-        <label className="cauth-label" htmlFor="req-type">
-          What do you need?
-        </label>
-        <select
-          id="req-type"
-          className="cauth-input"
-          value={type}
-          onChange={(e) => setType(e.target.value as RequestType)}
-        >
-          <option value="meeting">Meeting</option>
-          <option value="document">Document</option>
-          <option value="review">Attorney review</option>
-        </select>
+      <div className="li-cp-form" style={{ maxWidth: 460 }}>
+        <div className="li-cp-field">
+          <label className="li-cp-label" htmlFor="req-type">
+            {t('portal.requests.what', undefined, 'What do you need?')}
+          </label>
+          <select
+            id="req-type"
+            className="li-cp-select"
+            value={type}
+            onChange={(e) => setType(e.target.value as RequestType)}
+          >
+            <option value="meeting">{t('portal.requests.meeting', undefined, 'Meeting')}</option>
+            <option value="document">{t('portal.requests.document', undefined, 'Document')}</option>
+            <option value="review">
+              {t('portal.requests.review', undefined, 'Attorney review')}
+            </option>
+          </select>
+        </div>
 
         {type === 'meeting' && (
-          <>
-            <label className="cauth-label" htmlFor="req-dur">
-              How long?
+          <div className="li-cp-field">
+            <label className="li-cp-label" htmlFor="req-dur">
+              {t('portal.requests.how_long', undefined, 'How long?')}
             </label>
             <select
               id="req-dur"
-              className="cauth-input"
+              className="li-cp-select"
               value={duration}
               onChange={(e) => setDuration(Number(e.target.value))}
             >
-              <option value={30}>30 minutes</option>
-              <option value={60}>60 minutes</option>
-              <option value={90}>90 minutes</option>
+              <option value={30}>30 {t('portal.requests.minutes', undefined, 'minutes')}</option>
+              <option value={60}>60 {t('portal.requests.minutes', undefined, 'minutes')}</option>
+              <option value={90}>90 {t('portal.requests.minutes', undefined, 'minutes')}</option>
             </select>
-          </>
+          </div>
         )}
 
-        <label className="cauth-label" htmlFor="req-desc">
-          Details (optional)
-        </label>
-        <textarea
-          id="req-desc"
-          className="cauth-input"
-          rows={3}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Tell the attorney what you need…"
-        />
+        <div className="li-cp-field">
+          <label className="li-cp-label" htmlFor="req-desc">
+            {t('portal.requests.details', undefined, 'Details (optional)')}
+          </label>
+          <textarea
+            id="req-desc"
+            className="li-cp-textarea"
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t(
+              'portal.requests.details_ph',
+              undefined,
+              'Tell the attorney what you need…',
+            )}
+          />
+        </div>
 
         {!quote ? (
-          <button type="button" className="cauth-primary" disabled={busy} onClick={getQuote}>
-            {busy ? 'Getting price…' : 'See the cost'}
+          <button type="button" className="li-cp-btn" disabled={busy} onClick={getQuote}>
+            {busy
+              ? t('portal.requests.pricing', undefined, 'Getting price…')
+              : t('portal.requests.see_cost', undefined, 'See the cost')}
           </button>
         ) : (
-          <div className="alert" style={{ marginTop: 'var(--space-2)' }}>
+          <div className="li-cp-quote">
             <div>
               <strong>{formatMoney(quote.amount, quote.currency)}</strong> — {quote.basis}
             </div>
-            <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
-              <button type="button" className="cauth-primary" disabled={busy} onClick={accept}>
-                {busy ? 'Submitting…' : 'Accept & submit'}
+            <div className="li-cp-quote-actions">
+              <button type="button" className="li-cp-btn" disabled={busy} onClick={accept}>
+                {busy
+                  ? t('portal.requests.submitting', undefined, 'Submitting…')
+                  : t('portal.requests.accept', undefined, 'Accept & submit')}
               </button>
               <button
                 type="button"
-                className="cauth-link"
+                className="li-cp-linkbtn"
                 disabled={busy}
                 onClick={() => setQuote(null)}
               >
-                Cancel
+                {t('portal.gate.cancel')}
               </button>
             </div>
           </div>
@@ -1891,40 +2351,31 @@ function RequestsPanel({ matterEntityId }: { matterEntityId: string }) {
 
       {requests && requests.length > 0 && (
         <>
-          <h3 className="pdash-subhead">Your requests</h3>
-          <ul className="pdash-docs">
+          <div className="li-cp-section-label">
+            {t('portal.requests.your', undefined, 'Your requests')}
+          </div>
+          <div className="li-cp-list li-cp-list--flush">
             {requests.map((r) => (
-              <li key={r.requestEntityId} className="pdash-doc">
-                <div>
-                  <div className="pdash-doc-title">
-                    {REQUEST_TYPE_LABEL[r.requestType] ?? r.requestType} ·{' '}
-                    {formatMoney(r.amount, r.currency)}
-                  </div>
-                  <span className="pdash-badge-sm pdash-badge-muted">
-                    {REQUEST_STATUS_LABEL[r.status] ?? r.status}
-                  </span>
-                </div>
-              </li>
+              <div key={r.requestEntityId} className="li-cp-req-row">
+                <span className="li-cp-req-title">
+                  {REQUEST_TYPE_LABEL[r.requestType] ?? r.requestType} ·{' '}
+                  {formatMoney(r.amount, r.currency)}
+                </span>
+                <span className="li-cp-chip li-cp-chip--neutral li-cp-chip--plain">
+                  {REQUEST_STATUS_LABEL[r.status] ?? r.status}
+                </span>
+              </div>
             ))}
-          </ul>
+          </div>
         </>
       )}
     </section>
   )
 }
 
-function DocStateBadge({ state }: { state: ClientDocument['state'] }) {
-  const map = {
-    awaiting_you: { label: 'Awaiting your signature', cls: 'pdash-badge-warn' },
-    signed: { label: 'Signed', cls: 'pdash-badge-ok' },
-    declined: { label: 'Declined', cls: 'pdash-badge-muted' },
-    in_progress: { label: 'In progress', cls: 'pdash-badge-muted' },
-  }[state]
-  return <span className={`pdash-badge-sm ${map.cls}`}>{map.label}</span>
-}
-
 // Two-way messaging with the attorney for the selected matter.
 function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
+  const { t } = useI18n()
   const firmName = useFirmName()
   const [messages, setMessages] = useState<PortalMessage[] | null>(null)
   const [draft, setDraft] = useState('')
@@ -1971,12 +2422,10 @@ function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
   }
 
   return (
-    <section className="pdash-card">
-      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
-        Messages
-      </h3>
-      <p className="text-sm text-muted" style={{ marginTop: 'calc(-1 * var(--space-1))' }}>
-        Message your attorney about this matter.
+    <section className="li-cp-card">
+      <h2 className="li-cp-card-title">{t('portal.messages.label')}</h2>
+      <p className="li-cp-muted li-cp-small" style={{ marginTop: 0 }}>
+        {t('portal.messages.lead', undefined, 'Message your attorney about this matter.')}
       </p>
 
       {error && (
@@ -1986,48 +2435,114 @@ function MessagesPanel({ matterEntityId }: { matterEntityId: string }) {
       )}
 
       {messages === null ? (
-        <div className="loading-block" role="status" style={{ marginTop: 'var(--space-3)' }}>
-          <span className="spinner" /> Loading messages…
+        <div className="loading-block" role="status">
+          <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
         </div>
       ) : messages.length === 0 ? (
-        <p className="text-muted" style={{ marginTop: 'var(--space-3)' }}>
-          No messages yet. Start the conversation below.
+        <p className="li-cp-muted">
+          {t('portal.messages.start', undefined, 'No messages yet. Start the conversation below.')}
         </p>
       ) : (
-        <div className="pdash-thread" role="log" aria-live="polite" aria-label="Messages">
+        <div className="li-cp-thread" role="log" aria-live="polite" aria-label="Messages">
           {messages.map((m, i) => (
             <div
               key={`${m.sentAt}-${i}`}
-              className={`pdash-msg ${m.author === 'client' ? 'pdash-msg-me' : ''}`}
+              className={`li-cp-bubble-row ${m.author === 'client' ? 'me' : ''}`}
             >
-              <div className="pdash-msg-body">{m.body}</div>
-              <div className="pdash-msg-meta">
-                {m.author === 'client' ? 'You' : firmName} · {formatDateTime(m.sentAt)}
+              <div className={`li-cp-bubble ${m.author === 'client' ? 'me' : ''}`}>
+                <div className="li-cp-bubble-body">{m.body}</div>
+                <div className="li-cp-bubble-meta">
+                  {m.author === 'client' ? t('portal.messages.you') : firmName} ·{' '}
+                  {formatDateTime(m.sentAt)}
+                </div>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <div className="pdash-compose">
+      <div className="li-cp-compose">
         <textarea
+          className="li-cp-textarea"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           rows={2}
-          placeholder="Write a message…"
+          placeholder={t('portal.messages.write', undefined, 'Write a message…')}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send()
           }}
         />
-        <button className="pdash-btn" onClick={send} disabled={busy || !draft.trim()}>
-          {busy ? 'Sending…' : 'Send'}
+        <button type="button" className="li-cp-btn" onClick={send} disabled={busy || !draft.trim()}>
+          {busy
+            ? t('portal.messages.sending', undefined, 'Sending…')
+            : t('portal.messages.send', undefined, 'Send')}
         </button>
       </div>
     </section>
   )
 }
 
-// ── Assistant (WP-7) — floating bubble, gated per client ─────────────────────
+// ── Settings — honest subset (no client profile-edit / notif-prefs / cards /
+//    adopt-signature capability exists; those comp cards are omitted). ────────
+
+function SettingsView({ me }: { me: MeResponse }) {
+  const { t, lang, setLang } = useI18n()
+  return (
+    <>
+      <h1 className="li-cp-h1">{t('portal.nav.settings', undefined, 'Settings')}</h1>
+      <div className="li-cp-settings">
+        <section className="li-cp-card">
+          <h3 className="li-cp-set-h3">
+            {t('portal.settings.details', undefined, 'Your details')}
+          </h3>
+          <div className="li-cp-set-grid">
+            <div className="li-cp-set-kv">
+              <span className="li-cp-set-k">
+                {t('portal.settings.name', undefined, 'Full name')}
+              </span>
+              <span className="li-cp-set-v">{me.displayName}</span>
+            </div>
+            <div className="li-cp-set-kv">
+              <span className="li-cp-set-k">{t('portal.settings.email', undefined, 'Email')}</span>
+              <span className="li-cp-set-v">{me.email}</span>
+            </div>
+          </div>
+          <p className="li-cp-muted li-cp-small" style={{ marginTop: 'var(--space-3, 1rem)' }}>
+            {t(
+              'portal.settings.contact_note',
+              undefined,
+              'To update your details, message your attorney.',
+            )}
+          </p>
+        </section>
+
+        <section className="li-cp-card">
+          <h3 className="li-cp-set-h3">
+            {t('portal.settings.language', undefined, 'Preferred language')}
+          </h3>
+          <div className="li-cp-seg li-cp-seg--wide">
+            <button
+              type="button"
+              className={`li-cp-seg-btn ${lang === 'en' ? 'active' : ''}`}
+              onClick={() => setLang('en')}
+            >
+              English
+            </button>
+            <button
+              type="button"
+              className={`li-cp-seg-btn ${lang === 'es' ? 'active' : ''}`}
+              onClick={() => setLang('es')}
+            >
+              Español
+            </button>
+          </div>
+        </section>
+      </div>
+    </>
+  )
+}
+
+// ── Assistant (WP-7) — the comp's full-tab portal AI assistant ───────────────
 
 interface ChatMsg {
   role: 'user' | 'assistant'
@@ -2043,69 +2558,32 @@ interface RequestCard {
   quote: { amount: string; currency: string; basis: string; label: string }
 }
 
-function AssistantBubble() {
-  const { t } = useI18n()
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="cph-assistant">
-      {open && (
-        <div className="cph-assistant-panel">
-          <AssistantPanel />
-        </div>
-      )}
-      {!open && <span className="cph-assistant-tag">{t('portal.assistant.tag')}</span>}
-      <button
-        type="button"
-        className="cph-assistant-bubble"
-        aria-label={t('portal.assistant.title')}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? (
-          <svg
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#fff"
-            strokeWidth="2"
-            strokeLinecap="round"
-          >
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        ) : (
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#fff"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.7 8.7 0 0 1-3.9-.9L3 21l1.9-5.6A8.5 8.5 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z" />
-          </svg>
-        )}
-      </button>
-    </div>
-  )
-}
-
 // PORTAL-1 (WP5) — the portal chatbot: streams over the client-scoped tool
 // surface; a request needing the client's consent renders as a card whose
 // button — the client's OWN click — files the cost-accepted request.
-function AssistantPanel() {
+function AssistantView() {
   const { t } = useI18n()
+  const firmName = useFirmName()
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [card, setCard] = useState<RequestCard | null>(null)
   const [cardBusy, setCardBusy] = useState(false)
   const [cardDone, setCardDone] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
-  async function send() {
-    const message = input.trim()
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+  }, [messages, card, cardDone])
+
+  const suggestions = [
+    t('portal.assistant.s1', undefined, 'What’s the status of my matter?'),
+    t('portal.assistant.s2', undefined, 'When is my next consultation?'),
+    t('portal.assistant.s3', undefined, 'How do I pay my invoice?'),
+  ]
+
+  async function send(preset?: string) {
+    const message = (preset ?? input).trim()
     if (!message || busy) return
     setInput('')
     setCard(null)
@@ -2199,7 +2677,13 @@ function AssistantPanel() {
         },
       })
       setCard(null)
-      setCardDone('Request filed — the firm has been notified and will review it.')
+      setCardDone(
+        t(
+          'portal.assistant.filed',
+          undefined,
+          'Request filed — the firm has been notified and will review it.',
+        ),
+      )
     } catch (e) {
       setCardDone(e instanceof Error ? e.message : String(e))
     } finally {
@@ -2207,83 +2691,144 @@ function AssistantPanel() {
     }
   }
 
+  const empty = messages.length === 0
+
   return (
-    <section className="pdash-card" style={{ margin: 0 }}>
-      <h3 className="pdash-subhead" style={{ marginTop: 0 }}>
-        {t('portal.assistant.title')}
-      </h3>
-      <p className="text-muted text-sm">
-        Ask about your matters, documents, invoices, or scheduling. For legal questions the
-        assistant will route you to the attorney — it doesn&apos;t give legal advice.
-      </p>
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          margin: 'var(--space-3) 0',
-          maxHeight: 320,
-          overflowY: 'auto',
-        }}
-      >
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            style={{
-              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '85%',
-              padding: '8px 12px',
-              borderRadius: 12,
-              background: m.role === 'user' ? 'var(--navy, #1e3a8a)' : 'var(--surface-2, #f1f5f9)',
-              color: m.role === 'user' ? '#fff' : 'inherit',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {m.content || (busy && i === messages.length - 1 ? '…' : '')}
+    <>
+      <h1 className="li-cp-h1">{t('portal.assistant.title')}</h1>
+      <div className="li-cp-asst-wrap">
+        <div className="li-cp-asst">
+          <div className="li-cp-asst-head">
+            <GemStar />
+            <span>{t('portal.assistant.name', { firm: firmName }, `${firmName} Assistant`)}</span>
           </div>
-        ))}
-      </div>
-      {card && (
-        <div className="alert" role="note">
-          <strong>Confirm your request</strong>
-          <div style={{ margin: '6px 0' }}>
-            {card.prefill.description}
-            <br />
-            Fee: <strong>${card.quote.amount}</strong>{' '}
-            <span className="text-muted">({card.quote.basis})</span>
+          <div className="li-cp-asst-body" ref={scrollRef}>
+            {empty ? (
+              <div className="li-cp-asst-empty">
+                <div className="li-cp-asst-empty-h">
+                  {t('portal.assistant.empty_h', undefined, 'How can I help you today?')}
+                </div>
+                <div className="li-cp-asst-empty-p">
+                  {t(
+                    'portal.assistant.empty_p',
+                    undefined,
+                    'Ask about your matter, documents, scheduling, or payments.',
+                  )}
+                </div>
+                <div className="li-cp-asst-suggest">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className="li-cp-asst-chip"
+                      onClick={() => send(s)}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              messages.map((m, i) => (
+                <div key={i} className={`li-cp-asst-msgrow ${m.role === 'user' ? 'me' : ''}`}>
+                  <div className={`li-cp-asst-msg ${m.role === 'user' ? 'me' : ''}`}>
+                    {m.content || (busy && i === messages.length - 1 ? '…' : '')}
+                  </div>
+                </div>
+              ))
+            )}
+            {card && (
+              <div className="li-cp-asst-card">
+                <strong>{t('portal.assistant.confirm', undefined, 'Confirm your request')}</strong>
+                <div className="li-cp-asst-card-desc">
+                  {card.prefill.description}
+                  <br />
+                  {t('portal.assistant.fee', undefined, 'Fee')}:{' '}
+                  <strong>${card.quote.amount}</strong>{' '}
+                  <span className="li-cp-muted">({card.quote.basis})</span>
+                </div>
+                <button
+                  type="button"
+                  className="li-cp-btn li-cp-btn--sm"
+                  disabled={cardBusy}
+                  onClick={confirmRequest}
+                >
+                  {cardBusy
+                    ? t('portal.requests.submitting', undefined, 'Filing…')
+                    : t('portal.assistant.file', undefined, 'Accept fee & file request')}
+                </button>
+              </div>
+            )}
+            {cardDone && <div className="li-cp-asst-note">{cardDone}</div>}
           </div>
-          <button
-            className="pdash-btn pdash-btn-primary"
-            disabled={cardBusy}
-            onClick={confirmRequest}
-          >
-            {cardBusy ? 'Filing…' : 'Accept fee & file request'}
-          </button>
+          <div className="li-cp-asst-composer">
+            <input
+              value={input}
+              placeholder={t('portal.assistant.placeholder', undefined, 'Ask the assistant…')}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  void send()
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="li-cp-asst-send"
+              aria-label={t('portal.messages.send', undefined, 'Send')}
+              disabled={busy || !input.trim()}
+              onClick={() => void send()}
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M22 2 11 13" />
+                <path d="M22 2 15 22l-4-9-9-4z" />
+              </svg>
+            </button>
+          </div>
         </div>
-      )}
-      {cardDone && <div className="alert">{cardDone}</div>}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input
-          className="pdash-input"
-          style={{ flex: 1 }}
-          value={input}
-          placeholder="Ask the assistant…"
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              void send()
-            }
-          }}
-        />
-        <button
-          className="pdash-btn pdash-btn-primary"
-          disabled={busy || !input.trim()}
-          onClick={() => void send()}
-        >
-          {busy ? '…' : 'Send'}
-        </button>
+        <p className="li-cp-asst-disclaimer">
+          {t(
+            'portal.assistant.disclaimer',
+            undefined,
+            'For legal questions the assistant routes you to the attorney — it doesn’t give legal advice.',
+          )}
+        </p>
       </div>
-    </section>
+    </>
+  )
+}
+
+// The comp gemstar (the one AI affordance) — inline so the portal (outside
+// .li-shell) still animates it via the shared .li-gemstar rule.
+function GemStar() {
+  return (
+    <svg className="li-gemstar" width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+      <defs>
+        <linearGradient id="liCpGem" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#c6a968" />
+          <stop offset="1" stopColor="#d8c084" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M12 3.3c.5 4.1 2.3 5.9 6.4 6.4-4.1.5-5.9 2.3-6.4 6.4-.5-4.1-2.3-5.9-6.4-6.4 4.1-.5 5.9-2.3 6.4-6.4z"
+        fill="url(#liCpGem)"
+      />
+      <path
+        d="M19.4 2c.2 1.6.9 2.3 2.5 2.5-1.6.2-2.3.9-2.5 2.5-.2-1.6-.9-2.3-2.5-2.5 1.6-.2 2.3-.9 2.5-2.5z"
+        fill="url(#liCpGem)"
+        style={{ animationDelay: '.4s' }}
+      />
+    </svg>
   )
 }

@@ -62,6 +62,35 @@ const MESSAGE_CAP = 8
 const MATTER_CAP = 20
 export const CLIENT_CONTEXT_DEFAULT_BUDGET = 12_000
 
+// The client's matter ids with THIS file's semantics — INCLUDING archived
+// matters (archived ≠ invisible), newest first, same MATTER_CAP as the full
+// assembly — without the heavy per-matter loading getClientContext does.
+// Exported for clientBriefEngine's computeClientWatermark (Brief WP3): the
+// Client Brief staleness key must range over the SAME matter set the evidence
+// bundle assembles from, and getClient()'s active-only matter list is NOT that
+// set (a client whose matters are all archived would read as having no history
+// at all — found live on a real archived-matter client).
+export async function listClientContextMatterIds(
+  ctx: ActionContext,
+  clientEntityId: string,
+): Promise<string[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<{ matter_id: string }>(
+      `SELECT e.id AS matter_id
+         FROM entity e
+         JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'matter'
+         JOIN relationship r ON r.source_entity_id = e.id AND r.target_entity_id = $2
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+              AND rkd.kind_name = 'matter_of'
+        WHERE e.tenant_id = $1
+        ORDER BY e.created_at DESC
+        LIMIT ${MATTER_CAP}`,
+      [ctx.tenantId, clientEntityId],
+    )
+    return res.rows.map((row) => row.matter_id)
+  })
+}
+
 export async function getClientContext(
   ctx: ActionContext,
   clientEntityId: string,

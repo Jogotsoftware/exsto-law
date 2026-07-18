@@ -1,10 +1,18 @@
 'use client'
 
 // Shared signing surface used by BOTH the authenticated portal sign page and the
-// public token-link fallback page. Renders the document, the signer's fields,
-// the adopted-signature input + ESIGN/UETA consent, and Sign / Decline. The
-// caller supplies onSign/onDecline (portal MCP vs /api/sign routes).
-import { useState } from 'react'
+// public token-link fallback page. Renders the document, the signer's fields, the
+// adopted-signature capture (Type with a style picker, or Draw) + ESIGN/UETA
+// consent, and Sign / Decline. The caller supplies onSign/onDecline (portal MCP
+// vs /api/sign routes).
+//
+// LI PORTAL RESTYLE: the adopt-signature block now matches the comp's "Adopt your
+// signature" screen — a Type/Draw toggle, and in Type mode three cursive style
+// choices. Styles/draw are ADDITIVE: with no style chosen it behaves exactly as
+// before (typed legal name, no image). A chosen style or a drawn signature is
+// captured as `signatureData` (a data-URL image), which every caller/back end
+// already accepts.
+import { useRef, useState } from 'react'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ScaleIcon } from '@/components/icons'
 import { renderDocumentHtml } from '@/lib/documentHtml'
@@ -42,6 +50,106 @@ export const CONSENT_TEXT =
   'I agree to sign this document electronically and that my electronic signature ' +
   'is the legal equivalent of my handwritten signature (ESIGN / UETA).'
 
+// Cursive style choices for typed adoption (comp "Choose a style"). Each renders
+// the typed name in the given font; the selection is rasterized to a data-URL on
+// submit so the chosen look travels as signatureData.
+const SIGNATURE_STYLES: Array<{ font: string; italic: boolean }> = [
+  { font: "'EB Garamond', Georgia, serif", italic: true },
+  { font: '"Brush Script MT", "Segoe Script", cursive', italic: false },
+  { font: '"Snell Roundhand", "Apple Chancery", cursive', italic: true },
+]
+
+// Rasterize the typed name in a chosen script font → data-URL (transparent bg).
+function renderTypedSignature(
+  name: string,
+  style: { font: string; italic: boolean },
+): string | null {
+  if (typeof document === 'undefined' || !name.trim()) return null
+  const canvas = document.createElement('canvas')
+  const scale = 2
+  canvas.width = 440 * scale
+  canvas.height = 120 * scale
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.scale(scale, scale)
+  ctx.fillStyle = '#1b2a4a'
+  ctx.textBaseline = 'middle'
+  ctx.textAlign = 'center'
+  ctx.font = `${style.italic ? 'italic ' : ''}52px ${style.font}`
+  ctx.fillText(name.trim(), 220, 62, 420)
+  return canvas.toDataURL('image/png')
+}
+
+// A minimal draw pad → data-URL. Owns its own canvas ref and reports the drawn
+// signature (or null after a clear) up through onCommit, so the parent never has
+// to thread a DOM ref across the component boundary.
+function DrawPad({ onCommit }: { onCommit: (data: string | null) => void }) {
+  const ref = useRef<HTMLCanvasElement | null>(null)
+  const drawing = useRef(false)
+  const last = useRef<{ x: number; y: number } | null>(null)
+  const [hasInk, setHasInk] = useState(false)
+
+  function pos(e: React.PointerEvent<HTMLCanvasElement>) {
+    const c = ref.current!
+    const rect = c.getBoundingClientRect()
+    return {
+      x: (e.clientX - rect.left) * (c.width / rect.width),
+      y: (e.clientY - rect.top) * (c.height / rect.height),
+    }
+  }
+  function down(e: React.PointerEvent<HTMLCanvasElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drawing.current = true
+    last.current = pos(e)
+  }
+  function move(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawing.current || !ref.current) return
+    const ctx = ref.current.getContext('2d')
+    if (!ctx) return
+    const p = pos(e)
+    ctx.strokeStyle = '#1b2a4a'
+    ctx.lineWidth = 2.4
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(last.current!.x, last.current!.y)
+    ctx.lineTo(p.x, p.y)
+    ctx.stroke()
+    last.current = p
+    setHasInk(true)
+  }
+  function up() {
+    drawing.current = false
+    last.current = null
+    if (hasInk && ref.current) onCommit(ref.current.toDataURL('image/png'))
+  }
+  function clear() {
+    const c = ref.current
+    if (c) c.getContext('2d')?.clearRect(0, 0, c.width, c.height)
+    setHasInk(false)
+    onCommit(null)
+  }
+  return (
+    <>
+      <canvas
+        ref={ref}
+        width={880}
+        height={300}
+        className="li-cp-adopt-pad"
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerLeave={up}
+      />
+      {hasInk && (
+        <button type="button" className="li-cp-linkbtn" onClick={clear}>
+          Clear
+        </button>
+      )}
+    </>
+  )
+}
+
 export function SignDocument({
   doc,
   savedSignature,
@@ -69,6 +177,9 @@ export function SignDocument({
       : (doc.signerName ?? ''),
   )
   const [useSavedImage, setUseSavedImage] = useState(true)
+  const [mode, setMode] = useState<'type' | 'draw'>('type')
+  const [styleIdx, setStyleIdx] = useState<number | null>(null)
+  const [drawData, setDrawData] = useState<string | null>(null)
   const [consent, setConsent] = useState(false)
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(doc.fields.filter((f) => f.prefill).map((f) => [f.id, f.prefill!])),
@@ -142,13 +253,23 @@ export function SignDocument({
     )
   }
 
+  // Resolve the signature image to attach (if any) at submit time.
+  function resolveSignatureData(): string | null {
+    if (savedImage && useSavedImage) return savedImage
+    if (mode === 'draw' && drawData) return drawData
+    if (mode === 'type' && styleIdx !== null) {
+      return renderTypedSignature(signatureName, SIGNATURE_STYLES[styleIdx]!)
+    }
+    return null
+  }
+
   async function submit() {
     setBusy('sign')
     setError(null)
     try {
       const r = await onSign({
         signatureName,
-        signatureData: savedImage && useSavedImage ? savedImage : null,
+        signatureData: resolveSignatureData(),
         fieldValues,
         consent: CONSENT_TEXT,
       })
@@ -180,10 +301,10 @@ export function SignDocument({
   }
 
   return (
-    <div className="public-draft">
+    <div className="public-draft li-cp-sign">
       {confirmElement}
       {head()}
-      <div className="text-sm text-muted">
+      <div className="li-cp-sign-for">
         For signature{doc.signerName ? ` by ${doc.signerName}` : ''}
         {doc.signerTitle ? ` (${doc.signerTitle})` : ''}
       </div>
@@ -193,13 +314,14 @@ export function SignDocument({
         dangerouslySetInnerHTML={{ __html: renderDocumentHtml(doc.bodyMarkdown) }}
       />
 
-      <div className="sign-panel" style={{ marginTop: 'var(--space-4)' }}>
+      <div className="li-cp-adopt">
+        <h3 className="li-cp-adopt-h">Adopt your signature</h3>
+
         {inputFields.length > 0 && (
-          <div style={{ marginBottom: 'var(--space-3)' }}>
-            <h3 className="h4">Your fields</h3>
+          <div className="li-cp-adopt-fields">
             {inputFields.map((f) => (
-              <div key={f.id} style={{ marginBottom: 'var(--space-2)' }}>
-                <label className="text-sm">{f.label}</label>
+              <div key={f.id} className="li-cp-field">
+                <label className="li-cp-label">{f.label}</label>
                 {f.type === 'check' ? (
                   <input
                     type="checkbox"
@@ -210,10 +332,10 @@ export function SignDocument({
                   />
                 ) : (
                   <input
+                    className="li-cp-input"
                     type="text"
                     value={fieldValues[f.id] ?? ''}
                     onChange={(e) => setFieldValues((v) => ({ ...v, [f.id]: e.target.value }))}
-                    style={{ display: 'block', width: '100%' }}
                   />
                 )}
               </div>
@@ -221,74 +343,127 @@ export function SignDocument({
           </div>
         )}
 
-        <label className="text-sm" htmlFor="sig">
-          Type your full legal name to adopt your signature
-        </label>
-        <input
-          id="sig"
-          type="text"
-          value={signatureName}
-          onChange={(e) => setSignatureName(e.target.value)}
-          placeholder="Your full name"
-          style={{ display: 'block', width: '100%', marginTop: 'var(--space-1)' }}
-        />
-        {savedImage && (
-          <div style={{ marginTop: 'var(--space-2)' }}>
-            <label
-              className="text-sm"
-              style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}
-            >
+        {savedImage ? (
+          // Attorney standing signature — offer it directly (existing behavior).
+          <div className="li-cp-field">
+            <label className="li-cp-adopt-saved">
               <input
                 type="checkbox"
                 checked={useSavedImage}
                 onChange={(e) => setUseSavedImage(e.target.checked)}
-                style={{ width: 'auto' }}
               />
               <span>Use my saved signature</span>
             </label>
             {useSavedImage && (
-              // Data-URL preview of the standing signature being applied.
-              <img
-                src={savedImage}
-                alt="Your saved signature"
-                style={{
-                  display: 'block',
-                  marginTop: 'var(--space-1)',
-                  maxWidth: 220,
-                  maxHeight: 80,
-                  background: '#fff',
-                  border: '1px solid var(--border-soft)',
-                  borderRadius: 4,
-                  padding: 4,
-                }}
-              />
+              <img src={savedImage} alt="Your saved signature" className="li-cp-adopt-savedimg" />
             )}
           </div>
+        ) : (
+          <>
+            <div className="li-cp-seg li-cp-seg--wide">
+              <button
+                type="button"
+                className={`li-cp-seg-btn ${mode === 'type' ? 'active' : ''}`}
+                onClick={() => setMode('type')}
+              >
+                Type
+              </button>
+              <button
+                type="button"
+                className={`li-cp-seg-btn ${mode === 'draw' ? 'active' : ''}`}
+                onClick={() => setMode('draw')}
+              >
+                Draw
+              </button>
+            </div>
+
+            <div className="li-cp-field">
+              <label className="li-cp-label" htmlFor="sig">
+                Full legal name
+              </label>
+              <input
+                id="sig"
+                className="li-cp-input"
+                type="text"
+                value={signatureName}
+                onChange={(e) => setSignatureName(e.target.value)}
+                placeholder="Your full name"
+              />
+            </div>
+
+            {mode === 'type' && signatureName.trim() && (
+              <div className="li-cp-field">
+                <label className="li-cp-label">Choose a style</label>
+                <div className="li-cp-adopt-styles">
+                  {SIGNATURE_STYLES.map((s, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`li-cp-adopt-style ${styleIdx === i ? 'selected' : ''}`}
+                      onClick={() => setStyleIdx(i)}
+                    >
+                      <span
+                        style={{ fontFamily: s.font, fontStyle: s.italic ? 'italic' : 'normal' }}
+                      >
+                        {signatureName.trim()}
+                      </span>
+                      {styleIdx === i && (
+                        <svg
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#c6a968"
+                          strokeWidth="2.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {mode === 'draw' && (
+              <div className="li-cp-field">
+                <label className="li-cp-label">Draw your signature</label>
+                <DrawPad onCommit={setDrawData} />
+              </div>
+            )}
+          </>
         )}
-        <label
-          className="text-sm"
-          style={{ display: 'flex', gap: 'var(--space-1)', marginTop: 'var(--space-2)' }}
-        >
+
+        <label className="li-cp-adopt-consent">
           <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
           <span>{CONSENT_TEXT}</span>
         </label>
 
         {error && (
-          <div role="alert" className="alert alert-error" style={{ marginTop: 'var(--space-2)' }}>
+          <div role="alert" className="alert alert-error">
             {error}
           </div>
         )}
 
-        <div className="row" style={{ gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+        <div className="li-cp-adopt-actions">
           <button
-            className="ok"
+            type="button"
+            className="li-cp-btn"
             disabled={busy !== null || !signatureName.trim() || !consent}
             onClick={submit}
           >
             {busy === 'sign' && <span className="spinner" />}
             {busy === 'sign' ? 'Signing…' : 'Adopt & Sign'}
           </button>
-          <button className="danger" disabled={busy !== null} onClick={decline}>
+          <button
+            type="button"
+            className="li-cp-btn li-cp-btn--danger"
+            disabled={busy !== null}
+            onClick={decline}
+          >
             {busy === 'decline' ? 'Declining…' : 'Decline'}
           </button>
         </div>

@@ -65,21 +65,21 @@ export function PortalFeedbackWidget() {
   }
 
   return (
-    <div className="pfb-root">
+    <div className="li-cp-fb-root">
       {open ? (
-        <div className="pfb-panel" role="dialog" aria-label="Share feedback">
-          <div className="pfb-head">
+        <div className="li-cp-fb-panel" role="dialog" aria-label="Share feedback">
+          <div className="li-cp-fb-head">
             <strong>Share feedback</strong>
-            <button className="pfb-x" aria-label="Close" onClick={() => setOpen(false)}>
+            <button className="li-cp-fb-x" aria-label="Close" onClick={() => setOpen(false)}>
               ×
             </button>
           </div>
 
           {phase === 'sent' ? (
-            <div className="pfb-body">
-              <p className="pfb-thanks">Thanks — your feedback went straight to the firm. 🙏</p>
+            <div className="li-cp-fb-body">
+              <p className="li-cp-fb-thanks">Thanks — your feedback went straight to the firm.</p>
               <button
-                className="pfb-link"
+                className="li-cp-linkbtn"
                 onClick={() => {
                   setPhase('form')
                 }}
@@ -88,15 +88,15 @@ export function PortalFeedbackWidget() {
               </button>
             </div>
           ) : (
-            <div className="pfb-body">
-              <p className="pfb-lead">Tell us about your experience with the portal.</p>
+            <div className="li-cp-fb-body">
+              <p className="li-cp-fb-lead">Tell us about your experience with the portal.</p>
               {error && (
                 <div className="alert alert-error" role="alert">
                   {error}
                 </div>
               )}
               <select
-                className="pfb-select"
+                className="li-cp-select"
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 aria-label="Feedback type"
@@ -108,7 +108,7 @@ export function PortalFeedbackWidget() {
                 ))}
               </select>
               <textarea
-                className="pfb-textarea"
+                className="li-cp-textarea"
                 rows={4}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
@@ -116,7 +116,7 @@ export function PortalFeedbackWidget() {
                 autoFocus
               />
               <button
-                className="pfb-send"
+                className="li-cp-btn li-cp-btn--block"
                 disabled={phase === 'sending' || !message.trim()}
                 onClick={send}
               >
@@ -128,7 +128,7 @@ export function PortalFeedbackWidget() {
       ) : null}
 
       <button
-        className="pfb-fab"
+        className="li-cp-fb-fab"
         aria-label={open ? 'Close feedback' : 'Share feedback'}
         aria-expanded={open}
         onClick={() => {
@@ -136,7 +136,26 @@ export function PortalFeedbackWidget() {
           if (phase === 'idle') setPhase('form')
         }}
       >
-        {open ? '×' : '💬 Feedback'}
+        {open ? (
+          '×'
+        ) : (
+          <>
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.7 8.7 0 0 1-3.9-.9L3 21l1.9-5.6A8.5 8.5 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z" />
+            </svg>
+            Feedback
+          </>
+        )}
       </button>
     </div>
   )
