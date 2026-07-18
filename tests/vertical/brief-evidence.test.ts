@@ -14,6 +14,7 @@ import {
   buildClientEvidence,
   buildServiceDigestEvidence,
   type BriefScope,
+  fmtDate,
 } from '@exsto/legal'
 import type { MatterDetail } from '@exsto/legal'
 import type { MatterHistory } from '@exsto/legal'
@@ -626,5 +627,15 @@ describe('buildServiceDigestEvidence — accepted revisions + edit notes + revis
     const bundle = buildServiceDigestEvidence(material, DIGEST_SCOPE, 'balanced', ASSEMBLED_AT)
     expect(bundle.sections).toEqual([])
     expect(bundle.sourceWatermark).toBe(ASSEMBLED_AT)
+  })
+})
+
+describe('fmtDate hardening (first live generation regression)', () => {
+  it('accepts ISO strings, Date objects, and epoch numbers', () => {
+    expect(fmtDate('2026-07-18T01:02:03Z')).toBe('2026-07-18')
+    expect(fmtDate(new Date('2026-07-18T01:02:03Z'))).toBe('2026-07-18')
+    expect(fmtDate(new Date('2026-07-18T01:02:03Z').getTime())).toBe('2026-07-18')
+    expect(fmtDate(null)).toBe('')
+    expect(fmtDate(undefined)).toBe('')
   })
 })
