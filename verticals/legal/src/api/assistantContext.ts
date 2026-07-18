@@ -172,15 +172,21 @@ export function renderEmails(bodies: MatterMessageBody[]): string {
     .map((m) => {
       const who =
         m.direction === 'outbound' ? `Firm → ${m.to ?? 'client'}` : `${m.from ?? 'client'} → firm`
-      const when = m.sentAt ? ` (${m.sentAt.slice(0, 10)})` : ''
+      const when = m.sentAt ? ` (${fmtDate(m.sentAt)})` : ''
       const body = `${m.body}${m.truncated ? ' …[truncated]' : ''}`.trim()
       return `- ${who}${when} — subject "${m.subject}":\n${body || '(no body)'}`
     })
     .join('\n\n')
 }
 
-export function fmtDate(iso: string | null | undefined): string {
-  return iso ? iso.slice(0, 10) : ''
+export function fmtDate(iso: string | Date | number | null | undefined): string {
+  // The pg driver hands back Date objects for timestamp columns depending on the
+  // read path; the assistant's own readers serialize to strings first, but the
+  // brief evidence assembler consumes raw query rows. Coerce instead of trusting
+  // the declared type (first live brief generation failed on iso.slice here).
+  if (iso === null || iso === undefined || iso === '') return ''
+  const s = typeof iso === 'string' ? iso : new Date(iso).toISOString()
+  return s.slice(0, 10)
 }
 
 export function renderTasks(tasks: Awaited<ReturnType<typeof listTasksByMatter>>): string {
