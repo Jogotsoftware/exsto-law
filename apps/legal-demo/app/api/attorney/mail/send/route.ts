@@ -17,10 +17,15 @@ import { downloadObject } from '@/lib/documentStorage'
 // client of `matterId` AND the sender may send on it. So: doc ∈ matter ∧ recipient
 // client_of matter ∧ sender authorized — all enforced in @exsto/legal.
 export const runtime = 'nodejs'
+// Route renders up to 10 draft PDFs and uploads to Gmail in-request.
+export const maxDuration = 120
 
 interface SendBody {
   mode: 'compose' | 'reply'
   to?: string
+  // Firm-staff-only Cc (ASSISTANT-ACTS-1) — validated server-side by
+  // enqueueClientEmail (validateFirmCc); a non-staff address rejects the send.
+  cc?: string
   gmailThreadId?: string
   subject?: string
   bodyText: string
@@ -73,6 +78,7 @@ export async function POST(request: Request) {
       }
       await enqueueClientEmail(ctx, {
         to: body.to,
+        cc: body.cc?.trim() || undefined,
         subject: body.subject,
         body: body.bodyText,
         html: body.bodyHtml,

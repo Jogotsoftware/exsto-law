@@ -113,6 +113,10 @@ import './tools/commsTools.js'
 import './tools/briefTools.js'
 // Brief engine WP3 — Client Brief get/generate (same attorney-only contract).
 import './tools/clientBriefTools.js'
+// House-voice check (READ): exposes the pure checker in api/emailVoiceChecks.ts
+// so client code (e.g. the compose/reply modal) can call it without importing
+// @exsto/legal values directly.
+import './tools/emailVoiceTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

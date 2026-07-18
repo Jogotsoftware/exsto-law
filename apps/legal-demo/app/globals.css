@@ -21577,6 +21577,69 @@ a.li-uac-done-primary:hover {
 }
 
 /* ==========================================================================
+   ASSISTANT-ACTS-1 — the chat "acts in place": email compose (EmailComposeModal,
+   li-modal chrome) + the in-thread EmailDraftCard (uac-doc-card family — same
+   visual family as DocumentCard). Own family, appended last; composes with
+   .mail-attach-chip / .mail-field / .li-modal-* / .uac-doc-* rather than
+   reinventing them. Does NOT touch other families.
+   ========================================================================== */
+
+/* Pending-document chip in the compose modal — a wider, wrapping variant of
+   .mail-attach-chip (the instructive label runs longer than a filename). */
+.li-uac-pendingdoc-chip {
+  max-width: 26rem;
+  white-space: normal;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+.li-uac-pendingdoc-chip button {
+  margin-top: 0.1rem;
+  flex: 0 0 auto;
+}
+
+/* House-voice advisory chips — small muted pills, same family as the chat's
+   "Using <skill>" chips; advisory only, never a blocking state. */
+.li-uac-voice-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.2rem 0 0.9rem;
+}
+.li-uac-voice-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--warn-soft, rgba(245, 158, 11, 0.12));
+  color: #92400e;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+/* EmailDraftCard's collapsed body preview — clamps a long draft to a few lines
+   so the card reads as a summary, not the full email (uac-doc-card hosts it). */
+.li-uac-email-preview {
+  max-height: 4.5em;
+  overflow: hidden;
+  position: relative;
+}
+
+/* WP5 — scope-switch divider between messages ("Now grounded in the matter
+   you're viewing"): a muted centered status line, deliberately not a bubble. */
+.li-uac-ctxnote {
+  align-self: center;
+  margin: 0.35rem 0;
+  padding: 0.15rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2, rgba(15, 23, 42, 0.04));
+  color: var(--muted-fg, #64748b);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+/* ==========================================================================
    BRIEF ENGINE WP3 — CLIENT BRIEF research disclosure (li-brief-research-).
    Appended addition to the li-brief- family (design: docs/design/briefs/
    DESIGN.md §4/§6). The external-research audit strip inside BriefModal: a

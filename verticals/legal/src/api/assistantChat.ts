@@ -22,7 +22,12 @@ import {
   type AssistantUsage,
 } from '../adapters/claude.js'
 import { runPerplexityResearch, streamPerplexityResearch } from '../adapters/perplexity.js'
-import { resolveAssistantModel, type AssistantProvider } from './assistantModels.js'
+import {
+  resolveAssistantModel,
+  chooseAutoModel,
+  type AssistantModel,
+  type AssistantProvider,
+} from './assistantModels.js'
 import {
   buildMatterAssistantContext,
   buildContactAssistantContext,
@@ -78,6 +83,8 @@ import type { CostProposal } from './costAuthoring.js'
 import { buildCapabilityContextTool, buildRequestCapabilityTool } from './capabilityTools.js'
 import { buildKindContextTool, buildProposeKindTool } from './kindAuthoringTools.js'
 import { buildOpenEditorTool, type EditorLaunch } from './editorLaunchTools.js'
+import { buildComposeEmailTool, type EmailComposeCapture } from './composeEmailTool.js'
+import { buildPrepareEnvelopeTool, type EnvelopePrepareLaunch } from './esignLaunchTools.js'
 import type { KindProposal } from './kindAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 import { buildBuildBriefText } from './buildBrief.js'
@@ -332,6 +339,25 @@ export type AssistantChatStreamEvent =
       content: unknown
       variables?: unknown
     }
+  // ASSISTANT-ACTS-1: the assistant composed a client email — the client opens the
+  // edit/send modal prefilled with it. The ATTORNEY sends from there (their review
+  // in the modal is the approval); this event itself sends nothing.
+  | {
+      type: 'email_compose'
+      subject: string
+      bodyMarkdown: string
+      attachDocumentTitles: string[]
+    }
+  // ASSISTANT-ACTS-1: the assistant resolved a matter document to send for
+  // signature — the client opens the real prepare-signature wizard on it. The
+  // attorney confirms signers/fields and clicks Send there.
+  | {
+      type: 'envelope_prepare'
+      documentVersionId: string
+      documentKind: string
+      versionNumber: number
+      status: string
+    }
   | {
       type: 'done'
       eventId: string
@@ -392,6 +418,12 @@ export interface AssistantChatReply {
   kindProposals?: KindProposal[]
   // Editor launches resolved this turn (WP-H2) — the client opens the editor.
   editorLaunches?: EditorLaunch[]
+  // Client emails composed this turn (ASSISTANT-ACTS-1) — the client opens the
+  // edit/send modal. Recorded on the turn so a reopened thread re-shows the card.
+  emailDrafts?: EmailComposeCapture[]
+  // Envelope-prepare launches resolved this turn (ASSISTANT-ACTS-1) — the client
+  // opens the prepare-signature wizard. Transient like editorLaunches.
+  envelopePrepares?: EnvelopePrepareLaunch[]
 }
 
 export interface AssistantThreadEntry {
@@ -438,6 +470,10 @@ export interface AssistantThreadEntry {
   // New data-kind proposals captured on this turn (assistant side, Tier 1), so a
   // reopened thread still shows the approval cards.
   kindProposals?: KindProposal[]
+  // Client emails composed on this turn (assistant side, ASSISTANT-ACTS-1), so a
+  // reopened thread re-shows the Edit & send card. Sent-state is not persisted
+  // here — the communication thread is the durable record of a send.
+  emailDrafts?: EmailComposeCapture[]
 }
 
 const SYSTEM_PROMPT = [
@@ -614,6 +650,10 @@ export function buildAttorneyClientTools(
     kindProposals: KindProposal[]
     // WP-H2: editor launches resolved this turn (open_artifact_editor).
     editorLaunches: EditorLaunch[]
+    // ASSISTANT-ACTS-1: client emails composed this turn (compose_email).
+    emailComposes: EmailComposeCapture[]
+    // ASSISTANT-ACTS-1: envelope-prepare launches resolved this turn.
+    envelopePrepares: EnvelopePrepareLaunch[]
   },
 ): ClientTool[] {
   const tools: ClientTool[] = [buildFeedbackTool(ctx, input)]
@@ -640,6 +680,18 @@ export function buildAttorneyClientTools(
   // WP-H2: open a real editor on an EXISTING artifact from chat (unflagged —
   // editing what already exists is standalone, like workflow authoring above).
   tools.push(buildOpenEditorTool(ctx, capture.editorLaunches))
+  // ASSISTANT-ACTS-1: act-in-place tools exist only on SCOPED turns — a client
+  // email needs a client to resolve (matter/contact), and an envelope needs the
+  // matter's documents. A general or context-off chat never offers them, so the
+  // model can't compose into a void.
+  const scoped =
+    input.useContext !== false && Boolean(input.matterEntityId || input.contactEntityId)
+  if (scoped) {
+    tools.push(buildComposeEmailTool(capture.emailComposes))
+  }
+  if (input.useContext !== false && input.matterEntityId) {
+    tools.push(buildPrepareEnvelopeTool(ctx, input.matterEntityId, capture.envelopePrepares))
+  }
   // Build-Wizard (Phases 1–4): the authoring tools are dormant unless the
   // LEGAL_BUILD_WIZARD flag is on. With the flag off they're never registered (and
   // the orchestrator system-prompt block below is absent), so the chatbot is
@@ -730,6 +782,17 @@ export function buildClaudeSystem(
         : null
   if (entityPath) {
     system += `\n\nThis conversation is about the ${scope} at ${entityPath} — link to it with a markdown link when referring the attorney back to it.`
+  }
+  // ASSISTANT-ACTS-1 — act-in-place doctrine, present only on SCOPED turns (the
+  // compose/envelope tools are only registered there). Scope is fixed for a
+  // conversation's cache lifetime, so this stays in the stable/cached prefix.
+  if (scope === 'matter' || scope === 'contact') {
+    system +=
+      "\n\nCOMPOSING CLIENT EMAILS — when the attorney asks you to email, message, or send something to the CLIENT (a request for documents, a status update, findings, a follow-up), draft it and deliver it by CALLING the compose_email tool. That opens the firm's real composer prefilled with your draft; the ATTORNEY reviews, edits, attaches documents, and sends it themselves — their review in the composer IS the approval step, so NEVER say the email 'will go to the review queue', 'is queued', or 'was sent'. The composer resolves the client's address — never type or guess an email address. To attach a document, produce it FIRST with produce_document, then list its exact title in attach_document_titles. compose_email is for emails TO the client; produce_document is for standalone document deliverables. Put the email ONLY in the tool call; your reply is ONE short sentence pointing to the composer. All accuracy rules above apply to the email body."
+  }
+  if (scope === 'matter') {
+    system +=
+      "\n\nSENDING FOR SIGNATURE — when the attorney asks to get a document signed / e-signed / sent for signature, call the prepare_envelope tool with the document as they referred to it (its kind or title words, e.g. 'engagement letter') — never an id. That opens the firm's real send-for-signature wizard where the ATTORNEY confirms signers, places signature fields, and clicks Send — so never claim an envelope was sent. If the document was just drafted in chat, it must first be saved to the matter from its card; tell the attorney that in one sentence. If the tool reports multiple matches, ask WHICH document they mean."
   }
   // Build-Wizard Phase 1 (flag-gated): only when LEGAL_BUILD_WIZARD is on does the
   // assistant learn it can propose a NEW service. With the flag off this note is
@@ -972,6 +1035,10 @@ export async function recordAssistantTurn(
     // New data-kind proposals captured this turn (Tier 1 data-as-schema), recorded so
     // a reopened thread can re-show the approval cards. Additive field.
     kindProposals?: KindProposal[] | null
+    // Client emails composed this turn (ASSISTANT-ACTS-1), recorded so a reopened
+    // thread re-shows the Edit & send card. Additive field; sends are recorded
+    // separately by the mail.send projection when the attorney actually sends.
+    emailDrafts?: EmailComposeCapture[] | null
     // Token usage for the turn (Claude turns only — Perplexity doesn't report it).
     // Recorded additively in the event payload; powers the AI usage/cost view.
     usage?: AssistantUsage | null
@@ -1062,6 +1129,9 @@ export async function recordAssistantTurn(
         // reopened thread re-shows them. Null when none were proposed.
         kind_proposals:
           input.kindProposals && input.kindProposals.length ? input.kindProposals : null,
+        // Client emails composed this turn (edit/send cards), so a reopened thread
+        // re-shows them. Null when none were composed.
+        email_drafts: input.emailDrafts && input.emailDrafts.length ? input.emailDrafts : null,
         // Token usage (snake_case to match the rest of the payload), null when the
         // provider doesn't report it. The actor is captured as source_ref above, so
         // the usage view can attribute cost per attorney.
@@ -1182,6 +1252,23 @@ async function recordQuestionWithoutCardObservation(
 
 // Send a message to the chosen model with the matter/client context injected,
 // then record the exchange. Returns the reply (+ citations for research models).
+// ASSISTANT-ACTS-1 (WP4) — resolve the turn's model, routing the "Auto" tier to
+// a concrete Claude BEFORE anything else runs: Haiku for ordinary turns, Sonnet
+// only for genuinely heavy ones (deterministic, no extra model call — see
+// chooseAutoModel). Resolution happens here so 'auto' never reaches the adapter
+// and meta/persistence carry the model the attorney actually got; an explicit
+// pick passes through untouched.
+function resolveTurnModel(input: AssistantChatInput): AssistantModel | null {
+  const model = resolveAssistantModel(input.modelId)
+  if (!model || model.provider !== 'anthropic' || model.model !== 'auto') return model
+  const concrete = chooseAutoModel({
+    message: input.message,
+    buildMode: input.buildMode,
+    historyChars: (input.history ?? []).reduce((n, t) => n + t.content.length, 0),
+  })
+  return resolveAssistantModel(`anthropic:${concrete}`)
+}
+
 export async function assistantChat(
   ctx: ActionContext,
   input: AssistantChatInput,
@@ -1189,7 +1276,7 @@ export async function assistantChat(
   const message = input.message.trim()
   if (!message) throw new Error('Type a message first.')
 
-  const model = resolveAssistantModel(input.modelId)
+  const model = resolveTurnModel(input)
   if (!model) throw new Error(`Unknown model: ${input.modelId}`)
   if (!model.available) {
     throw new Error(`${model.providerLabel} chat isn't available yet — pick Claude or Perplexity.`)
@@ -1235,6 +1322,12 @@ export async function assistantChat(
   const kindProposals: KindProposal[] = []
   // Editor launches resolved this turn (WP-H2) — surfaced as editor pop-ups.
   const editorLaunches: EditorLaunch[] = []
+  // Client emails composed this turn (ASSISTANT-ACTS-1) — surfaced as the
+  // edit/send modal; recorded on the turn so the card re-shows on reopen.
+  const emailComposes: EmailComposeCapture[] = []
+  // Envelope-prepare launches resolved this turn (ASSISTANT-ACTS-1) — surfaced
+  // as the prepare-signature wizard pop-up; transient like editorLaunches.
+  const envelopePrepares: EnvelopePrepareLaunch[] = []
   // Token usage for the turn — Claude reports it; Perplexity doesn't, so it stays null.
   let usage: AssistantUsage | null = null
 
@@ -1292,6 +1385,8 @@ export async function assistantChat(
         buildQuestions,
         kindProposals,
         editorLaunches,
+        emailComposes,
+        envelopePrepares,
       }),
     })
     // WP-D4: a wizard card turn persists ONE framing sentence (the stream path
@@ -1401,6 +1496,7 @@ export async function assistantChat(
     costProposals,
     enableProposals,
     kindProposals,
+    emailDrafts: emailComposes,
     usage,
     chatSessionId,
     buildSessionId,
@@ -1437,6 +1533,8 @@ export async function assistantChat(
     buildQuestions: buildQuestions.length ? buildQuestions : undefined,
     kindProposals: kindProposals.length ? kindProposals : undefined,
     editorLaunches: editorLaunches.length ? editorLaunches : undefined,
+    emailDrafts: emailComposes.length ? emailComposes : undefined,
+    envelopePrepares: envelopePrepares.length ? envelopePrepares : undefined,
   }
 }
 
@@ -1451,7 +1549,7 @@ export async function* assistantChatStream(
   const message = input.message.trim()
   if (!message) throw new Error('Type a message first.')
 
-  const model = resolveAssistantModel(input.modelId)
+  const model = resolveTurnModel(input)
   if (!model) throw new Error(`Unknown model: ${input.modelId}`)
   if (!model.available) {
     throw new Error(`${model.providerLabel} chat isn't available yet — pick Claude or Perplexity.`)
@@ -1499,6 +1597,12 @@ export async function* assistantChatStream(
   // Editor launches resolved this turn (WP-H2) — surfaced as editor pop-ups
   // after the loop.
   const editorLaunches: EditorLaunch[] = []
+  // Client emails composed this turn (ASSISTANT-ACTS-1) — surfaced as the
+  // edit/send modal after the loop; recorded on the turn for reopen.
+  const emailComposes: EmailComposeCapture[] = []
+  // Envelope-prepare launches resolved this turn (ASSISTANT-ACTS-1) — surfaced
+  // as the prepare-signature wizard after the loop; transient.
+  const envelopePrepares: EnvelopePrepareLaunch[] = []
   let usage: AssistantUsage | null = null
   // WP-D4 — per-round text, so a wizard card turn can be collapsed to its
   // pre-tool framing sentence deterministically (rounds are delimited by tool
@@ -1578,6 +1682,8 @@ export async function* assistantChatStream(
         buildQuestions,
         kindProposals,
         editorLaunches,
+        emailComposes,
+        envelopePrepares,
       }),
     })) {
       // P3 — the first propose_workflow failure of the turn gets a muted status
@@ -1776,6 +1882,27 @@ export async function* assistantChatStream(
         variables: l.variables,
       }
     }
+    // Surface client emails composed this turn (ASSISTANT-ACTS-1) — the client
+    // opens the edit/send modal prefilled; the attorney sends from there.
+    for (const e of emailComposes) {
+      yield {
+        type: 'email_compose',
+        subject: e.subject,
+        bodyMarkdown: e.bodyMarkdown,
+        attachDocumentTitles: e.attachDocumentTitles,
+      }
+    }
+    // Surface envelope-prepare launches resolved this turn (ASSISTANT-ACTS-1) —
+    // the client opens the real prepare-signature wizard on the resolved version.
+    for (const p of envelopePrepares) {
+      yield {
+        type: 'envelope_prepare',
+        documentVersionId: p.documentVersionId,
+        documentKind: p.documentKind,
+        versionNumber: p.versionNumber,
+        status: p.status,
+      }
+    }
   }
 
   // WP-D4 (HARDENING-RESIDUALS-1): a wizard turn that rendered a card persists
@@ -1893,6 +2020,7 @@ export async function* assistantChatStream(
       costProposals,
       enableProposals,
       kindProposals,
+      emailDrafts: emailComposes,
       usage,
       chatSessionId,
       buildSessionId,
@@ -2000,6 +2128,7 @@ export async function listAssistantThread(
         cost_proposals?: CostProposal[] | null
         enable_proposals?: EnableProposal[] | null
         kind_proposals?: KindProposal[] | null
+        email_drafts?: EmailComposeCapture[] | null
       }
       occurred_at: string
     }>(
@@ -2061,6 +2190,7 @@ export async function listAssistantThread(
           costProposals: r.payload.cost_proposals ?? undefined,
           enableProposals: r.payload.enable_proposals ?? undefined,
           kindProposals: r.payload.kind_proposals ?? undefined,
+          emailDrafts: r.payload.email_drafts ?? undefined,
         },
       ]
     })

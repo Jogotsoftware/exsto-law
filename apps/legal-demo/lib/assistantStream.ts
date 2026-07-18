@@ -184,6 +184,26 @@ export interface EnableProposalEvent {
   completion?: string[]
 }
 
+// ASSISTANT-ACTS-1: the assistant composed a client email (compose_email) — the
+// chat opens an edit/send modal prefilled with it; the attorney's review there IS
+// the approval, so this event itself sends nothing. attachDocumentTitles match
+// this turn's produced documents by exact title (case-insensitive).
+export interface EmailComposeEvent {
+  subject: string
+  bodyMarkdown: string
+  attachDocumentTitles: string[]
+}
+
+// ASSISTANT-ACTS-1: the assistant resolved a matter document to send for
+// signature (prepare_envelope) — the chat opens the real prepare-signature
+// wizard on it. Transient, like an editor launch: never persisted.
+export interface EnvelopePrepareEvent {
+  documentVersionId: string
+  documentKind: string
+  versionNumber: number
+  status: string
+}
+
 export interface AssistantStreamHandlers {
   onMeta?: (meta: StreamMeta) => void
   onThinking?: (text: string) => void
@@ -217,6 +237,12 @@ export interface AssistantStreamHandlers {
   onBuildQuestion?: (question: BuildQuestionEvent) => void
   // WP-H2: the assistant resolved an existing artifact — open its real editor.
   onEditorLaunch?: (launch: EditorLaunchEvent) => void
+  // ASSISTANT-ACTS-1: the assistant composed a client email — open the edit/send
+  // modal prefilled with it.
+  onEmailCompose?: (draft: EmailComposeEvent) => void
+  // ASSISTANT-ACTS-1: the assistant resolved a document to send for signature —
+  // open the real prepare-signature wizard on it.
+  onEnvelopePrepare?: (launch: EnvelopePrepareEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
 }
@@ -430,6 +456,23 @@ export async function streamAssistant(
           name: String(evt.name ?? ''),
           content: evt.content,
           variables: evt.variables,
+        })
+        break
+      case 'email_compose':
+        handlers.onEmailCompose?.({
+          subject: String(evt.subject ?? ''),
+          bodyMarkdown: String(evt.bodyMarkdown ?? ''),
+          attachDocumentTitles: Array.isArray(evt.attachDocumentTitles)
+            ? (evt.attachDocumentTitles as string[])
+            : [],
+        })
+        break
+      case 'envelope_prepare':
+        handlers.onEnvelopePrepare?.({
+          documentVersionId: String(evt.documentVersionId ?? ''),
+          documentKind: String(evt.documentKind ?? ''),
+          versionNumber: typeof evt.versionNumber === 'number' ? evt.versionNumber : 1,
+          status: String(evt.status ?? ''),
         })
         break
       case 'done':
