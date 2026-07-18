@@ -36,7 +36,9 @@ function coalesce(runs: RedlineRun[]): RedlineRun[] {
 
 // Word-level LCS diff of two single lines → runs. Tokens keep their trailing
 // whitespace (split on the boundary) so reconstruction preserves spacing.
-function wordRuns(a: string, b: string): RedlineRun[] {
+// Exported for lib/trackedChanges (the li-edtr hunk model), which reuses this
+// run-level differ instead of growing its own.
+export function wordRuns(a: string, b: string): RedlineRun[] {
   const at = a.split(/(\s+)/).filter((t) => t !== '')
   const bt = b.split(/(\s+)/).filter((t) => t !== '')
   const n = at.length
