@@ -125,13 +125,13 @@ export default function ClientPortalLoginPage() {
   if (phase === 'check-email') {
     return (
       <Shell title="Confirm your email">
-        <p className="cauth-lead">
+        <p className="li-cp-auth-lead">
           We sent a confirmation link to <strong>{email}</strong>. Click it to activate your
           account, then come back and sign in.
         </p>
         <p style={{ marginTop: 'var(--space-3)' }}>
           <button
-            className="cauth-link"
+            className="li-cp-linkbtn"
             onClick={() => {
               setPhase('form')
               setIsSignUp(false)
@@ -149,7 +149,7 @@ export default function ClientPortalLoginPage() {
   if (!supabaseAuthConfigured) {
     return (
       <Shell>
-        <p className="cauth-lead">
+        <p className="li-cp-auth-lead">
           Sign-in isn&apos;t configured for this environment yet. Please contact the firm.
         </p>
       </Shell>
@@ -158,7 +158,7 @@ export default function ClientPortalLoginPage() {
 
   return (
     <Shell>
-      <p className="cauth-lead">
+      <p className="li-cp-auth-lead">
         Sign in to view your matters, documents, and messages with the firm.
       </p>
 
@@ -168,8 +168,8 @@ export default function ClientPortalLoginPage() {
         </div>
       )}
 
-      <form onSubmit={submit} className="cauth-form">
-        <label className="cauth-label" htmlFor="cauth-email">
+      <form onSubmit={submit} className="li-cp-auth-form">
+        <label className="li-cp-label" htmlFor="cauth-email">
           Email
         </label>
         <input
@@ -180,9 +180,9 @@ export default function ClientPortalLoginPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          className="cauth-input"
+          className="li-cp-input"
         />
-        <label className="cauth-label" htmlFor="cauth-pass">
+        <label className="li-cp-label" htmlFor="cauth-pass">
           Password
         </label>
         <input
@@ -196,17 +196,21 @@ export default function ClientPortalLoginPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder={isSignUp ? 'At least 8 characters' : 'Your password'}
-          className="cauth-input"
+          className="li-cp-input"
         />
-        <button type="submit" className="cauth-primary" disabled={submitting}>
+        <button
+          type="submit"
+          className="li-cp-btn li-cp-btn--block li-cp-auth-submit"
+          disabled={submitting}
+        >
           {submitting ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
         </button>
       </form>
 
-      <p className="cauth-foot">
+      <p className="li-cp-auth-foot">
         {isSignUp ? 'Already have an account?' : 'New here?'}{' '}
         <button
-          className="cauth-link"
+          className="li-cp-linkbtn"
           onClick={() => {
             setIsSignUp(!isSignUp)
             setError(null)
@@ -227,15 +231,15 @@ function Shell({
   children: React.ReactNode
 }) {
   return (
-    <main className="public-draft cauth-shell">
-      <div className="cauth-card">
-        <div className="pd-brandrow">
-          <span className="cp-crest" aria-hidden>
+    <main className="li-cp-auth">
+      <div className="li-cp-auth-card">
+        <div className="li-cp-auth-brand">
+          <span className="li-cp-auth-crest" aria-hidden>
             <ScaleIcon size={18} />
           </span>
-          <div className="public-draft-firm">Pacheco Law</div>
+          <div className="li-cp-auth-firm">Pacheco Law</div>
         </div>
-        <h1 className="cauth-title">{title}</h1>
+        <h1 className="li-cp-auth-title">{title}</h1>
         {children}
       </div>
     </main>
