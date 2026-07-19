@@ -93,3 +93,6 @@ desktop.ini
 
 # Transient agent worktrees (isolated builds)
 .claude/worktrees/
+
+# Local Netlify folder
+.netlify

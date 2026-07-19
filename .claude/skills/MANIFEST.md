@@ -48,6 +48,37 @@ Borrowed sparingly, adapted to the substrate. Do not bulk-install catalogs.
 | --- | --- |
 | [exsto-workflow](exsto-workflow/SKILL.md) | The Exsto build rhythm + which installed discipline (Superpowers/review/worktrees) to use, with the non-negotiable verify-on-DB gate. |
 
+### Engineering discipline (vendored from [obra/superpowers](https://github.com/obra/superpowers))
+
+The borrowed disciplines `exsto-workflow` orchestrates. Cross-references were de-namespaced (`superpowers:` prefix stripped) so they resolve to these bare directory names. Pair every one of these with the verify-on-DB gate — none of them override Exsto's hard rules.
+
+| Skill | Purpose |
+| --- | --- |
+| [brainstorming](brainstorming/SKILL.md) | Explore intent, requirements, and design **before** any creative/implementation work. |
+| [writing-plans](writing-plans/SKILL.md) | Turn a spec into a multi-step implementation plan before touching code. |
+| [executing-plans](executing-plans/SKILL.md) | Execute a written plan in a separate session with review checkpoints. |
+| [subagent-driven-development](subagent-driven-development/SKILL.md) | Execute a plan's independent tasks via subagents in the current session. |
+| [dispatching-parallel-agents](dispatching-parallel-agents/SKILL.md) | Fan out 2+ independent, no-shared-state tasks to parallel agents. |
+| [test-driven-development](test-driven-development/SKILL.md) | RED-GREEN-REFACTOR before writing implementation code (mirrors the invariant-test discipline). |
+| [systematic-debugging](systematic-debugging/SKILL.md) | Structured root-cause approach to any bug/test failure before proposing a fix. |
+| [verification-before-completion](verification-before-completion/SKILL.md) | Run verification + confirm output before claiming done — the discipline behind hard rule #12. |
+| [requesting-code-review](requesting-code-review/SKILL.md) | Code-review template before merging major work. |
+| [receiving-code-review](receiving-code-review/SKILL.md) | Handle review feedback with technical rigor — verify, don't blindly implement. |
+| [finishing-a-development-branch](finishing-a-development-branch/SKILL.md) | Structured options for merge / PR / cleanup once work is complete. |
+| [using-git-worktrees](using-git-worktrees/SKILL.md) | Ensure an isolated workspace exists (native or git worktree) before feature work. |
+| [writing-skills](writing-skills/SKILL.md) | Create/edit/verify skills (TDD-for-docs) — the meta-skill for maintaining this very library. |
+
+## Tier 2 — Document & app-testing tooling (vendored from [anthropics/skills](https://github.com/anthropics/skills))
+
+General-purpose deliverable tooling that serves the legal vertical directly (documents, invoice PDFs, billing exports, UI verification). Each carries its own scripts/reference assets.
+
+| Skill | Purpose |
+| --- | --- |
+| [docx](docx/SKILL.md) | Create/read/edit Word documents — tracked changes, templates, letterheads, find-and-replace. Legal deliverables. |
+| [pdf](pdf/SKILL.md) | Read/extract/merge/split/fill/OCR PDFs and produce them. Invoice + document output. |
+| [xlsx](xlsx/SKILL.md) | Create/read/edit spreadsheets — formulas, charts, clean messy tabular data. Billing exports. |
+| [webapp-testing](webapp-testing/SKILL.md) | Drive a local web app with Playwright to verify UI, capture screenshots + browser logs. Verify the Next.js app. |
+
 ## Promotion path
 
 When a skill proves useful in a project built on the foundation, promote it *up* into this template so every future project inherits it. That is how the library compounds without bloating.
