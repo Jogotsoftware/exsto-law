@@ -3,6 +3,7 @@ import { findTool } from '@exsto/mcp-tools'
 // Register the legal vertical's MCP tools into the shared registry (side effect).
 // @exsto/mcp-tools is now vertical-agnostic; the legal surface opts its tools in.
 import '@exsto/legal/mcp'
+import { WorkflowAdvanceGuardError } from '@exsto/legal'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
 
 export const runtime = 'nodejs'
@@ -37,6 +38,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ result })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return NextResponse.json({ error: message }, { status: 500 })
+    // A domain guard rejection (e.g. legal.matter.advance's "own action to
+    // complete it") is a well-formed request the server won't honor, not a
+    // server fault — 409, not 500. Every other thrown error keeps 500.
+    const status = error instanceof WorkflowAdvanceGuardError ? error.status : 500
+    return NextResponse.json({ error: message }, { status })
   }
 }
