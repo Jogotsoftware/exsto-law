@@ -53,16 +53,18 @@ registerTool({
   }),
 } satisfies Tool<UpdateTenantSettingsInput, { settings: TenantSettings }>)
 
-// ── Firm profile (P13) ──────────────────────────────────────────────────────
+// ── Firm profile (P13, + WP A1) ──────────────────────────────────────────────
 // Firm identity as substrate config: firm_name/address/phone/email attributes on
 // the firm_profile singleton, written via legal.firm.set_profile. These fields
 // fill the {{firm_*}} SYSTEM merge slots on generated documents; the Settings
-// "Firm details" section is their editor surface.
+// "Firm details" section is their editor surface. WP A1 adds firm_jurisdiction
+// (the resolveMatterJurisdiction fallback rung when a matter has no override),
+// practice_areas, and attorney_name — same singleton, same action.
 
 registerTool({
   name: 'legal.settings.firm_profile.get',
   description:
-    'Fetch the firm profile (firm name, mailing address, phone, contact email) — the identity block generated documents and letterheads resolve. Values come from the firm_profile record, falling back to legacy settings where never set.',
+    'Fetch the firm profile (firm name, mailing address, phone, contact email, home jurisdiction, practice areas, attorney name) — the identity block generated documents and letterheads resolve, plus the firm jurisdiction fallback for matters with no per-matter override. Values come from the firm_profile record, falling back to legacy settings where never set.',
   mode: 'read',
   handler: async (ctx: ActionContext) => ({ profile: await getFirmProfile(ctx) }),
 } satisfies Tool<Record<string, never>, { profile: FirmProfileFields }>)
@@ -70,7 +72,7 @@ registerTool({
 registerTool({
   name: 'legal.settings.firm_profile.set',
   description:
-    'Set the firm profile (firm name, mailing address, phone, contact email). Undefined fields are left alone; an empty value clears the field. Each change is appended — prior values stay in history. Applies to every subsequently generated document.',
+    'Set the firm profile (firm name, mailing address, phone, contact email, home jurisdiction, practice areas, attorney name). Undefined fields are left alone; an empty value clears the field. Each change is appended — prior values stay in history. Firm jurisdiction accepts a US state code or name (e.g. "NC" or "North Carolina") and is rejected if unrecognized.',
   mode: 'write',
   handler: async (ctx: ActionContext, input) => ({ profile: await setFirmProfile(ctx, input) }),
 } satisfies Tool<SetFirmProfileInput, { profile: FirmProfileFields }>)

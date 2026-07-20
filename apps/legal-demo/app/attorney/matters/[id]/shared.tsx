@@ -76,6 +76,9 @@ export interface MatterDetail {
   // HAS an authored lifecycle — the page shows the honest repair panel instead of
   // the legacy derived-step window.
   workflowRepairAvailable?: boolean
+  // WP A1 — resolved governing law: matter override > firm home jurisdiction >
+  // null (honest unset). Display + edit control on the Overview facts card.
+  governingLaw?: { code: string; displayName: string; source: 'matter' | 'firm' } | null
 }
 
 // Client-side replica of the server resolver's stepStates idea (resolve.ts): a

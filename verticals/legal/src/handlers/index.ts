@@ -1,5 +1,6 @@
 import './matter.js'
 import './matterAccess.js'
+import './matterJurisdiction.js'
 import './workflow.js'
 import './matterWorkflow.js'
 import './calendarCategories.js'
