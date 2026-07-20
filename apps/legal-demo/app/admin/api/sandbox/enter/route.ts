@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 const BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
   process.env.URL ??
-  'https://exstolaw.netlify.app'
+  'https://exsto-law.netlify.app'
 ).replace(/\/$/, '')
 
 // "Enter sandbox" (ADR 0046 §6): a platform admin gets an ATTORNEY session for the

@@ -16,7 +16,7 @@ import { button } from './layout.js'
 const PORTAL_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
   process.env.URL ??
-  'https://exstolaw.netlify.app'
+  'https://exsto-law.netlify.app'
 ).replace(/\/$/, '')
 
 function escapeRawHtml(md: string): string {

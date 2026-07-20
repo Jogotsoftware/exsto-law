@@ -20,7 +20,7 @@ export interface DraftReviewInput {
 const BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
   process.env.URL ??
-  'https://exstolaw.netlify.app'
+  'https://exsto-law.netlify.app'
 ).replace(/\/$/, '')
 
 // ─── P13: approve-time SYSTEM-token resolution ──────────────────────────────
