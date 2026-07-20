@@ -24,6 +24,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
 import { GemSparkle } from '@/components/GemSparkle'
 import { renderMarkdown } from '@/lib/draftExport'
+import { wrapBriefStatusChip } from '@/lib/briefChips'
 import { formatDateTime } from '@/lib/datetime'
 import { RefreshIcon, SearchIcon } from '@/components/icons'
 
@@ -134,6 +135,55 @@ function ResearchStrip({ research }: { research: BriefResearchRecord }) {
   )
 }
 
+// PO-1 — the accuracy/confidence score, collapsed by default: a small chip
+// showing the brief's overall (honest, never-100%) confidence that expands on
+// click to name exactly what it's uncertain about. The detail is NOT invented:
+// it is derived straight from the sections the model itself scored lowest
+// (BriefSection.confidence — the same per-section number the synthesis prompt
+// already asks for, see briefEngine.ts's BRIEF_SECTIONS_CONTRACT). No engine
+// change was needed — this data was already on the wire, just never surfaced.
+// A <details> disclosure (same pattern as ResearchStrip above) so it needs no
+// component state of its own.
+const UNCERTAIN_BELOW = 0.7
+
+function ConfidenceDisclosure({
+  confidence,
+  sections,
+}: {
+  confidence: number
+  sections: BriefSection[]
+}) {
+  const pct = Math.round(confidence * 100)
+  const flagged = sections
+    .filter((s) => s.confidence < UNCERTAIN_BELOW)
+    .sort((a, b) => a.confidence - b.confidence)
+  return (
+    <details className="li-brief-confidence">
+      <summary>
+        <span className="li-brief-confidence-chip">Confidence {pct}%</span>
+        <span className="li-brief-confidence-hint">click to see what's flagged</span>
+      </summary>
+      <div className="li-brief-confidence-body">
+        {flagged.length === 0 ? (
+          <p className="li-brief-confidence-empty">
+            Nothing flagged — every section scored above {Math.round(UNCERTAIN_BELOW * 100)}%
+            confidence.
+          </p>
+        ) : (
+          <ul className="li-brief-confidence-list">
+            {flagged.map((s, i) => (
+              <li key={i}>
+                <span className="li-brief-confidence-heading">{s.heading}</span>
+                <span className="li-brief-confidence-pct">{Math.round(s.confidence * 100)}%</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
+  )
+}
+
 export function BriefModal({
   scope,
   onClose,
@@ -212,7 +262,7 @@ export function BriefModal({
             <div className="li-brief-working-title">Synthesizing the {noun} brief…</div>
             <div className="li-brief-working-sub">
               {scope.kind === 'matter'
-                ? 'Reading the matter’s history, communications, documents, notes, and billing, then writing the brief. This takes a moment — running on the worker, so it is safe to close this window and come back.'
+                ? 'Reading the matter’s history, communications, documents, notes, and billing, then writing the brief. This takes a moment — you can keep working and come back to this window later.'
                 : 'Reading the client’s profile, every matter, notes, transcripts, and messages — plus a quick, privacy-guarded external search — then writing the brief. This takes a moment.'}
             </div>
           </div>
@@ -265,20 +315,23 @@ export function BriefModal({
           {matterController?.justCompleted && (
             <div className="li-brief-updated-flash">Brief updated.</div>
           )}
-          {(brief.modelIdentity || typeof brief.confidence === 'number') && (
-            <div className="li-brief-meta">
-              {brief.modelIdentity ?? ''}
-              {typeof brief.confidence === 'number'
-                ? `${brief.modelIdentity ? ' · ' : ''}confidence ${Math.round(brief.confidence * 100)}%`
-                : ''}
-            </div>
-          )}
+          {
+            // The model name is deliberately never shown (founder decision,
+            // PO-1) — only the honest confidence score, collapsed.
+            typeof brief.confidence === 'number' && (
+              <ConfidenceDisclosure confidence={brief.confidence} sections={brief.sections} />
+            )
+          }
           {brief.research && <ResearchStrip research={brief.research} />}
           <div
             className="li-brief-body"
             // renderMarkdown escapes ALL inline HTML (the assistant-chat
-            // renderer) — model output is never injected raw.
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(brief.markdown) }}
+            // renderer) — model output is never injected raw. tdWrap maps known
+            // status vocabulary in table cells (e.g. an Open Items checklist)
+            // to color-coded li-brief-chip spans — see lib/briefChips.ts.
+            dangerouslySetInnerHTML={{
+              __html: renderMarkdown(brief.markdown, { tdWrap: wrapBriefStatusChip }),
+            }}
           />
         </div>
       )}
