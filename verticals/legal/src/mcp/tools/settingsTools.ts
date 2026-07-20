@@ -10,6 +10,8 @@ import {
   getOwnPublicSlug,
   getFirmDefaultRate,
   setFirmDefaultRate,
+  getEmailDraftingConfig,
+  updateEmailDraftingConfig,
   getFirmProfile,
   setFirmProfile,
   getTenantSettings,
@@ -21,6 +23,7 @@ import {
   type AttorneySignature,
   type ConnectIntegrationInput,
   type ConnectResult,
+  type EmailDraftingConfigDoc,
   type FirmProfileFields,
   type FirmSignature,
   type FirmBookingRules,
@@ -30,6 +33,7 @@ import {
   type SetFirmProfileInput,
   type SetFirmSignatureInput,
   type TenantSettings,
+  type UpdateEmailDraftingConfigInput,
   type UpdateTenantSettingsInput,
 } from '../../index.js'
 import { FIRM_SENDER_DISPLAY_NAME } from '../../adapters/gmail.js'
@@ -186,6 +190,31 @@ registerTool({
   mode: 'write',
   handler: async (ctx: ActionContext, input) => await setFirmDefaultRate(ctx, input.rate),
 } satisfies Tool<{ rate: string }, { rate: string }>)
+
+// ── Email drafting prompt + house voice (WP FB-D) ────────────────────────────
+// Config-first, firm-wide (not per-service): the attorney's own override of the
+// AI email-drafting prompt and/or the house-voice doctrine, stored on the
+// firm_settings singleton. Either half falls back independently to the bundled
+// repo template when unset. NOT client-portal-callable (clientPolicy.ts is
+// default-deny) — email drafting config is attorney-only.
+
+registerTool({
+  name: 'legal.email.prompt.get',
+  description:
+    "Get the firm's email drafting prompt and house-voice doctrine. Returns each half's resolved text (in-app override if saved, else the bundled repo default), its source ('config' | 'repo'), the shared config version, and the required mustache slots the prompt must carry.",
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ config: await getEmailDraftingConfig(ctx) }),
+} satisfies Tool<Record<string, never>, { config: EmailDraftingConfigDoc }>)
+
+registerTool({
+  name: 'legal.email.prompt.update',
+  description:
+    'Save the firm email drafting prompt and/or house-voice doctrine. Each field is independent: omit (undefined) to leave it unchanged, pass null/empty to clear it back to the bundled repo default, or pass text to set a custom override. A custom prompt must contain every required slot (see legal.email.prompt.get) — the save is rejected otherwise. Bumps the shared config version when either half actually changes; the drafting worker and the "Draft with AI" compose box use the new config immediately.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    config: await updateEmailDraftingConfig(ctx, input),
+  }),
+} satisfies Tool<UpdateEmailDraftingConfigInput, { config: EmailDraftingConfigDoc }>)
 
 // ── Integrations ─────────────────────────────────────────────────────────────
 

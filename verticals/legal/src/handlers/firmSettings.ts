@@ -262,6 +262,41 @@ function validateManualPaymentConfig(raw: unknown): Record<string, unknown> {
   return { zelle, wallets }
 }
 
+// WP FB-D — the firm's email drafting prompt + house-voice doctrine, config-
+// first (per-tenant overrides of the two repo templates, either half
+// independent). Stored as one JSON config attribute on the firm_settings
+// singleton (Contract K precedent), same discipline as invoice_template_config
+// below: the API layer (api/emailDraftingConfig.ts updateEmailDraftingConfig)
+// validates the prompt's required slots, merges with the existing config, and
+// bumps prompt_version BEFORE calling submitAction — this handler just stores
+// the already-resolved config verbatim.
+registerActionHandler(
+  'legal.firm.set_email_drafting_config',
+  async (ctx, client, payload, actionId) => {
+    const p = payload as unknown as { config?: Record<string, unknown> }
+    const config = p.config && typeof p.config === 'object' ? p.config : {}
+
+    const firmSettingsId = await ensureFirmSettings(client, ctx.tenantId, actionId)
+    const akId = await lookupKindId(
+      client,
+      'attribute_kind_definition',
+      ctx.tenantId,
+      'email_drafting_config',
+    )
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: firmSettingsId,
+      attributeKindId: akId,
+      value: config,
+      confidence: 1.0,
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+    })
+    return { firm_settings_id: firmSettingsId }
+  },
+)
+
 // The firm's invoice template branding/content config (Phase 3). Stored as one
 // JSON attribute on the firm_settings singleton; a new write supersedes the prior
 // (append-only, effective-dated). The shape is validated/resolved on the read side
