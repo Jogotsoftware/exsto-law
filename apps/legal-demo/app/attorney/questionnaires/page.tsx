@@ -20,7 +20,13 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { useConfirm } from '@/components/ConfirmModal'
 import { QuestionnaireConfigModal } from '@/components/configEditors'
 import { DocumentSheet } from '@/components/DocumentSheet'
-import { FileTextIcon, MoreHorizontalIcon, PlusIcon } from '@/components/icons'
+import {
+  FileTextIcon,
+  LayoutGridIcon,
+  ListIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+} from '@/components/icons'
 import {
   QuestionnaireBuilder,
   schemaToSections,
@@ -138,6 +144,8 @@ export default function QuestionnaireLibraryPage(): ReactElement {
   const [modalQuestionnaire, setModalQuestionnaire] = useState<QuestionnaireTemplate | null>(null)
   const [svcForms, setSvcForms] = useState<ServiceIntakeForm[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Gallery card grid vs. compact list — a display preference only, no data change.
+  const [view, setView] = useState<'grid' | 'list'>('grid')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   // The firm's document templates, for the "Associated templates" picker.
@@ -298,19 +306,35 @@ export default function QuestionnaireLibraryPage(): ReactElement {
               <h1 className="li-int-title">Intake Forms</h1>
               <p className="li-int-sub">Forms clients complete before a matter opens.</p>
             </div>
-            <button
-              type="button"
-              className="li-int-new-btn"
-              onClick={() => setDraft(EMPTY_DRAFT())}
-            >
-              <PlusIcon size={16} />
-              New intake form
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="li-viewtoggle" role="group" aria-label="View">
+                <button
+                  type="button"
+                  className={view === 'grid' ? 'on' : ''}
+                  aria-label="Grid view"
+                  onClick={() => setView('grid')}
+                >
+                  <LayoutGridIcon size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={view === 'list' ? 'on' : ''}
+                  aria-label="List view"
+                  onClick={() => setView('list')}
+                >
+                  <ListIcon size={15} />
+                </button>
+              </div>
+              <button
+                type="button"
+                className="li-int-new-btn"
+                onClick={() => setDraft(EMPTY_DRAFT())}
+              >
+                <PlusIcon size={16} />
+                New intake form
+              </button>
+            </div>
           </div>
-          <p className="li-int-sublink">
-            Manage the reusable single questions in the{' '}
-            <a href="/attorney/questions">question library →</a>
-          </p>
 
           {items === null && !error && (
             <div className="loading-block" role="status">
@@ -322,7 +346,7 @@ export default function QuestionnaireLibraryPage(): ReactElement {
               No questionnaires yet. Build your first reusable intake form.
             </p>
           )}
-          {items && (items.length > 0 || (svcForms?.length ?? 0) > 0) && (
+          {items && (items.length > 0 || (svcForms?.length ?? 0) > 0) && view === 'grid' && (
             <div className="li-int-grid">
               {items.map((t) => {
                 const fields = thumbFields(
@@ -409,6 +433,82 @@ export default function QuestionnaireLibraryPage(): ReactElement {
                       {f.fieldCount} question{f.fieldCount === 1 ? '' : 's'}
                     </div>
                   </div>
+                </Link>
+              ))}
+            </div>
+          )}
+          {items && (items.length > 0 || (svcForms?.length ?? 0) > 0) && view === 'list' && (
+            <div className="li-viewlist">
+              {items.map((t) => {
+                const menuOpen = openMenuId === t.questionnaireTemplateId
+                return (
+                  <div key={t.questionnaireTemplateId} className="li-int-card-wrap">
+                    <button
+                      type="button"
+                      className="li-viewlist-row"
+                      onClick={() => editFrom(t)}
+                      aria-label={`Open ${t.name || 'untitled intake form'}`}
+                    >
+                      <span className="li-viewlist-name">{t.name || '(untitled)'}</span>
+                      <StatusBadge active />
+                      <span className="li-viewlist-meta">
+                        {t.fieldCount} question{t.fieldCount === 1 ? '' : 's'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="li-int-card-menu-btn"
+                      aria-label={`More actions for ${t.name || 'untitled intake form'}`}
+                      aria-expanded={menuOpen}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setOpenMenuId(menuOpen ? null : t.questionnaireTemplateId)
+                      }}
+                    >
+                      <MoreHorizontalIcon size={16} />
+                    </button>
+                    {menuOpen && (
+                      <div className="li-int-card-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            setModalQuestionnaire(t)
+                          }}
+                        >
+                          Edit in window
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="li-int-card-menu-danger"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            void archive(t)
+                          }}
+                        >
+                          Archive
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {/* Service-bound intake forms — every service's questionnaire, so
+                  this page is the full inventory. Edited in the service builder. */}
+              {(svcForms ?? []).map((f) => (
+                <Link
+                  key={`svc-${f.serviceKey}`}
+                  href={`/attorney/services/${encodeURIComponent(f.serviceKey)}/questionnaire`}
+                  className="li-viewlist-row"
+                  aria-label={`Open ${f.title} (edited in the ${f.serviceName} service)`}
+                >
+                  <span className="li-viewlist-name">{f.title}</span>
+                  <StatusBadge active={f.isActive} />
+                  <span className="li-viewlist-meta">
+                    {f.fieldCount} question{f.fieldCount === 1 ? '' : 's'}
+                  </span>
                 </Link>
               ))}
             </div>

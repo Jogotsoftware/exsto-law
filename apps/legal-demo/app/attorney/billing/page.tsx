@@ -13,6 +13,7 @@ import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDate } from '@/lib/datetime'
 import { CheckIcon } from '@/components/icons'
+import { Tabs } from '@/components/Tabs'
 
 // A select-all checkbox for a table/group header: checked when every row is
 // selected, indeterminate when only some are. The attorney asked for one plain
@@ -1081,20 +1082,12 @@ export default function BillingPage(): React.ReactElement {
       <p className="li-bill-subtitle">
         Unbilled work, issued invoices, and the firm rates they draw from.
       </p>
-      <div className="li-bill-tabs" role="tablist">
-        {BILL_TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.key}
-            className={`li-bill-tab ${tab === t.key ? 'is-active' : ''}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        ariaLabel="Billing"
+        tabs={BILL_TABS}
+        active={tab}
+        onSelect={(k) => setTab(k as BillTabKey)}
+      />
       <div role="tabpanel">
         {tab === 'unbilled' && <UnbilledTab onIssued={() => setReloadKey((k) => k + 1)} />}
         {tab === 'invoices' && <InvoicesTab reloadKey={reloadKey} />}

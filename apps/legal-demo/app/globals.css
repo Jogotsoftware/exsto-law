@@ -162,11 +162,17 @@ a:hover {
 
 h1 {
   margin: 0 0 0.5rem;
-  font-family: var(--font-serif, Georgia, 'Times New Roman', serif);
-  font-size: 1.9rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  /* THE attorney page-header style — single source of truth (docs/design/
+     legal-instruments). Public Sans 28/700 navy; serif is reserved for the
+     wordmark, client-facing heroes, and document bodies, and every one of
+     those overrides font-family/size/weight explicitly. Per-page li-*-title
+     classes carry ONLY margins — the css:check guard keeps it that way. */
+  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   line-height: 1.18;
+  color: var(--li-navy);
 }
 h2 {
   margin: 0 0 0.85rem;
@@ -9780,12 +9786,7 @@ input[type='number'] {
    (full restyle is WP-H — this only styles the card container around it).
    ──────────────────────────────────────────────────────────────────────── */
 .li-dash-title {
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   margin: 0 0 20px;
-  color: var(--li-navy);
 }
 
 .li-dash-grid {
@@ -10714,26 +10715,6 @@ input[type='number'] {
 }
 
 /* AI usage */
-.li-set-window-tabs {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 16px;
-}
-.li-set-window-tab {
-  border: 1px solid var(--li-border-input);
-  background: #fff;
-  border-radius: 8px;
-  padding: 7px 14px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--li-muted);
-  cursor: pointer;
-}
-.li-set-window-tab.on {
-  background: var(--li-navy);
-  color: #fff;
-  border-color: var(--li-navy);
-}
 .li-set-stat-row {
   display: flex;
   gap: 14px;
@@ -10924,11 +10905,7 @@ input[type='number'] {
   color: var(--li-body);
 }
 .li-rev-title {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   margin: 0 0 6px;
-  color: var(--li-fg);
 }
 .li-rev-sub {
   margin: 0 0 18px;
@@ -10936,7 +10913,9 @@ input[type='number'] {
   font-size: 14px;
 }
 .li-rev-empty {
-  color: var(--li-muted);
+  padding: 32px 4px;
+  text-align: center;
+  color: var(--li-muted-2);
   font-size: 14px;
 }
 .li-rev-alert {
@@ -11839,12 +11818,7 @@ input[type='number'] {
    li-set- or li-dash- so the two page families stay independent.
    ──────────────────────────────────────────────────────────────────────── */
 .li-bill-title {
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   margin: 0 0 6px;
-  color: var(--li-navy);
 }
 .li-bill-subtitle {
   margin: 0 0 20px;
@@ -11853,29 +11827,6 @@ input[type='number'] {
 }
 
 /* Underline tab strip */
-.li-bill-tabs {
-  display: flex;
-  gap: 28px;
-  border-bottom: 1px solid var(--li-border);
-  margin-bottom: 24px;
-}
-.li-bill-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 0 0 12px;
-  margin-bottom: -1px;
-  font-family: inherit;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--li-muted);
-  cursor: pointer;
-}
-.li-bill-tab.is-active {
-  font-weight: 700;
-  color: var(--li-navy);
-  border-bottom-color: var(--li-gold);
-}
 
 /* Unbilled — per-client sections */
 .li-bill-client-section {
@@ -12507,11 +12458,7 @@ input[type='number'] {
   margin-bottom: 18px;
 }
 .li-svc-title {
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-size: 28px;
-  font-weight: 600;
   margin: 0;
-  color: var(--li-fg);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -12588,26 +12535,31 @@ input[type='number'] {
 .li-svc-tabs {
   margin-bottom: 22px;
 }
+/* Canonical underline metrics (matches .nav-tabs.li-crm-tabs / .li-tabs). */
 .li-svc-tabs .nav-tabs {
   display: flex;
-  gap: 2px;
+  gap: 28px;
   border-bottom: 1px solid var(--li-border);
   margin: 0;
 }
 .li-svc-tabs .nav-tabs a {
   background: transparent;
   border: none;
-  padding: 11px 15px;
-  font-size: 14px;
+  padding: 0 0 12px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--li-muted);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }
+.li-svc-tabs .nav-tabs a:hover {
+  color: var(--li-navy);
+  text-decoration: none;
+}
 .li-svc-tabs .nav-tabs a.is-active {
   font-weight: 700;
-  color: var(--li-fg);
-  border-bottom-color: var(--li-gold);
+  color: var(--li-navy);
+  border-bottom-color: var(--li-navy);
 }
 
 .li-svc-airail {
@@ -12938,7 +12890,6 @@ fieldset.li-svc-fieldset legend {
   border: none;
   border-bottom: 1.5px solid var(--li-border);
   padding: 6px 2px;
-  font-family: inherit;
   font-size: 16px;
   font-weight: 700;
   color: var(--li-fg);
@@ -13297,7 +13248,6 @@ fieldset.li-svc-fieldset legend {
   text-align: center;
   font-weight: 700;
   font-size: 12px;
-  font-family: var(--font-sans), 'Public Sans', sans-serif;
   margin-bottom: 14px;
 }
 .li-svc-thumb-line {
@@ -13483,12 +13433,7 @@ fieldset.li-svc-fieldset legend {
   margin-bottom: 18px;
 }
 .li-mat-list-title {
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   margin: 0;
-  color: var(--li-navy);
 }
 .li-mat-list-newbtn {
   display: inline-flex;
@@ -13509,7 +13454,7 @@ fieldset.li-svc-fieldset legend {
 
 .li-mat-toolbar {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 16px;
   flex-wrap: wrap;
   align-items: center;
@@ -13522,7 +13467,7 @@ fieldset.li-svc-fieldset legend {
   border: 1px solid var(--li-border-input);
   border-radius: var(--li-radius-btn);
   padding: 0 12px;
-  height: 40px;
+  height: 34px;
   flex: 1 1 260px;
   max-width: 320px;
   color: var(--li-muted-2);
@@ -13543,10 +13488,10 @@ fieldset.li-svc-fieldset legend {
   align-items: center;
   gap: 8px;
   background: var(--li-card);
-  border: 1px solid var(--li-border-input);
+  border: 1px solid var(--li-border);
   border-radius: var(--li-radius-btn);
-  padding: 0 30px 0 14px;
-  height: 40px;
+  padding: 0 26px 0 12px;
+  height: 34px;
   cursor: pointer;
 }
 .li-mat-filter:hover {
@@ -13558,11 +13503,15 @@ fieldset.li-svc-fieldset legend {
   background: transparent;
   border: none;
   font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--li-body);
+  color: var(--li-muted-2);
   outline: none;
   cursor: pointer;
+}
+.li-mat-filter:hover select,
+.li-mat-filter:focus-within select {
+  color: var(--li-navy);
 }
 .li-mat-filter svg {
   position: absolute;
@@ -13746,17 +13695,23 @@ fieldset.li-svc-fieldset legend {
 
 /* Tab strip — scoped to .nav-tabs.li-mat-tabs so the CRM/service-editor's
    .nav-tabs default look is untouched (NavTabs className is additive). */
+/* Canonical underline metrics (matches .nav-tabs.li-crm-tabs / .li-tabs). */
 .nav-tabs.li-mat-tabs {
-  gap: 2px;
+  gap: 28px;
   border-bottom: 1px solid var(--li-border-input);
   margin-bottom: 22px;
 }
 .nav-tabs.li-mat-tabs a {
-  padding: 11px 16px;
-  font-size: 14px;
+  padding: 0 0 12px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--li-muted);
   border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.nav-tabs.li-mat-tabs a:hover {
+  color: var(--li-navy);
+  text-decoration: none;
 }
 .nav-tabs.li-mat-tabs a.is-active {
   color: var(--li-navy);
@@ -14754,28 +14709,11 @@ fieldset.li-svc-fieldset legend {
   padding: 0;
   overflow: hidden;
 }
-.li-mat-billtabs {
-  display: flex;
-  gap: 2px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--li-border-soft);
-  background: var(--li-bg);
-}
-.li-mat-billtab {
-  background: none;
-  border: none;
-  border-radius: 9px;
-  padding: 8px 16px;
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--li-muted);
-  cursor: pointer;
-}
-.li-mat-billtab.is-active {
-  background: var(--li-card);
-  font-weight: 700;
-  color: var(--li-navy);
-  box-shadow: var(--li-shadow-card);
+/* The shared .li-tabs bar is transparent/unpadded; inside this zero-padding
+   card it needs its own inset (the retired .li-mat-billtabs strip carried it). */
+.li-mat-billcard .li-tabs {
+  padding: 14px 20px 0;
+  margin-bottom: 0;
 }
 .li-mat-billpanel {
   padding: 20px 24px;
@@ -14947,12 +14885,7 @@ fieldset.li-svc-fieldset legend {
   margin-bottom: 18px;
 }
 .li-tpl-title {
-  font-family: 'Public Sans', sans-serif;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   margin: 0;
-  color: var(--li-fg);
 }
 .li-tpl-new-btn {
   display: inline-flex;
@@ -15054,18 +14987,15 @@ fieldset.li-svc-fieldset legend {
 }
 .li-tpl-card-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 .li-tpl-card-name {
   font-size: 14.5px;
   font-weight: 600;
   color: var(--li-fg);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .li-tpl-card-badge {
   flex: 0 0 auto;
@@ -15737,12 +15667,7 @@ fieldset.li-svc-fieldset legend {
   gap: 12px;
 }
 .li-mail-title {
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   margin: 0;
-  color: var(--li-navy);
 }
 .li-mail-composebtn {
   display: inline-flex;
@@ -15761,32 +15686,49 @@ fieldset.li-svc-fieldset legend {
   background: var(--li-navy-hover);
 }
 
-.li-mail-tabs {
+/* ── Controlled underline tab bar (components/Tabs.tsx) — the <button>
+   counterpart to .nav-tabs' link underline look. Explicitly neutralizes the
+   global button chrome (radius, hover fill, boxy focus ring) that made the
+   old one-off .li-mail-tab render a rounded artifact. ─────────────────── */
+.li-tabs {
   display: flex;
   gap: 28px;
   border-bottom: 1px solid var(--li-border-input);
   margin-bottom: 18px;
 }
-.li-mail-tab {
+.li-tabs .li-tabs-tab {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   background: none;
   border: none;
+  border-radius: 0;
   padding: 0 0 12px;
   font-size: 15px;
   font-weight: 500;
+  font-family: inherit;
   color: var(--li-muted);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   cursor: pointer;
 }
-.li-mail-tab.is-active {
+.li-tabs .li-tabs-tab:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+  color: var(--li-navy);
+}
+.li-tabs .li-tabs-tab.is-active,
+.li-tabs .li-tabs-tab.is-active:hover:not(:disabled) {
   font-weight: 700;
   color: var(--li-navy);
   border-bottom-color: var(--li-navy);
 }
-.li-mail-tab-count {
+.li-tabs .li-tabs-tab:focus-visible {
+  outline: none;
+  color: var(--li-navy);
+  border-bottom-color: var(--li-navy);
+}
+.li-tabs-count {
   font-size: 11px;
   font-weight: 700;
   color: #fff;
@@ -16307,12 +16249,7 @@ fieldset.li-svc-fieldset legend {
   margin-bottom: 18px;
 }
 .li-crm-list-title {
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   margin: 0;
-  color: var(--li-navy);
   display: flex;
   align-items: baseline;
   gap: 12px;
@@ -16860,11 +16797,7 @@ fieldset.li-svc-fieldset legend {
   gap: 16px;
 }
 .li-cal-title {
-  font-family: var(--font-sans), 'Public Sans', system-ui, sans-serif;
-  font-size: 28px;
-  font-weight: 600;
   margin: 0;
-  color: var(--li-navy);
 }
 .li-cal-nav {
   display: flex;
@@ -18822,25 +18755,15 @@ a.li-uac-done-primary:hover {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  margin-bottom: 6px;
+  margin-bottom: 18px;
 }
 .li-int-title {
-  font-family: 'Public Sans', sans-serif;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   margin: 0;
-  color: var(--li-fg);
 }
 .li-int-sub {
   margin: 6px 0 0;
   color: var(--li-muted);
   font-size: 14px;
-}
-.li-int-sublink {
-  margin: 0 0 20px;
-  color: var(--li-muted-2);
-  font-size: 13px;
 }
 .li-int-new-btn {
   display: inline-flex;
@@ -18960,18 +18883,15 @@ a.li-uac-done-primary:hover {
 }
 .li-int-card-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 .li-int-card-name {
   font-size: 14.5px;
   font-weight: 600;
   color: var(--li-fg);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .li-int-card-sub {
   font-size: 12px;
@@ -19220,10 +19140,6 @@ a.li-uac-done-primary:hover {
   margin-bottom: 20px;
 }
 .li-esign-title {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--li-navy);
   margin: 0 0 4px;
 }
 .li-esign-sub {
@@ -19486,10 +19402,6 @@ a.li-uac-done-primary:hover {
   margin-bottom: 20px;
 }
 .li-esign-detail-title {
-  font-size: 25px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--li-navy);
   margin: 0 0 6px;
 }
 .li-esign-detail-meta {
@@ -24053,6 +23965,78 @@ details.li-brief-research summary:hover {
   .li-cp-sign-pdfframe {
     height: 60vh;
   }
+}
+
+/* ── Grid⇄list view toggle + list rows (Templates, Intake Forms) ───────── */
+.li-viewtoggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--li-border-input);
+  border-radius: 8px;
+  background: #fff;
+}
+.li-viewtoggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--li-muted-2);
+  cursor: pointer;
+}
+.li-viewtoggle button:hover:not(:disabled) {
+  border-color: transparent;
+  background: #f4f6fb;
+  color: var(--li-navy);
+}
+.li-viewtoggle button.on,
+.li-viewtoggle button.on:hover:not(:disabled) {
+  background: var(--li-gold-bg-soft);
+  color: var(--li-navy);
+}
+.li-viewlist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.li-viewlist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  text-decoration: none;
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-left: 3px solid var(--li-navy);
+  border-radius: 10px;
+  /* right padding clears the absolute kebab button reused from the cards */
+  padding: 11px 48px 11px 16px;
+  font-size: 14px;
+  color: inherit;
+  cursor: pointer;
+  font-family: inherit;
+}
+.li-viewlist-row:hover:not(:disabled) {
+  background: var(--li-card);
+  border-color: var(--li-gold);
+  border-left-color: var(--li-navy);
+}
+.li-viewlist-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--li-navy);
+}
+.li-viewlist-meta {
+  font-size: 12.5px;
+  color: var(--li-muted);
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 /* ── FB-B — Settings → Assistant (custom instructions) ─────────────────────── */

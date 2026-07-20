@@ -20,6 +20,7 @@ import { formatDateTime } from '@/lib/datetime'
 import { MailComposer, type ComposerValue } from '@/components/MailComposer'
 import { SignatureBlock, type FirmSignature } from '@/components/SignatureBlock'
 import { Modal } from '@/components/Modal'
+import { Tabs } from '@/components/Tabs'
 import { AttachmentPicker, type PickedAttachment } from '@/components/mail/AttachmentPicker'
 import { SearchIcon, SendIcon, FileTextIcon, PlusIcon } from '@/components/icons'
 
@@ -558,26 +559,15 @@ export default function MailPage() {
       {portalError && <div className="alert alert-error">{portalError}</div>}
       {sentNote && <div className="alert">{sentNote}</div>}
 
-      <div className="li-mail-tabs">
-        <button
-          type="button"
-          className={`li-mail-tab ${tab === 'email' ? 'is-active' : ''}`}
-          onClick={() => setTab('email')}
-        >
-          Email
-          {inboxUnread > 0 && <span className="li-mail-tab-count">{inboxUnread}</span>}
-        </button>
-        <button
-          type="button"
-          className={`li-mail-tab ${tab === 'portal' ? 'is-active' : ''}`}
-          onClick={() => setTab('portal')}
-        >
-          Portal chat
-          {portalUnreadTabCount > 0 && (
-            <span className="li-mail-tab-count">{portalUnreadTabCount}</span>
-          )}
-        </button>
-      </div>
+      <Tabs
+        ariaLabel="Mail"
+        tabs={[
+          { key: 'email', label: 'Email', badge: inboxUnread },
+          { key: 'portal', label: 'Portal chat', badge: portalUnreadTabCount },
+        ]}
+        active={tab}
+        onSelect={(k) => setTab(k as MailTab)}
+      />
 
       <div className="li-mail-grid">
         {tab === 'email' ? (
