@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
 import { SendToClientModal } from '@/components/SendToClientModal'
+import { VersionCompareDrawer } from '@/components/VersionCompareDrawer'
 import { formatDate } from '@/lib/datetime'
 import { MoreVerticalIcon, UploadIcon } from '@/components/icons'
 import { readDevSession } from '@/lib/auth'
@@ -163,6 +164,8 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
   const [uploads, setUploads] = useState<UploadedDoc[]>([])
   const [loading, setLoading] = useState(true)
   const [showSend, setShowSend] = useState(false)
+  // B2.3 — "View Redlines" drawer entry point from the version tag.
+  const [showCompare, setShowCompare] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [emailStatus, setEmailStatus] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
@@ -364,6 +367,13 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
         />
       )}
 
+      {showCompare && draft && (
+        <VersionCompareDrawer
+          documentVersionId={draft.documentVersionId}
+          onClose={() => setShowCompare(false)}
+        />
+      )}
+
       <div className="li-mat-card li-mat-doccard">
         <div className="li-mat-doccard-head">
           <h2 className="li-mat-card-title">Documents</h2>
@@ -448,6 +458,18 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
                         >
                           Email
                         </button>
+                        {draft.versionNumber > 1 && (
+                          <button
+                            type="button"
+                            className="li-mat-menu-item"
+                            onClick={() => {
+                              setOpenMenuId(null)
+                              setShowCompare(true)
+                            }}
+                          >
+                            View Redlines
+                          </button>
+                        )}
                       </div>
                     </>
                   )}

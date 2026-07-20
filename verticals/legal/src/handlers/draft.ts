@@ -916,6 +916,18 @@ interface DocumentEditPayload {
   document_version_id: string // the version being edited
   document_markdown: string
   note?: string
+  // B2.3 (SAVE-REDLINES-1) — optional AS A GROUP. Present only when this edit
+  // came from the tracked-changes editor; a bare programmatic edit (e.g.
+  // approve-time system-token resolution, resolveSystemTokensBeforeApprove)
+  // omits all of these and gets EXACTLY the pre-B2.3 behavior — no
+  // document.redlined event, no ops blob, reasoning_trace_id stays null.
+  // `source` is the group's presence marker: gated on it, not on `ops`, since
+  // an all-untracked-edits session legitimately has an empty ops.accepted.
+  ops?: unknown
+  source?: 'human' | 'ai_accepted' | 'mixed'
+  instruction_text?: string
+  reasoning_trace_id?: string
+  counts?: { accepted: number; rejected: number; ai: number; manual: number }
 }
 
 registerActionHandler('document.edit', async (ctx, client, payload, actionId) => {
@@ -947,6 +959,9 @@ registerActionHandler('document.edit', async (ctx, client, payload, actionId) =>
   )
   const nextVersion = (maxRes.rows[0]?.max ?? 0) + 1
 
+  // De-orphan the revise-time reasoning trace (B2.3): when this edit accepted
+  // an AI revision, reasoning_trace_id now rides on the version it produced
+  // instead of always being null.
   const versionId = await insertDocumentVersion(client, {
     tenantId: ctx.tenantId,
     actionId,
@@ -954,13 +969,58 @@ registerActionHandler('document.edit', async (ctx, client, payload, actionId) =>
     contentBlobId,
     versionNumber: nextVersion,
     status: base.status === 'approved' ? 'approved' : 'pending_review',
-    reasoningTraceId: null,
+    reasoningTraceId: p.reasoning_trace_id ?? null,
     metadata: {
       edited_from_version_id: p.document_version_id,
       editor_actor_id: ctx.actorId,
       note: p.note ?? null,
     },
   })
+
+  // The structured redline artifact (B2.3): only for edits that carry the
+  // group (the tracked-changes editor) — a bare programmatic edit stays a
+  // silent version bump exactly as before.
+  if (p.source) {
+    const matterRes = await client.query<{ matter_entity_id: string }>(
+      `SELECT r.target_entity_id AS matter_entity_id
+         FROM relationship r
+         JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+        WHERE r.tenant_id = $1 AND r.source_entity_id = $2
+          AND rkd.kind_name IN ('draft_of', 'comm_draft_of')
+        LIMIT 1`,
+      [ctx.tenantId, base.document_entity_id],
+    )
+    const matterEntityId = matterRes.rows[0]?.matter_entity_id ?? null
+
+    // ops "can rival body size" (the task's own words) — never inlined into
+    // the event payload; a dedicated content_blob, same as the document body.
+    const opsBlobId = await insertContentBlob(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      contentType: 'application/json',
+      body: JSON.stringify(p.ops ?? {}),
+    })
+
+    await insertEvent(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      eventKindName: 'document.redlined',
+      primaryEntityId: matterEntityId,
+      secondaryEntityIds: [base.document_entity_id],
+      sourceType: 'human',
+      sourceRef: ctx.actorId,
+      data: {
+        from_version_id: p.document_version_id,
+        to_version_id: versionId,
+        editor_actor_id: ctx.actorId,
+        source: p.source,
+        ops_blob_id: opsBlobId,
+        instruction_text: p.instruction_text ?? null,
+        reasoning_trace_id: p.reasoning_trace_id ?? null,
+        counts: p.counts ?? { accepted: 0, rejected: 0, ai: 0, manual: 0 },
+      },
+    })
+  }
 
   return {
     documentEntityId: base.document_entity_id,

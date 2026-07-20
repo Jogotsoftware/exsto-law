@@ -25,14 +25,17 @@ import { useFitToWidth } from '@/lib/useFitToWidth'
 import {
   acceptAll,
   acceptHunk,
+  buildRedlineCounts,
   buildSessionNote,
   carryOver,
+  classifyRedlineSource,
   diffRuns,
   groupHunks,
   mapBaseRangeToCurStrict,
   undoAccept,
   type AcceptState,
   type PendingHunk,
+  type RedlineOp,
   type TrackRun,
 } from '@/lib/trackedChanges'
 import { TemplateVariable } from '@/components/templates/TemplateVariableNode'
@@ -47,6 +50,7 @@ import {
 import { DocumentSheet } from '@/components/DocumentSheet'
 import { GemSparkle, GemShimmer } from '@/components/GemSparkle'
 import { ConfirmModal } from '@/components/ConfirmModal'
+import { useDialogEscapeStack } from '@/components/Modal'
 import {
   BoldIcon,
   ItalicIcon,
@@ -138,7 +142,17 @@ export function TrackedChangesEditor({
   const [aiWorking, setAiWorking] = useState(false)
   const [aiNoChange, setAiNoChange] = useState(false)
   const aiPromptsRef = useRef<string[]>([])
+  // B2.3 — the reasoning_trace_id each AI revision call produced, same index
+  // order as aiPromptsRef. Saved links the LAST one to the accepting edit's
+  // document_version (de-orphaning the revise-time trace: document.edit
+  // previously always wrote reasoningTraceId: null regardless).
+  const aiTraceIdsRef = useRef<string[]>([])
   const [aiPromptCount, setAiPromptCount] = useState(0)
+  // B2.3 — rejected hunks this session (accepted ones already live in
+  // acceptRef.current.accepted). Currently these vanish on Reject with no
+  // record anywhere; kept here so a rejected AI suggestion is still counted
+  // and stored in the redline ops blob, not silently dropped.
+  const rejectedRef = useRef<RedlineOp[]>([])
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -253,20 +267,24 @@ export function TrackedChangesEditor({
     }),
   })
 
-  // Full-screen dialog behavior: body scroll lock + Escape closes (unless the
-  // discard-confirm is up — it owns Escape then).
+  // Full-screen dialog behavior: body scroll lock + Escape closes. This editor
+  // can now render INSIDE another surface's own <Modal> (the workflow runner's
+  // step modal — B2.1), so its Escape handling joins the SAME open-dialog stack
+  // <Modal> uses: without that, both this listener and the host Modal's would
+  // fire on one Escape press, and the host could close out from under an
+  // unsaved edit. The confirmRef check stays as defense in depth even though
+  // the discard-confirm (a <ConfirmModal>, itself stack-aware) already sits
+  // above this editor in the same stack.
   useEffect(() => {
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !confirmRef.current) requestCloseRef.current()
-    }
-    document.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = prevOverflow
-      document.removeEventListener('keydown', onKey)
     }
   }, [])
+  useDialogEscapeStack(() => {
+    if (!confirmRef.current) requestCloseRef.current()
+  })
 
   // Initial focus: the AI rail when opened via "AI revision", else the page.
   useEffect(() => {
@@ -281,6 +299,20 @@ export function TrackedChangesEditor({
     (hunks: PendingHunk[]): void => {
       const ed = editorRef.current
       if (!ed || hunks.length === 0) return
+      // B2.3 — log every rejected hunk (AI or manual) before it's gone; Save
+      // carries these in the redline ops blob / counts so a rejected AI
+      // suggestion is a recorded outcome, not silence.
+      rejectedRef.current = [
+        ...rejectedRef.current,
+        ...hunks.map((h) => ({
+          id: h.id,
+          kind: h.kind,
+          oldText: h.oldText,
+          newText: h.newText,
+          origin: h.origin,
+          prompt: h.prompt,
+        })),
+      ]
       const map = extractDocText(ed.state.doc)
       // Back-to-front so earlier hunks' positions stay valid while later ones
       // splice.
@@ -334,6 +366,19 @@ export function TrackedChangesEditor({
       acceptRef.current.accepted.length === 0 &&
       acceptRef.current.baseText === initialBaseTextRef.current
     ) {
+      // B2.3 — log these as rejected too; the shortcut skips applyRejects'
+      // editor-transaction path but not its bookkeeping.
+      rejectedRef.current = [
+        ...rejectedRef.current,
+        ...pendingRef.current.map((h) => ({
+          id: h.id,
+          kind: h.kind,
+          oldText: h.oldText,
+          newText: h.newText,
+          origin: h.origin,
+          prompt: h.prompt,
+        })),
+      ]
       ed.commands.setContent(seedHtmlRef.current, { emitUpdate: false })
       recompute()
       return
@@ -374,6 +419,7 @@ export function TrackedChangesEditor({
         setTrackOn(true)
         ed.commands.setContent(markdownToHtml(res.revisedMarkdown), { emitUpdate: false })
         aiPromptsRef.current = [...aiPromptsRef.current, res.instruction]
+        aiTraceIdsRef.current = [...aiTraceIdsRef.current, res.reasoningTraceId]
         setAiPromptCount(aiPromptsRef.current.length)
         setAiPrompt('')
         recompute({ prompt: res.instruction })
@@ -401,9 +447,34 @@ export function TrackedChangesEditor({
         aiPromptsRef.current,
         untrackedEditsRef.current,
       )
+      // B2.3 — the structured redline artifact. The handler stores `ops` as a
+      // content_blob and emits document.redlined alongside the new version;
+      // reasoningTraceId links the LAST AI revision's trace (if any) to the
+      // accepting edit, de-orphaning it.
+      const counts = buildRedlineCounts(acceptRef.current.accepted, rejectedRef.current)
+      const source = classifyRedlineSource(counts, untrackedEditsRef.current)
+      const instructionText =
+        aiPromptsRef.current.length > 0 ? aiPromptsRef.current.join(' | ') : undefined
+      const reasoningTraceId =
+        aiTraceIdsRef.current.length > 0
+          ? aiTraceIdsRef.current[aiTraceIdsRef.current.length - 1]
+          : undefined
       const result = await callAttorneyMcp<{ effects: Array<{ documentVersionId?: string }> }>({
         toolName: 'legal.draft.edit',
-        input: { documentVersionId: draft.documentVersionId, documentMarkdown, note },
+        input: {
+          documentVersionId: draft.documentVersionId,
+          documentMarkdown,
+          note,
+          ops: {
+            accepted: acceptRef.current.accepted,
+            rejected: rejectedRef.current,
+            untrackedEdits: untrackedEditsRef.current,
+          },
+          source,
+          instructionText,
+          reasoningTraceId,
+          counts,
+        },
       })
       const newId = result.effects?.find((e) => e.documentVersionId)?.documentVersionId ?? null
       onSaved(newId)

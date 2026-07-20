@@ -33,6 +33,7 @@
 // shape with plain fakes — no DB, no model, no module mocking.
 import { randomUUID } from 'node:crypto'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
+import { enqueueJob } from '@exsto/worker-runtime'
 import { callClaudeDrafter } from '../adapters/claude.js'
 import type { AiTask } from '../lib/modelRouter.js'
 import { DATA_BEGIN, DATA_END } from './assistantContext.js'
@@ -571,4 +572,38 @@ export async function getOrRefreshMatterBrief(
     watermark: bundle.sourceWatermark,
     refreshed: true,
   }
+}
+
+// ── Background enqueue (B2.2 — MATTER-BRIEF-BACKGROUND-1) ───────────────────
+// legal.matter.brief.generate (above, via the MCP tool) is a synchronous model
+// call in the request — fine for a tool the assistant invokes off its own turn,
+// but wrong for a page affordance the attorney clicks (the same Lesson #2 that
+// moved document drafting off the request in PROD-DRAFT-OFFLOAD-1). This is the
+// enqueue-and-return sibling: insert a `legal.brief.run` worker_job (cloned from
+// generateDocumentRuntime.ts's enqueueDraftAutoRunJob) and return immediately;
+// the worker claims it and calls getOrRefreshMatterBrief — this exact function,
+// unchanged — off the request. legal.matter.brief.generate's sync contract is
+// untouched; this is additive.
+//
+// The job payload key is `target_entity_id`, matching persistBrief's action
+// payload above (never `matter_entity_id`) — the SAME reason: nothing this path
+// writes should be mistakable for matter-scoped activity that would feed
+// computeMatterWatermark. In practice a worker_job payload is never read by
+// getMatterHistory at all, so this is naming discipline rather than a live bug,
+// but it keeps one vocabulary across the whole brief pipeline.
+export async function enqueueBriefJob(
+  ctx: ActionContext,
+  matterEntityId: string,
+  opts: GetOrRefreshOptions = {},
+): Promise<string> {
+  return enqueueJob({
+    tenantId: ctx.tenantId,
+    jobKind: 'legal.brief.run',
+    payload: {
+      target_entity_id: matterEntityId,
+      brief_type: 'matter',
+      ...(opts.depth ? { depth: opts.depth } : {}),
+      force: opts.force === true,
+    },
+  })
 }

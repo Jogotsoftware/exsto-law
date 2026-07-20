@@ -624,6 +624,73 @@ describe('buildServiceDigestEvidence — accepted revisions + edit notes + revis
     expect(bundle.sourceWatermark).toBe('2026-03-03T00:00:00Z')
   })
 
+  // SAVE-REDLINES-1 (B2.3): buildServiceDigestEvidence now reads the structured
+  // document.redlined event FIRST (ServiceDraftNote.redline) and only falls
+  // back to parsing the "AI revision: " note-string prefix when a version
+  // carries no such event (pre-B2.3 history, or a path that never sends it).
+  it('classifies structured-first from the redline field, independent of the note text', () => {
+    const material: ServiceDigestSignals = {
+      draftNotes: [
+        {
+          matterEntityId: 'm1',
+          matterNumber: '2026-001',
+          documentKind: 'operating_agreement',
+          documentVersionId: 'dv1',
+          versionNumber: 2,
+          // No "AI revision: " prefix here — the flagship editor's actual note
+          // shape (buildSessionNote's "Tracked edits: …") — legacy parsing
+          // alone would mis-bucket this as a manual edit.
+          note: 'Tracked edits: 1 change accepted (AI)',
+          recordedAt: '2026-03-01T00:00:00Z',
+          redline: { source: 'ai_accepted', instructionText: 'Make the tone firmer.' },
+        },
+        {
+          matterEntityId: 'm2',
+          matterNumber: '2026-002',
+          documentKind: 'operating_agreement',
+          documentVersionId: 'dv2',
+          versionNumber: 4,
+          note: 'Tracked edits: 2 changes accepted (1 AI, 1 manual)',
+          recordedAt: '2026-03-02T00:00:00Z',
+          redline: { source: 'mixed', instructionText: 'Add a confidentiality clause.' },
+        },
+        {
+          matterEntityId: 'm3',
+          matterNumber: '2026-003',
+          documentKind: 'operating_agreement',
+          documentVersionId: 'dv3',
+          versionNumber: 5,
+          note: 'Tracked edits: 1 change accepted (manual)',
+          recordedAt: '2026-03-03T00:00:00Z',
+          redline: { source: 'human', instructionText: null },
+        },
+        {
+          matterEntityId: 'm4',
+          matterNumber: '2026-004',
+          documentKind: 'operating_agreement',
+          documentVersionId: 'dv4',
+          versionNumber: 2,
+          // Legacy row — no redline event at all (pre-B2.3). Falls back to
+          // the note-string prefix, unchanged.
+          note: 'AI revision: Shorten the deadline.',
+          recordedAt: '2026-03-04T00:00:00Z',
+        },
+      ],
+      revisionRequests: [],
+    }
+    const bundle = buildServiceDigestEvidence(material, DIGEST_SCOPE, 'balanced', ASSEMBLED_AT)
+    const accepted = bundle.sections.find((s) => s.source === 'accepted_revisions')!
+    // ai_accepted, mixed, AND the legacy-fallback row all land as accepted
+    // revisions, using the structured instructionText where available.
+    expect(accepted.content).toContain('Make the tone firmer.')
+    expect(accepted.content).toContain('Add a confidentiality clause.')
+    expect(accepted.content).toContain('Shorten the deadline.')
+    expect(accepted.content).not.toContain('AI revision:')
+    const edits = bundle.sections.find((s) => s.source === 'edit_notes')!
+    expect(edits.content).toContain('Tracked edits: 1 change accepted (manual)')
+    expect(edits.content).not.toContain('Make the tone firmer.')
+  })
+
   it('returns an empty bundle (not an error) when the service has no signals yet', () => {
     const material: ServiceDigestSignals = { draftNotes: [], revisionRequests: [] }
     const bundle = buildServiceDigestEvidence(material, DIGEST_SCOPE, 'balanced', ASSEMBLED_AT)

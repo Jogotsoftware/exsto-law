@@ -357,15 +357,31 @@ export function mapBaseRangeToCurStrict(
 
 // The version-history note summarizing the session: counts by origin plus the
 // AI prompts used. Pure so it's testable.
+//
+// SAVE-REDLINES-1 (B2.3): when the session accepted at least one AI-origin
+// change, the note now LEADS with the exact "AI revision: " prefix
+// (briefEvidence.ts's AI_REVISION_PREFIX) the Service Digest's legacy
+// note-string classifier `.startsWith()`s on — belt-and-braces alongside the
+// new structured document.redlined event (verticals/legal/src/handlers/
+// draft.ts), which is the primary signal now. Before this fix the shipped
+// editor only ever wrote "Tracked edits: …", so every flagship AI revision
+// was silently mis-bucketed as a plain manual edit in both the Service Digest
+// and (via the same prefix) the draft-revision "already fixed" context.
 export function buildSessionNote(
   accepted: AcceptedChange[],
   aiPrompts: string[],
   untrackedEdits: boolean,
 ): string {
   const parts: string[] = []
+  const ai = accepted.filter((c) => c.origin === 'ai').length
+  const manual = accepted.length - ai
+  const leadWithAiRevision = ai > 0 && aiPrompts.length > 0
+
+  if (leadWithAiRevision) {
+    const quoted = aiPrompts.map((p) => `“${p}”`).join('; ')
+    parts.push(`AI revision: ${quoted}`)
+  }
   if (accepted.length > 0) {
-    const ai = accepted.filter((c) => c.origin === 'ai').length
-    const manual = accepted.length - ai
     const breakdown =
       ai > 0 && manual > 0
         ? ` (${ai} AI, ${manual} manual)`
@@ -378,11 +394,66 @@ export function buildSessionNote(
       `Tracked edits: ${accepted.length} change${accepted.length === 1 ? '' : 's'} accepted${breakdown}`,
     )
   }
-  if (aiPrompts.length > 0) {
+  if (!leadWithAiRevision && aiPrompts.length > 0) {
     const quoted = aiPrompts.map((p) => `“${p}”`).join('; ')
     parts.push(`AI prompts: ${quoted}`)
   }
   if (untrackedEdits) parts.push('Direct edits with track changes off')
   if (parts.length === 0) parts.push('Edited in the document editor')
   return `${parts.join('. ')}.`
+}
+
+// ── Redline artifact (B2.3 — SAVE-REDLINES-1) ────────────────────────────────
+// The structured shape handleSave sends to legal.draft.edit, which the
+// document.edit handler stores as a content_blob (ops_blob_id) and summarizes
+// into the new document.redlined event. Both accepted AND rejected hunks are
+// carried — a rejected AI suggestion currently vanishes entirely (the task's
+// "shipped learning-loop bug"); this is the fix.
+export interface RedlineOp {
+  id: string
+  kind: HunkKind
+  oldText: string
+  newText: string
+  origin: ChangeOrigin
+  prompt?: string
+}
+
+export type RedlineSource = 'human' | 'ai_accepted' | 'mixed'
+
+export interface RedlineCounts {
+  accepted: number
+  rejected: number
+  ai: number
+  manual: number
+}
+
+// Pure — from the session's accepted + rejected logs, counts by disposition ×
+// origin. `ai`/`manual` count ACCEPTED changes only (an origin split on
+// rejected hunks is in the ops blob for anyone who wants it, but the summary
+// counts mirror buildSessionNote's own breakdown).
+export function buildRedlineCounts(
+  accepted: AcceptedChange[],
+  rejected: RedlineOp[],
+): RedlineCounts {
+  const ai = accepted.filter((c) => c.origin === 'ai').length
+  return {
+    accepted: accepted.length,
+    rejected: rejected.length,
+    ai,
+    manual: accepted.length - ai,
+  }
+}
+
+// Pure — the event's `source` field: 'ai_accepted' when every accepted change
+// (and no untracked direct typing) came from AI, 'human' when none did,
+// 'mixed' otherwise. Untracked direct edits always count as human authorship.
+export function classifyRedlineSource(
+  counts: RedlineCounts,
+  untrackedEdits: boolean,
+): RedlineSource {
+  const hasAi = counts.ai > 0
+  const hasHuman = counts.manual > 0 || untrackedEdits
+  if (hasAi && hasHuman) return 'mixed'
+  if (hasAi) return 'ai_accepted'
+  return 'human'
 }

@@ -15,9 +15,12 @@ import {
   mapBaseRangeToCurRanges,
   mapBaseRangeToCurStrict,
   buildSessionNote,
+  buildRedlineCounts,
+  classifyRedlineSource,
   type TrackRun,
   type PendingHunk,
   type AcceptState,
+  type RedlineOp,
 } from '../../apps/legal-demo/lib/trackedChanges'
 
 // The run stream's two concatenation invariants — every case below leans on
@@ -334,5 +337,89 @@ describe('buildSessionNote', () => {
 
   it('falls back to a generic note', () => {
     expect(buildSessionNote([], [], false)).toBe('Edited in the document editor.')
+  })
+
+  // SAVE-REDLINES-1 (B2.3): the shipped editor never emitted the "AI revision: "
+  // prefix the Service Digest's legacy note-string classifier looks for
+  // (briefEvidence.ts AI_REVISION_PREFIX/.startsWith) — every flagship AI
+  // revision was silently mis-bucketed as a plain manual edit. This pins the fix.
+  it('leads with "AI revision: " when at least one accepted change is AI-origin', () => {
+    const note = buildSessionNote(
+      [{ id: '1', kind: 'replace', oldText: 'a', newText: 'b', start: 0, origin: 'ai' }],
+      ['Make the tone firmer'],
+      false,
+    )
+    expect(note.startsWith('AI revision: ')).toBe(true)
+    expect(note).toContain('“Make the tone firmer”')
+    expect(note).toContain('1 change accepted (AI)')
+  })
+
+  it('does NOT lead with "AI revision: " when only manual changes were accepted, even if AI ran', () => {
+    // An AI suggestion was generated (aiPrompts non-empty) but the attorney
+    // rejected it and only accepted their own manual edit — this save is not
+    // an accepted AI revision.
+    const note = buildSessionNote(
+      [{ id: '1', kind: 'replace', oldText: 'a', newText: 'b', start: 0, origin: 'manual' }],
+      ['Make the tone firmer'],
+      false,
+    )
+    expect(note.startsWith('AI revision: ')).toBe(false)
+    expect(note).toContain('AI prompts: “Make the tone firmer”')
+  })
+})
+
+describe('buildRedlineCounts + classifyRedlineSource (B2.3 — SAVE-REDLINES-1)', () => {
+  const rejected: RedlineOp[] = [
+    { id: 'r1', kind: 'replace', oldText: 'x', newText: 'y', origin: 'ai', prompt: 'tighten it' },
+  ]
+
+  it('counts accepted/rejected by disposition and AI/manual by origin', () => {
+    const counts = buildRedlineCounts(
+      [
+        { id: '1', kind: 'replace', oldText: 'a', newText: 'b', start: 0, origin: 'ai' },
+        { id: '2', kind: 'insertion', oldText: '', newText: 'c', start: 2, origin: 'manual' },
+      ],
+      rejected,
+    )
+    expect(counts).toEqual({ accepted: 2, rejected: 1, ai: 1, manual: 1 })
+  })
+
+  it('classifies ai_accepted when every accepted change is AI and nothing was typed untracked', () => {
+    const counts = buildRedlineCounts(
+      [{ id: '1', kind: 'replace', oldText: 'a', newText: 'b', start: 0, origin: 'ai' }],
+      [],
+    )
+    expect(classifyRedlineSource(counts, false)).toBe('ai_accepted')
+  })
+
+  it('classifies human when nothing AI was accepted', () => {
+    const counts = buildRedlineCounts(
+      [{ id: '1', kind: 'replace', oldText: 'a', newText: 'b', start: 0, origin: 'manual' }],
+      [],
+    )
+    expect(classifyRedlineSource(counts, false)).toBe('human')
+  })
+
+  it('classifies human for untracked direct edits with nothing accepted', () => {
+    expect(classifyRedlineSource(buildRedlineCounts([], []), true)).toBe('human')
+  })
+
+  it('classifies mixed when AI and manual changes were both accepted', () => {
+    const counts = buildRedlineCounts(
+      [
+        { id: '1', kind: 'replace', oldText: 'a', newText: 'b', start: 0, origin: 'ai' },
+        { id: '2', kind: 'insertion', oldText: '', newText: 'c', start: 2, origin: 'manual' },
+      ],
+      [],
+    )
+    expect(classifyRedlineSource(counts, false)).toBe('mixed')
+  })
+
+  it('classifies mixed when AI was accepted alongside untracked direct typing', () => {
+    const counts = buildRedlineCounts(
+      [{ id: '1', kind: 'replace', oldText: 'a', newText: 'b', start: 0, origin: 'ai' }],
+      [],
+    )
+    expect(classifyRedlineSource(counts, true)).toBe('mixed')
   })
 })

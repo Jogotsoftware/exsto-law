@@ -754,12 +754,35 @@ export function buildClientEvidence(
 // Marks a document_version note as an AI revision the attorney ACCEPTED (see
 // apps/legal-demo review reader's acceptRevision()/acceptRedlineEdits(), which
 // persist the accepted instruction with this exact prefix via legal.draft.edit).
+// LEGACY fallback only — B2.3 (SAVE-REDLINES-1) added the structured
+// document.redlined event; isAiAcceptedNote/instructionTextOf below prefer it
+// and fall back to this string marker only when a version carries no event
+// (edits from before B2.3, or any path that doesn't send the redline group).
 const AI_REVISION_PREFIX = 'AI revision: '
+
+// Structured-first: a version whose save recorded document.redlined with
+// source ai_accepted OR mixed counts as an accepted AI revision — mixed still
+// means SOME AI-authored text made it into the version, the signal the digest
+// cares about. Falls back to the legacy note-string prefix when there's no
+// structured record.
+function isAiAcceptedNote(n: ServiceDraftNote): boolean {
+  if (n.redline) return n.redline.source === 'ai_accepted' || n.redline.source === 'mixed'
+  return n.note.startsWith(AI_REVISION_PREFIX)
+}
+
+// The instruction text to surface for an accepted-revision line: the
+// structured event's instruction_text when present, else the note with the
+// legacy prefix stripped.
+function acceptedInstructionText(n: ServiceDraftNote): string {
+  if (n.redline?.instructionText) return n.redline.instructionText
+  return n.note.startsWith(AI_REVISION_PREFIX) ? n.note.slice(AI_REVISION_PREFIX.length) : n.note
+}
 
 // PURE — builds the Service Digest's EvidenceBundle. Section order: accepted AI
 // revision instructions → manual edit notes → revision requests (asks) — the
 // three signal kinds design §2a identifies, split from listServiceDigestSignals'
-// two queries by the AI_REVISION_PREFIX marker.
+// draftNotes by isAiAcceptedNote (structured document.redlined event first,
+// the AI_REVISION_PREFIX marker as a legacy fallback).
 export function buildServiceDigestEvidence(
   material: ServiceDigestSignals,
   scope: Extract<BriefScope, { kind: 'service_digest' }>,
@@ -769,14 +792,14 @@ export function buildServiceDigestEvidence(
   const b = EVIDENCE_BUDGETS[budget]
   const sections: EvidenceSection[] = []
 
-  const accepted = material.draftNotes.filter((n) => n.note.startsWith(AI_REVISION_PREFIX))
-  const edits = material.draftNotes.filter((n) => !n.note.startsWith(AI_REVISION_PREFIX))
+  const accepted = material.draftNotes.filter(isAiAcceptedNote)
+  const edits = material.draftNotes.filter((n) => !isAiAcceptedNote(n))
 
   const acceptedText = accepted
     .slice(0, b.digestItems)
     .map(
       (n) =>
-        `- [${safeField(n.matterNumber)} · ${n.documentKind} v${n.versionNumber}] ${n.note.slice(AI_REVISION_PREFIX.length)}`,
+        `- [${safeField(n.matterNumber)} · ${n.documentKind} v${n.versionNumber}] ${acceptedInstructionText(n)}`,
     )
     .join('\n')
   pushSection(

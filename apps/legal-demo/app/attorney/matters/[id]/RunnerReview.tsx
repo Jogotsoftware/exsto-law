@@ -3,80 +3,28 @@
 // The workflow runner's flagship surface (WORKFLOW-RUNNER-1 WP2): the FULL review
 // — document + Edit + Regenerate + Approve — lives inside the step's pop-up.
 // Opening the step IS opening the review; there is no intermediate confirm and no
-// navigation to /attorney/review. It reuses the exact pieces the standalone review
-// page uses (renderDocumentHtml for the document; the TipTap TemplateEditor for
-// Word-like editing; legal.draft.edit for the write path) and drives the write ops
-// through lib/stepRunner — Contract W only (the interim MCP fallback was retired
-// in RUNNER-FIXES-1 once BACKHALF-BLOCKS-1's routes were verified deployed).
+// navigation to /attorney/review. B2.1 (DOCUMENTREVIEWER-UNIFY-1): the review
+// itself is now the SAME <DocumentReviewer> the standalone /attorney/review
+// reader uses — same toolbar, tracked-changes Edit/AI-revision, Approve/Reject
+// (unified on MCP legal.draft.approve/reject), Send to client. This file keeps
+// only what's specific to running inside a workflow step: the producing/
+// spinner/failed states before a draft exists (#414), and the stage-level
+// "Regenerate…" full-redraft-with-notes capability (worker-driven, distinct
+// from DocumentReviewer's in-place Edit/AI revision — Contract W only, per
+// RUNNER-FIXES-1 WP5).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
 import { ConfirmModal } from '@/components/ConfirmModal'
-import { renderDocumentHtml } from '@/lib/documentHtml'
-import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
-import { downloadAsPdf, downloadAsWord, watermarkForStatus } from '@/lib/draftExport'
-import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
-import {
-  acceptClientStep,
-  approveDocument,
-  regenerateStep,
-  skipStep,
-  completeMatter,
-} from '@/lib/stepRunner'
+import { DocumentReviewer, type DocumentReviewerLoadedInfo } from '@/components/DocumentReviewer'
+import { acceptClientStep, regenerateStep, skipStep, completeMatter } from '@/lib/stepRunner'
 import { humanizeKind, humanizeService, type MatterDetail, type WfStage } from './shared'
-
-interface DraftPayload {
-  documentKind: string
-  versionNumber: number
-  status: string
-  bodyMarkdown: string
-}
 
 // Poll interval + attempts for a draft landing off the worker (regenerate, or the
 // auto-run producing capability on stage entry). Honest: we poll the real read;
 // we never animate fake progress.
 const POLL_MS = 3500
 const POLL_TRIES = 40 // ~2.3 min — model drafting budget
-
-function useLatestDraft(versionId: string | null): {
-  draft: DraftPayload | null
-  loading: boolean
-  reload: () => void
-} {
-  const [draft, setDraft] = useState<DraftPayload | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [nonce, setNonce] = useState(0)
-  useEffect(() => {
-    if (!versionId) {
-      setDraft(null)
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    callAttorneyMcp<{ draft: DraftPayload | null }>({
-      toolName: 'legal.draft.get',
-      input: { documentVersionId: versionId },
-    })
-      .then((r) => {
-        if (!cancelled) setDraft(r.draft)
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [versionId, nonce])
-  return { draft, loading, reload: () => setNonce((n) => n + 1) }
-}
-
-function statusBadgeClass(status: string): string {
-  if (status === 'approved') return 'badge ok'
-  if (status === 'rejected') return 'badge danger'
-  if (status === 'revision_requested') return 'badge warn'
-  return 'badge info'
-}
 
 export function RunnerReview({
   matter,
@@ -101,7 +49,6 @@ export function RunnerReview({
   waitsNote?: React.ReactNode
 }) {
   const versionId = matter.latestDraftVersionId
-  const { draft, loading, reload } = useLatestDraft(versionId)
 
   // ── Worker polling (regenerate / auto-run producing capability) ─────────────
   // 'running' means a draft is being produced off-request on the worker. We watch
@@ -152,90 +99,20 @@ export function RunnerReview({
     // for a given matter and re-running on its identity would restart the poll.
   }, [producing, isCurrent, versionId])
 
-  // ── Edit (TipTap, Word-like) ────────────────────────────────────────────────
-  const [editing, setEditing] = useState(false)
-  const [editNote, setEditNote] = useState('')
-  const editorRef = useRef<TemplateEditorHandle | null>(null)
+  // Draft summary reported by DocumentReviewer on load — just enough for the
+  // Regenerate panel's copy below (this file no longer fetches the draft itself;
+  // DocumentReviewer owns that read).
+  const [loaded, setLoaded] = useState<DocumentReviewerLoadedInfo | null>(null)
+
+  // ── Regenerate (stage-level, worker full redraft with change notes) ────────
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [changeNotes, setChangeNotes] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  // Unsaved-changes guard (RUNNER-FIXES-1 WP1): the editor is dirty after any
-  // keystroke (TemplateEditor's onChange never fires on the initial seed). Leaving
-  // edit mode with unsaved changes — Cancel, or closing the modal via ×/backdrop/
-  // Escape — asks first via an in-app dialog. Never a silent discard, never a
-  // native confirm. `discardGuard` also remembers what discarding should do:
-  // return to the review view ('cancel') or close the whole step ('close').
-  const [dirty, setDirty] = useState(false)
-  const [discardGuard, setDiscardGuard] = useState<null | 'cancel' | 'close'>(null)
-
-  function openEdit() {
-    setErr(null)
-    setNotice(null)
-    setEditNote('')
-    setDirty(false)
-    setEditing(true)
-  }
-
-  function cancelEdit() {
-    if (dirty) {
-      setDiscardGuard('cancel')
-      return
-    }
-    setEditing(false)
-  }
-
-  function requestClose() {
-    if (editing && dirty) {
-      // The guard is already up (e.g. Escape pressed twice): keep it, don't stack.
-      if (!discardGuard) setDiscardGuard('close')
-      return
-    }
-    onClose()
-  }
-
-  function discardEdits() {
-    const mode = discardGuard
-    setDiscardGuard(null)
-    setDirty(false)
-    setEditing(false)
-    if (mode === 'close') onClose()
-  }
-
-  async function saveEdit() {
-    if (!draft) return
-    const html = editorRef.current?.getHTML() ?? ''
-    const md = htmlToMarkdown(html).trim()
-    if (!md) return
-    setBusy('edit')
-    setErr(null)
-    try {
-      await callAttorneyMcp({
-        toolName: 'legal.draft.edit',
-        input: {
-          documentVersionId: versionId,
-          documentMarkdown: md,
-          note: editNote.trim() || undefined,
-        },
-      })
-      setDirty(false)
-      setEditing(false)
-      setNotice('Saved as a new version — the original is preserved in history.')
-      await onChanged() // new version becomes latest; reload
-      reload()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  // ── Regenerate ──────────────────────────────────────────────────────────────
-  const [regenOpen, setRegenOpen] = useState(false)
-  const [changeNotes, setChangeNotes] = useState('')
-
   async function runRegenerate() {
-    if (!draft || !changeNotes.trim()) return
+    if (!changeNotes.trim()) return
     setBusy('regenerate')
     setErr(null)
     try {
@@ -254,33 +131,6 @@ export function RunnerReview({
     }
   }
 
-  // ── Approve (± send) ──────────────────────────────────────────────────────────
-  const [approveOpen, setApproveOpen] = useState(false)
-  const approved = matter.latestDraftStatus === 'approved'
-
-  async function doApprove(send: boolean) {
-    if (!versionId) return
-    setBusy(send ? 'approve-send' : 'approve')
-    setErr(null)
-    try {
-      const r = await approveDocument(versionId, { send })
-      setApproveOpen(false)
-      setNotice(
-        r.sent
-          ? `Approved and emailed to the client${matter.clientEmail ? ` at ${matter.clientEmail}` : ''}.`
-          : 'Approved — the document fee (if the service sets one) is now accrued and ready to bill.',
-      )
-      await onChanged()
-      reload()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const fileBase = draft ? `${matter.matterNumber}-${draft.documentKind}` : matter.matterNumber
-
   const footer = (
     <>
       {advanceFooter && <span className="li-modal-foot-spacer" />}
@@ -289,23 +139,7 @@ export function RunnerReview({
   )
 
   return (
-    <Modal
-      title={stage.label}
-      onClose={requestClose}
-      size="wide"
-      footer={advanceFooter ? footer : null}
-    >
-      {discardGuard && (
-        <ConfirmModal
-          title="Discard unsaved changes?"
-          body="Your edits to this document haven’t been saved. Discarding returns to the last saved version."
-          confirmLabel="Discard"
-          cancelLabel="Keep editing"
-          danger
-          onConfirm={discardEdits}
-          onCancel={() => setDiscardGuard(null)}
-        />
-      )}
+    <Modal title={stage.label} onClose={onClose} size="wide" footer={advanceFooter ? footer : null}>
       {err && <div className="alert alert-error">{err}</div>}
       {notice && <div className="alert alert-success">{notice}</div>}
 
@@ -345,50 +179,15 @@ export function RunnerReview({
             {producing ? ' It drafts when this step becomes current.' : ''}
           </p>
         )
-      ) : loading || !draft ? (
-        <p className="text-muted text-sm">
-          <span className="spinner" /> Loading document…
-        </p>
-      ) : editing ? (
-        // ── Inline TipTap editor (Word-like) ──────────────────────────────────
-        <div>
-          <div className="runner-editor-wrap">
-            <TemplateEditor
-              initialHtml={markdownToHtml(draft.bodyMarkdown)}
-              editorRef={editorRef}
-              placeholder="Edit the document…"
-              onChange={() => setDirty(true)}
-            />
-          </div>
-          <input
-            type="text"
-            value={editNote}
-            onChange={(e) => setEditNote(e.target.value)}
-            placeholder="Optional: note what you changed (kept in version history)"
-            disabled={busy === 'edit'}
-            style={{ marginTop: 'var(--space-3)' }}
-          />
-          <div className="runner-toolbar" style={{ marginTop: 'var(--space-3)', marginBottom: 0 }}>
-            <button className="primary" onClick={() => void saveEdit()} disabled={busy === 'edit'}>
-              {busy === 'edit' && <span className="spinner" />}
-              {busy === 'edit' ? 'Saving…' : 'Save as new version'}
-            </button>
-            <button onClick={cancelEdit} disabled={busy === 'edit'}>
-              Cancel
-            </button>
-            <span className="text-muted text-sm runner-toolbar-end">
-              Saving creates a new version; the original is preserved.
-            </span>
-          </div>
-        </div>
       ) : regenOpen ? (
         // ── Regenerate window (in-place) ──────────────────────────────────────
         <div className="runner-subpanel">
           <h3 style={{ marginTop: 0 }}>Regenerate document</h3>
           <p className="text-muted text-sm">
-            Re-drafts this {humanizeKind(draft.documentKind)} (v{draft.versionNumber}) on the
-            worker. The matter’s questionnaire and consultation are always included; describe what
-            should change. The current version is kept — the redraft supersedes it, append-only.
+            Re-drafts this {loaded ? humanizeKind(loaded.documentKind) : 'document'}
+            {loaded ? ` (v${loaded.versionNumber})` : ''} on the worker. The matter’s questionnaire
+            and consultation are always included; describe what should change. The current version
+            is kept — the redraft supersedes it, append-only.
           </p>
           <label>
             <span>What needs to change</span>
@@ -414,96 +213,9 @@ export function RunnerReview({
             </button>
           </div>
         </div>
-      ) : approveOpen ? (
-        // ── Approve window (in-place): two explicit choices ───────────────────
-        <div className="runner-subpanel">
-          <h3 style={{ marginTop: 0 }}>Approve document</h3>
-          <p className="text-muted text-sm">
-            Approving marks v{draft.versionNumber} as the firm-approved version and accrues the
-            document fee per the service’s billing declaration. Choose whether to send it now.
-          </p>
-          <div className="runner-approve-choices">
-            <button
-              type="button"
-              className="runner-approve-choice"
-              onClick={() => void doApprove(false)}
-              disabled={busy !== null}
-            >
-              <span className="rc-title">
-                {busy === 'approve' && <span className="spinner" />} Approve
-              </span>
-              <span className="rc-sub">
-                Marks the document approved and accrues its fee. Nothing is emailed.
-              </span>
-            </button>
-            <button
-              type="button"
-              className="runner-approve-choice"
-              onClick={() => void doApprove(true)}
-              disabled={busy !== null}
-            >
-              <span className="rc-title">
-                {busy === 'approve-send' && <span className="spinner" />} Approve &amp; send to
-                client
-              </span>
-              <span className="rc-sub">
-                Approves, accrues the fee, and emails the approved version
-                {matter.clientEmail
-                  ? ` to ${matter.clientEmail}`
-                  : ' (no client email on file yet)'}
-                .
-              </span>
-            </button>
-          </div>
-          <div className="runner-toolbar" style={{ marginTop: 'var(--space-3)', marginBottom: 0 }}>
-            <button onClick={() => setApproveOpen(false)} disabled={busy !== null}>
-              Cancel
-            </button>
-          </div>
-        </div>
       ) : (
-        // ── The document, as a document + review actions ──────────────────────
-        <div>
-          <div className="runner-head">
-            <span className="kv-label" style={{ margin: 0 }}>
-              {humanizeKind(draft.documentKind)}
-            </span>
-            <span className="review-version">v{draft.versionNumber}</span>
-            <span className={statusBadgeClass(draft.status)}>
-              {draft.status.replace(/_/g, ' ')}
-            </span>
-          </div>
-
-          <div className="runner-toolbar">
-            <button onClick={openEdit} disabled={busy !== null}>
-              Edit
-            </button>
-            <button
-              onClick={() => setRegenOpen(true)}
-              disabled={busy !== null || phase === 'running'}
-            >
-              Regenerate…
-            </button>
-            <button
-              className="primary"
-              onClick={() => setApproveOpen(true)}
-              disabled={busy !== null || approved}
-            >
-              {approved ? 'Approved' : 'Approve…'}
-            </button>
-            <button
-              className="runner-toolbar-end"
-              onClick={() => downloadAsWord(draft.bodyMarkdown, fileBase, { status: draft.status })}
-            >
-              Word
-            </button>
-            <button
-              onClick={() => downloadAsPdf(draft.bodyMarkdown, fileBase, { status: draft.status })}
-            >
-              PDF
-            </button>
-          </div>
-
+        // ── The document, via the SAME review surface the queue uses ──────────
+        <>
           {phase === 'running' && (
             <div className="runner-state running" style={{ marginBottom: 'var(--space-3)' }}>
               <div className="runner-state-row">
@@ -516,16 +228,26 @@ export function RunnerReview({
               </p>
             </div>
           )}
-
-          <div className="runner-doc">
-            {/* P13 — pending versions carry the draft watermark (render state). */}
-            <article
-              className={`doc-rendered doc-paper${watermarkForStatus(draft.status) ? ' doc-watermark' : ''}`}
-              data-watermark={watermarkForStatus(draft.status) ?? undefined}
-              dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
-            />
-          </div>
-        </div>
+          <DocumentReviewer
+            versionId={versionId}
+            embedded
+            onLoaded={setLoaded}
+            onVersionChanged={() => void onChanged()}
+            onCompleted={() => {
+              void onChanged()
+            }}
+            extraToolbar={
+              <button
+                type="button"
+                className="li-rev-tbtn"
+                onClick={() => setRegenOpen(true)}
+                disabled={phase === 'running'}
+              >
+                Regenerate…
+              </button>
+            }
+          />
+        </>
       )}
 
       {waitsNote}
