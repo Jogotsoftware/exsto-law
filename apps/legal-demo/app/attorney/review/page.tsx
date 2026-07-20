@@ -172,7 +172,35 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {drafts && drafts.length === 0 && <p className="li-rev-empty">No drafts pending review.</p>}
+      {drafts && drafts.length === 0 && (
+        <div className="li-rev-table">
+          <div className="li-rev-thead">
+            <label className="li-rev-check">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleAll}
+                aria-label="Select all"
+              />
+            </label>
+            <button type="button" className="li-rev-th" onClick={() => sortBy('matterNumber')}>
+              MATTER <SortCaret columnKey="matterNumber" activeKey={sortKey} asc={sortAsc} />
+            </button>
+            <button type="button" className="li-rev-th" onClick={() => sortBy('clientName')}>
+              CLIENT <SortCaret columnKey="clientName" activeKey={sortKey} asc={sortAsc} />
+            </button>
+            <button type="button" className="li-rev-th" onClick={() => sortBy('documentKind')}>
+              DOCUMENT KIND <SortCaret columnKey="documentKind" activeKey={sortKey} asc={sortAsc} />
+            </button>
+            <span className="li-rev-th li-rev-th--static">VERSION</span>
+            <button type="button" className="li-rev-th" onClick={() => sortBy('recordedAt')}>
+              GENERATED <SortCaret columnKey="recordedAt" activeKey={sortKey} asc={sortAsc} />
+            </button>
+            <span className="li-rev-th li-rev-th--static li-rev-th--result">RESULT</span>
+          </div>
+          <div className="li-rev-empty">You are all up to date, nothing to review.</div>
+        </div>
+      )}
 
       {drafts && drafts.length > 0 && (
         <>

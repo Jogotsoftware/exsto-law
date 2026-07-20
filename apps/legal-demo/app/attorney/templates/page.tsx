@@ -18,6 +18,7 @@ import {
   PlusIcon,
   CopyIcon,
   LayoutGridIcon,
+  ListIcon,
   ChevronLeftIcon,
   PaperclipIcon,
   MoreHorizontalIcon,
@@ -291,6 +292,8 @@ export default function TemplatesPage() {
   const { confirm, confirmElement } = useConfirm()
   const [templates, setTemplates] = useState<Template[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Gallery card grid vs. compact list — a display preference only, no data change.
+  const [view, setView] = useState<'grid' | 'list'>('grid')
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -880,10 +883,30 @@ export default function TemplatesPage() {
         <>
           <div className="li-tpl-gallery-head">
             <h1 className="li-tpl-title">Templates</h1>
-            <button type="button" className="li-tpl-new-btn" onClick={openNewChooser}>
-              <PlusIcon size={16} />
-              New template
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="li-viewtoggle" role="group" aria-label="View">
+                <button
+                  type="button"
+                  className={view === 'grid' ? 'on' : ''}
+                  aria-label="Grid view"
+                  onClick={() => setView('grid')}
+                >
+                  <LayoutGridIcon size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={view === 'list' ? 'on' : ''}
+                  aria-label="List view"
+                  onClick={() => setView('list')}
+                >
+                  <ListIcon size={15} />
+                </button>
+              </div>
+              <button type="button" className="li-tpl-new-btn" onClick={openNewChooser}>
+                <PlusIcon size={16} />
+                New template
+              </button>
+            </div>
           </div>
 
           {templates === null && !error && (
@@ -896,7 +919,7 @@ export default function TemplatesPage() {
               No templates yet. Create your first reusable document or email template.
             </p>
           )}
-          {templates && templates.length > 0 && (
+          {templates && templates.length > 0 && view === 'grid' && (
             <div className="li-tpl-grid">
               {templates.map((t) => {
                 const preview = thumbPreview(t)
@@ -937,6 +960,71 @@ export default function TemplatesPage() {
                           {tokenCount} merge token{tokenCount === 1 ? '' : 's'} · updated {updated}
                         </div>
                       </div>
+                    </button>
+                    <button
+                      type="button"
+                      className="li-tpl-card-menu-btn"
+                      aria-label={`More actions for ${t.name || 'untitled template'}`}
+                      aria-expanded={menuOpen}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setOpenMenuId(menuOpen ? null : t.templateEntityId)
+                      }}
+                    >
+                      <MoreHorizontalIcon size={16} />
+                    </button>
+                    {menuOpen && (
+                      <div className="li-tpl-card-menu" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            setModalTemplate(t)
+                          }}
+                        >
+                          Edit in window
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="li-tpl-card-menu-danger"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            void archive(t)
+                          }}
+                        >
+                          Retire
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {templates && templates.length > 0 && view === 'list' && (
+            <div className="li-viewlist">
+              {templates.map((t) => {
+                const tokenCount = extractTokens(t.body).length
+                const updated = new Date(t.updatedAt).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                })
+                const menuOpen = openMenuId === t.templateEntityId
+                return (
+                  <div key={t.templateEntityId} className="li-tpl-card-wrap">
+                    <button
+                      type="button"
+                      className="li-viewlist-row"
+                      onClick={() => edit(t)}
+                      aria-label={`Open ${t.name || 'untitled template'}`}
+                    >
+                      <span className="li-viewlist-name">{t.name || '(untitled)'}</span>
+                      <span className="li-tpl-card-badge">{kindBadge(t)}</span>
+                      <span className="li-viewlist-meta">
+                        {tokenCount} merge token{tokenCount === 1 ? '' : 's'} · updated {updated}
+                      </span>
                     </button>
                     <button
                       type="button"
