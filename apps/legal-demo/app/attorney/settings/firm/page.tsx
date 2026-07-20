@@ -121,7 +121,7 @@ export default function FirmDetailsPage(): React.ReactElement {
 
   return (
     <>
-      <SettingsHeader title="Firm details" />
+      <SettingsHeader title="Firm Details" />
       {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
 
       {!settings ? (

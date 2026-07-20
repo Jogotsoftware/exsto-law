@@ -143,7 +143,7 @@ export default function ServicesPage() {
           onClick={() => router.push('/attorney/services/new')}
         >
           <PlusIcon size={15} />
-          New service
+          New Service
         </button>
       </div>
 

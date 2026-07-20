@@ -159,7 +159,7 @@ export default function ReviewQueue() {
 
   return (
     <main className="li-rev">
-      <h1 className="li-rev-title">Review queue</h1>
+      <h1 className="li-rev-title">Review Queue</h1>
       <p className="li-rev-sub">
         Drafts the AI produced, waiting for your review before they reach the client.
       </p>

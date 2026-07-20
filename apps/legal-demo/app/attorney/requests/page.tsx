@@ -86,7 +86,7 @@ export default function ClientRequestsPage() {
 
   return (
     <main>
-      <PageHead title="Client requests" />
+      <PageHead title="Client Requests" />
 
       {error && <div className="alert alert-error">{error}</div>}
 

@@ -16,7 +16,7 @@ export default function PrepareSignPage({ params }: { params: Promise<{ versionI
     <div className="li-esign li-esign-prepare">
       <div className="li-esign-head">
         <div>
-          <h1 className="li-esign-title">Send for signature</h1>
+          <h1 className="li-esign-title">Send For Signature</h1>
           <p className="li-esign-sub">
             Confirm the document, add signers, place fields, and send the envelope.
           </p>

@@ -11,7 +11,7 @@ export default function NewEnvelopePage() {
     <div className="li-esign li-esign-prepare">
       <div className="li-esign-head">
         <div>
-          <h1 className="li-esign-title">New envelope</h1>
+          <h1 className="li-esign-title">New Envelope</h1>
           <p className="li-esign-sub">
             Upload a PDF, add recipients (new ones are saved to Contacts), attach it to a matter or
             contact if you like, and send.
