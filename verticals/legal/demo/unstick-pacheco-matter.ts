@@ -34,7 +34,8 @@ async function main(): Promise<void> {
   const ctx: ActionContext = { tenantId: tenantId!, actorId }
   console.log(`tenant ${tenantId} · matter ${matterEntityId} · acting as ${actorId}`)
 
-  const repin = await repinMatterWorkflow(ctx, matterEntityId!)
+  const targetState = process.env.UNSTICK_TARGET_STATE?.trim() || undefined
+  const repin = await repinMatterWorkflow(ctx, matterEntityId!, { targetState })
   console.log('repin:', JSON.stringify(repin))
 
   const info = await withActionContext(ctx, async (client) => {

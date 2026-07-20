@@ -88,22 +88,31 @@ registerActionHandler('legal.matter.repin_workflow', async (ctx, client, payload
     )
   }
 
-  // State reconcile: same-key carries over; else the explicit target; else fail
-  // with the exact valid keys (matterWorkflow.ts orphan-guard style).
+  // State reconcile: an EXPLICIT target_state wins outright — when a new version
+  // REORDERS stages, a same-key carry-over can drop the matter far past where it
+  // really is (the live repro: v6 moved 'consultation' after drafting, so carrying
+  // the key over would have skipped intake+review entirely). Absent a target:
+  // same-key carries over; a missing key fails listing the exact valid keys
+  // (matterWorkflow.ts orphan-guard style).
+  const target = p.target_state?.trim()
+  if (target && !stageByKey(bound.graph, target)) {
+    throw new Error(
+      `legal.matter.repin_workflow: target_state "${target}" is not a stage of the new ` +
+        `workflow (v${bound.version}). Valid stages: ` +
+        bound.graph.map((s) => s.key).join(', '),
+    )
+  }
   let nextState = instance.currentState
   let stateMapped = false
-  if (!stageByKey(bound.graph, nextState)) {
-    const target = p.target_state?.trim()
-    if (target && stageByKey(bound.graph, target)) {
-      nextState = target
-      stateMapped = true
-    } else {
-      throw new Error(
-        `legal.matter.repin_workflow: the new workflow (v${bound.version}) has no stage ` +
-          `"${instance.currentState}". Pass target_state as one of: ` +
-          bound.graph.map((s) => s.key).join(', '),
-      )
-    }
+  if (target) {
+    nextState = target
+    stateMapped = target !== instance.currentState
+  } else if (!stageByKey(bound.graph, nextState)) {
+    throw new Error(
+      `legal.matter.repin_workflow: the new workflow (v${bound.version}) has no stage ` +
+        `"${instance.currentState}". Pass target_state as one of: ` +
+        bound.graph.map((s) => s.key).join(', '),
+    )
   }
 
   // Close out the old instance. current_state in the predicate is the TOCTOU
