@@ -11,6 +11,10 @@ export interface TenantSettings {
   // absent means honest unset, never a guessed value.
   firmJurisdiction: string | null
   practiceAreas: string[] | null
+  // FB-B (migration 0175, PLANNED) — the firm's standing custom instructions
+  // for the AI assistant. No default, same honest-unset posture as the rest of
+  // this WP A1/FB-B block.
+  assistantInstructions: string | null
   defaultHourlyRateUsd: number | null
   defaultLlcFlatFeeUsd: number | null
   updatedAt: string | null
@@ -24,6 +28,7 @@ const EMPTY: TenantSettings = {
   firmAddress: null,
   firmJurisdiction: null,
   practiceAreas: null,
+  assistantInstructions: null,
   defaultHourlyRateUsd: null,
   defaultLlcFlatFeeUsd: null,
   updatedAt: null,
@@ -45,7 +50,8 @@ const FIRM_DEFAULTS: TenantSettings = {
 // (handlers/firmProfile.ts). Reads here overlay the substrate value FIRST, then
 // fall back to the wedge-era tenant_settings table for anything unset.
 // WP A1 adds firm_jurisdiction / practice_areas / attorney_name (migration 0170)
-// to that same singleton, same set_profile action.
+// to that same singleton, same set_profile action. WP FB-B adds
+// assistant_instructions (migration 0175, PLANNED) the same way.
 export interface FirmProfileFields {
   firmName: string | null
   firmAddress: string | null
@@ -54,6 +60,7 @@ export interface FirmProfileFields {
   firmJurisdiction: string | null
   practiceAreas: string[] | null
   attorneyName: string | null
+  assistantInstructions: string | null
 }
 
 const PROFILE_ATTR_KINDS = [
@@ -64,6 +71,7 @@ const PROFILE_ATTR_KINDS = [
   'firm_jurisdiction',
   'practice_areas',
   'attorney_name',
+  'assistant_instructions',
 ] as const
 
 // Tri-state per field, read off the firm_profile singleton:
@@ -82,13 +90,14 @@ interface FirmProfileAttrReads {
   firmJurisdiction: string | null | undefined
   practiceAreas: string[] | null | undefined
   attorneyName: string | null | undefined
+  assistantInstructions: string | null | undefined
 }
 
 // Latest firm-identity attributes off the firm_profile singleton (all undefined
 // when no singleton / no rows yet). Mirrors api/firmSignature.readStored. Also
-// tolerates firm_jurisdiction/practice_areas/attorney_name not existing yet as
-// attribute kinds (migration 0170 unapplied): the kind_name = ANY($2) join
-// simply matches nothing for those, same as "never set".
+// tolerates firm_jurisdiction/practice_areas/attorney_name/assistant_instructions
+// not existing yet as attribute kinds (migration 0170/0175 unapplied): the
+// kind_name = ANY($2) join simply matches nothing for those, same as "never set".
 async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttrReads> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{ kind_name: string; value: string | null }>(
@@ -139,6 +148,7 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttr
       firmJurisdiction: val('firm_jurisdiction'),
       practiceAreas: arrVal('practice_areas'),
       attorneyName: val('attorney_name'),
+      assistantInstructions: val('assistant_instructions'),
     }
   })
 }
@@ -162,6 +172,7 @@ function overlayProfile(base: TenantSettings, profile: FirmProfileAttrReads): Te
     firmJurisdiction: field(profile.firmJurisdiction, base.firmJurisdiction),
     practiceAreas: arrField(profile.practiceAreas, base.practiceAreas),
     attorneyName: field(profile.attorneyName, base.attorneyName),
+    assistantInstructions: field(profile.assistantInstructions, base.assistantInstructions),
   }
 }
 
@@ -213,6 +224,7 @@ export async function getFirmProfile(ctx: ActionContext): Promise<FirmProfileFie
     firmJurisdiction: s.firmJurisdiction,
     practiceAreas: s.practiceAreas,
     attorneyName: s.attorneyName,
+    assistantInstructions: s.assistantInstructions,
   }
 }
 
@@ -226,6 +238,9 @@ export interface SetFirmProfileInput {
   firmJurisdiction?: string | null
   practiceAreas?: string[] | null
   attorneyName?: string | null
+  // FB-B (migration 0175, PLANNED) — the firm's standing custom instructions
+  // for the AI assistant. Empty clears.
+  assistantInstructions?: string | null
 }
 
 // Write the firm profile through the core (legal.firm.set_profile — append-only
@@ -248,6 +263,9 @@ export async function setFirmProfile(
         : {}),
       ...(input.practiceAreas !== undefined ? { practice_areas: input.practiceAreas } : {}),
       ...(input.attorneyName !== undefined ? { attorney_name: input.attorneyName } : {}),
+      ...(input.assistantInstructions !== undefined
+        ? { assistant_instructions: input.assistantInstructions }
+        : {}),
     },
   })
   return getFirmProfile(ctx)
@@ -278,10 +296,12 @@ async function readTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
       firmEmail: r.firm_email,
       firmPhone: r.firm_phone,
       firmAddress: r.firm_address,
-      // The legacy wedge-era table has no jurisdiction/practice-area columns —
-      // WP A1 fields live ONLY on the firm_profile singleton (no legacy source).
+      // The legacy wedge-era table has no jurisdiction/practice-area/assistant-
+      // instructions columns — these fields live ONLY on the firm_profile
+      // singleton (no legacy source).
       firmJurisdiction: null,
       practiceAreas: null,
+      assistantInstructions: null,
       defaultHourlyRateUsd:
         r.default_hourly_rate_usd != null ? Number(r.default_hourly_rate_usd) : null,
       defaultLlcFlatFeeUsd:

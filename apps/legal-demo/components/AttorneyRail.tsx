@@ -34,6 +34,7 @@ import {
   UsersIcon,
   DollarSignIcon,
   SparklesIcon,
+  WandIcon,
   ChevronDownIcon,
   LogOutIcon,
 } from '@/components/icons'
@@ -93,6 +94,7 @@ const NAV: NavNode[] = [
       { href: '/attorney/settings/users', label: 'Users & roles', Icon: UsersIcon },
       { href: '/attorney/settings/payments', label: 'Payments', Icon: DollarSignIcon },
       { href: '/attorney/settings/ai-usage', label: 'AI usage', Icon: SparklesIcon },
+      { href: '/attorney/settings/assistant', label: 'Assistant', Icon: WandIcon },
     ],
   },
 ]

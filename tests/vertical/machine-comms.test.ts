@@ -216,8 +216,11 @@ describe('loadEmailDraftingPrompt — composes the house-voice doctrine (STYLE-F
     expect(prompt).toContain('Adapted from stop-slop by Hardik Pandya')
     expect(prompt).toContain('Match this register')
     expect(prompt).toContain('No em dashes anywhere.')
-    // The data slots the compose path fills are untouched.
+    // The data slots the compose path fills are untouched. {{firm_instructions}}
+    // (WP FB-B) is one of these — see ai-context-custom-instructions.test.ts for
+    // its fill/empty-safe behavior.
     expect(prompt).toContain('{{purpose}}')
     expect(prompt).toContain('{{client_context}}')
+    expect(prompt).toContain('{{firm_instructions}}')
   })
 })
