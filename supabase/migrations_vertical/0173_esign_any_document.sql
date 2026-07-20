@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0170: E-sign any document (standalone PDF envelopes)
+-- Vertical migration 0173 (renumbered from 0172; 0172 = client_website on main): E-sign any document (standalone PDF envelopes)
 --
 -- Configuration-as-data (invariant 12 / 23): sending an ARBITRARY uploaded PDF
 -- for signature — decoupled from a matter or an AI draft, DocuSign-style — is
