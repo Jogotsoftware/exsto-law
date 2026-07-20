@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
+import { Tabs, type TabSpec } from '@/components/Tabs'
 
 interface ModelRow {
   model: string
@@ -52,6 +53,7 @@ const WINDOWS = [
   { days: 30, label: '30 days' },
   { days: 90, label: '90 days' },
 ]
+const WINDOW_TABS: TabSpec[] = WINDOWS.map((w) => ({ key: String(w.days), label: w.label }))
 
 const fmtInt = (n: number): string => n.toLocaleString('en-US')
 const fmtUsd = (n: number): string =>
@@ -114,18 +116,12 @@ export default function AiUsagePage(): React.ReactElement {
   return (
     <>
       <SettingsHeader title="AI usage" />
-      <div className="li-set-window-tabs">
-        {WINDOWS.map((w) => (
-          <button
-            key={w.days}
-            type="button"
-            className={`li-set-window-tab${w.days === windowDays ? ' on' : ''}`}
-            onClick={() => setWindowDays(w.days)}
-          >
-            {w.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        ariaLabel="Usage window"
+        tabs={WINDOW_TABS}
+        active={String(windowDays)}
+        onSelect={(k) => setWindowDays(Number(k))}
+      />
 
       {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
 

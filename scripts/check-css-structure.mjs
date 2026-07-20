@@ -17,25 +17,24 @@ import { readFileSync } from 'node:fs'
 // Allowlist for CHECK 1: title classes that legitimately declare font-family
 // (serif/mono exceptions are intentional: client-portal hero, assistant empty state, editor head)
 const TITLE_FONT_ALLOWLIST = new Set([
-  'li-uac-empty-title',      // serif - assistant empty state
-  'li-cp-auth-title',         // serif - client portal
-  'li-edtr-head-title',       // mono - editor head
+  'li-uac-empty-title', // serif - assistant empty state
+  'li-cp-auth-title', // serif - client portal
+  'li-edtr-head-title', // mono - editor head
 ])
 
 // Allowlist for CHECK 2: tab classes currently defined
-// (extend deliberately when adding a legit tab surface)
+// (extend deliberately when adding a legit tab surface).
+// li-tabs* = the shared controlled Tabs component; li-crm/mat/svc-tabs = NavTabs
+// route variants; li-cp-tab = the client portal's dark-band variant (same
+// underline pattern, portal palette — intentionally kept).
+// Retired 2026-07-20 (consolidated onto Tabs.tsx): li-mail-tab*, li-bill-tab*,
+// li-mat-billtab*, li-set-window-tab* — do NOT re-add.
 const TAB_CLASS_ALLOWLIST = new Set([
   'li-tabs',
   'li-tabs-tab',
-  'li-bill-tab',
-  'li-bill-tabs',
   'li-cp-tab',
   'li-crm-tabs',
-  'li-mat-billtab',
-  'li-mat-billtabs',
   'li-mat-tabs',
-  'li-set-window-tab',
-  'li-set-window-tabs',
   'li-svc-tabs',
 ])
 

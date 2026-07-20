@@ -19,6 +19,7 @@
 import { use, useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { SendIcon } from '@/components/icons'
+import { Tabs, type TabSpec } from '@/components/Tabs'
 
 // PORTAL-1 (WP3): the client's fee-consent trail (who consented, to what
 // amount, for what, when) rendered beside the fees it authorized.
@@ -93,6 +94,11 @@ function fmtDate(iso: string | null): string {
 }
 
 type BillTab = 'accrued' | 'invoiced' | 'paid'
+const BILL_TABS: TabSpec[] = [
+  { key: 'accrued', label: 'Accrued' },
+  { key: 'invoiced', label: 'Invoiced' },
+  { key: 'paid', label: 'Paid' },
+]
 
 export default function MatterBillingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -323,18 +329,12 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
       )}
 
       <section className="li-mat-card li-mat-billcard">
-        <div className="li-mat-billtabs">
-          {(['accrued', 'invoiced', 'paid'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={tab === t ? 'li-mat-billtab is-active' : 'li-mat-billtab'}
-              onClick={() => setTab(t)}
-            >
-              {t === 'accrued' ? 'Accrued' : t === 'invoiced' ? 'Invoiced' : 'Paid'}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          ariaLabel="Matter billing"
+          tabs={BILL_TABS}
+          active={tab}
+          onSelect={(k) => setTab(k as BillTab)}
+        />
 
         {error && <div className="alert alert-error">{error}</div>}
         {notice && <div className="alert">{notice}</div>}
