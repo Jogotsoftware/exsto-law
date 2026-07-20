@@ -1,9 +1,21 @@
 // Tiny markdown renderer (subset: headings, bold, italic, code, lists, hr,
-// paragraphs) — good enough for the legal drafts the agent produces. Escapes HTML
-// before applying inline syntax so output is safe to inject. This is kept for the
-// assistant CHAT (which must not render rich document styling). The finished
-// DOCUMENT paths (preview/share/review/e-sign/PDF/Word) use renderDocumentHtml,
-// which sanitizes an allowlisted styling subset instead of escaping it.
+// tables, paragraphs) — good enough for the legal drafts the agent produces.
+// Escapes HTML before applying inline syntax so output is safe to inject. This
+// is kept for the assistant CHAT (which must not render rich document
+// styling); the Brief modal (BriefModal.tsx) reuses it for the same reason —
+// brief markdown is model output, not attorney-authored document content, so
+// it gets the same escape-everything treatment as chat, not the sanitized
+// inline-HTML subset documents get. The finished DOCUMENT paths (preview/
+// share/review/e-sign/PDF/Word) use renderDocumentHtml, which sanitizes an
+// allowlisted styling subset instead of escaping it.
+//
+// PO-1: GFM pipe tables (`| a | b |` header + `| --- | --- |` separator) were
+// previously unhandled — the raw `| Item | Status |` text rendered literally
+// inside the Brief modal's checklist sections. Table cells now render as a
+// real <table>. `opts.tdWrap` is an optional per-cell post-processor (raw
+// trimmed cell text + its inline-formatted HTML in, replacement HTML out) —
+// BriefModal uses it to wrap known status vocabulary in color-coded chips
+// (lib/briefChips.ts); every other caller omits it and gets a plain <td>.
 
 import { renderDocumentHtml } from './documentHtml'
 
@@ -29,7 +41,80 @@ function inlineFormat(text: string): string {
   )
 }
 
-export function renderMarkdown(md: string): string {
+// Splits a `| a | b\|c |` row into ['a', 'b|c'] — trims each cell, drops one
+// leading/trailing empty cell from optional outer pipes, and unescapes `\|`.
+function splitTableRow(line: string): string[] {
+  let s = line.trim()
+  if (s.startsWith('|')) s = s.slice(1)
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1)
+  const cells: string[] = []
+  let buf = ''
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c === '\\' && s[i + 1] === '|') {
+      buf += '|'
+      i++
+      continue
+    }
+    if (c === '|') {
+      cells.push(buf.trim())
+      buf = ''
+      continue
+    }
+    buf += c
+  }
+  cells.push(buf.trim())
+  return cells
+}
+
+const TABLE_ALIGN_CELL = /^:?-+:?$/
+
+// A GFM separator row ("| --- | :---: |"). Requires at least one pipe so a
+// bare `---` line stays the existing <hr/> rule, never mistaken for a
+// (nonsensical) one-column table.
+function isTableSeparatorRow(line: string): boolean {
+  const trimmed = line.trim()
+  if (!trimmed.includes('|')) return false
+  const cells = splitTableRow(trimmed)
+  return cells.length > 0 && cells.every((c) => TABLE_ALIGN_CELL.test(c))
+}
+
+function tableAlign(cell: string): 'left' | 'right' | 'center' | null {
+  const left = cell.startsWith(':')
+  const right = cell.endsWith(':')
+  if (left && right) return 'center'
+  if (right) return 'right'
+  if (left) return 'left'
+  return null
+}
+
+function renderTable(
+  header: string[],
+  aligns: Array<'left' | 'right' | 'center' | null>,
+  rows: string[][],
+  tdWrap?: (cellText: string, cellHtml: string) => string,
+): string {
+  const alignStyle = (i: number): string => (aligns[i] ? ` style="text-align:${aligns[i]}"` : '')
+  const theadCells = header.map((h, i) => `<th${alignStyle(i)}>${inlineFormat(h)}</th>`).join('')
+  const tbodyRows = rows
+    .map((row) => {
+      const tds = header
+        .map((_, i) => {
+          const raw = row[i] ?? ''
+          const html = inlineFormat(raw)
+          return `<td${alignStyle(i)}>${tdWrap ? tdWrap(raw, html) : html}</td>`
+        })
+        .join('')
+      return `<tr>${tds}</tr>`
+    })
+    .join('')
+  return `<div class="li-md-table-wrap"><table><thead><tr>${theadCells}</tr></thead><tbody>${tbodyRows}</tbody></table></div>`
+}
+
+export function renderMarkdown(
+  md: string,
+  opts?: { tdWrap?: (cellText: string, cellHtml: string) => string },
+): string {
   const lines = md.split('\n')
   const out: string[] = []
   let inList: 'ul' | 'ol' | null = null
@@ -50,8 +135,28 @@ export function renderMarkdown(md: string): string {
     }
   }
 
-  for (const raw of lines) {
+  let i = 0
+  while (i < lines.length) {
+    const raw = lines[i]!
     const line = raw.trim()
+
+    // GFM pipe table: a row containing '|' whose NEXT line is a valid
+    // separator row starts a table. Consume header + separator, then every
+    // consecutive non-blank '|' row after as a data row.
+    if (line.includes('|') && i + 1 < lines.length && isTableSeparatorRow(lines[i + 1]!)) {
+      flushParagraph()
+      closeList()
+      const headerCells = splitTableRow(line)
+      const aligns = splitTableRow(lines[i + 1]!).map(tableAlign)
+      i += 2
+      const bodyRows: string[][] = []
+      while (i < lines.length && lines[i]!.trim() !== '' && lines[i]!.includes('|')) {
+        bodyRows.push(splitTableRow(lines[i]!))
+        i++
+      }
+      out.push(renderTable(headerCells, aligns, bodyRows, opts?.tdWrap))
+      continue
+    }
 
     const h = line.match(/^(#{1,6})\s+(.+)$/)
     if (h) {
@@ -59,6 +164,7 @@ export function renderMarkdown(md: string): string {
       closeList()
       const level = h[1]!.length
       out.push(`<h${level}>${inlineFormat(h[2]!)}</h${level}>`)
+      i++
       continue
     }
 
@@ -77,6 +183,7 @@ export function renderMarkdown(md: string): string {
         inList = 'ol'
       }
       out.push(`<li>${inlineFormat(ol[2]!)}</li>`)
+      i++
       continue
     }
 
@@ -89,6 +196,7 @@ export function renderMarkdown(md: string): string {
         inList = 'ul'
       }
       out.push(`<li>${inlineFormat(ul[1]!)}</li>`)
+      i++
       continue
     }
 
@@ -96,18 +204,21 @@ export function renderMarkdown(md: string): string {
       flushParagraph()
       closeList()
       out.push('<hr/>')
+      i++
       continue
     }
 
     if (line === '') {
       flushParagraph()
       closeList()
+      i++
       continue
     }
 
     closeList()
     inParagraph = true
     buf.push(inlineFormat(line))
+    i++
   }
   flushParagraph()
   closeList()
