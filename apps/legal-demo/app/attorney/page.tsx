@@ -62,6 +62,41 @@ interface MatterSummary {
   createdAt: string
 }
 
+// FB-H — one pressing item from the attention engine (legal.attention.feed).
+interface AttentionItem {
+  kind: string
+  title: string
+  why: string
+  deepLink: string
+  rank: number
+  occurredAt: string
+  entityId?: string
+}
+
+// Short chip label + status-token colors per kind, so the card reads at a glance
+// which KIND of pressing thing each row is. Colors reuse the shared li- status
+// pairs (same tokens the matters table uses). Unknown kinds fall back to neutral.
+const ATTENTION_KIND_META: Record<string, { label: string; fg: string; bg: string }> = {
+  overdue_task: { label: 'Overdue', fg: 'var(--li-danger)', bg: 'var(--li-danger-bg)' },
+  awaiting_reply: { label: 'Reply', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
+  draft_pending_review: { label: 'Review', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
+  envelope_unsigned: { label: 'Unsigned', fg: 'var(--li-info)', bg: 'var(--li-info-bg)' },
+  invoice_unpaid: { label: 'Unpaid', fg: 'var(--li-info)', bg: 'var(--li-info-bg)' },
+  workflow_parked: { label: 'Stuck', fg: 'var(--li-neutral)', bg: 'var(--li-neutral-bg)' },
+  stale_matter: { label: 'No activity', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
+  due_soon_task: { label: 'Due soon', fg: 'var(--li-neutral)', bg: 'var(--li-neutral-bg)' },
+}
+
+function attentionKindMeta(kind: string): { label: string; fg: string; bg: string } {
+  return (
+    ATTENTION_KIND_META[kind] ?? {
+      label: 'Attention',
+      fg: 'var(--li-muted)',
+      bg: 'var(--li-border-soft)',
+    }
+  )
+}
+
 // The matters TABLE's status filter groups + chip styling (li-dash-mstatus). Same
 // bucketing the old status-tab panel used, so the filter still covers every status
 // the app produces. Colors reuse the shared li- status-pair tokens (ADAPT — comp
@@ -155,6 +190,7 @@ export default function AttorneyHome() {
   const [categories, setCategories] = useState<CalendarCategory[]>([])
   const [recent, setRecent] = useState<RecentBooking[] | null>(null)
   const [matters, setMatters] = useState<MatterSummary[] | null>(null)
+  const [attention, setAttention] = useState<AttentionItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [calendarError, setCalendarError] = useState<string | null>(null)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
@@ -190,6 +226,14 @@ export default function AttorneyHome() {
       callAttorneyMcp<{ matters: MatterSummary[] }>({ toolName: 'legal.matter.list' }).then((m) =>
         setMatters(m.matters),
       ),
+      // FB-H — the attention feed for the "Attention" card (top pressing items).
+      // Non-fatal: a feed hiccup must not blank the whole dashboard.
+      callAttorneyMcp<{ items: AttentionItem[] }>({
+        toolName: 'legal.attention.feed',
+        input: { limit: 6 },
+      })
+        .then((r) => setAttention(r.items))
+        .catch(() => setAttention([])),
       callAttorneyMcp<{ categories: CalendarCategory[] }>({
         toolName: 'legal.calendar.categories.get',
       })
@@ -236,6 +280,43 @@ export default function AttorneyHome() {
       <h1 className="li-dash-title">Home</h1>
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      {/* FB-H — the ATTENTION card: the attorney's most pressing items, ranked by
+          the deterministic attention engine, each a click straight to where to
+          act. Rendered above the grid so it's the first thing the attorney sees.
+          Hidden entirely when nothing is pressing (an empty feed is good news). */}
+      {attention === null && !error && (
+        <section className="li-dash-card li-attn-card">
+          <h2 className="li-dash-card-title">Attention</h2>
+          <div className="loading-block" role="status">
+            <span className="spinner" /> Loading…
+          </div>
+        </section>
+      )}
+      {attention && attention.length > 0 && (
+        <section className="li-dash-card li-attn-card">
+          <h2 className="li-dash-card-title">Attention</h2>
+          <p className="li-attn-sub">Your most pressing items, most pressing first.</p>
+          <div className="li-attn-list">
+            {attention.map((it) => {
+              const meta = attentionKindMeta(it.kind)
+              return (
+                <Link
+                  key={`${it.kind}:${it.deepLink}:${it.entityId ?? it.rank}`}
+                  href={it.deepLink}
+                  className="li-attn-row"
+                >
+                  <span className="li-attn-kind" style={{ background: meta.bg, color: meta.fg }}>
+                    <span className="li-attn-dot" style={{ background: meta.fg }} />
+                    {meta.label}
+                  </span>
+                  <span className="li-attn-why">{it.why}</span>
+                </Link>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       <div className="li-dash-grid">
         <section className="li-dash-card">

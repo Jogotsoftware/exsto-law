@@ -96,6 +96,8 @@ export * from './assistantChat.js'
 export * from './composeEmailTool.js'
 // WP B5 — the read-only get_brief chat tool (brief fan-out).
 export * from './getBriefTool.js'
+// FB-H — the read-only get_attention_feed chat tool (attention engine).
+export * from './attentionFeedTool.js'
 export * from './esignLaunchTools.js'
 export * from './assistantMachinery.js'
 export * from './chatSession.js'

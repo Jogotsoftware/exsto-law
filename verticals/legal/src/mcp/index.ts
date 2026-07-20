@@ -119,6 +119,9 @@ import './tools/clientBriefTools.js'
 // so client code (e.g. the compose/reply modal) can call it without importing
 // @exsto/legal values directly.
 import './tools/emailVoiceTools.js'
+// FB-H — the attention engine's read tool (legal.attention.feed). Attorney-only;
+// backs the home "Attention" card and any read-only triage surface.
+import './tools/attentionTools.js'
 
 // The public-client-portal allowlist travels with the tools it gates.
 export {

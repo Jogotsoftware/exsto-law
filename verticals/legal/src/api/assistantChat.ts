@@ -96,6 +96,8 @@ import { buildOpenEditorTool, type EditorLaunch } from './editorLaunchTools.js'
 import { buildComposeEmailTool, type EmailComposeCapture } from './composeEmailTool.js'
 import { buildPrepareEnvelopeTool, type EnvelopePrepareLaunch } from './esignLaunchTools.js'
 import { buildGetBriefTool } from './getBriefTool.js'
+import { buildAttentionFeedTool } from './attentionFeedTool.js'
+import { getAttentionFeed, renderAttentionSnapshot } from '../queries/attentionFeed.js'
 import type { KindProposal } from './kindAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 import { buildBuildBriefText } from './buildBrief.js'
@@ -645,6 +647,11 @@ export function buildAttorneyClientTools(
   // WP-H2: open a real editor on an EXISTING artifact from chat (unflagged —
   // editing what already exists is standalone, like workflow authoring above).
   tools.push(buildOpenEditorTool(ctx, capture.editorLaunches))
+  // FB-H: the ATTENTION ENGINE is registered on EVERY attorney turn — global
+  // included — so "what's most pressing?" / "check my inbox" is answerable from a
+  // real ranked feed even on an unscoped chat. READ-ONLY; the paired ACT tools
+  // (compose_email, the review/e-sign launchers) stay scope-gated below.
+  tools.push(buildAttentionFeedTool(ctx))
   // ASSISTANT-ACTS-1: act-in-place tools exist only on SCOPED turns — a client
   // email needs a client to resolve (matter/contact), and an envelope needs the
   // matter's documents. A general or context-off chat never offers them, so the
@@ -719,11 +726,32 @@ const MAX_PAGE_CONTENT_CHARS = 16000
 // via getTenantSettingsForMerge (never getTenantSettings/FIRM_DEFAULTS): an
 // unset firm must resolve to honest "unset" facts, never the Pacheco Law demo
 // identity — the same anti-forgery posture document merge already uses.
+// FB-H — the signed-in attorney's own display name (the actor row for
+// ctx.actorId). Preferred over the firm's configured attorney_name so the
+// assistant addresses the PERSON at the keyboard. Null for a non-human/absent
+// actor, in which case the firm attorney_name is the fallback.
+async function resolveActorDisplayName(ctx: ActionContext): Promise<string | null> {
+  return withActionContext(ctx, async (client) => {
+    const r = await client.query<{ display_name: string | null }>(
+      `SELECT display_name FROM actor WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+      [ctx.tenantId, ctx.actorId],
+    )
+    const name = r.rows[0]?.display_name?.trim()
+    return name ? name : null
+  })
+}
+
 async function resolveAssistantFirmFacts(ctx: ActionContext): Promise<AssistantFirmFacts> {
-  const settings = await getTenantSettingsForMerge(ctx)
+  const [settings, actorName] = await Promise.all([
+    getTenantSettingsForMerge(ctx),
+    // Best-effort: an actor-name lookup failure must never break the chat.
+    resolveActorDisplayName(ctx).catch(() => null),
+  ])
   return {
     firmName: settings.firmName ?? 'the firm',
-    attorneyName: settings.attorneyName ?? undefined,
+    // FB-H — the signed-in attorney's name (actor display_name) takes precedence,
+    // falling back to the firm's configured attorney_name, then undefined.
+    attorneyName: actorName ?? settings.attorneyName ?? undefined,
     jurisdictionCode: settings.firmJurisdiction ?? undefined,
     jurisdictionDisplayName: jurisdictionDisplayName(settings.firmJurisdiction) ?? undefined,
     practiceAreas: settings.practiceAreas ?? undefined,
@@ -857,12 +885,27 @@ export function buildClaudeSystem(
 export function buildVolatileClaudeSystem(
   pageContext?: { path?: string; [k: string]: unknown } | null,
   buildBriefText = '',
+  // FB-H — the GLOBAL-scope attention snapshot (top pressing items as one-liners).
+  // Volatile by nature (it changes as work lands), and only ever passed on an
+  // unscoped turn, so an unscoped chat OPENS already knowing the landscape. Empty
+  // on scoped turns and when nothing is pressing.
+  attentionSnapshot = '',
 ): string {
   const parts: string[] = []
   // The live BUILD BRIEF (WP4.2) — the approved state of the service under
   // construction, re-derived every turn. Volatile by nature (it changes on every
   // approval), so it lives after the cache breakpoint.
   if (buildBriefText) parts.push(buildBriefText)
+  // FB-H — the attention snapshot, framed so the model treats it as the current
+  // landscape it may proactively surface, and pointed at get_attention_feed for
+  // the full, actionable list.
+  if (attentionSnapshot) {
+    parts.push(
+      '--- What is most pressing for the attorney right now (top items) ---\n' +
+        'This is a live snapshot of the attorney\'s most pressing items, most pressing first. Use it to answer "what should I work on?", "what\'s pressing?", or "check my inbox" without being asked to look it up, and call get_attention_feed for the full ranked list with links to act. Report only what is here — do not invent items or deadlines.\n' +
+        attentionSnapshot,
+    )
+  }
   const currentPath =
     typeof pageContext?.path === 'string' && pageContext.path ? pageContext.path : null
   if (currentPath) {
@@ -895,6 +938,31 @@ export function buildVolatileClaudeSystem(
     )
   }
   return parts.join('\n\n')
+}
+
+// FB-H — gate the attention snapshot to GLOBAL scope only. A scoped turn already
+// injects the matter/client context; the landscape snapshot is for the UNSCOPED
+// chat that would otherwise open blind. Pure + exported so the "global only"
+// property is unit-tested without a DB or model.
+export function attentionSnapshotForScope(scope: AssistantScope, snapshot: string): string {
+  return scope === 'global' ? snapshot : ''
+}
+
+// Compute the global-scope attention snapshot for the volatile prompt. Only runs
+// its (DB-hitting) read on an unscoped turn; empty otherwise. Best-effort: a feed
+// failure yields '' so the chat is never blocked on the landscape read.
+async function computeGlobalAttentionSnapshot(
+  ctx: ActionContext,
+  scope: AssistantScope,
+): Promise<string> {
+  if (scope !== 'global') return ''
+  try {
+    // Top ~8 one-liners, char-capped so the volatile block stays small.
+    const items = await getAttentionFeed(ctx, { maxItems: 8, maxChars: 1400 })
+    return attentionSnapshotForScope(scope, renderAttentionSnapshot(items))
+  } catch {
+    return ''
+  }
 }
 
 // Caps so an attached document can't blow the context window (or the bill): per
@@ -1448,9 +1516,12 @@ export async function assistantChat(
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey)
       : ''
+    // FB-H — on an UNSCOPED chat, open with the pressing-work landscape in the
+    // volatile half (scoped turns already carry matter/client context).
+    const attentionSnapshot = await computeGlobalAttentionSnapshot(ctx, scope)
     const { messages, volatile } = applyTokenGuard({
       system,
-      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief),
+      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief, attentionSnapshot),
       history: input.history ?? [],
       userMessage: composeUserMessage(message, input.attachments),
       model: model.model,
@@ -1756,9 +1827,12 @@ export async function* assistantChatStream(
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey)
       : ''
+    // FB-H — on an UNSCOPED chat, open with the pressing-work landscape in the
+    // volatile half (scoped turns already carry matter/client context).
+    const attentionSnapshot = await computeGlobalAttentionSnapshot(ctx, scope)
     const { messages, volatile } = applyTokenGuard({
       system,
-      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief),
+      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief, attentionSnapshot),
       history: input.history ?? [],
       userMessage: composeUserMessage(message, input.attachments),
       model: model.model,

@@ -39,6 +39,18 @@ function firmIntroLine(firm: AssistantFirmFacts): string {
   return `You are the AI assistant inside ${firm.firmName}'s practice app${areas} — a tool for the firm's attorneys.`
 }
 
+// FB-H — WHO the assistant is serving. The attorney's own name (the signed-in
+// actor's display name, falling back to the firm's configured attorney name), so
+// the assistant addresses them personally and works as THEIR task manager rather
+// than an anonymous tool. Omitted entirely when no name is known (an honest
+// silence, never a placeholder). Constant for the conversation, so it rides the
+// stable/cached half like the rest of the firm facts.
+function servedAttorneyLine(firm: AssistantFirmFacts): string {
+  const name = firm.attorneyName?.trim()
+  if (!name) return ''
+  return `You are working with ${name}, an attorney at the firm — address them directly and personally, and act as their task manager: when they ask what is most pressing, what to work on, to check their inbox, or what may have slipped, use the get_attention_feed tool and answer from it.`
+}
+
 // The jurisdiction sentence: when the firm has a home jurisdiction on file,
 // name it as the default but defer to the matter's own governing law. When it
 // is unset, the model must NEVER guess one — it has to ask.
@@ -181,6 +193,10 @@ export function buildPortalInstructionsBlock(portalInstructions?: string): strin
 export function buildBaseSystemPrompt(firm: AssistantFirmFacts): string {
   return [
     firmIntroLine(firm),
+    // FB-H — name the attorney (omitted when unknown), so the assistant works as
+    // their personal task manager. Empty strings are filtered out before join so
+    // an unset name changes nothing.
+    servedAttorneyLine(firm),
     jurisdictionSentence(firm),
     JURISDICTION_DRAFT_DISCIPLINE,
     'Help the attorney work: explain and use the app (intake, booking, drafting, review, Granola import, settings), summarize and answer questions about the matter or client in context, and draft internal text when asked.',
@@ -199,6 +215,11 @@ export function buildBaseSystemPrompt(firm: AssistantFirmFacts): string {
     'CITE THE GOVERNING LAW — when you state a legal rule or conclusion, name the controlling authority (the statute, regulation, or case) so the attorney can check it. Give a specific citation — a statute by name AND code section (e.g., "the Lanham Act, 15 U.S.C. § 1051 et seq."), or a case by name — ONLY when you are confident it is correct. If you are not certain of the exact section, subsection, pincite, or case name, name the statute or body of law generally (e.g., "the federal Lanham Act") and say the precise citation must be verified against the primary source. NEVER guess or invent a code section, subsection number, case name, date, or pincite to look authoritative — a wrong citation is worse than no citation. When web search is available, use it to confirm a citation before giving it.',
     NO_INVENTED_MATTER_FACTS,
     ASK_DONT_GUESS,
+    // FB-H — the attention-engine tool doctrine. One sentence: what it is for and
+    // how to answer from it. The feed is deterministic code, so the model must
+    // report only what it returns, cite each item's plain reason, and offer the
+    // link to act (pairing with the scoped act tools like compose_email for a reply).
+    "WHAT IS PRESSING — when the attorney asks what is most pressing, what to work on next, to check their inbox or messages, what is overdue, or what may have slipped through the cracks, CALL the get_attention_feed tool and answer from its ranked items: cite each item's reason in your own words and offer its deepLink to act (e.g. open the review queue, reply to a client). Report ONLY what the feed returns — never invent items, deadlines, or counts — and if it is empty, say plainly that nothing is pressing.",
     'You also collect product feedback. When the attorney shares a complaint, idea, or praise: if it is vague or missing actionable detail (which screen, what they expected, the steps to reproduce), ask ONE short clarifying question first. Once you have a clear, specific item, CALL the log_feedback tool to file it with the right category, then tell the attorney it is logged and share the reference id the tool returns. Use the tool only for genuine product feedback, not for ordinary questions.',
     // Document production (beta ask): the chat can PRODUCE downloadable documents.
     // The deliverable goes through the tool (surfaced as a download card), never
@@ -229,5 +250,9 @@ export function buildBaseSystemPrompt(firm: AssistantFirmFacts): string {
     REPLY_LANGUAGE,
     CHAT_VOICE,
     'Keep replies focused and concise.',
-  ].join(' ')
+    // Filter drops any block that is empty for this firm (e.g. the attorney-name
+    // line when no name is on file), so an unset field never leaves a double space.
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
