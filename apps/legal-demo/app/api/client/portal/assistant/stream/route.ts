@@ -39,6 +39,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     message?: unknown
     history?: unknown
+    locale?: unknown
   } | null
   if (!body || typeof body.message !== 'string') {
     return Response.json({ error: 'message is required' }, { status: 400 })
@@ -48,6 +49,9 @@ export async function POST(request: Request) {
         (h) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string',
       )
     : []
+  // WP A3 — the portal UI's language (en/es), used only to default a Spanish
+  // client to Spanish; anything unexpected degrades to unset (follow the user).
+  const locale = body.locale === 'es' ? 'es' : body.locale === 'en' ? 'en' : undefined
 
   const ctx: ActionContext = { tenantId, actorId: clientActorId }
 
@@ -72,7 +76,7 @@ export async function POST(request: Request) {
             displayName: session.displayName,
             email: session.email,
           },
-          { message: body.message as string, history },
+          { message: body.message as string, history, locale },
         )) {
           send(event)
         }

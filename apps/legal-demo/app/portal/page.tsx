@@ -2562,7 +2562,7 @@ interface RequestCard {
 // surface; a request needing the client's consent renders as a card whose
 // button — the client's OWN click — files the cost-accepted request.
 function AssistantView() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const firmName = useFirmName()
   const [messages, setMessages] = useState<ChatMsg[]>([])
   const [input, setInput] = useState('')
@@ -2601,6 +2601,9 @@ function AssistantView() {
         body: JSON.stringify({
           message,
           history: messages.slice(-12),
+          // WP A3 — the portal's current language, so a Spanish-speaking client
+          // is answered in Spanish from the first message.
+          locale: lang,
         }),
       })
       if (!res.ok || !res.body) {

@@ -346,5 +346,5 @@ Reply and tell us whether to send Hollowstone that edit. Nothing else is
 needed from you until then.
 
 Best,
-Joe Pacheco
+Sam Delgado
 ```
