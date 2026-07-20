@@ -13,6 +13,7 @@ import {
   buildMatterEvidence,
   buildClientEvidence,
   buildServiceDigestEvidence,
+  renderEvidenceBundle,
   type BriefScope,
   fmtDate,
 } from '@exsto/legal'
@@ -21,6 +22,7 @@ import type { MatterHistory } from '@exsto/legal'
 import type { NoteSummary } from '@exsto/legal'
 import type { ClientContext } from '@exsto/legal'
 import type { ServiceDigestSignals } from '@exsto/legal'
+import type { EvidenceBundle } from '@exsto/legal'
 
 const ASSEMBLED_AT = '2026-07-17T12:00:00.000Z'
 
@@ -627,6 +629,84 @@ describe('buildServiceDigestEvidence — accepted revisions + edit notes + revis
     const bundle = buildServiceDigestEvidence(material, DIGEST_SCOPE, 'balanced', ASSEMBLED_AT)
     expect(bundle.sections).toEqual([])
     expect(bundle.sourceWatermark).toBe(ASSEMBLED_AT)
+  })
+})
+
+// ── renderEvidenceBundle (WP B1 — extracted for the Service Digest injection
+// into drafting; briefEngine.ts's buildBriefSynthesisPrompt now calls this same
+// export, so its own prompt tests pin byte-equivalence for the no-opts call) ──
+
+function evidenceBundle(overrides: Partial<EvidenceBundle> = {}): EvidenceBundle {
+  return {
+    sections: [
+      {
+        source: 'matter',
+        label: 'Matter core',
+        content: 'Matter 2026-001 — status: open.',
+        truncated: false,
+      },
+      { source: 'notes', label: 'Notes', content: '- waiting on signers', truncated: true },
+    ],
+    sourceWatermark: '2026-07-15T10:00:00+00:00',
+    assembledAt: ASSEMBLED_AT,
+    scope: MATTER_SCOPE,
+    budget: 'balanced',
+    ...overrides,
+  }
+}
+
+describe('renderEvidenceBundle', () => {
+  it('renders every section labelled and source-tagged, truncated flag surfaced only when true', () => {
+    const text = renderEvidenceBundle(evidenceBundle())
+    expect(text).toContain('### Matter core [source: matter]\nMatter 2026-001 — status: open.')
+    expect(text).toContain('### Notes [source: notes, truncated]\n- waiting on signers')
+  })
+
+  it('is deterministic across repeated calls on the same bundle', () => {
+    const bundle = evidenceBundle()
+    expect(renderEvidenceBundle(bundle)).toBe(renderEvidenceBundle(bundle))
+  })
+
+  it('with no opts, is byte-identical to the sections joined by a blank line (no header, no cap)', () => {
+    const bundle = evidenceBundle()
+    const expected = bundle.sections
+      .map(
+        (s) =>
+          `### ${s.label} [source: ${s.source}${s.truncated ? ', truncated' : ''}]\n${s.content}`,
+      )
+      .join('\n\n')
+    expect(renderEvidenceBundle(bundle)).toBe(expected)
+  })
+
+  it('prepends an opts.header before the sections, inside the same output', () => {
+    const text = renderEvidenceBundle(evidenceBundle(), { header: 'FRAMING PROSE' })
+    expect(text.startsWith('FRAMING PROSE\n\n### Matter core')).toBe(true)
+  })
+
+  it('an empty bundle with a header renders just the header (no dangling separator collapse issue)', () => {
+    const text = renderEvidenceBundle(evidenceBundle({ sections: [] }), { header: 'FRAMING PROSE' })
+    expect(text).toBe('FRAMING PROSE\n\n')
+  })
+
+  it('caps the TOTAL rendered output (header + sections) at opts.maxChars, honestly marked', () => {
+    const bigBundle = evidenceBundle({
+      sections: [{ source: 'notes', label: 'Notes', content: 'x'.repeat(5000), truncated: false }],
+    })
+    const text = renderEvidenceBundle(bigBundle, { header: 'H', maxChars: 200 })
+    // clip() slices to maxChars, trimEnd()s (never grows it back), then appends
+    // its ' …[truncated]' marker (a leading space + 12 chars) — so the hard
+    // ceiling is maxChars + that marker's length, not maxChars alone.
+    expect(text.length).toBeLessThanOrEqual(200 + ' …[truncated]'.length)
+    expect(text).toContain('…[truncated]')
+  })
+
+  it('does not clip when the rendered output is already under maxChars', () => {
+    const text = renderEvidenceBundle(evidenceBundle(), { maxChars: 100_000 })
+    expect(text).not.toContain('…[truncated]')
+  })
+
+  it('renders an empty string for a bundle with no sections and no header', () => {
+    expect(renderEvidenceBundle(evidenceBundle({ sections: [] }))).toBe('')
   })
 })
 

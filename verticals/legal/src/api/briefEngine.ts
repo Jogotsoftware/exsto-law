@@ -36,7 +36,12 @@ import { submitAction, withActionContext, type ActionContext } from '@exsto/subs
 import { callClaudeDrafter } from '../adapters/claude.js'
 import type { AiTask } from '../lib/modelRouter.js'
 import { DATA_BEGIN, DATA_END } from './assistantContext.js'
-import { assembleBriefEvidence, type EvidenceBudget, type EvidenceBundle } from './briefEvidence.js'
+import {
+  assembleBriefEvidence,
+  renderEvidenceBundle,
+  type EvidenceBudget,
+  type EvidenceBundle,
+} from './briefEvidence.js'
 import { resolveTenantSystemActorId } from './capabilityRuntime.js'
 import { getMatterHistory } from '../queries/history.js'
 import {
@@ -135,12 +140,10 @@ export const BRIEF_QUOTING_RULE =
   'verbatim quote, set its "quoted" flag to true.'
 
 export function buildBriefSynthesisPrompt(bundle: EvidenceBundle): string {
-  const evidence = bundle.sections
-    .map(
-      (s) =>
-        `### ${s.label} [source: ${s.source}${s.truncated ? ', truncated' : ''}]\n${s.content}`,
-    )
-    .join('\n\n')
+  // Shared with the Service Digest injection (briefEvidence.ts's
+  // renderEvidenceBundle) — no header, no cap here, so this is byte-equivalent
+  // to the prior inline renderer.
+  const evidence = renderEvidenceBundle(bundle)
 
   return [
     'You are drafting an internal MATTER BRIEF for the attorney handling this matter — ' +

@@ -400,12 +400,16 @@ async function runDocumentGenerationCapability(
   // step's configured mode. A null return is a non-retryable precondition (draft.failed
   // already recorded) — throw so the matter never advances to review with no document.
   const { runDraftGeneration } = await import('./generateDraft.js')
+  // WP B1 — mirror use_client_context: opt OUT of the service digest per step
+  // (capability_config.use_service_digest: false); the default (unset/true) is
+  // to inject it, same as the bespoke generate_document path.
   const produced = await runDraftGeneration(h.agentCtx, {
     matterEntityId: h.matterEntityId,
     documentKind,
     generationMode,
     guidance: instructions,
     templateOverride: { templateText: tmpl.body, templateId: `template:${templateEntityId}` },
+    ...(h.config.use_service_digest === false ? { useServiceDigest: false } : {}),
   })
   if (!produced) {
     throw new CapabilityInputMissingError(

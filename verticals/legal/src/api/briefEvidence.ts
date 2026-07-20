@@ -811,6 +811,31 @@ export function buildServiceDigestEvidence(
   }
 }
 
+// ── Rendering (shared by every Brief-Engine-evidence consumer) ─────────────
+
+// The ONE bundle→text renderer — generalized from buildBriefSynthesisPrompt's
+// original inline version (briefEngine.ts now imports this instead of forking
+// its own copy; byte-equivalent for the no-opts call brief synthesis makes).
+// `header` prepends framing prose (a consumer-specific "what this data is and
+// how to weigh it" note) BEFORE the sections, still inside the same budget when
+// `maxChars` is set — so a caller that caps total size never has the header
+// itself blow the cap. `maxChars` reuses assistantContext's clip() (the same
+// truncation convention every other bundle-derived text in this vertical uses),
+// so a capped render carries the identical "…[truncated]" marker.
+export function renderEvidenceBundle(
+  bundle: EvidenceBundle,
+  opts: { header?: string; maxChars?: number } = {},
+): string {
+  const body = bundle.sections
+    .map(
+      (s) =>
+        `### ${s.label} [source: ${s.source}${s.truncated ? ', truncated' : ''}]\n${s.content}`,
+    )
+    .join('\n\n')
+  const rendered = opts.header ? `${opts.header}\n\n${body}` : body
+  return opts.maxChars ? clip(rendered, opts.maxChars) : rendered
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────
 
 // The ONE entry point WP2/WP3/WP4 synthesize on top of. Throws when a

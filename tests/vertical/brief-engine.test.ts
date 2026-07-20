@@ -23,6 +23,7 @@ import {
   isBriefStale,
   parseBriefSynthesisOutput,
   persistBrief,
+  renderEvidenceBundle,
   type EvidenceBundle,
   type MatterBriefEngineDeps,
   type PersistBriefDeps,
@@ -161,6 +162,26 @@ describe('buildBriefSynthesisPrompt', () => {
     expect(prompt).toContain('honest about gaps')
     expect(prompt).toContain('Never invent')
     expect(prompt).toContain('attorney')
+  })
+
+  // WP B1 — buildBriefSynthesisPrompt's evidence block now comes from the SAME
+  // renderEvidenceBundle export the Service Digest injection uses
+  // (briefEvidence.ts), instead of forking its own copy of the renderer. Prove
+  // the embedded evidence is byte-identical to calling renderEvidenceBundle
+  // directly on the same bundle — the refactor changed nothing observable.
+  it('embeds renderEvidenceBundle(bundle) byte-for-byte (shared renderer, no fork)', () => {
+    const b = bundle()
+    const expectedEvidence = renderEvidenceBundle(b)
+    expect(expectedEvidence.length).toBeGreaterThan(0)
+    // The «BEGIN/END MATTER DATA» markers also appear once earlier, inside the
+    // data-not-commands guard sentence — lastIndexOf/indexOf-after-that find the
+    // ACTUAL fence (the second occurrence of each), not that sentence.
+    const beginTag = '«BEGIN MATTER DATA»'
+    const endTag = '«END MATTER DATA»'
+    const fenceStart = prompt.lastIndexOf(beginTag)
+    const fenceEnd = prompt.indexOf(endTag, fenceStart)
+    const between = prompt.slice(fenceStart + beginTag.length, fenceEnd)
+    expect(between.trim()).toBe(expectedEvidence)
   })
 })
 
