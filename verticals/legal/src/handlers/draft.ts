@@ -16,7 +16,7 @@ import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
 import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
-import { scheduleProducingAutoRun } from '../lifecycle/autoRun.js'
+import { settleStage } from '../lifecycle/settle.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // draft.generate / draft.merge — persist a first-draft document (REQ-DRAFT-01..04,
@@ -686,9 +686,9 @@ async function advanceInstanceOnApprove(
     sourceRef: ctx.actorId,
   })
 
-  // ADR 0046 — approving a review memo may land the matter on the NEXT
-  // invoke_capability stage (e.g. request client materials); run it post-commit.
-  scheduleProducingAutoRun(ctx, matterEntityId, edge.to, graph)
+  // WF-FIX-1 — settle the landing: pass through non-blocking stage(s); a producing
+  // resting stage (e.g. request client materials) still runs post-commit.
+  await settleStage(client, ctx, matterEntityId, edge.to, graph, actionId)
 }
 
 registerActionHandler('draft.approve', async (ctx, client, payload, actionId) => {

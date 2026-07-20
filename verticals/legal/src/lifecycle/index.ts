@@ -14,6 +14,9 @@ export * from './instance.js'
 export * from './executor.js'
 // ADR 0046 — auto-run an invoke_capability stage on entry (post-commit).
 export * from './autoRun.js'
+// WF-FIX-1 — non-blocking pass-through: settle a landing through informational
+// stages, then schedule the producing auto-run for the resting stage.
+export * from './settle.js'
 // WORKFLOW-AUTHORING-1 — the self-describing invoke_capability authoring contract
 // (pure: worked-example step shape + precise config-mismatch diagnostics).
 export * from './capabilityAuthoring.js'

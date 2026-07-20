@@ -24054,3 +24054,16 @@ details.li-brief-research summary:hover {
     height: 60vh;
   }
 }
+
+/* ── FB-B — Settings → Assistant (custom instructions) ─────────────────────── */
+.li-set-charcount {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--li-muted-2);
+  text-align: right;
+}
+.li-set-charcount--limit {
+  color: var(--li-danger);
+  font-weight: 600;
+}

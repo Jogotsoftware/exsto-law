@@ -261,7 +261,7 @@ registerTool({
 registerTool({
   name: 'legal.assistant.settings_get',
   description:
-    "The attorney's persisted assistant settings (model, effort, web-search/research, context depth) — per-attorney, stored through core. Null when never saved (the client uses its defaults).",
+    "The attorney's persisted assistant settings (model, effort, web-search/research, context depth, custom instructions) — per-attorney, stored through core. Null when never saved (the client uses its defaults).",
   mode: 'read',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => ({ settings: await getAssistantSettings(ctx) }),
@@ -283,6 +283,10 @@ registerTool({
           webSearch: { type: 'boolean' },
           research: { type: 'boolean' },
           contextDepth: { type: 'string', enum: ['lean', 'balanced', 'generous'] },
+          // FB-B — this attorney's own standing instructions for the assistant.
+          // The editor caps input at 2,000 chars; the prompt-builder also clips
+          // defensively at injection time (assistantPrompt.ts).
+          customInstructions: { type: 'string', maxLength: 2000 },
         },
         additionalProperties: false,
       },

@@ -17,6 +17,13 @@ import { getPortalSchedulingAvailability, getSchedulingFeeQuote } from './portal
 import { quoteClientRequest, isRequestType, type RequestType } from './requestPricing.js'
 import { listServices } from './services.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
+import {
+  ASK_DONT_GUESS,
+  NO_INVENTED_MATTER_FACTS,
+  REPLY_LANGUAGE,
+  CHAT_VOICE,
+  portalLocaleLine,
+} from './assistantPrompt.js'
 
 // PORTAL-1 (WP5) — the portal chatbot: same brain (the Claude adapter's chat
 // loop + streaming + caching), DIFFERENT HANDS. The tool surface is built from
@@ -40,8 +47,15 @@ const MAX_HISTORY_TURNS = 12
 // honest generic "the firm", not the demo identity.
 // Exported for the zero-Pacheco/NC test (tests/vertical/): pure string
 // building, no DB, so an unset firm's portal prompt is directly assertable.
-export function buildBaseSystem(firmName: string): string {
-  return `You are ${firmName}'s client portal assistant, chatting with a signed-in client of the firm.
+// WP A3 — the `locale` is the portal UI's current language (en/es), threaded in
+// from the request so a Spanish-speaking client is greeted in Spanish rather than
+// answered in English until they switch. The four shared discipline blocks
+// (ask-vs-guess, no invented facts, reply language, chat voice) are imported from
+// assistantPrompt.ts so both surfaces carry ONE canonical wording. Jurisdiction
+// discipline is attorney-only — the portal bot does not draft or state law.
+export function buildBaseSystem(firmName: string, locale?: 'en' | 'es'): string {
+  return [
+    `You are ${firmName}'s client portal assistant, chatting with a signed-in client of the firm.
 
 Everything you can see comes from the tools, which are scoped to THIS client's own matters, documents, invoices, and messages. Use them; never guess or invent records. You cannot see other clients, firm internals, or anything the firm has not released.
 
@@ -49,9 +63,16 @@ You do not give legal advice, interpret the law for the client's situation, or p
 
 Anything with a cost must show its exact fee, and the client accepts it themselves in the portal — never treat a chat message as fee acceptance, and never imply something is free unless a tool said so.
 
-When the client wants something new: if it matches a service the firm offers online, point them to book it. Otherwise gather what the firm needs (what they want, which matter it concerns, urgency) and use prepare_request — the request goes to the attorney's queue; the attorney's approval is what turns it into work.
-
-Keep replies short, warm, and in plain language.`
+When the client wants something new: if it matches a service the firm offers online, point them to book it. Otherwise gather what the firm needs (what they want, which matter it concerns, urgency) and use prepare_request — the request goes to the attorney's queue; the attorney's approval is what turns it into work.`,
+    ASK_DONT_GUESS,
+    NO_INVENTED_MATTER_FACTS,
+    REPLY_LANGUAGE,
+    portalLocaleLine(locale),
+    CHAT_VOICE,
+    'Keep replies short, warm, and in plain language.',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 export interface ClientChatIdentity {
@@ -273,6 +294,9 @@ export interface ClientChatStreamEvent {
 export interface ClientChatInput {
   message: string
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  // WP A3 — the portal UI's current language, threaded through so the base
+  // prompt can default a Spanish-speaking client to Spanish (portalLocaleLine).
+  locale?: 'en' | 'es'
 }
 
 // Streaming client chat. ctx MUST carry the client's own actor (from the authed
@@ -294,7 +318,7 @@ export async function* clientAssistantChatStream(
   const skill = await getSkillBySlug(ctx, 'client-portal.portal-assistant')
   const firmSettings = await getTenantSettingsForMerge(ctx)
   const system = [
-    buildBaseSystem(firmSettings.firmName ?? 'the firm'),
+    buildBaseSystem(firmSettings.firmName ?? 'the firm', input.locale),
     skill?.body ? `--- Firm guidance ---\n${skill.body}` : '',
     `--- Client ---\nYou are talking to ${who.displayName} (${who.email}).`,
   ]

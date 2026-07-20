@@ -18,6 +18,25 @@ describe('normalizeFirmProfileFieldValue — text fields', () => {
   })
 })
 
+// WP FB-B (migration 0175, PLANNED) — assistant_instructions is a plain text
+// field on the same singleton, so it goes through the generic trim/clear
+// branch above like firm_name/attorney_name/etc. No special validation (unlike
+// firm_jurisdiction); the 2,000-char cap is enforced at the UI/MCP-schema layer
+// and defensively again at prompt-injection time (assistantPrompt.ts).
+describe('normalizeFirmProfileFieldValue — assistant_instructions', () => {
+  it('trims like any other text field', () => {
+    expect(
+      normalizeFirmProfileFieldValue('assistant_instructions', '  Always CC my paralegal.  '),
+    ).toBe('Always CC my paralegal.')
+  })
+
+  it('empty/null/non-string clears to an empty string', () => {
+    expect(normalizeFirmProfileFieldValue('assistant_instructions', '')).toBe('')
+    expect(normalizeFirmProfileFieldValue('assistant_instructions', null)).toBe('')
+    expect(normalizeFirmProfileFieldValue('assistant_instructions', undefined)).toBe('')
+  })
+})
+
 describe('normalizeFirmProfileFieldValue — firm_jurisdiction', () => {
   it('normalizes a code to itself (uppercased)', () => {
     expect(normalizeFirmProfileFieldValue('firm_jurisdiction', 'nc')).toBe('NC')

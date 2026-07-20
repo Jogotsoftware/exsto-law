@@ -78,10 +78,19 @@ async function resolveCurrentStage(
   })
 }
 
-// The document kind this generate_document stage produces: the stage's own document
-// ref wins; else the service's first registered document kind (transitions.documents).
-// Exported for the WP4 regenerate runtime (regenerateStage.ts), which re-drafts the
-// document a generate_document stage produces.
+// WF-FIX-1 (WP3): the stage's template annotation, when it names a firm-library
+// template by entity id. A review_send_document step authored in the step editor
+// carries exactly this shape ("1 doc" = a DocumentRef with templateEntityId); the
+// draft must come from THAT template, not a same-kind library default.
+export function resolveStageTemplateRef(stage: LifecycleStage): string | null {
+  const ref = stage.documents?.map((d) => d.templateEntityId).find((t): t is string => !!t?.trim())
+  return ref ?? null
+}
+
+// The document kind this producing stage produces: the stage's own document ref wins
+// (explicit docKind, else the annotated template's own kind); else the service's first
+// registered document kind (transitions.documents). Exported for the WP4 regenerate
+// runtime (regenerateStage.ts), which re-drafts the document a producing stage makes.
 export async function resolveStageDocumentKind(
   ctx: ActionContext,
   matterEntityId: string,
@@ -89,6 +98,15 @@ export async function resolveStageDocumentKind(
 ): Promise<string | null> {
   const fromStage = stage.documents?.map((d) => d.docKind).find((k): k is string => !!k?.trim())
   if (fromStage) return fromStage
+  const templateEntityId = resolveStageTemplateRef(stage)
+  if (templateEntityId) {
+    const { getStandaloneTemplate } = await import('../queries/templates.js')
+    const tmpl = await getStandaloneTemplate(ctx, templateEntityId)
+    if (tmpl) {
+      const { slugifyDocKind } = await import('./capabilityRuntime.js')
+      return (tmpl.docKind ?? '').trim() || slugifyDocKind(tmpl.name)
+    }
+  }
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{ documents: string[] | null }>(
       `SELECT wd.transitions -> 'documents' AS documents
@@ -167,6 +185,7 @@ export async function enqueueDraftAutoRunJob(
       `generate_document stage "${stage.key}" names no document kind (stage.documents / service documents both empty).`,
     )
   }
+  const templateEntityId = resolveStageTemplateRef(stage)
   let jobId: string
   try {
     jobId = await enqueueJob({
@@ -176,6 +195,9 @@ export async function enqueueDraftAutoRunJob(
         matter_entity_id: matterEntityId,
         document_kind: documentKind,
         producing_autorun: true,
+        // WF-FIX-1 (WP3): the stage's annotated template rides the payload so the
+        // worker drafts from THAT template, not a same-kind library default.
+        ...(templateEntityId ? { template_entity_id: templateEntityId } : {}),
       },
     })
   } catch (err) {
@@ -220,12 +242,17 @@ export async function generateDocumentForMatter(
     }
   }
   const { stage, currentState } = info
-  if (stage.action?.kind !== 'generate_document') {
+  // WF-FIX-1 (WP3): a review_send_document stage with a document annotation is a
+  // producing stage too — the review opens with its draft already made. A BARE
+  // review step (no documents) is still rejected: nothing to produce.
+  const annotatedReview =
+    stage.action?.kind === 'review_send_document' && (stage.documents?.length ?? 0) > 0
+  if (stage.action?.kind !== 'generate_document' && !annotatedReview) {
     return {
       ran: false,
       documentKind: '',
       advanced: false,
-      summary: `Stage "${stage.key}" is not a generate_document step (it is "${stage.action?.kind ?? 'none'}").`,
+      summary: `Stage "${stage.key}" is not a document-producing step (it is "${stage.action?.kind ?? 'none'}").`,
     }
   }
 
@@ -256,7 +283,30 @@ export async function generateDocumentForMatter(
   // PRODUCE — the proven producer. Emits draft.completed; attributes to the agent actor.
   // A null return is a non-retryable precondition failure (draft.failed already
   // recorded) — park WITHOUT advancing; never move a matter to review with no document.
-  const produced = await runDraftGeneration(agentCtx, { matterEntityId, documentKind })
+  // WF-FIX-1 (WP3): when the stage annotates a specific firm template, draft from THAT
+  // template (the document_generation capability's templateOverride seam) — a firm with
+  // several templates of the same kind must get the one the step names.
+  const templateEntityId = resolveStageTemplateRef(stage)
+  let templateOverride: { templateText: string; templateId: string } | undefined
+  if (templateEntityId) {
+    const { getStandaloneTemplate } = await import('../queries/templates.js')
+    const tmpl = await getStandaloneTemplate(agentCtx, templateEntityId)
+    if (!tmpl || !tmpl.body.trim()) {
+      await recordObservation(agentCtx, matterEntityId, 'generate_document_template_missing', {
+        stage: stage.key,
+        template_entity_id: templateEntityId,
+      })
+      throw new Error(
+        `Stage "${stage.key}" names template "${templateEntityId}" but it is not an active firm template — cannot draft.`,
+      )
+    }
+    templateOverride = { templateText: tmpl.body, templateId: `template:${templateEntityId}` }
+  }
+  const produced = await runDraftGeneration(agentCtx, {
+    matterEntityId,
+    documentKind,
+    ...(templateOverride ? { templateOverride } : {}),
+  })
   if (!produced) {
     return {
       ran: false,

@@ -14,7 +14,7 @@ import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { resolveActiveServiceVersion } from '../lifecycle/binding.js'
 import { createWorkflowInstance } from '../lifecycle/instance.js'
 import { entryStage } from '../lifecycle/resolve.js'
-import { scheduleProducingAutoRun } from '../lifecycle/autoRun.js'
+import { settleStage } from '../lifecycle/settle.js'
 import { normalizeJurisdiction } from '../api/jurisdictions.js'
 import { GOVERNING_JURISDICTION_FIELD_ID } from '../api/intakeFieldLibrary.js'
 
@@ -377,10 +377,18 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
         currentState: entry?.key ?? 'intake_submitted',
         actionId,
       })
-      // ADR 0046 — if a service's ENTRY stage is itself an invoke_capability, run
-      // it after matter.open commits (scheduling is a synchronous push — safe
-      // inside the savepoint; the run itself fires post-commit).
-      scheduleProducingAutoRun(ctx, matterEntityId, entry?.key ?? 'intake_submitted', bound.graph)
+      // WF-FIX-1 — settle the entry: a non-blocking entry stage (e.g. an
+      // informational consultation) passes through immediately instead of parking
+      // the matter; a producing entry stage still auto-runs after matter.open
+      // commits (scheduling is a synchronous push — safe inside the savepoint).
+      await settleStage(
+        client,
+        ctx,
+        matterEntityId,
+        entry?.key ?? 'intake_submitted',
+        bound.graph,
+        actionId,
+      )
       await client.query('RELEASE SAVEPOINT workflow_engine')
     } catch (err) {
       // Roll back ONLY the engine work; the matter is opened either way.

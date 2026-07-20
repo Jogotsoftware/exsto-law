@@ -35,8 +35,13 @@ import {
   type AssistantContext,
   type ContextDepth,
 } from './assistantContext.js'
-import { buildBaseSystemPrompt, type AssistantFirmFacts } from './assistantPrompt.js'
+import {
+  buildBaseSystemPrompt,
+  buildCustomInstructionsBlock,
+  type AssistantFirmFacts,
+} from './assistantPrompt.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
+import { getAssistantSettings } from './assistantSettings.js'
 import { jurisdictionDisplayName } from './jurisdictions.js'
 import { getMatter } from '../queries/matters.js'
 import { getContact } from '../queries/contacts.js'
@@ -714,6 +719,9 @@ async function resolveAssistantFirmFacts(ctx: ActionContext): Promise<AssistantF
     jurisdictionCode: settings.firmJurisdiction ?? undefined,
     jurisdictionDisplayName: jurisdictionDisplayName(settings.firmJurisdiction) ?? undefined,
     practiceAreas: settings.practiceAreas ?? undefined,
+    // FB-B — same anti-forgery posture: getTenantSettingsForMerge degrades to
+    // EMPTY (never a demo-firm default) when unset.
+    firmInstructions: settings.assistantInstructions ?? undefined,
   }
 }
 
@@ -749,9 +757,27 @@ export function buildClaudeSystem(
   // them at ~10% of the price. On the rare turn the attorney switches skills, the
   // prefix simply re-caches once. Empty on turns with no forced skill.
   activeSkillsText = '',
+  // FB-B — the signed-in attorney's own custom instructions (assistant_settings
+  // .customInstructions, resolved by the caller via getAssistantSettings — per
+  // actor, so it can't ride AssistantFirmFacts). Constant for the conversation
+  // (same actor for its lifetime), so it lives in this stable/cached half too.
+  attorneyInstructions = '',
 ): string {
   const basePrompt = buildBaseSystemPrompt(firm)
-  let system = context ? `${basePrompt}\n\n--- Context ---\n${context.full}` : basePrompt
+  // FB-B — firm + attorney standing instructions, fenced and placed AFTER the
+  // base prompt's accuracy/no-invented-facts/jurisdiction rules (the fence
+  // wording refers to them as "above"). Omitted entirely when both are unset,
+  // so an unconfigured firm gets the byte-identical pre-FB-B prompt.
+  const customInstructions = buildCustomInstructionsBlock(
+    firm.firmInstructions,
+    attorneyInstructions,
+  )
+  const promptWithInstructions = customInstructions
+    ? `${basePrompt}\n\n${customInstructions}`
+    : basePrompt
+  let system = context
+    ? `${promptWithInstructions}\n\n--- Context ---\n${context.full}`
+    : promptWithInstructions
   const entityPath =
     primaryEntityId && scope === 'matter'
       ? `/attorney/matters/${primaryEntityId}`
@@ -1338,6 +1364,7 @@ export async function assistantChat(
       wizardForcedSkillSlugs(message, input.skillSlugs, input.buildMode),
     )
     const firm = await resolveAssistantFirmFacts(ctx)
+    const attorneySettings = await getAssistantSettings(ctx)
     const system = buildClaudeSystem(
       scope,
       primaryEntityId,
@@ -1345,6 +1372,7 @@ export async function assistantChat(
       firm,
       buildSkillCatalogText(catalog),
       buildActiveSkillsText(forced),
+      attorneySettings?.customInstructions,
     )
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey)
@@ -1637,6 +1665,7 @@ export async function* assistantChatStream(
     // Surface the picked skills as chips immediately, before the reply streams.
     for (const s of forced) yield { type: 'skill', slug: s.slug, name: s.name }
     const firm = await resolveAssistantFirmFacts(ctx)
+    const attorneySettings = await getAssistantSettings(ctx)
     const system = buildClaudeSystem(
       scope,
       primaryEntityId,
@@ -1644,6 +1673,7 @@ export async function* assistantChatStream(
       firm,
       buildSkillCatalogText(catalog),
       buildActiveSkillsText(forced),
+      attorneySettings?.customInstructions,
     )
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey)

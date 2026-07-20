@@ -35,6 +35,8 @@ import {
   buildActiveSkillsText,
   resolveJurisdictionSkillSlugs,
 } from './skillContext.js'
+import { getTenantSettingsForMerge } from './tenantSettings.js'
+import { buildFirmInstructionsBlock } from './assistantPrompt.js'
 
 const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
 
@@ -164,6 +166,15 @@ export async function composeEmailDraft(
     intake_answers: matter.questionnaireResponses ?? {},
   }
 
+  // FB-B — the firm's standing instructions for the assistant (e.g. "always CC
+  // my paralegal") ride the email prompt too — this is where that guidance must
+  // actually bite. Same anti-forgery posture as the rest of this file:
+  // getTenantSettingsForMerge degrades to unset, never a demo-firm default.
+  const firmSettings = await getTenantSettingsForMerge(agentCtx)
+  const firmInstructionsBlock = buildFirmInstructionsBlock(
+    firmSettings.assistantInstructions ?? undefined,
+  )
+
   // Function replacers (assembleReviewPrompt precedent): every slotted value is
   // untrusted content — `$&`-style replacement patterns must be inert.
   let prompt = loadEmailDraftingPrompt()
@@ -171,6 +182,7 @@ export async function composeEmailDraft(
     .replaceAll('{{recipient_role}}', () => recipientRole)
     .replaceAll('{{matter_facts_json}}', () => JSON.stringify(matterFacts, null, 2))
     .replaceAll('{{client_context}}', () => clientContextText)
+    .replaceAll('{{firm_instructions}}', () => firmInstructionsBlock)
 
   const autoSkillSlugs = await resolveJurisdictionSkillSlugs(agentCtx, {
     documentKind: CLIENT_EMAIL_DOCUMENT_KIND,
