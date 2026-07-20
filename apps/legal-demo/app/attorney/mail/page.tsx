@@ -673,7 +673,7 @@ export default function MailPage() {
         ariaLabel="Mail"
         tabs={[
           { key: 'email', label: 'Email', badge: inboxUnread },
-          { key: 'portal', label: 'Portal chat', badge: portalUnreadTabCount },
+          { key: 'portal', label: 'Portal Chat', badge: portalUnreadTabCount },
         ]}
         active={tab}
         onSelect={(k) => setTab(k as MailTab)}
@@ -952,7 +952,7 @@ export default function MailPage() {
                       <div className="li-mail-detailhead-subject">
                         {currentPortalMeta?.clientName ||
                           currentPortalMeta?.matterNumber ||
-                          'Portal chat'}
+                          'Portal Chat'}
                       </div>
                       <div className="li-mail-detailhead-sub">
                         {currentPortalMeta?.matterNumber}
@@ -1026,7 +1026,7 @@ export default function MailPage() {
 
       {compose && (
         <Modal
-          title="New message"
+          title="New Message"
           onClose={() => setCompose(null)}
           size="wide"
           footer={

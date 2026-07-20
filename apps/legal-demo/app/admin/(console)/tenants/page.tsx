@@ -90,7 +90,7 @@ export default function AdminTenantsPage() {
       {error && <div className="alert alert-error">{error}</div>}
 
       <section style={{ marginBottom: 'var(--space-5)' }}>
-        <h2 style={{ fontSize: '1.1rem' }}>Create a tenant</h2>
+        <h2 style={{ fontSize: '1.1rem' }}>Create A Tenant</h2>
         {createMsg && <div className="alert alert-success">{createMsg}</div>}
         <form
           onSubmit={createTenant}
@@ -161,7 +161,7 @@ export default function AdminTenantsPage() {
                     {t.name}
                     {t.reserved && (
                       <span className="badge info" style={{ marginLeft: 'var(--space-2)' }}>
-                        reserved
+                        Reserved
                       </span>
                     )}
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--muted)' }}>{t.id}</div>

@@ -92,13 +92,14 @@ interface FirmProfileSetPayload {
   practice_areas?: unknown
   attorney_name?: string | null
   // FB-B (migration 0175, PLANNED) — the firm's standing instructions for the
-  // AI assistant. Plain text field, same clear-on-empty-string semantics as
-  // firm_name/firm_address/etc.
-  assistant_instructions?: string | null
+  // AI assistant. ITEM-12 WP-2 — now an array of pills (one instruction per
+  // Enter-to-add pill in Settings → Assistant), same shape/semantics as
+  // practice_areas below (a non-array clears; see normalizeFirmProfileFieldValue).
+  assistant_instructions?: unknown
   // FB-B2 (migration 0178, PLANNED) — the firm's standing, client-safe
   // instructions for the CLIENT PORTAL assistant. Independent of
-  // assistant_instructions above; same clear-on-empty-string semantics.
-  portal_assistant_instructions?: string | null
+  // assistant_instructions above; same array-of-pills shape.
+  portal_assistant_instructions?: unknown
 }
 
 const PROFILE_FIELDS = [
@@ -115,13 +116,40 @@ const PROFILE_FIELDS = [
 
 type ProfileField = (typeof PROFILE_FIELDS)[number]
 
+// ITEM-12 WP-2 — shared array-of-pills normalizer for assistant_instructions /
+// portal_assistant_instructions: trims each item, drops empties, dedupes
+// case-insensitively (same discipline as practice_areas), and additionally
+// caps each item at 500 chars and the whole list at 20 items — pills are
+// short standing instructions, not a place to paste a document, and an
+// unbounded list would defeat the point of a scannable pill row. A non-array
+// input clears the field, fails safe like practice_areas.
+const INSTRUCTIONS_ITEM_CHAR_CAP = 500
+const INSTRUCTIONS_MAX_ITEMS = 20
+
+function normalizeInstructionsPills(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const items: string[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue
+    const trimmed = entry.trim().slice(0, INSTRUCTIONS_ITEM_CHAR_CAP)
+    if (!trimmed || seen.has(trimmed.toLowerCase())) continue
+    seen.add(trimmed.toLowerCase())
+    items.push(trimmed)
+    if (items.length >= INSTRUCTIONS_MAX_ITEMS) break
+  }
+  return items
+}
+
 // PURE validation/normalization, exported for unit tests (tests/vertical). Text
 // fields are stored trimmed; '' means "cleared" (readers report it as null).
 // firm_jurisdiction must normalize to a canonical US state code (or be empty, to
 // clear) — an unrecognized value is rejected rather than silently stored garbage
 // a resolver could never match. practice_areas is deduped, trimmed, empty-string
 // entries dropped; a non-array input clears the field (fails safe, not silently
-// keeps a stale array).
+// keeps a stale array). assistant_instructions / portal_assistant_instructions
+// follow the same array shape (normalizeInstructionsPills above), with a per-item
+// and total-list cap on top.
 export function normalizeFirmProfileFieldValue(kind: ProfileField, raw: unknown): unknown {
   if (kind === 'practice_areas') {
     if (!Array.isArray(raw)) return []
@@ -135,6 +163,9 @@ export function normalizeFirmProfileFieldValue(kind: ProfileField, raw: unknown)
       areas.push(trimmed)
     }
     return areas
+  }
+  if (kind === 'assistant_instructions' || kind === 'portal_assistant_instructions') {
+    return normalizeInstructionsPills(raw)
   }
   const text = typeof raw === 'string' ? raw.trim() : ''
   if (kind === 'firm_jurisdiction' && text) {

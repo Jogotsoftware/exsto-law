@@ -24,7 +24,7 @@
         },
         {
           "id": "registered_agent_address",
-          "label": "Registered agent address in NC",
+          "label": "Registered agent address",
           "type": "address_autocomplete",
           "required": true
         },

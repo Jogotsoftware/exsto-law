@@ -163,7 +163,7 @@ export default function AiUsagePage(): React.ReactElement {
             <div className="li-set-card li-set-card--narrow">
               <div className="li-set-chart-head">
                 <div className="li-set-chart-title">
-                  Daily spend — last {summary.byDay.length} days
+                  Daily Spend — Last {summary.byDay.length} Days
                 </div>
                 <div className="li-set-legend">
                   <span>
@@ -201,7 +201,7 @@ export default function AiUsagePage(): React.ReactElement {
           {summary.bySource.length > 0 && (
             <div className="li-set-section-block li-set-card li-set-card--narrow li-set-card--flush">
               <div className="li-set-table-title" style={{ padding: '18px 22px 0' }}>
-                By source
+                By Source
               </div>
               <table className="li-set-usage-table">
                 <thead>
@@ -210,7 +210,7 @@ export default function AiUsagePage(): React.ReactElement {
                     <th className="num">Turns</th>
                     <th className="num">Input</th>
                     <th className="num">Output</th>
-                    <th className="num">Est. cost</th>
+                    <th className="num">Est. Cost</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -233,7 +233,7 @@ export default function AiUsagePage(): React.ReactElement {
           {summary.byModel.length > 0 && (
             <div className="li-set-section-block li-set-card li-set-card--narrow li-set-card--flush">
               <div className="li-set-table-title" style={{ padding: '18px 22px 0' }}>
-                By model
+                By Model
               </div>
               <table className="li-set-usage-table">
                 <thead>
@@ -242,8 +242,8 @@ export default function AiUsagePage(): React.ReactElement {
                     <th className="num">Turns</th>
                     <th className="num">Input</th>
                     <th className="num">Output</th>
-                    <th className="num">Cache read</th>
-                    <th className="num">Est. cost</th>
+                    <th className="num">Cache Read</th>
+                    <th className="num">Est. Cost</th>
                   </tr>
                 </thead>
                 <tbody>

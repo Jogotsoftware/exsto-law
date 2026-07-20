@@ -6472,6 +6472,36 @@ button.danger.outline:hover:not(:disabled) {
   opacity: 1;
   transform: scale(1);
 }
+/* Two-path chooser (A1.1) — the cards are pure navigation, never "selected",
+   so the trailing arrow is always-on rather than tick-on-select. */
+.bk-chooser-cta {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--bk-navy);
+}
+.bk-chooser-foot {
+  margin: 0.2rem 0 0;
+  text-align: center;
+  font-size: 0.85rem;
+}
+/* Plain-button-as-link — no chrome, underlined navy text. Used inline in
+   notices (the returning-client prompt) and as the chooser's footer link. */
+.bk-linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--bk-navy);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.bk-linklike:hover {
+  color: var(--bk-navy-700);
+}
 
 /* ---- Fields ---- */
 .bk-fields {
@@ -6834,6 +6864,30 @@ button.danger.outline:hover:not(:disabled) {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Calendar | List view switch (front door, A1.1 on-brand pass) — a two-way
+   segmented control matching the meeting-length pills' visual weight. */
+.bk-view-toggle {
+  display: inline-flex;
+  border: 1.5px solid var(--bk-line);
+  border-radius: var(--bk-r-md);
+  overflow: hidden;
+  width: fit-content;
+}
+.bk-view-toggle-btn {
+  appearance: none;
+  cursor: pointer;
+  border: none;
+  background: #fff;
+  color: var(--bk-slate);
+  font-family: var(--bk-sans);
+  font-weight: 600;
+  font-size: 0.88rem;
+  padding: 0.5rem 1rem;
+}
+.bk-view-toggle-btn.active {
+  background: var(--bk-navy);
+  color: #fff;
+}
 .bk-btn-soft {
   color: var(--bk-navy);
   background: #eef2ff;
@@ -6859,6 +6913,14 @@ button.danger.outline:hover:not(:disabled) {
 .bk-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* .bk-btn-primary's navy gradient at 50% opacity blends toward a washed-out
+   lavender against the light shell background (founder walk, 2026-07-20) — a
+   solid same-hue muted fill reads as "navy, dimmed" instead. */
+.bk-btn-primary:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--bk-navy) 55%, #fff);
+  box-shadow: none;
 }
 .bk-btn-wide {
   width: 100%;
@@ -7088,7 +7150,7 @@ button.danger.outline:hover:not(:disabled) {
     transform 0.16s var(--bk-ease);
   white-space: nowrap;
 }
-.bk-slot:hover:not(:disabled) {
+.bk-slot:hover {
   border-color: var(--bk-navy);
   background: #eef2ff;
   transform: translateY(-1px);
@@ -7099,13 +7161,6 @@ button.danger.outline:hover:not(:disabled) {
   border-color: transparent;
   box-shadow: var(--bk-shadow-pop);
   animation: bkPop 0.25s var(--bk-ease);
-}
-.bk-slot.taken {
-  color: var(--bk-slate-400);
-  background: var(--bk-line-soft);
-  border-color: transparent;
-  text-decoration: line-through;
-  cursor: not-allowed;
 }
 .bk-cal-more {
   display: flex;
@@ -12409,7 +12464,9 @@ input[type='number'] {
   border: 1px solid var(--li-border);
   border-radius: var(--li-radius-card);
   box-shadow: var(--li-shadow-card);
-  overflow: hidden;
+  /* Do NOT clip — the row gear's .row-menu is an absolutely-positioned
+     child that overflows the card on the first/last row. Round the row
+     corners directly instead (see the .data-table precedent above). */
 }
 .li-svc-row {
   display: flex;
@@ -12425,8 +12482,14 @@ input[type='number'] {
   font-family: inherit;
   color: inherit;
 }
+.li-svc-row:first-child {
+  border-top-left-radius: var(--li-radius-card);
+  border-top-right-radius: var(--li-radius-card);
+}
 .li-svc-row:last-child {
   border-bottom: none;
+  border-bottom-left-radius: var(--li-radius-card);
+  border-bottom-right-radius: var(--li-radius-card);
 }
 .li-svc-row:hover {
   background: #f7f9fc;
@@ -14983,15 +15046,21 @@ fieldset.li-svc-fieldset legend {
 .li-tpl-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* auto-rows: minmax(0, 1fr) plus the stretch below makes every card in a row
+     match the tallest sibling — a two-line title no longer makes its card
+     taller than its one-line neighbors (Joe walk item, uniform card sizes). */
+  grid-auto-rows: 1fr;
   gap: 18px;
 }
 .li-tpl-card-wrap {
   position: relative;
+  height: 100%;
 }
 .li-tpl-card {
   display: flex;
   flex-direction: column;
   width: 100%;
+  height: 100%;
   text-align: left;
   background: var(--li-card);
   border: 1px solid var(--li-border);
@@ -15069,8 +15138,16 @@ fieldset.li-svc-fieldset legend {
 .li-tpl-card-name {
   font-size: 14.5px;
   font-weight: 600;
+  line-height: 1.3;
   color: var(--li-fg);
   min-width: 0;
+  /* Reserve room for exactly two lines (clamped) so a long name never grows
+     this card past its one-line siblings in the same grid row. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.6em;
 }
 .li-tpl-card-badge {
   flex: 0 0 auto;
@@ -15647,6 +15724,14 @@ fieldset.li-svc-fieldset legend {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+/* The token-chip + Required row: stack instead of sharing one row so a long
+   {{token}} never pushes the Required label off the edge of the card. */
+.li-tpl-field-row:not(.li-tpl-field-row--meta) {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px;
 }
 .li-tpl-field-row--meta {
   margin-top: 8px;
@@ -18866,16 +18951,22 @@ a.li-uac-done-primary:hover {
 .li-int-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  /* Same fix as the templates gallery (.li-tpl-grid): stretch every card in a
+     row to the tallest sibling so a two-line name never makes one card taller
+     than its one-line neighbors (Joe walk item, uniform card sizes). */
+  grid-auto-rows: 1fr;
   gap: 18px;
   margin-top: 20px;
 }
 .li-int-card-wrap {
   position: relative;
+  height: 100%;
 }
 .li-int-card {
   display: flex;
   flex-direction: column;
   width: 100%;
+  height: 100%;
   text-align: left;
   text-decoration: none;
   background: var(--li-card);
@@ -18965,8 +19056,16 @@ a.li-uac-done-primary:hover {
 .li-int-card-name {
   font-size: 14.5px;
   font-weight: 600;
+  line-height: 1.3;
   color: var(--li-fg);
   min-width: 0;
+  /* Reserve room for exactly two lines (clamped) so a long name never grows
+     this card past its one-line siblings in the same grid row. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.6em;
 }
 .li-int-card-sub {
   font-size: 12px;
@@ -23666,6 +23765,11 @@ details.li-brief-research summary:hover {
   align-items: flex-start;
   padding: clamp(2rem, 8vh, 6rem) 1.5rem 3rem;
   font-family: var(--font-sans, 'Public Sans', system-ui, sans-serif);
+  /* Positioned + clipped so an optional .bk-aurora child (login page only,
+     A1.1) stays contained and the card below still stacks above it — a
+     no-op for consumers (set-password) that never render that child. */
+  position: relative;
+  overflow: hidden;
 }
 .li-cp-auth-card {
   width: 100%;
@@ -23675,6 +23779,8 @@ details.li-brief-research summary:hover {
   border-radius: 16px;
   padding: 32px;
   box-shadow: 0 10px 40px rgba(15, 23, 42, 0.09);
+  position: relative;
+  z-index: 1;
 }
 .li-cp-auth-brand {
   display: flex;
@@ -24179,6 +24285,71 @@ details.li-brief-research summary:hover {
   font-size: 14px;
   color: var(--li-navy);
   min-width: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ITEM-12 WP-2 — li-taginput: reusable Enter-to-add pills editor
+   (components/TagInput.tsx). Generalizes tpl-ai-skillchip (services/
+   [serviceKey]/templates/page.tsx) and mail-attach-chip / li-uac-pendingdoc-chip
+   (EmailComposeModal.tsx) into ONE shared control for any string[] setting:
+   the three custom-instructions cards (Settings → Assistant) and firm practice
+   areas (Settings → Firm details). Pills wrap (white-space: normal) rather than
+   ellipsis-truncate — the mail-attach-chip precedent for a label longer than a
+   filename (li-uac-pendingdoc-chip) — because an instruction is meant to stay
+   readable in place, not hide behind a hover. Append-only family from here;
+   see scripts/check-css-structure.mjs.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.li-taginput {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.li-taginput-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.li-taginput-pill {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  max-width: 28rem;
+  padding: 0.2rem 0.3rem 0.2rem 0.65rem;
+  border: 1px solid var(--accent, #1e3a8a);
+  border-radius: 999px;
+  background: var(--accent-attorney-soft, #e8efff);
+  color: var(--accent, #1e3a8a);
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: normal;
+  word-break: break-word;
+}
+.li-taginput-pill button {
+  flex: 0 0 auto;
+  margin-top: 0.05rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+.li-taginput-pill button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.li-taginput-input {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.86rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg, #fff);
+  color: var(--fg);
+}
+.li-taginput-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* ==========================================================================

@@ -14,11 +14,18 @@ export interface TenantSettings {
   // FB-B (migration 0175, PLANNED) — the firm's standing custom instructions
   // for the AI assistant. No default, same honest-unset posture as the rest of
   // this WP A1/FB-B block.
-  assistantInstructions: string | null
+  // ITEM-12 WP-2 — stored (and read here) as a JSON array of strings, one per
+  // Enter-to-add pill in the Settings → Assistant editor, the same shape as
+  // practiceAreas above. A row saved before WP-2 is still a plain string;
+  // readFirmProfileAttrs' listOrTextVal below reads that legacy shape back as
+  // a one-item array, so old data renders as a single pill with no backfill.
+  assistantInstructions: string[] | null
   // FB-B2 (migration 0178, PLANNED) — a SEPARATE, client-safe field: the
   // firm's standing instructions for the CLIENT PORTAL assistant. No default,
   // same honest-unset posture; never overlaps with assistantInstructions above.
-  portalAssistantInstructions: string | null
+  // ITEM-12 WP-2 — same array-of-pills shape and legacy-string compat as
+  // assistantInstructions above.
+  portalAssistantInstructions: string[] | null
   defaultHourlyRateUsd: number | null
   defaultLlcFlatFeeUsd: number | null
   updatedAt: string | null
@@ -68,8 +75,8 @@ export interface FirmProfileFields {
   firmJurisdiction: string | null
   practiceAreas: string[] | null
   attorneyName: string | null
-  assistantInstructions: string | null
-  portalAssistantInstructions: string | null
+  assistantInstructions: string[] | null
+  portalAssistantInstructions: string[] | null
 }
 
 const PROFILE_ATTR_KINDS = [
@@ -100,8 +107,8 @@ interface FirmProfileAttrReads {
   firmJurisdiction: string | null | undefined
   practiceAreas: string[] | null | undefined
   attorneyName: string | null | undefined
-  assistantInstructions: string | null | undefined
-  portalAssistantInstructions: string | null | undefined
+  assistantInstructions: string[] | null | undefined
+  portalAssistantInstructions: string[] | null | undefined
 }
 
 // Latest firm-identity attributes off the firm_profile singleton (all undefined
@@ -152,6 +159,33 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttr
       const areas = parsed.filter((x): x is string => typeof x === 'string')
       return areas.length ? areas : null // [] = explicit clear
     }
+    // ITEM-12 WP-2 — assistant_instructions / portal_assistant_instructions
+    // used to be plain-text attributes (val() above); the Settings → Assistant
+    // editor now saves them as a JSON array of strings, one per pill, the same
+    // shape as practice_areas. ARRAY-OR-LEGACY-STRING: a row written before
+    // WP-2 is still a bare string — `#>> '{}'` unwraps it to plain text that
+    // is NOT valid JSON (JSON.parse throws), so that case falls through to a
+    // one-item array. A row written after WP-2 is a JSON array; `#>> '{}'`
+    // returns its JSON text (e.g. `["a","b"]`), same as arrVal above.
+    const listOrTextVal = (kind: string): string[] | null | undefined => {
+      if (!byKind.has(kind)) return undefined // never set → fallback allowed
+      const v = byKind.get(kind)
+      if (typeof v !== 'string') return null
+      const raw = v.trim()
+      if (!raw) return null // explicit clear: legacy '' or new '[]' (see below)
+      try {
+        const parsed: unknown = JSON.parse(v)
+        if (Array.isArray(parsed)) {
+          const items = parsed.filter(
+            (x): x is string => typeof x === 'string' && x.trim().length > 0,
+          )
+          return items.length ? items : null // [] = explicit clear
+        }
+      } catch {
+        // Not JSON — a legacy plain-string row. Fall through to the one-item array.
+      }
+      return [raw] // legacy plain-string value → one-item array for the pills UI
+    }
     return {
       firmName: val('firm_name'),
       firmAddress: val('firm_address'),
@@ -160,8 +194,8 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttr
       firmJurisdiction: val('firm_jurisdiction'),
       practiceAreas: arrVal('practice_areas'),
       attorneyName: val('attorney_name'),
-      assistantInstructions: val('assistant_instructions'),
-      portalAssistantInstructions: val('portal_assistant_instructions'),
+      assistantInstructions: listOrTextVal('assistant_instructions'),
+      portalAssistantInstructions: listOrTextVal('portal_assistant_instructions'),
     }
   })
 }
@@ -185,8 +219,9 @@ function overlayProfile(base: TenantSettings, profile: FirmProfileAttrReads): Te
     firmJurisdiction: field(profile.firmJurisdiction, base.firmJurisdiction),
     practiceAreas: arrField(profile.practiceAreas, base.practiceAreas),
     attorneyName: field(profile.attorneyName, base.attorneyName),
-    assistantInstructions: field(profile.assistantInstructions, base.assistantInstructions),
-    portalAssistantInstructions: field(
+    // ITEM-12 WP-2 — array-shaped now (arrField, same as practiceAreas), not text.
+    assistantInstructions: arrField(profile.assistantInstructions, base.assistantInstructions),
+    portalAssistantInstructions: arrField(
       profile.portalAssistantInstructions,
       base.portalAssistantInstructions,
     ),
@@ -258,10 +293,12 @@ export interface SetFirmProfileInput {
   attorneyName?: string | null
   // FB-B (migration 0175, PLANNED) — the firm's standing custom instructions
   // for the AI assistant. Empty clears.
-  assistantInstructions?: string | null
+  // ITEM-12 WP-2 — array of pills, undefined/null/[] all behave like the other
+  // clear-on-empty fields (undefined leaves it unchanged, null/[] clears it).
+  assistantInstructions?: string[] | null
   // FB-B2 (migration 0178, PLANNED) — the firm's standing, client-safe
   // instructions for the CLIENT PORTAL assistant. Empty clears.
-  portalAssistantInstructions?: string | null
+  portalAssistantInstructions?: string[] | null
 }
 
 // Write the firm profile through the core (legal.firm.set_profile — append-only

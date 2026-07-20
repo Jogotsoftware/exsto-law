@@ -71,9 +71,9 @@ type View = 'week' | 'day' | 'month'
 const DAY_MS = 24 * 3600 * 1000
 
 const CATEGORY_LABELS: Record<BookingCategory, string> = {
-  new_consultation: 'New consultation',
-  new_matter: 'New matter',
-  existing_project: 'Existing project',
+  new_consultation: 'New Consultation',
+  new_matter: 'New Matter',
+  existing_project: 'Existing Project',
 }
 const CATEGORY_ORDER: BookingCategory[] = ['new_consultation', 'new_matter', 'existing_project']
 
@@ -286,17 +286,17 @@ export function WeeklyCalendar({
         }
       : {}
     const menuItems: ActionItem[] = [
-      { label: 'Edit event', onClick: () => setModal({ type: 'edit', item: it }) },
+      { label: 'Edit Event', onClick: () => setModal({ type: 'edit', item: it }) },
       { label: 'Duplicate', onClick: () => duplicateItem(it) },
       {
-        label: 'Email client',
+        label: 'Email Client',
         onClick: () => {
           if (it.matterEntityId) launchCompose({ matterId: it.matterEntityId })
         },
       },
-      { label: 'Add guests', onClick: () => setModal({ type: 'attendees', item: it }) },
+      { label: 'Add Guests', onClick: () => setModal({ type: 'attendees', item: it }) },
       {
-        label: 'View matter',
+        label: 'View Matter',
         href: it.matterEntityId ? `/attorney/matters/${it.matterEntityId}` : undefined,
       },
       { label: 'Delete', danger: true, onClick: () => deleteItem(it) },
@@ -603,7 +603,7 @@ function AttendeesModal({
   const [attendeesInput, setAttendeesInput] = useState('')
   return (
     <Modal
-      title="Add guests"
+      title="Add Guests"
       onClose={onClose}
       footer={
         <>
@@ -681,7 +681,7 @@ function CalendarEditModal({
 
   return (
     <Modal
-      title="Event details"
+      title="Event Details"
       onClose={onClose}
       footer={
         <>
@@ -882,7 +882,7 @@ function HourGrid({
             </div>
           </>
         ),
-        confirmLabel: 'Move event',
+        confirmLabel: 'Move Event',
         cancelLabel: 'Cancel',
       })
       if (ok) onReschedule(d.item, newStart.toISOString(), newEnd.toISOString())
@@ -898,10 +898,10 @@ function HourGrid({
   function menuItemsFor(item: CalendarItem): ActionItem[] {
     if (item.kind === 'external') {
       return [
-        { label: 'Edit event', disabled: true, title: GOOGLE_MANAGED_TOOLTIP },
+        { label: 'Edit Event', disabled: true, title: GOOGLE_MANAGED_TOOLTIP },
         { label: 'Duplicate', disabled: true, title: GOOGLE_MANAGED_TOOLTIP },
         {
-          label: 'Open in Google',
+          label: 'Open In Google',
           onClick: () => {
             if (item.htmlLink) window.open(item.htmlLink, '_blank', 'noopener,noreferrer')
           },
@@ -910,17 +910,17 @@ function HourGrid({
       ]
     }
     return [
-      { label: 'Edit event', onClick: () => onEdit(item) },
+      { label: 'Edit Event', onClick: () => onEdit(item) },
       { label: 'Duplicate', onClick: () => onDuplicate(item) },
       {
-        label: 'Email client',
+        label: 'Email Client',
         onClick: () => {
           if (item.matterEntityId) launchCompose({ matterId: item.matterEntityId })
         },
       },
-      { label: 'Add guests', onClick: () => onAttendees(item) },
+      { label: 'Add Guests', onClick: () => onAttendees(item) },
       {
-        label: 'View matter',
+        label: 'View Matter',
         href: item.matterEntityId ? `/attorney/matters/${item.matterEntityId}` : undefined,
       },
       { label: 'Delete', danger: true, onClick: () => onDelete(item) },

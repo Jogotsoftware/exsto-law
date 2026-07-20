@@ -211,7 +211,7 @@ export function PrepareSignature({ documentVersionId, onSent, cancelHref }: Prep
         <span className="li-esign-wiz-sent-ico" aria-hidden="true">
           <CheckIcon size={30} />
         </span>
-        <h3 className="li-esign-wiz-sent-title">Envelope sent</h3>
+        <h3 className="li-esign-wiz-sent-title">Envelope Sent</h3>
         <p className="li-esign-wiz-sent-body">
           Each signer received a secure signing link by email. You’ll see progress update on this
           envelope as they open and sign.
@@ -272,7 +272,7 @@ export function PrepareSignature({ documentVersionId, onSent, cancelHref }: Prep
         {step === 1 && (
           <div>
             <div className="li-esign-wiz-h-row">
-              <div className="li-esign-wiz-h">Add signers &amp; signing order</div>
+              <div className="li-esign-wiz-h">Add Signers &amp; Signing Order</div>
               <button type="button" className="li-esign-btn li-esign-btn--sm" onClick={addSigner}>
                 <PlusIcon size={14} />
                 Add signer

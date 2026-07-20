@@ -159,7 +159,7 @@ export default function PaymentsPage(): React.ReactElement {
               <CreditCard size={20} aria-hidden />
             </span>
             <div>
-              <div className="li-set-pay-title">Card payments — Stripe</div>
+              <div className="li-set-pay-title">Card Payments — Stripe</div>
               <div className={`li-set-pay-status ${statusTone}`}>{statusText}</div>
             </div>
           </div>
@@ -330,7 +330,7 @@ function ManualMethodsCard(): React.ReactElement {
         className="li-set-manual-block"
         style={{ marginTop: 0, borderTop: 'none', paddingTop: 0 }}
       >
-        <h3>Zelle &amp; crypto</h3>
+        <h3>Zelle &amp; Crypto</h3>
         <p className="li-set-hint" style={{ margin: '0 0 16px' }}>
           Shown to clients on the invoice payment page as “Other ways to pay”, with step-by-step
           instructions and QR codes. Clients report their payment with a Zelle confirmation number
@@ -371,7 +371,7 @@ function ManualMethodsCard(): React.ReactElement {
         </label>
 
         <div className="li-set-table-title" style={{ marginTop: 10 }}>
-          Crypto wallets
+          Crypto Wallets
         </div>
         {methods.wallets.map((w, i) => (
           <div key={i} className="li-set-wallet-card">

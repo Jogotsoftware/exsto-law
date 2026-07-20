@@ -302,7 +302,7 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }): React.ReactElement
             <div className="li-bill-client-head">
               <h3 className="li-bill-client-name">{c.clientName}</h3>
               <span className="li-bill-chip li-bill-chip--blue">
-                {c.billableRate ? `${money(c.billableRate, currency)}/hr` : 'no rate set'}
+                {c.billableRate ? `${money(c.billableRate, currency)}/hr` : 'No Rate Set'}
                 {c.billingType ? ` · ${c.billingType}` : ''}
               </span>
               <strong className="li-bill-unbilled-total">
@@ -443,10 +443,10 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }): React.ReactElement
                       disabled={setupBusy === m.matterEntityId}
                       onClick={() => setupBilling(m)}
                     >
-                      {setupBusy === m.matterEntityId ? '…' : 'Set up billing'}
+                      {setupBusy === m.matterEntityId ? '…' : 'Set Up Billing'}
                     </button>
                   ) : (
-                    <span className="li-bill-td-muted">no contact</span>
+                    <span className="li-bill-td-muted">No Contact</span>
                   )}
                 </span>
               </div>
@@ -636,7 +636,7 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }): React.ReactElement {
       {reports.some((r) => r.status === 'open') && (
         <section className="li-bill-reports">
           <h3 className="li-bill-section-title li-bill-section-title--lg">
-            Payments reported by clients
+            Payments Reported By Clients
           </h3>
           <div className="li-bill-reports-grid">
             {reports
@@ -935,7 +935,7 @@ function RatesTab(): React.ReactElement {
         per-service fixed fees below are the single source of truth and apply everywhere.
       </p>
 
-      <h3 className="li-bill-section-title">Client hourly rates</h3>
+      <h3 className="li-bill-section-title">Client Hourly Rates</h3>
       <div className="li-bill-table li-bill-table--lg">
         <div className="li-bill-thead li-bill-thead--rate">
           <span>CLIENT</span>
@@ -989,7 +989,7 @@ function RatesTab(): React.ReactElement {
       </div>
 
       <h3 className="li-bill-section-title li-bill-section-title--tight">
-        Service &amp; document fees
+        Service &amp; Document Fees
       </h3>
       <p className="li-bill-hint li-bill-hint--tight">
         A service’s fixed fee bills when the service is marked complete. Per-document fees (billed
@@ -1020,8 +1020,8 @@ function RatesTab(): React.ReactElement {
                     : ''}
                   <Link href={`/attorney/services/${s.serviceKey}/billing`}>
                     {Object.keys(s.documentFees).length > 0
-                      ? 'edit document fees'
-                      : 'set document fees →'}
+                      ? 'Edit Document Fees'
+                      : 'Set Document Fees →'}
                   </Link>
                 </div>
               </span>

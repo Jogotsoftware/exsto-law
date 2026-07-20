@@ -11,10 +11,18 @@
 // approving attorney's account only), home jurisdiction (the fallback rung
 // resolveMatterJurisdiction reads when a matter has no override — a per-matter
 // fact, editable on the matter's Overview page, always wins over this), and
-// practice areas (a simple comma-separated list, shown as chips).
+// practice areas.
+// ITEM-12 WP-2 — the practice-areas comma-separated text input is now a
+// TagInput pill editor (components/TagInput.tsx), the same Enter-to-add
+// control as Settings → Assistant's three instruction cards. It edits
+// `settings.practiceAreas` directly (same in-place pattern as firmName/
+// firmEmail/etc. below via updateField) rather than through a separate
+// comma-parsed text buffer — save() already sent a plain string[] here, so
+// swapping the control is a drop-in change.
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { TagInput } from '@/components/TagInput'
 import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
 import { US_STATE_OPTIONS } from '@/lib/usStates'
 
@@ -31,20 +39,6 @@ interface TenantSettings {
   updatedAt: string | null
 }
 
-// The practice-areas edit field is a single comma-separated text input (simplest
-// control for a small free-text list); this turns it into a clean string[] for
-// save, and back into a display string for the input's own value while editing.
-function parsePracticeAreasInput(text: string): string[] {
-  return [
-    ...new Set(
-      text
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-    ),
-  ]
-}
-
 export default function FirmDetailsPage(): React.ReactElement {
   const [settings, setSettings] = useState<TenantSettings | null>(null)
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
@@ -52,10 +46,6 @@ export default function FirmDetailsPage(): React.ReactElement {
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [editing, setEditing] = useState(false)
-  // Free-text edit buffer for practice areas (comma-separated); parsed to
-  // string[] only on save. Kept separate from `settings.practiceAreas` so the
-  // input doesn't fight the user over trailing commas/spaces while typing.
-  const [practiceAreasText, setPracticeAreasText] = useState('')
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -105,7 +95,7 @@ export default function FirmDetailsPage(): React.ReactElement {
           firmAddress: settings.firmAddress ?? '',
           attorneyName: settings.attorneyName ?? '',
           firmJurisdiction: settings.firmJurisdiction ?? '',
-          practiceAreas: parsePracticeAreasInput(practiceAreasText),
+          practiceAreas: settings.practiceAreas ?? [],
         },
       })
       await refreshSettings()
@@ -171,13 +161,7 @@ export default function FirmDetailsPage(): React.ReactElement {
               className="li-set-actions-row"
               style={{ justifyContent: 'flex-end', marginTop: 0 }}
             >
-              <button
-                className="li-set-btn"
-                onClick={() => {
-                  setPracticeAreasText((settings.practiceAreas ?? []).join(', '))
-                  setEditing(true)
-                }}
-              >
+              <button className="li-set-btn" onClick={() => setEditing(true)}>
                 Edit
               </button>
             </div>
@@ -237,14 +221,10 @@ export default function FirmDetailsPage(): React.ReactElement {
                 </label>
                 <label className="li-set-label">
                   <span>Practice areas</span>
-                  <input
-                    className="li-set-input"
-                    placeholder="e.g. business law, estate planning"
-                    value={practiceAreasText}
-                    onChange={(e) => {
-                      setPracticeAreasText(e.target.value)
-                      setSaved(false)
-                    }}
+                  <TagInput
+                    values={settings.practiceAreas ?? []}
+                    onChange={(next) => updateField('practiceAreas', next)}
+                    placeholder="e.g. business law, estate planning. Press Enter to add."
                   />
                 </label>
               </div>
@@ -260,8 +240,8 @@ export default function FirmDetailsPage(): React.ReactElement {
               <p className="li-set-hint">
                 These fields fill the firm identity on generated documents and letterheads. The home
                 jurisdiction is the firm-wide fallback — each matter carries its own governing law
-                (from intake, editable on the matter page), which always wins. Practice areas are
-                comma-separated.
+                (from intake, editable on the matter page), which always wins. Type a practice area
+                and press Enter to add it as a pill.
               </p>
               <div className="li-set-actions-row">
                 <button

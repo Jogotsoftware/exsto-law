@@ -75,10 +75,13 @@ export function AvailabilityCalendar({
   )
   const today = useMemo(() => new Date(), [])
 
-  // Group slots by local day.
+  // Group slots by local day. Unavailable (anonymous-blocked) slots are
+  // dropped here — the public calendar shows open times only, never a
+  // clickable-looking-but-disabled "taken" cell (A1.3).
   const dayMap = useMemo(() => {
     const m = new Map<string, CalendarSlot[]>()
     for (const s of slots) {
+      if (!s.available) continue
       const d = startOfLocalDay(new Date(s.startIso))
       const k = dayKey(d)
       const arr = m.get(k) ?? []
@@ -209,11 +212,8 @@ export function AvailabilityCalendar({
                     <button
                       key={s.startIso}
                       type="button"
-                      className={`bk-slot ${selectedStartIso === s.startIso ? 'selected' : ''} ${s.available ? '' : 'taken'}`}
-                      onClick={() => s.available && onSelect(s)}
-                      disabled={!s.available}
-                      aria-label={s.available ? undefined : t('cal.taken')}
-                      title={s.available ? undefined : t('cal.taken')}
+                      className={`bk-slot ${selectedStartIso === s.startIso ? 'selected' : ''}`}
+                      onClick={() => onSelect(s)}
                     >
                       {new Date(s.startIso).toLocaleTimeString(dateLocale, {
                         hour: 'numeric',
@@ -246,12 +246,12 @@ export function AvailabilityCalendar({
         {days.map((d) => {
           const open = openDayIso === d.iso
           const hasSlots = d.slots.length > 0
-          const openCount = d.slots.filter((s) => s.available).length
+          // d.slots already holds only available times (A1.3) — no separate
+          // "all taken" state; a day is either empty or has open times.
+          const openCount = d.slots.length
           const summary = !hasSlots
             ? t('cal.no_times')
-            : openCount === 0
-              ? t('cal.all_taken')
-              : t(openCount === 1 ? 'cal.times_open_one' : 'cal.times_open_many', { n: openCount })
+            : t(openCount === 1 ? 'cal.times_open_one' : 'cal.times_open_many', { n: openCount })
           return (
             <div
               key={d.iso}
@@ -280,9 +280,8 @@ export function AvailabilityCalendar({
                     <button
                       key={s.startIso}
                       type="button"
-                      className={`bk-slot ${selectedStartIso === s.startIso ? 'selected' : ''} ${s.available ? '' : 'taken'}`}
-                      onClick={() => s.available && onSelect(s)}
-                      disabled={!s.available}
+                      className={`bk-slot ${selectedStartIso === s.startIso ? 'selected' : ''}`}
+                      onClick={() => onSelect(s)}
                     >
                       {new Date(s.startIso).toLocaleTimeString(dateLocale, {
                         hour: 'numeric',

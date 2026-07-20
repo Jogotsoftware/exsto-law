@@ -20,6 +20,7 @@ const en: Record<string, string> = {
   // Common
   'common.continue': 'Continue',
   'common.back': 'Back',
+  'common.loading': 'Loading…',
 
   // Service step
   'service.loading': 'Loading services…',
@@ -134,7 +135,7 @@ const en: Record<string, string> = {
   'field.company_name.label': 'Proposed LLC name',
   'field.company_purpose.label': 'Purpose of the LLC (one sentence)',
   'field.registered_agent_name.label': 'Registered agent name',
-  'field.registered_agent_address.label': 'Registered agent address in NC',
+  'field.registered_agent_address.label': 'Registered agent address',
   'field.principal_office_address.label': 'Principal office address',
   'field.expected_formation_date.label': 'Expected formation date',
   'field.members.label': 'Members',
@@ -357,6 +358,15 @@ const en: Record<string, string> = {
   'funnel.signedin': 'Booking as',
   'funnel.portal': 'Go to your portal',
 
+  // Two-path chooser (A1.1) — the first screen on both booking surfaces
+  'chooser.title': 'Welcome',
+  'chooser.subtitle': 'How would you like to continue?',
+  'chooser.signin_title': 'Sign In To Your Client Portal',
+  'chooser.signin_desc': 'Already a client? View your matter, documents, and messages.',
+  'chooser.new_title': 'Continue As New Client',
+  'chooser.new_desc': 'Tell us what you need and grab a time that works for you.',
+  'chooser.firm_login': 'Firm login',
+
   // Inline sign-in panel
   'signin.email': 'Email',
   'signin.password': 'Password',
@@ -419,6 +429,7 @@ const es: Record<string, string> = {
   // Common
   'common.continue': 'Continuar',
   'common.back': 'Atrás',
+  'common.loading': 'Cargando…',
 
   // Service step
   'service.loading': 'Cargando servicios…',
@@ -531,7 +542,7 @@ const es: Record<string, string> = {
   'field.company_name.label': 'Nombre propuesto de la LLC',
   'field.company_purpose.label': 'Propósito de la LLC (una oración)',
   'field.registered_agent_name.label': 'Nombre del agente registrado',
-  'field.registered_agent_address.label': 'Dirección del agente registrado en NC',
+  'field.registered_agent_address.label': 'Dirección del agente registrado',
   'field.principal_office_address.label': 'Dirección de la oficina principal',
   'field.expected_formation_date.label': 'Fecha esperada de constitución',
   'field.members.label': 'Miembros',
@@ -755,6 +766,15 @@ const es: Record<string, string> = {
     'para reservar con tus datos precargados — o continúa abajo si eres nuevo aquí.',
   'funnel.signedin': 'Reservando como',
   'funnel.portal': 'Ir a tu portal',
+
+  // Selector de dos caminos (A1.1) — la primera pantalla en ambas superficies de reserva
+  'chooser.title': 'Bienvenido',
+  'chooser.subtitle': '¿Cómo te gustaría continuar?',
+  'chooser.signin_title': 'Inicia Sesión En Tu Portal De Cliente',
+  'chooser.signin_desc': '¿Ya eres cliente? Consulta tu caso, documentos y mensajes.',
+  'chooser.new_title': 'Continuar Como Cliente Nuevo',
+  'chooser.new_desc': 'Cuéntanos qué necesitas y elige un horario que te convenga.',
+  'chooser.firm_login': 'Acceso del despacho',
 
   // Panel de inicio de sesión integrado
   'signin.email': 'Correo electrónico',

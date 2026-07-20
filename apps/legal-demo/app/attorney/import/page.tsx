@@ -230,7 +230,7 @@ export default function ImportPage() {
                 <th>Note</th>
                 <th>Date</th>
                 <th>Attendees</th>
-                <th>Matched matter</th>
+                <th>Matched Matter</th>
               </tr>
             </thead>
             <tbody>
@@ -262,7 +262,7 @@ export default function ImportPage() {
                         {n.match ? (
                           <span className="badge ok">Matched</span>
                         ) : (
-                          <span className="badge warn">No match</span>
+                          <span className="badge warn">No Match</span>
                         )}
                         <select
                           value={row?.matterEntityId ?? ''}
@@ -305,7 +305,7 @@ export default function ImportPage() {
 
       {results && (
         <section>
-          <h2>Import results</h2>
+          <h2>Import Results</h2>
           <table className="client-table">
             <thead>
               <tr>
@@ -346,8 +346,8 @@ export default function ImportPage() {
                       {r.matterEntityId
                         ? matter
                           ? `${matter.matterNumber}${matter.clientName ? ` — ${matter.clientName}` : ''}`
-                          : 'matched'
-                        : 'review queue'}
+                          : 'Matched'
+                        : 'Review Queue'}
                     </td>
                   </tr>
                 )

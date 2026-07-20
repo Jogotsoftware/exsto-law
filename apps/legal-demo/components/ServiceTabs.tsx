@@ -28,7 +28,7 @@ export function ServiceTabs({
         ...(generationMode === 'ai_draft' ? [{ href: `${base}/prompt`, label: 'Prompt' }] : []),
         // AI review of client-uploaded documents — orthogonal to how the
         // service's own documents are generated, so it shows for every service.
-        { href: `${base}/review`, label: 'AI review' },
+        { href: `${base}/review`, label: 'AI Review' },
         { href: `${base}/workflow`, label: 'Workflow' },
         { href: `${base}/billing`, label: 'Billing' },
       ]}

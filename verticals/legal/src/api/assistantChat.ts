@@ -797,7 +797,10 @@ export function buildClaudeSystem(
   // .customInstructions, resolved by the caller via getAssistantSettings — per
   // actor, so it can't ride AssistantFirmFacts). Constant for the conversation
   // (same actor for its lifetime), so it lives in this stable/cached half too.
-  attorneyInstructions = '',
+  // ITEM-12 WP-2 — customInstructions is now saved as an array of pills; see
+  // assistantPrompt.ts normalizeInstructionsText for the string | string[]
+  // compat shim (a pre-WP-2 settings row is still a bare string).
+  attorneyInstructions: string | string[] = '',
 ): string {
   const basePrompt = buildBaseSystemPrompt(firm)
   // FB-B — firm + attorney standing instructions, fenced and placed AFTER the

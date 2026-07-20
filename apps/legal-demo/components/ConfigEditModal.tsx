@@ -192,7 +192,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
             onClick={() => setAiOpen((v) => !v)}
             aria-expanded={aiOpen}
           >
-            <SparklesIcon size={14} /> AI regenerate
+            <SparklesIcon size={14} /> AI Regenerate
           </button>
         )}
         <span style={{ flex: 1 }} />
@@ -233,7 +233,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
       {proposal !== null && (
         <div className="li-modal-proposal">
           <div className="li-modal-proposal-head">
-            <strong>AI proposal</strong>
+            <strong>AI Proposal</strong>
             <span className="li-modal-muted">review, then use it or discard</span>
             <span style={{ flex: 1 }} />
             <button
@@ -290,7 +290,7 @@ export function ConfigEditModal(props: ConfigEditModalProps) {
             onClick={() => void persist('save')}
             disabled={busy !== null}
           >
-            {busy === 'save' ? 'Saving…' : (props.saveLabel ?? 'Save & approve')}
+            {busy === 'save' ? 'Saving…' : (props.saveLabel ?? 'Save & Approve')}
           </button>
         )}
       </div>

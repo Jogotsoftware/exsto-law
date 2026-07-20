@@ -252,7 +252,7 @@ export default function ReviewQueue() {
                 Clear
               </button>
               <button type="button" className="li-rev-begin" onClick={beginReview}>
-                Begin review
+                Begin Review
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <line
                     x1="5"

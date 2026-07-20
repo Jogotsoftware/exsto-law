@@ -191,7 +191,7 @@ export function NewEnvelopeWizard() {
         <span className="li-esign-wiz-sent-ico" aria-hidden="true">
           <CheckIcon size={30} />
         </span>
-        <h3 className="li-esign-wiz-sent-title">Envelope sent</h3>
+        <h3 className="li-esign-wiz-sent-title">Envelope Sent</h3>
         <p className="li-esign-wiz-sent-body">
           Each recipient received a secure signing link by email.
           {result.savedContacts.length > 0 &&
@@ -305,7 +305,7 @@ export function NewEnvelopeWizard() {
         {step === 1 && (
           <div>
             <div className="li-esign-wiz-h-row">
-              <div className="li-esign-wiz-h">Add recipients &amp; signing order</div>
+              <div className="li-esign-wiz-h">Add Recipients &amp; Signing Order</div>
               <button
                 type="button"
                 className="li-esign-btn li-esign-btn--sm"
@@ -452,7 +452,7 @@ export function NewEnvelopeWizard() {
               </div>
               {newRecipients.length > 0 && (
                 <div className="li-esign-wiz-reviewrow">
-                  <span className="li-esign-wiz-reviewk">New contacts</span>
+                  <span className="li-esign-wiz-reviewk">New Contacts</span>
                   <span className="li-esign-wiz-reviewv">
                     {newRecipients.map((r) => r.email.trim()).join(', ')} will be saved to Contacts.
                   </span>

@@ -513,7 +513,7 @@ export function DocumentReviewer({
                 disabled={busy !== null || sendOpening}
               >
                 {sendOpening ? <span className="spinner" /> : <SendIcon size={15} />}
-                Send to client
+                Send To Client
               </button>
               <DocumentActionBar
                 context={{
@@ -602,7 +602,7 @@ export function DocumentReviewer({
               disabled={busy !== null}
             >
               <GemCluster size={18} />
-              AI revision
+              AI Revision
             </button>
           )}
           {isEmail && (
@@ -613,7 +613,7 @@ export function DocumentReviewer({
               disabled={busy !== null}
             >
               <GemCluster size={18} />
-              Regenerate email
+              Regenerate Email
             </button>
           )}
           <button
@@ -709,7 +709,7 @@ export function DocumentReviewer({
           )}
           {alternatives.length > 0 && (
             <div className="li-rev-mc-group">
-              <h3>Alternatives considered ({alternatives.length})</h3>
+              <h3>Alternatives Considered ({alternatives.length})</h3>
               {alternatives.map((a, i) => (
                 <div key={i} className="li-rev-mc-card">
                   <strong>{a.decision_point ?? 'Decision'}</strong>
@@ -720,7 +720,7 @@ export function DocumentReviewer({
           )}
           {ambiguities.length > 0 && (
             <div className="li-rev-mc-group">
-              <h3>Ambiguities flagged ({ambiguities.length})</h3>
+              <h3>Ambiguities Flagged ({ambiguities.length})</h3>
               {ambiguities.map((a, i) => (
                 <div key={i} className="li-rev-mc-card">
                   <strong>{a.topic ?? 'Ambiguity'}</strong>
@@ -805,7 +805,7 @@ export function DocumentReviewer({
             <div className="li-rev-modal-head">
               <GemCluster size={22} />
               <div className="li-rev-modal-titles">
-                <h2>Regenerate email</h2>
+                <h2>Regenerate Email</h2>
                 <div className="li-rev-modal-sub">{draft.emailSubject || 'Email draft'}</div>
               </div>
               <button

@@ -18,22 +18,60 @@ describe('normalizeFirmProfileFieldValue — text fields', () => {
   })
 })
 
-// WP FB-B (migration 0175, PLANNED) — assistant_instructions is a plain text
-// field on the same singleton, so it goes through the generic trim/clear
-// branch above like firm_name/attorney_name/etc. No special validation (unlike
-// firm_jurisdiction); the 2,000-char cap is enforced at the UI/MCP-schema layer
-// and defensively again at prompt-injection time (assistantPrompt.ts).
-describe('normalizeFirmProfileFieldValue — assistant_instructions', () => {
-  it('trims like any other text field', () => {
-    expect(
-      normalizeFirmProfileFieldValue('assistant_instructions', '  Always CC my paralegal.  '),
-    ).toBe('Always CC my paralegal.')
+// ITEM-12 WP-2 — assistant_instructions / portal_assistant_instructions are no
+// longer plain text: the Settings → Assistant editor now saves them as pills
+// (one Enter-to-add instruction per array item), so they go through the same
+// array-normalization discipline as practice_areas below — trim, drop empty,
+// dedupe case-insensitively, non-array input fails safe to [] — PLUS a
+// per-item cap (500 chars) and a total-list cap (20 items) practice_areas does
+// not have, since an instruction pill is meant to stay short and scannable.
+describe('normalizeFirmProfileFieldValue — assistant_instructions / portal_assistant_instructions', () => {
+  it('trims, drops empties, and dedupes case-insensitively (both kinds)', () => {
+    for (const kind of ['assistant_instructions', 'portal_assistant_instructions'] as const) {
+      expect(
+        normalizeFirmProfileFieldValue(kind, [
+          '  Always CC my paralegal.  ',
+          'Always CC My Paralegal.',
+          '',
+          '   ',
+          'Mention office hours.',
+        ]),
+      ).toEqual(['Always CC my paralegal.', 'Mention office hours.'])
+    }
   })
 
-  it('empty/null/non-string clears to an empty string', () => {
-    expect(normalizeFirmProfileFieldValue('assistant_instructions', '')).toBe('')
-    expect(normalizeFirmProfileFieldValue('assistant_instructions', null)).toBe('')
-    expect(normalizeFirmProfileFieldValue('assistant_instructions', undefined)).toBe('')
+  it('drops non-string entries', () => {
+    expect(
+      normalizeFirmProfileFieldValue('assistant_instructions', ['keep this', 42, null, 'and this']),
+    ).toEqual(['keep this', 'and this'])
+  })
+
+  it('a non-array input clears to an empty array (fails safe, matches practice_areas)', () => {
+    expect(normalizeFirmProfileFieldValue('assistant_instructions', null)).toEqual([])
+    expect(
+      normalizeFirmProfileFieldValue('assistant_instructions', 'Always CC my paralegal.'),
+    ).toEqual([])
+    expect(normalizeFirmProfileFieldValue('assistant_instructions', undefined)).toEqual([])
+    expect(normalizeFirmProfileFieldValue('portal_assistant_instructions', null)).toEqual([])
+  })
+
+  it('an already-empty array clears', () => {
+    expect(normalizeFirmProfileFieldValue('assistant_instructions', [])).toEqual([])
+    expect(normalizeFirmProfileFieldValue('portal_assistant_instructions', [])).toEqual([])
+  })
+
+  it('caps each item at 500 characters', () => {
+    const long = 'x'.repeat(600)
+    const result = normalizeFirmProfileFieldValue('assistant_instructions', [long]) as string[]
+    expect(result).toEqual([long.slice(0, 500)])
+    expect(result[0]).toHaveLength(500)
+  })
+
+  it('caps the whole list at 20 items', () => {
+    const items = Array.from({ length: 25 }, (_, i) => `instruction ${i}`)
+    const result = normalizeFirmProfileFieldValue('assistant_instructions', items) as string[]
+    expect(result).toHaveLength(20)
+    expect(result).toEqual(items.slice(0, 20))
   })
 })
 
