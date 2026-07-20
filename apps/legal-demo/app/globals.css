@@ -24689,3 +24689,101 @@ details.li-brief-research summary:hover {
   font-weight: 700;
   flex: 0 0 auto;
 }
+
+/* ==========================================================================
+ FB-0 — thumbs up/down feedback on an assistant reply (attorney chat and the
+ client-portal chat) and the tiny note modal it opens. Self-contained append,
+ two new class families: "li-fbk-" (the note-modal body, shared by both
+ surfaces — the attorney side wraps it in the existing Modal component, the
+ portal side wraps it in the existing "li-cp-modal-" chrome) and
+ "li-cp-asst-fbk-" together with li-cp-asst-msgcol (the portal's thumbs row,
+ and the column wrapper that stacks a reply bubble over its thumbs row inside
+ li-cp-asst-msgrow's existing start/end flex). The attorney thumbs buttons
+ reuse the existing uac-reply-btn base class (globals ~5066) with a
+ li-fbk-btn modifier for the filled "rated" state — no changes to any
+ existing selector.
+ ========================================================================== */
+.li-fbk-btn {
+  padding: 0.2rem 0.35rem;
+}
+.li-fbk-btn.li-fbk-btn-active {
+  color: var(--li-gold-text, #8c7534);
+  border-color: var(--li-gold, #c6a968);
+  background: var(--li-gold-bg-soft, #fbf6ea);
+}
+.li-fbk-modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-fbk-modal-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-body, #23324f);
+  margin-bottom: 6px;
+}
+.li-fbk-modal-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  border: 1px solid var(--li-border-input, #dce2ee);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--li-body, #23324f);
+  background: #fff;
+}
+.li-fbk-modal-textarea:focus {
+  outline: none;
+  border-color: var(--li-navy, #1b2a4a);
+}
+
+/* Portal: the column wrapper lets li-cp-asst-msgrow keep aligning the WHOLE
+   turn (bubble + thumbs row) start/end while the bubble and its thumbs stack
+   vertically inside it. */
+.li-cp-asst-msgcol {
+  display: flex;
+  flex-direction: column;
+  max-width: 78%;
+}
+/* The column itself now owns the 78% cap — let the bubble inside fill it
+   rather than compounding two 78% caps (globals ~23565's .li-cp-asst-msg). */
+.li-cp-asst-msgcol .li-cp-asst-msg {
+  max-width: 100%;
+}
+.li-cp-asst-msgrow.me .li-cp-asst-msgcol {
+  align-items: flex-end;
+}
+.li-cp-asst-fbk {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.li-cp-asst-fbk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--li-border, #dce2ee);
+  border-radius: 7px;
+  background: #fff;
+  color: #6b7690;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.li-cp-asst-fbk-btn:hover {
+  background: #fbfaf4;
+  border-color: var(--li-gold, #c6a968);
+  color: var(--li-navy, #1b2a4a);
+}
+.li-cp-asst-fbk-btn.li-cp-asst-fbk-btn-active {
+  color: var(--li-gold-text, #8c7534);
+  border-color: var(--li-gold, #c6a968);
+  background: var(--li-gold-bg-soft, #fbf6ea);
+}
