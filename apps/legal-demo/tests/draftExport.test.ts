@@ -85,3 +85,77 @@ describe('renderMarkdown — basic functionality preserved', () => {
     expect(html).toContain('<p>Second paragraph</p>')
   })
 })
+
+// PO-1 (Brief modal UX polish, product-walk 2026-07-20) — GFM pipe tables were
+// previously unhandled by this renderer: `| Item | Status |` rendered as
+// literal text inside the Brief modal's checklist sections. This pins the
+// fix — a real <table> — plus the `tdWrap` per-cell hook BriefModal uses to
+// wrap known status vocabulary in color-coded chips (lib/briefChips.ts).
+describe('renderMarkdown — GFM pipe tables', () => {
+  it('renders a header + separator + rows as a real table, not literal pipe text', () => {
+    const md = '| Item | Status |\n| --- | --- |\n| Engagement letter | Pending |'
+    const html = renderMarkdown(md)
+    expect(html).not.toContain('| Item | Status |')
+    expect(html).toContain('<table>')
+    expect(html).toContain('<thead>')
+    expect(html).toContain('<th>Item</th>')
+    expect(html).toContain('<th>Status</th>')
+    expect(html).toContain('<tbody>')
+    expect(html).toContain('<td>Engagement letter</td>')
+    expect(html).toContain('<td>Pending</td>')
+  })
+
+  it('wraps the rendered table in a scrollable container', () => {
+    const md = '| A | B |\n| --- | --- |\n| 1 | 2 |'
+    const html = renderMarkdown(md)
+    expect(html).toContain('<div class="li-md-table-wrap"><table>')
+  })
+
+  it('renders multiple consecutive data rows', () => {
+    const md = ['| Item | Status |', '| --- | --- |', '| A | Complete |', '| B | Unknown |'].join(
+      '\n',
+    )
+    const html = renderMarkdown(md)
+    const rowCount = (html.match(/<tr>/g) || []).length
+    // 1 header row + 2 data rows
+    expect(rowCount).toBe(3)
+  })
+
+  it('applies inline formatting inside cells', () => {
+    const md = '| Item | Note |\n| --- | --- |\n| **Deed** | see `exhibit A` |'
+    const html = renderMarkdown(md)
+    expect(html).toContain('<strong>Deed</strong>')
+    expect(html).toContain('<code>exhibit A</code>')
+  })
+
+  it('honors GFM alignment markers', () => {
+    const md = '| L | C | R |\n| :--- | :---: | ---: |\n| a | b | c |'
+    const html = renderMarkdown(md)
+    expect(html).toContain('<th style="text-align:left">L</th>')
+    expect(html).toContain('<th style="text-align:center">C</th>')
+    expect(html).toContain('<th style="text-align:right">R</th>')
+  })
+
+  it('does not treat a bare --- line (no pipes) as a table — stays <hr/>', () => {
+    const html = renderMarkdown('above\n\n---\n\nbelow')
+    expect(html).toContain('<hr/>')
+    expect(html).not.toContain('<table>')
+  })
+
+  it('table ends at the first blank or non-pipe line', () => {
+    const md = '| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter the table.'
+    const html = renderMarkdown(md)
+    expect(html).toContain('<p>After the table.</p>')
+    const rowCount = (html.match(/<tr>/g) || []).length
+    expect(rowCount).toBe(2) // header + one data row, paragraph is not swallowed
+  })
+
+  it('applies the tdWrap hook to data cells only, not headers', () => {
+    const md = '| Item | Status |\n| --- | --- |\n| Deed | Pending |'
+    const html = renderMarkdown(md, {
+      tdWrap: (text, html) => (text === 'Pending' ? `<mark>${html}</mark>` : html),
+    })
+    expect(html).toContain('<td><mark>Pending</mark></td>')
+    expect(html).toContain('<th>Status</th>')
+  })
+})
