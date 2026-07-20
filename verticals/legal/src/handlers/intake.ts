@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import {
+  getLatestAttributeValue,
   insertAttribute,
   insertEntity,
   insertEvent,
@@ -14,6 +15,8 @@ import { resolveActiveServiceVersion } from '../lifecycle/binding.js'
 import { createWorkflowInstance } from '../lifecycle/instance.js'
 import { entryStage } from '../lifecycle/resolve.js'
 import { scheduleProducingAutoRun } from '../lifecycle/autoRun.js'
+import { normalizeJurisdiction } from '../api/jurisdictions.js'
+import { GOVERNING_JURISDICTION_FIELD_ID } from '../api/intakeFieldLibrary.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // intake.submit — steps 1–3 of the intake flow (REQ-INTAKE-01..04, 07).
@@ -253,6 +256,21 @@ async function findOrCreateClientParent(
   return clientEntityId
 }
 
+// Pure projection: the intake's answers → the governing_law stamp value, or
+// null when there is no such answer, no such id, or the answer doesn't
+// normalize (junk, or the WP2.4 "I don't know" sentinel) — never a guess.
+// Exported for unit tests (tests/vertical), same PURE-no-DB pattern as
+// normalizeGoverningLawValue (handlers/matterJurisdiction.ts).
+export function resolveGoverningLawStamp(
+  intakeResponses: Record<string, unknown> | null | undefined,
+): string | null {
+  const answer =
+    intakeResponses && typeof intakeResponses === 'object'
+      ? intakeResponses[GOVERNING_JURISDICTION_FIELD_ID]
+      : undefined
+  return typeof answer === 'string' ? normalizeJurisdiction(answer) : null
+}
+
 registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as MatterOpenPayload
 
@@ -278,8 +296,24 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
     { kind: 'service_key', value: p.service_key },
     { kind: 'workflow_route', value: p.workflow_route },
     { kind: 'matter_status', value: 'intake_submitted' },
-    { kind: 'governing_law', value: 'North Carolina' },
   ]
+  // WP A2b — governing jurisdiction is a PER-MATTER fact from the client's OWN
+  // intake answer, never a hardcoded default (this used to always stamp
+  // 'North Carolina'). When the intake carried the reusable governing_jurisdiction
+  // question (intakeFieldLibrary.ts) and the client answered it, normalize and
+  // stamp THAT. Otherwise stamp nothing: absence is an honest unset, and
+  // resolveMatterJurisdiction (api/matterJurisdiction.ts) is what falls back to
+  // the firm's home jurisdiction — this handler must never guess one.
+  const intakeResponses = await getLatestAttributeValue<Record<string, unknown>>(
+    client,
+    ctx.tenantId,
+    p.questionnaire_entity_id,
+    'questionnaire_responses',
+  )
+  const normalizedJurisdiction = resolveGoverningLawStamp(intakeResponses)
+  if (normalizedJurisdiction) {
+    matterAttrs.push({ kind: 'governing_law', value: normalizedJurisdiction })
+  }
   // Send-authz owner (0088): this is the PUBLIC booking/intake path — ctx.actorId is
   // the intake actor, not an attorney — so auto-assign the firm's PRACTICING
   // attorney (resolveDefaultMatterOwner) as owner. While the firm has one attorney

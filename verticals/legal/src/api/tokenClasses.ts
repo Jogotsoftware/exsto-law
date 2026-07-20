@@ -51,6 +51,11 @@ const CLIENT_SOURCED_SLOTS: ReadonlySet<string> = new Set([
   'business_description',
   // A service may legitimately ask the client for a desired effective date.
   'effective_date',
+  // WP A2b — governing_jurisdiction is asked of the client directly (the
+  // reusable field, intakeFieldLibrary.ts) even though the {{governing_jurisdiction}}
+  // TOKEN resolves system-side from the matter's stored fact, not the raw
+  // answer — same shape as effective_date above.
+  'governing_jurisdiction',
 ])
 
 // True when a proposed CLIENT-FACING questionnaire field with this id must be

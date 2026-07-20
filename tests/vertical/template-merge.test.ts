@@ -227,3 +227,54 @@ describe('MERGE_SLOT_FIELDS (editor recognition contract)', () => {
     expect(markdown).toBe('[[MISSING: firm_name]] / [[MISSING: attorney_name]]')
   })
 })
+
+// WP A2b — {{governing_jurisdiction}} is a curated slot fed by the CALLER
+// (generateDraft.ts / generateEmail.ts resolve it via resolveMatterJurisdiction
+// before calling buildMergeData; this module stays pure/sync). Never a
+// hardcoded state, and unset must be as honest-MISSING as any other slot.
+describe('governing_jurisdiction (WP A2b)', () => {
+  const baseMatter = {
+    matterEntityId: 'm1',
+    matterNumber: 'PL-2026-0007',
+    clientName: 'Maria Gomez',
+    serviceKey: 'nc_llc_multi_member',
+    workflowRoute: 'auto',
+    status: 'in_review',
+    scheduledAt: null,
+    createdAt: '2026-06-18T00:00:00Z',
+    practiceArea: 'nc_llc_multi_member',
+    summary: '',
+    attributes: {},
+    questionnaireResponses: {},
+    transcriptText: null,
+    latestDraftVersionId: null,
+    latestDraftStatus: null,
+    clientEmail: 'maria@example.com',
+  } satisfies MatterDetail
+
+  it('is listed in MERGE_SLOT_FIELDS (editor recognition contract)', () => {
+    expect(MERGE_SLOT_FIELDS).toContain('governing_jurisdiction')
+  })
+
+  it('binds {{governing_jurisdiction}} to the resolved display name', () => {
+    const data = buildMergeData(baseMatter, {
+      effectiveDateIso: '2026-06-18T00:00:00Z',
+      governingJurisdiction: 'North Carolina',
+    })
+    expect(data.governing_jurisdiction).toBe('North Carolina')
+    const { markdown, missingFields } = renderTemplate(
+      'This matter is governed by the laws of {{governing_jurisdiction}}.',
+      data,
+    )
+    expect(markdown).toBe('This matter is governed by the laws of North Carolina.')
+    expect(missingFields).toEqual([])
+  })
+
+  it('renders an honest MISSING marker — never a guess — when unset', () => {
+    const data = buildMergeData(baseMatter, { effectiveDateIso: '2026-06-18T00:00:00Z' })
+    expect(data.governing_jurisdiction).toBeUndefined()
+    const { markdown, missingFields } = renderTemplate('{{governing_jurisdiction}}', data)
+    expect(markdown).toBe('[[MISSING: governing_jurisdiction]]')
+    expect(missingFields).toContain('governing_jurisdiction')
+  })
+})

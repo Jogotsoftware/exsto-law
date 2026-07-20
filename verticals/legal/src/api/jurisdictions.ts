@@ -101,3 +101,64 @@ export function jurisdictionDisplayName(code: string | null | undefined): string
   const upper = code.trim().toUpperCase()
   return US_STATES[upper] ?? null
 }
+
+// Spanish display names, parallel to US_STATES by code (WP A2b — Spanish intake
+// copy for the reusable governing_jurisdiction question; the established
+// label_i18n/options_i18n pattern, BUILDER-UX-2 WP-7). Display-only: the option
+// VALUE an intake answer stores is always the English name in US_STATES (see
+// optionLabelOf in apps/legal-demo/app/book/page.tsx, which looks up the
+// localized label by index but submits the English option string) — so
+// normalizeJurisdiction never needs to understand Spanish input.
+export const US_STATE_NAMES_ES: Readonly<Record<string, string>> = Object.freeze({
+  AL: 'Alabama',
+  AK: 'Alaska',
+  AZ: 'Arizona',
+  AR: 'Arkansas',
+  CA: 'California',
+  CO: 'Colorado',
+  CT: 'Connecticut',
+  DE: 'Delaware',
+  FL: 'Florida',
+  GA: 'Georgia',
+  HI: 'Hawái',
+  ID: 'Idaho',
+  IL: 'Illinois',
+  IN: 'Indiana',
+  IA: 'Iowa',
+  KS: 'Kansas',
+  KY: 'Kentucky',
+  LA: 'Luisiana',
+  ME: 'Maine',
+  MD: 'Maryland',
+  MA: 'Massachusetts',
+  MI: 'Míchigan',
+  MN: 'Minnesota',
+  MS: 'Misisipi',
+  MO: 'Misuri',
+  MT: 'Montana',
+  NE: 'Nebraska',
+  NV: 'Nevada',
+  NH: 'Nuevo Hampshire',
+  NJ: 'Nueva Jersey',
+  NM: 'Nuevo México',
+  NY: 'Nueva York',
+  NC: 'Carolina del Norte',
+  ND: 'Dakota del Norte',
+  OH: 'Ohio',
+  OK: 'Oklahoma',
+  OR: 'Oregón',
+  PA: 'Pensilvania',
+  RI: 'Rhode Island',
+  SC: 'Carolina del Sur',
+  SD: 'Dakota del Sur',
+  TN: 'Tennessee',
+  TX: 'Texas',
+  UT: 'Utah',
+  VT: 'Vermont',
+  VA: 'Virginia',
+  WA: 'Washington',
+  WV: 'Virginia Occidental',
+  WI: 'Wisconsin',
+  WY: 'Wyoming',
+  DC: 'Distrito de Columbia',
+})

@@ -29,12 +29,12 @@ import { getMatter } from '../queries/matters.js'
 import { getClientContext, formatClientContext } from '../queries/clientContext.js'
 import { getStandaloneTemplate } from '../queries/templates.js'
 import { renderTemplate, buildMergeData } from './templateMerge.js'
+import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 import {
   loadForcedSkills,
   buildActiveSkillsText,
   resolveJurisdictionSkillSlugs,
 } from './skillContext.js'
-import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 
 const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
 
@@ -112,9 +112,14 @@ export async function composeEmailDraft(
         `Email template "${templateEntityId}" is not an active firm template (not found or empty body).`,
       )
     }
+    // WP A2b — the matter's own governing-law fact, never a hardcoded state.
+    const jurisdiction = await resolveMatterJurisdiction(agentCtx, input.matterEntityId)
     const merged = renderTemplate(
       tmpl.body,
-      buildMergeData(matter, { effectiveDateIso: new Date().toISOString() }),
+      buildMergeData(matter, {
+        effectiveDateIso: new Date().toISOString(),
+        governingJurisdiction: jurisdiction?.displayName,
+      }),
     )
     // A template body may pin its own subject with a leading SUBJECT: line;
     // otherwise the template's name is the subject.
