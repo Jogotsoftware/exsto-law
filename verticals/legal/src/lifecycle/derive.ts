@@ -56,8 +56,13 @@ export function deriveLifecycleFromService(input: DeriveInput): Lifecycle {
         // A client can always have a transcript ingested directly (call.ingest),
         // booking or not — so consulted is reachable without the booking branch.
         { to: 'consulted', gate: 'system', on: 'call.ingest' },
+        // B1.1 parity fix: same structural bug as authored.ts's stage 1 — a CLIENT
+        // edge gated on `via: 'booking.create'` can never be reached by the system
+        // `intake.completed` dispatch matter.open fires (signalEvent only matches
+        // system/automatic `on:` edges). Mirror the authored.ts fix so a service on
+        // the derived (legacy-backfill) lifecycle does not strand the same way.
         ...(bookingEnabled
-          ? [{ to: 'consultation_booked', gate: 'client' as const, via: 'booking.create' }]
+          ? [{ to: 'consultation_booked', gate: 'system' as const, on: 'intake.completed' }]
           : []),
       ],
     },
