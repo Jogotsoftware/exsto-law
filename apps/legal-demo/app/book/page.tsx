@@ -9,7 +9,8 @@ import { callClientMcp } from '@/lib/mcpClient'
 import { callClientPortalMcp } from '@/lib/mcpClientPortal'
 import { AddressAutocomplete, type StructuredAddress } from '@/components/AddressAutocomplete'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
-import { LanguageToggle } from '@/components/LanguageToggle'
+import { BookTopbar } from '@/components/BookTopbar'
+import { BookingChooser } from '@/components/BookingChooser'
 import { PortalSignInInline } from '@/components/PortalSignInInline'
 import { FeeConsentCard } from '@/components/FeeConsentCard'
 import { Turnstile } from '@/components/Turnstile'
@@ -26,7 +27,6 @@ import {
   LockIcon,
   MailIcon,
   MegaphoneIcon,
-  ScaleIcon,
   SparklesIcon,
   UserIcon,
   UsersIcon,
@@ -296,6 +296,12 @@ export default function BookPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // A1.1: the two-path chooser gates the wizard on first paint — "Continue As
+  // New Client" (or a ?service= preset, which already implies that choice)
+  // dismisses it for the rest of the session; a signed-in visitor never sees
+  // it (portalMe truthy skips straight to the step machine below).
+  const [chooserDismissed, setChooserDismissed] = useState(false)
+
   // PORTAL-1: signed-in clients skip the contact step AND the account gate —
   // identity comes from the session; the submit runs through the authed portal
   // endpoint attributed to their own actor. undefined = still checking.
@@ -320,10 +326,6 @@ export default function BookPage() {
     void refreshPortalMe()
   }, [refreshPortalMe])
   const signedIn = Boolean(portalMe)
-  // Returning-client sign-in, IN PLACE: the flow-start notice expands this panel
-  // and the account step can swap to it — no navigation, so every wizard answer
-  // survives the sign-in.
-  const [showSignInPanel, setShowSignInPanel] = useState(false)
 
   // The account gate (anonymous flow): password + the fee card. accountMode
   // swaps the create-account fields for the inline sign-in panel; the stage
@@ -373,6 +375,7 @@ export default function BookPage() {
     const p = new URLSearchParams(window.location.search)
     const s = p.get('service')
     if (s) {
+      setChooserDismissed(true)
       setPresetServiceKey(s)
       setSelectedServiceKey(s)
       setStep('contact')
@@ -956,6 +959,42 @@ export default function BookPage() {
     )
   }
 
+  // portalMe undefined = the session check hasn't resolved yet. Gate on it
+  // (rather than defaulting to the anonymous flow) so the chooser below never
+  // flashes in on top of an already-rendered service grid.
+  if (portalMe === undefined) {
+    return (
+      <main className="bk-shell">
+        <div className="bk-aurora" aria-hidden />
+        <div className="bk-frame">
+          <BookTopbar firmName={firmBranding?.firmName ?? null} />
+          <section className="bk-card">
+            <div className="bk-loading">
+              <span className="bk-spinner" />
+              {t('common.loading')}
+            </div>
+          </section>
+        </div>
+      </main>
+    )
+  }
+
+  // ---- Two-path chooser (A1.1) ---------------------------------------------
+  // Anonymous visitors (portalMe === null, i.e. the session check has
+  // resolved and found none) see the chooser first; a preset link or an
+  // already-signed-in session skips straight to the step machine below. The
+  // step===service / no-selection-yet guard means a portalMe resolution that
+  // lands AFTER the visitor has already started picking a service never yanks
+  // them back to the chooser mid-flow.
+  if (portalMe === null && !chooserDismissed && step === 'service' && !selectedServiceKey) {
+    return (
+      <BookingChooser
+        firmName={firmBranding?.firmName ?? null}
+        onContinueAsNewClient={() => setChooserDismissed(true)}
+      />
+    )
+  }
+
   const stepTitle =
     step === 'service'
       ? t('header.service')
@@ -1022,36 +1061,9 @@ export default function BookPage() {
 
             {step === 'service' && (
               <>
-                {portalMe === null && (
-                  <div className="bk-notice" role="note">
-                    {t('funnel.existing', undefined, 'Already working with us?')}{' '}
-                    <button
-                      type="button"
-                      className="bk-linklike"
-                      aria-expanded={showSignInPanel}
-                      onClick={() => setShowSignInPanel((v) => !v)}
-                    >
-                      {t('funnel.signin', undefined, 'Sign in to your client portal')}
-                    </button>{' '}
-                    {t(
-                      'funnel.existing_tail',
-                      undefined,
-                      'to book with your details prefilled — or continue below if you are new here.',
-                    )}
-                    {showSignInPanel && (
-                      <PortalSignInInline
-                        continuePath="/book"
-                        onSignedIn={async () => {
-                          // The panel never unmounts the wizard — refreshing the
-                          // session flips the signed-in machinery (step skips,
-                          // prefill, authed submit) with every answer intact.
-                          await refreshPortalMe()
-                          setShowSignInPanel(false)
-                        }}
-                      />
-                    )}
-                  </div>
-                )}
+                {/* The "already working with us?" fork now lives on the
+                    chooser screen (A1.1), rendered before this step is ever
+                    reachable — no redundant in-grid prompt for it here. */}
                 {portalMe && (
                   <div className="bk-notice" role="note">
                     {t('funnel.signedin', undefined, 'Booking as')}{' '}
@@ -1563,22 +1575,6 @@ export default function BookPage() {
         </p>
       </div>
     </main>
-  )
-}
-
-function BookTopbar({ firmName }: { firmName: string | null }) {
-  return (
-    <header className="bk-topbar">
-      <div className="bk-brand">
-        <span className="bk-brand-mark">
-          <ScaleIcon size={18} />
-        </span>
-        {/* Resolved firm name (MULTI-TENANT-1). Blank until firm_branding lands —
-            a real firm always resolves a name, so this fills within a beat. */}
-        <span className="bk-brand-name">{firmName ?? ''}</span>
-      </div>
-      <LanguageToggle />
-    </header>
   )
 }
 

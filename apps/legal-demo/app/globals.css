@@ -6472,6 +6472,36 @@ button.danger.outline:hover:not(:disabled) {
   opacity: 1;
   transform: scale(1);
 }
+/* Two-path chooser (A1.1) — the cards are pure navigation, never "selected",
+   so the trailing arrow is always-on rather than tick-on-select. */
+.bk-chooser-cta {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--bk-navy);
+}
+.bk-chooser-foot {
+  margin: 0.2rem 0 0;
+  text-align: center;
+  font-size: 0.85rem;
+}
+/* Plain-button-as-link — no chrome, underlined navy text. Used inline in
+   notices (the returning-client prompt) and as the chooser's footer link. */
+.bk-linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--bk-navy);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.bk-linklike:hover {
+  color: var(--bk-navy-700);
+}
 
 /* ---- Fields ---- */
 .bk-fields {
@@ -6834,6 +6864,30 @@ button.danger.outline:hover:not(:disabled) {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Calendar | List view switch (front door, A1.1 on-brand pass) — a two-way
+   segmented control matching the meeting-length pills' visual weight. */
+.bk-view-toggle {
+  display: inline-flex;
+  border: 1.5px solid var(--bk-line);
+  border-radius: var(--bk-r-md);
+  overflow: hidden;
+  width: fit-content;
+}
+.bk-view-toggle-btn {
+  appearance: none;
+  cursor: pointer;
+  border: none;
+  background: #fff;
+  color: var(--bk-slate);
+  font-family: var(--bk-sans);
+  font-weight: 600;
+  font-size: 0.88rem;
+  padding: 0.5rem 1rem;
+}
+.bk-view-toggle-btn.active {
+  background: var(--bk-navy);
+  color: #fff;
+}
 .bk-btn-soft {
   color: var(--bk-navy);
   background: #eef2ff;
@@ -6859,6 +6913,14 @@ button.danger.outline:hover:not(:disabled) {
 .bk-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* .bk-btn-primary's navy gradient at 50% opacity blends toward a washed-out
+   lavender against the light shell background (founder walk, 2026-07-20) — a
+   solid same-hue muted fill reads as "navy, dimmed" instead. */
+.bk-btn-primary:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--bk-navy) 55%, #fff);
+  box-shadow: none;
 }
 .bk-btn-wide {
   width: 100%;
@@ -7088,7 +7150,7 @@ button.danger.outline:hover:not(:disabled) {
     transform 0.16s var(--bk-ease);
   white-space: nowrap;
 }
-.bk-slot:hover:not(:disabled) {
+.bk-slot:hover {
   border-color: var(--bk-navy);
   background: #eef2ff;
   transform: translateY(-1px);
@@ -7099,13 +7161,6 @@ button.danger.outline:hover:not(:disabled) {
   border-color: transparent;
   box-shadow: var(--bk-shadow-pop);
   animation: bkPop 0.25s var(--bk-ease);
-}
-.bk-slot.taken {
-  color: var(--bk-slate-400);
-  background: var(--bk-line-soft);
-  border-color: transparent;
-  text-decoration: line-through;
-  cursor: not-allowed;
 }
 .bk-cal-more {
   display: flex;
@@ -23710,6 +23765,11 @@ details.li-brief-research summary:hover {
   align-items: flex-start;
   padding: clamp(2rem, 8vh, 6rem) 1.5rem 3rem;
   font-family: var(--font-sans, 'Public Sans', system-ui, sans-serif);
+  /* Positioned + clipped so an optional .bk-aurora child (login page only,
+     A1.1) stays contained and the card below still stacks above it — a
+     no-op for consumers (set-password) that never render that child. */
+  position: relative;
+  overflow: hidden;
 }
 .li-cp-auth-card {
   width: 100%;
@@ -23719,6 +23779,8 @@ details.li-brief-research summary:hover {
   border-radius: 16px;
   padding: 32px;
   box-shadow: 0 10px 40px rgba(15, 23, 42, 0.09);
+  position: relative;
+  z-index: 1;
 }
 .li-cp-auth-brand {
   display: flex;
