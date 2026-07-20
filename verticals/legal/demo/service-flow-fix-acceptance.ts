@@ -133,8 +133,17 @@ function correctedShape(): Lifecycle {
 
 // ── helpers (autorun-2 harness patterns) ────────────────────────────────────────
 
-async function makeService(serviceKey: string, name: string, graph: Lifecycle): Promise<void> {
-  await createService(ctx, { serviceKey, displayName: name, description: `${name} (WF-FIX-1)` })
+async function makeService(name: string, graph: Lifecycle): Promise<string> {
+  // createService GENERATES the service key (input keys are ignored) — use the
+  // returned one for every subsequent write.
+  const created = await createService(ctx, {
+    displayName: name,
+    description: `${name} (WF-FIX-1 acceptance — not client-facing)`,
+    route: 'manual',
+    documents: [],
+    sortOrder: 963,
+  })
+  const serviceKey = created.serviceKey
   await submitAction(ctx, {
     actionKindName: 'legal.service.upsert',
     intentKind: 'exploration',
@@ -148,10 +157,36 @@ async function makeService(serviceKey: string, name: string, graph: Lifecycle): 
           templates: { operating_agreement: OA_TEMPLATE },
         },
         generation: { modes: { operating_agreement: 'template_merge' } },
+        // The enable gate requires a questionnaire (one section, one field).
+        intake_schema: {
+          sections: [
+            {
+              id: 'basics',
+              title: 'Company basics',
+              fields: [
+                { id: 'company_name', label: 'Company name', type: 'text', required: true },
+                { id: 'member_name', label: 'Sole member', type: 'text', required: true },
+                { id: 'effective_date', label: 'Effective date', type: 'text' },
+                { id: 'formation_statement', label: 'Formation statement', type: 'text' },
+              ],
+            },
+          ],
+        },
       },
     },
   })
-  await setServiceLifecycleAI(ctx, serviceKey, graph)
+  await setServiceLifecycleAI(ctx, serviceKey, graph, {
+    conclusion: 'WF-FIX-1 acceptance lifecycle.',
+    confidence: 0.9,
+  })
+  // New services (and their authored definitions) start 'deprecated' so they never
+  // surface publicly by accident — matter.open requires an ACTIVE definition.
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.set_active',
+    intentKind: 'enforcement',
+    payload: { service_key: serviceKey, active: true },
+  })
+  return serviceKey
 }
 
 async function openMatter(serviceKey: string): Promise<{ matterEntityId: string }> {
@@ -237,8 +272,7 @@ async function main(): Promise<void> {
   const tag = randomUUID().slice(0, 6)
 
   // A — settle past the non-blocking consultation.
-  const svcA = `wffix_pacheco_shape_${tag}`
-  await makeService(svcA, 'WF-FIX A (Pacheco shape)', pachecoShape())
+  const svcA = await makeService(`WF-FIX A (Pacheco shape) ${tag}`, pachecoShape())
   const a = await openMatter(svcA)
   const aInst = (await instances(a.matterEntityId))[0]
   check('A: settled past the non-blocking consultation', aInst?.current_state === 'client_intake')
@@ -248,8 +282,7 @@ async function main(): Promise<void> {
   )
 
   // B — intake.completed carries the matter to review in ONE action.
-  const svcB = `wffix_corrected_shape_${tag}`
-  await makeService(svcB, 'WF-FIX B (corrected shape)', correctedShape())
+  const svcB = await makeService(`WF-FIX B (corrected shape) ${tag}`, correctedShape())
   const b = await openMatter(svcB)
   const bInst = (await instances(b.matterEntityId))[0]
   check(
@@ -281,7 +314,7 @@ async function main(): Promise<void> {
   // D — repin the A matter to v2.
   const v2 = pachecoShape()
   v2[1]!.advances_to = [{ to: 'review_send_oa', gate: 'system', on: 'intake.completed' }]
-  await setServiceLifecycleAI(ctx, svcA, v2)
+  await setServiceLifecycleAI(ctx, svcA, v2, { conclusion: 'v2', confidence: 0.9 })
   const repin = await submitAction(ctx, {
     actionKindName: 'legal.matter.repin_workflow',
     intentKind: 'correction',
@@ -317,7 +350,7 @@ async function main(): Promise<void> {
     s.advances_to = s.advances_to.map((e) => ({ ...e, to: `${e.to}_v3` }))
   })
   ;(v3[0] as { entry?: boolean }).entry = true
-  await setServiceLifecycleAI(ctx, svcA, v3 as Lifecycle)
+  await setServiceLifecycleAI(ctx, svcA, v3 as Lifecycle, { conclusion: 'v3', confidence: 0.9 })
   let renamedErr = ''
   try {
     await submitAction(ctx, {
