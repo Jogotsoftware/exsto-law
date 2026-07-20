@@ -7,11 +7,23 @@
 // approve…". The stream got paragraph breaks earlier (founder-reported); the
 // RESTATEMENT itself was never collapsed.
 //
-// Pure, conservative collapse: a paragraph is dropped only when its ENTIRE
-// token sequence is contained in ORDER within the opening of the paragraph that
-// follows it — i.e. the next fragment restates it (usually with more detail).
-// The richer restatement wins; ordinary consecutive paragraphs (which add NEW
-// tokens, not a superset restatement) are untouched.
+// Pure, conservative collapse, two passes (AI-CONTEXT A4 added pass 2 and
+// widened pass 1 past adjacency — see collapseRoundStutter for both):
+//   1. A short fragment is dropped when SOME later, strictly richer fragment
+//      restates it — ordered-subset match against that later fragment's
+//      opening. Scans every later fragment, not only the immediate next one,
+//      so a restatement separated by other text (a tool-result aside,
+//      reasoning narration) is still caught. The richer restatement wins.
+//   2. A short TRAILING fragment is dropped when it duplicates content an
+//      EARLIER fragment already said — ordered-subset match against that
+//      earlier fragment, also allowing other text in between. Direction is
+//      mirrored from pass 1: the earlier fragment wins and the redundant
+//      verbatim tail repeat is dropped.
+// Both passes are bounded by MAX_STUTTER_TOKENS and conservative by
+// construction: an ordered-subset match requires every token of the dropped
+// fragment to appear, in order, inside the surviving one, so ordinary
+// consecutive paragraphs that add NEW tokens (not a superset/subset
+// restatement) are untouched.
 
 function tokens(s: string): string[] {
   return s.toLowerCase().match(/[a-z0-9$&%]+/g) ?? []
@@ -42,14 +54,17 @@ function splitFragments(reply: string): string[] {
 const MAX_STUTTER_TOKENS = 40 // framing lines are short; never collapse real content
 
 // HARDENING-RESIDUALS-1 (WP-D4) — card turns speak ONE framing sentence.
-// collapseRoundStutter (below) is forward-only ordered-subset matching and
-// verifiably misses two prod shapes: the reasoning-paragraph-then-restate turn
-// and the verbatim tail repeat separated by other text. Rather than extending
-// it with similarity heuristics, wizard-mode turns that rendered a card are
-// collapsed DETERMINISTICALLY: the persisted reply is the first sentence of
-// the first text round (the pre-tool framing — "what the card is"), and every
-// post-tool text round is dropped. Reasoning narration belongs in the thinking
-// channel; the cards carry the substance.
+// AI-CONTEXT A4 extended collapseRoundStutter (below) to also catch the
+// reasoning-paragraph-then-restate turn and the verbatim tail repeat
+// separated by other text (both previously missed — see its own comment for
+// how). Wizard-mode card turns still bypass it, not because it can't dedupe
+// them, but because a card turn needs exactly ONE deterministic framing
+// sentence naming the card — not "whichever fragments survive a dedup pass."
+// So turns that rendered a card stay collapsed DETERMINISTICALLY: the
+// persisted reply is the first sentence of the first text round (the
+// pre-tool framing — "what the card is"), and every post-tool text round is
+// dropped. Reasoning narration belongs in the thinking channel; the cards
+// carry the substance.
 export function framingSentenceForCardTurn(roundTexts: string[]): string {
   const first = roundTexts.map((t) => (t ?? '').trim()).find(Boolean)
   if (!first) return ''
@@ -145,24 +160,48 @@ export function collapseRoundStutter(reply: string): string {
   const frags = splitFragments(trimmed)
   if (frags.length < 2) return trimmed
 
-  const kept: string[] = []
+  const fragTokens = frags.map(tokens)
+  const dropped: boolean[] = frags.map(() => false)
+
+  // Pass 1 — short fragment restated by a LATER, richer fragment. Scans every
+  // subsequent fragment (not just the immediate next one), so a restatement
+  // separated by other text (a tool-result aside, reasoning narration) is
+  // still caught. "Richer" is a strict token-count comparison so an exact
+  // duplicate (a tie) is left for pass 2, which drops the trailing copy
+  // instead of the leading one.
   for (let i = 0; i < frags.length; i++) {
-    const cur = frags[i]!
-    const next = frags[i + 1]
-    if (next) {
-      const curTokens = tokens(cur)
-      // Compare against the NEXT fragment's opening (twice the stutter's length
-      // is plenty for "same line restated with a few added words").
-      const nextOpening = tokens(next.slice(0, Math.max(240, cur.length * 2)))
-      if (
-        curTokens.length > 0 &&
-        curTokens.length <= MAX_STUTTER_TOKENS &&
-        isOrderedSubset(curTokens, nextOpening)
-      ) {
-        continue // cur is a stutter of next — the richer restatement wins
+    const curTokens = fragTokens[i]!
+    if (curTokens.length === 0 || curTokens.length > MAX_STUTTER_TOKENS) continue
+    for (let j = i + 1; j < frags.length; j++) {
+      if (dropped[j]) continue
+      const nextTokens = fragTokens[j]!
+      if (nextTokens.length <= curTokens.length) continue // not richer — pass 2's shape
+      // Compare against the LATER fragment's opening (twice the stutter's
+      // length is plenty for "same line restated with a few added words").
+      const nextOpening = tokens(frags[j]!.slice(0, Math.max(240, frags[i]!.length * 2)))
+      if (isOrderedSubset(curTokens, nextOpening)) {
+        dropped[i] = true // cur is a stutter of a later fragment — the richer restatement wins
+        break
       }
     }
-    kept.push(cur)
   }
-  return kept.join('\n\n')
+
+  // Pass 2 — a TRAILING fragment that verbatim-repeats an EARLIER fragment,
+  // possibly separated by other text. Mirror direction of pass 1: the earlier
+  // fragment (equal or richer, since it must contain every token of the
+  // trailing one, in order) wins and the redundant repeat is dropped.
+  for (let j = 1; j < frags.length; j++) {
+    if (dropped[j]) continue
+    const curTokens = fragTokens[j]!
+    if (curTokens.length === 0 || curTokens.length > MAX_STUTTER_TOKENS) continue
+    for (let i = 0; i < j; i++) {
+      if (dropped[i]) continue
+      if (isOrderedSubset(curTokens, fragTokens[i]!)) {
+        dropped[j] = true // cur repeats an earlier fragment — the earlier original wins
+        break
+      }
+    }
+  }
+
+  return frags.filter((_, idx) => !dropped[idx]).join('\n\n')
 }

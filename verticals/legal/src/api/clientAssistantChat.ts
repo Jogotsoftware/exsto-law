@@ -7,6 +7,7 @@ import {
 } from '../adapters/claude.js'
 import { resolveModelForTask } from '../lib/modelRouter.js'
 import { recordAssistantTurn } from './assistantChat.js'
+import { collapseRoundStutter } from './replyAssembly.js'
 import { getSkillBySlug } from '../queries/skills.js'
 import { listClientMatters, getClientMatterTimeline } from '../queries/clientPortal.js'
 import { listApprovedClientDocuments } from '../queries/clientDocuments.js'
@@ -389,11 +390,15 @@ export async function* clientAssistantChatStream(
 
   if (requestCard) yield { type: 'request_card', card: requestCard }
 
-  // The turn on the ledger — the CLIENT's own actor, contact-scoped.
+  // The turn on the ledger — the CLIENT's own actor, contact-scoped. AI-CONTEXT
+  // A4 — the portal had no stutter collapse (attorney turns got it via item 8);
+  // same backstop here, on the persisted copy only — the live stream already
+  // sent `reply`'s raw chunks to the client, so this only fixes what re-renders
+  // from history.
   try {
     await recordAssistantTurn(ctx, {
       message,
-      reply,
+      reply: collapseRoundStutter(reply),
       provider: 'anthropic',
       model,
       kind: 'question',
