@@ -25,7 +25,7 @@ import { insertAttribute, insertEvent, lookupKindId } from './common.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
 import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
-import { scheduleProducingAutoRun } from '../lifecycle/autoRun.js'
+import { settleStage } from '../lifecycle/settle.js'
 import type { GateKind } from '../lifecycle/types.js'
 
 interface MatterAdvancePayload {
@@ -180,9 +180,10 @@ registerActionHandler('legal.matter.advance', async (ctx, client, payload, actio
     sourceRef,
   })
 
-  // ADR 0046 — if this advance landed the matter on an invoke_capability stage, run
-  // that capability AFTER this transaction commits (never inside it).
-  scheduleProducingAutoRun(ctx, p.matter_entity_id, p.to_state, graph)
+  // WF-FIX-1 — settle the landing: pass through non-blocking stage(s), then schedule
+  // the producing auto-run (post-commit, never inside this transaction) for the
+  // stage the matter rests on.
+  await settleStage(client, ctx, p.matter_entity_id, p.to_state, graph, actionId)
 
   return {
     workflowInstanceId: instance.id,

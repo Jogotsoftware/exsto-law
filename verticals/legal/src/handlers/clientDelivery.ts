@@ -18,7 +18,7 @@ import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
 import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
-import { scheduleProducingAutoRun } from '../lifecycle/autoRun.js'
+import { settleStage } from '../lifecycle/settle.js'
 
 interface Ctx {
   tenantId: string
@@ -104,10 +104,10 @@ export async function dispatchClientDelivery(
     sourceRef,
   })
 
-  // ADR 0046 — the client's OWN delivery may land the matter on an invoke_capability
-  // stage (e.g. re-review the newly uploaded doc). Run it AFTER commit so the client
-  // self-serve path is autonomous — the AI fires with no attorney/route trigger.
-  scheduleProducingAutoRun(ctx, matterEntityId, edge.to, graph)
+  // WF-FIX-1 — settle the landing: pass through non-blocking stage(s); the producing
+  // auto-run for the resting stage still fires AFTER commit, so the client
+  // self-serve path stays autonomous with no attorney/route trigger.
+  await settleStage(client, ctx, matterEntityId, edge.to, graph, actionId)
 
   return { from, to: edge.to }
 }
