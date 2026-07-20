@@ -6,6 +6,14 @@ import {
   OPERATING_AGREEMENT_MULTI_MEMBER_BODY,
   ENGAGEMENT_LETTER_BODY,
 } from './bundledBodies.js'
+import {
+  DRAFTING_PROMPT_BODY,
+  DOCUMENT_REVIEW_PROMPT_BODY,
+  DOCUMENT_REDLINE_PROMPT_BODY,
+  EMAIL_DRAFTING_PROMPT_BODY,
+  HOUSE_VOICE_DOCTRINE_BODY,
+  TRANSCRIPT_EXTRACTION_PROMPT_BODY,
+} from './bundledPrompts.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // here points at dist/templates at runtime and src/templates during dev; both
@@ -15,13 +23,9 @@ const templatesDir = resolve(here, '..', '..', 'templates')
 
 let cached: {
   intakeQuestionnaireOa?: IntakeQuestionnaire
-  draftingPrompt?: string
-  reviewPrompt?: string
-  redlinePrompt?: string
   emailDraftingPrompt?: string
   emailDraftingPromptTemplate?: string
   houseVoiceDoctrine?: string
-  transcriptExtractionPrompt?: string
 } = {}
 
 export interface QuestionnaireField {
@@ -150,20 +154,18 @@ export function resolveRepoDocumentTemplate(
   throw new Error(`No bundled template for document kind: ${documentKind}`)
 }
 
+// Bundled (inlined) so the prompt resolves in the deployed standalone
+// serverless bundle, same rationale as the document-body loaders above (see
+// bundledPrompts.ts for the why). The .md file remains the canonical source
+// to edit — run `pnpm prompts:gen` after editing it.
 export function loadDraftingPrompt(): string {
-  if (!cached.draftingPrompt) {
-    cached.draftingPrompt = readFileSync(resolve(templatesDir, 'drafting-prompt.md'), 'utf8')
-  }
-  return cached.draftingPrompt
+  return DRAFTING_PROMPT_BODY
 }
 
 // Default AI document-review prompt (per-service config overrides it, same
-// config-first pattern as the drafting prompt).
+// config-first pattern as the drafting prompt). Bundled — see loadDraftingPrompt.
 export function loadReviewPrompt(): string {
-  if (!cached.reviewPrompt) {
-    cached.reviewPrompt = readFileSync(resolve(templatesDir, 'document-review-prompt.md'), 'utf8')
-  }
-  return cached.reviewPrompt
+  return DOCUMENT_REVIEW_PROMPT_BODY
 }
 
 // MACHINE-COMMS-1 (WP2/WP3) — email drafting + transcript extraction prompts.
@@ -188,7 +190,7 @@ export const HOUSE_VOICE_SLOT = '{{house_voice_doctrine}}'
 // (possibly config) doctrine text is known.
 export function loadEmailDraftingPromptTemplate(): string {
   if (!cached.emailDraftingPromptTemplate) {
-    const raw = readFileSync(resolve(templatesDir, 'email-drafting-prompt.md'), 'utf8')
+    const raw = EMAIL_DRAFTING_PROMPT_BODY
     if (!raw.includes(HOUSE_VOICE_SLOT)) {
       // Loud, not silent: a prompt that lost its doctrine slot must never draft
       // undoctored client email.
@@ -203,7 +205,7 @@ export function loadEmailDraftingPromptTemplate(): string {
 // attorney's custom override replaces wholesale).
 export function loadHouseVoiceDoctrine(): string {
   if (!cached.houseVoiceDoctrine) {
-    cached.houseVoiceDoctrine = readFileSync(resolve(templatesDir, 'house-voice.md'), 'utf8').trim()
+    cached.houseVoiceDoctrine = HOUSE_VOICE_DOCTRINE_BODY.trim()
   }
   return cached.houseVoiceDoctrine
 }
@@ -224,21 +226,13 @@ export function loadEmailDraftingPrompt(): string {
 }
 
 export function loadTranscriptExtractionPrompt(): string {
-  if (!cached.transcriptExtractionPrompt) {
-    cached.transcriptExtractionPrompt = readFileSync(
-      resolve(templatesDir, 'transcript-extraction-prompt.md'),
-      'utf8',
-    )
-  }
-  return cached.transcriptExtractionPrompt
+  return TRANSCRIPT_EXTRACTION_PROMPT_BODY
 }
 
 // The redline pass's prompt is REPO-CONTROLLED (not attorney-editable): its
 // output contract (verbatim reproduction + memo-driven edits only) is what the
 // diff view depends on, so it stays content the firm can't accidentally break.
+// Bundled — see loadDraftingPrompt.
 export function loadRedlinePrompt(): string {
-  if (!cached.redlinePrompt) {
-    cached.redlinePrompt = readFileSync(resolve(templatesDir, 'document-redline-prompt.md'), 'utf8')
-  }
-  return cached.redlinePrompt
+  return DOCUMENT_REDLINE_PROMPT_BODY
 }
