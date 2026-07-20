@@ -19,6 +19,7 @@ import { ingestionContext } from './granolaIngestion.js'
 import { queueNotification } from './notifications.js'
 import { findClientContactByEmailInTenant } from './clientIdentity.js'
 import { assertCanSendOnMatter } from './matterAccess.js'
+import { resolvePublicIntakeActor } from './publicBooking.js'
 import {
   DEFAULT_ESIGN_PROVIDER,
   EsignNotConfiguredError,
@@ -35,8 +36,6 @@ import {
   type EsignFieldType,
 } from '../esign/fields.js'
 
-const SIGNING_ACTOR = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
-
 function baseUrl(): string {
   return (
     process.env.NEXT_PUBLIC_BASE_URL ??
@@ -45,10 +44,24 @@ function baseUrl(): string {
   ).replace(/\/$/, '')
 }
 
+// The actor public sign actions run as, resolved PER TENANT (ESIGN-ANY-DOC-1
+// follow-up): tenant zero keeps its historical …0005 public-intake actor; every
+// other tenant uses its own system/agent actor (resolvePublicIntakeActor — the
+// same seam the public booking funnel was moved to in MULTI-TENANT-1). A
+// module-level hardcode would attribute a second firm's signatures to tenant
+// zero's actor. Cached per tenant: actors are stable and the sign routes
+// resolve this on every token verification.
+const signingActorByTenant = new Map<string, string>()
+
 // Exported for the file-envelope surfaces (esignFile.ts): the public sign
 // routes act as the signing system actor, tenant-scoped from the verified token.
-export function signingCtx(tenantId: string): ActionContext {
-  return { tenantId, actorId: SIGNING_ACTOR }
+export async function signingCtx(tenantId: string): Promise<ActionContext> {
+  let actorId = signingActorByTenant.get(tenantId)
+  if (!actorId) {
+    actorId = await resolvePublicIntakeActor(tenantId)
+    signingActorByTenant.set(tenantId, actorId)
+  }
+  return { tenantId, actorId }
 }
 
 /** The signed-in client portal identity, passed by portal routes. */
@@ -870,7 +883,7 @@ export async function loadSignableDocument(
   signerIp?: string | null,
 ): Promise<SignableDocument> {
   const tok = verifySigningToken(token)
-  const ctx = signingCtx(tok.tenantId)
+  const ctx = await signingCtx(tok.tenantId)
   await recordOpen(ctx, tok.requestId, tok.envelopeId, signerIp)
   return buildSignable(ctx, tok.requestId)
 }
@@ -893,7 +906,7 @@ export interface RecordSignatureResult {
 
 export async function recordSignature(input: RecordSignatureInput): Promise<RecordSignatureResult> {
   const tok = verifySigningToken(input.token)
-  const ctx = signingCtx(tok.tenantId)
+  const ctx = await signingCtx(tok.tenantId)
   return signRequest(ctx, tok.requestId, tok.envelopeId, {
     signatureName: input.signatureName,
     signatureData: input.signatureData ?? null,
@@ -909,7 +922,7 @@ export async function declineSignature(input: {
   signerIp?: string | null
 }): Promise<{ ok: boolean; envelopeId: string }> {
   const tok = verifySigningToken(input.token)
-  const ctx = signingCtx(tok.tenantId)
+  const ctx = await signingCtx(tok.tenantId)
   await declineRequest(ctx, tok.requestId, tok.envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId: tok.envelopeId }
 }
@@ -924,7 +937,7 @@ export interface PendingSignature {
 }
 
 export async function listClientSignatures(p: ClientPrincipal): Promise<PendingSignature[]> {
-  const ctx = signingCtx(p.tenantId)
+  const ctx = await signingCtx(p.tenantId)
   if (p.matterIds.length === 0) return []
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
@@ -993,7 +1006,7 @@ export interface ClientDocument {
 // portal "Documents" surface renders this; the to-sign subset still drives the
 // dedicated /portal/sign page.
 export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDocument[]> {
-  const ctx = signingCtx(p.tenantId)
+  const ctx = await signingCtx(p.tenantId)
   if (p.matterIds.length === 0) return []
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
@@ -1054,7 +1067,7 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
 }
 
 async function assertClientOwnsRequest(p: ClientPrincipal, requestId: string): Promise<string> {
-  const ctx = signingCtx(p.tenantId)
+  const ctx = await signingCtx(p.tenantId)
   const ok = await withActionContext(ctx, async (client) => {
     const envelopeId = await requestEnvelopeId(client, p.tenantId, requestId)
     if (!envelopeId) return null
@@ -1085,7 +1098,7 @@ export async function loadSignableForClient(
   signerIp?: string | null,
 ): Promise<SignableDocument> {
   const envelopeId = await assertClientOwnsRequest(p, requestId)
-  const ctx = signingCtx(p.tenantId)
+  const ctx = await signingCtx(p.tenantId)
   await recordOpen(ctx, requestId, envelopeId, signerIp)
   return buildSignable(ctx, requestId)
 }
@@ -1102,7 +1115,7 @@ export async function recordSignatureForClient(
   },
 ): Promise<RecordSignatureResult> {
   const envelopeId = await assertClientOwnsRequest(p, input.requestId)
-  const ctx = signingCtx(p.tenantId)
+  const ctx = await signingCtx(p.tenantId)
   return signRequest(ctx, input.requestId, envelopeId, {
     signatureName: input.signatureName,
     signatureData: input.signatureData ?? null,
@@ -1117,7 +1130,7 @@ export async function declineForClient(
   input: { requestId: string; reason?: string; signerIp?: string | null },
 ): Promise<{ ok: boolean; envelopeId: string }> {
   const envelopeId = await assertClientOwnsRequest(p, input.requestId)
-  const ctx = signingCtx(p.tenantId)
+  const ctx = await signingCtx(p.tenantId)
   await declineRequest(ctx, input.requestId, envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId }
 }

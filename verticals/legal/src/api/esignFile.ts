@@ -213,5 +213,5 @@ export async function loadEnvelopeFileRef(
  *  envelope isn't a file envelope. Throws on a bad/expired token. */
 export async function loadEnvelopeFileRefByToken(token: string): Promise<EnvelopeFileRef | null> {
   const tok = verifySigningToken(token)
-  return loadEnvelopeFileRef(signingCtx(tok.tenantId), tok.envelopeId)
+  return loadEnvelopeFileRef(await signingCtx(tok.tenantId), tok.envelopeId)
 }
