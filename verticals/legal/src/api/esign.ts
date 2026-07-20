@@ -958,12 +958,20 @@ export async function listClientSignatures(p: ClientPrincipal): Promise<PendingS
        JOIN entity env ON env.id=req.target_entity_id
        JOIN relationship eo ON eo.source_entity_id=env.id AND eo.tenant_id=env.tenant_id
        JOIN relationship_kind_definition eok ON eok.id=eo.relationship_kind_id AND eok.kind_name='envelope_of'
-       JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=env.tenant_id
-       JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
+       LEFT JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=env.tenant_id
+         AND (df.valid_to IS NULL OR df.valid_to > now())
+         AND df.relationship_kind_id =
+             (SELECT id FROM relationship_kind_definition
+               WHERE kind_name = 'draft_of' AND tenant_id = env.tenant_id LIMIT 1)
+       LEFT JOIN relationship du ON du.source_entity_id=eo.target_entity_id AND du.tenant_id=env.tenant_id
+         AND (du.valid_to IS NULL OR du.valid_to > now())
+         AND du.relationship_kind_id =
+             (SELECT id FROM relationship_kind_definition
+               WHERE kind_name = 'document_of' AND tenant_id = env.tenant_id LIMIT 1)
        JOIN attribute em ON em.entity_id=req.source_entity_id AND em.tenant_id=$1
        JOIN attribute_kind_definition emk ON emk.id=em.attribute_kind_id AND emk.kind_name='signer_email'
-       LEFT JOIN entity m ON m.id=df.target_entity_id
-       WHERE req.tenant_id=$1 AND df.target_entity_id = ANY($2)
+       LEFT JOIN entity m ON m.id = coalesce(df.target_entity_id, du.target_entity_id)
+       WHERE req.tenant_id=$1 AND coalesce(df.target_entity_id, du.target_entity_id) = ANY($2)
          AND lower(em.value #>> '{}') = lower($3)
          AND (em.valid_to IS NULL OR em.valid_to > now())
          AND (eo.valid_to IS NULL OR eo.valid_to > now())`,
@@ -1027,12 +1035,20 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
        JOIN entity env ON env.id=req.target_entity_id
        JOIN relationship eo ON eo.source_entity_id=env.id AND eo.tenant_id=env.tenant_id
        JOIN relationship_kind_definition eok ON eok.id=eo.relationship_kind_id AND eok.kind_name='envelope_of'
-       JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=env.tenant_id
-       JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
+       LEFT JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=env.tenant_id
+         AND (df.valid_to IS NULL OR df.valid_to > now())
+         AND df.relationship_kind_id =
+             (SELECT id FROM relationship_kind_definition
+               WHERE kind_name = 'draft_of' AND tenant_id = env.tenant_id LIMIT 1)
+       LEFT JOIN relationship du ON du.source_entity_id=eo.target_entity_id AND du.tenant_id=env.tenant_id
+         AND (du.valid_to IS NULL OR du.valid_to > now())
+         AND du.relationship_kind_id =
+             (SELECT id FROM relationship_kind_definition
+               WHERE kind_name = 'document_of' AND tenant_id = env.tenant_id LIMIT 1)
        JOIN attribute em ON em.entity_id=req.source_entity_id AND em.tenant_id=$1
        JOIN attribute_kind_definition emk ON emk.id=em.attribute_kind_id AND emk.kind_name='signer_email'
-       LEFT JOIN entity m ON m.id=df.target_entity_id
-       WHERE req.tenant_id=$1 AND df.target_entity_id = ANY($2)
+       LEFT JOIN entity m ON m.id = coalesce(df.target_entity_id, du.target_entity_id)
+       WHERE req.tenant_id=$1 AND coalesce(df.target_entity_id, du.target_entity_id) = ANY($2)
          AND lower(em.value #>> '{}') = lower($3)
          AND (em.valid_to IS NULL OR em.valid_to > now())
          AND (eo.valid_to IS NULL OR eo.valid_to > now())`,

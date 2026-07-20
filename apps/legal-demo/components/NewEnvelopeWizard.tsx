@@ -74,6 +74,46 @@ export function NewEnvelopeWizard() {
       .catch(() => setMatters([]))
   }, [])
 
+  // Pre-fill the first recipient row from whatever the envelope is attached to —
+  // the matter's client (client_of contact) takes priority, else the directly
+  // attached contact. A blank free-text row was how a founder walk sent a
+  // signing email to the wrong, near-identically-named contact; pre-filling from
+  // the matter/contact the attorney already picked removes that hazard while
+  // staying fully editable/removable (never overwrites a row already touched).
+  useEffect(() => {
+    if (!matterId && !contactId) return
+    let cancelled = false
+
+    function applyFill(name: string, email: string) {
+      if (!email) return
+      setRecipients((rows) => {
+        if (rows.length === 0 || rows[0].name.trim() || rows[0].email.trim()) return rows
+        return rows.map((r, i) => (i === 0 ? { ...r, name, email } : r))
+      })
+    }
+
+    if (matterId) {
+      callAttorneyMcp<{
+        matter: { clientName: string; clientEmail: string | null } | null
+      }>({
+        toolName: 'legal.matter.get',
+        input: { matterEntityId: matterId },
+      })
+        .then((r) => {
+          if (cancelled || !r.matter) return
+          applyFill(r.matter.clientName || '', r.matter.clientEmail || '')
+        })
+        .catch(() => {})
+    } else if (contactId) {
+      const c = contacts.find((x) => x.contactEntityId === contactId)
+      if (c) applyFill(c.fullName || '', c.email || '')
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [matterId, contactId, contacts])
+
   const contactByEmail = useMemo(() => {
     const m = new Map<string, ContactSummary>()
     for (const c of contacts) if (c.email) m.set(c.email.toLowerCase(), c)
