@@ -99,6 +99,9 @@ export function WorkflowEditor({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
+  // WF-FIX-1 (WP4) — repin affordance state.
+  const [repinning, setRepinning] = useState(false)
+  const [repinError, setRepinError] = useState<string | null>(null)
   // localId of the row whose step config panel is open (NEW-G: edit config in place).
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -223,6 +226,37 @@ export function WorkflowEditor({
     }
   }
 
+  // WF-FIX-1 (WP4): the service workflow moved past the version this matter is
+  // pinned to — offer the sanctioned repin (successor instance; handler errors,
+  // e.g. the missing-stage one listing valid keys, surface verbatim).
+  const repinAvailable =
+    typeof workflow.boundVersion === 'number' &&
+    typeof workflow.latestVersion === 'number' &&
+    workflow.latestVersion > workflow.boundVersion
+  const repin = async (): Promise<void> => {
+    setRepinning(true)
+    setRepinError(null)
+    try {
+      const res = await fetch(
+        `/api/attorney/matters/${encodeURIComponent(matterEntityId)}/workflow/repin`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(workflow.hasOverride ? { clearOverride: true } : {}),
+        },
+      )
+      const body = (await res.json().catch(() => null)) as { error?: string } | null
+      if (!res.ok) {
+        setRepinError(body?.error ?? 'Could not update the workflow.')
+        return
+      }
+      await onSaved()
+      onClose()
+    } finally {
+      setRepinning(false)
+    }
+  }
+
   return (
     <Modal
       title="Edit steps for this matter"
@@ -252,6 +286,35 @@ export function WorkflowEditor({
         Changes apply to <strong>this matter only</strong> — the service’s default workflow is not
         affected. Drag to reorder. The current step can’t be removed.
       </p>
+
+      {repinAvailable && (
+        <div
+          className="text-sm"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            marginBottom: 'var(--space-3)',
+            padding: 'var(--space-2) var(--space-3)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+          }}
+        >
+          <span>
+            The service’s workflow has been updated (v{workflow.boundVersion} → v
+            {workflow.latestVersion}). This matter still runs the older version
+            {workflow.hasOverride ? ' with per-matter customizations (updating discards them)' : ''}
+            .
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {repinError && <span style={{ color: 'var(--danger)' }}>{repinError}</span>}
+            <button className="button" onClick={() => void repin()} disabled={repinning}>
+              {repinning ? 'Updating…' : 'Update to latest workflow'}
+            </button>
+          </span>
+        </div>
+      )}
 
       <div className="step-list">
         {rows.map((r) => {

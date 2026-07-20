@@ -47,6 +47,11 @@ export interface MatterDetail extends MatterSummary {
     graph: Lifecycle
     currentState: string
     status: string
+    // WF-FIX-1 (WP4): the bound version vs the service's latest — the Workflow
+    // window shows "Update to latest workflow" when boundVersion < latestVersion.
+    boundVersion: number | null
+    latestVersion: number | null
+    hasOverride: boolean
   } | null
   // MACHINE-COMMS-1 (WP0) — honesty flag: the matter has NO instance but its
   // service DOES carry an authored lifecycle (any status). The matter page must
@@ -261,12 +266,22 @@ async function loadWorkflow(
   try {
     const instance = await getWorkflowInstanceForMatter(client, tenantId, matterEntityId)
     if (!instance) return null
-    let graph: Lifecycle
-    if (instance.statesOverride && instance.statesOverride.length > 0) {
-      graph = instance.statesOverride
-    } else {
-      const bound = await resolveBoundWorkflowById(client, tenantId, instance.workflowDefinitionId)
-      graph = bound?.graph ?? []
+    const bound = await resolveBoundWorkflowById(client, tenantId, instance.workflowDefinitionId)
+    const hasOverride = !!instance.statesOverride && instance.statesOverride.length > 0
+    const graph: Lifecycle = hasOverride ? instance.statesOverride! : (bound?.graph ?? [])
+    // Latest version by the bound definition's kind_name (= service key) — drives
+    // the repin affordance. Best-effort like the rest of this read.
+    let latestVersion: number | null = null
+    if (bound) {
+      const latest = await client.query<{ version: number }>(
+        `SELECT version FROM workflow_definition
+          WHERE tenant_id = $1 AND kind_name = (
+            SELECT kind_name FROM workflow_definition WHERE tenant_id = $1 AND id = $2
+          ) AND valid_to IS NULL
+          ORDER BY version DESC LIMIT 1`,
+        [tenantId, instance.workflowDefinitionId],
+      )
+      latestVersion = latest.rows[0]?.version ?? null
     }
     return {
       instanceId: instance.id,
@@ -274,6 +289,9 @@ async function loadWorkflow(
       graph,
       currentState: instance.currentState,
       status: instance.status,
+      boundVersion: bound?.version ?? null,
+      latestVersion,
+      hasOverride,
     }
   } catch {
     return null
