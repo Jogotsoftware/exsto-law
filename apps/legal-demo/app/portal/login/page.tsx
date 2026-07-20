@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { safeInternalPath } from '@/lib/safeRedirect'
-import { ScaleIcon } from '@/components/icons'
+import { CheckIcon, ScaleIcon } from '@/components/icons'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
 import { bridgeSupabaseSession, signInWithPasswordAndBridge } from '@/components/PortalSignInInline'
 import { callClientMcp } from '@/lib/mcpClient'
@@ -103,10 +103,22 @@ export default function ClientPortalLoginPage() {
     }
   }
 
+  // A2.2 — 'working' is set ONLY by the ?code= confirmation-return effect
+  // above, so reaching this render means Supabase already confirmed the
+  // email server-side (that's what minted the code); exchangeCodeForSession
+  // below is just the session handoff. Branded "you made it" landing instead
+  // of a bare spinner — the dead-end this replaces was the redirect target
+  // never resolving at all (wrong fallback domain, fixed alongside this).
   if (phase === 'working') {
     return (
-      <Shell>
-        <div className="loading-block" style={{ marginTop: 'var(--space-6)' }} role="status">
+      <Shell title="You're Confirmed">
+        <div className="bk-success" style={{ margin: '0.5rem auto 0.75rem' }}>
+          <span className="bk-success-ring" aria-hidden />
+          <span className="bk-success-check">
+            <CheckIcon size={36} />
+          </span>
+        </div>
+        <div className="loading-block" role="status">
           <span className="spinner" /> Signing you in…
         </div>
       </Shell>

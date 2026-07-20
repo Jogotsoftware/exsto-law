@@ -17,7 +17,7 @@ import { signPortalInviteToken } from './portalInviteToken.js'
 const BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
   process.env.URL ??
-  'https://exstolaw.netlify.app'
+  'https://exsto-law.netlify.app'
 ).replace(/\/$/, '')
 
 export interface PortalInviteResult {
