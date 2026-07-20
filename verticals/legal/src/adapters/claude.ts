@@ -4,9 +4,11 @@ import { redactSecret } from './redact.js'
 import {
   TIER_MODEL,
   resolveModelForTask,
+  tierForModel,
   type AiTask,
   type RouteSignals,
 } from '../lib/modelRouter.js'
+import { estimateTokens, assertDraftBudget, INPUT_CEILING_BY_TIER } from '../lib/tokenGuard.js'
 
 // AI-CONTEXT C1 — model selection lives in lib/modelRouter.ts (the central,
 // pure router); this adapter stays the only place that actually CALLS the
@@ -292,6 +294,13 @@ export async function callClaudeDrafter(
     inputChars: request.signals?.inputChars ?? request.prompt.length,
   })
   console.log(`[claude] task=${request.task} model=${routed.model} — ${routed.reason}`)
+  // AI-CONTEXT C3 — fail FAST, before the paid Anthropic round-trip. A single
+  // drafting prompt has no history/volatile the way chat does, so there's
+  // nothing to auto-trim safely (see tokenGuard.ts's assertDraftBudget doc) —
+  // an over-ceiling prompt throws here with an actionable message instead of
+  // reaching the API and coming back as an opaque 400 after we've already
+  // paid for the request.
+  assertDraftBudget(request.task, request.prompt, routed.model, request.maxTokens ?? 8000)
   let response: Anthropic.Message
   try {
     response = await withTransientRetry(
@@ -440,7 +449,13 @@ const WEB_SEARCH_TOOL = { type: 'web_search_20250305', name: 'web_search', max_u
 // (Opus 4.8 / Sonnet 4.6) we use adaptive thinking + the `effort` parameter —
 // the current, non-deprecated controls (a fixed `budget_tokens` is rejected on
 // these models). On Haiku (no `effort`) we only stretch `max_tokens`.
-function workRateParams(
+// AI-CONTEXT C3 — exported so chat callers (assistantChat.ts,
+// clientAssistantChat.ts) can compute the SAME max_tokens value pre-flight, to
+// pass into guardChatBudget's ceiling calculation (ceiling = tier ceiling −
+// this call's real output reservation). Pure function, no I/O — safe to call
+// twice (once here for the guard, once inside buildChatRequest for the actual
+// request) without any side effect or cache implication.
+export function workRateParams(
   rate: WorkRate,
   supportsWorkRate: boolean,
 ): { extra: Record<string, unknown>; maxTokens: number } {
@@ -537,16 +552,39 @@ export function buildChatRequest(
   // expected. The first turn still thinks; only the post-tool wrap-up doesn't.
   const isContinuation = carryTurns.length > 0
   const effectiveExtra = isContinuation ? withoutThinking(extra) : extra
+  const finalModel = opts.model ?? resolveModelForTask('chat_turn').model
+  // Tool loops (web search / client tools) can run several rounds before the
+  // final answer; give them headroom on top of the work-rate budget.
+  const finalMaxTokens = tools.length ? maxTokens + 1024 : maxTokens
+  const finalMessages = withCacheBreakpoint([...built, ...carryTurns])
+  // AI-CONTEXT C3 — belt-and-suspenders, LOG-ONLY. guardChatBudget (called by
+  // assistantChat.ts / clientAssistantChat.ts before messages ever reach here)
+  // is the real enforcement point; this is a last-line diagnostic in case a
+  // caller bypasses it — or a future caller is added that forgets to — so an
+  // over-ceiling request is never sent with no trace at all. Deliberately
+  // NEVER throws here: the adapter's job is to send the request Anthropic will
+  // accept or reject on its own terms, not to second-guess an
+  // already-assembled body this late (a tool-loop round in particular MUST
+  // complete once started — see withTransientRetry's side-effect-safety note).
+  const estimatedTokens = estimateTokens(
+    JSON.stringify(system ?? '') + JSON.stringify(finalMessages),
+  )
+  const ceiling = Math.max(0, INPUT_CEILING_BY_TIER[tierForModel(finalModel)] - finalMaxTokens)
+  if (estimatedTokens > ceiling) {
+    console.warn(
+      `[claude] buildChatRequest: estimated ~${estimatedTokens} input tokens exceeds the ` +
+        `${ceiling}-token ceiling for ${finalModel} (over by ${estimatedTokens - ceiling}) — ` +
+        `the caller's guardChatBudget should have trimmed this turn; check the call site.`,
+    )
+  }
   return {
     // The unified assistant chat (and every other chat-style caller) passes
     // its own resolved model — see the router's chat_turn/chat_client_portal
     // defaults; this is only a safety net for a caller that truly sets none.
-    model: opts.model ?? resolveModelForTask('chat_turn').model,
-    // Tool loops (web search / client tools) can run several rounds before the
-    // final answer; give them headroom on top of the work-rate budget.
-    max_tokens: tools.length ? maxTokens + 1024 : maxTokens,
+    model: finalModel,
+    max_tokens: finalMaxTokens,
     system,
-    messages: withCacheBreakpoint([...built, ...carryTurns]),
+    messages: finalMessages,
     ...(tools.length ? { tools } : {}),
     ...effectiveExtra,
   }
