@@ -3,6 +3,9 @@
 // this package once at startup to wire the vertical.
 import '@exsto/primitives' // registers the generic primitive handlers (event.record, raw_event.ingest, ...)
 import './handlers/index.js'
+// legal.matter.advance's GUARD 2 rejection — exported so an HTTP adapter can map
+// it to a 4xx instead of the generic 500 every other thrown handler error gets.
+export { WorkflowAdvanceGuardError } from './handlers/workflow.js'
 
 export * from './api/index.js'
 export * from './queries/index.js'

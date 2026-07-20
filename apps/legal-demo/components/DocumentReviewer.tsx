@@ -4,23 +4,28 @@
 // Extracted verbatim from the standalone review reader
 // (app/attorney/review/[versionId]/page.tsx) so the review QUEUE and the
 // matter workflow runner's step modal show the SAME experience — toolbar
-// (Edit / PDF / Word / Send to client / document actions / Matter context),
-// the tracked-changes editor (li-edtr flagship, Edit + AI revision), Approve /
-// Reject, and the AI-review memo redline. Session (?review=session) stepping
-// and router-level navigation stay OWNED by the page wrapper — this component
-// is a controlled surface: it takes a `versionId` and reports version swaps /
-// dispositions back up via callbacks rather than navigating itself.
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+// (Edit / Share ▾ [PDF, Word, Email to client] / document actions / Matter
+// context), the tracked-changes editor (li-edtr flagship, Edit + AI revision),
+// Approve / Reject, and the AI-review memo redline. WF-RUNNER-TOOLBAR-1
+// consolidated the old three standalone PDF / Word / "Send To Client" buttons
+// into one Share dropdown (same downloadAsPdf/downloadAsWord/openSendToClient
+// handlers underneath — this is a presentation change only). Session
+// (?review=session) stepping and router-level navigation stay OWNED by the
+// page wrapper — this component is a controlled surface: it takes a
+// `versionId` and reports version swaps / dispositions back up via callbacks
+// rather than navigating itself.
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, shareUrlFor, watermarkForStatus } from '@/lib/draftExport'
 import { formatDateTimeShort } from '@/lib/datetime'
 import { lineDiff, diffStats } from '@/lib/lineDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { ActionsMenu } from '@/components/ActionsMenu'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { DocumentSheet, DocumentCanvas } from '@/components/DocumentSheet'
 import { GemCluster } from '@/components/GemSparkle'
-import { SendIcon, XIcon } from '@/components/icons'
+import { ChevronDownIcon, MailIcon, Share2Icon, XIcon } from '@/components/icons'
 import { SendToClientModal, type SendToClientMatter } from '@/components/SendToClientModal'
 import { TrackedChangesEditor } from '@/components/TrackedChangesEditor'
 import { VersionDiff } from '@/components/VersionDiff'
@@ -162,10 +167,14 @@ export interface DocumentReviewerProps {
   // (currently: a load failure while embedded, where a Close button is offered).
   onClose?: () => void
   onLoaded?: (info: DocumentReviewerLoadedInfo) => void
-  // Extra controls rendered in the left toolbar group, after "Matter context" —
-  // e.g. the workflow runner's stage-level "Regenerate…" (a distinct, worker-
-  // driven full redraft-with-notes capability this component doesn't have).
-  extraToolbar?: ReactNode
+  // WF-RUNNER-TOOLBAR-1: the workflow runner's stage-level "Regenerate from
+  // scratch" (a distinct, worker-driven full redraft-with-notes capability this
+  // component doesn't otherwise have — see TrackedChangesEditor's own doc
+  // comment on the same prop). Only the runner passes this (it alone has the
+  // matterEntityId + stage.key the stage-scoped regenerate route needs); the
+  // standalone review reader leaves it unset and the AI-revision editor simply
+  // omits the option.
+  onRegenerateFromScratch?: (changeNotes: string) => Promise<void>
 }
 
 export function DocumentReviewer({
@@ -175,7 +184,7 @@ export function DocumentReviewer({
   onCompleted,
   onClose,
   onLoaded,
-  extraToolbar,
+  onRegenerateFromScratch,
 }: DocumentReviewerProps) {
   // Controlled-with-override: seeded from the `versionId` prop, but internal
   // actions that mint a new version swap this immediately (no round trip
@@ -470,51 +479,69 @@ export function DocumentReviewer({
           </button>
           {!isEmail && (
             <>
-              <button
-                type="button"
-                className="li-rev-tbtn li-rev-tbtn--pdf"
-                onClick={() =>
-                  downloadAsPdf(draft.bodyMarkdown, docFileBase, { status: draft.status })
+              <ActionsMenu
+                align="left"
+                triggerClassName="li-rev-tbtn"
+                triggerContent={
+                  <>
+                    <Share2Icon size={15} />
+                    Share
+                    <ChevronDownIcon size={13} />
+                  </>
                 }
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M4 4h9l5 5v11H4z"
-                    stroke="#c4443b"
-                    strokeWidth="1.7"
-                    strokeLinejoin="round"
-                  />
-                  <path d="M13 4v5h5" stroke="#c4443b" strokeWidth="1.7" strokeLinejoin="round" />
-                </svg>
-                PDF
-              </button>
-              <button
-                type="button"
-                className="li-rev-tbtn li-rev-tbtn--word"
-                onClick={() =>
-                  downloadAsWord(draft.bodyMarkdown, docFileBase, { status: draft.status })
-                }
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M4 4h9l5 5v11H4z"
-                    stroke="#2b579a"
-                    strokeWidth="1.7"
-                    strokeLinejoin="round"
-                  />
-                  <path d="M13 4v5h5" stroke="#2b579a" strokeWidth="1.7" strokeLinejoin="round" />
-                </svg>
-                Word
-              </button>
-              <button
-                type="button"
-                className="li-rev-tbtn"
-                onClick={() => void openSendToClient()}
-                disabled={busy !== null || sendOpening}
-              >
-                {sendOpening ? <span className="spinner" /> : <SendIcon size={15} />}
-                Send To Client
-              </button>
+                triggerTitle="Download or send this document"
+                items={[
+                  {
+                    label: 'Download PDF',
+                    icon: (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M4 4h9l5 5v11H4z"
+                          stroke="#c4443b"
+                          strokeWidth="1.7"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M13 4v5h5"
+                          stroke="#c4443b"
+                          strokeWidth="1.7"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    ),
+                    onClick: () =>
+                      downloadAsPdf(draft.bodyMarkdown, docFileBase, { status: draft.status }),
+                  },
+                  {
+                    label: 'Download Word',
+                    icon: (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M4 4h9l5 5v11H4z"
+                          stroke="#2b579a"
+                          strokeWidth="1.7"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M13 4v5h5"
+                          stroke="#2b579a"
+                          strokeWidth="1.7"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    ),
+                    onClick: () =>
+                      downloadAsWord(draft.bodyMarkdown, docFileBase, { status: draft.status }),
+                  },
+                  {
+                    label: 'Email to client',
+                    icon: <MailIcon size={15} />,
+                    onClick: () => void openSendToClient(),
+                    disabled: busy !== null || sendOpening,
+                    title: sendOpening ? 'Opening…' : undefined,
+                  },
+                ]}
+              />
               <DocumentActionBar
                 context={{
                   documentVersionId: draft.documentVersionId,
@@ -559,7 +586,6 @@ export function DocumentReviewer({
               View Redlines
             </button>
           )}
-          {extraToolbar}
         </div>
         <div className="li-rev-toolbar-group">
           <button
@@ -780,6 +806,7 @@ export function DocumentReviewer({
           }
           aiEnabled={canRevise}
           initialFocus={editorMode}
+          onRegenerateFromScratch={onRegenerateFromScratch}
           onClose={() => setEditorMode(null)}
           onSaved={(newId) => {
             setEditorMode(null)
