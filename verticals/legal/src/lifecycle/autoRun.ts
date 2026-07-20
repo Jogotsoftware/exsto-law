@@ -107,6 +107,24 @@ const PRODUCING_RUNNERS: Partial<Record<StepActionKind, ProducingRunner>> = {
       await enqueueDraftAutoRunJob(base, matterEntityId, stage)
     },
   },
+  review_send_document: {
+    // WF-FIX-1 (WP3): a review step that CARRIES a document annotation drafts that
+    // document on entry, so the attorney opens the review with the draft already
+    // there. Before this, stage.documents on a review step produced NOTHING — the
+    // step-editor let an attorney author "Review & send X [1 doc]" and the matter
+    // arrived at review with no document and no way to get one short of the
+    // Documents tab (the live Pacheco operating-agreement repro). A bare review
+    // step (no documents) stays non-producing: entry waits at the human gate with
+    // no enqueue. After producing there is no automatic edge to advance, so the
+    // matter PARKS at review with the fresh draft — exactly the desired shape
+    // (draft.approve advances it, handlers/draft.ts).
+    shouldAutoRun: (stage) =>
+      Boolean(stage.documents?.some((d) => d.templateEntityId?.trim() || d.docKind?.trim())),
+    run: async (base, matterEntityId, stage) => {
+      const { enqueueDraftAutoRunJob } = await import('../api/generateDocumentRuntime.js')
+      await enqueueDraftAutoRunJob(base, matterEntityId, stage)
+    },
+  },
 }
 
 // Does this step-action kind have a producing runner at all? The settle loop
