@@ -3,9 +3,11 @@ import {
   getLatestAttributeValue,
   insertAttribute,
   insertEntity,
+  insertEvent,
   insertRelationship,
   lookupKindId,
 } from './common.js'
+import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
 
 interface QuestionnaireSubmitPayload {
   matter_entity_id: string
@@ -78,6 +80,20 @@ registerActionHandler('legal.questionnaire.submit', async (ctx, client, payload,
     targetEntityId: responseEntityId,
     relationshipKindId: linkKindId,
   })
+
+  // WF-FIX-1 (WP2) — intake attached to an EXISTING matter: emit the completion
+  // signal and dispatch it so a system edge waiting on 'intake.completed' fires.
+  // Unconditional is safe: dispatch is a no-op when no instance/edge waits.
+  await insertEvent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    eventKindName: 'intake.completed',
+    primaryEntityId: parsed.matter_entity_id,
+    data: { questionnaire_entity_id: responseEntityId },
+    sourceType: 'system',
+    sourceRef: 'system:workflow_engine',
+  })
+  await dispatchLifecycleEvent(client, ctx, parsed.matter_entity_id, 'intake.completed', actionId)
 
   // Advance the matter status to questionnaire_submitted.
   const statusKindId = await lookupKindId(

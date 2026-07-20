@@ -93,6 +93,10 @@ export function defaultTrigger(
   if (gate === 'system') {
     if (precedingActionKind === 'approve_send_invoice' || precedingActionKind === 'await_payment')
       return 'invoice.paid'
+    // WF-FIX-1 (WP2): after an intake step, the real signal is the client
+    // finishing the questionnaire — never transcript.received (which only a
+    // transcript import fires; picking it stranded matters).
+    if (precedingActionKind === 'view_intake') return 'intake.completed'
     if (
       precedingActionKind === 'invoke_capability' &&
       typeof precedingConfig?.capability_slug === 'string' &&

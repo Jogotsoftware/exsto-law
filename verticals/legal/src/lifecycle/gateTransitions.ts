@@ -77,6 +77,14 @@ export const GATE_TRANSITION_VOCABULARY: Record<
       { token: 'invoice.paid', label: 'The invoice for the matter is paid.' },
       { token: 'esign.completed', label: 'All signers finish a sent e-signature envelope.' },
       { token: 'transcript.received', label: 'A consultation transcript is imported.' },
+      {
+        // WF-FIX-1 (WP2): before this token existed, "the client finishes intake"
+        // had no system edge that could ever fire — builders reached for
+        // transcript.received (the only intake-adjacent-sounding option) and
+        // stranded matters at stages no form submission could exit.
+        token: 'intake.completed',
+        label: 'The client completes the intake questionnaire for the matter.',
+      },
     ],
   },
   // Automatic edges advance immediately via the worker/engine; `on` is descriptive

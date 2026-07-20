@@ -62,7 +62,12 @@ export interface CatalogGate {
 function defaultOnEvent(kind: WfStepActionKind | undefined): string {
   if (kind === 'generate_document') return 'document.generated'
   if (kind === 'await_payment' || kind === 'approve_send_invoice') return 'invoice.paid'
-  return 'condition'
+  // WF-FIX-1 (WP2): intake steps wait on the client finishing the questionnaire.
+  if (kind === 'view_intake') return 'intake.completed'
+  // The old fallback was the literal string 'condition' — a token nothing ever
+  // dispatches, i.e. a stage no event could exit. Default to the intake signal
+  // (the one system event every service has); the attorney can still pick another.
+  return 'intake.completed'
 }
 
 // A valid outgoing edge for a NEW step (no saved edge to preserve): attorney/client

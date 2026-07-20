@@ -246,6 +246,9 @@ describe('P8/P12 — defaultTrigger never emits a dead token (keyed off the PREC
     // A step after an invoice step is reached when the invoice is paid.
     expect(defaultTrigger('system', 'approve_send_invoice')).toBe('invoice.paid')
     expect(defaultTrigger('system', 'await_payment')).toBe('invoice.paid')
+    // WF-FIX-1 (WP2): a step after an intake step is reached when the client
+    // finishes the questionnaire — never transcript.received.
+    expect(defaultTrigger('system', 'view_intake')).toBe('intake.completed')
     // A step after the e-signature capability is reached when the envelope completes.
     expect(defaultTrigger('system', 'invoke_capability', { capability_slug: 'esignature' })).toBe(
       'esign.completed',
