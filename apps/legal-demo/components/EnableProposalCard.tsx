@@ -6,6 +6,7 @@ import { buildFirmBookingUrl, useFirmPublicSlug } from '@/lib/firmBookingLink'
 import { ProposalCardShell } from '@/components/ProposalCardShell'
 import { CheckIcon, EyeIcon, Share2Icon, MailIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
+import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is a
 // structural mirror of the EnableProposal captured in
@@ -16,15 +17,20 @@ export interface EnableProposal {
   // BUILDER-UX-1 WP-2.1 — the completed service's steps, rendered as a bulleted
   // completion summary rather than a comma-run.
   completion?: string[]
+  // The service's attorney-authored display name — the card title, read fresh at
+  // propose_enable time (verticals/legal/src/api/costEnableTools.ts). Preferred
+  // over the client-cached catalog (lib/serviceLabel) because THIS is the one
+  // surface where a stale cache is near-guaranteed: the service being enabled was
+  // very likely just created earlier in the SAME build session, after the
+  // session's one catalog fetch already ran. Undefined only if that server-side
+  // read failed, in which case `label` below falls through to the cached catalog
+  // and finally to the generic humanizer — never a title-cased guess (see B3.1:
+  // a mechanical Title Case pass over the slug mangled "single_member_llc" into
+  // "Single Member Llc" instead of "Single-Member LLC").
+  displayName?: string
 }
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
-
-// Attorneys never see snake_case: "eviction_filing" → "Eviction Filing" (founder
-// walk — the enable card was showing the raw service slug as its title).
-function humanizeSlug(slug: string): string {
-  return slug.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
 
 // The inline approval card for the TERMINAL Enable step (Build-Wizard Phase 6). It is
 // the HUMAN GATE that makes the service LIVE: clicking Approve POSTs to the
@@ -56,6 +62,12 @@ export function EnableProposalCard({
   // MULTI-TENANT-1: firm slug for the firm-scoped fallback link (the server value is
   // preferred; this only applies if the enable response omitted bookingLink).
   const publicSlug = useFirmPublicSlug()
+  // The card's title, in preference order: the fresh server-side displayName (see
+  // the EnableProposal field comment) → the shared serviceKey→displayName catalog
+  // (lib/serviceLabel, the one resolver every other attorney surface uses) → the
+  // generic humanizer. Never a title-cased guess at any step.
+  const catalogNames = useServiceDisplayNames()
+  const label = proposal.displayName || serviceLabel(proposal.serviceKey, catalogNames)
 
   async function approve() {
     setApproveState('approving')
@@ -95,7 +107,7 @@ export function EnableProposalCard({
           artifact: 'enable',
           link: data.link,
           serviceKey: data.serviceKey || proposal.serviceKey,
-          label: data.label || `Service "${humanizeSlug(proposal.serviceKey)}" (live)`,
+          label: data.label || `Service "${label}" (live)`,
         })
       }
     } catch (e) {
@@ -125,7 +137,7 @@ export function EnableProposalCard({
   return (
     <ProposalCardShell
       kind="Review & publish"
-      title={humanizeSlug(proposal.serviceKey)}
+      title={label}
       meta="final step"
       footer={
         approveError ? (

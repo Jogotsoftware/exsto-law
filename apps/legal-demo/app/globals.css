@@ -24492,3 +24492,24 @@ details.li-brief-research summary:hover {
   text-decoration: line-through;
   text-decoration-color: #b91c1c;
 }
+
+/* ==========================================================================
+ B3.2 — assistant reply container (chat polish). Self-contained append,
+ overriding only the declarations named below on the existing selectors
+ (globals ~18148 "Messages"): the user turn already gets a filled navy bubble
+ (.li-uac-msg-user); the assistant's prose reply had none ("bubble-less serif
+ assistant prose"), reading as un-contained relative to the user side. This
+ gives the reply text itself a matching container — light card, rounded
+ corners mirrored to the opposite side from the user bubble's cut corner —
+ WITHOUT wrapping the whole turn: the reasoning disclosure, document cards,
+ and proposal cards below the prose keep their own existing card treatment
+ (double-boxing them inside a bigger bubble would look wrong). Scoped to
+ `.assistant-md` so it only ever wraps rendered prose, which is why it never
+ shows for a turn that carries no reply text (interview/build-question turns).
+ ========================================================================== */
+.li-uac-msg-assistant > .assistant-md {
+  background: #fbfbf9;
+  border: 1px solid var(--li-border-input, #dce2ee);
+  border-radius: 5px 15px 15px 15px;
+  padding: 12px 16px;
+}

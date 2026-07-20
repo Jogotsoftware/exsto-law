@@ -167,9 +167,16 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
     return <div className="alert alert-error">{error}</div>
   }
 
-  const hasQuestionnaire = matter.questionnaireResponses !== null
+  // B3.1 (product-walk trace, 2026-07-20): renamed from `hasQuestionnaire`. This is
+  // whether the CLIENT has submitted intake ANSWERS on THIS matter — a different
+  // fact from whether the SERVICE has a questionnaire SCHEMA configured (that
+  // flag is also called `hasQuestionnaire` in serviceAuthoring.ts /
+  // intakeTemplateTools.ts). The two are easy to conflate reading across
+  // matter-scoped vs service-scoped surfaces — a live service can have a real
+  // schema while a given matter's client just hasn't filled it in yet.
+  const hasSubmittedIntake = matter.questionnaireResponses !== null
   const hasTranscript = matter.transcriptText !== null
-  const canGenerate = hasQuestionnaire && hasTranscript
+  const canGenerate = hasSubmittedIntake && hasTranscript
   const steps = deriveMatterSteps(matter, { hasInvoice })
 
   return (
@@ -273,7 +280,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
           title="Intake — questionnaire"
           onClose={closeStep}
           footer={
-            hasQuestionnaire && matter.questionnaireResponses ? (
+            hasSubmittedIntake && matter.questionnaireResponses ? (
               <>
                 <button
                   onClick={() =>
@@ -300,7 +307,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
             ) : null
           }
         >
-          {hasQuestionnaire && matter.questionnaireResponses ? (
+          {hasSubmittedIntake && matter.questionnaireResponses ? (
             <QuestionnaireView data={matter.questionnaireResponses} />
           ) : (
             <p className="text-muted">
@@ -330,10 +337,10 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
                 onChange={(e) => setCallTranscript(e.target.value)}
                 placeholder="Paste the consultation transcript…"
                 rows={6}
-                disabled={!hasQuestionnaire || busy !== null}
+                disabled={!hasSubmittedIntake || busy !== null}
               />
               <button
-                disabled={!hasQuestionnaire || !callTranscript.trim() || busy !== null}
+                disabled={!hasSubmittedIntake || !callTranscript.trim() || busy !== null}
                 onClick={async () => {
                   await action('record-call', 'legal.call.record_manual', {
                     matterEntityId: id,
@@ -345,7 +352,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
                 {busy === 'record-call' && <span className="spinner" />}
                 {busy === 'record-call' ? 'Recording…' : 'Record consultation call'}
               </button>
-              {!hasQuestionnaire && (
+              {!hasSubmittedIntake && (
                 <p className="text-muted text-sm">
                   Recording unlocks once the client completes intake.
                 </p>
