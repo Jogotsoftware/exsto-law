@@ -52,6 +52,11 @@ export interface MatterWorkflow {
   graph: WfStage[]
   currentState: string
   status: string
+  // WF-FIX-1 (WP4): bound vs latest service workflow version — drives the
+  // "Update to latest workflow" repin affordance.
+  boundVersion?: number | null
+  latestVersion?: number | null
+  hasOverride?: boolean
 }
 
 export interface MatterDetail {

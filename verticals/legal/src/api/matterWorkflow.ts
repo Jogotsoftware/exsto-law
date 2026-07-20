@@ -38,3 +38,34 @@ export async function startMatterWorkflow(
   })
   return res.effects[0] as { workflowInstanceId: string; started: boolean; startState: string }
 }
+
+// WF-FIX-1 (WP4) — move ONE in-flight matter to its service's LATEST workflow
+// version (successor-instance repin; see handlers/matterRepin.ts). intent
+// 'correction': the pin should reflect the firm's current process.
+export interface RepinMatterWorkflowResult {
+  repinned: boolean
+  workflowInstanceId: string
+  supersededInstanceId?: string
+  version: number
+  state: string
+  stateMapped?: boolean
+  overrideCleared?: boolean
+  summary?: string
+}
+
+export async function repinMatterWorkflow(
+  ctx: ActionContext,
+  matterEntityId: string,
+  opts?: { targetState?: string; clearOverride?: boolean },
+): Promise<RepinMatterWorkflowResult> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.matter.repin_workflow',
+    intentKind: 'correction',
+    payload: {
+      matter_entity_id: matterEntityId,
+      ...(opts?.targetState ? { target_state: opts.targetState } : {}),
+      ...(opts?.clearOverride ? { clear_override: true } : {}),
+    },
+  })
+  return res.effects[0] as RepinMatterWorkflowResult
+}
