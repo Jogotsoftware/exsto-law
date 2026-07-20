@@ -81,6 +81,13 @@ export interface MergeDataOptions {
   // today the caller passes "now" for both, but effective_date is a legal fact
   // that may diverge from the generation date, so they stay separate slots.
   todayIso?: string
+  // WP A2b — {{governing_jurisdiction}}'s display name (e.g. "North Carolina"),
+  // resolved by the caller via resolveMatterJurisdiction (api/matterJurisdiction.ts)
+  // BEFORE calling buildMergeData — this module stays pure/sync, so it never
+  // resolves the matter fact itself. Undefined (matter + firm both unset) renders
+  // an honest [[MISSING: governing_jurisdiction]], same as every other curated
+  // slot — never a guessed state.
+  governingJurisdiction?: string
 }
 
 // Pull the first plausible value for a logical field out of the questionnaire
@@ -194,6 +201,7 @@ export function buildMergeData(
       ? longDate(letterDateAnswer)
       : longDate(options.todayIso ?? options.effectiveDateIso),
     business_description: pick(q, ['business_description', 'business_purpose']),
+    governing_jurisdiction: options.governingJurisdiction,
 
     // Firm identity (tenant settings) — undefined when the firm hasn't set them,
     // which renders an honest MISSING rather than a guessed name.
@@ -242,6 +250,7 @@ export const MERGE_SLOT_FIELDS: readonly string[] = [
   'today',
   'letter_date',
   'business_description',
+  'governing_jurisdiction',
   'firm_name',
   'attorney_name',
   'attorney_email',

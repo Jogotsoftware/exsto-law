@@ -265,6 +265,9 @@ export async function runDraftGeneration(
     // have always offered. The ForMerge read degrades to unknown (honest
     // MISSING), never to the demo-firm defaults the Settings page shows.
     const settings = await getTenantSettingsForMerge(agentCtx)
+    // WP A2b — the matter's own governing-law fact (client intake answer, with
+    // the firm's home jurisdiction as fallback), never a hardcoded state.
+    const jurisdiction = await resolveMatterJurisdiction(agentCtx, input.matterEntityId)
     const { markdown, missingFields } = renderTemplate(
       template,
       buildMergeData(m, {
@@ -273,6 +276,7 @@ export async function runDraftGeneration(
         feeStructureHuman: service.feeStructureHuman,
         firmName: settings.firmName ?? undefined,
         attorneyName: settings.attorneyName ?? undefined,
+        governingJurisdiction: jurisdiction?.displayName,
         // P13 — the rest of the firm identity block (firm_profile singleton,
         // legacy-table fallback). Unknown stays undefined → honest MISSING;
         // the approve-time resolver is the safety net.

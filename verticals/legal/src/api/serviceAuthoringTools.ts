@@ -24,8 +24,14 @@ import {
   SERVICE_GENERATION_MODES,
   type ServiceProposal,
 } from './serviceAuthoring.js'
-import { serviceCompleteness, type WorkflowRoute } from './services.js'
+import {
+  serviceCompleteness,
+  getService,
+  type WorkflowRoute,
+  type IntakeSchema,
+} from './services.js'
 import type { GenerationMode } from './generateDraft.js'
+import { GOVERNING_JURISDICTION_FIELD_ID } from './intakeFieldLibrary.js'
 
 const SERVICE_CONTEXT_TOOL_DEF = {
   name: 'get_service_context',
@@ -344,9 +350,49 @@ const SERVICE_COMPLETENESS_TOOL_DEF = {
   },
 }
 
-// Read-only completeness tool. Returns the { serviceKey, ready, missing } shape as
-// JSON. No capture, no write — it delegates to serviceCompleteness, the single
-// source of truth the Enable gate also uses.
+// WP A2b — non-blocking nudge. NEVER folded into `missing` (which drives
+// `ready` — see computeCompleteness in services.ts): a service that drafts
+// documents is jurisdiction-sensitive by construction (its documents will
+// carry governing-law facts), so suggest attaching the reusable
+// governing_jurisdiction question (intakeFieldLibrary.ts) when the service's
+// own questionnaire doesn't already ask it. A manual/document-less service has
+// nothing to merge a governing-law fact into, so it gets no suggestion.
+//
+// PURE — takes the already-fetched service shape, no DB — so it is unit
+// testable with zero fixtures (tests/vertical), same split as
+// computeCompleteness/serviceCompleteness in services.ts.
+export function jurisdictionSuggestions(service: {
+  route: WorkflowRoute
+  documents: string[]
+  intakeSchema: IntakeSchema | undefined
+}): string[] {
+  const jurisdictionSensitive = service.route === 'auto' && service.documents.length > 0
+  if (!jurisdictionSensitive) return []
+  const hasField = (service.intakeSchema?.sections ?? []).some((s) =>
+    (s.fields ?? []).some((f) => f.id === GOVERNING_JURISDICTION_FIELD_ID),
+  )
+  if (hasField) return []
+  return [
+    `This service drafts documents, which are typically jurisdiction-sensitive — consider adding the reusable "${GOVERNING_JURISDICTION_FIELD_ID}" question ("Which state's law governs this matter?") to the intake, so {{${GOVERNING_JURISDICTION_FIELD_ID}}} resolves per-matter instead of falling back to the firm's default jurisdiction.`,
+  ]
+}
+
+// DB-touching wrapper — fetches the service, then delegates to the pure
+// jurisdictionSuggestions above. Errs toward silence (returns [] on any lookup
+// miss) — a nudge is never worth a thrown error in a read-only tool.
+async function buildCompletenessSuggestions(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<string[]> {
+  const service = await getService(ctx, serviceKey)
+  if (!service) return []
+  return jurisdictionSuggestions(service)
+}
+
+// Read-only completeness tool. Returns { serviceKey, ready, missing, suggestions }
+// as JSON. `ready`/`missing` still delegate to serviceCompleteness (the single
+// source of truth the Enable gate also uses) untouched; `suggestions` is
+// additive and never affects `ready`. No capture, no write.
 export function buildServiceCompletenessTool(ctx: ActionContext): ClientTool {
   return {
     definition: SERVICE_COMPLETENESS_TOOL_DEF,
@@ -356,7 +402,8 @@ export function buildServiceCompletenessTool(ctx: ActionContext): ClientTool {
       const serviceKey = (args.service_key ?? '').trim()
       if (!serviceKey) return 'A service_key is required to check service completeness.'
       const completeness = await serviceCompleteness(ctx, serviceKey)
-      return JSON.stringify(completeness)
+      const suggestions = await buildCompletenessSuggestions(ctx, serviceKey)
+      return JSON.stringify({ ...completeness, suggestions })
     },
   }
 }

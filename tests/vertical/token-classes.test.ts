@@ -61,6 +61,10 @@ describe('isAutoInternalToken (client can never be asked for system data)', () =
     expect(isAutoInternalToken('company_name')).toBe(false)
     expect(isAutoInternalToken('business_description')).toBe(false)
     expect(isAutoInternalToken('effective_date')).toBe(false)
+    // WP A2b — the client answers this directly (intakeFieldLibrary.ts); the
+    // {{governing_jurisdiction}} TOKEN is system-resolved, but the QUESTION
+    // must stay client-facing or the client could never be asked.
+    expect(isAutoInternalToken('governing_jurisdiction')).toBe(false)
   })
 
   it('never coerces a non-system token', () => {
