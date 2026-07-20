@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { registerActionHandler, withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import {
@@ -54,16 +55,106 @@ async function findCallByGranolaId(
   return res.rows[0]?.entity_id ?? null
 }
 
+// WP B2 — content-keyed transcript dedupe. The manual-paste path
+// (api/recordManualCall.ts) mints a fresh `manual-${randomUUID()}` granola_call_id
+// on every submission, so findCallByGranolaId above never catches an attorney
+// re-pasting the SAME transcript: the projection re-ran, re-enqueued Claude
+// extraction, and double-wrote ai_summary/ai_extraction notes into client memory.
+// This hash is a second, content-addressed dedupe key. CONSERVATIVE normalization
+// (whitespace runs collapsed, trimmed) only — no case-folding, no punctuation
+// stripping — so we never collide two transcripts that differ in substance.
+export function transcriptContentHash(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  return createHash('sha256').update(normalized, 'utf8').digest('hex')
+}
+
+// Latest-value lookup shaped like findCallByGranolaId above, but scoped to a
+// MATTER: identical transcript content pasted onto a DIFFERENT matter is allowed
+// (e.g. a copy-paste mistake caught and correctly re-filed), so the hash alone is
+// not the dedupe key — (matter, hash) is. Walks transcript --transcript_of--> the
+// call_session, then --call_of--> the matter (the relationship call.ingest always
+// writes for a matched call, unlike the best-effort direct transcript_of_matter
+// enrichment) and returns the CALL entity id, matching what callers of call.ingest
+// expect back. Tolerates migration 0171 being unapplied: if the
+// transcript_content_hash attribute kind does not exist yet, the join simply
+// matches nothing and this returns null — never throws.
+async function findTranscriptCallByContentHash(
+  client: DbClient,
+  tenantId: string,
+  matterEntityId: string,
+  contentHash: string,
+): Promise<string | null> {
+  const res = await client.query<{ call_entity_id: string }>(
+    `SELECT tr.target_entity_id AS call_entity_id
+     FROM attribute a
+     JOIN attribute_kind_definition akd
+          ON akd.id = a.attribute_kind_id AND akd.kind_name = 'transcript_content_hash'
+     JOIN relationship tr
+          ON tr.tenant_id = a.tenant_id AND tr.source_entity_id = a.entity_id
+          AND (tr.valid_to IS NULL OR tr.valid_to > now())
+     JOIN relationship_kind_definition trk
+          ON trk.id = tr.relationship_kind_id AND trk.kind_name = 'transcript_of'
+     JOIN relationship co
+          ON co.tenant_id = a.tenant_id AND co.source_entity_id = tr.target_entity_id
+          AND (co.valid_to IS NULL OR co.valid_to > now())
+     JOIN relationship_kind_definition cok
+          ON cok.id = co.relationship_kind_id AND cok.kind_name = 'call_of'
+     WHERE a.tenant_id = $1
+       AND co.target_entity_id = $2
+       AND a.value #>> '{}' = $3
+     LIMIT 1`,
+    [tenantId, matterEntityId, contentHash],
+  )
+  return res.rows[0]?.call_entity_id ?? null
+}
+
+// Optional attribute-kind lookup (unlike lookupKindId in common.ts, never throws):
+// the hash write below must be a no-op — not a failed ingest — in any environment
+// where migration 0171 (PLAN ONLY at ship time) has not been applied yet.
+async function lookupOptionalAttributeKindId(
+  client: DbClient,
+  tenantId: string,
+  kindName: string,
+): Promise<string | null> {
+  const res = await client.query<{ id: string }>(
+    `SELECT id FROM attribute_kind_definition
+     WHERE tenant_id = $1 AND kind_name = $2 AND status = 'active'
+     ORDER BY valid_from DESC LIMIT 1`,
+    [tenantId, kindName],
+  )
+  return res.rows[0]?.id ?? null
+}
+
 registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as CallIngestPayload
   // Default to integration/Granola provenance; a manual entry overrides both.
   const sourceType = p.source_type ?? 'integration'
   const sourceRef = p.source_ref ?? `granola:${p.granola_call_id}`
 
-  // Idempotency: a replayed webhook or re-run projection is a no-op.
+  // Idempotency: a replayed webhook or re-run projection is a no-op. Checked
+  // FIRST and unchanged — this is the id-based dedupe, cheapest and most exact.
   const existing = await findCallByGranolaId(client, ctx.tenantId, p.granola_call_id)
   if (existing) {
     return { callEntityId: existing, deduplicated: true }
+  }
+
+  const contentHash = transcriptContentHash(p.transcript_text)
+
+  // WP B2 — content-keyed dedupe, SECOND. Only meaningful for a matched call: an
+  // unmatched (review-queue) ingest has no matter to scope the hash to, and two
+  // different prospects can legitimately paste similar-looking transcripts.
+  // Creates NOTHING on a hit (no call_session, no transcript, no extraction
+  // enqueue) — the whole point is that the re-paste never reaches that code.
+  if (p.matter_entity_id) {
+    const existingByHash = await findTranscriptCallByContentHash(
+      client,
+      ctx.tenantId,
+      p.matter_entity_id,
+      contentHash,
+    )
+    if (existingByHash) {
+      return { callEntityId: existingByHash, deduplicated: true, reason: 'content_hash' }
+    }
   }
 
   const callKindId = await lookupKindId(
@@ -141,6 +232,28 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
       confidence: a.confidence ?? 1.0,
       sourceType,
       sourceRef,
+    })
+  }
+
+  // WP B2 — record the content hash so a future re-paste of this SAME text can be
+  // caught by findTranscriptCallByContentHash above. Best-effort: migration 0171
+  // is PLAN ONLY as of this ship, so `hashKindId` is null wherever it hasn't been
+  // applied yet — skip the write rather than fail the whole ingest.
+  const hashKindId = await lookupOptionalAttributeKindId(
+    client,
+    ctx.tenantId,
+    'transcript_content_hash',
+  )
+  if (hashKindId) {
+    await insertAttribute(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      entityId: transcriptEntityId,
+      attributeKindId: hashKindId,
+      value: contentHash,
+      confidence: 1.0,
+      sourceType: 'system',
+      sourceRef: 'call.ingest',
     })
   }
 
