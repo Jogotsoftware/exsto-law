@@ -25,7 +25,7 @@
 -- (portal_assistant_enabled on the `client` kind is the closest precedent:
 -- a single new attribute on an existing, already-provisioned entity kind).
 --
--- Id block: …1011-000000002100 (fresh — 0169 Brief engine holds …2000-…2007,
+-- Id block: …1011-000000002120 (renumbered from …2100 — the Wave-1 sibling collision; 0170 keeps …2100. 0169 holds …2000-…2007,
 -- the highest attribute-kind id on origin/main; verified free against every
 -- migrations_vertical/*.sql and supabase/seed/*.sql id on this branch).
 --
@@ -41,7 +41,7 @@ SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', false
 -- ── tenant-zero ────────────────────────────────────────────────────────────
 INSERT INTO attribute_kind_definition
   (id, tenant_id, kind_name, display_name, description, on_entity_kind_id, value_type, is_pii)
-SELECT '00000000-0000-0000-1011-000000002100', '00000000-0000-0000-0000-000000000001',
+SELECT '00000000-0000-0000-1011-000000002120', '00000000-0000-0000-0000-000000000001',
        'client_website', 'Website',
        'The client''s own website (CRM comp parity — the Clients list WEBSITE column and an editable field on the client detail page). A plain text URL/domain, attorney-entered. Also the verified source for PublicIdentifiers.website in the Client Brief external-research privacy guard (briefResearchGuard.ts) — normalized/validated there, stored here as entered.',
        ekd.id, 'text', false

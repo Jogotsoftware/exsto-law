@@ -30,8 +30,8 @@
 -- degrade to a no-op (lookupOptionalAttributeKindId / an empty JOIN) rather
 -- than throwing — see verticals/legal/src/handlers/call.ts.
 --
--- Ids: tenant zero gets the fixed, fresh id
--- 00000000-0000-0000-1011-000000002100 (verified free against origin/main —
+-- Ids: tenant zero gets the fixed id (renumbered from …2100: the parallel Wave-1 batch had three agents each independently claim …2100 against main — 0170 keeps it as first claimant)
+-- 00000000-0000-0000-1011-000000002110 (verified free against origin/main —
 -- the highest attribute-kind id on main is 0169's brief-engine block, which
 -- tops out at …002007). Every OTHER tenant gets gen_random_uuid() per row,
 -- since attribute_kind_definition.id is a single global PK and a loop over
@@ -52,7 +52,7 @@ SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', false
 INSERT INTO attribute_kind_definition
   (id, tenant_id, kind_name, display_name, description, on_entity_kind_id, value_type, is_pii)
 SELECT
-  '00000000-0000-0000-1011-000000002100', '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-1011-000000002110', '00000000-0000-0000-0000-000000000001',
   'transcript_content_hash', 'Transcript content hash',
   'SHA-256 hex digest of the whitespace-normalized transcript_text (collapse whitespace runs to a single space, trim — no other canonicalization). Written once by call.ingest on a non-dedupe ingest; read back scoped to a matter to recognize the SAME transcript re-pasted and skip re-creating the call/transcript pair and re-running extraction. A one-way digest, not itself treated as PII.',
   ekd.id, 'text', false
