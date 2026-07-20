@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { insertAttribute, insertEntity, lookupKindId } from './common.js'
+import { normalizeJurisdiction } from '../api/jurisdictions.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Skills (legal know-how ported from claude-for-legal). A skill entity is a
@@ -11,6 +12,24 @@ import { insertAttribute, insertEntity, lookupKindId } from './common.js'
 // ───────────────────────────────────────────────────────────────────────────
 
 const SKILL_ENTITY_KIND = 'skill'
+
+// PURE validation/normalization (mirrors handlers/matterJurisdiction.ts's
+// normalizeGoverningLawValue), exported for unit tests. '' clears — an untagged
+// skill is jurisdiction-NEUTRAL, never excluded by the resolver's negative
+// filter (skillContext.ts). Any other value must normalize to a canonical US
+// state code (api/jurisdictions.ts) or is rejected — never silently stored as
+// text the resolver could never match.
+export function normalizeSkillJurisdictionValue(raw: string | null | undefined): string {
+  const trimmed = typeof raw === 'string' ? raw.trim() : ''
+  if (!trimmed) return ''
+  const code = normalizeJurisdiction(trimmed)
+  if (!code) {
+    throw new Error(
+      `skill jurisdiction must be a valid US state code or name (got "${trimmed}"); leave empty for a jurisdiction-neutral skill.`,
+    )
+  }
+  return code
+}
 
 async function setSkillAttr(
   client: DbClient,
@@ -71,6 +90,7 @@ interface SkillCreatePayload {
   when_to_use: string
   body: string
   user_invocable?: boolean
+  jurisdiction?: string | null
 }
 
 registerActionHandler('legal.skill.create', async (ctx, client, payload, actionId) => {
@@ -105,6 +125,10 @@ registerActionHandler('legal.skill.create', async (ctx, client, payload, actionI
   if (p.description != null && String(p.description).trim()) {
     attrs.push({ kind: 'skill_description', value: String(p.description) })
   }
+  const jurisdiction = normalizeSkillJurisdictionValue(p.jurisdiction)
+  if (jurisdiction) {
+    attrs.push({ kind: 'skill_jurisdiction', value: jurisdiction })
+  }
   for (const a of attrs) {
     await setSkillAttr(client, {
       tenantId: ctx.tenantId,
@@ -128,6 +152,7 @@ interface SkillUpdatePayload {
   when_to_use?: string
   body?: string
   user_invocable?: boolean
+  jurisdiction?: string | null
 }
 
 registerActionHandler('legal.skill.update', async (ctx, client, payload, actionId) => {
@@ -157,6 +182,12 @@ registerActionHandler('legal.skill.update', async (ctx, client, payload, actionI
   }
   if (p.user_invocable != null) {
     updates.push({ kind: 'skill_user_invocable', value: p.user_invocable })
+  }
+  if (p.jurisdiction !== undefined) {
+    updates.push({
+      kind: 'skill_jurisdiction',
+      value: normalizeSkillJurisdictionValue(p.jurisdiction),
+    })
   }
 
   for (const u of updates) {

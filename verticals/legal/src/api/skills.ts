@@ -14,6 +14,11 @@ export interface UpsertSkillInput {
   whenToUse: string
   body: string
   userInvocable?: boolean
+  // WP A5 — optional US jurisdiction this skill is SPECIFIC to (a 2-letter code
+  // or full state name, normalized to the canonical code by the handler). Empty/
+  // absent = jurisdiction-neutral (applies everywhere; never excluded by the
+  // drafting resolver's negative filter).
+  jurisdiction?: string | null
 }
 
 export async function createSkill(ctx: ActionContext, input: UpsertSkillInput): Promise<Skill> {
@@ -28,6 +33,7 @@ export async function createSkill(ctx: ActionContext, input: UpsertSkillInput): 
       when_to_use: input.whenToUse,
       body: input.body,
       user_invocable: input.userInvocable !== false,
+      jurisdiction: input.jurisdiction ?? null,
     },
   })
   const created = await getSkillBySlug(ctx, input.slug)
@@ -44,6 +50,8 @@ export interface UpdateSkillInput {
   whenToUse?: string
   body?: string
   userInvocable?: boolean
+  // undefined leaves it unchanged; '' clears it (jurisdiction-neutral again).
+  jurisdiction?: string | null
 }
 
 export async function updateSkill(
@@ -62,6 +70,7 @@ export async function updateSkill(
       when_to_use: input.whenToUse,
       body: input.body,
       user_invocable: input.userInvocable,
+      jurisdiction: input.jurisdiction,
     },
   })
   return input.slug ? getSkillBySlug(ctx, input.slug) : null
@@ -81,6 +90,7 @@ export async function upsertSkill(ctx: ActionContext, input: UpsertSkillInput): 
     whenToUse: input.whenToUse,
     body: input.body,
     userInvocable: input.userInvocable,
+    jurisdiction: input.jurisdiction,
   })
   return updated ?? existing
 }

@@ -448,11 +448,17 @@ export async function runDocumentReview(
       .join('\n\n') || undefined
 
   // Skills: attorney-configured (forced) plus the conservative jurisdiction
-  // auto-resolve, keyed on the memo kind. Same resolved-jurisdiction binding as
-  // drafting (the matter's own jurisdiction, never a hardcoded 'NC').
+  // auto-resolve. WP A5 fix: keyed on the REVIEWED document's own kind
+  // (object.documentKind — 'uploaded'/'intake_upload'/'esign_upload' today, a
+  // future more specific value if one is ever set) plus intent: 'review's fixed
+  // vocabulary, NOT the output memo's sentinel kind (REVIEW_MEMO_DOCUMENT_KIND)
+  // — that was a near-no-op, since no seeded skill's words match "document
+  // review memo". Same resolved-jurisdiction binding as drafting (the matter's
+  // own jurisdiction, never a hardcoded 'NC').
   const autoSkillSlugs = await resolveJurisdictionSkillSlugs(agentCtx, {
-    documentKind: REVIEW_MEMO_DOCUMENT_KIND,
+    documentKind: object.documentKind,
     jurisdiction: jurisdiction?.code,
+    intent: 'review',
   })
   const skillSlugs = [...new Set([...config.skillSlugs, ...autoSkillSlugs])]
   const forcedSkills = await loadForcedSkills(agentCtx, skillSlugs)
