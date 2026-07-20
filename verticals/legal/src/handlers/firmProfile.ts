@@ -16,6 +16,14 @@ import { normalizeJurisdiction } from '../api/jurisdictions.js'
 // email-drafting prompt (assistantPrompt.ts buildFirmInstructionsBlock). Same
 // singleton, same action, same append-only-supersede pattern as every other
 // profile field.
+// Migration 0178 (WP FB-B2, PLANNED — not applied) adds
+// portal_assistant_instructions — a SEPARATE, client-safe field: the firm's
+// standing guidance for the CLIENT-FACING portal assistant (e.g. "mention our
+// office closes at 5pm"), injected only into the portal chat's system prompt
+// (assistantPrompt.ts buildPortalInstructionsBlock, via clientAssistantChat.ts).
+// It never reaches the attorney chat or the email-drafting prompt — those stay
+// on assistant_instructions alone, and the portal never reads that internal
+// field either (leak risk was the whole reason FB-B excluded the portal).
 // legal.firm.set_profile creates the singleton on first write and supersedes its
 // attributes append-only — the exact legal.firm.signature_set pattern
 // (handlers/firmSignature.ts).
@@ -87,6 +95,10 @@ interface FirmProfileSetPayload {
   // AI assistant. Plain text field, same clear-on-empty-string semantics as
   // firm_name/firm_address/etc.
   assistant_instructions?: string | null
+  // FB-B2 (migration 0178, PLANNED) — the firm's standing, client-safe
+  // instructions for the CLIENT PORTAL assistant. Independent of
+  // assistant_instructions above; same clear-on-empty-string semantics.
+  portal_assistant_instructions?: string | null
 }
 
 const PROFILE_FIELDS = [
@@ -98,6 +110,7 @@ const PROFILE_FIELDS = [
   'practice_areas',
   'attorney_name',
   'assistant_instructions',
+  'portal_assistant_instructions',
 ] as const
 
 type ProfileField = (typeof PROFILE_FIELDS)[number]
@@ -141,7 +154,7 @@ registerActionHandler('legal.firm.set_profile', async (ctx, client, payload, act
   const provided = PROFILE_FIELDS.filter((k) => p[k] !== undefined)
   if (provided.length === 0) {
     throw new Error(
-      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions.',
+      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions, portal_assistant_instructions.',
     )
   }
 
