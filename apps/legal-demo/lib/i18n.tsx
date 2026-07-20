@@ -348,6 +348,17 @@ const en: Record<string, string> = {
   'portal.assistant.placeholder': 'Ask the assistant…',
   'portal.assistant.disclaimer':
     'For legal questions the assistant routes you to the attorney — it doesn’t give legal advice.',
+  // FB-0 — thumbs feedback on an assistant reply.
+  'portal.assistant.fb_helpful': 'Mark this reply helpful',
+  'portal.assistant.fb_unhelpful': 'Mark this reply not helpful',
+  'portal.assistant.fb_title': 'Rate this reply',
+  'portal.assistant.fb_marked_helpful': 'Marked helpful',
+  'portal.assistant.fb_marked_unhelpful': 'Marked not helpful',
+  'portal.assistant.fb_note_label': 'Add a note (optional)',
+  'portal.assistant.fb_note_placeholder': 'What made this reply good or bad?',
+  'portal.assistant.fb_cancel': 'Cancel',
+  'portal.assistant.fb_submit': 'Submit',
+  'portal.assistant.fb_submitting': 'Submitting…',
   'fee.hint': 'Accept the fee above to continue.',
 
   // Returning-client notice (flow start)
@@ -757,6 +768,17 @@ const es: Record<string, string> = {
   'portal.assistant.placeholder': 'Pregunte al asistente…',
   'portal.assistant.disclaimer':
     'Para preguntas legales, el asistente le remite al abogado — no ofrece asesoría legal.',
+  // FB-0 — comentarios (pulgar arriba/abajo) sobre una respuesta del asistente.
+  'portal.assistant.fb_helpful': 'Marcar esta respuesta como útil',
+  'portal.assistant.fb_unhelpful': 'Marcar esta respuesta como no útil',
+  'portal.assistant.fb_title': 'Califique esta respuesta',
+  'portal.assistant.fb_marked_helpful': 'Marcada como útil',
+  'portal.assistant.fb_marked_unhelpful': 'Marcada como no útil',
+  'portal.assistant.fb_note_label': 'Agregue una nota (opcional)',
+  'portal.assistant.fb_note_placeholder': '¿Qué hizo que esta respuesta fuera buena o mala?',
+  'portal.assistant.fb_cancel': 'Cancelar',
+  'portal.assistant.fb_submit': 'Enviar',
+  'portal.assistant.fb_submitting': 'Enviando…',
   'fee.hint': 'Acepta los honorarios de arriba para continuar.',
 
   // Aviso para clientes existentes (inicio del flujo)
