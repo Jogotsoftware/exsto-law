@@ -14,9 +14,20 @@ let _pool: Pool | undefined
 //   • keep each serverless instance's pool tiny (it only serves one request at a
 //     time anyway) and reap idle connections quickly so they return to the pooler;
 //   • the long-running worker is a single process, so it can hold a few more.
-// DATABASE_POOL_MAX overrides either default. (The durable fix is to point the
-// prod DATABASE_URL at the TRANSACTION-mode pooler — port 6543 — which multiplexes
-// instead of capping clients; this config just keeps us well-behaved either way.)
+// DATABASE_POOL_MAX overrides either default.
+//
+// DURABLE FIX (B3.3): right-sizing (above) alone did NOT stop the intermittent
+// 500s — session-mode pins one Postgres backend per pooled client, so even small
+// per-instance pools across many warm Lambdas re-saturate the 15-slot cap (17 idle
+// session-pinned backends vs 1 active, observed). The fix is to point the *app*
+// DATABASE_URL at the TRANSACTION-mode pooler (port 6543), which assigns a backend
+// per transaction and multiplexes instead of capping clients. That is safe here
+// because EVERY app DB path is transaction-scoped: withTenant/withActionContext/
+// withAppRole all set their tenant/role GUCs with SET LOCAL semantics inside
+// BEGIN/COMMIT (no cross-transaction GUC leak), and withSuperuser is now wrapped in
+// a transaction too. This config is correct under BOTH pooler modes, so the env
+// flip needs no code change and is reversible. The single-process worker (Render)
+// and migrations stay on the session/direct URL. See PR body for the exact env.
 function buildPoolConfig(connectionString: string): PoolConfig {
   const serverless = Boolean(
     process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY || process.env.VERCEL,
@@ -107,13 +118,35 @@ export async function closeDbPool(): Promise<void> {
   }
 }
 
-// Runs a one-off query as the connecting role with no tenant binding. Useful
-// only for migrations, seed scripts, and other process-bypass operations.
-// Application code must never call this directly — use withTenant.
+// Runs the callback as the connecting role with no tenant binding, inside a
+// single committed transaction. Used for cross-tenant auth infrastructure that
+// resolves before a tenant is known (email→user lookups, connection-secret
+// read-then-write) plus migrations, seed scripts, and worker queue ops.
+// Application substrate writes still go through withTenant.
+//
+// The BEGIN/COMMIT wrapper is what makes this safe under a TRANSACTION-mode
+// pooler (port 6543): that pooler assigns a server backend per transaction, so a
+// multi-statement callback that ran statement-by-statement in autocommit could
+// land each statement on a different backend (breaking a read-then-write or a
+// DELETE+UPDATE pair). Pinning the whole callback to one transaction keeps it on
+// one backend and atomic. Under a session-mode pooler the wrapper is a harmless
+// no-op (the checkout already pins one backend for its lifetime). No caller
+// issues its own BEGIN/COMMIT (verified) and none runs a transaction-forbidden
+// statement (CREATE INDEX CONCURRENTLY / VACUUM), so the wrap is universally safe.
 export async function withSuperuser<T>(callback: (client: DbClient) => Promise<T>): Promise<T> {
   const client = await getPool().connect()
   try {
-    return await callback(client)
+    await client.query('BEGIN')
+    const result = await callback(client)
+    await client.query('COMMIT')
+    return result
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      // ignore rollback error; original error is what matters
+    }
+    throw error
   } finally {
     client.release()
   }
