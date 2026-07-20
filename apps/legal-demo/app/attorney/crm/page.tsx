@@ -10,6 +10,13 @@
 // the status filter embedded in its own column header). "New client" opens a
 // comp-toned Modal instead of an inline form section (the create flow itself —
 // legal.client.create — is unchanged, still real, still wired).
+//
+// WP B3 (founder-approved, comp parity): the comp's Clients list shows a
+// WEBSITE column (docs/design/legal-instruments/legal-instruments.dc.html
+// crmCols, S.crmTab === 'clients' branch) where this table previously showed
+// Billing — a documented deviation, now reversed. Billing is unchanged on the
+// client detail page (stat card) and in the "New client" create flow below;
+// only this list column swaps.
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -24,6 +31,7 @@ interface ClientSummary {
   name: string | null
   billableRate: string | null
   billingType: string | null
+  website: string | null
   mainContactId: string | null
   mainContactName: string | null
   contactCount: number
@@ -35,13 +43,6 @@ interface ClientSummary {
 
 type BillingType = '' | 'hourly' | 'fixed'
 const MONEY_RE = /^\d+(\.\d{1,2})?$/
-
-function billingLabel(c: ClientSummary): string {
-  if (!c.billingType) return '—'
-  return c.billingType === 'hourly'
-    ? `Hourly${c.billableRate ? ` · $${c.billableRate}` : ''}`
-    : `Fixed${c.billableRate ? ` · $${c.billableRate}` : ''}`
-}
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<ClientSummary[] | null>(null)
@@ -88,11 +89,11 @@ export default function ClientsPage() {
       render: (c) => <span className="li-crm-cell-text">{c.mainContactName || '—'}</span>,
     },
     {
-      key: 'billing',
-      label: 'Billing',
+      key: 'website',
+      label: 'Website',
       width: '1.4fr',
-      sortValue: (c) => billingLabel(c),
-      render: (c) => <span className="li-crm-cell-text">{billingLabel(c)}</span>,
+      sortValue: (c) => c.website ?? '',
+      render: (c) => <span className="li-crm-cell-text">{c.website || '—'}</span>,
     },
     {
       key: 'matters',

@@ -22,6 +22,11 @@ export interface ClientSummary {
   name: string
   billableRate: string | null
   billingType: string | null
+  /** WP B3: CRM comp parity — the client's own website (client_website attribute,
+   *  migration 0172; null when unset or when the attribute kind doesn't exist
+   *  yet for this tenant — the same left-join-to-null the client already gets
+   *  for any as-yet-unset attribute). */
+  website: string | null
   /** PORTAL-1 (WP3): portal-scheduled time is billable for this client. */
   portalSchedulingBillable?: boolean
   mainContactId: string | null
@@ -63,6 +68,7 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
       name: string | null
       billable_rate: string | null
       billing_type: string | null
+      website: string | null
       main_contact_id: string | null
       main_contact_name: string | null
       contact_count: string
@@ -94,6 +100,7 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)          AS name,
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_billable_rate' ORDER BY a.valid_from DESC LIMIT 1) AS billable_rate,
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_billing_type' ORDER BY a.valid_from DESC LIMIT 1)  AS billing_type,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_website' ORDER BY a.valid_from DESC LIMIT 1)      AS website,
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_main_contact' ORDER BY a.valid_from DESC LIMIT 1)  AS main_contact_id,
          COALESCE(
            (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
@@ -128,6 +135,7 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
       name: r.name ?? '',
       billableRate: r.billable_rate,
       billingType: r.billing_type,
+      website: r.website,
       mainContactId: r.main_contact_id,
       mainContactName: r.main_contact_name,
       contactCount: Number(r.contact_count),
@@ -149,6 +157,7 @@ export async function getClient(
       name: string | null
       billable_rate: string | null
       billing_type: string | null
+      website: string | null
       main_contact_id: string | null
       portal_scheduling_billable: string | null
       created_at: Date
@@ -158,6 +167,7 @@ export async function getClient(
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_name' ORDER BY a.valid_from DESC LIMIT 1)          AS name,
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_billable_rate' ORDER BY a.valid_from DESC LIMIT 1) AS billable_rate,
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_billing_type' ORDER BY a.valid_from DESC LIMIT 1)  AS billing_type,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_website' ORDER BY a.valid_from DESC LIMIT 1)      AS website,
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'client_main_contact' ORDER BY a.valid_from DESC LIMIT 1)  AS main_contact_id,
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'portal_scheduling_billable' ORDER BY a.valid_from DESC LIMIT 1) AS portal_scheduling_billable,
          e.created_at
@@ -219,6 +229,7 @@ export async function getClient(
       name: c.name ?? '',
       billableRate: c.billable_rate,
       billingType: c.billing_type,
+      website: c.website,
       portalSchedulingBillable: c.portal_scheduling_billable === 'true',
       mainContactId,
       mainContactName: mainContactRow?.full_name ?? null,

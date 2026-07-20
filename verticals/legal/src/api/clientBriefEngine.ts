@@ -204,6 +204,9 @@ export async function loadPublicIdentifiers(
   const narrow: ClientProfileFields = {
     name: profile.name,
     contacts: profile.contacts.map((c) => ({ fullName: c.fullName, isMain: c.isMain })),
+    // WP B3: profile.website is real now (client_website attribute) — still
+    // narrowed through this exact allowlist, same as name/contacts above.
+    website: profile.website,
   }
   return extractPublicIdentifiers(narrow)
 }

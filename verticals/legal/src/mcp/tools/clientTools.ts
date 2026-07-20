@@ -40,6 +40,7 @@ registerTool({
       client_name: { type: 'string' },
       billable_rate: { type: 'string', description: 'Decimal string, e.g. "350.00".' },
       billing_type: { type: 'string', enum: ['hourly', 'fixed'] },
+      website: { type: 'string', description: "The client's own website (URL or bare domain)." },
       main_contact_id: { type: 'string' },
       contact_ids: { type: 'array', items: { type: 'string' } },
       matter_ids: { type: 'array', items: { type: 'string' } },
@@ -67,6 +68,10 @@ registerTool({
       client_name: { type: 'string' },
       billable_rate: { type: 'string' },
       billing_type: { type: 'string', enum: ['hourly', 'fixed'] },
+      website: {
+        type: 'string',
+        description: "The client's own website (URL or bare domain). An empty string clears it.",
+      },
       main_contact_id: { type: 'string' },
       attach_contact_id: { type: 'string' },
       attach_matter_id: { type: 'string' },

@@ -23910,3 +23910,18 @@ details.li-brief-research summary:hover {
   font-size: 12px;
   color: #b3403a;
 }
+
+/* ── WP B3: client website (CRM detail page subtitle link) ──────────────── */
+.li-crm-detail-website {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--li-link);
+  text-decoration: none;
+}
+.li-crm-detail-website:hover {
+  text-decoration: underline;
+}
