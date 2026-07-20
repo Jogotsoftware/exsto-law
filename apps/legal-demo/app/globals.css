@@ -24513,3 +24513,179 @@ details.li-brief-research summary:hover {
   border-radius: 5px 15px 15px 15px;
   padding: 12px 16px;
 }
+
+/* ==========================================================================
+   PO-1 — BRIEF MODAL POLISH (product-walk 2026-07-20). Self-contained append,
+   three pieces, none touching any rule above:
+
+     1. .li-md-table-wrap — a generic, minimal wrapper renderMarkdown
+        (lib/draftExport.ts) now emits around every rendered GFM table (it
+        previously left `| Item | Status |` as literal text — no table syntax
+        was handled at all) so a wide table scrolls inside its own box
+        instead of stretching the modal. Unstyled beyond that: the base
+        `table`/`th`/`td` rules (globals ~315) already give every
+        renderMarkdown consumer — chat, this modal, draft/email previews — a
+        reasonable default look for free.
+
+     2. .li-brief-body table/th/td/h2 — this modal's on-brand refinement of
+        that default: a tighter navy-header table sized for the modal, and
+        the synthesis prompt's "## " section headings styled as a card-chrome
+        bar instead of plain text. The h2 rule is a SECOND, additive
+        `.li-brief-body h2` block — the original (globals ~21075, sets color/
+        margin/font-size) is left untouched; CSS applies both.
+
+     3. .li-brief-chip — status-vocabulary chips for brief tables/checklists
+        (lib/briefChips.ts maps "Complete"/"On file"/"Pending"/"Not on
+        file"/"Gap — …"/"Unknown" to a tone; any other cell text is never
+        wrapped — no guessing). .li-brief-confidence — the collapsed
+        accuracy/confidence <details> disclosure (same shape as
+        .li-brief-research, globals ~21738): a small chip that expands on
+        click to the sections the brief itself scored below 70% confidence
+        (BriefSection.confidence, already on the wire — no engine change).
+        Replaces the old .li-brief-meta model-name/confidence line (that
+        class is left defined but unused — model identity is never shown to
+        the attorney anymore, per founder decision).
+   ========================================================================== */
+
+.li-md-table-wrap {
+  overflow-x: auto;
+  margin: 4px 0 14px;
+}
+
+.li-brief-body .li-md-table-wrap {
+  margin: 10px 0 16px;
+}
+.li-brief-body table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13px;
+}
+.li-brief-body th {
+  background: var(--li-border-soft);
+  color: var(--li-navy);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--li-border);
+  white-space: nowrap;
+}
+.li-brief-body td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--li-border-soft);
+  vertical-align: top;
+  color: var(--li-text);
+}
+.li-brief-body tbody tr:last-child td {
+  border-bottom: none;
+}
+.li-brief-body h2 {
+  background: var(--li-border-soft);
+  border-left: 3px solid var(--li-gold);
+  border-radius: 6px;
+  padding: 7px 12px;
+  margin: 22px 0 10px;
+}
+
+.li-brief-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 20px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.li-brief-chip--ok {
+  background: var(--li-ok-bg);
+  color: var(--li-ok);
+}
+.li-brief-chip--warn {
+  background: var(--li-warn-bg);
+  color: var(--li-warn);
+}
+.li-brief-chip--danger {
+  background: var(--li-danger-bg);
+  color: var(--li-danger);
+}
+.li-brief-chip--neutral {
+  background: #eef1f6;
+  color: var(--li-muted-2);
+}
+
+.li-brief-confidence {
+  margin-bottom: 14px;
+}
+.li-brief-confidence summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.li-brief-confidence summary::-webkit-details-marker {
+  display: none;
+}
+.li-brief-confidence-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 11px;
+  border-radius: 20px;
+  background: var(--li-border-soft);
+  color: var(--li-navy);
+}
+.li-brief-confidence-hint {
+  font-size: 12px;
+  color: var(--li-text-muted);
+}
+.li-brief-confidence summary:hover .li-brief-confidence-hint {
+  color: var(--li-navy);
+}
+.li-brief-confidence-body {
+  margin: 8px 0 0 2px;
+}
+.li-brief-confidence-empty {
+  font-size: 12.5px;
+  color: var(--li-text-muted);
+  margin: 0;
+  font-style: italic;
+}
+.li-brief-confidence-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+.li-brief-confidence-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--li-text);
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.li-brief-confidence-heading {
+  font-weight: 600;
+}
+.li-brief-confidence-pct {
+  color: var(--li-warn);
+  font-weight: 700;
+  flex: 0 0 auto;
+}

@@ -18,7 +18,7 @@
 // completely unchanged: no mount read, plain button, BriefModal keeps its own
 // original synchronous get-on-open / generate-on-click.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileTextIcon } from '@/components/icons'
+import { SparklesIcon } from '@/components/icons'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import {
   BriefModal,
@@ -146,11 +146,19 @@ export function BriefButton({
 
   const hasNoBriefYet = isMatter && matterState !== null && matterState.brief === null
 
+  // PO-1 (founder product-walk 2026-07-20): clicking Generate must never open
+  // the modal into a loading state — the button's own "Generating…" pill IS
+  // the loading UX. First run (no brief exists yet): kick off the background
+  // generate and stay closed; the modal opens only once a finished brief
+  // exists — a later click, once the label flips off "Generate Brief". No
+  // auto-open is added here: pollForBrief only updates matterState, it never
+  // calls setOpen itself, so landing a brief while the attorney is elsewhere
+  // on the page still requires a click, same as before this fix.
   function handleClick() {
-    // First run: one click both enqueues AND opens the modal, so the attorney
-    // watches it land rather than having to click "Generate" a second time
-    // inside the modal.
-    if (hasNoBriefYet && !generating) startGenerate(false)
+    if (hasNoBriefYet) {
+      if (!generating) startGenerate(false)
+      return
+    }
     setOpen(true)
   }
 
@@ -176,7 +184,7 @@ export function BriefButton({
   return (
     <>
       <button type="button" className={buttonClass} onClick={handleClick} title={title}>
-        {generating ? <span className="spinner" /> : <FileTextIcon size={15} />}
+        {generating ? <span className="spinner" /> : <SparklesIcon size={15} />}
         {buttonLabel}
       </button>
       {open && (
