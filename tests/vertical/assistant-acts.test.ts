@@ -12,6 +12,7 @@ import {
   buildClaudeSystem,
   buildComposeEmailTool,
   type AssistantChatInput,
+  type AssistantFirmFacts,
   type EmailComposeCapture,
 } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
@@ -20,6 +21,11 @@ const ctx: ActionContext = {
   tenantId: '00000000-0000-0000-0000-000000000001',
   actorId: '00000000-0000-0000-0001-000000000002',
 }
+
+// WP A2 — buildClaudeSystem now takes the firm's own facts instead of
+// hardcoding Pacheco Law/NC. This suite is about act-in-place scoping, not
+// jurisdiction content, so a minimal stand-in firm.
+const TEST_FIRM: AssistantFirmFacts = { firmName: 'Test Firm' }
 
 // The empty capture buckets buildAttorneyClientTools needs — none are written by
 // mere construction (the tools only push on run()), so they stay empty here.
@@ -128,7 +134,7 @@ describe('compose_email capture behavior', () => {
 
 describe('act-in-place system-prompt blocks', () => {
   it('teaches composing + signature on a matter scope', () => {
-    const system = buildClaudeSystem('matter', MATTER_ID, null)
+    const system = buildClaudeSystem('matter', MATTER_ID, null, TEST_FIRM)
     expect(system).toContain('COMPOSING CLIENT EMAILS')
     expect(system).toContain('SENDING FOR SIGNATURE')
     // The honesty rule rides the block: the composer is the review.
@@ -136,13 +142,13 @@ describe('act-in-place system-prompt blocks', () => {
   })
 
   it('teaches composing but not signature on a contact scope', () => {
-    const system = buildClaudeSystem('contact', CONTACT_ID, null)
+    const system = buildClaudeSystem('contact', CONTACT_ID, null, TEST_FIRM)
     expect(system).toContain('COMPOSING CLIENT EMAILS')
     expect(system).not.toContain('SENDING FOR SIGNATURE')
   })
 
   it('teaches neither on a global scope (dormancy)', () => {
-    const system = buildClaudeSystem('global', null, null)
+    const system = buildClaudeSystem('global', null, null, TEST_FIRM)
     expect(system).not.toContain('COMPOSING CLIENT EMAILS')
     expect(system).not.toContain('SENDING FOR SIGNATURE')
     expect(system).not.toContain('compose_email')

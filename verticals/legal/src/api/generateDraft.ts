@@ -12,6 +12,7 @@ import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } fr
 import { getMatter } from '../queries/matters.js'
 import { renderTemplate, buildMergeData } from './templateMerge.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
+import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 import {
   loadForcedSkills,
   buildActiveSkillsText,
@@ -201,6 +202,9 @@ export async function runDraftGeneration(
   }
 
   const m = matter!
+  // WP A2 — the matter's own resolved jurisdiction (matter fact, else the
+  // firm's home jurisdiction, else honest unset). NEVER a hardcoded 'NC'.
+  const jurisdiction = await resolveMatterJurisdiction(agentCtx, input.matterEntityId)
   // Document-BODY selection is now config-as-data, per document kind (Doc-Types
   // PR1): an attorney-authored template in the service config wins; otherwise a
   // bundled repo body for the two Phase-0 kinds (the operating-agreement body is
@@ -285,7 +289,7 @@ export async function runDraftGeneration(
         matter_entity_id: input.matterEntityId,
         document_kind: input.documentKind,
         document_markdown: markdown,
-        jurisdiction: 'NC',
+        jurisdiction: jurisdiction?.code ?? null,
         template_id: templateId,
         missing_fields: missingFields,
         supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
@@ -329,13 +333,14 @@ export async function runDraftGeneration(
   // Skills applied to this draft = attorney-selected (force-applied) PLUS the right
   // jurisdiction playbook auto-resolved from the document kind, so a draft always gets
   // the correct legal skill even when the attorney picked none. Jurisdiction mirrors
-  // the draft.generate binding below (NC). The resolver is conservative — it returns
-  // nothing unless a skill strongly matches the document kind — so a first draft with
-  // no good match behaves exactly as before. Attorney picks lead; auto picks are
+  // the draft.generate binding below (the matter's own resolved jurisdiction, never a
+  // hardcoded 'NC'). The resolver is conservative — it returns nothing unless a skill
+  // strongly matches the document kind — so an unset jurisdiction or a first draft
+  // with no good match behaves exactly as before. Attorney picks lead; auto picks are
   // appended and de-duped.
   const autoSkillSlugs = await resolveJurisdictionSkillSlugs(agentCtx, {
     documentKind: input.documentKind,
-    jurisdiction: 'NC',
+    jurisdiction: jurisdiction?.code,
   })
   const skillSlugs = [...new Set([...(input.skillSlugs ?? []), ...autoSkillSlugs])]
   const forcedSkills = await loadForcedSkills(agentCtx, skillSlugs)
@@ -418,7 +423,7 @@ export async function runDraftGeneration(
       document_markdown: result.documentMarkdown,
       model_identity: result.modelIdentity,
       reasoning_trace_id: reasoningTraceId,
-      jurisdiction: 'NC',
+      jurisdiction: jurisdiction?.code ?? null,
       confidence: clampConfidence(result.reasoningTrace.confidence),
       supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
       // Token usage (snake_case, same shape recordAssistantTurn writes on

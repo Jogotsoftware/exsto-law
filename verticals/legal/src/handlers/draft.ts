@@ -42,7 +42,9 @@ interface PersistDraftArgs {
   // attribute/label.
   documentKind: string
   documentMarkdown: string
-  jurisdiction: string
+  // WP A2 — the matter's resolved jurisdiction, or null when neither the
+  // matter nor the firm has one on file (honest unset, never a guessed 'NC').
+  jurisdiction: string | null
   generationMode: GenerationMode
   // Set for ai_draft (the trace is mandatory there); null for template_merge.
   reasoningTraceId: string | null
@@ -171,10 +173,23 @@ async function persistDraftDocument(
       },
     )
 
-    const draftAttrs: Array<{ kind: string; value: unknown; confidence?: number }> = [
+    const draftAttrs: Array<{
+      kind: string
+      value: unknown
+      confidence?: number
+      knowabilityState?: string
+    }> = [
       { kind: 'document_kind', value: p.documentKind },
       { kind: 'draft_status', value: 'pending_review' },
-      { kind: 'document_jurisdiction', value: p.jurisdiction },
+      // WP A2 — jurisdiction is honest-nullable (the matter/firm may not have
+      // one on file yet). A null value is knowability 'never_observed', never
+      // 'observed' — the substrate must distinguish "we don't know" from "we
+      // know there is nothing" (hard rule 5).
+      {
+        kind: 'document_jurisdiction',
+        value: p.jurisdiction,
+        knowabilityState: p.jurisdiction == null ? 'never_observed' : 'observed',
+      },
       { kind: 'generation_mode', value: p.generationMode },
     ]
     if (p.confidence != null)
@@ -192,6 +207,7 @@ async function persistDraftDocument(
         attributeKindId: akId,
         value: a.value,
         confidence: a.confidence ?? 1.0,
+        knowabilityState: a.knowabilityState,
         sourceType: p.sourceType,
         sourceRef: p.sourceRef,
       })
@@ -325,7 +341,7 @@ interface DraftGeneratePayload {
   document_markdown: string
   model_identity: string
   reasoning_trace_id: string
-  jurisdiction: string
+  jurisdiction: string | null
   confidence?: number
   // AI document review (reviewDocument.ts): the memo is persisted through this
   // same action so it lands in the review queue unchanged. 'ai_review' is the
@@ -411,7 +427,7 @@ interface DraftMergePayload {
   matter_entity_id: string
   document_kind: string
   document_markdown: string
-  jurisdiction: string
+  jurisdiction: string | null
   // The template the merge rendered (config version vs bundled repo), for audit.
   template_id?: string
   // Slots left unfilled by the deterministic merge — surfaced to the attorney.

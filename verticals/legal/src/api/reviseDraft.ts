@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { callClaudeDrafter } from '../adapters/claude.js'
 import { getDraftVersion } from '../queries/drafts.js'
+import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
 // same actor generateDraft.ts records its reasoning traces under.
@@ -56,10 +57,15 @@ export async function reviseDraftText(
   const currentMarkdown = input.baseMarkdown?.trim() ? input.baseMarkdown : base.bodyMarkdown
   if (!currentMarkdown.trim()) throw new Error('The document to revise is empty.')
 
+  // WP A2 — the matter's own resolved jurisdiction (matter fact, else the
+  // firm's home jurisdiction, else honest unset). NEVER a hardcoded 'NC'.
+  const jurisdiction = await resolveMatterJurisdiction(ctx, base.matterEntityId)
+
   const prompt = buildRevisionPrompt({
     currentMarkdown,
     documentKind: base.documentKind,
     instruction,
+    jurisdictionDisplayName: jurisdiction?.displayName ?? null,
   })
 
   const result = await callClaudeDrafter(ctx.tenantId, { prompt, task: 'draft_revise' })
@@ -89,13 +95,20 @@ interface RevisionPromptArgs {
   currentMarkdown: string
   documentKind: string
   instruction: string
+  // WP A2 — the matter's resolved jurisdiction display name, or null when
+  // NEITHER the matter nor the firm has one on file. null must NOT fall back
+  // to a guessed jurisdiction — the prompt tells the model to say so instead.
+  jurisdictionDisplayName?: string | null
 }
 
 // The model returns the FULL revised document first, then a fenced ```json trace
 // — the same two-part contract callClaudeDrafter (splitDocumentAndTrace) parses.
 export function buildRevisionPrompt(args: RevisionPromptArgs): string {
   const kindLabel = args.documentKind.replace(/_/g, ' ')
-  return `You are a legal drafting assistant revising an existing ${kindLabel} at the reviewing attorney's request, under North Carolina law.
+  const governingLawLine = args.jurisdictionDisplayName
+    ? `under ${args.jurisdictionDisplayName} law.`
+    : 'the governing jurisdiction is NOT SET — do not assume one; open with a bolded "Governing law to be confirmed" note and avoid state-specific provisions.'
+  return `You are a legal drafting assistant revising an existing ${kindLabel} at the reviewing attorney's request, ${governingLawLine}
 
 Output the COMPLETE revised document as clean markdown — not a diff, not a summary, the whole document. The attorney will review your changes as tracked redlines (deletions and insertions) against the current version, then accept or reject them. Make ONLY the changes the instruction calls for: preserve the document's structure, headings, parties, defined terms, and every passage the instruction does not touch, so the redline stays tight and legible.
 

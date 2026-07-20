@@ -5,6 +5,7 @@ import {
   type ActionContext,
   type ActionResult,
 } from '@exsto/substrate'
+import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 
 const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
 
@@ -39,6 +40,9 @@ export async function cacheDraft(
     trace: input.reasoningTrace,
     modelIdentity: input.modelIdentity,
   })
+  // WP A2 — the matter's own resolved jurisdiction (matter fact, else the
+  // firm's home jurisdiction, else honest unset). NEVER a hardcoded 'NC'.
+  const jurisdiction = await resolveMatterJurisdiction(ctx, input.matterEntityId)
 
   return submitAction(ctx, {
     actionKindName: 'draft.generate',
@@ -50,7 +54,7 @@ export async function cacheDraft(
       document_markdown: input.documentMarkdown,
       model_identity: input.modelIdentity,
       reasoning_trace_id: traceId,
-      jurisdiction: 'NC',
+      jurisdiction: jurisdiction?.code ?? null,
     },
   })
 }

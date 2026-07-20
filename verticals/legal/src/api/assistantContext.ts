@@ -31,6 +31,9 @@ import { listTasksByMatter } from '../queries/tasks.js'
 import { listMeetingsForMatter } from '../queries/meetings.js'
 import { listMatterInvoiced } from '../queries/billing.js'
 import { matterCommunicationBodies, type MatterMessageBody } from './mailWorkspace.js'
+import { getTenantSettingsForMerge } from './tenantSettings.js'
+import { resolveMatterJurisdiction, type ResolvedJurisdiction } from './matterJurisdiction.js'
+import { jurisdictionDisplayName } from './jurisdictions.js'
 
 export interface AssistantContext {
   full: string
@@ -49,7 +52,49 @@ export function parseContextDepth(v: unknown): ContextDepth {
   return v === 'lean' || v === 'balanced' || v === 'generous' ? v : DEFAULT_CONTEXT_DEPTH
 }
 
-const JURISDICTION = 'U.S. North Carolina business-law firm'
+// WP A2 — the non-confidential firm/jurisdiction line that frames an EXTERNAL
+// research call (Perplexity). Used to be a hardcoded NC constant; now derived
+// from the firm's own facts, honest-unset falling back to a jurisdiction-free
+// description rather than guessing NC for every clone of this app.
+//
+// Split into a PURE core (buildFirmJurisdictionLine / buildResearchJurisdictionLine
+// — no DB, unit-testable with zero fixtures) and thin ctx-reading wrappers, the
+// same shape as matterJurisdiction.ts's resolveJurisdictionChain split.
+export function buildFirmJurisdictionLine(firm: {
+  firmJurisdiction: string | null
+  practiceAreas: string[] | null
+}): string {
+  const displayName = jurisdictionDisplayName(firm.firmJurisdiction)
+  if (!displayName) return 'U.S. law firm'
+  const practiceArea = firm.practiceAreas?.length ? firm.practiceAreas.join('/') : 'business-law'
+  return `U.S. ${displayName} ${practiceArea} firm`
+}
+
+// Matter-scoped variant: the MATTER's own resolved jurisdiction (matter fact,
+// else the firm's home jurisdiction, else the firm-wide honest-unset line
+// above) — never a hardcoded 'NC'.
+export function buildResearchJurisdictionLine(
+  matterJurisdiction: ResolvedJurisdiction | null,
+  firm: { firmJurisdiction: string | null; practiceAreas: string[] | null },
+): string {
+  if (matterJurisdiction) return `U.S. ${matterJurisdiction.displayName} business-law firm`
+  return buildFirmJurisdictionLine(firm)
+}
+
+async function resolveFirmJurisdictionLine(ctx: ActionContext): Promise<string> {
+  return buildFirmJurisdictionLine(await getTenantSettingsForMerge(ctx))
+}
+
+async function resolveMatterJurisdictionLine(
+  ctx: ActionContext,
+  matterEntityId: string,
+): Promise<string> {
+  const resolved = await resolveMatterJurisdiction(ctx, matterEntityId)
+  if (resolved) return `U.S. ${resolved.displayName} business-law firm`
+  // resolveMatterJurisdiction already falls through matter → firm, so a null
+  // result means the firm rung is null too — no second (redundant) read needed.
+  return resolveFirmJurisdictionLine(ctx)
+}
 
 interface DepthBudget {
   emailCount: number
@@ -414,10 +459,11 @@ export async function buildMatterAssistantContext(
 
   const data = wrapData(sections)
   const full = data ? `${header.join('\n')}\n\n${data}` : header.join('\n')
+  const jurisdictionLine = await resolveMatterJurisdictionLine(ctx, matterEntityId)
 
   return {
     full,
-    framing: `Context: ${JURISDICTION}; practice area ${matter.serviceKey || 'business law'}.`,
+    framing: `Context: ${jurisdictionLine}; practice area ${matter.serviceKey || 'business law'}.`,
     label: `Matter ${matter.matterNumber}`,
   }
 }
@@ -459,10 +505,11 @@ export async function buildContactAssistantContext(
 
   const data = wrapData(matterSections)
   const full = data ? `${header.join('\n')}\n\n${data}` : header.join('\n')
+  const jurisdictionLine = await resolveFirmJurisdictionLine(ctx)
 
   return {
     full,
-    framing: `Context: ${JURISDICTION}; a business-law client contact.`,
+    framing: `Context: ${jurisdictionLine}; a business-law client contact.`,
     label: contact.fullName || contact.companyName || 'Contact',
   }
 }
