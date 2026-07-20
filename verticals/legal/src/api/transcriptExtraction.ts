@@ -173,7 +173,11 @@ export async function runTranscriptExtraction(
     .replaceAll('{{matter_facts_json}}', () => JSON.stringify(matterFacts, null, 2))
     .replaceAll('{{transcript_text}}', () => transcriptText)
 
-  const model = await callClaudeDrafter(agentCtx.tenantId, { prompt, maxTokens: 6000 })
+  const model = await callClaudeDrafter(agentCtx.tenantId, {
+    prompt,
+    maxTokens: 6000,
+    task: 'transcript_extract',
+  })
   const parsed = parseExtractionOutput(model.documentMarkdown)
   if (!parsed.summary.trim()) {
     throw new Error('Transcript extraction produced no summary — nothing recorded (no-simulate).')

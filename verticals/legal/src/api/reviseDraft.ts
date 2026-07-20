@@ -62,7 +62,7 @@ export async function reviseDraftText(
     instruction,
   })
 
-  const result = await callClaudeDrafter(ctx.tenantId, { prompt })
+  const result = await callClaudeDrafter(ctx.tenantId, { prompt, task: 'draft_revise' })
   if (!result.documentMarkdown.trim()) {
     throw new Error('The revision came back empty. Try rephrasing the instruction.')
   }

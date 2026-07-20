@@ -181,7 +181,11 @@ export async function composeEmailDraft(
   // Never a rewrite, never a block — a still-failing draft reaches the attorney
   // flagged, and a clean pass records voice_violations: [] so the receipt is
   // queryable either way.
-  let chosen = await callClaudeDrafter(agentCtx.tenantId, { prompt, maxTokens: 4000 })
+  let chosen = await callClaudeDrafter(agentCtx.tenantId, {
+    prompt,
+    maxTokens: 4000,
+    task: 'email_generate',
+  })
   let promptUsed = prompt
   let parsed = parseEmailDraftOutput(chosen.documentMarkdown, fallbackSubject)
   let violations = checkEmailVoice(parsed.subject, parsed.body)
@@ -194,6 +198,7 @@ export async function composeEmailDraft(
       const retry = await callClaudeDrafter(agentCtx.tenantId, {
         prompt: retryPrompt,
         maxTokens: 4000,
+        task: 'email_generate',
       })
       const reparsed = parseEmailDraftOutput(retry.documentMarkdown, fallbackSubject)
       chosen = retry

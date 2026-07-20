@@ -450,7 +450,11 @@ export async function runDocumentReview(
   })
 
   // Call 1 — the review memo (+ structured trace).
-  const result = await callClaudeDrafter(agentCtx.tenantId, { prompt, maxTokens: 8000 })
+  const result = await callClaudeDrafter(agentCtx.tenantId, {
+    prompt,
+    maxTokens: 8000,
+    task: 'doc_review',
+  })
 
   const reasoningTraceId = await persistReviewTrace(agentCtx, {
     prompt,
@@ -477,6 +481,7 @@ export async function runDocumentReview(
       const redline = await callClaudeDrafter(agentCtx.tenantId, {
         prompt: redlinePrompt,
         maxTokens: 16000,
+        task: 'redline',
       })
       redlineText = redline.documentMarkdown
       redlineTraceId = await persistReviewTrace(agentCtx, {

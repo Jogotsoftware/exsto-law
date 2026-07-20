@@ -24,10 +24,10 @@ import {
 import { runPerplexityResearch, streamPerplexityResearch } from '../adapters/perplexity.js'
 import {
   resolveAssistantModel,
-  chooseAutoModel,
   type AssistantModel,
   type AssistantProvider,
 } from './assistantModels.js'
+import { resolveConcreteAssistantModelId } from '../lib/modelRouter.js'
 import {
   buildMatterAssistantContext,
   buildContactAssistantContext,
@@ -1258,15 +1258,23 @@ async function recordQuestionWithoutCardObservation(
 // chooseAutoModel). Resolution happens here so 'auto' never reaches the adapter
 // and meta/persistence carry the model the attorney actually got; an explicit
 // pick passes through untouched.
+// AI-CONTEXT C1 — refactored onto the router's resolveConcreteAssistantModelId
+// (the same Auto-resolution standaloneTemplates.ts now uses); no behavior
+// change — an Auto pick still resolves via chooseAutoModel and is looked back
+// up in the catalog exactly as before, a non-Auto pick still passes through.
 function resolveTurnModel(input: AssistantChatInput): AssistantModel | null {
   const model = resolveAssistantModel(input.modelId)
-  if (!model || model.provider !== 'anthropic' || model.model !== 'auto') return model
-  const concrete = chooseAutoModel({
+  if (!model) return null
+  const concreteId = resolveConcreteAssistantModelId(input.modelId, {
     message: input.message,
     buildMode: input.buildMode,
     historyChars: (input.history ?? []).reduce((n, t) => n + t.content.length, 0),
   })
-  return resolveAssistantModel(`anthropic:${concrete}`)
+  if (!concreteId) return null
+  if (model.provider === 'anthropic' && model.model === 'auto') {
+    return resolveAssistantModel(`anthropic:${concreteId}`)
+  }
+  return model
 }
 
 export async function assistantChat(

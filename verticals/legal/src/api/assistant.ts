@@ -1,5 +1,6 @@
 import { submitAction, type ActionContext } from '@exsto/substrate'
 import { chatWithAssistant, type ChatMessage } from '../adapters/claude.js'
+import { resolveModelForTask } from '../lib/modelRouter.js'
 
 // The page the attorney was on when they opened the assistant, plus an optional
 // intent flag the widget sets (e.g. a "Leave feedback" entry point). Kept open
@@ -107,7 +108,15 @@ export async function askAssistant(
     { role: 'user', content: message },
   ]
 
-  const reply = await chatWithAssistant(ctx.tenantId, messages)
+  // AI-CONTEXT C1 — tags this legacy in-app-help chat as chat_turn so it goes
+  // through the router (behavior unchanged: chat_turn's registry default is
+  // the same sonnet value this call used to get from the adapter's now-removed
+  // DEFAULT_MODEL fallback).
+  const reply = await chatWithAssistant(
+    ctx.tenantId,
+    messages,
+    resolveModelForTask('chat_turn').model,
+  )
 
   const kind = classifyKind(message, input.pageContext)
   await recordFeedback(ctx, { message, reply, pageContext: input.pageContext, kind })

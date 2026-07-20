@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { chatWithAssistantDetailed } from '../adapters/claude.js'
+import { resolveModelForTask } from '../lib/modelRouter.js'
 import { aiEnhanceTemplate } from './standaloneTemplates.js'
 import { validateProposedQuestionnaire } from './intakeAuthoring.js'
 import { validateProposedLifecycle } from './workflowAuthoring.js'
@@ -60,10 +61,17 @@ export async function enqueueConfigRegenerate(
 // must be a single JSON value; tolerate a fenced block (the adapter's stop-slop
 // habits) but nothing else.
 async function oneShotJson(tenantId: string, system: string, user: string): Promise<unknown> {
-  const { reply } = await chatWithAssistantDetailed(tenantId, [
-    { role: 'system', content: system },
-    { role: 'user', content: user },
-  ])
+  // AI-CONTEXT C1 — tagged config_regenerate so this goes through the router
+  // (was an unset opts.model, silently hitting the adapter's chat_turn
+  // fallback before this WP).
+  const { reply } = await chatWithAssistantDetailed(
+    tenantId,
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { model: resolveModelForTask('config_regenerate').model },
+  )
   const fenced = reply.match(/```(?:json)?\s*\n([\s\S]*?)\n```/)
   const raw = ((fenced ? fenced[1] : reply) ?? '').trim()
   return JSON.parse(raw)
