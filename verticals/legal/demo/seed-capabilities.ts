@@ -23,8 +23,21 @@ import { upsertCapability, type UpsertCapabilityInput } from '@exsto/legal'
 import { type ActionContext } from '@exsto/substrate'
 
 // Registry contract upgrades apply wherever the capabilities live. Defaults to
-// tenant zero (Pacheco pilot — where the 21 live); SEED_TENANT overrides it so the
-// same contract can be provisioned into the sandbox tenant for runtime testing.
+// tenant zero — STALE LABEL FIXED (B3.1): this comment used to call tenant zero
+// "Pacheco pilot," which was true when it was written but has not been true since
+// migration 0166 (FIRM-PROVISIONING-1) re-slugged 00000000…0001 to "Dev Firm" and
+// stood up the REAL Pacheco Law tenant at a different id
+// (ae5530a1-05c7-4241-a38e-79bd186c1bbb). Capabilities are tenant-scoped entities
+// (queries/capabilities.ts) and are NOT cloned by tenant bootstrap/vocab-sync
+// (0174's header excludes "skills/capability libraries" by design, deferring them
+// to a firm-config replay). Net effect: the real Pacheco tenant has never had this
+// catalog seeded, so get_capability_context legitimately returns no `esignature`
+// entry there today even though the feature is fully live — the assistant is not
+// hallucinating, the catalog for THAT tenant is just empty. Root-caused during the
+// B3.1 product-walk trace (2026-07-20); replay via
+// SEED_TENANT=ae5530a1-05c7-4241-a38e-79bd186c1bbb is the fix, still pending.
+// SEED_TENANT overrides the default so the same contract can be provisioned into
+// the sandbox tenant (or, per the above, the real Pacheco tenant) for runtime use.
 const TENANT = process.env.SEED_TENANT ?? '00000000-0000-0000-0000-000000000001'
 const ADMIN = '00000000-0000-0000-0001-000000000004' // seeded Claude agent actor
 

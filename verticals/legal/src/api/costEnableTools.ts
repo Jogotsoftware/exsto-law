@@ -19,7 +19,7 @@ import type { ClientTool } from '../adapters/claude.js'
 import { validateProposedCost, SERVICE_COST_TYPES, type CostProposal } from './costAuthoring.js'
 import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
-import type { ServiceCostType } from './services.js'
+import { getService, type ServiceCostType } from './services.js'
 
 // ─── propose_cost ───────────────────────────────────────────────────────────
 
@@ -162,6 +162,12 @@ export interface EnableProposal {
   // the completion summary as a bulleted list ("Review client intake", "AI
   // first-pass review", "Attorney approves", …) instead of a comma-run.
   completion?: string[]
+  // The service's attorney-authored display name (e.g. "Single-Member LLC Operating
+  // Agreement"), correctly cased. The card title MUST use this — never derive a
+  // title by title-casing serviceKey (a mechanical snake_case→Title Case pass
+  // mangles acronyms: "single_member_llc" → "Single Member Llc"). Undefined only if
+  // the service read fails; the card falls back to the raw key in that case.
+  displayName?: string
 }
 
 const PROPOSE_ENABLE_TOOL_DEF = {
@@ -208,12 +214,24 @@ export function buildProposeEnableTool(ctx: ActionContext, captured: EnablePropo
       } catch {
         // omit the checklist rather than fail the proposal
       }
+      // The card's title MUST be the attorney-authored display name, never a
+      // mechanical title-case of the slug (that mangles acronyms, e.g.
+      // "single_member_llc" → "Single Member Llc"). Best-effort — a read failure
+      // just omits it, and the card falls back to the raw key rather than guessing.
+      let displayName: string | undefined
+      try {
+        const service = await getService(ctx, serviceKey)
+        if (service?.displayName) displayName = service.displayName
+      } catch {
+        // omit — the card falls back to the raw serviceKey rather than a title-cased guess
+      }
       captured.push({
         serviceKey,
         summary:
           (args.summary ?? '').trim() ||
           `${serviceKey} is complete — approve to make it live and bookable.`,
         completion,
+        displayName,
       })
       return `The Enable step for "${serviceKey}" is shown to the attorney as the final approval card; the service goes live only when they approve. This is the LAST step — the build is complete. Reply with ONE short sentence telling them to approve it to go live. Do NOT start another step or claim it is live yet.`
     },

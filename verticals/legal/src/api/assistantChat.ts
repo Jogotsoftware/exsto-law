@@ -314,6 +314,9 @@ export type AssistantChatStreamEvent =
       serviceKey: string
       summary: string
       completion?: string[]
+      // The service's attorney-authored display name — the card title. Never a
+      // title-cased derivation of serviceKey (mangles acronyms like "LLC").
+      displayName?: string
     }
   // The assistant ASKED a structured interview question (Build-Wizard Phase 7). The UI
   // renders it as a click-to-answer QuestionCard (choice buttons + optional text box);
@@ -2018,6 +2021,7 @@ export async function* assistantChatStream(
         serviceKey: p.serviceKey,
         summary: p.summary,
         completion: p.completion,
+        displayName: p.displayName,
       }
     }
     // Surface structured interview questions captured this turn (Phase 7) as click-to-

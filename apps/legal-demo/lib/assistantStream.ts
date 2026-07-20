@@ -182,6 +182,10 @@ export interface EnableProposalEvent {
   summary: string
   // BUILDER-UX-1 WP-2.1 — the completed service's steps, rendered as bullets.
   completion?: string[]
+  // The service's attorney-authored display name — the card title. Undefined only
+  // if the server-side service read failed (falls back to the raw key, never a
+  // title-cased guess — see EnableProposalCard).
+  displayName?: string
 }
 
 // ASSISTANT-ACTS-1: the assistant composed a client email (compose_email) — the
@@ -412,6 +416,7 @@ export async function streamAssistant(
           serviceKey: String(evt.serviceKey ?? ''),
           summary: String(evt.summary ?? ''),
           completion: Array.isArray(evt.completion) ? (evt.completion as string[]) : undefined,
+          displayName: typeof evt.displayName === 'string' ? evt.displayName : undefined,
         })
         break
       case 'kind_proposal':

@@ -181,20 +181,29 @@ function sortOrderOf(r: WorkflowRow): number {
   return typeof r.transitions.sort_order === 'number' ? r.transitions.sort_order : 99
 }
 
-// Resolve the questionnaire for a service from the three-tier fallback:
-// in-app config → repo file → empty. Always returns a well-formed IntakeSchema.
+// Resolve the questionnaire for a service from the two-tier fallback: in-app
+// config → repo file → empty. Always returns a well-formed IntakeSchema (never
+// null — mapRow's ServiceDefinition.intakeSchema is a non-optional field; the
+// booking page and other truthy-checking callers need a real object with
+// possibly-empty sections, not null).
+//
+// B3.1 (product-walk trace, 2026-07-20): this used to be a SEPARATE
+// re-implementation of the exact same config-first/repo-fallback resolution
+// resolveQuestionnaireDoc (below) already does — a real inconsistency risk,
+// since the two disagreed on the terminal "nothing resolves" case (this one
+// returned `{sections:[]}`, that one returned `null`) even though every current
+// caller happens to treat both as "no questionnaire" today. Delegating here
+// makes it ONE resolution path, config-first, with a single place to fix if the
+// fallback logic ever needs to change.
 function resolveIntakeSchema(
   configured: IntakeSchema | undefined,
   intakeFormId: string,
 ): IntakeSchema {
-  if (configured && Array.isArray(configured.sections)) {
-    return { sections: configured.sections }
-  }
-  try {
-    return { sections: loadIntakeForm(intakeFormId).sections }
-  } catch {
-    return { sections: [] }
-  }
+  const doc = resolveQuestionnaireDoc(
+    { intake_schema: configured, intake_form_id: intakeFormId },
+    '',
+  )
+  return { sections: doc?.sections ?? [] }
 }
 
 // A money decimal string (ADR 0044): non-negative, up to 2 fractional digits.

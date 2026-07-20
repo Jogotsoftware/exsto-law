@@ -484,7 +484,14 @@ function storeModelId(id: string): void {
 // vocab live here, revealed only when the attorney chooses to expand (the Claude
 // pattern: clean by default, transparent on demand). Reasoning is plain summarized text
 // (not markdown/machinery), so it's rendered verbatim, not through renderMarkdown.
-function ReasoningDisclosure({ reasoning }: { reasoning: string }) {
+//
+// B3.2 (chat polish): the toggle read "Thinking" even for a turn that finished long
+// ago — confusing, since the turn is done, not currently thinking. `isLive` is true
+// only while this is the newest turn AND the assistant is still actively working on
+// this exchange (the caller passes `streaming !== null && i === lastIndex`); the
+// label reflects that live/settled distinction and flips to "See Reasoning" the
+// moment the turn completes.
+function ReasoningDisclosure({ reasoning, isLive }: { reasoning: string; isLive: boolean }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="uac-reasoning">
@@ -496,7 +503,7 @@ function ReasoningDisclosure({ reasoning }: { reasoning: string }) {
       >
         {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         <GemCluster size={14} />
-        <span>Thinking</span>
+        <span>{isLive ? 'Thinking' : 'See Reasoning'}</span>
       </button>
       {open && <div className="uac-reasoning-body">{reasoning}</div>}
     </div>
@@ -3633,7 +3640,10 @@ export function UnifiedAssistantChat({
                     chrome on every builder turn (interview cards and proposal cards
                     alike). */}
                   {!buildMode && !t.buildQuestions?.length && t.reasoning?.trim() && (
-                    <ReasoningDisclosure reasoning={t.reasoning} />
+                    <ReasoningDisclosure
+                      reasoning={t.reasoning}
+                      isLive={streaming !== null && i === visibleTurns.length - 1}
+                    />
                   )}
                   {/* Documents the assistant produced — downloadable deliverables
                     (PDF/Word + save to matter), not the prose. Downloads attach
