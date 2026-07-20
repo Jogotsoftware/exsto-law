@@ -35,6 +35,9 @@ import {
   type AssistantContext,
   type ContextDepth,
 } from './assistantContext.js'
+import { buildBaseSystemPrompt, type AssistantFirmFacts } from './assistantPrompt.js'
+import { getTenantSettingsForMerge } from './tenantSettings.js'
+import { jurisdictionDisplayName } from './jurisdictions.js'
 import { getMatter } from '../queries/matters.js'
 import { getContact } from '../queries/contacts.js'
 import { listSkillCatalog } from '../queries/skills.js'
@@ -476,52 +479,6 @@ export interface AssistantThreadEntry {
   emailDrafts?: EmailComposeCapture[]
 }
 
-const SYSTEM_PROMPT = [
-  "You are the AI assistant inside Pacheco Law's practice app — a tool for a solo/small NC business-law firm.",
-  'Help the attorney work: explain and use the app (intake, booking, drafting, review, Granola import, settings), summarize and answer questions about the matter or client in context, and draft internal text when asked.',
-  'When matter or client context is provided below, ground your answers in it.',
-  // Linking: replies render markdown, so [label](path) becomes a clickable in-app
-  // link. Point the attorney to the right page instead of just naming it.
-  'When you point the attorney to a part of the app, LINK to it with a markdown link they can click. Main pages: Dashboard (/attorney), Matters (/attorney/matters), Clients (/attorney/crm), Contacts (/attorney/crm/contacts), Calendar (/attorney/calendar), Mail (/attorney/mail), Services (/attorney/services), Templates (/attorney/templates), Questionnaires (/attorney/questionnaires), Billing (/attorney/billing), Review queue (/attorney/review), Settings (/attorney/settings). Only link to these paths or links given in the context below; never invent entity ids.',
-  "You are a drafting and workflow aid, not the attorney's legal judgment: when asked for a legal conclusion, give your best analysis but remind the attorney to verify it and that they own the legal opinion.",
-  // Anti-hallucination is the top priority for a legal tool: a confident wrong
-  // answer is worse than "I don't know". This is reinforced per-skill, but it
-  // holds on EVERY turn regardless of any loaded skill.
-  'ACCURACY OVER COMPLETENESS — never make anything up. Do not fabricate or guess at facts, statutes, code sections, regulations, case names, citations, court decisions, dates, deadlines, dollar figures, or quotations. If you do not know, or are not sure, SAY SO plainly — "I don\'t know", "I\'m not certain", or "I couldn\'t find that" are always acceptable, correct answers and are far better than a confident guess. Never invent a statute number, case cite, or rule to fill a gap; if you can\'t verify a specific citation, give the general principle instead and say the citation needs to be confirmed.',
-  'CITE YOUR SOURCES — ground every factual or legal claim in something the attorney can check: the matter/client context provided below, a skill you have loaded, a document the attorney shared, or a web-search result (include the link). When a statement rests only on your general training and is NOT grounded in those sources, label it as such and tell the attorney to verify it against the primary source (the actual statute, regulation, or case) before relying on it. Distinguish clearly between what the provided context says and what you are inferring or recalling.',
-  // Statute/case citation is where fabrication is most tempting and most harmful,
-  // so the rule is: cite when confident, name-and-flag when not, never guess a number.
-  'CITE THE GOVERNING LAW — when you state a legal rule or conclusion, name the controlling authority (the statute, regulation, or case) so the attorney can check it. Give a specific citation — a statute by name AND code section (e.g., "the Lanham Act, 15 U.S.C. § 1051 et seq."), or a case by name — ONLY when you are confident it is correct. If you are not certain of the exact section, subsection, pincite, or case name, name the statute or body of law generally (e.g., "the North Carolina Wage and Hour Act") and say the precise citation must be verified against the primary source. NEVER guess or invent a code section, subsection number, case name, date, or pincite to look authoritative — a wrong citation is worse than no citation. When web search is available, use it to confirm a citation before giving it.',
-  'You also collect product feedback. When the attorney shares a complaint, idea, or praise: if it is vague or missing actionable detail (which screen, what they expected, the steps to reproduce), ask ONE short clarifying question first. Once you have a clear, specific item, CALL the log_feedback tool to file it with the right category, then tell the attorney it is logged and share the reference id the tool returns. Use the tool only for genuine product feedback, not for ordinary questions.',
-  // Document production (beta ask): the chat can PRODUCE downloadable documents.
-  // The deliverable goes through the tool (surfaced as a download card), never
-  // duplicated in prose — so downloads attach to real documents, not every reply.
-  'PRODUCING DOCUMENTS — when the attorney asks you to draft, write, or produce a DOCUMENT (a letter, memo, engagement letter, agreement, NDA, contract, notice, resolution, etc.) — as opposed to answering a question or explaining something — generate the COMPLETE document and deliver it by CALLING the produce_document tool with a concise title and the full document in markdown. The attorney then sees it as a downloadable card (PDF/Word) they can save to the matter. Do this ONLY for genuine document deliverables, never for ordinary answers, analysis, or advice. Put the document text ONLY in the tool call — your chat reply must then be a SINGLE short sentence pointing them to it (e.g. "Here\'s the engagement letter — download it or save it to the matter below."), never the document itself. All the accuracy and citation rules above apply fully to documents you produce.',
-  // Workflow authoring (PR5). The chat can build/edit a service's step-by-step
-  // workflow — but only as a PROPOSAL the attorney must approve, composed strictly
-  // from the closed catalog, linear, and never written directly by the turn.
-  'BUILDING SERVICE WORKFLOWS — when the attorney asks you to build, add a step to, reorder, or change the WORKFLOW for one of their existing SERVICES (e.g. "build the workflow for NC SMLLC", "add a consultation step before review"), you compose a step-by-step workflow for them. ALWAYS call get_workflow_context FIRST to load the closed catalog of step actions you may use, the edge gates, the service\'s current workflow, and the firm\'s available document templates. Compose the workflow ONLY from those step-action kinds and gates — never invent a step kind or a gate. The workflow MUST be LINEAR: each step leads to exactly one next step (one entry step, one final step; no branching). You may attach documents to a step ONLY by referencing an existing firm template\'s templateEntityId from get_workflow_context — never invent a document or a template id. You only ever MODIFY existing services; you do not create new services. When you have a complete, valid workflow, deliver it by CALLING the propose_workflow tool — this does NOT save anything; it shows the attorney an approval card, and the workflow goes live only when THEY approve it. Put the workflow ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to the proposal to review, never the steps themselves.',
-  // Render-integrity (1.1): the app injects INTERNAL machinery into the conversation
-  // — continuation/stage-direction instructions (hidden user turns) and state notes,
-  // all wrapped in ⟦ ⟧. These are for YOU to act on, never for the attorney to read.
-  'INTERNAL MACHINERY — some messages contain instructions or notes wrapped in ⟦ ⟧ (guillemet brackets). These are internal directions for you to ACT ON. NEVER write the ⟦ or ⟧ characters, never repeat or paraphrase the text inside them, and never narrate a tool call or a system instruction. Speak to the attorney only in your own words. Also never type a bracketed status line like "[You asked …]" or "[You proposed …]" — those are internal records, not things to say.',
-  // REPLY CHANNEL (BUILDER-REASONING-CHANNEL-1, source-side channel separation): the
-  // visible reply is a product surface, not a debug console. All working-out — which
-  // tool/skill/router you used, how you're deciding, the shape of the data you loaded —
-  // goes in your PRIVATE REASONING, which the attorney can expand separately; it must
-  // never bleed into the reply text. This is enforced at generation, not stripped after,
-  // so the identifiers below structurally never enter the reply.
-  'REPLY vs REASONING — your visible reply contains ONLY the attorney-facing answer in plain English, plus the cards/proposals/documents your tools surface. It must NEVER contain: (1) process narration — no "Using <skill>", "Let me call…", "I\'ll now run…", "Routing to…", or naming a tool, skill, router, or phase; (2) internal identifiers or data-structure vocabulary that appears in tool inputs/results — field/entity ids, service or capability slugs (e.g. capability_slug), config keys (e.g. availableTemplates, config_schema, gateTransitions, stepTemplate), advance tokens, snake_case keys, or raw JSON. Refer to things by their plain human names (say "the engagement-letter template", never a slug or key). Your step-by-step reasoning and any reference to that internal structure belong in your thinking, where they are shown to the attorney behind an expandable disclosure — keep them out of the reply entirely.',
-  // Structured read-outs render as BULLETS (UI-BUILDER-FIX-1 Phase 6): a summary
-  // of enumerable things is a scan surface, not an essay. This is the ONLY
-  // formatting rule for read-outs in the chain — nothing above overrides it (the
-  // "single short sentence" rules govern replies that DELIVER a tool artifact,
-  // not summaries the attorney asked for).
-  'STRUCTURED READ-OUTS ARE BULLETS — whenever your reply summarizes enumerable structure (a workflow\'s steps, a pricing/billing summary, a proposal recap, a service\'s configuration, a list of documents/questions/options), format each item as a markdown bullet ("- …"), one item per bullet, with a one-line lead-in at most. Never fold three or more enumerable items into a prose paragraph. Ordinary conversational answers stay prose.',
-  "EDITING EXISTING ARTIFACTS — when the attorney asks to edit an existing document template, a service's intake questionnaire, or a service's workflow, call the open_artifact_editor tool: it opens the firm's real editor in a pop-up on that artifact. If the reference is ambiguous, ask WHICH one first. Never paste an artifact's content into chat for editing.",
-  'Keep replies focused and concise.',
-].join(' ')
-
 // Definition advertised to the model for the log_feedback client tool. The
 // assistant calls it to file a clean, triageable feedback item (vs. the passive
 // keyword capture of every turn). Executed by buildFeedbackTool below.
@@ -745,6 +702,21 @@ const MAX_PAGE_CONTENT_CHARS = 16000
 const SCREEN_BEGIN = '«BEGIN SCREEN»'
 const SCREEN_END = '«END SCREEN»'
 
+// WP A2 — resolve the firm facts the base system prompt is built from. Reads
+// via getTenantSettingsForMerge (never getTenantSettings/FIRM_DEFAULTS): an
+// unset firm must resolve to honest "unset" facts, never the Pacheco Law demo
+// identity — the same anti-forgery posture document merge already uses.
+async function resolveAssistantFirmFacts(ctx: ActionContext): Promise<AssistantFirmFacts> {
+  const settings = await getTenantSettingsForMerge(ctx)
+  return {
+    firmName: settings.firmName ?? 'the firm',
+    attorneyName: settings.attorneyName ?? undefined,
+    jurisdictionCode: settings.firmJurisdiction ?? undefined,
+    jurisdictionDisplayName: jurisdictionDisplayName(settings.firmJurisdiction) ?? undefined,
+    practiceAreas: settings.practiceAreas ?? undefined,
+  }
+}
+
 // Build the Claude system text: the base prompt + the matter/client context, plus
 // where the attorney is in the app — the exact route they're on (so "this page",
 // "here", "this screen" resolve) and the current entity's in-app link so the
@@ -764,6 +736,11 @@ export function buildClaudeSystem(
   scope: AssistantScope,
   primaryEntityId: string | null,
   context: AssistantContext | null,
+  // WP A2 — the firm's own facts (name, home jurisdiction, practice areas),
+  // resolved by the caller via getTenantSettingsForMerge (never FIRM_DEFAULTS,
+  // so an unset firm never resolves to "Pacheco Law"/NC). Constant for the
+  // conversation, so it lives in this stable/cached half.
+  firm: AssistantFirmFacts,
   skillCatalogText = '',
   // Force-loaded skill BODIES (1.1 WP8.1). These used to ride the uncached volatile
   // block, so the ~16k-char build playbook was re-billed at full price EVERY turn of a
@@ -773,7 +750,8 @@ export function buildClaudeSystem(
   // prefix simply re-caches once. Empty on turns with no forced skill.
   activeSkillsText = '',
 ): string {
-  let system = context ? `${SYSTEM_PROMPT}\n\n--- Context ---\n${context.full}` : SYSTEM_PROMPT
+  const basePrompt = buildBaseSystemPrompt(firm)
+  let system = context ? `${basePrompt}\n\n--- Context ---\n${context.full}` : basePrompt
   const entityPath =
     primaryEntityId && scope === 'matter'
       ? `/attorney/matters/${primaryEntityId}`
@@ -803,9 +781,9 @@ export function buildClaudeSystem(
     // search what already exists before authoring anything, so the firm's library
     // never bloats with duplicates. Stated up front so it governs every propose_*.
     system +=
-      '\n\nREUSE BEFORE YOU CREATE (this rule governs the whole build) — the firm already has services, questionnaires, document templates, and saved workflow steps. BEFORE you propose ANY new artifact you MUST call the matching get_*_context tool and SEARCH what already exists. If a matching SERVICE exists (check get_service_context\'s existingServices), propose EDITING that service — point the attorney to its key — and do NOT create a duplicate. If a matching QUESTIONNAIRE, document TEMPLATE, or workflow STEP exists, REUSE or ADAPT it — start from its content (its fields / its body / its action+gate) rather than authoring from scratch. Create a BRAND-NEW artifact ONLY when nothing close exists, and when you do, say WHY in the proposal\'s summary (e.g. "no existing template covered an NC operating agreement, so this is new"). Duplicating what the firm already has is a mistake; reusing or adapting it is the default.'
+      '\n\nREUSE BEFORE YOU CREATE (this rule governs the whole build) — the firm already has services, questionnaires, document templates, and saved workflow steps. BEFORE you propose ANY new artifact you MUST call the matching get_*_context tool and SEARCH what already exists. If a matching SERVICE exists (check get_service_context\'s existingServices), propose EDITING that service — point the attorney to its key — and do NOT create a duplicate. If a matching QUESTIONNAIRE, document TEMPLATE, or workflow STEP exists, REUSE or ADAPT it — start from its content (its fields / its body / its action+gate) rather than authoring from scratch. Create a BRAND-NEW artifact ONLY when nothing close exists, and when you do, say WHY in the proposal\'s summary (e.g. "no existing template covered an operating agreement, so this is new"). Duplicating what the firm already has is a mistake; reusing or adapting it is the default.'
     system +=
-      '\n\nCREATING A NEW SERVICE — when the attorney asks you to create, set up, or add a new SERVICE offering (e.g. "create an NC SMLLC formation service", "add a trademark filing service"), you propose an empty service SHELL for them to approve. ALWAYS call get_service_context FIRST: SEARCH its `existingServices` for a close match (if one exists, propose editing it instead of a duplicate), and use the existing service keys (so a new key is unique) and the closed route + generation_mode vocabularies. Pick a route and generation_mode ONLY from those — never invent one. When you have a name and a valid choice, deliver it by CALLING the propose_service tool — this does NOT save anything; it shows the attorney an approval card, and the service is created (as a disabled draft) only when THEY approve it. Put the proposal ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to it to review.'
+      '\n\nCREATING A NEW SERVICE — when the attorney asks you to create, set up, or add a new SERVICE offering (e.g. "create an LLC formation service", "add a trademark filing service"), you propose an empty service SHELL for them to approve. ALWAYS call get_service_context FIRST: SEARCH its `existingServices` for a close match (if one exists, propose editing it instead of a duplicate), and use the existing service keys (so a new key is unique) and the closed route + generation_mode vocabularies. Pick a route and generation_mode ONLY from those — never invent one. When you have a name and a valid choice, deliver it by CALLING the propose_service tool — this does NOT save anything; it shows the attorney an approval card, and the service is created (as a disabled draft) only when THEY approve it. Put the proposal ONLY in the tool call; your chat reply must then be a SINGLE short sentence pointing them to it to review.'
     system +=
       "\n\nBUILDING A SERVICE'S INTAKE QUESTIONNAIRE AND DOCUMENTS — when the attorney asks you to build the intake form (questionnaire) or a document template for an EXISTING service, you propose them for approval, bound by the VARIABLE CONTRACT: every document {{token}} must map to a questionnaire field id, or it renders [[MISSING]]. For a QUESTIONNAIRE: call get_questionnaire_context FIRST (it gives the closed field types, the current form, and the {{tokens}} the service's documents reference) and build a form that collects a field for EACH template token (matching ids), then CALL propose_questionnaire. For a TEMPLATE: call get_template_context FIRST (it gives the questionnaire's field ids) and write a markdown body whose {{tokens}} are flat snake_case and bind to those field ids — never invent a dotted path — then CALL propose_template. Both tools only show an approval card; nothing is saved until the attorney approves. Put the proposal ONLY in the tool call; your reply is a SINGLE short sentence pointing them to it. " +
       "DOCUMENTS COME BEFORE THE QUESTIONNAIRE (flow-aware) — when you propose a TEMPLATE for a service that has NO questionnaire yet, the template's tokens are NOT 'missing' or broken: they are exactly the fields the questionnaire will collect in the NEXT step (the questionnaire is reverse-engineered from the templates). Frame them that way to the attorney — forward-looking, not alarming. Only treat a token as a genuine [[MISSING]] gap once a questionnaire already EXISTS and a token has no matching question. " +
@@ -819,13 +797,13 @@ export function buildClaudeSystem(
     // non-negotiable behaviors as a safety net; the skill carries the full playbook,
     // the worked example, the build order, and the data-as-schema / capability rules.
     system +=
-      '\n\nBUILDING A WHOLE SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a whole new service / offering / matter type end-to-end (e.g. "build me an NC LLC formation service"), the firm-admin.build-service skill is your AUTHORITATIVE PLAYBOOK: load_skill it and FOLLOW IT — the doctrine, the process-first interview, the build order (shell → documents → questionnaire → billing → workflow → enable), when you may propose a new data kind vs. request a capability, and how to finish. Do not improvise the flow from memory. Three behaviors hold no matter what: ' +
+      '\n\nBUILDING A WHOLE SERVICE (the guided wizard) — when the attorney asks you to build, set up, or stand up a whole new service / offering / matter type end-to-end (e.g. "build me an LLC formation service"), the firm-admin.build-service skill is your AUTHORITATIVE PLAYBOOK: load_skill it and FOLLOW IT — the doctrine, the process-first interview, the build order (shell → documents → questionnaire → billing → workflow → enable), when you may propose a new data kind vs. request a capability, and how to finish. Do not improvise the flow from memory. Three behaviors hold no matter what: ' +
       '(1) EVERY interview question goes through the ask_build_question tool (a click-to-answer card), NEVER free-text prose. Open with the attorney describing their process in their own words; DERIVE the platform choices (how automated the service is, how documents are produced, the gates) from that walkthrough and present them as plain-language CONFIRMATIONS to click, never as open questions. Never silently default a derived choice — confirm it. ' +
       '(2) NEVER use platform vocabulary with the attorney — no "route", "generation_mode", "kind", "gate", "entity" in any question or confirmation; say it in attorney language ("the draft comes to you before the client sees it — right?") and translate to the schema silently inside the proposal. ' +
       '(3) DO NOT NARRATE your process — run reads/lookups silently, and keep your OWN prose to at most ONE short sentence per turn (the questions and proposals live in the cards, never duplicated in text). Before building from scratch, REUSE first: check the capability library (get_capability_context) and existing kinds (get_kind_context) so you wire in what the platform already does rather than reinventing it. ' +
       'CARD TURNS SAY WHAT, NOT WHY — when a turn shows a card, your entire visible reply is ONE sentence of at most 15 words naming what the card is ("Here\'s the intake form to approve."), spoken BEFORE the card, never restated after it. The reasoning behind the proposal ("this is a document-review service with no documents to author, so…") is thinking-channel content or nothing — never reply text. Card blurbs follow house voice: no em dashes, no self-evaluation filler like "no gaps" or "fully covered". ' +
       'THE TWO-ENDS RULE for every piece of CLIENT-VISIBLE copy you author (tile names, tile descriptions, client-facing blurbs): describe only the two ends the client touches — what they PROVIDE ("upload your lease") and what they RECEIVE ("a plain-English review of your lease") — never the machinery between, however paraphrased (who or what does the work, review steps, queues, drafting, approval). Attorney-facing copy leads with the outcome in one sentence; mechanics may follow. ' +
-      "NEVER STAMP JURISDICTION INTO NAMES — do not prefix a state or jurisdiction ('NC', 'North Carolina', …) onto the service display name, the derived key, or any client copy UNLESS the attorney's request explicitly named that jurisdiction. The firm being a North Carolina firm is context for the legal CONTENT (governing-law clauses), never a reason to name a service 'NC Cease & Desist Letter' when the attorney asked for a 'cease and desist letter'. The key is permanent, so a stray prefix is forever — name it 'Cease & Desist Letter'.'"
+      `NEVER STAMP JURISDICTION INTO NAMES — do not prefix a state or jurisdiction onto the service display name, the derived key, or any client copy UNLESS the attorney's request explicitly named that jurisdiction.${firm.jurisdictionDisplayName ? ` The firm's home jurisdiction (${firm.jurisdictionDisplayName}) is context for the legal CONTENT (governing-law clauses), never a reason to name a service '${firm.jurisdictionCode ?? firm.jurisdictionDisplayName} Cease & Desist Letter' when the attorney asked for a 'cease and desist letter'.` : ''} The key is permanent, so a stray prefix is forever — name it 'Cease & Desist Letter'.'`
   }
   if (skillCatalogText) system += `\n\n${skillCatalogText}`
   // Force-loaded skill bodies live in the cached prefix now (WP8.1), after the catalog.
@@ -1359,10 +1337,12 @@ export async function assistantChat(
       ctx,
       wizardForcedSkillSlugs(message, input.skillSlugs, input.buildMode),
     )
+    const firm = await resolveAssistantFirmFacts(ctx)
     const system = buildClaudeSystem(
       scope,
       primaryEntityId,
       context,
+      firm,
       buildSkillCatalogText(catalog),
       buildActiveSkillsText(forced),
     )
@@ -1656,10 +1636,12 @@ export async function* assistantChatStream(
     )
     // Surface the picked skills as chips immediately, before the reply streams.
     for (const s of forced) yield { type: 'skill', slug: s.slug, name: s.name }
+    const firm = await resolveAssistantFirmFacts(ctx)
     const system = buildClaudeSystem(
       scope,
       primaryEntityId,
       context,
+      firm,
       buildSkillCatalogText(catalog),
       buildActiveSkillsText(forced),
     )

@@ -16,6 +16,7 @@ import {
   buildActiveSkillsText,
   resolveJurisdictionSkillSlugs,
 } from './skillContext.js'
+import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // AI document review (document-review services). The attorney preconfigures a
@@ -396,6 +397,9 @@ export async function runDocumentReview(
 
   const matter = await getMatter(agentCtx, input.matterEntityId)
   if (!matter) return fail(`Matter not found: ${input.matterEntityId}`)
+  // WP A2 — the matter's own resolved jurisdiction (matter fact, else the
+  // firm's home jurisdiction, else honest unset). NEVER a hardcoded 'NC'.
+  const jurisdiction = await resolveMatterJurisdiction(agentCtx, input.matterEntityId)
 
   // Matter-scoped resolve (document_of IDOR guard) — never trust a payload key.
   const object = await getUploadedDocumentObject(
@@ -430,10 +434,11 @@ export async function runDocumentReview(
       .join('\n\n') || undefined
 
   // Skills: attorney-configured (forced) plus the conservative jurisdiction
-  // auto-resolve, keyed on the memo kind. Same NC binding as drafting.
+  // auto-resolve, keyed on the memo kind. Same resolved-jurisdiction binding as
+  // drafting (the matter's own jurisdiction, never a hardcoded 'NC').
   const autoSkillSlugs = await resolveJurisdictionSkillSlugs(agentCtx, {
     documentKind: REVIEW_MEMO_DOCUMENT_KIND,
-    jurisdiction: 'NC',
+    jurisdiction: jurisdiction?.code,
   })
   const skillSlugs = [...new Set([...config.skillSlugs, ...autoSkillSlugs])]
   const forcedSkills = await loadForcedSkills(agentCtx, skillSlugs)
@@ -510,7 +515,7 @@ export async function runDocumentReview(
       document_markdown: result.documentMarkdown,
       model_identity: result.modelIdentity,
       reasoning_trace_id: reasoningTraceId,
-      jurisdiction: 'NC',
+      jurisdiction: jurisdiction?.code ?? null,
       confidence: clampConfidence(result.reasoningTrace.confidence),
       generation_mode: 'ai_review',
       review_of_document_version_id: input.documentVersionId,

@@ -34,6 +34,7 @@ import {
   buildActiveSkillsText,
   resolveJurisdictionSkillSlugs,
 } from './skillContext.js'
+import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 
 const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
 
@@ -94,6 +95,9 @@ export async function composeEmailDraft(
   const matter = await getMatter(agentCtx, input.matterEntityId)
   if (!matter) throw new Error(`Matter not found: ${input.matterEntityId}`)
   const fallbackSubject = `Update on your matter ${matter.matterNumber}`
+  // WP A2 — the matter's own resolved jurisdiction (matter fact, else the
+  // firm's home jurisdiction, else honest unset). NEVER a hardcoded 'NC'.
+  const jurisdiction = await resolveMatterJurisdiction(agentCtx, input.matterEntityId)
 
   if (mode === 'template') {
     const templateEntityId = (input.templateEntityId ?? '').trim()
@@ -122,7 +126,7 @@ export async function composeEmailDraft(
         matter_entity_id: input.matterEntityId,
         document_kind: CLIENT_EMAIL_DOCUMENT_KIND,
         document_markdown: parsed.body,
-        jurisdiction: 'NC',
+        jurisdiction: jurisdiction?.code ?? null,
         template_id: `template:${templateEntityId}`,
         missing_fields: merged.missingFields,
         supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
@@ -165,7 +169,7 @@ export async function composeEmailDraft(
 
   const autoSkillSlugs = await resolveJurisdictionSkillSlugs(agentCtx, {
     documentKind: CLIENT_EMAIL_DOCUMENT_KIND,
-    jurisdiction: 'NC',
+    jurisdiction: jurisdiction?.code,
   })
   const skillsText = buildActiveSkillsText(await loadForcedSkills(agentCtx, autoSkillSlugs))
   if (skillsText.trim()) prompt += `\n\n${skillsText.trim()}`
@@ -224,7 +228,7 @@ export async function composeEmailDraft(
       document_markdown: parsed.body,
       model_identity: chosen.modelIdentity,
       reasoning_trace_id: reasoningTraceId,
-      jurisdiction: 'NC',
+      jurisdiction: jurisdiction?.code ?? null,
       confidence: clampConfidence(chosen.reasoningTrace.confidence),
       supersedes_document_entity_id: input.supersedesDocumentEntityId ?? null,
       channel: 'communication',

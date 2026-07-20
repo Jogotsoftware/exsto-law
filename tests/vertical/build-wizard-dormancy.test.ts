@@ -6,13 +6,23 @@
 // run() is deferred) and buildClaudeSystem is pure string building, so no live DB
 // or model is touched — the test can pass a minimal ctx.
 import { describe, it, expect, afterEach } from 'vitest'
-import { buildAttorneyClientTools, buildClaudeSystem, type AssistantChatInput } from '@exsto/legal'
+import {
+  buildAttorneyClientTools,
+  buildClaudeSystem,
+  type AssistantChatInput,
+  type AssistantFirmFacts,
+} from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 
 const ctx: ActionContext = {
   tenantId: '00000000-0000-0000-0000-000000000001',
   actorId: '00000000-0000-0000-0001-000000000002',
 }
+
+// WP A2 — buildClaudeSystem now takes the firm's own facts (name/jurisdiction/
+// practice areas) instead of hardcoding Pacheco Law/NC. This suite is about
+// wizard-flag dormancy, not jurisdiction content, so a minimal stand-in firm.
+const TEST_FIRM: AssistantFirmFacts = { firmName: 'Test Firm' }
 
 const input: AssistantChatInput = { message: 'build me an NC LLC formation service', modelId: 'a' }
 
@@ -85,7 +95,7 @@ describe('build wizard dormancy (LEGAL_BUILD_WIZARD off)', () => {
 
   it('omits the orchestrator system-prompt block when the flag is off', () => {
     process.env.LEGAL_BUILD_WIZARD = '0'
-    const system = buildClaudeSystem('global', null, null)
+    const system = buildClaudeSystem('global', null, null, TEST_FIRM)
     expect(system).not.toContain(ORCHESTRATOR_MARKER)
     // And it teaches nothing about creating services at all (Phase 1 note absent too).
     expect(system).not.toContain('CREATING A NEW SERVICE')
@@ -120,7 +130,7 @@ describe('build wizard activation (LEGAL_BUILD_WIZARD on)', () => {
 
   it('includes the orchestrator system-prompt block when the flag is on', () => {
     process.env.LEGAL_BUILD_WIZARD = 'true'
-    const system = buildClaudeSystem('global', null, null)
+    const system = buildClaudeSystem('global', null, null, TEST_FIRM)
     expect(system).toContain(ORCHESTRATOR_MARKER)
     // It points the model at the AUTHORITATIVE playbook skill (the flow itself
     // lives there — single source of truth) and keeps the two non-negotiables
@@ -132,7 +142,7 @@ describe('build wizard activation (LEGAL_BUILD_WIZARD on)', () => {
 
   it('frames the documents→questionnaire flow as forward-looking + reuse-aware (Phase 7)', () => {
     process.env.LEGAL_BUILD_WIZARD = '1'
-    const system = buildClaudeSystem('global', null, null)
+    const system = buildClaudeSystem('global', null, null, TEST_FIRM)
     // Flow-aware: tokens before a questionnaire exists are NOT "missing/broken".
     expect(system).toContain('DOCUMENTS COME BEFORE THE QUESTIONNAIRE')
     // Reuse-aware: existing firm questions are reused, not re-invented.

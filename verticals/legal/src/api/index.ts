@@ -86,6 +86,7 @@ export * from './assistant.js'
 export * from './assistantModels.js'
 export * from './assistantContext.js'
 export * from './briefEvidence.js'
+export * from './assistantPrompt.js'
 export * from './assistantChat.js'
 // ASSISTANT-ACTS-1 — the act-in-place chat tools (compose a client email into
 // the real composer; stage an e-sign envelope into the prepare wizard).

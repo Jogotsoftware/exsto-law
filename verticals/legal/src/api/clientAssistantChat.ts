@@ -16,6 +16,7 @@ import { resolveClientMatterIds } from './clientIdentity.js'
 import { getPortalSchedulingAvailability, getSchedulingFeeQuote } from './portalScheduling.js'
 import { quoteClientRequest, isRequestType, type RequestType } from './requestPricing.js'
 import { listServices } from './services.js'
+import { getTenantSettingsForMerge } from './tenantSettings.js'
 
 // PORTAL-1 (WP5) — the portal chatbot: same brain (the Claude adapter's chat
 // loop + streaming + caching), DIFFERENT HANDS. The tool surface is built from
@@ -32,7 +33,15 @@ import { listServices } from './services.js'
 const MAX_MESSAGE_CHARS = 4_000
 const MAX_HISTORY_TURNS = 12
 
-const BASE_SYSTEM = `You are the Pacheco Law client portal assistant, chatting with a signed-in client of the firm.
+// WP A2 — de-hardcoded from a literal "Pacheco Law" name: this bot serves
+// EVERY tenant's client portal, so a hardcoded firm name here would name
+// Pacheco Law inside another firm's portal. Read via getTenantSettingsForMerge
+// (never getTenantSettings/FIRM_DEFAULTS) so an unset firm degrades to the
+// honest generic "the firm", not the demo identity.
+// Exported for the zero-Pacheco/NC test (tests/vertical/): pure string
+// building, no DB, so an unset firm's portal prompt is directly assertable.
+export function buildBaseSystem(firmName: string): string {
+  return `You are ${firmName}'s client portal assistant, chatting with a signed-in client of the firm.
 
 Everything you can see comes from the tools, which are scoped to THIS client's own matters, documents, invoices, and messages. Use them; never guess or invent records. You cannot see other clients, firm internals, or anything the firm has not released.
 
@@ -43,6 +52,7 @@ Anything with a cost must show its exact fee, and the client accepts it themselv
 When the client wants something new: if it matches a service the firm offers online, point them to book it. Otherwise gather what the firm needs (what they want, which matter it concerns, urgency) and use prepare_request — the request goes to the attorney's queue; the attorney's approval is what turns it into work.
 
 Keep replies short, warm, and in plain language.`
+}
 
 export interface ClientChatIdentity {
   clientContactId: string
@@ -282,8 +292,9 @@ export async function* clientAssistantChatStream(
   // The seeded skill is the bot's standing discipline; a missing skill row is a
   // configuration error we surface honestly rather than running unbounded.
   const skill = await getSkillBySlug(ctx, 'client-portal.portal-assistant')
+  const firmSettings = await getTenantSettingsForMerge(ctx)
   const system = [
-    BASE_SYSTEM,
+    buildBaseSystem(firmSettings.firmName ?? 'the firm'),
     skill?.body ? `--- Firm guidance ---\n${skill.body}` : '',
     `--- Client ---\nYou are talking to ${who.displayName} (${who.email}).`,
   ]
