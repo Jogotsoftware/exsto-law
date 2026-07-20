@@ -16,11 +16,13 @@ import { submitAction, withActionContext, type ActionContext } from '@exsto/subs
 import {
   chatWithAssistantDetailed,
   streamChatWithAssistant,
+  workRateParams,
   type ChatMessage,
   type ClientTool,
   type WorkRate,
   type AssistantUsage,
 } from '../adapters/claude.js'
+import { guardChatBudget, SCREEN_BEGIN, SCREEN_END, type HistoryTurn } from '../lib/tokenGuard.js'
 import { runPerplexityResearch, streamPerplexityResearch } from '../adapters/perplexity.js'
 import {
   resolveAssistantModel,
@@ -703,9 +705,11 @@ export function buildAttorneyClientTools(
 // Server-side bound on the live page-content snapshot — defense in depth on top of
 // the client cap, so a huge page can't blow up the prompt. Fenced with these
 // markers (neutralized in captured text) so embedded content can't break out.
+// SCREEN_BEGIN/SCREEN_END are imported from lib/tokenGuard.ts (AI-CONTEXT C3),
+// which owns them so guardChatBudget can locate and further clip the fenced
+// span — imported here rather than the reverse, so tokenGuard.ts never depends
+// on this file (see tokenGuard.ts's module header).
 const MAX_PAGE_CONTENT_CHARS = 16000
-const SCREEN_BEGIN = '«BEGIN SCREEN»'
-const SCREEN_END = '«END SCREEN»'
 
 // WP A2 — resolve the firm facts the base system prompt is built from. Reads
 // via getTenantSettingsForMerge (never getTenantSettings/FIRM_DEFAULTS): an
@@ -917,6 +921,52 @@ function composeUserMessage(
   }
   if (sections.length === 0) return message
   return `${message}\n\n--- Attached documents (provided by the attorney for this question) ---\n\n${sections.join('\n\n')}`
+}
+
+// AI-CONTEXT C3 — pre-flight budget check + deterministic trim, shared by both
+// Claude entry points below (assistantChat / assistantChatStream) so the two
+// can never drift. Computes the SAME max_tokens value buildChatRequest will
+// (workRateParams, +1024 tool-loop headroom) — a chat turn always registers a
+// client-tool set (buildAttorneyClientTools), so budgeting as though tools are
+// present is the accurate case here, not merely a conservative one. Runs
+// guardChatBudget, logs ONCE if anything was trimmed, and returns the
+// ChatMessage[] + (possibly clipped) volatile string ready for the adapter.
+function applyTokenGuard(input: {
+  system: string
+  volatile: string
+  history: HistoryTurn[]
+  userMessage: string
+  model: string
+  workRate: WorkRate | undefined
+  supportsWorkRate: boolean
+  logLabel: string
+}): { messages: ChatMessage[]; volatile: string } {
+  const { maxTokens } = workRateParams(input.workRate ?? 'balanced', input.supportsWorkRate)
+  const guarded = guardChatBudget({
+    systemStable: input.system,
+    volatile: input.volatile,
+    history: input.history,
+    userMessage: input.userMessage,
+    model: input.model,
+    maxTokens: maxTokens + 1024,
+  })
+  if (guarded.droppedHistoryTurns > 0 || guarded.volatileClippedToChars !== undefined) {
+    console.warn(
+      `[${input.logLabel}] token guard trimmed turn — droppedHistoryTurns=${guarded.droppedHistoryTurns}` +
+        (guarded.volatileClippedToChars !== undefined
+          ? ` volatileClippedToChars=${guarded.volatileClippedToChars}`
+          : '') +
+        ` estimatedInputTokens=${guarded.estimatedInputTokens} model=${input.model}`,
+    )
+  }
+  return {
+    messages: [
+      { role: 'system', content: guarded.systemStable },
+      ...guarded.history,
+      { role: 'user', content: guarded.userMessage },
+    ],
+    volatile: guarded.volatile,
+  }
 }
 
 // Heuristic feedback sniff (mirrors the legacy assistant). Perplexity turns are
@@ -1377,17 +1427,22 @@ export async function assistantChat(
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey)
       : ''
-    const messages: ChatMessage[] = [
-      { role: 'system', content: system },
-      ...(input.history ?? []),
-      { role: 'user', content: composeUserMessage(message, input.attachments) },
-    ]
+    const { messages, volatile } = applyTokenGuard({
+      system,
+      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief),
+      history: input.history ?? [],
+      userMessage: composeUserMessage(message, input.attachments),
+      model: model.model,
+      workRate: input.workRate,
+      supportsWorkRate: model.supportsWorkRate,
+      logLabel: 'assistantChat',
+    })
     const result = await chatWithAssistantDetailed(ctx.tenantId, messages, {
       model: model.model,
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief),
+      volatile,
       clientTools: buildAttorneyClientTools(ctx, input, {
         catalog,
         producedDocuments,
@@ -1678,17 +1733,22 @@ export async function* assistantChatStream(
     const buildBrief = buildWizardEnabled()
       ? await buildBuildBriefText(ctx, input.buildServiceKey)
       : ''
-    const messages: ChatMessage[] = [
-      { role: 'system', content: system },
-      ...(input.history ?? []),
-      { role: 'user', content: composeUserMessage(message, input.attachments) },
-    ]
+    const { messages, volatile } = applyTokenGuard({
+      system,
+      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief),
+      history: input.history ?? [],
+      userMessage: composeUserMessage(message, input.attachments),
+      model: model.model,
+      workRate: input.workRate,
+      supportsWorkRate: model.supportsWorkRate,
+      logLabel: 'assistantChatStream',
+    })
     for await (const chunk of streamChatWithAssistant(ctx.tenantId, messages, {
       model: model.model,
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief),
+      volatile,
       clientTools: buildAttorneyClientTools(ctx, input, {
         catalog,
         producedDocuments,

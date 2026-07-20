@@ -38,13 +38,29 @@ export {
   TIER_MODEL,
   resolveModelForTask,
   resolveConcreteAssistantModelId,
+  tierForModel,
 } from './lib/modelRouter.js'
+// AI-CONTEXT C3 — the pre-flight token-budget guard (pure policy, see the
+// module header in lib/tokenGuard.ts). estimateTokens/INPUT_CEILING_BY_TIER
+// are exported for tests and for any future caller that needs the raw
+// estimate/ceiling without going through the full chat-turn guard.
+export type { HistoryTurn, ChatBudgetParts, ChatBudgetResult } from './lib/tokenGuard.js'
+export {
+  estimateTokens,
+  INPUT_CEILING_BY_TIER,
+  guardChatBudget,
+  assertDraftBudget,
+  DraftBudgetExceededError,
+  SCREEN_BEGIN,
+  SCREEN_END,
+} from './lib/tokenGuard.js'
 export type { ClaudeDraftRequest, ClaudeDraftResult, ClientTool } from './adapters/claude.js'
 export {
   resolveAnthropicApiKey,
   clientToolUses,
   runClientTools,
   buildChatRequest,
+  workRateParams,
   stripThinkingBlocks,
   isRetryableAnthropicError,
   retryDelayMs,

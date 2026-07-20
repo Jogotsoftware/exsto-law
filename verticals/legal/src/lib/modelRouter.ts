@@ -131,7 +131,11 @@ function tierResult(tier: ModelTier, reason: string): ResolvedModel {
 // so ResolvedModel.tier/supportsWorkRate stay meaningful). Defaults to
 // 'sonnet' — the conservative choice (work-rate support assumed on) for an id
 // this router doesn't recognize.
-function tierForModel(model: string): ModelTier {
+// AI-CONTEXT C3 — exported so lib/tokenGuard.ts (the pre-flight token-budget
+// guard) can classify a resolved model id into its ceiling tier without
+// duplicating this parsing logic. tokenGuard.ts imports ONLY from this module
+// (never adapters/claude.ts), preserving the pure-policy/no-cycle boundary.
+export function tierForModel(model: string): ModelTier {
   if (model.includes('haiku')) return 'haiku'
   if (model.includes('opus')) return 'opus'
   return 'sonnet'

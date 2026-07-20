@@ -1,11 +1,13 @@
 import type { ActionContext } from '@exsto/substrate'
 import {
   streamChatWithAssistant,
+  workRateParams,
   type AssistantStreamChunk,
   type ChatMessage,
   type ClientTool,
 } from '../adapters/claude.js'
 import { resolveModelForTask } from '../lib/modelRouter.js'
+import { guardChatBudget } from '../lib/tokenGuard.js'
 import { recordAssistantTurn } from './assistantChat.js'
 import { getSkillBySlug } from '../queries/skills.js'
 import { listClientMatters, getClientMatterTimeline } from '../queries/clientPortal.js'
@@ -330,12 +332,6 @@ export async function* clientAssistantChatStream(
     .filter((h) => (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string')
     .map((h) => ({ role: h.role, content: h.content.slice(0, MAX_MESSAGE_CHARS) }))
 
-  const messages: ChatMessage[] = [
-    { role: 'system', content: system },
-    ...history,
-    { role: 'user', content: message },
-  ]
-
   const tools = buildClientPortalTools(ctx, who)
   let reply = ''
   let requestCard: Record<string, unknown> | null = null
@@ -344,6 +340,39 @@ export async function* clientAssistantChatStream(
   // consulted for chat_client_portal). Now the router's pinned default for this
   // task — byte-identical value, same reasoning, one fewer hardcoded model id.
   const model = resolveModelForTask('chat_client_portal').model
+
+  // AI-CONTEXT C3 — pre-flight budget check. The portal bot's caps above
+  // (MAX_MESSAGE_CHARS=4k, MAX_HISTORY_TURNS=12) already bound this well below
+  // any tier ceiling in the common case, but a firm-authored skill body
+  // (skill?.body, folded into `system` above) is attorney-controlled content
+  // this code doesn't otherwise cap — guardChatBudget still checks the total
+  // and trims history further (whole turns, oldest-first) if an oversized
+  // skill body ever pushes a turn over budget. No page-capture in the portal
+  // bot, so volatile is empty — nothing for step 2 to clip.
+  const { maxTokens } = workRateParams('balanced', true)
+  const guarded = guardChatBudget({
+    systemStable: system,
+    volatile: '',
+    history,
+    userMessage: message,
+    model,
+    // The portal bot always registers its client-portal tool set — same
+    // reasoning as assistantChat.ts's applyTokenGuard: budget as though tools
+    // are present, because they always are.
+    maxTokens: maxTokens + 1024,
+  })
+  if (guarded.droppedHistoryTurns > 0) {
+    console.warn(
+      `[clientAssistantChat] token guard trimmed turn — droppedHistoryTurns=${guarded.droppedHistoryTurns} ` +
+        `estimatedInputTokens=${guarded.estimatedInputTokens} model=${model}`,
+    )
+  }
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: guarded.systemStable },
+    ...guarded.history,
+    { role: 'user', content: guarded.userMessage },
+  ]
 
   // Wrap prepare_request so the UI gets the consent card as a stream event too.
   const wrapped = tools.map((t) =>
