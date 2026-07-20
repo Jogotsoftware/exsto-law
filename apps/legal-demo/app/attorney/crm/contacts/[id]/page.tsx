@@ -20,6 +20,7 @@ import { BackButton } from '@/components/BackButton'
 import { launchCompose } from '@/lib/contractD'
 import { MailIcon } from '@/components/icons'
 import { CRM_STATUS_META, crmInitials, type CrmBucket } from '@/lib/crmStatus'
+import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
 
 interface ContactMatter {
   matterEntityId: string
@@ -42,14 +43,6 @@ interface ContactDetail {
   firstSeenAt: string
   lastActivityAt: string
   matters: ContactMatter[]
-}
-
-function humanizeService(key: string): string {
-  if (!key) return ''
-  if (key === 'llc_formation' || key === 'business_formation') return 'NC LLC formation'
-  if (key === 'oa_amendment') return 'OA amendment'
-  if (key === 'other') return 'Custom'
-  return key.replace(/_/g, ' ')
 }
 
 function humanizeStatus(s: string): string {
@@ -78,6 +71,7 @@ export default function ContactDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [inviting, setInviting] = useState(false)
   const [inviteMsg, setInviteMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const serviceNames = useServiceDisplayNames()
 
   const load = useCallback(async () => {
     setError(null)
@@ -249,7 +243,7 @@ export default function ContactDetailPage() {
               />
               <span className="li-crm-contact-info">
                 <span className="li-crm-contact-name">
-                  {humanizeService(m.serviceKey) || m.matterNumber}
+                  {m.serviceKey ? serviceLabel(m.serviceKey, serviceNames) : m.matterNumber}
                 </span>
                 <span className="li-crm-contact-sub">
                   {humanizeStatus(m.status)}

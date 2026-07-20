@@ -8,7 +8,7 @@
 //                 feed and mark-all-read wiring from the retired AttorneyTopNav.
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { FIRM_NAME } from '@/lib/brand'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { parseTimestamp, formatDate } from '@/lib/datetime'
 import { SearchBar } from '@/components/SearchBar'
@@ -46,6 +46,25 @@ export function AttorneyTopBar(): React.JSX.Element {
   const [unread, setUnread] = useState(0)
   const [notifOpen, setNotifOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
+  // FB-C — the resolved TENANT's firm name (legal.settings.get), never the
+  // hardcoded FIRM_NAME literal: this bar renders for every firm's attorneys,
+  // not just Pacheco's. Falls back to the product tagline while loading / if
+  // a firm has not set a name yet — never a hardcoded firm literal.
+  const [firmName, setFirmName] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    callAttorneyMcp<{ settings: { firmName: string | null } }>({ toolName: 'legal.settings.get' })
+      .then((r) => {
+        if (!cancelled) setFirmName(r.settings.firmName)
+      })
+      .catch(() => {
+        /* leave the fallback tagline showing */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Load the attorney's in-app notifications (resolved beta feedback).
   useEffect(() => {
@@ -93,7 +112,7 @@ export function AttorneyTopBar(): React.JSX.Element {
 
   return (
     <header className="li-topbar">
-      <div className="li-topbar-firm">{FIRM_NAME}</div>
+      <div className="li-topbar-firm">{firmName ?? PRODUCT_TAGLINE}</div>
       <div className="li-topbar-spacer" />
 
       <SearchBar variant="topbar" />

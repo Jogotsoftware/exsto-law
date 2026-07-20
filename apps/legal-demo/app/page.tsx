@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { fetchSession } from '@/lib/auth'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -22,7 +23,7 @@ export default function LoginPage() {
         const params = new URLSearchParams(window.location.search)
         const err = params.get('error')
         if (err === 'not_allowed')
-          setError('That Google account is not authorized to access Pacheco Law.')
+          setError('That Google account is not authorized to access this workspace.')
         else if (err) setError(decodeURIComponent(err))
       }
     })
@@ -39,7 +40,7 @@ export default function LoginPage() {
     <main>
       <div style={{ maxWidth: 420, margin: '4rem auto 0' }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>Pacheco Law</h1>
+          <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{PRODUCT_TAGLINE}</h1>
           <p style={{ color: 'var(--muted)' }}>Sign in to your dashboard</p>
         </div>
         <div className="login-card">

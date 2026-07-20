@@ -4,6 +4,7 @@
 // Activity / Documents / Billing). Not a route — a plain module imported by the
 // tab pages and the layout, so humanizers + the questionnaire/transcript renderers
 // live in exactly one place.
+import { serviceLabel, getCachedServiceDisplayNames } from '@/lib/serviceLabel'
 
 // ── Workflow shape (ADR 0045 PR3) ───────────────────────────────────────────
 // The app cannot import the server lifecycle types (no server-package imports in
@@ -233,13 +234,13 @@ function mdCell(value: unknown): string {
   return humanizeValue(value).replace(/\|/g, '\\|').replace(/\n/g, ' ')
 }
 
+// FB-C: delegates to the one shared serviceKey → label resolver (lib/serviceLabel).
+// A plain function, not a hook — callers here are other plain functions/JSX
+// expressions, not always component top level — so it reads whatever service
+// catalog is already cached (warmed by any useServiceDisplayNames() call
+// elsewhere on the page) rather than fetching itself. Never a hardcoded label.
 export function humanizeService(key: string): string {
-  if (!key) return '—'
-  if (key === 'llc_formation') return 'NC LLC formation'
-  if (key === 'oa_amendment') return 'OA amendment'
-  if (key === 'business_formation') return 'NC LLC formation'
-  if (key === 'other') return 'Custom'
-  return key.replace(/_/g, ' ')
+  return serviceLabel(key, getCachedServiceDisplayNames())
 }
 
 export function humanizeStatus(s: string): string {

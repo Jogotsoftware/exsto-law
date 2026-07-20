@@ -270,7 +270,7 @@ export function openGmailDraft(args: EmailDraftArgs): void {
     `Take a look at your convenience and let me know if you have questions.`,
     ``,
     `Best,`,
-    args.attorneyName ?? 'Pacheco Law',
+    args.attorneyName ?? 'The firm',
   ].join('\n')
   const params = new URLSearchParams({
     view: 'cm',

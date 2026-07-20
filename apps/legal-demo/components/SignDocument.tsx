@@ -16,6 +16,7 @@ import { useRef, useState } from 'react'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ScaleIcon } from '@/components/icons'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 export interface SignField {
   id: string
@@ -48,6 +49,10 @@ export interface SignableDoc {
   fields: SignField[]
   canSign: boolean
   alreadyResolved: boolean
+  // FB-C — the resolved firm's name (never a hardcoded literal). Optional so
+  // any other existing caller keeps compiling; the component falls back to
+  // the product tagline when absent.
+  firmName?: string | null
 }
 
 export const CONSENT_TEXT =
@@ -207,7 +212,7 @@ export function SignDocument({
             <span className="cp-crest" aria-hidden>
               <ScaleIcon size={18} />
             </span>
-            <div className="public-draft-firm">Pacheco Law</div>
+            <div className="public-draft-firm">{doc.firmName ?? PRODUCT_TAGLINE}</div>
           </div>
           <h1 style={{ margin: 'var(--space-1) 0 0' }}>{doc.documentTitle}</h1>
         </div>

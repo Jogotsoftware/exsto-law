@@ -11,6 +11,7 @@ import {
 } from '@/components/WeeklyCalendar'
 import { ChevronDownIcon, ClockIcon, Share2Icon } from '@/components/icons'
 import { parseTimestamp } from '@/lib/datetime'
+import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
 
 // Copies the public booking-page link to the clipboard. Replaces the old
 // "/attorney/share" link, which 404'd (no such route) — the link prospects use
@@ -122,14 +123,6 @@ function matterStatusGroup(status: string): (typeof STATUS_GROUPS)[number] {
   return STATUS_GROUPS.find((g) => g.matches(status)) ?? STATUS_GROUPS[0]!
 }
 
-function humanizeService(key: string): string {
-  if (key === 'llc_formation') return 'NC LLC formation'
-  if (key === 'oa_amendment') return 'OA amendment'
-  if (key === 'business_formation') return 'NC LLC formation'
-  if (key === 'other') return 'Custom'
-  return key.replace(/_/g, ' ')
-}
-
 function timeAgo(iso: string): string {
   const t = parseTimestamp(iso)?.getTime() ?? NaN
   if (!Number.isFinite(t)) return '—'
@@ -167,6 +160,7 @@ export default function AttorneyHome() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [dashStatusFilter, setDashStatusFilter] = useState('')
   const [dashSortDir, setDashSortDir] = useState<'asc' | 'desc'>('desc')
+  const serviceNames = useServiceDisplayNames()
 
   // Fetch the unified calendar feed (real Google events + app consultations) for a
   // broad window; the calendar navigates within it client-side. Reused by the
@@ -335,7 +329,9 @@ export default function AttorneyHome() {
                 >
                   <span>
                     <span className="li-dash-rclient">{r.clientName || r.matterNumber}</span>
-                    <span className="li-dash-rservice">{humanizeService(r.serviceKey)}</span>
+                    <span className="li-dash-rservice">
+                      {serviceLabel(r.serviceKey, serviceNames)}
+                    </span>
                   </span>
                   <span className="li-dash-rtime">
                     <ClockIcon size={12} />

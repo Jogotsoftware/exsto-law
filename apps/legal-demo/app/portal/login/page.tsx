@@ -7,6 +7,8 @@ import { safeInternalPath } from '@/lib/safeRedirect'
 import { ScaleIcon } from '@/components/icons'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
 import { bridgeSupabaseSession, signInWithPasswordAndBridge } from '@/components/PortalSignInInline'
+import { callClientMcp } from '@/lib/mcpClient'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 // The client-portal sign-in page — email + password (Supabase Auth). On sign in
 // or a confirmed sign-up we POST the verified token to /api/client/auth/supabase,
@@ -230,6 +232,24 @@ function Shell({
   title?: string
   children: React.ReactNode
 }) {
+  // FB-C — the resolved firm's name (never a hardcoded literal), via the same
+  // public firm-branding tool the booking page uses. Falls back to the product
+  // tagline while loading / when no firm slug is in play — never a guess.
+  const [firmName, setFirmName] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    callClientMcp<{ firmName: string | null }>({ toolName: 'legal.public.firm_branding' })
+      .then((r) => {
+        if (!cancelled) setFirmName(r.firmName)
+      })
+      .catch(() => {
+        /* leave the fallback tagline showing */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <main className="li-cp-auth">
       <div className="li-cp-auth-card">
@@ -237,7 +257,7 @@ function Shell({
           <span className="li-cp-auth-crest" aria-hidden>
             <ScaleIcon size={18} />
           </span>
-          <div className="li-cp-auth-firm">Pacheco Law</div>
+          <div className="li-cp-auth-firm">{firmName ?? PRODUCT_TAGLINE}</div>
         </div>
         <h1 className="li-cp-auth-title">{title}</h1>
         {children}

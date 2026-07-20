@@ -119,7 +119,7 @@ export default function SignaturePage(): React.ReactElement {
             initialHtml={sigSeed.html}
             disabled={!sigEnabled}
             minHeight={110}
-            placeholder={'Best regards,\nJuan Carlos Pacheco\nPacheco Law Firm'}
+            placeholder={'Best regards,\nJane Smith\nSmith & Associates PLLC'}
             onChange={(v) => {
               setSigDraft(v.text)
               setSigDraftHtml(v.html)

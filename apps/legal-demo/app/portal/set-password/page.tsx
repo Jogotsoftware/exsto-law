@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { ScaleIcon } from '@/components/icons'
+import { callClientMcp } from '@/lib/mcpClient'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 // Invite landing: the client arrives here from the "set up your portal access"
 // email (/portal/set-password?token=…). They choose a password; we POST it with
@@ -21,6 +23,10 @@ export default function SetPasswordPage() {
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  // FB-C — the resolved firm's name (never a hardcoded literal), via the same
+  // public firm-branding tool the booking page uses. Falls back to the product
+  // tagline while loading / when no firm slug is in play — never a guess.
+  const [firmName, setFirmName] = useState<string | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -28,6 +34,20 @@ export default function SetPasswordPage() {
     setToken(params.get('token'))
     setContinueParam(safeInternalPath(params.get('continue'), '/portal'))
     // Mount-only: read the token + continue target from the URL once.
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    callClientMcp<{ firmName: string | null }>({ toolName: 'legal.public.firm_branding' })
+      .then((r) => {
+        if (!cancelled) setFirmName(r.firmName)
+      })
+      .catch(() => {
+        /* leave the fallback tagline showing */
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   async function submit(e: React.FormEvent) {
@@ -63,10 +83,10 @@ export default function SetPasswordPage() {
   }
 
   return (
-    <Shell title="Set your password">
+    <Shell title="Set your password" firmName={firmName}>
       <p className="li-cp-auth-lead">
-        Choose a password for your Pacheco Law client portal. You&apos;ll use your email and this
-        password to sign in.
+        Choose a password for your {firmName ?? PRODUCT_TAGLINE} client portal. You&apos;ll use your
+        email and this password to sign in.
       </p>
 
       {error && (
@@ -122,9 +142,11 @@ export default function SetPasswordPage() {
 
 function Shell({
   title = 'Client Portal',
+  firmName,
   children,
 }: {
   title?: string
+  firmName?: string | null
   children: React.ReactNode
 }) {
   return (
@@ -134,7 +156,7 @@ function Shell({
           <span className="li-cp-auth-crest" aria-hidden>
             <ScaleIcon size={18} />
           </span>
-          <div className="li-cp-auth-firm">Pacheco Law</div>
+          <div className="li-cp-auth-firm">{firmName ?? PRODUCT_TAGLINE}</div>
         </div>
         <h1 className="li-cp-auth-title">{title}</h1>
         {children}

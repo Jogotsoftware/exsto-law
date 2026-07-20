@@ -11,6 +11,7 @@ import { withActionContext, type ActionContext, type ActionResult } from '@exsto
 import { resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
 import { rescheduleBooking, cancelBooking } from './calendarWorkspace.js'
 import { getService } from './services.js'
+import { getTenantSettings } from './tenantSettings.js'
 import {
   verifyBookingManageToken,
   signBookingManageToken,
@@ -40,6 +41,9 @@ export interface ManageableBooking {
   status: string | null
   /** True when the appointment is still upcoming and not cancelled. */
   canModify: boolean
+  // FB-C — the resolved firm's name off the SAME tenant the signed token
+  // carries (never a hardcoded literal). Null when the firm hasn't set one.
+  firmName: string | null
 }
 
 interface MatterRow {
@@ -112,6 +116,13 @@ export async function loadManageableBooking(
     }
   }
 
+  let firmName: string | null = null
+  try {
+    firmName = (await getTenantSettings(ctx)).firmName
+  } catch {
+    firmName = null // degrade to the page's generic fallback, never guess a name
+  }
+
   const cancelled = row.status === 'consultation_cancelled'
   return {
     clientFirstName: firstNameOf(row.client_name),
@@ -122,6 +133,7 @@ export async function loadManageableBooking(
     scheduledEndIso: row.scheduled_end,
     status: row.status,
     canModify: !cancelled && isUpcoming(row.scheduled_at, nowMs),
+    firmName,
   }
 }
 

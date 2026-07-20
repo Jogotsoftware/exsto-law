@@ -1,5 +1,6 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { resolveClientMatterIds } from '../api/clientIdentity.js'
+import { getTenantSettings } from '../api/tenantSettings.js'
 
 // CLIENT-SAFE invoice reads for the authenticated portal. Deliberately a separate
 // module from queries/billing.ts (the attorney surface) so the projection is easy
@@ -36,6 +37,10 @@ export interface ClientInvoiceDetail extends ClientInvoiceSummary {
   /** The client's own name (the "Bill to" on their invoice). */
   clientName: string
   lines: ClientInvoiceLine[]
+  // FB-C — the resolved firm's name (never a hardcoded literal). Backs BOTH
+  // pay doors (authed session + the token-based magic link), since both call
+  // this same function. Null when the firm hasn't set one.
+  firmName: string | null
 }
 
 // 'paid' stays 'paid'; everything else a client can see (issued/sent) is "due".
@@ -108,7 +113,7 @@ export async function getClientInvoiceByNumber(
 ): Promise<ClientInvoiceDetail | null> {
   const matterIds = await resolveClientMatterIds(ctx.tenantId, clientContactId)
   if (matterIds.length === 0) return null
-  return withActionContext(ctx, async (client) => {
+  const detail = await withActionContext(ctx, async (client) => {
     const head = await client.query<InvoiceHeadRow & { client_name: string | null }>(
       `
        SELECT ${HEAD_COLUMNS},
@@ -154,6 +159,15 @@ export async function getClientInvoiceByNumber(
       })),
     }
   })
+  if (!detail) return null
+
+  let firmName: string | null = null
+  try {
+    firmName = (await getTenantSettings(ctx)).firmName
+  } catch {
+    firmName = null // degrade to the page's generic fallback, never guess a name
+  }
+  return { ...detail, firmName }
 }
 
 // PORTAL-1 (WP6) — the magic-link pay door: resolve the CLIENT CONTACT the

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
 import { PlusIcon, SearchIcon, ChevronDownIcon } from '@/components/icons'
+import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
 
 interface MatterSummary {
   matterEntityId: string
@@ -15,15 +16,6 @@ interface MatterSummary {
   status: string
   summary: string
   createdAt: string
-}
-
-function humanizeService(key: string): string {
-  if (!key) return '—'
-  if (key === 'llc_formation') return 'NC LLC formation'
-  if (key === 'oa_amendment') return 'OA amendment'
-  if (key === 'business_formation') return 'NC LLC formation'
-  if (key === 'other') return 'Custom'
-  return key.replace(/_/g, ' ')
 }
 
 function humanizeStatus(status: string): string {
@@ -108,6 +100,7 @@ export default function MattersPage() {
   const [sortKey, setSortKey] = useState<SortKey>('createdAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [showNew, setShowNew] = useState(false)
+  const serviceNames = useServiceDisplayNames()
 
   const load = useCallback(() => {
     callAttorneyMcp<{ matters: MatterSummary[] }>({ toolName: 'legal.matter.list' })
@@ -241,7 +234,7 @@ export default function MattersPage() {
             <option value="">Service</option>
             {serviceOptions.map((s) => (
               <option key={s} value={s}>
-                {humanizeService(s)}
+                {serviceLabel(s, serviceNames)}
               </option>
             ))}
           </select>
@@ -313,7 +306,9 @@ export default function MattersPage() {
                     {m.summary && <span className="li-mat-cell-summary">{m.summary}</span>}
                   </span>
                   <span className="li-mat-cell-client">{m.clientName || '—'}</span>
-                  <span className="li-mat-cell-service">{humanizeService(m.practiceArea)}</span>
+                  <span className="li-mat-cell-service">
+                    {serviceLabel(m.practiceArea, serviceNames)}
+                  </span>
                   <span className="li-mat-status" style={{ background: group.bg, color: group.fg }}>
                     <span className="li-mat-status-dot" style={{ background: group.fg }} />
                     {group.chipLabel}

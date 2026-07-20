@@ -496,7 +496,7 @@ export default function QuestionnaireEditorPage() {
                 <input
                   value={doc.title}
                   onChange={(e) => patch((d) => ({ ...d, title: e.target.value }))}
-                  placeholder="e.g. NC LLC operating agreement intake"
+                  placeholder="e.g. LLC operating agreement intake"
                 />
               </label>
               <label>

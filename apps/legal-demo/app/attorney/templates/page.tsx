@@ -1071,7 +1071,7 @@ export default function TemplatesPage() {
               placeholder={
                 draft.body.trim()
                   ? 'Draft or revise with AI — e.g. “add a severability clause”, “make it more formal”…'
-                  : 'Draft with AI — e.g. “a mutual NDA for a NC LLC, 2-year term”…'
+                  : 'Draft with AI — e.g. “a mutual NDA for an LLC, 2-year term”…'
               }
             />
             {aiAttachName ? (

@@ -450,7 +450,7 @@ export default function QuestionnaireLibraryPage(): ReactElement {
               <input
                 value={draft.name}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder="e.g. NC LLC intake"
+                placeholder="e.g. LLC formation intake"
               />
             </label>
             <label style={{ flex: '2 1 22rem' }}>
