@@ -14,8 +14,18 @@ export const NC_SMLLC_AUTHORED: Lifecycle = [
     client_label: 'Intake',
     entry: true,
     action: { kind: 'view_intake' },
-    // Client submits the intake + books the consultation.
-    advances_to: [{ to: 'consultation_booked', gate: 'client', via: 'booking.create' }],
+    // B1.1 (item 7 fix): matter.open (post-#415) emits `intake.completed` as a
+    // SYSTEM event the moment the funnel's intake finishes — reliably, in the same
+    // action that opens the matter. The prior shape gated this edge on the CLIENT
+    // actually completing a separate `booking.create` action; signalEvent only ever
+    // matches system/automatic `on:` edges (executor.ts), so that edge was a
+    // structural no-op for the intake.completed dispatch and matters whose booking
+    // never independently re-triggered dispatchClientDelivery('booking.create')
+    // (handlers/booking.ts) sat "Waiting on the client" forever. `booking.create`
+    // still dispatches — dispatchClientDelivery degrades to a no-op once this edge
+    // has already fired (no remaining client edge to match), same idempotent
+    // contract as every other dispatchClientDelivery caller.
+    advances_to: [{ to: 'consultation_booked', gate: 'system', on: 'intake.completed' }],
   },
   {
     key: 'consultation_booked',
