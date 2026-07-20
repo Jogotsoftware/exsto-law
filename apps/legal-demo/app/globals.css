@@ -2208,6 +2208,65 @@ pre {
   align-items: center;
   gap: var(--space-2);
 }
+/* To-row recipient picker: Combobox's .cbx wrapper must flex like the old
+   input did, or the row collapses. */
+.mail-field .cbx {
+  flex: 1;
+}
+.mail-field .mail-icon-btn {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* "Draft with AI" affordance in the compose modal */
+.mail-ai-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+.mail-ai-prompt {
+  flex: 1;
+  font-size: var(--text-sm);
+  padding: 0.45rem 0.7rem;
+}
+.mail-ai-btn {
+  flex-shrink: 0;
+  border: 1px solid var(--accent-attorney);
+  background: var(--surface);
+  color: var(--accent-attorney);
+  border-radius: var(--radius-md, 0.5rem);
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mail-ai-btn:hover:not(:disabled) {
+  background: var(--accent-attorney-soft);
+}
+.mail-ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mail-ai-preview {
+  margin-bottom: var(--space-2);
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--rule-soft);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  white-space: pre-wrap;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+.mail-ai-error {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--danger, #b91c1c);
+}
+
 .mail-attach-btn {
   border: 1px solid var(--border);
   background: var(--bg, #fff);
@@ -2404,10 +2463,20 @@ pre {
   overflow-y: auto;
   max-height: 360px;
 }
-.composer-area.is-empty::before {
+/* TipTap's Placeholder decorates the first paragraph, not the root (the old
+   execCommand editor set is-empty on the root — that rule is retired). */
+.composer-area p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--muted);
+  float: left;
+  height: 0;
   pointer-events: none;
+}
+.composer-area blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 0.9rem;
+  margin: 0.3rem 0;
+  color: var(--muted);
 }
 .composer-area ul,
 .composer-area ol {

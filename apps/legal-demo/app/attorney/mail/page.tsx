@@ -12,7 +12,7 @@
 // path. Gmail read/send is granted as part of the single "Connect Google"
 // consent in Settings; the in-tab "Reconnect Google" button is only a
 // fallback for legacy connections made before that consent was unified.
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { fetchSession } from '@/lib/auth'
@@ -21,10 +21,22 @@ import { MailComposer, type ComposerValue } from '@/components/MailComposer'
 import { SignatureBlock, type FirmSignature } from '@/components/SignatureBlock'
 import { Modal } from '@/components/Modal'
 import { Tabs } from '@/components/Tabs'
+import { Combobox, type ComboboxOption } from '@/components/Combobox'
 import { AttachmentPicker, type PickedAttachment } from '@/components/mail/AttachmentPicker'
+import { streamMailAi, splitComposeDraft } from '@/lib/mailAiStream'
+import { markdownToHtml } from '@/lib/templateBody'
 import { SearchIcon, SendIcon, FileTextIcon, PlusIcon } from '@/components/icons'
 
 type MatterRef = { matterEntityId: string; matterNumber: string }
+
+// Compose "To" picker (searchable, over legal.contact.list) — the shape we
+// actually read off ContactSummary; matter counts / lead stage etc. aren't
+// needed here.
+interface ComposeContact {
+  fullName: string
+  email: string
+  companyName: string | null
+}
 
 // Send a client email WITH attachments through the dedicated route (attachments
 // can't ride the JSON MCP transport; the server resolves refs → bytes + scope).
@@ -187,6 +199,21 @@ export default function MailPage() {
   const [composeAttach, setComposeAttach] = useState<PickedAttachment[]>([])
   const [composeMatters, setComposeMatters] = useState<MatterRef[]>([])
   const [composeMatterId, setComposeMatterId] = useState<string | null>(null)
+  // Searchable "To" picker (Combobox) state — contacts loaded once per compose
+  // session; the manual toggle covers addresses that aren't a known contact yet.
+  const [composeContacts, setComposeContacts] = useState<ComposeContact[]>([])
+  const [manualTo, setManualTo] = useState(false)
+  // "Draft with AI" — streams a subject+body draft from legal.mail.ai/stream.
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  // Body text accumulated so far, shown in a preview while streaming; null once
+  // there's nothing to preview (idle, or just injected into the composer).
+  const [aiPreview, setAiPreview] = useState<string | null>(null)
+  // Whether the current compose.subject value was set BY the AI draft (as opposed
+  // to typed by the attorney) — a later draft keeps refining it; a manual edit
+  // locks it so a follow-up "Draft with AI" click won't clobber it.
+  const [aiSubjectIsAiSet, setAiSubjectIsAiSet] = useState(false)
 
   // ── Portal chat tab state ────────────────────────────────────────────────
   const [portalThreads, setPortalThreads] = useState<PortalThreadSummary[] | null>(null)
@@ -345,6 +372,38 @@ export default function MailPage() {
     }
   }, [composeTo])
 
+  // Load the contact list once each time the compose modal opens (not on page
+  // mount — most sessions never open compose), for the searchable To picker.
+  const composeOpen = compose !== null
+  useEffect(() => {
+    if (!composeOpen) return
+    callAttorneyMcp<{ contacts: ComposeContact[] }>({ toolName: 'legal.contact.list' })
+      .then((r) => setComposeContacts(r.contacts.filter((c) => c.email.trim())))
+      .catch(() => setComposeContacts([]))
+  }, [composeOpen])
+
+  // Reset the "Draft with AI" affordance whenever the compose modal is closed, so
+  // the next compose session starts clean.
+  useEffect(() => {
+    if (compose) return
+    setAiPrompt('')
+    setAiPreview(null)
+    setAiError(null)
+    setAiBusy(false)
+    setAiSubjectIsAiSet(false)
+    setManualTo(false)
+  }, [compose])
+
+  const composeContactOptions: ComboboxOption[] = useMemo(
+    () =>
+      composeContacts.map((c) => ({
+        value: c.email.toLowerCase(),
+        label: c.fullName || c.email,
+        hint: c.email + (c.companyName ? ` · ${c.companyName}` : ''),
+      })),
+    [composeContacts],
+  )
+
   async function openThread(gmailThreadId: string) {
     setBusy('open')
     setError(null)
@@ -449,6 +508,57 @@ export default function MailPage() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(null)
+    }
+  }
+
+  // "Draft with AI" — streams a subject+body draft (legal.mail.ai/stream) scoped
+  // to whichever matter the recipient resolved to. Subject updates live while it
+  // keeps refining (unless the attorney already typed one); the body streams into
+  // a preview and is only injected into the composer (as HTML, via a remount) once
+  // the draft is complete — the composer itself has no live-streaming mode.
+  async function draftWithAi() {
+    if (!compose || !compose.to.trim() || !aiPrompt.trim() || aiBusy) return
+    // Fixed for the duration of this draft: an attorney-typed subject is left
+    // alone; one the AI already set (this session or a prior draft) keeps updating.
+    const subjectLocked = compose.subject.trim().length > 0 && !aiSubjectIsAiSet
+    const matterEntityId = composeMatterId || composeMatters[0]?.matterEntityId
+    setAiBusy(true)
+    setAiError(null)
+    setAiPreview('')
+    let accumulated = ''
+    try {
+      await streamMailAi(
+        { instructions: aiPrompt.trim(), matterEntityId },
+        {
+          onText: (chunk) => {
+            accumulated += chunk
+            const { subject, body } = splitComposeDraft(accumulated)
+            setAiPreview(body)
+            if (!subjectLocked && subject) {
+              setAiSubjectIsAiSet(true)
+              setCompose((c) => (c ? { ...c, subject } : c))
+            }
+          },
+          onDone: () => {
+            const { body } = splitComposeDraft(accumulated)
+            const text = body.trim()
+            const html = markdownToHtml(text)
+            setCompose((c) => (c ? { ...c, body: { html, text } } : c))
+            setComposerNonce((n) => n + 1)
+            setAiPreview(null)
+            setAiBusy(false)
+          },
+          onError: (message) => {
+            setAiError(message)
+            setAiPreview(null)
+            setAiBusy(false)
+          },
+        },
+      )
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err))
+      setAiPreview(null)
+      setAiBusy(false)
     }
   }
 
@@ -918,6 +1028,7 @@ export default function MailPage() {
         <Modal
           title="New message"
           onClose={() => setCompose(null)}
+          size="wide"
           footer={
             <>
               <button onClick={() => setCompose(null)}>Discard</button>
@@ -935,23 +1046,63 @@ export default function MailPage() {
         >
           <label className="mail-field">
             <span className="mail-field-label">To</span>
-            <input
-              type="email"
-              placeholder="client@example.com"
-              value={compose.to}
-              onChange={(e) => setCompose({ ...compose, to: e.target.value })}
-            />
+            {manualTo ? (
+              <input
+                type="email"
+                placeholder="client@example.com"
+                value={compose.to}
+                onChange={(e) => setCompose({ ...compose, to: e.target.value })}
+              />
+            ) : (
+              <Combobox
+                options={composeContactOptions}
+                value={compose.to ? compose.to.toLowerCase() : null}
+                onChange={(email) => setCompose({ ...compose, to: email })}
+                placeholder="Search contacts…"
+                ariaLabel="Recipient"
+              />
+            )}
+            <button type="button" className="mail-icon-btn" onClick={() => setManualTo((v) => !v)}>
+              {manualTo ? 'Pick from contacts' : 'Enter address manually'}
+            </button>
           </label>
           <label className="mail-field">
             <span className="mail-field-label">Subject</span>
             <input
               type="text"
               value={compose.subject}
-              onChange={(e) => setCompose({ ...compose, subject: e.target.value })}
+              onChange={(e) => {
+                setAiSubjectIsAiSet(false)
+                setCompose({ ...compose, subject: e.target.value })
+              }}
             />
           </label>
+          <div className="mail-ai-row">
+            <input
+              type="text"
+              className="mail-ai-prompt"
+              placeholder="What should this email accomplish?"
+              value={aiPrompt}
+              disabled={aiBusy}
+              onChange={(e) => setAiPrompt(e.target.value)}
+            />
+            <button
+              type="button"
+              className="mail-ai-btn"
+              disabled={aiBusy || !aiPrompt.trim() || !compose.to.trim()}
+              title={!compose.to.trim() ? 'Pick a recipient first' : undefined}
+              onClick={draftWithAi}
+            >
+              {aiBusy ? 'Drafting…' : 'Draft with AI'}
+            </button>
+          </div>
+          {aiError && <div className="mail-ai-error">{aiError}</div>}
+          {aiBusy && aiPreview !== null && (
+            <div className="mail-ai-preview">{aiPreview || 'Drafting…'}</div>
+          )}
           <MailComposer
             key={`compose-${composerNonce}`}
+            initialHtml={compose.body.html}
             placeholder="Write your message… Only known client contacts are accepted."
             footer={<SignatureBlock value={signature} onChange={setSignature} />}
             onChange={(v) => setCompose((c) => (c ? { ...c, body: v } : c))}
