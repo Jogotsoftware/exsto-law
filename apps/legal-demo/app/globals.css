@@ -23832,3 +23832,81 @@ details.li-brief-research summary:hover {
     display: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WP A1 — Firm jurisdiction (li-set practice-area chips + li-mat governing-law
+   fact). Append-only family: Settings → Firm details read-view chips, and the
+   matter Overview facts-card governing-law display/inline-edit control.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.li-set-pareas {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.li-set-parea-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--li-bg);
+  border: 1px solid var(--li-border-soft);
+  color: var(--li-navy);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+/* The facts card gains a 4th cell (Governing law); 4-up on wide screens, wrap
+   below. Appended override of the 3-col rule at its original declaration. */
+.li-mat-facts {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.li-mat-govlaw-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-mat-govlaw-src {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--li-muted-2);
+  background: var(--li-bg);
+  border: 1px solid var(--li-border-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.li-mat-govlaw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--li-muted-3);
+  cursor: pointer;
+  font-size: 12px;
+}
+.li-mat-govlaw-btn:hover {
+  background: var(--li-bg);
+  color: var(--li-navy);
+}
+.li-mat-govlaw-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.li-mat-govlaw-select {
+  font-size: 13.5px;
+  color: var(--li-navy);
+  background: var(--li-card);
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  max-width: 200px;
+}
+.li-mat-govlaw-err {
+  font-size: 12px;
+  color: #b3403a;
+}

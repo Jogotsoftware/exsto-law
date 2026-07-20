@@ -6,6 +6,11 @@ export interface TenantSettings {
   firmEmail: string | null
   firmPhone: string | null
   firmAddress: string | null
+  // WP A1 — the firm's home jurisdiction (short code, e.g. 'NC') and practice
+  // areas. Deliberately NO default anywhere below (FIRM_DEFAULTS must not grow):
+  // absent means honest unset, never a guessed value.
+  firmJurisdiction: string | null
+  practiceAreas: string[] | null
   defaultHourlyRateUsd: number | null
   defaultLlcFlatFeeUsd: number | null
   updatedAt: string | null
@@ -17,6 +22,8 @@ const EMPTY: TenantSettings = {
   firmEmail: null,
   firmPhone: null,
   firmAddress: null,
+  firmJurisdiction: null,
+  practiceAreas: null,
   defaultHourlyRateUsd: null,
   defaultLlcFlatFeeUsd: null,
   updatedAt: null,
@@ -37,31 +44,51 @@ const FIRM_DEFAULTS: TenantSettings = {
 // firm_profile singleton (migration 0161), written through legal.firm.set_profile
 // (handlers/firmProfile.ts). Reads here overlay the substrate value FIRST, then
 // fall back to the wedge-era tenant_settings table for anything unset.
+// WP A1 adds firm_jurisdiction / practice_areas / attorney_name (migration 0170)
+// to that same singleton, same set_profile action.
 export interface FirmProfileFields {
   firmName: string | null
   firmAddress: string | null
   firmPhone: string | null
   firmEmail: string | null
+  firmJurisdiction: string | null
+  practiceAreas: string[] | null
+  attorneyName: string | null
 }
 
-const PROFILE_ATTR_KINDS = ['firm_name', 'firm_address', 'firm_phone', 'firm_email'] as const
+const PROFILE_ATTR_KINDS = [
+  'firm_name',
+  'firm_address',
+  'firm_phone',
+  'firm_email',
+  'firm_jurisdiction',
+  'practice_areas',
+  'attorney_name',
+] as const
 
 // Tri-state per field, read off the firm_profile singleton:
-//   string    — set to a value;
-//   null      — an attribute row EXISTS with an empty value: the attorney
-//               explicitly cleared it (legal.firm.set_profile stores '' on
-//               clear). A cleared field must resolve to null — NEVER fall back
-//               to the legacy table or a default, or the clear can never take;
+//   value     — set to a value;
+//   null      — an attribute row EXISTS with an empty value (''/[]): the
+//               attorney explicitly cleared it (legal.firm.set_profile stores
+//               that on clear). A cleared field must resolve to null — NEVER
+//               fall back to the legacy table or a default, or the clear can
+//               never take;
 //   undefined — no attribute row at all (never set) → fallback allowed.
 interface FirmProfileAttrReads {
   firmName: string | null | undefined
   firmAddress: string | null | undefined
   firmPhone: string | null | undefined
   firmEmail: string | null | undefined
+  firmJurisdiction: string | null | undefined
+  practiceAreas: string[] | null | undefined
+  attorneyName: string | null | undefined
 }
 
 // Latest firm-identity attributes off the firm_profile singleton (all undefined
-// when no singleton / no rows yet). Mirrors api/firmSignature.readStored.
+// when no singleton / no rows yet). Mirrors api/firmSignature.readStored. Also
+// tolerates firm_jurisdiction/practice_areas/attorney_name not existing yet as
+// attribute kinds (migration 0170 unapplied): the kind_name = ANY($2) join
+// simply matches nothing for those, same as "never set".
 async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttrReads> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{ kind_name: string; value: string | null }>(
@@ -88,11 +115,30 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttr
       const v = byKind.get(kind)
       return typeof v === 'string' && v.trim() ? v : null // row with '' = explicit clear
     }
+    // practice_areas is stored as a json array; `#>> '{}'` returns its JSON text
+    // (e.g. `["business law"]`), not a bare string, so it needs its own parse.
+    const arrVal = (kind: string): string[] | null | undefined => {
+      if (!byKind.has(kind)) return undefined // never set → fallback allowed
+      const v = byKind.get(kind)
+      if (typeof v !== 'string') return null
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(v)
+      } catch {
+        return null
+      }
+      if (!Array.isArray(parsed)) return null
+      const areas = parsed.filter((x): x is string => typeof x === 'string')
+      return areas.length ? areas : null // [] = explicit clear
+    }
     return {
       firmName: val('firm_name'),
       firmAddress: val('firm_address'),
       firmPhone: val('firm_phone'),
       firmEmail: val('firm_email'),
+      firmJurisdiction: val('firm_jurisdiction'),
+      practiceAreas: arrVal('practice_areas'),
+      attorneyName: val('attorney_name'),
     }
   })
 }
@@ -100,8 +146,12 @@ async function readFirmProfileAttrs(ctx: ActionContext): Promise<FirmProfileAttr
 // Substrate profile value wins; an EXPLICIT CLEAR stays cleared (resolves null,
 // no legacy/default resurrection); a legacy table value survives only where the
 // profile has never been set (append-only history stays on the substrate side).
+// attorneyName: the profile value (WP A1) now wins over the legacy tenant_settings
+// row / FIRM_DEFAULTS the same way firmName already does.
 function overlayProfile(base: TenantSettings, profile: FirmProfileAttrReads): TenantSettings {
   const field = (p: string | null | undefined, b: string | null): string | null =>
+    p === undefined ? b : p
+  const arrField = (p: string[] | null | undefined, b: string[] | null): string[] | null =>
     p === undefined ? b : p
   return {
     ...base,
@@ -109,6 +159,9 @@ function overlayProfile(base: TenantSettings, profile: FirmProfileAttrReads): Te
     firmAddress: field(profile.firmAddress, base.firmAddress),
     firmPhone: field(profile.firmPhone, base.firmPhone),
     firmEmail: field(profile.firmEmail, base.firmEmail),
+    firmJurisdiction: field(profile.firmJurisdiction, base.firmJurisdiction),
+    practiceAreas: arrField(profile.practiceAreas, base.practiceAreas),
+    attorneyName: field(profile.attorneyName, base.attorneyName),
   }
 }
 
@@ -149,7 +202,7 @@ export async function getTenantSettingsForMerge(ctx: ActionContext): Promise<Ten
 
 // The resolved firm profile for the Settings editor / MCP get tool: substrate
 // singleton first, legacy tenant_settings fallback. Same values getTenantSettings
-// reports for these four fields.
+// reports for these fields.
 export async function getFirmProfile(ctx: ActionContext): Promise<FirmProfileFields> {
   const s = await getTenantSettings(ctx)
   return {
@@ -157,15 +210,22 @@ export async function getFirmProfile(ctx: ActionContext): Promise<FirmProfileFie
     firmAddress: s.firmAddress,
     firmPhone: s.firmPhone,
     firmEmail: s.firmEmail,
+    firmJurisdiction: s.firmJurisdiction,
+    practiceAreas: s.practiceAreas,
+    attorneyName: s.attorneyName,
   }
 }
 
 export interface SetFirmProfileInput {
-  // undefined leaves a field unchanged; ''/null clears it.
+  // undefined leaves a field unchanged; ''/null ([]/null for practiceAreas) clears it.
   firmName?: string | null
   firmAddress?: string | null
   firmPhone?: string | null
   firmEmail?: string | null
+  // Short US state code or full name (normalized in the handler); empty clears.
+  firmJurisdiction?: string | null
+  practiceAreas?: string[] | null
+  attorneyName?: string | null
 }
 
 // Write the firm profile through the core (legal.firm.set_profile — append-only
@@ -183,6 +243,11 @@ export async function setFirmProfile(
       ...(input.firmAddress !== undefined ? { firm_address: input.firmAddress } : {}),
       ...(input.firmPhone !== undefined ? { firm_phone: input.firmPhone } : {}),
       ...(input.firmEmail !== undefined ? { firm_email: input.firmEmail } : {}),
+      ...(input.firmJurisdiction !== undefined
+        ? { firm_jurisdiction: input.firmJurisdiction }
+        : {}),
+      ...(input.practiceAreas !== undefined ? { practice_areas: input.practiceAreas } : {}),
+      ...(input.attorneyName !== undefined ? { attorney_name: input.attorneyName } : {}),
     },
   })
   return getFirmProfile(ctx)
@@ -213,6 +278,10 @@ async function readTenantSettings(ctx: ActionContext): Promise<TenantSettings> {
       firmEmail: r.firm_email,
       firmPhone: r.firm_phone,
       firmAddress: r.firm_address,
+      // The legacy wedge-era table has no jurisdiction/practice-area columns —
+      // WP A1 fields live ONLY on the firm_profile singleton (no legacy source).
+      firmJurisdiction: null,
+      practiceAreas: null,
       defaultHourlyRateUsd:
         r.default_hourly_rate_usd != null ? Number(r.default_hourly_rate_usd) : null,
       defaultLlcFlatFeeUsd:

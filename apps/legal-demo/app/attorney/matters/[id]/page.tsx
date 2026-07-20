@@ -43,6 +43,7 @@ import {
   CompleteMatterStep,
 } from './RunnerReview'
 import { skipStep } from '@/lib/stepRunner'
+import { US_STATE_OPTIONS } from '@/lib/usStates'
 import { useConfirm } from '@/components/ConfirmModal'
 import { NotesSection } from '@/components/NotesSection'
 
@@ -195,6 +196,7 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
               {new Date(matter.createdAt).toLocaleDateString()}
             </div>
           </div>
+          <GoverningLawFact matter={matter} onChanged={load} />
         </div>
 
         {matter.workflow ? (
@@ -383,6 +385,96 @@ function StepIcon({ state }: { state: StepState }) {
   if (state === 'done') return <CheckCircleIcon size={18} />
   if (state === 'current') return <ClockIcon size={18} />
   return <FileTextIcon size={18} />
+}
+
+// ── WP A1: governing-law fact + inline edit ─────────────────────────────────
+// Shows the RESOLVED governing law (matter override > firm home jurisdiction >
+// honest "Not set") with its source, and a small pencil affordance that swaps in
+// a state <select> wired to legal.matter.set_governing_law. Choosing "Use firm
+// default" clears the matter override so the firm rung takes over.
+function GoverningLawFact({
+  matter,
+  onChanged,
+}: {
+  matter: MatterDetail
+  onChanged: () => Promise<void> | void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const resolved = matter.governingLaw ?? null
+
+  async function set(code: string) {
+    setSaving(true)
+    setErr(null)
+    try {
+      await callAttorneyMcp({
+        toolName: 'legal.matter.set_governing_law',
+        input: { matterEntityId: matter.matterEntityId, governingLaw: code },
+      })
+      await onChanged()
+      setEditing(false)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="li-mat-facts-label">Governing law</div>
+      {editing ? (
+        <span className="li-mat-govlaw-edit">
+          <select
+            className="li-mat-govlaw-select"
+            // The select's value is the MATTER'S OWN override (not the firm
+            // fallback): '' here means "no override — use firm default".
+            value={resolved?.source === 'matter' ? resolved.code : ''}
+            disabled={saving}
+            onChange={(e) => set(e.target.value)}
+            aria-label="Governing law"
+          >
+            <option value="">Use firm default</option>
+            {US_STATE_OPTIONS.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="li-mat-govlaw-btn"
+            onClick={() => {
+              setEditing(false)
+              setErr(null)
+            }}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          {err && <span className="li-mat-govlaw-err">{err}</span>}
+        </span>
+      ) : (
+        <div className="li-mat-facts-value li-mat-govlaw-value">
+          {resolved ? resolved.displayName : 'Not set'}
+          {resolved && (
+            <span className="li-mat-govlaw-src">
+              {resolved.source === 'matter' ? 'this matter' : 'firm default'}
+            </span>
+          )}
+          <button
+            type="button"
+            className="li-mat-govlaw-btn"
+            onClick={() => setEditing(true)}
+            aria-label="Edit governing law"
+          >
+            <EditIcon size={13} />
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── MACHINE-COMMS-1: honest workflow repair panel ───────────────────────────

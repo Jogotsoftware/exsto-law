@@ -2,6 +2,10 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import type { Lifecycle } from '../lifecycle/types.js'
+import {
+  resolveMatterJurisdictionWithClient,
+  type ResolvedJurisdiction,
+} from '../api/matterJurisdiction.js'
 
 // Bitemporal read discipline (exsto-query-substrate): current attribute state =
 // latest valid_from with valid_to open; relationships current via valid_to.
@@ -49,6 +53,11 @@ export interface MatterDetail extends MatterSummary {
   // then show the repair control ("start workflow"), NEVER the fabricated legacy
   // pipeline. False when an instance exists or the service has no lifecycle at all.
   workflowRepairAvailable: boolean
+  // WP A1 — the resolved governing law: the matter's own override if set, else
+  // the firm's home jurisdiction, else null (honest unset; no service rung, no
+  // guessed default). DISPLAY ONLY here — the AI drafting/email/review consumers
+  // still hardcode 'NC' until a later WP de-hardcodes them.
+  governingLaw: ResolvedJurisdiction | null
 }
 
 export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> {
@@ -190,6 +199,11 @@ export async function getMatter(
     )
 
     const workflow = await loadWorkflow(client, ctx.tenantId, matterEntityId)
+    const governingLaw = await resolveMatterJurisdictionWithClient(
+      client,
+      ctx.tenantId,
+      matterEntityId,
+    )
 
     // WP0 honesty: with no instance, does the service have an authored lifecycle
     // the repair control could instantiate? Any-status current row, non-empty graph.
@@ -228,6 +242,7 @@ export async function getMatter(
       clientEntityId: clientParent.rows[0]?.id ?? null,
       workflow,
       workflowRepairAvailable,
+      governingLaw,
     }
   })
 }

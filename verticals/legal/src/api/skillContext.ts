@@ -6,6 +6,7 @@ import {
   type SkillCatalogEntry,
   type Skill,
 } from '../queries/skills.js'
+import { US_STATES } from './jurisdictions.js'
 
 // Shared skill-awareness for ANY generative-AI feature in the legal vertical —
 // not just the chatbot. The same legal skills (playbooks ported from
@@ -113,16 +114,13 @@ export async function loadForcedSkills(
 // into a draft and drafting behaves exactly as before.
 
 // A 2-letter US jurisdiction code → full state name, so a skill that spells out the
-// state ("North Carolina LLC …") still earns the jurisdiction bonus. Only the codes we
-// actually operate in need entries; anything else falls back to the code-as-word match.
-const JURISDICTION_NAMES: Record<string, string> = {
-  nc: 'north carolina',
-  ca: 'california',
-  ny: 'new york',
-  tx: 'texas',
-  de: 'delaware',
-  fl: 'florida',
-}
+// state ("North Carolina LLC …") still earns the jurisdiction bonus. The full 50
+// states + DC (jurisdictions.ts, WP A1) — a pure superset of the 6-state map this
+// replaced, so every prior match still passes; anything else falls back to the
+// code-as-word match.
+const JURISDICTION_NAMES: Record<string, string> = Object.fromEntries(
+  Object.entries(US_STATES).map(([code, name]) => [code.toLowerCase(), name.toLowerCase()]),
+)
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
