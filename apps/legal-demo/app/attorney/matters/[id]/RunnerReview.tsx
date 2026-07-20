@@ -539,8 +539,48 @@ export function RunnerReview({
 // an honest status panel: done if the matter has already moved past it, running on
 // the worker while it is the current step (auto-run fired on entry), or waiting if
 // it is still upcoming. We poll the real matter read for the step to advance — we
-// never animate fake progress. There is no worker job-status read exposed to the
-// app yet, so a recorded-error "failed" state is not shown (tracked as OPEN).
+// never animate fake progress. WF-FIX-1 (WP6): when the poll exhausts, the panel
+// reads the matter history for a recorded capability failure on this stage
+// (capability_invoke_failed / capability_run_stalled / capability_run_enqueue_failed)
+// and shows an honest FAILED state; either way the attorney gets "Run this step
+// again", which re-enqueues through the workflow/invoke route (worker-side
+// idempotency makes a duplicate run safe).
+
+const CAPABILITY_FAIL_TAGS = new Set([
+  'capability_invoke_failed',
+  'capability_run_stalled',
+  'capability_run_enqueue_failed',
+])
+
+interface HistoryEventEntry {
+  eventId: string
+  kindName: string
+  data: Record<string, unknown>
+  occurredAt: string
+}
+
+async function readCapabilityFailure(
+  matterEntityId: string,
+  stageKey: string,
+): Promise<string | null> {
+  const res = await callAttorneyMcp<{ events?: HistoryEventEntry[] }>({
+    toolName: 'legal.matter.history',
+    input: { matterEntityId },
+  }).catch(() => null)
+  const events = res?.events ?? []
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]
+    if (e.kindName !== 'observation') continue
+    const kind = typeof e.data?.kind === 'string' ? e.data.kind : ''
+    if (!CAPABILITY_FAIL_TAGS.has(kind)) continue
+    const evStage = typeof e.data?.stage === 'string' ? e.data.stage : null
+    if (evStage && evStage !== stageKey) continue
+    const reason = typeof e.data?.reason === 'string' ? e.data.reason : ''
+    return reason || 'The automated step recorded a failure.'
+  }
+  return null
+}
+
 export function CapabilityStatePanel({
   stage,
   matter,
@@ -559,6 +599,10 @@ export function CapabilityStatePanel({
   waitsNote?: React.ReactNode
 }) {
   const [stalled, setStalled] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const [rerunning, setRerunning] = useState(false)
+  // Bumping attempt restarts the poll loop (Keep watching / Run again).
+  const [attempt, setAttempt] = useState(0)
   const pollRef = useRef<{ cancelled: boolean } | null>(null)
 
   useEffect(() => {
@@ -567,6 +611,7 @@ export function CapabilityStatePanel({
     const token = { cancelled: false }
     pollRef.current = token
     setStalled(false)
+    setFailure(null)
     ;(async () => {
       const startState = matter.workflow?.currentState ?? null
       for (let i = 0; i < POLL_TRIES; i++) {
@@ -584,14 +629,37 @@ export function CapabilityStatePanel({
         }
       }
       if (!token.cancelled) {
+        // Exhausted: before settling on "still running", check the history for a
+        // recorded failure on this stage — honesty beats a hopeful spinner.
+        const recorded = await readCapabilityFailure(matter.matterEntityId, stage.key)
+        if (token.cancelled) return
+        setFailure(recorded)
         setStalled(true)
       }
     })()
     return () => {
       token.cancelled = true
     }
-    // Keyed on the step becoming current for this matter; onChanged is stable.
-  }, [state, matter.matterEntityId])
+    // Keyed on the step becoming current for this matter (+ manual retry); onChanged is stable.
+  }, [state, matter.matterEntityId, attempt])
+
+  const runAgain = async (): Promise<void> => {
+    setRerunning(true)
+    try {
+      const res = await fetch(
+        `/api/attorney/matters/${encodeURIComponent(matter.matterEntityId)}/workflow/invoke`,
+        { method: 'POST' },
+      )
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null
+        setFailure(body?.error ?? 'Could not queue the step to run again.')
+        return
+      }
+      setAttempt((a) => a + 1)
+    } finally {
+      setRerunning(false)
+    }
+  }
 
   const waitingOn =
     (typeof stage.action?.config?.waiting_on === 'string' && stage.action.config.waiting_on) ||
@@ -611,18 +679,35 @@ export function CapabilityStatePanel({
         </div>
       ) : state === 'current' ? (
         stalled ? (
-          <div className="runner-state running">
-            <div className="runner-state-row">
-              <span className="runner-state-title">Still running on the worker</span>
+          failure ? (
+            <div className="runner-state">
+              <div className="runner-state-row">
+                <span className="runner-state-title">This step hit a problem</span>
+              </div>
+              <p className="runner-state-detail">{failure}</p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => void runAgain()} disabled={rerunning}>
+                  {rerunning ? 'Queueing…' : 'Run this step again'}
+                </button>
+              </div>
             </div>
-            <p className="runner-state-detail">
-              This step hasn’t advanced yet. It runs off-request on the worker and advances
-              automatically when it completes; keep this open to watch, or check back shortly.
-            </p>
-            <div>
-              <button onClick={() => setStalled(false)}>Keep watching</button>
+          ) : (
+            <div className="runner-state running">
+              <div className="runner-state-row">
+                <span className="runner-state-title">Still running on the worker</span>
+              </div>
+              <p className="runner-state-detail">
+                This step hasn’t advanced yet. It runs off-request on the worker and advances
+                automatically when it completes; keep this open to watch, or check back shortly.
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setAttempt((a) => a + 1)}>Keep watching</button>
+                <button onClick={() => void runAgain()} disabled={rerunning}>
+                  {rerunning ? 'Queueing…' : 'Run this step again'}
+                </button>
+              </div>
             </div>
-          </div>
+          )
         ) : (
           <div className="runner-state running">
             <div className="runner-state-row">

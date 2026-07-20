@@ -228,6 +228,39 @@ registerWorkerHandler('legal.draft.reconcile', async (ctx) => {
   }
 })
 
+// WF-FIX-1 (WP6) — the capability sibling of draft.reconcile: surface
+// legal.capability.run jobs orphaned 'running' as capability_run_stalled
+// observations so the matter's Workflow window can show an honest failed state
+// (before this, capability stalls vanished into the generic queue sweep with no
+// matter-visible record). Same swallow-errors posture: recovery never crashes boot.
+registerWorkerHandler('legal.capability.reconcile', async (ctx) => {
+  try {
+    const { resolveStaleCapabilityJobs } = await import('../api/capabilityReconcile.js')
+    const resolved = await resolveStaleCapabilityJobs(ctx)
+    if (resolved.length > 0) {
+      console.log(
+        `[capability.reconcile] surfaced ${resolved.length} stalled capability job(s): ` +
+          resolved.map((r) => r.jobId).join(', '),
+      )
+    }
+  } catch (err) {
+    console.error('[capability.reconcile] sweep failed (non-fatal):', err)
+  }
+})
+
+export async function ensureStaleCapabilityReconcileScheduled(tenantId: string): Promise<void> {
+  const pending = await withTenant(tenantId, async (client) => {
+    const r = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM worker_job
+       WHERE tenant_id = $1 AND job_kind = 'legal.capability.reconcile' AND status IN ('pending','running')`,
+      [tenantId],
+    )
+    return Number(r.rows[0]?.n ?? '0')
+  })
+  if (pending > 0) return
+  await enqueueJob({ tenantId, jobKind: 'legal.capability.reconcile', runAt: new Date() })
+}
+
 // Seed ONE recovery sweep at worker startup — idempotent (no-ops if one is already
 // pending/running) so a restart never piles them up. Deliberately one-shot per
 // boot, NOT a self-perpetuating chain like meeting-reconcile: resolveStaleDraftJobs
