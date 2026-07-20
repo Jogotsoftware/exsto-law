@@ -12,6 +12,12 @@ import {
   buildFirmJurisdictionLine,
   buildResearchJurisdictionLine,
   jurisdictionDisplayName,
+  ASK_DONT_GUESS,
+  NO_INVENTED_MATTER_FACTS,
+  REPLY_LANGUAGE,
+  CHAT_VOICE,
+  JURISDICTION_DRAFT_DISCIPLINE,
+  portalLocaleLine,
   type AssistantFirmFacts,
 } from '@exsto/legal'
 
@@ -145,5 +151,66 @@ describe('a firm with NC set keeps full jurisdiction content', () => {
       { firmJurisdiction: 'NC', practiceAreas: null },
     )
     expect(line).toBe('U.S. California business-law firm')
+  })
+})
+
+// ── WP A3 — the five shared/attorney discipline blocks land on the right
+// surface(s), and the portal locale hint renders for Spanish. The snapshots
+// above already lock the FULL attorney prompt wording; these pin which block
+// belongs where (attorney vs portal) and the per-request locale behaviour. ──
+describe('WP A3 — discipline blocks are present on the right surface(s)', () => {
+  const attorney = buildBaseSystemPrompt({ firmName: 'Acme Legal' })
+  const portal = buildBaseSystem('Acme Legal')
+
+  it('attorney chat carries all five blocks (jurisdiction discipline is attorney-only)', () => {
+    expect(attorney).toContain(JURISDICTION_DRAFT_DISCIPLINE)
+    expect(attorney).toContain(ASK_DONT_GUESS)
+    expect(attorney).toContain(NO_INVENTED_MATTER_FACTS)
+    expect(attorney).toContain(REPLY_LANGUAGE)
+    expect(attorney).toContain(CHAT_VOICE)
+  })
+
+  it('portal chat carries the four shared blocks but NOT jurisdiction discipline', () => {
+    expect(portal).toContain(ASK_DONT_GUESS)
+    expect(portal).toContain(NO_INVENTED_MATTER_FACTS)
+    expect(portal).toContain(REPLY_LANGUAGE)
+    expect(portal).toContain(CHAT_VOICE)
+    // The portal bot does not draft or state law, so the drafting-jurisdiction
+    // rule must not leak onto the client surface.
+    expect(portal).not.toContain(JURISDICTION_DRAFT_DISCIPLINE)
+  })
+
+  it('CHAT VOICE stays formatting-neutral so it never overrides attorney bullets', () => {
+    // The attorney surface keeps its STRUCTURED READ-OUTS ARE BULLETS rule; the
+    // shared voice block must not itself dictate bullet vs prose.
+    expect(CHAT_VOICE).not.toMatch(/bullet/i)
+    expect(attorney).toContain('STRUCTURED READ-OUTS ARE BULLETS')
+  })
+})
+
+describe('WP A3 — portal locale hint', () => {
+  it("renders the Spanish default line only for 'es'", () => {
+    expect(portalLocaleLine('es')).toContain('default to Spanish')
+    expect(portalLocaleLine('en')).toBe('')
+    expect(portalLocaleLine(undefined)).toBe('')
+  })
+
+  it("threads into the portal prompt for 'es' and is absent otherwise", () => {
+    expect(buildBaseSystem('Acme Legal', 'es')).toContain('default to Spanish')
+    expect(buildBaseSystem('Acme Legal', 'en')).not.toContain('default to Spanish')
+    expect(buildBaseSystem('Acme Legal')).not.toContain('default to Spanish')
+  })
+})
+
+// Snapshot the portal base prompt too — like the attorney prompt above, its
+// wording is a reviewed artifact, so a change to any shared block or the locale
+// hint shows up as a deliberate snapshot diff.
+describe('buildBaseSystem (portal) — snapshots', () => {
+  it('firm portal prompt, no locale hint', () => {
+    expect(buildBaseSystem('Acme Legal')).toMatchSnapshot()
+  })
+
+  it('firm portal prompt with the Spanish locale hint', () => {
+    expect(buildBaseSystem('Acme Legal', 'es')).toMatchSnapshot()
   })
 })
