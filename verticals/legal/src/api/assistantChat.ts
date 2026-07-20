@@ -1108,6 +1108,14 @@ export async function recordAssistantTurn(
     // general turns, service_build_session for build turns). Additive.
     chatSessionId?: string | null
     buildSessionId?: string | null
+    // AI-CONTEXT A6 — belt-and-braces tag for a portal-client-authored turn (set
+    // by clientAssistantChat.ts). The primary fence is source-actor-based (the
+    // attorney reader excludes rows whose source actor is a portal client, keyed
+    // off actor.external_id = 'client:<contactId>' — backfill-safe, no payload
+    // change needed for existing rows). This field is a second, independent
+    // signal the same reader also checks, so a portal turn stays fenced even if
+    // the actor-based check is ever bypassed. Never set by attorney-side callers.
+    surface?: 'portal' | null
   },
 ): Promise<{ eventId: string }> {
   // WP-D6 — orchestration text is never persisted as anyone's words. A hidden
@@ -1138,6 +1146,9 @@ export async function recordAssistantTurn(
         // Conversation scoping (WP-D2/D5) — null for legacy/unscoped turns.
         chat_session_id: input.chatSessionId ?? null,
         build_session_id: input.buildSessionId ?? null,
+        // AI-CONTEXT A6 — portal-turn tag (see the `surface` doc above). Null for
+        // every attorney-side turn.
+        surface: input.surface ?? null,
         // The model's reasoning for this turn, relocated out of the reply. Null when the
         // turn produced none, so a reopened thread's disclosure only shows when there's
         // something to show. Additive — never affects the reply text itself.
@@ -2222,7 +2233,10 @@ export async function listAssistantThread(
     }>(
       // A chat-session read (WP-D2) selects that conversation's turns by the
       // session id in the payload; the legacy scope read (per-matter/contact/
-      // global) is unchanged so pre-session history still opens.
+      // global) is unchanged so pre-session history still opens. The session
+      // branch needs no history fence (AI-CONTEXT A6): a portal client turn
+      // never carries a chat_session_id (clientAssistantChat.ts never sets one),
+      // so it can never surface through this branch in the first place.
       scope.chatSessionId
         ? `SELECT e.id AS event_id, e.payload,
                   to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
@@ -2233,14 +2247,50 @@ export async function listAssistantThread(
              AND e.payload->>'chat_session_id' = $2
              AND COALESCE(e.payload->>'kind', '') <> 'feedback'
            ORDER BY e.occurred_at ASC`
-        : `SELECT e.id AS event_id, e.payload,
+        : // AI-CONTEXT A6 (history-fence) — the legacy per-matter/contact/global
+          // read has no session id to scope on, so on a CONTACT thread it would
+          // otherwise select every assistant.turn row with that primary_entity_id
+          // — including the portal client's OWN turns (clientAssistantChat.ts
+          // records them with primaryEntityId = the same client_contact id, no
+          // chat_session_id). Two independent, redundant fences keep those out of
+          // the attorney's view (and out of the model-history re-feed):
+          //  (1) actor fence — LEFT JOIN to the turn's source actor (source_ref
+          //      is that actor's id, as text) and exclude rows whose actor is
+          //      THIS contact's portal actor (external_id = 'client:<contactId>',
+          //      the migration-0135 contract). Backfill-safe: works on every
+          //      existing row, no payload migration needed.
+          //  (2) surface fence — exclude rows explicitly tagged
+          //      payload.surface = 'portal' (set going forward by
+          //      recordAssistantTurn's `surface` param). Catches a portal turn
+          //      even if (1) is ever defeated (e.g. an actor reassignment).
+          // Comparing source_ref to actor.id via ::text (not casting source_ref
+          // to uuid) is deliberate: source_ref also holds non-uuid values like
+          // 'integration:perplexity', which would otherwise throw. The exclusion
+          // is built off e.primary_entity_id (a column, already proven equal to
+          // $2 by the WHERE clause above) rather than reusing $2 a second time
+          // with a different cast, so the prepared statement never needs to
+          // reconcile $2 against two types.
+          // NULL GUARD: on the global thread (primary_entity_id IS NULL — the
+          // scope a portal turn never uses), 'client:' || NULL is NULL, and
+          // `external_id IS DISTINCT FROM NULL` is FALSE whenever external_id
+          // is ALSO NULL (e.g. an attorney actor with no external_id) — which
+          // would wrongly exclude that attorney's own global-thread turns. The
+          // `e.primary_entity_id IS NULL OR …` guard skips the actor fence
+          // entirely for the global thread, where it can never be relevant.
+          `SELECT e.id AS event_id, e.payload,
                   to_char(e.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
            FROM event e
            JOIN event_kind_definition ekd ON ekd.id = e.event_kind_id
+           LEFT JOIN actor src ON src.tenant_id = e.tenant_id AND src.id::text = e.source_ref
            WHERE e.tenant_id = $1
              AND ekd.kind_name = 'assistant.turn'
              AND e.primary_entity_id IS NOT DISTINCT FROM $2::uuid
              AND COALESCE(e.payload->>'kind', '') <> 'feedback'
+             AND (
+               e.primary_entity_id IS NULL
+               OR src.external_id IS DISTINCT FROM 'client:' || e.primary_entity_id::text
+             )
+             AND e.payload->>'surface' IS DISTINCT FROM 'portal'
            ORDER BY e.occurred_at ASC`,
       [ctx.tenantId, scope.chatSessionId ?? primary],
     )

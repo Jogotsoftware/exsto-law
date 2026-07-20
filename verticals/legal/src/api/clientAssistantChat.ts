@@ -346,6 +346,14 @@ export async function* clientAssistantChatStream(
     .filter(Boolean)
     .join('\n\n')
 
+  // AI-CONTEXT A6 — INVARIANT: portal chat history is entirely CLIENT-SUPPLIED,
+  // per request, from this array. There is no DB read of prior turns on this
+  // side — so an attorney's turns can never surface into a client's history,
+  // by construction (nothing to fence). The reverse direction (a portal turn
+  // must never surface into an ATTORNEY's history) is a real DB read and is
+  // fenced on that side — see listAssistantThread's legacy branch in
+  // assistantChat.ts (actor + payload.surface fence). If a DB-backed portal
+  // thread read is ever added here, it MUST filter to this client's own actor.
   const history = (input.history ?? [])
     .slice(-MAX_HISTORY_TURNS)
     .filter((h) => (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string')
@@ -438,10 +446,10 @@ export async function* clientAssistantChatStream(
   if (requestCard) yield { type: 'request_card', card: requestCard }
 
   // The turn on the ledger — the CLIENT's own actor, contact-scoped. AI-CONTEXT
-  // A4 — the portal had no stutter collapse (attorney turns got it via item 8);
-  // same backstop here, on the persisted copy only — the live stream already
-  // sent `reply`'s raw chunks to the client, so this only fixes what re-renders
-  // from history.
+  // A4 — stutter collapse on the persisted copy only (the live stream already
+  // sent raw chunks). AI-CONTEXT A6 — tagged surface: 'portal', belt-and-braces
+  // so the attorney-side history reader can fence it out even independent of
+  // the actor check.
   try {
     await recordAssistantTurn(ctx, {
       message,
@@ -452,6 +460,7 @@ export async function* clientAssistantChatStream(
       citations: [],
       scope: 'contact',
       primaryEntityId: who.clientContactId,
+      surface: 'portal',
     })
   } catch {
     // Recording must never break the reply the client already received.
