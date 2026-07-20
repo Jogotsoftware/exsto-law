@@ -19,7 +19,12 @@ export interface AssistantFirmFacts {
   // assistant_instructions attribute (api/tenantSettings.ts). Constant for the
   // conversation, same as the rest of AssistantFirmFacts, so it rides the
   // STABLE/cached half alongside them.
-  firmInstructions?: string
+  // ITEM-12 WP-2 — assistant_instructions is now an array of pills (one
+  // Enter-to-add pill per standing instruction); a row saved before WP-2 is
+  // still a plain string (tenantSettings.ts reads it back as a one-item array,
+  // but callers/tests may still pass a bare string directly), so every reader
+  // here accepts both shapes.
+  firmInstructions?: string | string[]
 }
 
 // "a" vs "an" for a practice-area phrase that may start with any word (a
@@ -130,6 +135,23 @@ function clipCustomInstructions(text: string): string {
   return `${text.slice(0, CUSTOM_INSTRUCTIONS_CHAR_CAP)}\n…[truncated at ${CUSTOM_INSTRUCTIONS_CHAR_CAP} characters]`
 }
 
+// ITEM-12 WP-2 — every instructions slot (firm/attorney/portal) now accepts
+// either shape: a plain string (pre-WP-2 data, or a caller/test passing text
+// directly) or a string[] (one item per Enter-to-add pill in the Settings →
+// Assistant / Firm details editors). An array renders as `- item` bullet
+// lines — one instruction per line reads as a checklist, the same discipline
+// STRUCTURED READ-OUTS ARE BULLETS applies to the chat's own replies — joined
+// back into ONE string so the existing 2,000-char clip (clipCustomInstructions
+// above) still bites on the combined text regardless of which shape came in.
+function normalizeInstructionsText(input: string | string[] | undefined): string {
+  if (!input) return ''
+  if (Array.isArray(input)) {
+    const items = input.map((s) => s.trim()).filter(Boolean)
+    return items.map((item) => `- ${item}`).join('\n')
+  }
+  return input.trim()
+}
+
 const FIRM_INSTRUCTIONS_HEADER =
   '--- FIRM INSTRUCTIONS (standing guidance from this firm; follow unless it conflicts with the accuracy, no-invented-facts, or jurisdiction rules above) ---'
 const ATTORNEY_INSTRUCTIONS_HEADER = "--- YOUR ATTORNEY'S INSTRUCTIONS ---"
@@ -138,8 +160,8 @@ const ATTORNEY_INSTRUCTIONS_HEADER = "--- YOUR ATTORNEY'S INSTRUCTIONS ---"
 // which has no notion of a "current attorney" turn to attach a personal block
 // to. Empty-safe: '' in, '' out, so a caller can always splice the result into
 // a template slot without a stray header.
-export function buildFirmInstructionsBlock(firmInstructions?: string): string {
-  const text = firmInstructions?.trim()
+export function buildFirmInstructionsBlock(firmInstructions?: string | string[]): string {
+  const text = normalizeInstructionsText(firmInstructions)
   if (!text) return ''
   return `${FIRM_INSTRUCTIONS_HEADER}\n${clipCustomInstructions(text)}`
 }
@@ -148,13 +170,13 @@ export function buildFirmInstructionsBlock(firmInstructions?: string): string {
 // entirely when unset — with both unset this returns '' and the caller's
 // prompt is byte-identical to the pre-FB-B prompt.
 export function buildCustomInstructionsBlock(
-  firmInstructions?: string,
-  attorneyInstructions?: string,
+  firmInstructions?: string | string[],
+  attorneyInstructions?: string | string[],
 ): string {
   const parts: string[] = []
   const firmBlock = buildFirmInstructionsBlock(firmInstructions)
   if (firmBlock) parts.push(firmBlock)
-  const attorneyText = attorneyInstructions?.trim()
+  const attorneyText = normalizeInstructionsText(attorneyInstructions)
   if (attorneyText) {
     parts.push(`${ATTORNEY_INSTRUCTIONS_HEADER}\n${clipCustomInstructions(attorneyText)}`)
   }
@@ -179,8 +201,8 @@ const PORTAL_INSTRUCTIONS_HEADER =
 // Empty-safe: '' in, '' out — a caller can always splice the result into the
 // portal prompt without a stray header. Same 2,000-char clip/truncation-marker
 // discipline as the internal blocks above.
-export function buildPortalInstructionsBlock(portalInstructions?: string): string {
-  const text = portalInstructions?.trim()
+export function buildPortalInstructionsBlock(portalInstructions?: string | string[]): string {
+  const text = normalizeInstructionsText(portalInstructions)
   if (!text) return ''
   return `${PORTAL_INSTRUCTIONS_HEADER}\n${clipCustomInstructions(text)}`
 }

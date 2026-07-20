@@ -27,9 +27,23 @@ export interface AssistantSettings {
   // buildCustomInstructionsBlock) alongside the firm-wide block. Clipped to
   // 2,000 chars at injection time; stored as-is here (the editor enforces the
   // cap client-side).
-  customInstructions?: string
+  // ITEM-12 WP-2 — the Settings → Assistant editor now saves this as pills
+  // (an array, one instruction per Enter-to-add pill) instead of one free-text
+  // blob. Widened to `string | string[]` rather than migrated outright: a
+  // payload saved before this change is still a plain string, and
+  // parseSettings below returns it as-is (JSON.parse doesn't care which shape
+  // it finds) — every reader (assistantPrompt.ts's block builders) accepts
+  // both, so an old string value keeps rendering correctly with zero backfill.
+  customInstructions?: string | string[]
 }
 
+// Tolerant of both payload shapes (see the customInstructions comment above):
+// a settings row written before ITEM-12 WP-2 has customInstructions as a plain
+// string; one written after has it as string[]. JSON.parse doesn't care which
+// it finds, and every downstream reader (assistantPrompt.ts) already accepts
+// `string | string[]`, so no reshaping happens here — this function's job is
+// only "is this valid JSON that looks like a settings object", not migrating
+// the shape of any one field.
 function parseSettings(raw: string | null | undefined): AssistantSettings | null {
   if (!raw) return null
   try {

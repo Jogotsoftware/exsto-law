@@ -68,7 +68,10 @@ const MAX_HISTORY_TURNS = 12
 export function buildBaseSystem(
   firmName: string,
   locale?: 'en' | 'es',
-  portalInstructions?: string,
+  // ITEM-12 WP-2 — portal_assistant_instructions is now an array of pills; see
+  // assistantPrompt.ts normalizeInstructionsText for the string | string[]
+  // compat shim (a pre-WP-2 row is still a bare string).
+  portalInstructions?: string | string[],
 ): string {
   return [
     `You are ${firmName}'s client portal assistant, chatting with a signed-in client of the firm.
