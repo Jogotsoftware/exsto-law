@@ -25,6 +25,20 @@ export {
   questionnaireFromTemplate,
   type RenderOptions,
 } from './lib/templates/render.js'
+// AI-CONTEXT C1 — the central model router (pure policy: which Claude/
+// Perplexity model an AI task runs on). Named exports only (not `export *`):
+// AUTO_MODEL_ID/AUTO_MODEL_HAIKU_ID/AUTO_MODEL_SONNET_ID/chooseAutoModel are
+// ALSO reachable via api/assistantModels.js's re-export of this same module —
+// a plain `export *` here would re-surface those names a second time. Since
+// both point at the identical original binding that's not an error, but it's
+// needless duplication; list only what assistantModels.js doesn't already
+// forward.
+export type { AiTask, ModelTier, RouteSignals, ResolvedModel } from './lib/modelRouter.js'
+export {
+  TIER_MODEL,
+  resolveModelForTask,
+  resolveConcreteAssistantModelId,
+} from './lib/modelRouter.js'
 export type { ClaudeDraftRequest, ClaudeDraftResult, ClientTool } from './adapters/claude.js'
 export {
   resolveAnthropicApiKey,

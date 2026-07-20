@@ -33,7 +33,7 @@ return submitAction(ctx, {
 
 ## Talking to the model
 
-The Anthropic SDK lives behind a single adapter (`verticals/legal/src/adapters/claude.ts`, `callClaudeDrafter`). It uses `@anthropic-ai/sdk`, `ANTHROPIC_API_KEY`, and a current Claude model pinned via env (`const DEFAULT_MODEL = process.env.LEGAL_DRAFTING_MODEL ?? 'claude-sonnet-4-6'`) so the model can be upgraded without code changes. Keep model calls in one adapter; record `response.model` as `model_identity` in the trace. Default to the latest capable Claude model for new work.
+The Anthropic SDK lives behind a single adapter (`verticals/legal/src/adapters/claude.ts`, `callClaudeDrafter`). It uses `@anthropic-ai/sdk` and `ANTHROPIC_API_KEY`; which model runs is decided by the central model router (`verticals/legal/src/lib/modelRouter.ts`, `resolveModelForTask`) — pure policy, no SDK import, the SINGLE home of Claude model ids (`TIER_MODEL`). Every `callClaudeDrafter` call now REQUIRES a `task: AiTask` field (e.g. `'draft_generate'`, `'doc_review'`, `'brief_client'`) so the router can pick Haiku vs Sonnet per task and apply the firm's `LEGAL_DRAFTING_MODEL` override only where it belongs; a new call site that forgets `task` fails `tsc`, not a silent guessed model. Keep model calls in one adapter; record `response.model` as `model_identity` in the trace. Default to the latest capable Claude model for new work (add/adjust an entry in `TIER_MODEL`, not a hardcoded string).
 
 ## What the trace must contain (or the feedback loop is blind)
 

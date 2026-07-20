@@ -287,7 +287,7 @@ export async function runDraftGeneration(
     activeSkillsText,
   })
 
-  const result = await callClaudeDrafter(agentCtx.tenantId, { prompt })
+  const result = await callClaudeDrafter(agentCtx.tenantId, { prompt, task: 'draft_generate' })
 
   const reasoningTraceId = await persistReasoningTrace(agentCtx, {
     prompt,

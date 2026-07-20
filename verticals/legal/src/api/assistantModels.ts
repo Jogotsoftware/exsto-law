@@ -9,6 +9,19 @@
 // enable" until that lands (then `available` flips to true).
 import type { ActionContext } from '@exsto/substrate'
 import { listIntegrationStatuses, type IntegrationProvider } from './integrations.js'
+// AI-CONTEXT C1 — chooseAutoModel + the AUTO_MODEL_* ids now live in the
+// central model router (lib/modelRouter.ts); re-exported here (a bare
+// `export … from`, not a computed value) so every existing import of these
+// symbols from this module — or from '@exsto/legal' — keeps working. This is
+// a genuine import cycle (modelRouter.ts imports resolveAssistantModel below
+// for resolveConcreteAssistantModelId) that is safe ONLY as a pure re-export;
+// see modelRouter.ts's module header before changing either side.
+export {
+  AUTO_MODEL_ID,
+  AUTO_MODEL_HAIKU_ID,
+  AUTO_MODEL_SONNET_ID,
+  chooseAutoModel,
+} from '../lib/modelRouter.js'
 
 export type AssistantProvider = Extract<IntegrationProvider, 'anthropic' | 'perplexity' | 'openai'>
 
@@ -141,99 +154,6 @@ const CATALOG: Array<Omit<AssistantModel, 'connected' | 'id'> & { provider: Assi
 
 function modelId(provider: AssistantProvider, model: string): string {
   return `${provider}:${model}`
-}
-
-// Stable id for the "Auto" tier — the UI sends this back like any other pick,
-// and the chat handler resolves it (via chooseAutoModel, below) to one of the
-// two concrete ids it can hand back, instead of pinning a single model.
-export const AUTO_MODEL_ID = 'anthropic:auto'
-
-// The two concrete Anthropic models chooseAutoModel() picks between. These
-// values must stay equal to the `model` fields on the Haiku/Sonnet CATALOG
-// entries above — Auto only ever hands back a model this file already exposes,
-// never an invented id.
-export const AUTO_MODEL_HAIKU_ID = 'claude-haiku-4-5-20251001'
-export const AUTO_MODEL_SONNET_ID = 'claude-sonnet-4-6'
-
-// Intent verbs that signal real drafting/analysis work. Matched as a token
-// PREFIX (not exact-equal) so inflected forms count too — "reviewing",
-// "drafted", "analyzing" — without a bare \b regex, which mis-splits right at
-// an accented letter (this repo hit that bug before: ASCII \b vs Ñ). Deliberately
-// excludes "summarize" — a long summary is still a cheap turn.
-const HEAVY_INTENT_VERBS: readonly string[] = [
-  'draft',
-  'write',
-  'compose',
-  'prepare',
-  'revise',
-  'redline',
-  'analyze',
-  'review',
-]
-
-// Document-ish nouns that make a request about a real filing/instrument rather
-// than a quick question. Exact token match (no inflection) — plurals aren't
-// worth the false-positive risk a prefix match would add here.
-const HEAVY_DOCUMENT_NOUNS = new Set([
-  'letter',
-  'email',
-  'agreement',
-  'contract',
-  'motion',
-  'brief',
-  'memo',
-  'clause',
-  'addendum',
-  'amendment',
-  'lease',
-  'will',
-  'deed',
-  'complaint',
-  'petition',
-  'envelope',
-])
-
-// Lower-cases and splits on runs of non-letters using \p{L} (Unicode "is a
-// letter"), not \w/\b — a plain ASCII word boundary can fall in the wrong place
-// right next to an accented character, splitting a word incorrectly. This keeps
-// each token a clean run of letters in any language, e.g. "Ñ" stays attached to
-// its word instead of acting as a boundary.
-function tokenize(message: string): string[] {
-  return message
-    .toLowerCase()
-    .split(/[^\p{L}]+/u)
-    .filter((token) => token.length > 0)
-}
-
-// True when the tokens show a drafting/analysis ask against a real document:
-// an intent-verb (or its "draw up" phrasal form) alongside a document noun.
-function hasHeavyIntent(tokens: string[]): boolean {
-  const hasDocNoun = tokens.some((t) => HEAVY_DOCUMENT_NOUNS.has(t))
-  if (!hasDocNoun) return false
-  if (tokens.some((t) => HEAVY_INTENT_VERBS.some((verb) => t.startsWith(verb)))) return true
-  for (let i = 0; i < tokens.length - 1; i++) {
-    if (tokens[i] === 'draw' && tokens[i + 1] === 'up') return true
-  }
-  return false
-}
-
-// Cost-default router for the "Auto" tier: ordinary turns go to Haiku, and we
-// escalate to Sonnet only when the turn shows it actually needs it — an
-// explicit build-mode turn, a genuine drafting/analysis ask against a real
-// document, or enough text (this message or the accumulated history) that a
-// stronger model earns its cost. Pure and deterministic (no I/O, no Date, no
-// randomness) so every branch is directly testable.
-export function chooseAutoModel(input: {
-  message: string
-  buildMode?: boolean
-  historyChars?: number
-}): string {
-  const heavy =
-    input.buildMode === true ||
-    input.message.length > 1500 ||
-    (input.historyChars ?? 0) > 60000 ||
-    hasHeavyIntent(tokenize(input.message))
-  return heavy ? AUTO_MODEL_SONNET_ID : AUTO_MODEL_HAIKU_ID
 }
 
 // The catalog cross-referenced with the firm's live integration health. Order:

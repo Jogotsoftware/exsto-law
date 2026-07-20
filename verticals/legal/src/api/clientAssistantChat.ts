@@ -5,6 +5,7 @@ import {
   type ChatMessage,
   type ClientTool,
 } from '../adapters/claude.js'
+import { resolveModelForTask } from '../lib/modelRouter.js'
 import { recordAssistantTurn } from './assistantChat.js'
 import { getSkillBySlug } from '../queries/skills.js'
 import { listClientMatters, getClientMatterTimeline } from '../queries/clientPortal.js'
@@ -303,6 +304,11 @@ export async function* clientAssistantChatStream(
   const tools = buildClientPortalTools(ctx, who)
   let reply = ''
   let requestCard: Record<string, unknown> | null = null
+  // AI-CONTEXT C1 — was a literal 'claude-sonnet-4-6' pin (a workaround for the
+  // LEGAL_DRAFTING_MODEL=''-not-unset gotcha, since that env var isn't even
+  // consulted for chat_client_portal). Now the router's pinned default for this
+  // task — byte-identical value, same reasoning, one fewer hardcoded model id.
+  const model = resolveModelForTask('chat_client_portal').model
 
   // Wrap prepare_request so the UI gets the consent card as a stream event too.
   const wrapped = tools.map((t) =>
@@ -324,10 +330,7 @@ export async function* clientAssistantChatStream(
 
   try {
     const stream = streamChatWithAssistant(ctx.tenantId, messages, {
-      // Pinned (not DEFAULT_MODEL): LEGAL_DRAFTING_MODEL is empty-not-unset in
-      // some deploys and '' is rejected by the API. Sonnet is the right
-      // cost/latency point for client Q&A.
-      model: 'claude-sonnet-4-6',
+      model,
       workRate: 'balanced',
       supportsWorkRate: true,
       webSearch: false, // client PII in context — never exfiltrate to search
@@ -357,7 +360,7 @@ export async function* clientAssistantChatStream(
       message,
       reply,
       provider: 'anthropic',
-      model: 'claude-sonnet-4-6',
+      model,
       kind: 'question',
       citations: [],
       scope: 'contact',

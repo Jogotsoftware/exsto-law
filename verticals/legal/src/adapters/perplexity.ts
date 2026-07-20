@@ -6,10 +6,19 @@
 import { loadConnection, markConnectionError } from './connectionStore.js'
 import { redactSecret } from './redact.js'
 import type { AssistantStreamChunk } from './claude.js'
+import { resolveModelForTask } from '../lib/modelRouter.js'
 
 type PerplexitySecret = { api_key: string }
 
-const DEFAULT_MODEL = process.env.LEGAL_RESEARCH_MODEL ?? 'sonar'
+// AI-CONTEXT C1 — LEGAL_RESEARCH_MODEL is read in exactly one place now (the
+// router), normalized against the same ''-vs-unset gotcha as
+// LEGAL_DRAFTING_MODEL. Read lazily (a function, not a module-level const) so
+// a test that sets the env var after this module has already loaded still
+// sees it — this file's DEFAULT_MODEL used to be a load-time constant, which
+// made the env var effectively unreadable-by-tests-set-later.
+function defaultResearchModel(): string {
+  return resolveModelForTask('research').model
+}
 
 // Shared system framing for research turns — used by both the one-shot and the
 // streaming calls so they answer identically.
@@ -47,7 +56,7 @@ export async function verifyPerplexityKey(apiKey: string): Promise<string | null
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: DEFAULT_MODEL,
+        model: defaultResearchModel(),
         // Perplexity rejects max_tokens < 16 with a 400 (invalid_request). Keep
         // this at the API floor — the probe only needs a successful round-trip,
         // not the content, so the cheapest valid call is 16.
@@ -95,7 +104,7 @@ export async function callPerplexity(
 ): Promise<ResearchResult> {
   const system = RESEARCH_SYSTEM
   const user = request.context ? `${request.context}\n\n${request.question}` : request.question
-  const model = request.model ?? DEFAULT_MODEL
+  const model = request.model ?? defaultResearchModel()
 
   const res = await fetch('https://api.perplexity.ai/chat/completions', {
     method: 'POST',
@@ -160,7 +169,7 @@ export async function* streamPerplexityResearch(
 ): AsyncGenerator<AssistantStreamChunk> {
   const { apiKey, source } = await resolvePerplexityApiKey(tenantId)
   const user = request.context ? `${request.context}\n\n${request.question}` : request.question
-  const model = request.model ?? DEFAULT_MODEL
+  const model = request.model ?? defaultResearchModel()
 
   const res = await fetch('https://api.perplexity.ai/chat/completions', {
     method: 'POST',

@@ -34,6 +34,7 @@
 import { randomUUID } from 'node:crypto'
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { callClaudeDrafter } from '../adapters/claude.js'
+import type { AiTask } from '../lib/modelRouter.js'
 import { DATA_BEGIN, DATA_END } from './assistantContext.js'
 import { assembleBriefEvidence, type EvidenceBudget, type EvidenceBundle } from './briefEvidence.js'
 import { resolveTenantSystemActorId } from './capabilityRuntime.js'
@@ -297,12 +298,20 @@ export interface SynthesizedBrief extends ParsedBriefOutput {
   modelIdentity: string
 }
 
+// AI-CONTEXT C1 — briefType selects the router task: 'service_digest' gets its
+// own Haiku-default/escalate-by-size registry entry (a digest is typically much
+// smaller than a full matter brief); every other BriefType this engine handles
+// ('matter' today; 'client' has its own engine/task in clientBriefEngine.ts)
+// routes as 'brief_matter' (fixed sonnet — matter briefs synthesize a lot of
+// evidence and are worth the stronger model unconditionally).
 export async function synthesizeBrief(
   ctx: ActionContext,
   bundle: EvidenceBundle,
+  briefType: BriefType = 'matter',
 ): Promise<SynthesizedBrief> {
   const prompt = buildBriefSynthesisPrompt(bundle)
-  const result = await callClaudeDrafter(ctx.tenantId, { prompt })
+  const task: AiTask = briefType === 'service_digest' ? 'service_digest' : 'brief_matter'
+  const result = await callClaudeDrafter(ctx.tenantId, { prompt, task })
   const parsed = parseBriefSynthesisOutput(result.rawResponse)
   return { ...parsed, prompt, modelIdentity: result.modelIdentity }
 }
@@ -534,7 +543,7 @@ export async function getOrRefreshMatterBrief(
   }
 
   const bundle = await deps.assemble(agentCtx, { kind: 'matter', matterEntityId }, opts.depth)
-  const synthesized = await deps.synthesize(agentCtx, bundle)
+  const synthesized = await deps.synthesize(agentCtx, bundle, 'matter')
   const generatedAt = new Date().toISOString()
   const { briefEntityId } = await deps.persist(agentCtx, {
     targetEntityId: matterEntityId,

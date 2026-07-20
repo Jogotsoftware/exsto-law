@@ -1,11 +1,19 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { loadConnection, markConnectionError } from './connectionStore.js'
 import { redactSecret } from './redact.js'
+import {
+  TIER_MODEL,
+  resolveModelForTask,
+  type AiTask,
+  type RouteSignals,
+} from '../lib/modelRouter.js'
 
-// Default to a current Claude 4.x model; allow override via env so we can pin
-// a specific model for evaluation or use the latest as Anthropic publishes new
-// versions.
-const DEFAULT_MODEL = process.env.LEGAL_DRAFTING_MODEL ?? 'claude-sonnet-4-6'
+// AI-CONTEXT C1 — model selection lives in lib/modelRouter.ts (the central,
+// pure router); this adapter stays the only place that actually CALLS the
+// Anthropic API (the single-adapter rule — CLAUDE.md, exsto-ai-operation
+// skill). There is deliberately no local DEFAULT_MODEL constant anymore — see
+// the router's module header for why (`LEGAL_DRAFTING_MODEL=''` is a real
+// deploy state that `??` doesn't catch).
 
 // Every Anthropic client in this adapter is constructed here so they all hit the
 // same endpoint. We pin baseURL to Anthropic's real API on purpose: the SDK
@@ -175,6 +183,15 @@ type AnthropicSecret = { api_key: string }
 export interface ClaudeDraftRequest {
   prompt: string
   maxTokens?: number
+  // AI-CONTEXT C1 — REQUIRED so every drafting call site declares what kind of
+  // work it is; the router uses it to pick Haiku vs Sonnet (and to know
+  // whether LEGAL_DRAFTING_MODEL is allowed to override it). This is
+  // deliberately a compile-error safety net: a new call site that forgets to
+  // classify itself fails `tsc`, not silently falls back to a guessed model.
+  task: AiTask
+  // Optional routing signals beyond the default (inputChars defaults to
+  // request.prompt.length — see callClaudeDrafter below).
+  signals?: RouteSignals
 }
 
 export interface ClaudeDraftReasoningTrace {
@@ -228,7 +245,7 @@ export async function verifyAnthropicKey(apiKey: string): Promise<string | null>
     await withTransientRetry(
       () =>
         anthropic.messages.create({
-          model: 'claude-haiku-4-5-20251001',
+          model: TIER_MODEL.haiku,
           max_tokens: 8,
           messages: [{ role: 'user', content: 'ping' }],
         }),
@@ -270,12 +287,17 @@ export async function callClaudeDrafter(
 ): Promise<ClaudeDraftResult> {
   const { apiKey, source } = await resolveAnthropicApiKey(tenantId)
   const anthropic = makeAnthropic(apiKey)
+  const routed = resolveModelForTask(request.task, {
+    ...request.signals,
+    inputChars: request.signals?.inputChars ?? request.prompt.length,
+  })
+  console.log(`[claude] task=${request.task} model=${routed.model} — ${routed.reason}`)
   let response: Anthropic.Message
   try {
     response = await withTransientRetry(
       () =>
         anthropic.messages.create({
-          model: DEFAULT_MODEL,
+          model: routed.model,
           max_tokens: request.maxTokens ?? 8000,
           messages: [{ role: 'user', content: request.prompt }],
         }),
@@ -490,9 +512,10 @@ export function buildChatRequest(
   const isContinuation = carryTurns.length > 0
   const effectiveExtra = isContinuation ? withoutThinking(extra) : extra
   return {
-    // The unified assistant chat passes the attorney's chosen Claude model;
-    // fall back to the firm default when none is specified.
-    model: opts.model ?? DEFAULT_MODEL,
+    // The unified assistant chat (and every other chat-style caller) passes
+    // its own resolved model — see the router's chat_turn/chat_client_portal
+    // defaults; this is only a safety net for a caller that truly sets none.
+    model: opts.model ?? resolveModelForTask('chat_turn').model,
     // Tool loops (web search / client tools) can run several rounds before the
     // final answer; give them headroom on top of the work-rate budget.
     max_tokens: tools.length ? maxTokens + 1024 : maxTokens,

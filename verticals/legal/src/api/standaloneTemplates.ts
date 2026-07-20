@@ -2,7 +2,7 @@ import { submitAction, type ActionContext } from '@exsto/substrate'
 import { archiveEntity } from '@exsto/primitives'
 import { chatWithAssistantDetailed, streamChatWithAssistant } from '../adapters/claude.js'
 import { withSkills, loadForcedSkills, buildActiveSkillsText } from './skillContext.js'
-import { resolveAssistantModel } from './assistantModels.js'
+import { resolveConcreteAssistantModelId, resolveModelForTask } from '../lib/modelRouter.js'
 import {
   getStandaloneTemplate,
   type StandaloneTemplate,
@@ -147,7 +147,7 @@ async function buildTemplateAiPrompt(
   system: string
   userMsg: string
   clientTools: Awaited<ReturnType<typeof withSkills>>['clientTools']
-  model: string | undefined
+  model: string
 }> {
   const kind = input.category === 'email' ? 'email' : 'legal document'
   const instructions = input.instructions?.trim()
@@ -211,7 +211,16 @@ async function buildTemplateAiPrompt(
   const forced = await loadForcedSkills(ctx, input.skillSlugs)
   const activeText = buildActiveSkillsText(forced)
   const system = activeText ? `${catalogSystem}\n\n${activeText}` : catalogSystem
-  const model = input.modelId ? resolveAssistantModel(input.modelId)?.model : undefined
+  // AI-CONTEXT C1 fix: this used to be `resolveAssistantModel(input.modelId)?.model`,
+  // which returned the CATALOG's literal 'auto' placeholder unresolved when the
+  // attorney picked the Auto tier — sending the string 'auto' to the Anthropic
+  // API as a model id. resolveConcreteAssistantModelId resolves Auto (via
+  // chooseAutoModel) before it can reach the adapter; no explicit pick falls
+  // back to this task's registry default (LEGAL_DRAFTING_MODEL-eligible).
+  const resolvedModelId = input.modelId
+    ? resolveConcreteAssistantModelId(input.modelId, { message: userMsg })
+    : null
+  const model = resolvedModelId ?? resolveModelForTask('template_ai').model
   return { system, userMsg, clientTools, model }
 }
 

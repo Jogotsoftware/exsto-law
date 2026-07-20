@@ -33,7 +33,7 @@ Proceeded with: `public-intake` system actor.
 
 ## 4. Drafting model identity
 
-`verticals/legal/src/adapters/claude.ts` defaults `LEGAL_DRAFTING_MODEL` to `claude-sonnet-4-6`. The drafting prompt and reasoning trace structure are stable across the Claude 4.x family, but the founder should pick the production model deliberately. Options: Sonnet 4.6 (default), Opus 4.7 (higher quality, more expensive), Haiku 4.5 (cheaper, lower quality).
+`verticals/legal/src/lib/modelRouter.ts` (the central model router, `TIER_MODEL`/`resolveModelForTask`) defaults server drafting tasks to `claude-sonnet-4-6`, overridable per-deploy via `LEGAL_DRAFTING_MODEL`. The drafting prompt and reasoning trace structure are stable across the Claude 4.x family, but the founder should pick the production model deliberately. Options: Sonnet 4.6 (default), Opus 4.8 (higher quality, more expensive), Haiku 4.5 (cheaper, lower quality — already the router's default for cheap/high-volume tasks like key verification and ordinary transcript/service-digest extraction).
 
 Recommendation: Sonnet 4.6 for the v1 evaluation; Opus 4.7 once you want to assess top-quality drafts.
 

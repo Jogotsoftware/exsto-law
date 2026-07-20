@@ -184,7 +184,7 @@ export async function synthesizeClientBrief(
   bundle: EvidenceBundle,
 ): Promise<SynthesizedBrief> {
   const prompt = buildClientBriefSynthesisPrompt(bundle)
-  const result = await callClaudeDrafter(ctx.tenantId, { prompt })
+  const result = await callClaudeDrafter(ctx.tenantId, { prompt, task: 'brief_client' })
   const parsed: ParsedBriefOutput = parseBriefSynthesisOutput(result.rawResponse, 'Client brief')
   return { ...parsed, prompt, modelIdentity: result.modelIdentity }
 }
