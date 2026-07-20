@@ -43,12 +43,24 @@ export interface ServiceDigestSignals {
 export async function listServiceDigestSignals(
   ctx: ActionContext,
   serviceKey: string,
+  // WP B4 (context spine): when a documentEntityId is given, scope to that ONE
+  // document's own history — its version notes and revision asks — instead of
+  // the cross-matter service digest (draft_revision uses the same two readers,
+  // narrowed, rather than a forked query). The serviceKey argument is then
+  // unused; the document's own id is authoritative regardless of the matter's
+  // current service_key.
+  opts: { documentEntityId?: string } = {},
 ): Promise<ServiceDigestSignals> {
   return withActionContext(ctx, async (client) => {
+    const { documentEntityId } = opts
     const serviceKeyMatch = `(SELECT a.value #>> '{}' FROM attribute a
          JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
         WHERE a.tenant_id = $1 AND a.entity_id = m.id AND akd.kind_name = 'service_key'
         ORDER BY a.valid_from DESC LIMIT 1) = $2`
+    // $2 is either the serviceKey (digest) or the documentEntityId (revision).
+    const notesScope = documentEntityId ? 'dv.document_entity_id = $2' : serviceKeyMatch
+    const requestsScope = documentEntityId ? 'e_doc.id = $2' : serviceKeyMatch
+    const scopeValue = documentEntityId ?? serviceKey
 
     const notesRes = await client.query<{
       matter_id: string
@@ -72,9 +84,9 @@ export async function listServiceDigestSignals(
          JOIN entity m ON m.id = r.target_entity_id
         WHERE dv.tenant_id = $1
           AND dv.metadata->>'note' IS NOT NULL
-          AND ${serviceKeyMatch}
+          AND ${notesScope}
         ORDER BY dv.recorded_at DESC`,
-      [ctx.tenantId, serviceKey],
+      [ctx.tenantId, scopeValue],
     )
 
     const requestsRes = await client.query<{
@@ -100,9 +112,9 @@ export async function listServiceDigestSignals(
          JOIN entity m ON m.id = r.target_entity_id
         WHERE o.tenant_id = $1
           AND o.outcome_data->>'notes' IS NOT NULL
-          AND ${serviceKeyMatch}
+          AND ${requestsScope}
         ORDER BY o.recorded_at DESC`,
-      [ctx.tenantId, serviceKey],
+      [ctx.tenantId, scopeValue],
     )
 
     return {

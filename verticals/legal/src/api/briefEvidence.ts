@@ -42,6 +42,7 @@ import {
   safeField,
 } from './assistantContext.js'
 import { getMatter, type MatterDetail } from '../queries/matters.js'
+import { getDraftVersion } from '../queries/drafts.js'
 import { getMatterHistory, type MatterHistory } from '../queries/history.js'
 import { listNotesForEntity, type NoteSummary } from '../queries/notes.js'
 import { listTasksByMatter, type Task } from '../queries/tasks.js'
@@ -59,14 +60,32 @@ import { listMatterDocuments, type UploadedDocItem } from './documentUpload.js'
 import { listEnvelopes, type EnvelopeListItem } from './esign.js'
 import { listMatterResearch, type MatterResearchEntry } from './research.js'
 import { getClientContext, oneLine, type ClientContext } from '../queries/clientContext.js'
-import { listServiceDigestSignals, type ServiceDigestSignals } from '../queries/serviceDigest.js'
+import {
+  listServiceDigestSignals,
+  type ServiceDigestSignals,
+  type ServiceDraftNote,
+  type ServiceRevisionRequest,
+} from '../queries/serviceDigest.js'
 
 export type BriefScope =
   | { kind: 'matter'; matterEntityId: string }
   | { kind: 'client'; clientEntityId: string }
   | { kind: 'service_digest'; serviceKey: string }
+  // WP B4 (context spine): the context a mid-revision draft needs — this
+  // document's own facts + intake + what prior revisions already fixed — so a
+  // revision doesn't regress an earlier edit. Scoped by the base version id.
+  | { kind: 'draft_revision'; documentVersionId: string }
 
 export type EvidenceBudget = 'lean' | 'balanced' | 'generous'
+
+// WP B4 — who a rendered bundle is FOR. The spine assembles one bundle; the
+// renderer's `audience` decides which sources that consumer is allowed to see
+// (a per-source allowlist). Only `attorney_full` is exercised today (the
+// attorney-facing revision/review consumers); the other two are the declared,
+// tested seams for the research-framing and portal-tool-backed surfaces a later
+// WP wires — kept narrow now so nothing client-facing can ever render the full
+// internal bundle by omission. The portal grep-gate test enforces that intent.
+export type EvidenceAudience = 'attorney_full' | 'research_framing' | 'portal_tool_backed'
 
 export interface EvidenceSection {
   source: string
@@ -811,6 +830,116 @@ export function buildServiceDigestEvidence(
   }
 }
 
+// ── Draft revision scope (WP B4) ─────────────────────────────────────────────
+
+// The lean context a mid-revision draft needs so a revision does not silently
+// regress an earlier accepted edit: the matter's core facts + intake, and THIS
+// document's own edit history and outstanding revision asks. Reuses getMatter,
+// getDraftVersion, and listServiceDigestSignals (narrowed to one documentEntityId)
+// rather than forking any query.
+interface DraftRevisionMaterial {
+  matter: MatterDetail
+  // This document's prior edit notes (document.edit metadata.note), newest first —
+  // "what was already fixed" so the model can preserve it.
+  versionNotes: ServiceDraftNote[]
+  // Outstanding revision asks recorded against THIS document entity.
+  revisionRequests: ServiceRevisionRequest[]
+}
+
+async function loadDraftRevisionMaterial(
+  ctx: ActionContext,
+  documentVersionId: string,
+): Promise<DraftRevisionMaterial | null> {
+  // getDraftVersion authenticates the id under the tenant and hands back the
+  // owning matter + document entity ids (and the matter's service_key) — no
+  // separate resolve query needed.
+  const base = await getDraftVersion(ctx, documentVersionId)
+  if (!base) return null
+  const matter = await getMatter(ctx, base.matterEntityId)
+  if (!matter) return null
+  const signals = await listServiceDigestSignals(ctx, base.serviceKey, {
+    documentEntityId: base.documentEntityId,
+  })
+  return { matter, versionNotes: signals.draftNotes, revisionRequests: signals.revisionRequests }
+}
+
+// PURE — builds the draft-revision EvidenceBundle. Section order: matter core →
+// intake facts → document edit history ("already fixed — do not regress") →
+// document revision requests. Runs LEAN (~3k) by default: a revision prompt
+// already carries the full current document, so this is background, not bulk.
+export function buildDraftRevisionEvidence(
+  material: DraftRevisionMaterial,
+  scope: Extract<BriefScope, { kind: 'draft_revision' }>,
+  budget: EvidenceBudget,
+  assembledAt: string,
+): EvidenceBundle {
+  const b = EVIDENCE_BUDGETS[budget]
+  const sections: EvidenceSection[] = []
+  const { matter, versionNotes, revisionRequests } = material
+
+  // 1. Matter core — facts only (the current document supplies the substance).
+  const coreLines = [
+    `Matter ${safeField(matter.matterNumber)} — service: ${safeField(matter.serviceKey) || 'unspecified'}; status: ${safeField(matter.status)}; opened ${fmtDate(matter.createdAt)}.`,
+    `Client: ${safeField(matter.clientName) || 'unknown'}${matter.clientEmail ? ` <${safeField(matter.clientEmail)}>` : ''}.`,
+  ]
+  pushSection(sections, 'matter_core', 'Matter core', coreLines.join('\n'), b.sectionChars)
+
+  // 2. Intake facts — the client's own answers, the ground truth a revision
+  // must not contradict.
+  if (matter.questionnaireResponses && Object.keys(matter.questionnaireResponses).length > 0) {
+    const intake = renderIntake(matter.questionnaireResponses, b.intakeChars)
+    pushSection(sections, 'intake_facts', 'Intake facts', intake, b.intakeChars, wasClipped(intake))
+  }
+
+  // 3. Document edit history — what prior revisions already fixed. Accepted AI
+  // instructions keep their verbatim text (the AI_REVISION_PREFIX marker is
+  // stripped so each line reads as the change that was made).
+  const editHistoryText = versionNotes
+    .slice(0, b.digestItems)
+    .map((n) => {
+      const note = n.note.startsWith(AI_REVISION_PREFIX)
+        ? n.note.slice(AI_REVISION_PREFIX.length)
+        : n.note
+      return `- v${n.versionNumber}: ${note}`
+    })
+    .join('\n')
+  pushSection(
+    sections,
+    'document_edit_history',
+    'Document edit history — already fixed; do not regress it',
+    editHistoryText,
+    b.sectionChars,
+    versionNotes.length > b.digestItems,
+  )
+
+  // 4. Document revision requests — outstanding asks on this document.
+  const requestsText = revisionRequests
+    .slice(0, b.digestItems)
+    .map((r) => `- ${r.notes}`)
+    .join('\n')
+  pushSection(
+    sections,
+    'document_revision_requests',
+    'Document revision requests',
+    requestsText,
+    b.sectionChars,
+    revisionRequests.length > b.digestItems,
+  )
+
+  const watermark = maxTimestamp([
+    ...versionNotes.map((n) => n.recordedAt),
+    ...revisionRequests.map((r) => r.recordedAt),
+  ])
+
+  return {
+    sections,
+    sourceWatermark: watermark ?? assembledAt,
+    assembledAt,
+    scope,
+    budget,
+  }
+}
+
 // ── Rendering (shared by every Brief-Engine-evidence consumer) ─────────────
 
 // The ONE bundle→text renderer — generalized from buildBriefSynthesisPrompt's
@@ -822,11 +951,28 @@ export function buildServiceDigestEvidence(
 // itself blow the cap. `maxChars` reuses assistantContext's clip() (the same
 // truncation convention every other bundle-derived text in this vertical uses),
 // so a capped render carries the identical "…[truncated]" marker.
+// WP B4 — the per-audience source allowlist. `null` = no filter (the attorney
+// sees every source the bundle assembled). The narrower audiences enumerate the
+// EXACT sources they may render; anything the spine adds later is excluded by
+// default (fail-closed), so a future consumer can never leak a new internal
+// source by omission. Only `attorney_full` is exercised today.
+const AUDIENCE_SOURCE_ALLOWLIST: Record<EvidenceAudience, ReadonlySet<string> | null> = {
+  attorney_full: null,
+  // Research framing: only neutral, non-privileged matter/service facts — never
+  // client communications, notes, or intake answers.
+  research_framing: new Set(['matter_core', 'matter', 'history', 'documents']),
+  // Portal tool-backed: the narrowest — only what a client may already see about
+  // their own matter.
+  portal_tool_backed: new Set(['matter_core', 'portal_thread', 'documents']),
+}
+
 export function renderEvidenceBundle(
   bundle: EvidenceBundle,
-  opts: { header?: string; maxChars?: number } = {},
+  opts: { header?: string; maxChars?: number; audience?: EvidenceAudience } = {},
 ): string {
-  const body = bundle.sections
+  const allow = AUDIENCE_SOURCE_ALLOWLIST[opts.audience ?? 'attorney_full']
+  const sections = allow ? bundle.sections.filter((s) => allow.has(s.source)) : bundle.sections
+  const body = sections
     .map(
       (s) =>
         `### ${s.label} [source: ${s.source}${s.truncated ? ', truncated' : ''}]\n${s.content}`,
@@ -866,6 +1012,11 @@ export async function assembleBriefEvidence(
     case 'service_digest': {
       const material = await listServiceDigestSignals(ctx, scope.serviceKey)
       return buildServiceDigestEvidence(material, scope, budget, assembledAt)
+    }
+    case 'draft_revision': {
+      const material = await loadDraftRevisionMaterial(ctx, scope.documentVersionId)
+      if (!material) throw new Error(`Draft version not found: ${scope.documentVersionId}`)
+      return buildDraftRevisionEvidence(material, scope, budget, assembledAt)
     }
     default: {
       const exhaustive: never = scope
