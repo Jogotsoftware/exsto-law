@@ -23925,3 +23925,132 @@ details.li-brief-research summary:hover {
 .li-crm-detail-website:hover {
   text-decoration: underline;
 }
+
+/* ── E-sign any document (0170): New-envelope wizard + PDF signer surface ──── */
+.li-esign-filedrop {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 22px 20px;
+  border: 1.5px dashed var(--li-border, #d7dce6);
+  border-radius: 12px;
+  background: var(--li-surface-2, #f8f9fc);
+  cursor: pointer;
+  text-align: left;
+}
+.li-esign-filedrop:hover {
+  border-color: var(--li-gold, #c6a968);
+}
+.li-esign-filedrop-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.li-esign-attach-h {
+  margin-top: 22px;
+}
+.li-esign-attach-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+}
+.li-esign-attach-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--li-muted);
+}
+.li-esign-attach-field select {
+  font: inherit;
+  font-weight: 400;
+  color: var(--li-navy);
+  padding: 9px 10px;
+  border: 1px solid var(--li-border, #d7dce6);
+  border-radius: 8px;
+  background: #fff;
+}
+.li-esign-recipient {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.li-esign-rec-badge {
+  align-self: flex-start;
+  margin-left: 44px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--li-ok-bg);
+  color: var(--li-ok);
+}
+.li-esign-rec-badge.is-new {
+  background: var(--li-info-bg);
+  color: var(--li-info);
+}
+.li-esign-suggest {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 44px;
+  right: 44px;
+  z-index: 30;
+  background: #fff;
+  border: 1px solid var(--li-border, #d7dce6);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(20, 32, 60, 0.14);
+  overflow: hidden;
+}
+.li-esign-suggest-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.li-esign-suggest-item:hover {
+  background: var(--li-surface-2, #f5f7fb);
+}
+.li-esign-suggest-name {
+  font-weight: 600;
+  color: var(--li-navy);
+  font-size: 13px;
+}
+.li-esign-suggest-email {
+  color: var(--li-muted);
+  font-size: 12.5px;
+}
+.li-esign-subject-in {
+  flex: 1;
+  min-width: 0;
+}
+.li-cp-sign-file {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
+}
+.li-cp-sign-pdfframe {
+  width: 100%;
+  height: min(72vh, 860px);
+  border: 1px solid var(--li-border, #d7dce6);
+  border-radius: 12px;
+  background: #fff;
+}
+@media (max-width: 720px) {
+  .li-esign-attach-grid {
+    grid-template-columns: 1fr;
+  }
+  .li-cp-sign-pdfframe {
+    height: 60vh;
+  }
+}

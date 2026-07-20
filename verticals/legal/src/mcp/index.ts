@@ -81,6 +81,7 @@ import './tools/sendDraftLinkEmail.js'
 // Session 5: "Send for signature" + envelope status + portal signing.
 import './tools/sendForSignature.js'
 import './tools/esignAttorneyTools.js'
+import './tools/esignFileTools.js'
 import './tools/esignPortalTools.js'
 // Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
 // invoices, list/inspect them, and send (activation-gated). Session 4.

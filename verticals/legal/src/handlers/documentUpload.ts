@@ -19,7 +19,13 @@ import {
 import { dispatchClientDelivery } from './clientDelivery.js'
 
 interface DocumentUploadPayload {
-  matter_entity_id: string
+  // OPTIONAL since 0170: a standalone upload (the e-sign "any PDF" path) has no
+  // matter. It may instead be filed under a contact via attach_contact_entity_id,
+  // or stand fully alone (reachable through its envelope).
+  matter_entity_id?: string | null
+  // File the upload under an existing client_contact (document_of_contact, 0170).
+  // Independent of client_contact_id below, which is upload PROVENANCE.
+  attach_contact_entity_id?: string | null
   // The storage object key (the route already uploaded the bytes under it).
   object_key: string
   original_filename: string
@@ -37,8 +43,12 @@ interface DocumentUploadPayload {
 
 registerActionHandler('document.upload', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as DocumentUploadPayload
-  if (!p.matter_entity_id) throw new Error('matter_entity_id is required')
   if (!p.object_key) throw new Error('object_key is required')
+  // Client (portal) uploads are always matter-scoped — only the firm's e-sign
+  // path may record a standalone document.
+  if (!p.matter_entity_id && p.document_source === 'client_uploaded') {
+    throw new Error('matter_entity_id is required for a client upload')
+  }
   const filename = (p.original_filename ?? '').trim() || 'document'
   const documentKind = (p.document_kind ?? '').trim() || 'uploaded'
 
@@ -114,26 +124,45 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
     },
   })
 
-  const documentOfId = await lookupKindId(
-    client,
-    'relationship_kind_definition',
-    ctx.tenantId,
-    'document_of',
-  )
-  await insertRelationship(client, {
-    tenantId: ctx.tenantId,
-    actionId,
-    sourceEntityId: docEntityId,
-    targetEntityId: p.matter_entity_id,
-    relationshipKindId: documentOfId,
-    properties: { document_kind: documentKind, document_source: docSource },
-  })
+  if (p.matter_entity_id) {
+    const documentOfId = await lookupKindId(
+      client,
+      'relationship_kind_definition',
+      ctx.tenantId,
+      'document_of',
+    )
+    await insertRelationship(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      sourceEntityId: docEntityId,
+      targetEntityId: p.matter_entity_id,
+      relationshipKindId: documentOfId,
+      properties: { document_kind: documentKind, document_source: docSource },
+    })
+  }
+
+  if (p.attach_contact_entity_id) {
+    const documentOfContactId = await lookupKindId(
+      client,
+      'relationship_kind_definition',
+      ctx.tenantId,
+      'document_of_contact',
+    )
+    await insertRelationship(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      sourceEntityId: docEntityId,
+      targetEntityId: p.attach_contact_entity_id,
+      relationshipKindId: documentOfContactId,
+      properties: { document_kind: documentKind, document_source: docSource },
+    })
+  }
 
   await insertEvent(client, {
     tenantId: ctx.tenantId,
     actionId,
     eventKindName: 'document.uploaded',
-    primaryEntityId: p.matter_entity_id,
+    primaryEntityId: p.matter_entity_id ?? docEntityId,
     secondaryEntityIds: [docEntityId],
     data: {
       document_version_id: versionId,
@@ -153,7 +182,7 @@ registerActionHandler('document.upload', async (ctx, client, payload, actionId) 
   // gate whose edge is `via: 'document.upload'` (e.g. "client sends the follow-up
   // materials"). Firm uploads never drive a client gate, so only client uploads
   // dispatch. Flag-guarded no-op otherwise.
-  if (isClientUpload) {
+  if (isClientUpload && p.matter_entity_id) {
     await dispatchClientDelivery(
       client,
       ctx,
