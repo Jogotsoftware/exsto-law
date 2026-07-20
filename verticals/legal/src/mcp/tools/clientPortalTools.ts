@@ -12,6 +12,8 @@ import {
   createClientRequest,
   listClientRequests,
   submitClientPortalFeedback,
+  submitAssistantMessageFeedback,
+  type TranscriptTurnSnapshot,
   renderClientInvoicePdfBase64,
   listApprovedClientDocuments,
   listClientUploadedDocuments,
@@ -315,6 +317,43 @@ const feedbackSubmitTool: Tool<FeedbackInput, { eventId: string }> = {
     }),
 }
 
+// FB-0 — thumbs up/down on ONE assistant-portal reply, with an optional note
+// and a snapshot of the whole visible conversation. clientContactId is
+// stamped by the authed route (never trusted from the body) and is the ONLY
+// scope used — submitAssistantMessageFeedback forces the portal surface onto
+// that contact regardless of anything else in `input`, so a client can only
+// ever rate their OWN chat.
+interface MessageFeedbackInput {
+  verdict: 'up' | 'down'
+  note?: string | null
+  messageEventId?: string | null
+  messageIndex: number
+  chatSessionId?: string | null
+  transcript: TranscriptTurnSnapshot[]
+  clientContactId: string
+}
+
+const messageFeedbackSubmitTool: Tool<
+  MessageFeedbackInput,
+  { eventId: string; transcriptBlobId: string }
+> = {
+  name: 'legal.client.message_feedback_submit',
+  description:
+    "Record the signed-in client's thumbs up/down on ONE portal-assistant reply, with an optional note, plus a snapshot of the whole visible conversation so far.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    submitAssistantMessageFeedback(ctx, {
+      verdict: input.verdict,
+      note: input.note ?? null,
+      surface: 'portal',
+      messageEventId: input.messageEventId ?? null,
+      messageIndex: input.messageIndex,
+      chatSessionId: input.chatSessionId ?? null,
+      transcript: input.transcript,
+      clientContactId: input.clientContactId,
+    }),
+}
+
 // ── Manual payment methods (Zelle + crypto, migration 0115) ─────────────────
 // The instruct-then-verify rails: the pay page shows the firm's Zelle recipient
 // and wallet addresses, the client pays in their own app, then REPORTS it here
@@ -565,5 +604,6 @@ registerTool(requestListTool)
 registerTool(documentsTool)
 registerTool(uploadsTool)
 registerTool(feedbackSubmitTool)
+registerTool(messageFeedbackSubmitTool)
 registerTool(paymentMethodsTool)
 registerTool(reportPaymentTool)
