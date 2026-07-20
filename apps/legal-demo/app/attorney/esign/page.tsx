@@ -43,10 +43,10 @@ interface EnvelopeListItem {
 
 // One color language across the stat-card dot, filter pill, and row chip.
 const BUCKET_META: Record<EnvelopeBucket, { label: string; fg: string; bg: string }> = {
-  action_needed: { label: 'Action needed', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
+  action_needed: { label: 'Action Needed', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
   // Comp's "Out for signature" chip (esignData().stMap.sent) is the warn amber/tan
   // pair, not blue.
-  out: { label: 'Out for signature', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
+  out: { label: 'Out For Signature', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
   completed: { label: 'Completed', fg: 'var(--li-ok)', bg: 'var(--li-ok-bg)' },
   declined: { label: 'Declined', fg: 'var(--li-danger)', bg: 'var(--li-danger-bg)' },
   voided: { label: 'Voided', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
@@ -105,8 +105,8 @@ function formatUpdated(iso: string | null): string {
 type Pill = { key: 'all' | EnvelopeBucket; label: string }
 const PILLS: Pill[] = [
   { key: 'all', label: 'All' },
-  { key: 'action_needed', label: 'Action needed' },
-  { key: 'out', label: 'Out for signature' },
+  { key: 'action_needed', label: 'Action Needed' },
+  { key: 'out', label: 'Out For Signature' },
   { key: 'completed', label: 'Completed' },
   { key: 'declined', label: 'Declined' },
 ]

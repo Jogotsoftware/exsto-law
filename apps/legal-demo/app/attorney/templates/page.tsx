@@ -79,18 +79,18 @@ const EMPTY_DRAFT: Draft = {
 // deliberately absent: it is CLIENT data, so a template using it correctly
 // triggers a questionnaire proposal.
 const STANDARD_TOKENS: { id: string; label: string }[] = [
-  { id: 'client_name', label: 'Client name' },
-  { id: 'client_email', label: 'Client email' },
-  { id: 'matter_number', label: 'Matter number' },
-  { id: 'firm_name', label: 'Firm name' },
-  { id: 'firm_address', label: 'Firm address' },
-  { id: 'firm_phone', label: 'Firm phone' },
-  { id: 'firm_email', label: 'Firm email' },
-  { id: 'attorney_name', label: 'Attorney name' },
-  { id: 'attorney_email', label: 'Attorney email' },
-  { id: 'effective_date', label: 'Effective date' },
-  { id: 'today', label: "Today's date" },
-  { id: 'letter_date', label: 'Letter date' },
+  { id: 'client_name', label: 'Client Name' },
+  { id: 'client_email', label: 'Client Email' },
+  { id: 'matter_number', label: 'Matter Number' },
+  { id: 'firm_name', label: 'Firm Name' },
+  { id: 'firm_address', label: 'Firm Address' },
+  { id: 'firm_phone', label: 'Firm Phone' },
+  { id: 'firm_email', label: 'Firm Email' },
+  { id: 'attorney_name', label: 'Attorney Name' },
+  { id: 'attorney_email', label: 'Attorney Email' },
+  { id: 'effective_date', label: 'Effective Date' },
+  { id: 'today', label: "Today's Date" },
+  { id: 'letter_date', label: 'Letter Date' },
 ]
 
 const TOKEN_RE = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
@@ -804,7 +804,7 @@ export default function TemplatesPage() {
           >
             <div className="tpl-modal-head">
               <PlusIcon size={16} />
-              <span>New template</span>
+              <span>New Template</span>
               <button
                 type="button"
                 className="tpl-modal-x"
@@ -817,13 +817,13 @@ export default function TemplatesPage() {
             <div className="tpl-new-body">
               <button type="button" className="tpl-new-option" onClick={startFromScratch}>
                 <FileTextIcon size={18} />
-                <span className="tpl-new-option-t">Start from scratch</span>
+                <span className="tpl-new-option-t">Start From Scratch</span>
                 <span className="tpl-new-option-d">A blank document you build yourself.</span>
               </button>
 
               <div className="tpl-new-group">
                 <div className="tpl-new-group-h">
-                  <CopyIcon size={15} /> Clone an existing template
+                  <CopyIcon size={15} /> Clone An Existing Template
                 </div>
                 {templates && templates.length > 0 ? (
                   <ul className="tpl-new-list">
@@ -847,7 +847,7 @@ export default function TemplatesPage() {
 
               <div className="tpl-new-group">
                 <div className="tpl-new-group-h">
-                  <LayoutGridIcon size={15} /> Start from a questionnaire
+                  <LayoutGridIcon size={15} /> Start From A Questionnaire
                 </div>
                 {questionnaires === null ? (
                   <p className="tpl-new-empty">Loading questionnaires…</p>
@@ -904,7 +904,7 @@ export default function TemplatesPage() {
               </div>
               <button type="button" className="li-tpl-new-btn" onClick={openNewChooser}>
                 <PlusIcon size={16} />
-                New template
+                New Template
               </button>
             </div>
           </div>
@@ -983,7 +983,7 @@ export default function TemplatesPage() {
                             setModalTemplate(t)
                           }}
                         >
-                          Edit in window
+                          Edit In Window
                         </button>
                         <button
                           type="button"
@@ -1048,7 +1048,7 @@ export default function TemplatesPage() {
                             setModalTemplate(t)
                           }}
                         >
-                          Edit in window
+                          Edit In Window
                         </button>
                         <button
                           type="button"
@@ -1250,7 +1250,7 @@ export default function TemplatesPage() {
                 onChange={onVariablesChange}
                 onInsert={insertToken}
               />
-              <div className="li-tpl-rail-subtitle">Standard fields</div>
+              <div className="li-tpl-rail-subtitle">Standard Fields</div>
               <div className="li-tpl-standard-chips">
                 {STANDARD_TOKENS.map((t) => (
                   <button

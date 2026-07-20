@@ -156,7 +156,7 @@ export function AttorneyTopBar(): React.JSX.Element {
                         aria-hidden="true"
                       />
                       <div className="li-top-notif-body">
-                        <div className="li-top-notif-rowtitle">Resolved feedback</div>
+                        <div className="li-top-notif-rowtitle">Resolved Feedback</div>
                         {detail && <div className="li-top-notif-detail">{detail}</div>}
                       </div>
                       {when && <span className="li-top-notif-when">{when}</span>}

@@ -423,11 +423,11 @@ export default function QuestionnaireEditorPage() {
   async function saveToLibrary() {
     if (!doc) return
     const name = await prompt({
-      title: 'Save to the library',
+      title: 'Save To The Library',
       body: 'Adds a copy of this questionnaire to the firm library so it can seed other services.',
       label: 'Name in the library',
       defaultValue: 'Untitled questionnaire',
-      confirmLabel: 'Save to library',
+      confirmLabel: 'Save To Library',
     })
     if (!name) return
     setBusy(true)
@@ -475,7 +475,7 @@ export default function QuestionnaireEditorPage() {
           onClick={() => void saveToLibrary()}
           disabled={busy || !doc}
         >
-          Save to library
+          Save To Library
         </button>
       </div>
 

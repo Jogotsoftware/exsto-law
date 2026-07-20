@@ -597,23 +597,23 @@ export default function CalendarPage() {
   // both open the same unified edit modal the grid's pencil/right-click use.
   function eventMenuItems(e: WorkspaceEvent): ActionItem[] {
     if (e.meetingEntityId) {
-      const items: ActionItem[] = [{ label: 'Edit event', onClick: () => openEdit(e) }]
+      const items: ActionItem[] = [{ label: 'Edit Event', onClick: () => openEdit(e) }]
       if (e.matterEntityId)
-        items.push({ label: 'View matter', href: `/attorney/matters/${e.matterEntityId}` })
-      items.push({ label: 'Cancel event', danger: true, onClick: () => deleteEvent(e) })
+        items.push({ label: 'View Matter', href: `/attorney/matters/${e.matterEntityId}` })
+      items.push({ label: 'Cancel Event', danger: true, onClick: () => deleteEvent(e) })
       return items
     }
     return [
-      { label: 'Edit event', onClick: () => openEdit(e) },
+      { label: 'Edit Event', onClick: () => openEdit(e) },
       {
-        label: 'Email guests',
+        label: 'Email Guests',
         onClick: () => {
           setAttendeeInput('')
           setAttendeesFor({ matterEntityId: e.matterEntityId!, matterNumber: e.matterNumber ?? '' })
         },
       },
-      { label: 'View matter', href: `/attorney/matters/${e.matterEntityId}` },
-      { label: 'Cancel event', danger: true, onClick: () => deleteEvent(e) },
+      { label: 'View Matter', href: `/attorney/matters/${e.matterEntityId}` },
+      { label: 'Cancel Event', danger: true, onClick: () => deleteEvent(e) },
     ]
   }
 
@@ -1616,7 +1616,7 @@ export default function CalendarPage() {
         <div className="li-cal-modal-backdrop" onClick={() => !busy && setPanel(null)}>
           <div className="li-cal-modal" onClick={(ev) => ev.stopPropagation()}>
             <div className="li-cal-modal-head">
-              <h2>{panel.kind === 'create' ? 'New event' : 'Event details'}</h2>
+              <h2>{panel.kind === 'create' ? 'New Event' : 'Event Details'}</h2>
               <button
                 type="button"
                 className="li-cal-modal-x"
@@ -1867,7 +1867,7 @@ export default function CalendarPage() {
 
       {attendeesFor && (
         <Modal
-          title={`Email guests — ${attendeesFor.matterNumber}`}
+          title={`Email Guests — ${attendeesFor.matterNumber}`}
           onClose={() => setAttendeesFor(null)}
           footer={
             <>

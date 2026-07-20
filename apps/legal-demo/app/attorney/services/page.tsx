@@ -113,7 +113,7 @@ export default function ServicesPage() {
     const ok = await confirm({
       title: `Delete “${svc.displayName}”?`,
       body: 'The service is retired and removed from every listing. Its history is kept, but it can’t be re-enabled.',
-      confirmLabel: 'Delete service',
+      confirmLabel: 'Delete Service',
       danger: true,
     })
     if (!ok) return

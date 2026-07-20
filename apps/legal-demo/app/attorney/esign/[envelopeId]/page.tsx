@@ -52,10 +52,10 @@ interface EnvelopeStatus {
 }
 
 const BUCKET_META: Record<EnvelopeBucket, { label: string; fg: string; bg: string }> = {
-  action_needed: { label: 'Action needed', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
+  action_needed: { label: 'Action Needed', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
   // Comp's "Out for signature" chip (esignData().stMap.sent) is the warn amber/tan
   // pair, not blue — kept in sync with the list page's BUCKET_META.
-  out: { label: 'Out for signature', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
+  out: { label: 'Out For Signature', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
   completed: { label: 'Completed', fg: 'var(--li-ok)', bg: 'var(--li-ok-bg)' },
   declined: { label: 'Declined', fg: 'var(--li-danger)', bg: 'var(--li-danger-bg)' },
   voided: { label: 'Voided', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
@@ -89,7 +89,7 @@ function formatDate(iso: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 function channelLabel(channel: string | null): string {
-  return channel === 'portal' ? 'Client portal' : 'Email link'
+  return channel === 'portal' ? 'Client Portal' : 'Email Link'
 }
 function signedDisplay(s: EnvelopeSigner): string {
   if (s.signedAt) return `Signed ${formatDate(s.signedAt)}`

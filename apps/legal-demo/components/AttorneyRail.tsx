@@ -415,7 +415,7 @@ export function AttorneyRail(): React.JSX.Element {
                 onClick={handleSignOut}
               >
                 <LogOutIcon size={16} />
-                Sign out
+                Sign Out
               </button>
             </div>
           )}

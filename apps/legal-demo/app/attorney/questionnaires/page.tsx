@@ -526,7 +526,7 @@ export default function QuestionnaireLibraryPage(): ReactElement {
               marginBottom: 'var(--space-3)',
             }}
           >
-            <h2>{draft.id ? 'Edit questionnaire' : 'New questionnaire'}</h2>
+            <h2>{draft.id ? 'Edit Questionnaire' : 'New Questionnaire'}</h2>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
               <button className="primary" onClick={save} disabled={saving}>
                 {saving ? 'Saving…' : draft.id ? 'Save changes' : 'Create questionnaire'}

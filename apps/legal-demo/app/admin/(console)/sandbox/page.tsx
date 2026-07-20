@@ -157,7 +157,7 @@ export default function AdminSandboxPage() {
       </section>
 
       <section>
-        <h2 style={{ fontSize: '1.1rem' }}>Promote services</h2>
+        <h2 style={{ fontSize: '1.1rem' }}>Promote Services</h2>
         <label style={{ display: 'block', marginBottom: 'var(--space-4)' }}>
           Target tenant
           <select
@@ -226,7 +226,7 @@ export default function AdminSandboxPage() {
       </section>
 
       <section style={{ marginTop: 'var(--space-5)' }}>
-        <h2 style={{ fontSize: '1.1rem' }}>Promote document &amp; email templates</h2>
+        <h2 style={{ fontSize: '1.1rem' }}>Promote Document &amp; Email Templates</h2>
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           The firm&apos;s reusable template library (select a target firm above).
         </p>

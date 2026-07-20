@@ -59,7 +59,7 @@ export function AdminTopNav() {
         {email ?? ''}
       </span>
       <button onClick={signOut} style={{ fontSize: '0.85rem' }}>
-        Sign out
+        Sign Out
       </button>
     </nav>
   )

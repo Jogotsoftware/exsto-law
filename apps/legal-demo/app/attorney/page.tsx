@@ -83,8 +83,8 @@ const ATTENTION_KIND_META: Record<string, { label: string; fg: string; bg: strin
   envelope_unsigned: { label: 'Unsigned', fg: 'var(--li-info)', bg: 'var(--li-info-bg)' },
   invoice_unpaid: { label: 'Unpaid', fg: 'var(--li-info)', bg: 'var(--li-info-bg)' },
   workflow_parked: { label: 'Stuck', fg: 'var(--li-neutral)', bg: 'var(--li-neutral-bg)' },
-  stale_matter: { label: 'No activity', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
-  due_soon_task: { label: 'Due soon', fg: 'var(--li-neutral)', bg: 'var(--li-neutral-bg)' },
+  stale_matter: { label: 'No Activity', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
+  due_soon_task: { label: 'Due Soon', fg: 'var(--li-neutral)', bg: 'var(--li-neutral-bg)' },
 }
 
 function attentionKindMeta(kind: string): { label: string; fg: string; bg: string } {
@@ -112,7 +112,7 @@ const STATUS_GROUPS: Array<{
   {
     key: 'inquiry',
     label: 'New inquiries',
-    chipLabel: 'New inquiry',
+    chipLabel: 'New Inquiry',
     matches: (s) =>
       s === 'inquiry' || s === 'questionnaire_pending' || s === 'questionnaire_submitted',
     // Neutral gray per the comp's matters table (stBadge); matches the matters
@@ -123,7 +123,7 @@ const STATUS_GROUPS: Array<{
   {
     key: 'scheduled',
     label: 'Consultation booked',
-    chipLabel: 'Consultation booked',
+    chipLabel: 'Consultation Booked',
     matches: (s) => s === 'consultation_scheduled' || s === 'consultation_completed',
     fg: 'var(--li-info)',
     bg: 'var(--li-info-bg)',
@@ -393,7 +393,7 @@ export default function AttorneyHome() {
         </section>
 
         <section className="li-dash-card">
-          <h2 className="li-dash-card-title">Recently booked</h2>
+          <h2 className="li-dash-card-title">Recently Booked</h2>
           {recent === null && !error && (
             <div className="loading-block" role="status">
               <span className="spinner" /> Loading…
@@ -427,7 +427,7 @@ export default function AttorneyHome() {
 
       <section className="li-dash-week">
         <div className="li-dash-week-head">
-          <h2 className="li-dash-card-title li-dash-week-title">This week</h2>
+          <h2 className="li-dash-card-title li-dash-week-title">This Week</h2>
           <ShareBookingButton />
         </div>
         {calendarError && (

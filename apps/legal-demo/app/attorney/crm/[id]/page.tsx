@@ -290,7 +290,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {editing && (
         <section className="li-crm-editcard">
-          <h2>Edit client</h2>
+          <h2>Edit Client</h2>
           <div className="form-grid">
             <label>
               <span>Client name</span>

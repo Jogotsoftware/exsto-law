@@ -254,7 +254,7 @@ function InviteModal({
     <div className="li-modal-backdrop" onClick={onClose}>
       <div className="li-modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="li-modal-head">
-          <h2>Invite user</h2>
+          <h2>Invite User</h2>
           <button onClick={onClose} aria-label="Close" className="li-modal-close">
             <X size={18} aria-hidden />
           </button>

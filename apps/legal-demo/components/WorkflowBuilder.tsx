@@ -450,7 +450,7 @@ function AddPalette({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
-        <strong style={{ fontSize: '0.9rem' }}>Pick a step action</strong>
+        <strong style={{ fontSize: '0.9rem' }}>Pick A Step Action</strong>
         <button
           type="button"
           className="back-link"
@@ -485,7 +485,7 @@ function AddPalette({
 
       {capabilities.length > 0 && (
         <>
-          <PaletteGroupHeading>Platform capabilities</PaletteGroupHeading>
+          <PaletteGroupHeading>Platform Capabilities</PaletteGroupHeading>
           <div style={{ display: 'grid', gap: '0.4rem' }}>
             {capabilities.map((c) => (
               <button
@@ -515,7 +515,7 @@ function AddPalette({
 
       {library.length > 0 && (
         <>
-          <PaletteGroupHeading>From your step library</PaletteGroupHeading>
+          <PaletteGroupHeading>From Your Step Library</PaletteGroupHeading>
           <div style={{ display: 'grid', gap: '0.4rem' }}>
             {library.map((t) => {
               const actionLabel =
@@ -678,7 +678,7 @@ function StepCard({
               onClick={onStartSaveToLib}
               disabled={savingToLib}
             >
-              Save to library
+              Save To Library
             </button>
           )}
           <button

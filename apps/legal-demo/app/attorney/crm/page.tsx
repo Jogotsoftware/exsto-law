@@ -118,7 +118,7 @@ export default function ClientsPage() {
     },
     {
       key: 'last',
-      label: 'Last activity',
+      label: 'Last Activity',
       width: '1fr',
       sortValue: (c) => c.lastActivityAt,
       render: (c) => formatCrmDate(c.lastActivityAt),
@@ -134,7 +134,7 @@ export default function ClientsPage() {
         </h1>
         <button type="button" className="li-crm-list-newbtn" onClick={() => setShowNew(true)}>
           <PlusIcon size={16} />
-          New client
+          New Client
         </button>
       </div>
 
@@ -227,7 +227,7 @@ function NewClientModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
   return (
     <Modal
-      title="New client"
+      title="New Client"
       onClose={onClose}
       footer={
         <>

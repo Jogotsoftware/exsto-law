@@ -35,7 +35,7 @@ const STATUS_GROUPS: Array<{
 }> = [
   {
     key: 'inquiry',
-    chipLabel: 'New inquiry',
+    chipLabel: 'New Inquiry',
     matches: (s) =>
       s === 'inquiry' || s === 'questionnaire_pending' || s === 'questionnaire_submitted',
     // Comp's matters table (legal-instruments.dc.html stBadge) pairs "New inquiry"
@@ -45,7 +45,7 @@ const STATUS_GROUPS: Array<{
   },
   {
     key: 'scheduled',
-    chipLabel: 'Consultation booked',
+    chipLabel: 'Consultation Booked',
     matches: (s) => s === 'consultation_scheduled' || s === 'consultation_completed',
     fg: 'var(--li-info)',
     bg: 'var(--li-info-bg)',
@@ -192,7 +192,7 @@ export default function MattersPage() {
         <h1 className="li-mat-list-title">Matters</h1>
         <button type="button" className="li-mat-list-newbtn" onClick={() => setShowNew(true)}>
           <PlusIcon size={16} />
-          New matter
+          New Matter
         </button>
       </div>
 
@@ -387,7 +387,7 @@ function NewMatterModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title="New matter"
+      title="New Matter"
       onClose={onClose}
       footer={
         <>

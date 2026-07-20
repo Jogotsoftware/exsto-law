@@ -104,7 +104,7 @@ export default function ContactsPage() {
     },
     {
       key: 'last',
-      label: 'Last activity',
+      label: 'Last Activity',
       width: '1fr',
       sortValue: (c) => c.lastActivityAt,
       render: (c) => formatCrmDate(c.lastActivityAt),
