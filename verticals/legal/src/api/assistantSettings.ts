@@ -22,6 +22,12 @@ export interface AssistantSettings {
   // Contract-A connection status.
   research?: boolean
   contextDepth?: 'lean' | 'balanced' | 'generous'
+  // FB-B — this attorney's own standing instructions for the assistant, folded
+  // into the STABLE half of their chat's system prompt (assistantPrompt.ts
+  // buildCustomInstructionsBlock) alongside the firm-wide block. Clipped to
+  // 2,000 chars at injection time; stored as-is here (the editor enforces the
+  // cap client-side).
+  customInstructions?: string
 }
 
 function parseSettings(raw: string | null | undefined): AssistantSettings | null {

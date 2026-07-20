@@ -10,6 +10,12 @@ import { normalizeJurisdiction } from '../api/jurisdictions.js'
 // resolve as SYSTEM merge slots. Migration 0170 (WP A1) adds firm_jurisdiction /
 // practice_areas / attorney_name — the firm's home jurisdiction (matter>firm>
 // unset resolver fallback rung), practice areas, and lead attorney display name.
+// Migration 0175 (WP FB-B, PLANNED — not applied) adds assistant_instructions —
+// the firm's standing custom instructions for the AI assistant (e.g. "always CC
+// my paralegal"), injected into the attorney chat's stable system prompt and the
+// email-drafting prompt (assistantPrompt.ts buildFirmInstructionsBlock). Same
+// singleton, same action, same append-only-supersede pattern as every other
+// profile field.
 // legal.firm.set_profile creates the singleton on first write and supersedes its
 // attributes append-only — the exact legal.firm.signature_set pattern
 // (handlers/firmSignature.ts).
@@ -77,6 +83,10 @@ interface FirmProfileSetPayload {
   firm_jurisdiction?: string | null
   practice_areas?: unknown
   attorney_name?: string | null
+  // FB-B (migration 0175, PLANNED) — the firm's standing instructions for the
+  // AI assistant. Plain text field, same clear-on-empty-string semantics as
+  // firm_name/firm_address/etc.
+  assistant_instructions?: string | null
 }
 
 const PROFILE_FIELDS = [
@@ -87,6 +97,7 @@ const PROFILE_FIELDS = [
   'firm_jurisdiction',
   'practice_areas',
   'attorney_name',
+  'assistant_instructions',
 ] as const
 
 type ProfileField = (typeof PROFILE_FIELDS)[number]
@@ -130,7 +141,7 @@ registerActionHandler('legal.firm.set_profile', async (ctx, client, payload, act
   const provided = PROFILE_FIELDS.filter((k) => p[k] !== undefined)
   if (provided.length === 0) {
     throw new Error(
-      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name.',
+      'Nothing to update: provide at least one of firm_name, firm_address, firm_phone, firm_email, firm_jurisdiction, practice_areas, attorney_name, assistant_instructions.',
     )
   }
 

@@ -14,6 +14,12 @@ export interface AssistantFirmFacts {
   jurisdictionCode?: string
   jurisdictionDisplayName?: string
   practiceAreas?: string[]
+  // FB-B — the firm's standing custom instructions for the assistant (e.g.
+  // "always CC my paralegal"), read off the firm_profile singleton's
+  // assistant_instructions attribute (api/tenantSettings.ts). Constant for the
+  // conversation, same as the rest of AssistantFirmFacts, so it rides the
+  // STABLE/cached half alongside them.
+  firmInstructions?: string
 }
 
 // "a" vs "an" for a practice-area phrase that may start with any word (a
@@ -90,6 +96,56 @@ export function portalLocaleLine(locale?: 'en' | 'es'): string {
   return locale === 'es'
     ? 'This client is using the portal in Spanish — default to Spanish unless they write to you in another language.'
     : ''
+}
+
+// ── FB-B — custom instructions (firm + per-attorney) ────────────────────────
+// Two independent, attorney-authored free-text slots the assistant follows:
+// a FIRM-wide one ("always CC my paralegal") set by an admin on the
+// firm_profile singleton, and a PER-ATTORNEY one set on that attorney's own
+// assistant_settings payload (api/assistantSettings.ts). Both are optional
+// and additive to the fixed discipline blocks above/below — NEVER a way to
+// override accuracy, no-invented-facts, or jurisdiction discipline, which is
+// why the fence says so explicitly and why this block is composed to land
+// AFTER those rules in the prompt (see buildClaudeSystem). Attorney chat only
+// (composeEmailDraft reuses buildFirmInstructionsBlock alone; the client
+// portal gets neither — client-facing, and firm instructions could leak
+// internal guidance to a client).
+const CUSTOM_INSTRUCTIONS_CHAR_CAP = 2000
+
+function clipCustomInstructions(text: string): string {
+  if (text.length <= CUSTOM_INSTRUCTIONS_CHAR_CAP) return text
+  return `${text.slice(0, CUSTOM_INSTRUCTIONS_CHAR_CAP)}\n…[truncated at ${CUSTOM_INSTRUCTIONS_CHAR_CAP} characters]`
+}
+
+const FIRM_INSTRUCTIONS_HEADER =
+  '--- FIRM INSTRUCTIONS (standing guidance from this firm; follow unless it conflicts with the accuracy, no-invented-facts, or jurisdiction rules above) ---'
+const ATTORNEY_INSTRUCTIONS_HEADER = "--- YOUR ATTORNEY'S INSTRUCTIONS ---"
+
+// The firm block alone — also used by composeEmailDraft (generateEmail.ts),
+// which has no notion of a "current attorney" turn to attach a personal block
+// to. Empty-safe: '' in, '' out, so a caller can always splice the result into
+// a template slot without a stray header.
+export function buildFirmInstructionsBlock(firmInstructions?: string): string {
+  const text = firmInstructions?.trim()
+  if (!text) return ''
+  return `${FIRM_INSTRUCTIONS_HEADER}\n${clipCustomInstructions(text)}`
+}
+
+// Both blocks, for the attorney chat's stable system half. Each is omitted
+// entirely when unset — with both unset this returns '' and the caller's
+// prompt is byte-identical to the pre-FB-B prompt.
+export function buildCustomInstructionsBlock(
+  firmInstructions?: string,
+  attorneyInstructions?: string,
+): string {
+  const parts: string[] = []
+  const firmBlock = buildFirmInstructionsBlock(firmInstructions)
+  if (firmBlock) parts.push(firmBlock)
+  const attorneyText = attorneyInstructions?.trim()
+  if (attorneyText) {
+    parts.push(`${ATTORNEY_INSTRUCTIONS_HEADER}\n${clipCustomInstructions(attorneyText)}`)
+  }
+  return parts.join('\n\n')
 }
 
 // Build the base (firm-agnostic apart from the facts passed in) system prompt
