@@ -4,6 +4,7 @@ import { Document, Page, Text, View, StyleSheet, renderToBuffer } from '@react-p
 import { h } from './reactPdfElement.js'
 import { marked } from 'marked'
 import type { Token, Tokens } from 'marked'
+import { classifyExecutionLine } from '../esign/executionBlock.js'
 
 // Server-side markdown → PDF renderer for generated legal-document drafts. Used
 // to attach a draft as PDF bytes on an outgoing email. There is no headless
@@ -90,6 +91,19 @@ const styles = StyleSheet.create({
   },
   hr: { borderBottomWidth: 1, borderBottomColor: '#d1d5db', marginVertical: 10 },
   space: { height: 6 },
+  // SIG-BLOCK-1 — a DocuSign-style ruled signature/date line: a fixed-width rule
+  // with a small caption beneath ("Signature", "Date", …). Replaces the literal
+  // underscore runs that rendered as broken text. `break-inside` keeps rule+label
+  // together across a page boundary.
+  sigLine: { marginTop: 14, marginBottom: 6 },
+  sigRule: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#1b1b1b',
+    width: 240,
+    maxWidth: '100%',
+    marginBottom: 3,
+  },
+  sigLabel: { fontSize: 8.5, color: '#555' },
   strong: { fontFamily: 'Helvetica-Bold' },
   em: { fontFamily: 'Helvetica-Oblique' },
   del: { textDecoration: 'line-through' },
@@ -185,6 +199,45 @@ function renderInline(
   })
 }
 
+// A single DocuSign-style ruled line: the rule, then its caption beneath.
+function renderSigRule(label: string, key: string): React.ReactNode {
+  return h(View, { key, style: styles.sigLine }, [
+    h(View, { key: 'r', style: styles.sigRule }),
+    label ? h(Text, { key: 'l', style: styles.sigLabel }, label) : null,
+  ])
+}
+
+// A paragraph MAY be an execution block: the seeded template's signature stanza is
+// three consecutive lines (no blank line between), so `Signature: ____ / Name: … /
+// Date: ____` arrives as ONE paragraph token. Split its raw lines and, when any is
+// an execution line (marker or legacy underscore run), render a mixed <View>:
+// ruled lines for the execution lines, normal inline text for the rest. When none
+// is, fall through to the ordinary single-<Text> paragraph.
+function renderParagraph(p: Tokens.Paragraph, key: string): React.ReactNode {
+  const rawLines = p.raw.replace(/\n+$/, '').split('\n')
+  if (!rawLines.some((l) => classifyExecutionLine(l) !== null)) {
+    return h(Text, { key, style: styles.paragraph }, renderInline(p.tokens, p.text, key))
+  }
+  const children = rawLines
+    .map((line, i) => {
+      const lk = `${key}-el-${i}`
+      const cls = classifyExecutionLine(line)
+      if (cls) return renderSigRule(cls.label, lk)
+      const trimmed = line.trim()
+      if (!trimmed) return null
+      // Re-tokenize just this line so its inline formatting (e.g. **bold name**)
+      // still renders; fall back to raw text if it isn't a plain paragraph.
+      const first = marked.lexer(trimmed)[0]
+      const inline =
+        first && first.type === 'paragraph'
+          ? renderInline((first as Tokens.Paragraph).tokens, (first as Tokens.Paragraph).text, lk)
+          : trimmed
+      return h(Text, { key: lk, style: styles.paragraph }, inline)
+    })
+    .filter(Boolean)
+  return h(View, { key }, children)
+}
+
 function renderListItems(list: Tokens.List, keyPrefix: string): React.ReactNode[] {
   return list.items.map((item, i) => {
     const marker = list.ordered
@@ -211,10 +264,8 @@ function renderBlock(token: Token, key: string): React.ReactNode {
         renderInline(heading.tokens, heading.text, key),
       )
     }
-    case 'paragraph': {
-      const p = token as Tokens.Paragraph
-      return h(Text, { key, style: styles.paragraph }, renderInline(p.tokens, p.text, key))
-    }
+    case 'paragraph':
+      return renderParagraph(token as Tokens.Paragraph, key)
     case 'list':
       return h(View, { key, style: styles.paragraph }, renderListItems(token as Tokens.List, key))
     case 'blockquote': {

@@ -1313,6 +1313,33 @@ export function hasDraftingTraceContract(promptText: string): boolean {
   return promptText.includes('"conclusion"') && promptText.includes('"confidence"')
 }
 
+// The EXECUTION BLOCK contract (SIG-BLOCK-1). Foundational: without it the model
+// freestyles signature/date lines — usually raw underscore runs — which render
+// poorly through the PDF/preview pipeline and give e-signature placement nothing to
+// anchor to. Auto-appended (same pattern as DRAFTING_TRACE_CONTRACT) so EVERY saved
+// prompt — repo default or per-service config — instructs the canonical markers.
+export const DRAFTING_EXECUTION_BLOCK_RULE = `
+
+# Execution block (signatures)
+
+When the document is meant to be signed, ALWAYS end it with a canonical execution block — one per signer — and NEVER freestyle your own signature/date lines (no "Signature: ______", no drawn underscores or dashes). For each signer, put on their own lines the signature marker, the printed name, and the date marker, using the signer key you are given (e.g. \`client\`):
+
+\`\`\`
+{{sign:client}}
+
+Name: **<full legal name, or a {{name:client}} marker if unknown>**
+
+{{date:client}}
+\`\`\`
+
+\`{{sign:key}}\` is the signature line and \`{{date:key}}\` the date line; the platform renders them as ruled lines and anchors the e-signature to them. Add \`{{title:key}}\` only when a signing capacity/title is needed.`
+
+// A prompt already carries the execution-block rule when it references the canonical
+// signature marker (or names the section). Keeps the auto-append from double-adding.
+export function hasExecutionBlockRule(promptText: string): boolean {
+  return promptText.includes('{{sign:') || /#\s*Execution block/i.test(promptText)
+}
+
 // Validate a drafting prompt before persisting, and RETURN the prompt to store —
 // possibly AUGMENTED (WP5): the FIXED mustache slots must be present (throws, naming
 // the missing slots), and the output/trace contract is auto-appended when absent so
@@ -1329,9 +1356,16 @@ export function validateDraftingPrompt(promptText: unknown): string {
         `Every prompt must contain ${REQUIRED_DRAFTING_SLOTS.join(', ')} so the worker can fill them.`,
     )
   }
-  return hasDraftingTraceContract(promptText)
+  let out = hasDraftingTraceContract(promptText)
     ? promptText
     : `${promptText.trimEnd()}\n${DRAFTING_TRACE_CONTRACT}`
+  // Append the execution-block rule independently (its own presence gate) so a
+  // configured prompt that already had a trace contract still picks up the
+  // canonical signature/date markers.
+  if (!hasExecutionBlockRule(out)) {
+    out = `${out.trimEnd()}\n${DRAFTING_EXECUTION_BLOCK_RULE}`
+  }
+  return out
 }
 
 // Write a service's drafting prompt for one document kind as a new immutable

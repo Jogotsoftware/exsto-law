@@ -1,5 +1,10 @@
 import { Marked } from 'marked'
 import sanitizeHtml from 'sanitize-html'
+// Pure execution-block transform (SIG-BLOCK-1). Imported via the package's `./esign`
+// subpath, NOT the '@exsto/legal' barrel: this module is client-bundled (the e-sign
+// prepare/sign views are 'use client'), and the subpath resolves to a leaf pure
+// module (executionBlock.ts + fields.ts) with no server dependencies.
+import { renderSigMarkersForPreview } from '@exsto/legal/esign'
 
 // Rich document renderer: markdown (with an allowlisted inline-HTML subset for
 // per-run font / size / alignment) → sanitized HTML, safe to inject into a signed
@@ -103,9 +108,17 @@ export const DOCUMENT_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
 
 // Render a markdown document body (which may contain the allowlisted inline-HTML
 // styling subset) to sanitized HTML for display. Tokens are expected already
-// substituted by the merge engine; {{token}}/{{>include}}/{{type:key}} text that
-// remains is plain text and passes through untouched (it is not HTML).
+// substituted by the merge engine; {{token}}/{{>include}} text that remains is
+// plain text and passes through untouched (it is not HTML).
+//
+// Whole-line e-sign execution markers ({{sign:key}} / {{date:key}} / …) and legacy
+// underscore runs are first turned into clean ruled `sig-line` markup (SIG-BLOCK-1)
+// so signature/date lines render as proper lines, not literal `{{sign:client}}`
+// text or broken underscores. This is DISPLAY only — the stored body keeps the
+// markers, which is what the e-sign field parser (parseFields) anchors to. An
+// INLINE marker inside a sentence is intentionally left verbatim.
 export function renderDocumentHtml(body: string): string {
-  const rendered = md.parse(body ?? '', { async: false }) as string
+  const withSigLines = renderSigMarkersForPreview(body ?? '')
+  const rendered = md.parse(withSigLines, { async: false }) as string
   return sanitizeHtml(rendered, DOCUMENT_SANITIZE_OPTIONS)
 }

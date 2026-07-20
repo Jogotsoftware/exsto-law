@@ -14,6 +14,10 @@
       "types": "./dist/mcp/index.d.ts",
       "import": "./dist/mcp/index.js"
     },
+    "./esign": {
+      "types": "./dist/esign/executionBlock.d.ts",
+      "import": "./dist/esign/executionBlock.js"
+    },
     "./templates/*": "./templates/*"
   },
   "files": [

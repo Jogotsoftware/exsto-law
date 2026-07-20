@@ -21,6 +21,11 @@ export default defineConfig({
       '@exsto/legal/mcp': fileURLToPath(
         new URL('./verticals/legal/dist/mcp/index.js', import.meta.url),
       ),
+      // Pure execution-block subpath (SIG-BLOCK-1), also more-specific than the
+      // barrel — must precede it so the prefix match doesn't rewrite it wrong.
+      '@exsto/legal/esign': fileURLToPath(
+        new URL('./verticals/legal/dist/esign/executionBlock.js', import.meta.url),
+      ),
       '@exsto/legal': fileURLToPath(new URL('./verticals/legal/dist/index.js', import.meta.url)),
       // legal-demo uses the `@/` path alias for app-local imports. Route-handler
       // tests import those files, so map it here too. The key must be '@' (not

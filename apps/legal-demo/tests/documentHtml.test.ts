@@ -14,14 +14,41 @@ describe('renderDocumentHtml — markdown rendering', () => {
     expect(html).toContain('<strong>world</strong>')
   })
 
-  it('passes merge tokens and the e-sign anchor through verbatim', () => {
-    // The e-sign anchor {{type:key}} MUST survive the render byte-for-byte — the
-    // signing field matcher finds it in the produced document. Plain tokens (shown
-    // pre-merge in previews) survive too. ({{>include}} is resolved server-side
-    // before display; its `>` would be HTML-encoded to &gt;, which is correct.)
+  it('passes merge tokens and an INLINE e-sign anchor through verbatim', () => {
+    // A plain merge token survives (shown pre-merge in previews). An INLINE e-sign
+    // anchor {{type:key}} inside a sentence survives verbatim too — only a WHOLE-LINE
+    // marker becomes a ruled line (see the SIG-BLOCK-1 suite below). The signing
+    // field matcher (parseFields) reads the stored body, not this HTML, either way.
     const html = renderDocumentHtml('Dear {{client_name}}, please sign {{sign:client}} below.')
     expect(html).toContain('{{client_name}}')
     expect(html).toContain('{{sign:client}}')
+  })
+})
+
+describe('renderDocumentHtml — SIG-BLOCK-1 execution markers', () => {
+  it('renders a whole-line signature marker as a ruled sig-line', () => {
+    const html = renderDocumentHtml('{{sign:client}}')
+    expect(html).toContain('class="sig-line"')
+    expect(html).toContain('Signature')
+    expect(html).not.toContain('{{sign:client}}')
+  })
+
+  it('renders a whole-line date marker as a ruled Date line', () => {
+    const html = renderDocumentHtml('{{date:client}}')
+    expect(html).toContain('class="sig-line"')
+    expect(html).toContain('Date')
+  })
+
+  it('turns a legacy underscore run into a clean rule (old docs stop looking broken)', () => {
+    const html = renderDocumentHtml('Signature: ______________________________')
+    expect(html).toContain('class="sig-line"')
+    expect(html).not.toContain('______')
+  })
+
+  it('keeps surrounding markdown rendering around an execution block', () => {
+    const html = renderDocumentHtml('{{sign:client}}\n\nName: **Alice Chen**\n\n{{date:client}}')
+    expect(html).toContain('class="sig-line"')
+    expect(html).toContain('<strong>Alice Chen</strong>')
   })
 })
 
