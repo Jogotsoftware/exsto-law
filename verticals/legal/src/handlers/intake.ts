@@ -15,6 +15,7 @@ import { resolveActiveServiceVersion } from '../lifecycle/binding.js'
 import { createWorkflowInstance } from '../lifecycle/instance.js'
 import { entryStage } from '../lifecycle/resolve.js'
 import { settleStage } from '../lifecycle/settle.js'
+import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
 import { normalizeJurisdiction } from '../api/jurisdictions.js'
 import { GOVERNING_JURISDICTION_FIELD_ID } from '../api/intakeFieldLibrary.js'
 
@@ -389,6 +390,21 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
         bound.graph,
         actionId,
       )
+      // WF-FIX-1 (WP2) — the public funnel runs intake.submit BEFORE matter.open,
+      // so intake is complete the moment the instance exists: emit the signal and
+      // dispatch it so a system edge waiting on 'intake.completed' fires in this
+      // same action (create → settle → dispatch; dispatch is a no-op when no edge
+      // waits — same contract as every dispatchLifecycleEvent site).
+      await insertEvent(client, {
+        tenantId: ctx.tenantId,
+        actionId,
+        eventKindName: 'intake.completed',
+        primaryEntityId: matterEntityId,
+        data: { service_key: p.service_key, questionnaire_entity_id: p.questionnaire_entity_id },
+        sourceType: 'system',
+        sourceRef: 'system:workflow_engine',
+      })
+      await dispatchLifecycleEvent(client, ctx, matterEntityId, 'intake.completed', actionId)
       await client.query('RELEASE SAVEPOINT workflow_engine')
     } catch (err) {
       // Roll back ONLY the engine work; the matter is opened either way.

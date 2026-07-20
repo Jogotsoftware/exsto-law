@@ -167,7 +167,7 @@ describe('gate-transition vocabulary — pinned to the runtime dispatch tokens',
   it('system on = the dispatchLifecycleEvent event kinds', () => {
     // handlers/invoice.ts, esign.ts, call.ts.
     expect(allowedTransitionTokens('system')?.sort()).toEqual(
-      ['esign.completed', 'invoice.paid', 'transcript.received'].sort(),
+      ['esign.completed', 'intake.completed', 'invoice.paid', 'transcript.received'].sort(),
     )
   })
 

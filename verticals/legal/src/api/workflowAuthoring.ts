@@ -24,6 +24,8 @@ import {
   validateLifecycle,
   validateLinearLifecycle,
   validateBlockingReachability,
+  isBlockingStage,
+  hasProducingRunner,
   buildInvokeCapabilityStepTemplate,
   capabilityConfigSchemaProps,
   diagnoseCapabilityStepConfig,
@@ -323,6 +325,75 @@ export async function validateProposedLifecycle(
         svc.cost.type === 'fixed'
           ? `split billing: this service charges per-document fee(s) totaling $${feeTotal.toFixed(2)} on approval AND a $${svc.cost.amount} service fee at completion — two charges per matter (total $${(feeTotal + Number(svc.cost.amount)).toFixed(2)}). Keep both ONLY if the attorney deliberately chose a split; otherwise remove one so the service has ONE billing point.`
           : `split billing: this service charges per-document fee(s) totaling $${feeTotal.toFixed(2)} on approval AND hourly billing at $${svc.cost.amount}/hour — two charge declarations per matter. Keep both ONLY if the attorney deliberately chose a split; otherwise remove one so the service has ONE billing point.`,
+      )
+    }
+  }
+
+  // WF-FIX-1 (WP7) — authoring-hygiene WARNINGS (never rejections; existing saved
+  // graphs keep validating). Each names the exact fix, same diagnostic style as the
+  // errors above.
+  // (a) transcript.received in a graph that never schedules a consultation: no
+  // booking edge and no blocking consultation step means no transcript will ever
+  // be imported — the edge can never fire (the live stuck-matter class).
+  const schedulesConsultation =
+    graph.some((s) => s.advances_to.some((e) => e.via === 'booking.create')) ||
+    graph.some((s) => s.action?.kind === 'view_consultation' && isBlockingStage(s))
+  for (const s of graph) {
+    for (const e of s.advances_to) {
+      if (e.on === 'transcript.received' && !schedulesConsultation) {
+        warnings.push(
+          `stage "${s.key}" waits on 'transcript.received', but nothing in this workflow schedules a consultation — no transcript will ever arrive and the matter would wait forever. If this step should fire when the client finishes the intake form, use 'intake.completed' instead.`,
+        )
+      }
+    }
+  }
+  // (b) a non-blocking stage never WAITS: pass-through traverses its outgoing edge
+  // immediately, so a gate/token there is recorded but never waited on. Say it out
+  // loud so "non-blocking + client gate" is an authoring signal, not a runtime
+  // surprise. Producing stages are exempt — they run on entry by design.
+  for (const s of graph) {
+    if (s.terminal || isBlockingStage(s) || hasProducingRunner(s.action?.kind)) continue
+    const edge = s.advances_to[0]
+    const token = edge?.via ?? edge?.on
+    if (edge && token) {
+      warnings.push(
+        `step "${s.label}" is informational (non-blocking): the matter moves through it immediately, so its '${token}' trigger is never waited on. Mark the step blocking if the matter should stop there.`,
+      )
+    }
+  }
+  // (c) a NON-producing workflow that completes with no billing point at all: the
+  // producing case above is an error; this is the softer sibling (some services
+  // are legitimately unbilled or billed off-platform).
+  if (serviceKey) {
+    const svc = await getService(ctx, serviceKey)
+    const hasFixedFee2 = svc?.cost?.type === 'fixed' || pendingBilling?.costType === 'fixed'
+    const completes = graph.some((s) => s.action?.kind === 'complete_matter')
+    if (producingStages.length === 0 && completes && !hasInvoiceStep && !hasFixedFee2) {
+      warnings.push(
+        `this workflow reaches completion but declares no billing — no invoice step and no flat service fee${svc?.cost?.type === 'hourly' ? ' (hourly time only bills through an approve_send_invoice step)' : ''}. Add an approve_send_invoice step or a flat fee unless this service is deliberately unbilled.`,
+      )
+    }
+  }
+  // (d) no terminal at all: the matter can never complete.
+  if (terminals.length === 0 && graph.length > 0) {
+    warnings.push(
+      `no step is marked as the end of the matter — without a terminal completion step the matter can never be completed, billed at completion, or archived. Make the last step a complete_matter step.`,
+    )
+  }
+  // (e) a client-gated wait with nothing client-facing to act on: the exit needs a
+  // client action, but the step shows the client no document/ask.
+  for (const s of graph) {
+    const edge = s.advances_to[0]
+    if (!edge || edge.gate !== 'client' || !isBlockingStage(s)) continue
+    const kind = s.action?.kind
+    const clientFacing =
+      kind === 'review_send_document' ||
+      kind === 'invoke_capability' ||
+      (s.documents?.length ?? 0) > 0 ||
+      Boolean(s.client_label)
+    if (!clientFacing) {
+      warnings.push(
+        `step "${s.label}" waits on the client ('${edge.via ?? edge.on}') but shows the client nothing to act on — no document, no request, no client-facing label. Give the step a client-facing ask (attach a document, use a request_client_materials capability, or set a client label) so the client knows what to do.`,
       )
     }
   }
