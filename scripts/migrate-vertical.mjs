@@ -96,6 +96,25 @@ async function main() {
       }
     }
     console.log(`vertical: ${count} applied, ${files.length - count} already current.`)
+
+    // Tenant vocabulary reconcile (0174). Feature migrations seed new kinds and
+    // notification routes into TENANT ZERO by convention; the bootstrap copy runs
+    // only at tenant creation, so tenants created earlier drift. Running the sync
+    // after every migration pass means "seed tenant zero" reaches EVERY tenant in
+    // the same `pnpm migrate:vertical`. Guarded: a database that predates 0174
+    // (or a core-only database) simply skips.
+    const syncFn = await pool.query(
+      `SELECT to_regproc('private.cp_sync_all_tenant_vocab') IS NOT NULL AS ok`,
+    )
+    if (syncFn.rows[0].ok) {
+      const res = await pool.query(`SELECT private.cp_sync_all_tenant_vocab() AS summary`)
+      const summary = res.rows[0].summary
+      console.log(
+        Object.keys(summary).length === 0
+          ? 'vertical: tenant vocab in sync (nothing to copy).'
+          : `vertical: tenant vocab synced — ${JSON.stringify(summary)}`,
+      )
+    }
   } finally {
     await pool.end()
   }
