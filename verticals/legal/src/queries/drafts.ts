@@ -1,5 +1,6 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { VoiceViolation } from '../api/emailVoiceChecks.js'
+import { getTenantSettings } from '../api/tenantSettings.js'
 
 export interface PendingDraftSummary {
   documentVersionId: string
@@ -237,6 +238,9 @@ export async function listDocumentVersions(
 
 export interface SharedDraftView extends PendingDraftSummary {
   bodyMarkdown: string
+  // FB-C — the resolved firm's name (never a hardcoded literal), for the
+  // public/portal share-view chrome. Null when the firm hasn't set one.
+  firmName: string | null
 }
 
 // Client-safe projection for the PUBLIC shared-draft view (/d/[versionId]).
@@ -249,7 +253,7 @@ export async function getSharedDraftVersion(
   ctx: ActionContext,
   documentVersionId: string,
 ): Promise<SharedDraftView | null> {
-  return withActionContext(ctx, async (client) => {
+  const view = await withActionContext(ctx, async (client) => {
     const res = await client.query<{
       version_id: string
       document_entity_id: string
@@ -309,6 +313,15 @@ export async function getSharedDraftVersion(
       bodyMarkdown: row.body,
     }
   })
+  if (!view) return null
+
+  let firmName: string | null = null
+  try {
+    firmName = (await getTenantSettings(ctx)).firmName
+  } catch {
+    firmName = null // degrade to the page's generic fallback, never guess a name
+  }
+  return { ...view, firmName }
 }
 
 export async function getDraftVersion(

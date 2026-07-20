@@ -366,7 +366,7 @@ function ManualMethodsCard(): React.ReactElement {
             className="li-set-input"
             value={zelle.recipientName}
             onChange={(e) => setZelle({ recipientName: e.target.value })}
-            placeholder="Pacheco Law PLLC"
+            placeholder="Smith & Associates PLLC"
           />
         </label>
 

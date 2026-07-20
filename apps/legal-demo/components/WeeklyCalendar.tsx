@@ -30,6 +30,7 @@ import { useConfirm, type ConfirmOptions } from '@/components/ConfirmModal'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { launchCompose } from '@/lib/contractD'
 import { layoutOverlappingEvents, overlapResultToPct } from '@/lib/calendarOverlapLayout'
+import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
 
 export type BookingCategory = 'new_consultation' | 'new_matter' | 'existing_project'
 
@@ -105,13 +106,6 @@ function sameDay(a: Date, b: Date): boolean {
 function timeOnly(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
-function humanizeService(key: string): string {
-  if (!key) return ''
-  if (key === 'llc_formation' || key === 'business_formation') return 'NC LLC formation'
-  if (key === 'oa_amendment') return 'OA amendment'
-  if (key === 'other') return 'Custom'
-  return key.replace(/_/g, ' ')
-}
 function toLocalDateStr(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -148,6 +142,7 @@ export function WeeklyCalendar({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { confirm, confirmElement } = useConfirm()
+  const serviceNames = useServiceDisplayNames()
 
   const palette = useMemo(() => {
     const m = new Map<string, CalendarCategory>()
@@ -319,7 +314,7 @@ export function WeeklyCalendar({
           <span className="wcal-block-time">{timeOnly(it.startIso)}</span>
           <span className="wcal-block-client">{it.title}</span>
           {it.serviceKey && (
-            <span className="wcal-block-service">{humanizeService(it.serviceKey)}</span>
+            <span className="wcal-block-service">{serviceLabel(it.serviceKey, serviceNames)}</span>
           )}
         </button>
         <span className="wcal-block-edit">

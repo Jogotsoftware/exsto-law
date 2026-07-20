@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { FIRM_NAME, PRODUCT_TAGLINE, PRODUCT_STAGE } from '@/lib/brand'
+import { PRODUCT_TAGLINE, PRODUCT_STAGE } from '@/lib/brand'
 import { fetchSession, clearDevSession, type DemoSession } from '@/lib/auth'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { SearchBar } from '@/components/SearchBar'
@@ -259,7 +259,9 @@ export function AttorneyTopNav() {
               <ScaleIcon size={16} />
             </span>
             <span className="att-top-brand-text">
-              <span className="att-top-brand-name">{FIRM_NAME}</span>
+              {/* Dead/unrendered legacy nav (superseded by AttorneyTopBar); kept
+                  compiling with the product tagline, never a hardcoded firm. */}
+              <span className="att-top-brand-name">{PRODUCT_TAGLINE}</span>
               <span className="att-top-brand-sub">
                 {PRODUCT_TAGLINE} · {PRODUCT_STAGE}
               </span>

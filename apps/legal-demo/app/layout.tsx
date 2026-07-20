@@ -26,7 +26,7 @@ const ebGaramond = EB_Garamond({
 export const metadata = {
   title: PRODUCT_NAME,
   applicationName: PRODUCT_NAME,
-  description: 'Intake, drafting, and matter workspace for Pacheco Law Firm.',
+  description: 'Intake, drafting, and matter workspace for law firms.',
 }
 
 // Explicit, audited viewport: device-width + initial-scale (pinch-zoom left

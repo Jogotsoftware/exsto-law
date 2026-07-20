@@ -89,7 +89,7 @@ export async function GET(request: Request) {
       // Signin mode: require a resolved actor (DB allowlist).
       if (!result.actorId) {
         return redirectToLoginWithError(
-          `The Google account ${result.accountEmail} is not authorized to access Pacheco Law. Sign in with an authorized account.`,
+          `The Google account ${result.accountEmail} is not authorized to access this workspace. Sign in with an authorized account.`,
         )
       }
 

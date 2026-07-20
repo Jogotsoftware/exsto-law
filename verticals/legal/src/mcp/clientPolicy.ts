@@ -42,6 +42,7 @@ export function isClientPortalTool(toolName: string): boolean {
 // only governs WHICH tools are reachable at all. Keep it MINIMAL — every entry
 // must return a client-safe projection. All entries are read-mode.
 export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
+  'legal.public.firm_branding', // FB-C: resolved firm name for authed portal chrome (pay page etc.) — same tool the booking page uses, session tenant instead of a slug
   'legal.client.home_summary', // the portal home in one read (matters, attention, previews, badge, gate state)
   'legal.client.notifications', // the notifications feed + unread watermark
   'legal.client.notifications_read', // mark notifications read (append-only watermark)

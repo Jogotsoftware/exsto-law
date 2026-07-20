@@ -13,6 +13,7 @@ import { callClientMcp } from '@/lib/mcpClient'
 import { AvailabilityCalendar, type CalendarSlot } from '@/components/AvailabilityCalendar'
 import { CheckIcon, ClockIcon, ChevronLeftIcon, ScaleIcon, LockIcon } from '@/components/icons'
 import { parseTimestamp } from '@/lib/datetime'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 interface ManageableBooking {
   clientFirstName: string | null
@@ -23,6 +24,7 @@ interface ManageableBooking {
   scheduledEndIso: string | null
   status: string | null
   canModify: boolean
+  firmName: string | null
 }
 
 const INITIAL_HORIZON_DAYS = 60
@@ -170,7 +172,7 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
             <span className="bk-brand-mark">
               <ScaleIcon size={18} />
             </span>
-            <span className="bk-brand-name">Pacheco Law</span>
+            <span className="bk-brand-name">{booking?.firmName ?? PRODUCT_TAGLINE}</span>
           </div>
         </header>
 
@@ -199,7 +201,7 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
                   )}
                 </p>
                 <Link href="/" className="bk-btn bk-btn-ghost bk-btn-wide">
-                  Back to Pacheco Law
+                  Back to {booking?.firmName ?? PRODUCT_TAGLINE}
                 </Link>
               </Centered>
             ) : loadError ? (

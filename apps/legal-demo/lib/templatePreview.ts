@@ -47,8 +47,8 @@ const CURATED: Record<string, string> = {
   client_email: 'jordan.avery@example.com',
   client_address: '1200 Peachtree St NE, Atlanta, GA 30309',
   matter_number: 'M-2026-0142',
-  firm_name: 'Pacheco Law',
-  attorney_name: 'Alex Pacheco',
+  firm_name: 'Smith & Associates PLLC',
+  attorney_name: 'Alex Smith',
 }
 
 // A readable sample for a token, or null if we have nothing sensible. We only

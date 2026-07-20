@@ -19,6 +19,7 @@ import { ingestionContext } from './granolaIngestion.js'
 import { queueNotification } from './notifications.js'
 import { findClientContactByEmailInTenant } from './clientIdentity.js'
 import { assertCanSendOnMatter } from './matterAccess.js'
+import { getTenantSettings } from './tenantSettings.js'
 import {
   DEFAULT_ESIGN_PROVIDER,
   EsignNotConfiguredError,
@@ -790,10 +791,14 @@ export interface SignableDocument {
   /** True when this signer can act now (their turn, not yet resolved). */
   canSign: boolean
   alreadyResolved: boolean
+  // FB-C — the resolved firm's name (never a hardcoded literal). Backs both
+  // signing doors (token link + authed portal), since both call buildSignable.
+  // Null when the firm hasn't set one.
+  firmName: string | null
 }
 
 async function buildSignable(ctx: ActionContext, requestId: string): Promise<SignableDocument> {
-  return withActionContext(ctx, async (client) => {
+  const doc = await withActionContext(ctx, async (client) => {
     const envelopeId = await requestEnvelopeId(client, ctx.tenantId, requestId)
     if (!envelopeId) throw new Error('Signing request not found.')
     const signerKey = await latestAttr(client, ctx.tenantId, requestId, 'signer_key')
@@ -861,6 +866,14 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
         envelopeStatus === 'voided',
     }
   })
+
+  let firmName: string | null = null
+  try {
+    firmName = (await getTenantSettings(ctx)).firmName
+  } catch {
+    firmName = null // degrade to the caller's generic fallback, never guess a name
+  }
+  return { ...doc, firmName }
 }
 
 // ── Token (link) surface ──────────────────────────────────────────────────────

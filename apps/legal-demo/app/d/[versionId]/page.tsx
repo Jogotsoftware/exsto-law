@@ -8,6 +8,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { downloadAsPdf, downloadAsWord, watermarkForStatus } from '@/lib/draftExport'
 import { formatDate } from '@/lib/datetime'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 interface DraftPayload {
   documentVersionId: string
@@ -18,6 +19,7 @@ interface DraftPayload {
   status: string
   recordedAt: string
   bodyMarkdown: string
+  firmName: string | null
 }
 
 function humanizeKind(k: string): string {
@@ -97,7 +99,7 @@ export default function PublicDraftPage({ params }: { params: Promise<{ versionI
             <span className="cp-crest" aria-hidden>
               <ScaleIcon size={18} />
             </span>
-            <div className="public-draft-firm">Pacheco Law</div>
+            <div className="public-draft-firm">{draft.firmName ?? PRODUCT_TAGLINE}</div>
           </div>
           <h1 style={{ margin: 'var(--space-1) 0 0' }}>{title}</h1>
           <div className="text-sm text-muted" style={{ marginTop: 'var(--space-1)' }}>

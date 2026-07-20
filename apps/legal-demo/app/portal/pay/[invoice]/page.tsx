@@ -16,6 +16,7 @@ import { PayForm } from './PayForm'
 import { ScaleIcon } from '@/components/icons'
 import { ManualPaymentOptions } from './ManualPaymentOptions'
 import { formatDate } from '@/lib/datetime'
+import { PRODUCT_TAGLINE } from '@/lib/brand'
 
 // The payment-intent shape returned by legal.client.invoice_payment_intent.
 type IntentReady = {
@@ -42,6 +43,7 @@ interface ClientInvoiceDetail {
   issuedDate: string | null
   dueDate: string | null
   lines: ClientInvoiceLine[]
+  firmName: string | null
 }
 
 function money(amount: string, currency: string): string {
@@ -195,7 +197,7 @@ export default function InvoicePayPage({ params }: { params: Promise<{ invoice: 
           <ScaleIcon size={20} />
         </span>
         <div>
-          <div className="li-cp-pay-firm">Pacheco Law</div>
+          <div className="li-cp-pay-firm">{data?.firmName ?? PRODUCT_TAGLINE}</div>
           <h1 className="li-cp-pay-h1">Invoice {invoiceNumber}</h1>
         </div>
       </div>

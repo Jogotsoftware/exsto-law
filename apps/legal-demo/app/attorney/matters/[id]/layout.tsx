@@ -23,6 +23,7 @@ import {
 import { launchCompose, launchScheduler } from '@/lib/contractD'
 import { BriefButton } from '@/components/BriefButton'
 import { humanizeService, type MatterDetail } from './shared'
+import { useServiceDisplayNames } from '@/lib/serviceLabel'
 
 export default function MatterLayout({
   children,
@@ -43,6 +44,10 @@ export default function MatterLayout({
     | 'matterEntityId'
     | 'workflow'
   > | null>(null)
+  // Warms the shared serviceKey → displayName cache (lib/serviceLabel) once per
+  // matter workspace mount, so every tab's humanizeService(...) call below
+  // prefers the firm's real configured name over the generic fallback.
+  useServiceDisplayNames()
 
   useEffect(() => {
     let cancelled = false
