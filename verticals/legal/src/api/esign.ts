@@ -45,7 +45,9 @@ function baseUrl(): string {
   ).replace(/\/$/, '')
 }
 
-function signingCtx(tenantId: string): ActionContext {
+// Exported for the file-envelope surfaces (esignFile.ts): the public sign
+// routes act as the signing system actor, tenant-scoped from the verified token.
+export function signingCtx(tenantId: string): ActionContext {
   return { tenantId, actorId: SIGNING_ACTOR }
 }
 
@@ -93,6 +95,8 @@ export interface SendForSignatureResult {
   }>
   dispatched: boolean
   activation?: string
+  /** 0170: recipients who weren't in contacts yet, saved as new client_contacts. */
+  savedContacts: Array<{ email: string; contactEntityId: string }>
 }
 
 export async function sendForSignature(
@@ -223,12 +227,14 @@ export async function sendForSignature(
         channel: s.channel,
       })),
       fields,
+      save_signers_as_contacts: true,
     },
   })
   const eff = (result.effects[0] ?? {}) as {
     envelopeId?: string
     requestIds?: string[]
     deliveredRequestIds?: string[]
+    createdContacts?: Array<{ email: string; contactEntityId: string }>
   }
   const envelopeId = eff.envelopeId ?? ''
   const requestIds = eff.requestIds ?? []
@@ -257,13 +263,15 @@ export async function sendForSignature(
     }),
     dispatched,
     activation,
+    savedContacts: eff.createdContacts ?? [],
   }
 }
 
 // Notify the freshly-delivered signers: portal signers get a "sign in" nudge,
 // link signers get an emailed secure /sign/<token> link. Returns the per-request
 // destination URLs so the caller (attorney) can also surface them.
-async function notifyDelivered(
+// Exported for the file-envelope send path (esignFile.ts).
+export async function notifyDelivered(
   ctx: ActionContext,
   envelopeId: string,
   requestIds: string[],
@@ -334,6 +342,15 @@ export interface EnvelopeStatus {
   documentKind: string | null
   sentAt: string | null
   bucket: EnvelopeBucket
+  // 0170 — file envelopes: the document is a stored PDF (View streams it), and a
+  // standalone envelope may be filed under a contact instead of a matter.
+  isFile: boolean
+  fileName: string | null
+  contactEntityId: string | null
+  contactName: string | null
+  /** File envelopes only, once completed: the executed signature-certificate
+   *  markdown (the executed version's body). Drafts keep using legal.draft.get. */
+  executedCertificateMarkdown: string | null
 }
 
 export async function getEnvelopeStatus(
@@ -354,15 +371,36 @@ export async function getEnvelopeStatus(
       matter_entity_id: string | null
       matter_number: string | null
       document_kind: string | null
+      object_key: string | null
+      file_name: string | null
+      contact_entity_id: string | null
+      contact_name: string | null
+      executed_body: string | null
     }>(
       `SELECT r.target_entity_id AS document_entity_id,
               coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
-              df.target_entity_id AS matter_entity_id,
-              e_matter.name AS matter_number,
+              coalesce(df.target_entity_id, du.target_entity_id) AS matter_entity_id,
+              coalesce(e_matter.name, e_matter_u.name) AS matter_number,
+              dc.target_entity_id AS contact_entity_id,
+              e_contact.name AS contact_name,
               (SELECT dv.id FROM document_version dv
                  WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
                    AND (dv.metadata->>'executed') = 'true'
-                 ORDER BY dv.version_number DESC LIMIT 1) AS executed_version_id
+                 ORDER BY dv.version_number DESC LIMIT 1) AS executed_version_id,
+              (SELECT dv.metadata->>'object_key' FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS object_key,
+              (SELECT dv.metadata->>'original_filename' FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS file_name,
+              (SELECT cb2.body FROM document_version dv2
+                 JOIN content_blob cb2 ON cb2.id = dv2.content_blob_id
+                 WHERE dv2.document_entity_id = r.target_entity_id AND dv2.tenant_id = $1
+                   AND (dv2.metadata->>'executed') = 'true'
+                   AND cb2.content_type = 'text/markdown'
+                 ORDER BY dv2.version_number DESC LIMIT 1) AS executed_body
          FROM relationship r
          JOIN relationship_kind_definition rkd
            ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
@@ -373,6 +411,18 @@ export async function getEnvelopeStatus(
                (SELECT id FROM relationship_kind_definition
                  WHERE kind_name = 'draft_of' AND tenant_id = $1 LIMIT 1)
          LEFT JOIN entity e_matter ON e_matter.id = df.target_entity_id
+         LEFT JOIN relationship du ON du.source_entity_id = r.target_entity_id
+           AND du.tenant_id = $1 AND (du.valid_to IS NULL OR du.valid_to > now())
+           AND du.relationship_kind_id =
+               (SELECT id FROM relationship_kind_definition
+                 WHERE kind_name = 'document_of' AND tenant_id = $1 LIMIT 1)
+         LEFT JOIN entity e_matter_u ON e_matter_u.id = du.target_entity_id
+         LEFT JOIN relationship dc ON dc.source_entity_id = r.target_entity_id
+           AND dc.tenant_id = $1 AND (dc.valid_to IS NULL OR dc.valid_to > now())
+           AND dc.relationship_kind_id =
+               (SELECT id FROM relationship_kind_definition
+                 WHERE kind_name = 'document_of_contact' AND tenant_id = $1 LIMIT 1)
+         LEFT JOIN entity e_contact ON e_contact.id = dc.target_entity_id
         WHERE r.tenant_id = $1 AND r.source_entity_id = $2
           AND (r.valid_to IS NULL OR r.valid_to > now())
         LIMIT 1`,
@@ -429,6 +479,13 @@ export async function getEnvelopeStatus(
       documentKind: doc.rows[0]?.document_kind ?? null,
       sentAt: meta.rows[0]?.sent_at ?? null,
       bucket: classifyEnvelope(status ?? 'pending_dispatch', signers),
+      isFile: Boolean(doc.rows[0]?.object_key),
+      fileName: doc.rows[0]?.file_name ?? null,
+      contactEntityId: doc.rows[0]?.contact_entity_id ?? null,
+      contactName: doc.rows[0]?.contact_name ?? null,
+      executedCertificateMarkdown: doc.rows[0]?.object_key
+        ? (doc.rows[0]?.executed_body ?? null)
+        : null,
       signers,
     }
   })
@@ -457,6 +514,9 @@ export interface EnvelopeListItem {
   documentKind: string | null
   matterEntityId: string | null
   matterNumber: string | null
+  // 0170: standalone file envelopes — the contact it's filed under (if any).
+  contactEntityId: string | null
+  contactName: string | null
   signers: EnvelopeListSigner[]
   signedCount: number
   signerCount: number
@@ -506,6 +566,8 @@ export async function listEnvelopes(ctx: ActionContext): Promise<EnvelopeListIte
       document_kind: string | null
       matter_entity_id: string | null
       matter_number: string | null
+      contact_entity_id: string | null
+      contact_name: string | null
       sent_at: string
       signers: EnvelopeListSigner[] | null
     }>(
@@ -515,8 +577,10 @@ export async function listEnvelopes(ctx: ActionContext): Promise<EnvelopeListIte
          ${ev('envelope_status')} AS status,
          eo.target_entity_id AS document_entity_id,
          coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
-         df.target_entity_id AS matter_entity_id,
-         e_matter.name AS matter_number,
+         coalesce(df.target_entity_id, du.target_entity_id) AS matter_entity_id,
+         coalesce(e_matter.name, e_matter_u.name) AS matter_number,
+         dc.target_entity_id AS contact_entity_id,
+         e_contact.name AS contact_name,
          to_char(e.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS sent_at,
          (SELECT coalesce(jsonb_agg(jsonb_build_object(
              'name', ${rq('signer_name')},
@@ -550,6 +614,20 @@ export async function listEnvelopes(ctx: ActionContext): Promise<EnvelopeListIte
             (SELECT id FROM relationship_kind_definition
               WHERE kind_name = 'draft_of' AND tenant_id = $1 LIMIT 1)
        LEFT JOIN entity e_matter ON e_matter.id = df.target_entity_id
+       LEFT JOIN relationship du
+         ON du.source_entity_id = eo.target_entity_id AND du.tenant_id = $1
+        AND (du.valid_to IS NULL OR du.valid_to > now())
+        AND du.relationship_kind_id =
+            (SELECT id FROM relationship_kind_definition
+              WHERE kind_name = 'document_of' AND tenant_id = $1 LIMIT 1)
+       LEFT JOIN entity e_matter_u ON e_matter_u.id = du.target_entity_id
+       LEFT JOIN relationship dc
+         ON dc.source_entity_id = eo.target_entity_id AND dc.tenant_id = $1
+        AND (dc.valid_to IS NULL OR dc.valid_to > now())
+        AND dc.relationship_kind_id =
+            (SELECT id FROM relationship_kind_definition
+              WHERE kind_name = 'document_of_contact' AND tenant_id = $1 LIMIT 1)
+       LEFT JOIN entity e_contact ON e_contact.id = dc.target_entity_id
        WHERE e.tenant_id = $1
        ORDER BY e.recorded_at DESC`,
       [ctx.tenantId],
@@ -580,6 +658,8 @@ export async function listEnvelopes(ctx: ActionContext): Promise<EnvelopeListIte
         documentKind: row.document_kind,
         matterEntityId: row.matter_entity_id,
         matterNumber: row.matter_number,
+        contactEntityId: row.contact_entity_id,
+        contactName: row.contact_name,
         signers,
         signedCount,
         signerCount: signers.length,
@@ -694,6 +774,12 @@ export interface SignableDocument {
   envelopeId: string
   documentTitle: string
   bodyMarkdown: string
+  /** 0170 — uploaded-file envelope: the document is a stored file (PDF), not
+   *  markdown. The signer surface renders it via the token-gated file route;
+   *  bodyMarkdown is empty and there are no inline fields. */
+  isFile: boolean
+  fileName: string | null
+  fileContentType: string | null
   signerName: string | null
   signerEmail: string | null
   signerTitle: string | null
@@ -715,8 +801,17 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       (await latestAttr(client, ctx.tenantId, requestId, 'signer_status')) ?? 'pending'
     const signerTitle = await latestAttr(client, ctx.tenantId, requestId, 'signer_title')
     const envelopeStatus = await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_status')
-    const docRes = await client.query<{ body: string }>(
-      `SELECT cb.body FROM relationship r
+    const docRes = await client.query<{
+      body: string
+      object_key: string | null
+      content_type: string | null
+      original_filename: string | null
+    }>(
+      `SELECT cb.body,
+              dv.metadata->>'object_key' AS object_key,
+              COALESCE(dv.metadata->>'content_type', cb.content_type) AS content_type,
+              dv.metadata->>'original_filename' AS original_filename
+         FROM relationship r
          JOIN relationship_kind_definition rkd
            ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
          JOIN document_version dv ON dv.document_entity_id = r.target_entity_id
@@ -727,6 +822,9 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
         ORDER BY dv.version_number DESC LIMIT 1`,
       [ctx.tenantId, envelopeId],
     )
+    // 0170: an uploaded-file envelope's body is a storage object key, not
+    // signable text — flag it so the surfaces render the file instead.
+    const isFile = Boolean(docRes.rows[0]?.object_key)
     const fieldsJson = await latestAttrRaw(client, ctx.tenantId, envelopeId, 'envelope_fields')
     const allFields: EsignField[] = fieldsJson ? (JSON.parse(fieldsJson) as EsignField[]) : []
     const myFields = allFields
@@ -742,7 +840,10 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       envelopeId,
       documentTitle:
         (await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_subject')) ?? 'Document',
-      bodyMarkdown: docRes.rows[0]?.body ?? '',
+      bodyMarkdown: isFile ? '' : (docRes.rows[0]?.body ?? ''),
+      isFile,
+      fileName: isFile ? (docRes.rows[0]?.original_filename ?? null) : null,
+      fileContentType: isFile ? (docRes.rows[0]?.content_type ?? null) : null,
       signerName: await latestAttr(client, ctx.tenantId, requestId, 'signer_name'),
       signerEmail: await latestAttr(client, ctx.tenantId, requestId, 'signer_email'),
       signerTitle,

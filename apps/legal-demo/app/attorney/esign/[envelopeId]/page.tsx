@@ -7,6 +7,7 @@
 import { use, useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { readDevSession } from '@/lib/auth'
 import { DocumentSheet } from '@/components/DocumentSheet'
 import { downloadAsPdf } from '@/lib/draftExport'
 import {
@@ -43,6 +44,11 @@ interface EnvelopeStatus {
   documentKind: string | null
   sentAt: string | null
   bucket: EnvelopeBucket
+  isFile: boolean
+  fileName: string | null
+  contactEntityId: string | null
+  contactName: string | null
+  executedCertificateMarkdown: string | null
 }
 
 const BUCKET_META: Record<EnvelopeBucket, { label: string; fg: string; bg: string }> = {
@@ -163,18 +169,57 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
     setBusy('download')
     setError(null)
     try {
+      const base = cleanEnvelopeSubject(env.subject) || humanizeDocKind(env.documentKind)
+      // 0170 — file envelope: the executed copy IS the signature certificate
+      // (the PDF itself is unchanged; View streams it). legal.draft.get only
+      // resolves draft-lane documents, so the certificate rides the status read.
+      if (env.isFile) {
+        if (!env.executedCertificateMarkdown) throw new Error('Certificate is unavailable.')
+        downloadAsPdf(env.executedCertificateMarkdown, `${base} — Signature Certificate`, {
+          status: 'executed',
+        })
+        return
+      }
       const r = await callAttorneyMcp<DraftGet>({
         toolName: 'legal.draft.get',
         input: { documentVersionId: env.executedDocumentVersionId },
       })
       const body = r.draft?.bodyMarkdown
       if (!body) throw new Error('Executed copy is unavailable.')
-      const base = cleanEnvelopeSubject(env.subject) || humanizeDocKind(env.documentKind)
       downloadAsPdf(body, `${base} — Executed`, { status: 'executed' })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
+    }
+  }
+
+  // 0170 — stream the uploaded PDF through the attorney file route. Fetch-as-blob
+  // (not a plain href) so the dev identity headers reach the request, mirroring
+  // the matter-documents download pattern.
+  async function onViewFile(): Promise<void> {
+    if (!env) return
+    setError(null)
+    try {
+      const headers: Record<string, string> = {}
+      if (process.env.NODE_ENV !== 'production') {
+        const dev = readDevSession()
+        if (dev) {
+          headers['x-actor-id'] = dev.actorId
+          headers['x-tenant-id'] = dev.tenantId
+        }
+      }
+      const res = await fetch(`/api/attorney/esign/${envelopeId}/file`, { headers })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body.error || `Could not load the document (${res.status}).`)
+      }
+      const blob = await res.blob()
+      const objUrl = URL.createObjectURL(blob)
+      window.open(objUrl, '_blank', 'noopener')
+      setTimeout(() => URL.revokeObjectURL(objUrl), 60_000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -211,11 +256,22 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
               {meta.label}
             </span>
             <span className="li-esign-detail-metatext">
-              {(env.matterNumber || '—') + ' · Sent ' + formatDate(env.sentAt)}
+              {(env.matterNumber || env.contactName || '—') + ' · Sent ' + formatDate(env.sentAt)}
             </span>
           </div>
         </div>
         <div className="li-esign-detail-actions">
+          {env.isFile && (
+            <button
+              type="button"
+              className="li-esign-btn"
+              onClick={onViewFile}
+              disabled={busy !== null}
+            >
+              <FileTextIcon size={15} />
+              View document
+            </button>
+          )}
           {isActive && (
             <>
               {canResend && (
@@ -247,7 +303,11 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
               disabled={busy !== null}
             >
               <DownloadIcon size={15} />
-              {busy === 'download' ? 'Preparing…' : 'Download executed copy'}
+              {busy === 'download'
+                ? 'Preparing…'
+                : env.isFile
+                  ? 'Download certificate'
+                  : 'Download executed copy'}
             </button>
           )}
         </div>

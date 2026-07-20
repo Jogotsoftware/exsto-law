@@ -36,6 +36,10 @@ export interface SavedSignature {
 export interface SignableDoc {
   documentTitle: string
   bodyMarkdown: string
+  // 0170 — uploaded-file envelope (PDF): the caller passes fileUrl and the
+  // surface renders the file inline instead of markdown.
+  isFile?: boolean
+  fileName?: string | null
   signerName: string | null
   signerEmail: string | null
   signerTitle: string | null
@@ -152,11 +156,14 @@ function DrawPad({ onCommit }: { onCommit: (data: string | null) => void }) {
 
 export function SignDocument({
   doc,
+  fileUrl,
   savedSignature,
   onSign,
   onDecline,
 }: {
   doc: SignableDoc
+  /** 0170: token/session-gated streaming URL for a file (PDF) envelope. */
+  fileUrl?: string | null
   savedSignature?: SavedSignature | null
   onSign: (a: {
     signatureName: string
@@ -309,10 +316,23 @@ export function SignDocument({
         {doc.signerTitle ? ` (${doc.signerTitle})` : ''}
       </div>
 
-      <div
-        className="doc-rendered"
-        dangerouslySetInnerHTML={{ __html: renderDocumentHtml(doc.bodyMarkdown) }}
-      />
+      {doc.isFile && fileUrl ? (
+        <div className="li-cp-sign-file">
+          <iframe
+            src={fileUrl}
+            title={doc.fileName ?? doc.documentTitle}
+            className="li-cp-sign-pdfframe"
+          />
+          <a href={fileUrl} target="_blank" rel="noreferrer" className="li-cp-linkbtn">
+            Open {doc.fileName ?? 'document'} in a new tab
+          </a>
+        </div>
+      ) : (
+        <div
+          className="doc-rendered"
+          dangerouslySetInnerHTML={{ __html: renderDocumentHtml(doc.bodyMarkdown) }}
+        />
+      )}
 
       <div className="li-cp-adopt">
         <h3 className="li-cp-adopt-h">Adopt your signature</h3>

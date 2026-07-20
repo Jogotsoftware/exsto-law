@@ -35,7 +35,9 @@ import {
   resolveExecutedMarkdown,
   type EsignField,
 } from '../esign/fields.js'
+import { buildFileCertificateMarkdown } from '../esign/fileCertificate.js'
 import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
+import { findContactByEmail } from './intake.js'
 
 interface SendSigner {
   email: string
@@ -59,11 +61,63 @@ interface EsignSendPayload {
   signers: SendSigner[]
   /** The parsed field plan for the document (anchor tags). */
   fields?: EsignField[]
+  /** 0170: create a client_contact for any signer email not already in contacts
+   *  (same dedupe-by-email rule as intake.submit) — "people you send to become
+   *  contacts", DocuSign-style. */
+  save_signers_as_contacts?: boolean
 }
 
 registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
   const p = payload as unknown as EsignSendPayload
   const tenantId = ctx.tenantId
+
+  // 0170: every NEW recipient becomes a contact (existing emails dedupe via the
+  // same case-insensitive rule intake.submit uses). Runs first, inside this
+  // action's transaction, so a failed send never leaves an envelope without its
+  // contacts or vice versa mid-request.
+  const createdContacts: Array<{ email: string; contactEntityId: string }> = []
+  if (p.save_signers_as_contacts) {
+    const contactKindId = await lookupKindId(
+      client,
+      'entity_kind_definition',
+      tenantId,
+      'client_contact',
+    )
+    const seen = new Map<string, string>()
+    for (const s of p.signers) {
+      const email = s.email?.trim()
+      if (!email || seen.has(email.toLowerCase())) continue
+      const existing = await findContactByEmail(client, tenantId, email)
+      if (existing) {
+        seen.set(email.toLowerCase(), existing)
+        continue
+      }
+      const contactEntityId = await insertEntity(
+        client,
+        tenantId,
+        actionId,
+        contactKindId,
+        s.name?.trim() || email,
+      )
+      const attrs: Array<{ kind: string; value: unknown }> = [{ kind: 'email', value: email }]
+      if (s.name?.trim()) attrs.push({ kind: 'full_name', value: s.name.trim() })
+      for (const a of attrs) {
+        const akId = await lookupKindId(client, 'attribute_kind_definition', tenantId, a.kind)
+        await insertAttribute(client, {
+          tenantId,
+          actionId,
+          entityId: contactEntityId,
+          attributeKindId: akId,
+          value: a.value,
+          confidence: 1.0,
+          sourceType: 'human',
+          sourceRef: ctx.actorId,
+        })
+      }
+      seen.set(email.toLowerCase(), contactEntityId)
+      createdContacts.push({ email, contactEntityId })
+    }
+  }
 
   const envelopeKindId = await lookupKindId(
     client,
@@ -222,7 +276,13 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     })
   }
 
-  return { envelopeId, requestIds, deliveredRequestIds: deliveredAtSend, status: envelopeStatus }
+  return {
+    envelopeId,
+    requestIds,
+    deliveredRequestIds: deliveredAtSend,
+    status: envelopeStatus,
+    createdContacts,
+  }
 })
 
 interface EsignOpenPayload {
@@ -840,14 +900,38 @@ async function deliverNextGroup(
   return { delivered, completed: false }
 }
 
-// The latest NON-executed version body — the original we are executing.
-async function loadOriginalBody(
+// The latest NON-executed version — the original we are executing. For a
+// markdown draft, `body` IS the content; for an uploaded file (0170), `body` is
+// the storage object key and the file's identity (MIME, byte hash, size) rides
+// the version metadata / content_blob columns.
+interface OriginalVersion {
+  body: string
+  objectKey: string | null
+  contentType: string | null
+  filename: string | null
+  sha256Hex: string | null
+  sizeBytes: number | null
+}
+
+async function loadOriginalVersion(
   client: DbClient,
   tenantId: string,
   documentEntityId: string,
-): Promise<string> {
-  const res = await client.query<{ body: string }>(
-    `SELECT cb.body
+): Promise<OriginalVersion> {
+  const res = await client.query<{
+    body: string
+    object_key: string | null
+    content_type: string | null
+    original_filename: string | null
+    sha256_hex: string | null
+    size_bytes: string | null
+  }>(
+    `SELECT cb.body,
+            dv.metadata->>'object_key' AS object_key,
+            COALESCE(dv.metadata->>'content_type', cb.content_type) AS content_type,
+            dv.metadata->>'original_filename' AS original_filename,
+            encode(cb.sha256, 'hex') AS sha256_hex,
+            dv.metadata->>'size_bytes' AS size_bytes
        FROM document_version dv
        JOIN content_blob cb ON cb.id = dv.content_blob_id
       WHERE dv.tenant_id = $1 AND dv.document_entity_id = $2
@@ -856,7 +940,15 @@ async function loadOriginalBody(
       LIMIT 1`,
     [tenantId, documentEntityId],
   )
-  return res.rows[0]?.body ?? ''
+  const row = res.rows[0]
+  return {
+    body: row?.body ?? '',
+    objectKey: row?.object_key ?? null,
+    contentType: row?.content_type ?? null,
+    filename: row?.original_filename ?? null,
+    sha256Hex: row?.sha256_hex ?? null,
+    sizeBytes: row?.size_bytes ? Number(row.size_bytes) : null,
+  }
 }
 
 interface FullSigner {
@@ -961,10 +1053,60 @@ async function writeExecutedVersion(
   envelopeId: string,
   documentEntityId: string,
 ): Promise<{ versionId: string; versionNumber: number }> {
-  const original = await loadOriginalBody(client, tenantId, documentEntityId)
+  const original = await loadOriginalVersion(client, tenantId, documentEntityId)
   const signers = await loadEnvelopeSigners(client, tenantId, envelopeId)
+
+  // 0170 — uploaded-file envelope: the original's body is a storage object key,
+  // not signable text, and there is no PDF field-stamping path (the markdown tag
+  // model doesn't apply). The executed artifact is the SIGNATURE CERTIFICATE
+  // itself: a markdown version binding the signers' adoptions to the exact file
+  // bytes via the SHA-256 recorded at upload. The file is untouched (immutable
+  // in Storage); tamper-evidence is the hash, same doctrine as the markdown path.
+  if (original.objectKey) {
+    const cert = buildFileCertificateMarkdown({
+      envelopeId,
+      filename: original.filename,
+      contentType: original.contentType,
+      sizeBytes: original.sizeBytes,
+      sha256Hex: original.sha256Hex,
+      signers,
+    })
+    const contentBlobId = await insertContentBlob(client, {
+      tenantId,
+      actionId,
+      contentType: 'text/markdown',
+      body: cert,
+    })
+    const versionNumber = (await maxVersionNumber(client, tenantId, documentEntityId)) + 1
+    const versionId = await insertDocumentVersion(client, {
+      tenantId,
+      actionId,
+      documentEntityId,
+      contentBlobId,
+      versionNumber,
+      status: 'approved',
+      reasoningTraceId: null,
+      metadata: {
+        executed: true,
+        executed_from_envelope_id: envelopeId,
+        original_sha256: original.sha256Hex,
+        original_object_key: original.objectKey,
+        original_content_type: original.contentType,
+        original_filename: original.filename,
+        source: 'esign-native',
+        signers: signers.map((s) => ({
+          name: s.name,
+          email: s.email,
+          title: s.title,
+          signed_at: s.signed_at,
+        })),
+      },
+    })
+    return { versionId, versionNumber }
+  }
+
   const fields = await loadEnvelopeFields(client, tenantId, envelopeId)
-  const originalSha = createHash('sha256').update(original, 'utf8').digest('hex')
+  const originalSha = createHash('sha256').update(original.body, 'utf8').digest('hex')
 
   // Resolve each field tag (in the body) to its signer's value.
   const signerByKey = new Map<string, FullSigner>()
@@ -975,7 +1117,9 @@ async function writeExecutedVersion(
   const inlinedImageSigners = new Set<string>()
   for (const f of fields)
     valuesById[f.id] = fieldValue(f, signerByKey.get(f.signerKey), inlinedImageSigners)
-  const filledBody = fields.length ? resolveExecutedMarkdown(original, valuesById) : original
+  const filledBody = fields.length
+    ? resolveExecutedMarkdown(original.body, valuesById)
+    : original.body
 
   const cert = [
     '',

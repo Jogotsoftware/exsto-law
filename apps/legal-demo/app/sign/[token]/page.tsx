@@ -91,6 +91,7 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
   return (
     <SignDocument
       doc={doc}
+      fileUrl={doc.isFile ? `/api/sign/file?token=${encodeURIComponent(token)}` : null}
       savedSignature={saved}
       onSign={async ({ signatureName, signatureData, fieldValues, consent }) => {
         const r = await fetch('/api/sign/submit', {

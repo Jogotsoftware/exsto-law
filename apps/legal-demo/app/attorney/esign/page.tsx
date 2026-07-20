@@ -32,6 +32,8 @@ interface EnvelopeListItem {
   documentKind: string | null
   matterEntityId: string | null
   matterNumber: string | null
+  contactEntityId: string | null
+  contactName: string | null
   signers: EnvelopeSigner[]
   signedCount: number
   signerCount: number
@@ -52,6 +54,8 @@ const BUCKET_META: Record<EnvelopeBucket, { label: string; fg: string; bg: strin
 
 export function humanizeDocKind(kind: string | null): string {
   if (!kind) return 'Document'
+  // 0170: uploaded-PDF envelopes carry the esign_upload document kind.
+  if (kind === 'esign_upload') return 'Uploaded PDF'
   return kind.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
@@ -156,7 +160,7 @@ export default function EsignPage() {
         <button
           type="button"
           className="li-esign-newbtn"
-          onClick={() => router.push('/attorney/review')}
+          onClick={() => router.push('/attorney/esign/new')}
         >
           <PlusIcon size={16} />
           New envelope
@@ -204,7 +208,7 @@ export default function EsignPage() {
       {view && view.length === 0 && (
         <div className="li-esign-empty">
           {envelopes && envelopes.length === 0
-            ? 'No envelopes yet. Send a document for signature from Review.'
+            ? 'No envelopes yet. Upload a PDF with “New envelope”, or send a drafted document from Review.'
             : 'No envelopes in this filter.'}
         </div>
       )}
@@ -236,7 +240,9 @@ export default function EsignPage() {
                         {cleanEnvelopeSubject(e.subject) || humanizeDocKind(e.documentKind)}
                       </span>
                       <span className="li-esign-doc-sub">
-                        {(e.matterNumber || '—') + ' · ' + humanizeDocKind(e.documentKind)}
+                        {(e.matterNumber || e.contactName || '—') +
+                          ' · ' +
+                          humanizeDocKind(e.documentKind)}
                       </span>
                     </span>
                   </span>

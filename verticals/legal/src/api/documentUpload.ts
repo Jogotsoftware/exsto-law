@@ -7,7 +7,10 @@
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 
 export interface RecordUploadInput {
-  matterEntityId: string
+  // Optional since 0170: the e-sign "any PDF" path records standalone documents
+  // (no matter), optionally filed under an existing contact instead.
+  matterEntityId?: string | null
+  attachContactEntityId?: string | null
   objectKey: string
   originalFilename: string
   contentType: string
@@ -29,7 +32,8 @@ export async function recordUploadedDocument(
     actionKindName: 'document.upload',
     intentKind: 'enforcement',
     payload: {
-      matter_entity_id: input.matterEntityId,
+      matter_entity_id: input.matterEntityId ?? null,
+      attach_contact_entity_id: input.attachContactEntityId ?? null,
       object_key: input.objectKey,
       original_filename: input.originalFilename,
       content_type: input.contentType,
