@@ -24,6 +24,7 @@ import { registerActionHandler } from '@exsto/substrate'
 import { getLatestAttributeValue, insertEvent } from './common.js'
 import { getWorkflowInstanceForMatter, resolveCurrentServiceVersion } from '../lifecycle/binding.js'
 import { createWorkflowInstance } from '../lifecycle/instance.js'
+import { settleStage } from '../lifecycle/settle.js'
 import {
   validateLifecycle,
   validateLinearLifecycle,
@@ -107,10 +108,20 @@ registerActionHandler('legal.matter.set_workflow', async (ctx, client, payload, 
       sourceType: 'human',
       sourceRef: ctx.actorId,
     })
+    // WF-FIX-1 — a repaired matter must not recreate the parked-on-non-blocking bug:
+    // settle the start stage (pass-through + producing auto-run for the resting stage).
+    const settledState = await settleStage(
+      client,
+      ctx,
+      p.matter_entity_id,
+      startState,
+      bound.graph,
+      actionId,
+    )
     return {
       workflowInstanceId: instanceId,
       started: true,
-      startState,
+      startState: settledState,
       stageCount: bound.graph.length,
     }
   }

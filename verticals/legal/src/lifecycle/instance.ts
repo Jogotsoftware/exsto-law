@@ -67,6 +67,10 @@ export async function advanceWorkflowInstance(
     via?: string
     status?: string
     actionId: string
+    // WF-FIX-1: a settle hop through a non-blocking stage. Recorded in the history
+    // entry so a pass-through is distinguishable from a gated advance forever after
+    // (the 0093 trigger only enforces prefix-append; extra fields are safe).
+    passThrough?: boolean
   },
 ): Promise<void> {
   const entry = {
@@ -76,6 +80,7 @@ export async function advanceWorkflowInstance(
     via: args.via ?? null,
     action_id: args.actionId,
     at: new Date().toISOString(),
+    ...(args.passThrough ? { pass_through: true } : {}),
   }
   const r = await client.query(
     `UPDATE workflow_instance

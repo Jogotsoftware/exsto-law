@@ -21,7 +21,7 @@ import {
 import { workflowEngineEnabled } from './flags.js'
 import { advanceWorkflowInstance } from './instance.js'
 import { edgesFrom, stageByKey } from './resolve.js'
-import { scheduleProducingAutoRun } from './autoRun.js'
+import { settleStage } from './settle.js'
 import type { Lifecycle, LifecycleEdge } from './types.js'
 
 interface Ctx {
@@ -115,10 +115,10 @@ export async function advanceMatter(
       actionId,
     })
     chain.push({ from: current, to: edge.to, gate: 'automatic', via: edge.via })
-    // ADR 0046 — an automatic hop may land on an invoke_capability stage; run it
-    // post-commit (scheduleProducingAutoRun is a no-op if the stage isn't one).
-    scheduleProducingAutoRun(ctx, matterEntityId, edge.to, graph)
-    current = edge.to
+    // WF-FIX-1: settle the landing — pass through any non-blocking stage(s), then
+    // schedule the producing auto-run for the stage the matter rests on (settle is
+    // a bare schedule when the landing stage is blocking, the pre-settle behavior).
+    current = await settleStage(client, ctx, matterEntityId, edge.to, graph, actionId)
   }
   return chain
 }
@@ -140,7 +140,20 @@ export async function signalEvent(
   const { instance, graph } = loaded
   if (graph.length === 0) return
 
-  const edge = edgesFrom(graph, instance.currentState).find(
+  // WF-FIX-1 retro-unstick: a matter parked on a non-blocking stage (parked before
+  // pass-through existed) settles forward on the NEXT event that touches it — BEFORE
+  // edge matching, so the event is matched against the stage the matter should
+  // actually be resting on. For a healthy (blocking) stage this is a no-op lookup.
+  const currentState = await settleStage(
+    client,
+    ctx,
+    matterEntityId,
+    instance.currentState,
+    graph,
+    actionId,
+  )
+
+  const edge = edgesFrom(graph, currentState).find(
     (e) => e.on === eventKind && (e.gate === 'system' || e.gate === 'automatic'),
   )
   if (!edge) return
@@ -148,16 +161,16 @@ export async function signalEvent(
   const toStage = stageByKey(graph, edge.to)
   await advanceWorkflowInstance(client, ctx, {
     instanceId: instance.id,
-    fromState: instance.currentState,
+    fromState: currentState,
     toState: edge.to,
     gate: edge.gate,
     via: edge.via,
     status: toStage?.terminal ? 'completed' : undefined,
     actionId,
   })
-  // ADR 0046 — a system/automatic event (e.g. invoice.paid) may land on an
-  // invoke_capability stage; run it post-commit before chaining automatic edges.
-  scheduleProducingAutoRun(ctx, matterEntityId, edge.to, graph)
+  // WF-FIX-1: settle the landing (pass-through + producing auto-run for the resting
+  // stage), then chain any automatic edges from wherever the matter settled.
+  await settleStage(client, ctx, matterEntityId, edge.to, graph, actionId)
   await advanceMatter(client, ctx, matterEntityId, actionId)
 }
 

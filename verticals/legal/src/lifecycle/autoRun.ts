@@ -109,6 +109,15 @@ const PRODUCING_RUNNERS: Partial<Record<StepActionKind, ProducingRunner>> = {
   },
 }
 
+// Does this step-action kind have a producing runner at all? The settle loop
+// (settle.ts) uses this to STOP pass-through at a producing stage — entering one
+// means "run it" (or, for a manual-trigger producing stage, "wait at it"), never
+// "walk past it". Deliberately ignores shouldAutoRun: even a producing stage whose
+// entry does not auto-fire is a real step, not an informational one.
+export function hasProducingRunner(kind: StepActionKind | undefined): boolean {
+  return !!kind && kind in PRODUCING_RUNNERS
+}
+
 // Schedule the post-commit auto-run for the stage a matter just entered, if that stage
 // is a producing kind whose entry should auto-run. A pure no-op for every other stage,
 // so an advance handler can call it unconditionally after landing the matter.
