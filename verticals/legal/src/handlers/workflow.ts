@@ -28,6 +28,22 @@ import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
 import { settleStage } from '../lifecycle/settle.js'
 import type { GateKind } from '../lifecycle/types.js'
 
+// Thrown by GUARD 2 below: a bare Continue can't finish a step whose edge names
+// its own completing action (e.g. a review step's draft.approve). This is a
+// well-formed request rejected by workflow state, not a server fault — carries
+// `status` so an HTTP adapter (apps/legal-demo's MCP route) can return 409
+// instead of 500, and a client can render it as in-modal guidance rather than a
+// raw request-failure wall. The message text is unchanged from before this type
+// existed — callers that string-match it keep working.
+export class WorkflowAdvanceGuardError extends Error {
+  status: number
+  constructor(message: string) {
+    super(message)
+    this.name = 'WorkflowAdvanceGuardError'
+    this.status = 409
+  }
+}
+
 interface MatterAdvancePayload {
   matter_entity_id: string
   to_state: string
@@ -104,7 +120,7 @@ registerActionHandler('legal.matter.advance', async (ctx, client, payload, actio
   if (matchedEdge.via && matchedEdge.via !== 'legal.matter.advance') {
     const sanctionedClientSkip = p.skip === true && matchedEdge.gate === 'client'
     if (!sanctionedClientSkip) {
-      throw new Error(
+      throw new WorkflowAdvanceGuardError(
         `This step isn't finished by clicking Continue — it has its own action to complete it ` +
           `(for a review step, open it and approve/send the document). ` +
           `Finish that step to move the matter forward.`,
