@@ -42,7 +42,7 @@ import { runDraftGeneration } from './generateDraft.js'
 
 // The AI agent actor — same id every AI write in the vertical uses (and the actor the
 // generate_document producer already attributes its draft to). #303's actor.
-const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
+import { resolveTenantAgentCtx } from './tenantActors.js'
 
 export interface GenerateDocumentRuntimeResult {
   ran: boolean
@@ -141,7 +141,7 @@ async function recordObservation(
       primary_entity_id: matterEntityId,
       data: { kind: tag, ...data },
       source_type: 'agent',
-      source_ref: CLAUDE_AGENT_ACTOR_ID,
+      source_ref: agentCtx.actorId,
     },
   })
 }
@@ -157,7 +157,7 @@ export async function enqueueDraftAutoRunJob(
   matterEntityId: string,
   stage: LifecycleStage,
 ): Promise<string | null> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const agentCtx = await resolveTenantAgentCtx(ctx)
   const documentKind = await resolveStageDocumentKind(ctx, matterEntityId, stage)
   if (!documentKind) {
     await recordObservation(agentCtx, matterEntityId, 'generate_document_no_kind', {
@@ -207,7 +207,7 @@ export async function generateDocumentForMatter(
   ctx: ActionContext,
   matterEntityId: string,
 ): Promise<GenerateDocumentRuntimeResult> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const agentCtx = await resolveTenantAgentCtx(ctx)
 
   const info = await resolveCurrentStage(ctx, matterEntityId)
   if (!info || !info.stage) {

@@ -25,7 +25,7 @@ import {
 } from './briefEvidence.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent).
-const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
+import { resolveTenantAgentCtx } from './tenantActors.js'
 
 export type GenerationMode = 'ai_draft' | 'template_merge'
 
@@ -175,7 +175,7 @@ export async function runDraftGeneration(
   ctx: ActionContext,
   input: GenerateDraftInput,
 ): Promise<ActionResult | null> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const agentCtx = await resolveTenantAgentCtx(ctx)
   const matter = await getMatter(agentCtx, input.matterEntityId)
 
   // Drafting fires at QUESTIONNAIRE SUBMIT (beta sprint Obj 6) — the questionnaire
@@ -580,7 +580,7 @@ async function persistReasoningTrace(ctx: ActionContext, args: PersistTraceArgs)
       [
         id,
         ctx.tenantId,
-        CLAUDE_AGENT_ACTOR_ID,
+        ctx.actorId,
         args.prompt,
         JSON.stringify(args.evidence),
         JSON.stringify(args.alternatives),
@@ -687,7 +687,7 @@ export async function resolveStaleDraftJobs(
   ctx: ActionContext,
   staleMinutes = 30,
 ): Promise<{ matterEntityId: string; jobId: string; documentKind: string }[]> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const agentCtx = await resolveTenantAgentCtx(ctx)
   const stale = await withActionContext(agentCtx, async (client) => {
     // A "stuck" draft job is one CLAIMED (status='running', locked_at set) whose
     // worker died before reaching a terminal state. Pending jobs are not stuck —

@@ -16,7 +16,15 @@ vi.mock('@exsto/worker-runtime', async (importOriginal) => {
 })
 vi.mock('@exsto/substrate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@exsto/substrate')>()
-  return { ...actual, submitAction: vi.fn(async () => ({ actionId: 'a', effects: [] })) }
+  return {
+    ...actual,
+    submitAction: vi.fn(async () => ({ actionId: 'a', effects: [] })),
+    // WF-FIX-1 (WP5): the enqueue path now resolves the tenant's own agent actor
+    // first (tenantActors.resolveTenantAgentCtx) — answer that lookup without a DB.
+    withActionContext: vi.fn(async (_ctx: unknown, fn: (client: unknown) => Promise<unknown>) =>
+      fn({ query: async () => ({ rows: [{ id: 'tenant-agent-actor' }], rowCount: 1 }) }),
+    ),
+  }
 })
 import { enqueueJob } from '@exsto/worker-runtime'
 import { submitAction } from '@exsto/substrate'

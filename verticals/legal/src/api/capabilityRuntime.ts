@@ -34,7 +34,10 @@ import type { GenerationMode } from './generateDraft.js'
 
 // The AI agent actor seeded by the core foundation — the runtime records its audit
 // and any AI writes as this actor (same id every AI write in the vertical uses).
-const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
+import { resolveTenantAgentCtx, resolveTenantSystemActorId } from './tenantActors.js'
+// Re-export: existing consumers (briefEngine, clientBriefEngine, transcriptExtraction)
+// import the resolver from this module.
+export { resolveTenantSystemActorId, resolveTenantAgentCtx } from './tenantActors.js'
 
 // A capability was invoked but the platform has no executable implementation for it
 // (it is contracted but not yet built, or not step-invocable). Surfaced to the
@@ -128,7 +131,7 @@ export async function enqueueCapabilityRunJob(
   stageKey: string,
 ): Promise<string | null> {
   const { enqueueJob } = await import('@exsto/worker-runtime')
-  const agentCtx: ActionContext = { tenantId: base.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const agentCtx = await resolveTenantAgentCtx(base)
   let jobId: string
   try {
     jobId = await enqueueJob({
@@ -162,7 +165,7 @@ export async function invokeCapabilityForMatter(
   matterEntityId: string,
   deps?: CapabilityRuntimeDeps,
 ): Promise<InvokeCapabilityResult> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const agentCtx = await resolveTenantAgentCtx(ctx)
 
   // 1. Resolve the matter's current stage + its capability config (read-only).
   const stageInfo = await withActionContext(ctx, async (client) => {
@@ -295,7 +298,7 @@ export async function invokeCapabilityForMatter(
         outputs: result.outputs,
       },
       source_type: 'agent',
-      source_ref: CLAUDE_AGENT_ACTOR_ID,
+      source_ref: agentCtx.actorId,
     },
   })
 
@@ -856,7 +859,7 @@ export async function runAdHocCapability(
         outputs: result.outputs,
       },
       source_type: 'agent',
-      source_ref: CLAUDE_AGENT_ACTOR_ID,
+      source_ref: agentCtx.actorId,
     },
   })
 
@@ -901,7 +904,7 @@ async function recordObservation(
       primary_entity_id: matterEntityId,
       data: { kind: tag, ...data },
       source_type: 'agent',
-      source_ref: CLAUDE_AGENT_ACTOR_ID,
+      source_ref: agentCtx.actorId,
     },
   })
 }
@@ -954,21 +957,4 @@ export async function advanceAutomaticFromStage(
     },
   })
   return true
-}
-
-// The tenant's own system/agent actor id (an `automatic`/`system` advance must come from
-// a non-human actor). Prefers the tenant's `agent` actor (Claude), then any `system`
-// actor; falls back to the tenant-zero agent const if the tenant seeds neither (so
-// tenant-zero behavior is unchanged even if the lookup is ever empty).
-export async function resolveTenantSystemActorId(ctx: ActionContext): Promise<string> {
-  return withActionContext(ctx, async (client) => {
-    const r = await client.query<{ id: string }>(
-      `SELECT id FROM actor
-        WHERE tenant_id = $1 AND actor_type IN ('agent', 'system')
-        ORDER BY CASE actor_type WHEN 'agent' THEN 0 ELSE 1 END, id
-        LIMIT 1`,
-      [ctx.tenantId],
-    )
-    return r.rows[0]?.id ?? CLAUDE_AGENT_ACTOR_ID
-  })
 }
