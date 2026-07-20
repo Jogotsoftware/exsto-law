@@ -61,6 +61,11 @@ interface ReasoningTrace {
   conclusion?: string
   confidence?: number
   ambiguities?: Ambiguity[]
+  // Generation integrity — every raw {{token}} findUnresolvedTokens (tokenClasses.ts)
+  // still found in the produced body, recorded regardless of what `ambiguities`
+  // above says (buildDraftTraceJson, generateDraft.ts). Absent on versions
+  // generated before this fix, or on template_merge versions (which have no trace).
+  unresolved_tokens?: string[]
   [k: string]: unknown
 }
 interface EvidenceItem {
@@ -350,6 +355,7 @@ export function DocumentReviewer({
   const evidence = useMemo(() => draft?.reasoningTrace?.evidence ?? [], [draft])
   const alternatives = useMemo(() => draft?.reasoningTrace?.alternatives_considered ?? [], [draft])
   const ambiguities = useMemo(() => draft?.reasoningTrace?.ambiguities ?? [], [draft])
+  const unresolvedTokens = useMemo(() => draft?.reasoningTrace?.unresolved_tokens ?? [], [draft])
   const memoRedlineOps = useMemo(
     () =>
       draft?.aiReview?.sourceText && draft.aiReview.redlineText
@@ -427,6 +433,14 @@ export function DocumentReviewer({
           <span className={statusChipClass(draft.status)}>
             {KIND_LABEL[draft.status] ?? humanizeKind(draft.status)}
           </span>
+          {unresolvedTokens.length > 0 && (
+            <span
+              className="li-rev-chip li-rev-chip--warn"
+              title={`Raw template fields left in the document text: ${unresolvedTokens.join(', ')}`}
+            >
+              {unresolvedTokens.length} unresolved field{unresolvedTokens.length === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
       </div>
       <div className="li-rev-subline">
