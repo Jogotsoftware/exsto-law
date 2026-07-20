@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0173: tenant vocabulary sync (every tenant has all it needs)
+-- Vertical migration 0174 (renumbered from 0173; 0173 = esign_any_document on main): tenant vocabulary sync (every tenant has all it needs)
 --
 -- THE DRIFT THIS CLOSES: feature migrations seed new kinds into TENANT ZERO by
 -- convention (0169's header calls the cross-tenant path "the normal bootstrap/
