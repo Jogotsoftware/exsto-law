@@ -5,6 +5,7 @@ import './workers/index.js' // registers vertical worker handlers
 import { startWorker } from '@exsto/worker-runtime'
 import {
   ensureMeetingReconcileScheduled,
+  ensureStaleCapabilityReconcileScheduled,
   ensureStaleDraftReconcileScheduled,
 } from './workers/index.js'
 
@@ -20,6 +21,11 @@ await ensureMeetingReconcileScheduled(TENANT_ZERO).catch((err) => {
 // instance's crash/deploy (idempotent). Best-effort: never blocks worker startup.
 await ensureStaleDraftReconcileScheduled(TENANT_ZERO).catch((err) => {
   console.error('[worker] stale-draft-reconcile bootstrap failed (worker continues):', err)
+})
+
+// WF-FIX-1 (WP6) — same one-shot sweep for capability jobs orphaned 'running'.
+await ensureStaleCapabilityReconcileScheduled(TENANT_ZERO).catch((err) => {
+  console.error('[worker] stale-capability-reconcile bootstrap failed (worker continues):', err)
 })
 
 startWorker().catch((error) => {
