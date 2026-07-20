@@ -21,6 +21,7 @@ import { launchCompose } from '@/lib/contractD'
 import { MailIcon } from '@/components/icons'
 import { CRM_STATUS_META, crmInitials, type CrmBucket } from '@/lib/crmStatus'
 import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
+import { useConfirm } from '@/components/ConfirmModal'
 
 interface ContactMatter {
   matterEntityId: string
@@ -71,6 +72,14 @@ export default function ContactDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [inviting, setInviting] = useState(false)
   const [inviteMsg, setInviteMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [removing, setRemoving] = useState(false)
+  const [removeMsg, setRemoveMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  // A2.3 — there is no restore path yet (see the confirm copy below), so once
+  // this session has removed access, further Invite/Remove clicks are
+  // pointless — track it locally rather than re-deriving from getContact
+  // (which doesn't currently expose live entity status).
+  const [portalRemoved, setPortalRemoved] = useState(false)
+  const { confirm, confirmElement } = useConfirm()
   const serviceNames = useServiceDisplayNames()
 
   const load = useCallback(async () => {
@@ -110,6 +119,46 @@ export default function ContactDetailPage() {
       setInviting(false)
     }
   }, [id])
+
+  const removeAccess = useCallback(async () => {
+    const ok = await confirm({
+      title: 'Remove portal access?',
+      body: (
+        <>
+          <p style={{ margin: 0 }}>
+            {contact?.fullName || contact?.email || 'This client'} will be signed out and can no
+            longer sign in to the portal.
+          </p>
+          <p style={{ margin: '0.6rem 0 0', fontWeight: 600 }}>
+            This cannot be undone from here — re-inviting sends a new email, but sign-in will stay
+            refused. Use this only when the client relationship is actually ending.
+          </p>
+        </>
+      ),
+      confirmLabel: 'Remove access',
+      danger: true,
+    })
+    if (!ok) return
+
+    setRemoving(true)
+    setRemoveMsg(null)
+    try {
+      const res = await fetch(
+        `/api/attorney/contacts/${encodeURIComponent(id)}/revoke-portal-access`,
+        {
+          method: 'POST',
+        },
+      )
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null
+      if (!res.ok || !data?.ok) throw new Error(data?.error ?? 'Could not remove portal access.')
+      setRemoveMsg({ ok: true, text: 'Portal access removed.' })
+      setPortalRemoved(true)
+    } catch (e) {
+      setRemoveMsg({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setRemoving(false)
+    }
+  }, [id, contact, confirm])
 
   if (error && !contact) {
     return (
@@ -206,20 +255,36 @@ export default function ContactDetailPage() {
           Email this client a secure link to set a password and sign in to view their matters,
           documents, and invoices, and message you. Re-sending resets their password.
         </p>
-        <button
-          type="button"
-          className="li-crm-btn-primary"
-          disabled={inviting || !contact.email}
-          onClick={invite}
-        >
-          {inviting ? 'Sending…' : 'Invite to portal'}
-        </button>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="li-crm-btn-primary"
+            disabled={inviting || !contact.email || portalRemoved}
+            onClick={invite}
+          >
+            {inviting ? 'Sending…' : 'Invite to portal'}
+          </button>
+          <button
+            type="button"
+            className="li-crm-btn"
+            disabled={removing || portalRemoved}
+            onClick={removeAccess}
+          >
+            {removing ? 'Removing…' : portalRemoved ? 'Access removed' : 'Remove portal access'}
+          </button>
+        </div>
         {!contact.email && <span className="li-crm-portal-hint">Add an email first.</span>}
         {inviteMsg && (
           <div className={`alert ${inviteMsg.ok ? 'alert-success' : 'alert-error'}`}>
             {inviteMsg.text}
           </div>
         )}
+        {removeMsg && (
+          <div className={`alert ${removeMsg.ok ? 'alert-success' : 'alert-error'}`}>
+            {removeMsg.text}
+          </div>
+        )}
+        {confirmElement}
       </div>
 
       <div className="li-crm-panel">

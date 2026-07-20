@@ -3,8 +3,10 @@ import {
   listContacts,
   getContact,
   inviteClientToPortal,
+  revokeClientPortalAccess,
   type ContactSummary,
   type ContactDetail,
+  type RevokePortalAccessResult,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -51,6 +53,28 @@ const inviteTool: Tool<InviteInput, { ok: boolean; email?: string; error?: strin
   },
 }
 
+interface RevokeInput {
+  contactEntityId: string
+}
+
+// A2.3 — the inverse of invite_to_portal: revoke a client's portal access.
+// Attorney-only WRITE; see api/portalAccess.ts for the two-write mechanics
+// (deactivate the mapped actor + archive the contact) and why both matter.
+const revokeTool: Tool<RevokeInput, RevokePortalAccessResult> = {
+  name: 'legal.contact.revoke_portal_access',
+  description:
+    'Remove a client contact’s portal access: deactivates their portal login and archives ' +
+    'the contact so a future sign-in attempt cannot silently re-provision a new account. ' +
+    'There is currently no restore path — re-inviting sends a new set-password email but ' +
+    'the sign-in will still be refused while the contact is archived. Use only when the ' +
+    'client relationship is actually ending.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => {
+    return revokeClientPortalAccess(ctx, input.contactEntityId)
+  },
+}
+
 registerTool(listTool)
 registerTool(getTool)
 registerTool(inviteTool)
+registerTool(revokeTool)

@@ -22146,17 +22146,46 @@ details.li-brief-research summary:hover {
   align-items: center;
   gap: 16px;
 }
+/* Dark-adapted lang toggle for the navy portal header (A2.1b) — the light
+   .bk-shell version doesn't apply here (different ancestor), so this button
+   was falling back to the global button reset: a white boxy pill on navy. */
+.li-cp-lang .lang-toggle {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 3px;
+}
 .li-cp-lang .lang-toggle-btn {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: #c6cfe0;
+  font-weight: 700;
+  font-size: 11.5px;
+  padding: 4px 9px;
+}
+.li-cp-lang .lang-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: transparent;
+  color: #fff;
+}
+.li-cp-lang .lang-toggle-btn.active,
+.li-cp-lang .lang-toggle-btn.active:hover {
+  background: var(--li-rail-gold);
+  color: var(--li-navy-deep);
 }
 .li-cp-bell {
   position: relative;
   width: 34px;
   height: 34px;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.06);
-  border: none;
-  color: #c6cfe0;
+  /* A2.1c — the 0.06-alpha fill + borderless edge left the resting icon
+     nearly invisible against the navy band; a visible track (matching the
+     lang toggle's) plus a brighter icon reads clearly at rest. */
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #dbe2f0;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -22164,7 +22193,8 @@ details.li-brief-research summary:hover {
 }
 .li-cp-bell:hover,
 .li-cp-bell.active {
-  background: rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.24);
   color: #fff;
 }
 .li-cp-bell-badge {
@@ -22302,6 +22332,7 @@ details.li-brief-research summary:hover {
 .li-cp-tab {
   background: none;
   border: none;
+  border-radius: 0;
   padding: 14px 2px;
   font-family: inherit;
   font-size: 14px;
@@ -22312,12 +22343,26 @@ details.li-brief-research summary:hover {
   cursor: pointer;
   white-space: nowrap;
 }
-.li-cp-tab:hover {
+/* Scoped to .li-cp-nav so this out-specifies the global button:hover reset
+   (globals.css ~216, element+2 pseudo-classes) that otherwise fills these
+   tabs with a boxy background+border on hover (A2.1a). */
+.li-cp-nav .li-cp-tab:hover {
+  background: none;
+  border-color: transparent;
+  border-bottom-color: transparent;
   color: #fff;
+}
+.li-cp-tab:focus-visible {
+  outline: none;
+  color: #fff;
+  border-bottom-color: var(--li-rail-gold);
 }
 .li-cp-tab.active {
   color: #fff;
   font-weight: 700;
+  border-bottom-color: var(--li-rail-gold);
+}
+.li-cp-nav .li-cp-tab.active:hover {
   border-bottom-color: var(--li-rail-gold);
 }
 

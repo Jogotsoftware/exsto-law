@@ -47,7 +47,7 @@ const MIN_PASSWORD_LENGTH = 8
 const BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
   process.env.URL ??
-  'https://exstolaw.netlify.app'
+  'https://exsto-law.netlify.app'
 ).replace(/\/$/, '')
 
 interface FinalizeBody {

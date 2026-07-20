@@ -5,6 +5,7 @@ import { ChevronDown } from 'lucide-react'
 import { ScaleIcon } from '@/components/icons'
 import { FeeConsentCard } from '@/components/FeeConsentCard'
 import { LanguageToggle } from '@/components/LanguageToggle'
+import { Tabs } from '@/components/Tabs'
 import { useI18n } from '@/lib/i18n'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
 import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
@@ -1380,24 +1381,24 @@ function DocumentsView({ matters }: { matters: MatterListItem[] }) {
       )}
       <section className="li-cp-card li-cp-docs">
         <div className="li-cp-docs-head">
-          <div className="li-cp-seg">
-            <button
-              type="button"
-              className={`li-cp-seg-btn ${tab === 'attorney' ? 'active' : ''}`}
-              onClick={() => setTab('attorney')}
-            >
-              {t('portal.docs.from_attorney')}
-              <span className="li-cp-seg-n">{attorneyRows.length}</span>
-            </button>
-            <button
-              type="button"
-              className={`li-cp-seg-btn ${tab === 'uploaded' ? 'active' : ''}`}
-              onClick={() => setTab('uploaded')}
-            >
-              {t('portal.docs.uploaded')}
-              <span className="li-cp-seg-n">{uploadedRows.length}</span>
-            </button>
-          </div>
+          {/* A2.1d — a sub-tab filter, not a preference toggle (unlike the
+              Settings language pill and SignDocument's type/draw mode), so it
+              goes through the shared Tabs component (flat underline, gold
+              active) rather than the pill-styled li-cp-seg family — li-cp-seg
+              stays untouched for those other consumers. */}
+          <Tabs
+            tabs={[
+              {
+                key: 'attorney',
+                label: t('portal.docs.from_attorney'),
+                badge: attorneyRows.length,
+              },
+              { key: 'uploaded', label: t('portal.docs.uploaded'), badge: uploadedRows.length },
+            ]}
+            active={tab}
+            onSelect={(key) => setTab(key as 'attorney' | 'uploaded')}
+            ariaLabel={t('portal.docs.title')}
+          />
           <div className="li-cp-docs-tools">
             <div className="li-cp-search">
               <svg

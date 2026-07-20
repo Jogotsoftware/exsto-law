@@ -86,3 +86,17 @@ export async function upsertConfirmedPasswordAccount(
   }
   throw error
 }
+
+// A2.3 — the Auth-side half of removing a client's portal access. Best-effort:
+// no matching Auth user (never signed up, or already removed) is NOT an error
+// — the caller's substrate-side revoke (actor deactivated + contact archived)
+// is what actually blocks sign-in; this just cleans up the GoTrue account so
+// re-inviting the same email later doesn't collide with a stale password.
+export async function deleteAuthUserByEmail(email: string): Promise<{ deleted: boolean }> {
+  const admin = getSupabaseAdmin()
+  const id = await findUserIdByEmail(admin, email)
+  if (!id) return { deleted: false }
+  const { error } = await admin.auth.admin.deleteUser(id)
+  if (error) throw error
+  return { deleted: true }
+}

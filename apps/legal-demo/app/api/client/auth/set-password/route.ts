@@ -31,7 +31,7 @@ export const dynamic = 'force-dynamic'
 const BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
   process.env.URL ??
-  'https://exstolaw.netlify.app'
+  'https://exsto-law.netlify.app'
 ).replace(/\/$/, '')
 
 const MIN_PASSWORD_LENGTH = 8
