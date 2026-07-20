@@ -24,7 +24,11 @@ import {
   buildVoiceCorrectionSection,
   type VoiceViolation,
 } from './emailVoiceChecks.js'
-import { loadEmailDraftingPrompt } from '../templates/loader.js'
+import {
+  getEmailDraftingConfig,
+  composeEmailDraftingPrompt,
+  type EmailDraftingConfigDoc,
+} from './emailDraftingConfig.js'
 import { getMatter } from '../queries/matters.js'
 import { getClientContext, formatClientContext } from '../queries/clientContext.js'
 import { getBriefForTarget, type StoredBrief } from '../queries/briefs.js'
@@ -200,9 +204,12 @@ export async function composeEmailDraft(
     firmSettings.assistantInstructions ?? undefined,
   )
 
-  // Function replacers (assembleReviewPrompt precedent): every slotted value is
-  // untrusted content — `$&`-style replacement patterns must be inert.
-  let prompt = loadEmailDraftingPrompt()
+  // WP FB-D — config-first: the firm's own prompt/doctrine overrides win, else
+  // the repo templates (byte-identical fallback). Function replacers
+  // (assembleReviewPrompt precedent): every slotted value is untrusted content
+  // — `$&`-style replacement patterns must be inert.
+  const emailPromptDoc = await getEmailDraftingConfig(agentCtx)
+  let prompt = composeEmailDraftingPrompt(emailPromptDoc)
     .replaceAll('{{purpose}}', () => purpose)
     .replaceAll('{{recipient_role}}', () => recipientRole)
     .replaceAll('{{matter_facts_json}}', () => JSON.stringify(matterFacts, null, 2))
@@ -264,7 +271,11 @@ export async function composeEmailDraft(
       // failed attempt, and the flagged draft still reaches the queue.
     }
   }
-  const reasoningTraceId = await persistEmailTrace(agentCtx, { prompt: promptUsed, result: chosen })
+  const reasoningTraceId = await persistEmailTrace(agentCtx, {
+    prompt: promptUsed,
+    result: chosen,
+    promptDoc: emailPromptDoc,
+  })
 
   const result = await submitAction(agentCtx, {
     actionKindName: 'draft.generate',
@@ -319,7 +330,7 @@ function finishResult(
 
 async function persistEmailTrace(
   ctx: ActionContext,
-  args: { prompt: string; result: ClaudeDraftResult },
+  args: { prompt: string; result: ClaudeDraftResult; promptDoc: EmailDraftingConfigDoc },
 ): Promise<string> {
   const id = randomUUID()
   await withActionContext(ctx, async (client) => {
@@ -340,7 +351,20 @@ async function persistEmailTrace(
         args.result.modelIdentity,
         JSON.stringify({
           ...(args.result.reasoningTrace as unknown as Record<string, unknown>),
-          prompt_config: { prompt_id: 'email-drafting@repo', kind: 'email_generation' },
+          // WP FB-D — name the config version (or the repo fallback) that
+          // actually produced this draft, same idiom as generateDraft.ts's
+          // promptId (config wins over repo, tagged with its prompt_version).
+          prompt_config: {
+            prompt_id:
+              args.promptDoc.promptVersion != null &&
+              (args.promptDoc.promptSource === 'config' ||
+                args.promptDoc.houseVoiceSource === 'config')
+                ? `email-drafting@config-v${args.promptDoc.promptVersion}`
+                : 'email-drafting@repo',
+            prompt_source: args.promptDoc.promptSource,
+            house_voice_source: args.promptDoc.houseVoiceSource,
+            kind: 'email_generation',
+          },
         }),
       ],
     )

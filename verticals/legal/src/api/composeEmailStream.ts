@@ -14,7 +14,7 @@
 // constant (a known 2nd-firm hazard in the worker paths).
 import type { ActionContext } from '@exsto/substrate'
 import { streamChatWithAssistant } from '../adapters/claude.js'
-import { loadEmailDraftingPrompt } from '../templates/loader.js'
+import { getEmailDraftingConfig, composeEmailDraftingPrompt } from './emailDraftingConfig.js'
 import { getMatter } from '../queries/matters.js'
 import { getClientContext, formatClientContext } from '../queries/clientContext.js'
 import { resolveMatterJurisdiction } from './matterJurisdiction.js'
@@ -71,8 +71,10 @@ export async function* streamComposeEmail(
     if (context) clientContextText = formatClientContext(context)
   }
 
-  // Same prompt template + inert function-replacer discipline as generateEmail.
-  let prompt = loadEmailDraftingPrompt()
+  // WP FB-D — config-first, same as generateEmail.ts. Same prompt template +
+  // inert function-replacer discipline as generateEmail.
+  const emailPromptDoc = await getEmailDraftingConfig(ctx)
+  let prompt = composeEmailDraftingPrompt(emailPromptDoc)
     .replaceAll('{{purpose}}', () => instructions)
     .replaceAll('{{recipient_role}}', () => 'client')
     .replaceAll('{{matter_facts_json}}', () => JSON.stringify(matterFacts, null, 2))

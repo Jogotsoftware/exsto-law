@@ -19,6 +19,8 @@ let cached: {
   reviewPrompt?: string
   redlinePrompt?: string
   emailDraftingPrompt?: string
+  emailDraftingPromptTemplate?: string
+  houseVoiceDoctrine?: string
   transcriptExtractionPrompt?: string
 } = {}
 
@@ -175,17 +177,47 @@ export function loadReviewPrompt(): string {
 // file included whole, never duplicated into the prompt. The deterministic
 // validator lists in api/emailVoiceChecks.ts mirror that file — change both
 // together. Function replacer so `$`-patterns in the doctrine stay inert.
-const HOUSE_VOICE_SLOT = '{{house_voice_doctrine}}'
+// Exported (WP FB-D): api/emailDraftingConfig.ts's required-slot list and its
+// compose step both need this exact literal — one source of truth.
+export const HOUSE_VOICE_SLOT = '{{house_voice_doctrine}}'
 
-export function loadEmailDraftingPrompt(): string {
-  if (!cached.emailDraftingPrompt) {
+// WP FB-D — the RAW prompt template (the .md file, unsubstituted): the repo
+// fallback for the config-first resolver in api/emailDraftingConfig.ts, and
+// what an attorney's custom override replaces wholesale. Still carries the
+// {{house_voice_doctrine}} slot — composition happens one level up, once the
+// (possibly config) doctrine text is known.
+export function loadEmailDraftingPromptTemplate(): string {
+  if (!cached.emailDraftingPromptTemplate) {
     const raw = readFileSync(resolve(templatesDir, 'email-drafting-prompt.md'), 'utf8')
     if (!raw.includes(HOUSE_VOICE_SLOT)) {
       // Loud, not silent: a prompt that lost its doctrine slot must never draft
       // undoctored client email.
       throw new Error(`email-drafting-prompt.md is missing the ${HOUSE_VOICE_SLOT} slot`)
     }
-    const voice = readFileSync(resolve(templatesDir, 'house-voice.md'), 'utf8').trim()
+    cached.emailDraftingPromptTemplate = raw
+  }
+  return cached.emailDraftingPromptTemplate
+}
+
+// WP FB-D — the RAW house-voice doctrine text (the repo fallback + what an
+// attorney's custom override replaces wholesale).
+export function loadHouseVoiceDoctrine(): string {
+  if (!cached.houseVoiceDoctrine) {
+    cached.houseVoiceDoctrine = readFileSync(resolve(templatesDir, 'house-voice.md'), 'utf8').trim()
+  }
+  return cached.houseVoiceDoctrine
+}
+
+// The fully COMPOSED, all-repo prompt (template + doctrine substituted in).
+// Kept for backward compatibility (still the byte-identical no-config
+// fallback) — WP FB-D's config-first callers (generateEmail.ts,
+// composeEmailStream.ts) instead resolve each half through
+// api/emailDraftingConfig.ts and compose with composeEmailDraftingPrompt so a
+// per-tenant override of either half is honored.
+export function loadEmailDraftingPrompt(): string {
+  if (!cached.emailDraftingPrompt) {
+    const raw = loadEmailDraftingPromptTemplate()
+    const voice = loadHouseVoiceDoctrine()
     cached.emailDraftingPrompt = raw.replace(HOUSE_VOICE_SLOT, () => voice)
   }
   return cached.emailDraftingPrompt
