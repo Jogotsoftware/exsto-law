@@ -84,7 +84,7 @@ export async function* streamComposeEmail(
   const skillsText = buildActiveSkillsText(await loadForcedSkills(ctx, autoSkillSlugs))
   if (skillsText.trim()) prompt += `\n\n${skillsText.trim()}`
 
-  const model = resolveModelForTask('email_generate', { message: instructions }).model
+  const model = resolveModelForTask('email_generate').model
   for await (const chunk of streamChatWithAssistant(
     ctx.tenantId,
     [{ role: 'user', content: prompt }],
