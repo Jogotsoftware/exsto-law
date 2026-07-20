@@ -18,8 +18,17 @@ export interface EsignField {
   label: string
 }
 
+// The marker type vocabulary, as one regex-alternation string. Single-sourced here
+// so the parser (below) and the execution-block builder/preview transform
+// (executionBlock.ts) share ONE grammar and can never drift. Adding a new marker
+// kind is a change to EsignFieldType + LABELS + this pattern, nowhere else.
+export const MARKER_TYPE_PATTERN = 'sign|initial|name|date|title|text|check'
+
 // {{ type : signerKey }} — whitespace tolerant; keys are [A-Za-z0-9_-].
-const TAG_RE = /\{\{\s*(sign|initial|name|date|title|text|check)\s*:\s*([A-Za-z0-9_-]+)\s*\}\}/g
+const TAG_RE = new RegExp(
+  `\\{\\{\\s*(${MARKER_TYPE_PATTERN})\\s*:\\s*([A-Za-z0-9_-]+)\\s*\\}\\}`,
+  'g',
+)
 
 const LABELS: Record<EsignFieldType, string> = {
   sign: 'Signature',

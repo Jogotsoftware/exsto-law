@@ -283,9 +283,11 @@ Pacheco Law Firm
 
 **Accepted and Agreed:**
 
-Signature: ______________________________
+{{sign:client}}
+
 Name: **{{primary_client_name}}**
-Date: ______________________________
+
+{{date:client}}
 
 ---
 
