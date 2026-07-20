@@ -21,7 +21,7 @@ import type { ActionContext } from '@exsto/substrate'
 const listTool: Tool<Record<string, never>, { skills: SkillCatalogEntry[] }> = {
   name: 'legal.skill.list',
   description:
-    "List the firm's assistant skills (legal playbooks) — slug, name, practice area, description, and when-to-use. The lightweight catalog, without the (long) bodies.",
+    "List the firm's assistant skills (legal playbooks) — slug, name, practice area, description, when-to-use, and jurisdiction (if the skill is jurisdiction-specific). The lightweight catalog, without the (long) bodies.",
   mode: 'read',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => ({ skills: await listSkillCatalog(ctx) }),
@@ -43,7 +43,7 @@ const getTool: Tool<{ slug: string }, { skill: Skill | null }> = {
 const createTool: Tool<UpsertSkillInput, { skill: Skill }> = {
   name: 'legal.skill.create',
   description:
-    'Create a skill: a stable slug, a name, a practice area, a when-to-use trigger, and the instruction body (markdown). Optionally a one-line description and userInvocable (default true).',
+    'Create a skill: a stable slug, a name, a practice area, a when-to-use trigger, and the instruction body (markdown). Optionally a one-line description, userInvocable (default true), and jurisdiction (a US state code/name if this skill is jurisdiction-SPECIFIC, e.g. a Delaware-only playbook — leave unset for a jurisdiction-neutral skill).',
   mode: 'write',
   inputSchema: {
     type: 'object',
@@ -55,6 +55,11 @@ const createTool: Tool<UpsertSkillInput, { skill: Skill }> = {
       whenToUse: { type: 'string', description: 'When the assistant should load this skill.' },
       body: { type: 'string', description: 'The full instruction markdown.' },
       userInvocable: { type: 'boolean' },
+      jurisdiction: {
+        type: 'string',
+        description:
+          'US state code or name this skill is SPECIFIC to (e.g. "DE" or "Delaware"). A matter resolved to a DIFFERENT jurisdiction never auto-loads this skill. Leave unset for a jurisdiction-neutral skill.',
+      },
     },
     required: ['slug', 'name', 'practiceArea', 'whenToUse', 'body'],
     additionalProperties: false,
@@ -65,7 +70,7 @@ const createTool: Tool<UpsertSkillInput, { skill: Skill }> = {
 const updateTool: Tool<UpdateSkillInput, { skill: Skill | null }> = {
   name: 'legal.skill.update',
   description:
-    'Update a skill (by skillEntityId or slug): any of name / practiceArea / description / whenToUse / body / userInvocable. Append-only: a new attribute version supersedes the prior.',
+    'Update a skill (by skillEntityId or slug): any of name / practiceArea / description / whenToUse / body / userInvocable / jurisdiction. Append-only: a new attribute version supersedes the prior. Send jurisdiction: "" to clear it back to jurisdiction-neutral.',
   mode: 'write',
   inputSchema: {
     type: 'object',
@@ -78,6 +83,10 @@ const updateTool: Tool<UpdateSkillInput, { skill: Skill | null }> = {
       whenToUse: { type: 'string' },
       body: { type: 'string' },
       userInvocable: { type: 'boolean' },
+      jurisdiction: {
+        type: 'string',
+        description: 'US state code or name this skill is SPECIFIC to; "" clears it.',
+      },
     },
     additionalProperties: false,
   },

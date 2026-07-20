@@ -1439,7 +1439,9 @@ export async function assistantChat(
       primaryEntityId,
       context,
       firm,
-      buildSkillCatalogText(catalog),
+      // WP A5 — scope the advertised catalog to the firm's own practice areas
+      // (unset firm = full catalog, the honest default).
+      buildSkillCatalogText(catalog, firm.practiceAreas),
       buildActiveSkillsText(forced),
       attorneySettings?.customInstructions,
     )
@@ -1745,7 +1747,9 @@ export async function* assistantChatStream(
       primaryEntityId,
       context,
       firm,
-      buildSkillCatalogText(catalog),
+      // WP A5 — scope the advertised catalog to the firm's own practice areas
+      // (unset firm = full catalog, the honest default).
+      buildSkillCatalogText(catalog, firm.practiceAreas),
       buildActiveSkillsText(forced),
       attorneySettings?.customInstructions,
     )

@@ -73,7 +73,8 @@ function findMarkdown(dir: string): string[] {
 
 // Minimal frontmatter parser: a leading `---` block of single-line `key: value`
 // pairs, then the markdown body. No YAML dep — we control the format, so keys are
-// single-line (slug, name, practice_area, description, when_to_use, user_invocable).
+// single-line (slug, name, practice_area, description, when_to_use, user_invocable,
+// jurisdiction).
 function parseSkillFile(text: string, file: string): UpsertSkillInput {
   const m = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
   if (!m) throw new Error(`${file}: missing frontmatter block.`)
@@ -97,6 +98,9 @@ function parseSkillFile(text: string, file: string): UpsertSkillInput {
     whenToUse: need('when_to_use'),
     body: body.trim(),
     userInvocable: (fields.user_invocable ?? 'true').toLowerCase() !== 'false',
+    // WP A5 — optional; absent means jurisdiction-neutral (the vast majority of
+    // skills). No skill file sets this yet (content curation is a separate PR).
+    jurisdiction: fields.jurisdiction || undefined,
   }
 }
 

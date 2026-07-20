@@ -135,18 +135,30 @@ export async function getUploadedDocumentObject(
   ctx: ActionContext,
   matterEntityId: string,
   documentVersionId: string,
-): Promise<{ objectKey: string; contentType: string; filename: string; sizeBytes: number } | null> {
+): Promise<{
+  objectKey: string
+  contentType: string
+  filename: string
+  sizeBytes: number
+  // WP A5 — the uploaded document's OWN kind label (e.g. 'intake_upload',
+  // 'esign_upload', or a future more specific value; 'uploaded' is the generic
+  // default). Callers use this for skill auto-resolve (the ACTUAL reviewed
+  // document's kind, never the review MEMO's own kind).
+  documentKind: string
+} | null> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       object_key: string | null
       content_type: string | null
       original_filename: string | null
       size_bytes: string | null
+      document_kind: string | null
     }>(
       `SELECT dv.metadata->>'object_key'        AS object_key,
               dv.metadata->>'content_type'      AS content_type,
               dv.metadata->>'original_filename' AS original_filename,
-              dv.metadata->>'size_bytes'        AS size_bytes
+              dv.metadata->>'size_bytes'        AS size_bytes,
+              COALESCE(e.metadata->>'document_kind', 'uploaded') AS document_kind
          FROM document_version dv
          JOIN entity e ON e.id = dv.document_entity_id
          JOIN relationship r ON r.source_entity_id = e.id
@@ -166,6 +178,7 @@ export async function getUploadedDocumentObject(
       contentType: row.content_type ?? 'application/octet-stream',
       filename: row.original_filename ?? 'document',
       sizeBytes: row.size_bytes ? Number(row.size_bytes) : 0,
+      documentKind: row.document_kind ?? 'uploaded',
     }
   })
 }

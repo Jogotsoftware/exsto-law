@@ -15,6 +15,11 @@ export interface SkillCatalogEntry {
   description: string
   whenToUse: string
   userInvocable: boolean
+  // WP A5 — optional US jurisdiction the skill is SPECIFIC to (canonical short
+  // code, e.g. 'DE'), written through legal.skill.create/update. Absent/undefined
+  // means jurisdiction-neutral (applies everywhere) — never treated as a mismatch
+  // by the drafting resolver's negative filter (skillContext.ts).
+  jurisdiction?: string
 }
 
 export interface Skill extends SkillCatalogEntry {
@@ -32,6 +37,7 @@ type SkillRow = {
   when_to_use: string | null
   body: string | null
   user_invocable: boolean | null
+  jurisdiction: string | null
   updated_at: Date
 }
 
@@ -48,6 +54,7 @@ function skillSelect(includeBody: boolean): string {
     (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_description' ORDER BY a.valid_from DESC LIMIT 1)   AS description,
     (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_when_to_use' ORDER BY a.valid_from DESC LIMIT 1)   AS when_to_use,
     (SELECT (a.value #>> '{}')::boolean FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_user_invocable' ORDER BY a.valid_from DESC LIMIT 1) AS user_invocable,
+    (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_jurisdiction' ORDER BY a.valid_from DESC LIMIT 1)       AS jurisdiction,
     ${includeBody ? `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'skill_body' ORDER BY a.valid_from DESC LIMIT 1)` : 'NULL'} AS body,
     e.created_at AS updated_at
   FROM entity e
@@ -63,6 +70,7 @@ function mapCatalog(r: SkillRow): SkillCatalogEntry {
     description: r.description ?? '',
     whenToUse: r.when_to_use ?? '',
     userInvocable: r.user_invocable !== false,
+    jurisdiction: r.jurisdiction || undefined,
   }
 }
 

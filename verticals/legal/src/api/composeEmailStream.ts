@@ -24,7 +24,6 @@ import {
   resolveJurisdictionSkillSlugs,
 } from './skillContext.js'
 import { resolveModelForTask } from '../lib/modelRouter.js'
-import { CLIENT_EMAIL_DOCUMENT_KIND } from './generateEmail.js'
 
 export interface ComposeEmailStreamInput {
   // What the attorney wants the email to accomplish (the short prompt).
@@ -47,12 +46,14 @@ export async function* streamComposeEmail(
   let clientEntityId = input.clientEntityId?.trim() || null
   let matterFacts: Record<string, unknown> = {}
   let jurisdictionCode: string | undefined
+  let serviceKey: string | null = null
   if (input.matterEntityId?.trim()) {
     const matter = await getMatter(ctx, input.matterEntityId.trim())
     if (!matter) throw new Error(`Matter not found: ${input.matterEntityId}`)
     clientEntityId = clientEntityId ?? matter.clientEntityId ?? null
     const jurisdiction = await resolveMatterJurisdiction(ctx, input.matterEntityId.trim())
     jurisdictionCode = jurisdiction?.code ?? undefined
+    serviceKey = matter.serviceKey || null
     matterFacts = {
       matter_number: matter.matterNumber,
       service_key: matter.serviceKey,
@@ -77,9 +78,13 @@ export async function* streamComposeEmail(
     .replaceAll('{{matter_facts_json}}', () => JSON.stringify(matterFacts, null, 2))
     .replaceAll('{{client_context}}', () => clientContextText)
 
+  // WP A5 fix: same real-keys posture as generateEmail.ts's worker path — the
+  // matter's own service (or the attorney's instructions text absent a matter)
+  // plus intent: 'email' vocabulary, not the sentinel CLIENT_EMAIL_DOCUMENT_KIND.
   const autoSkillSlugs = await resolveJurisdictionSkillSlugs(ctx, {
-    documentKind: CLIENT_EMAIL_DOCUMENT_KIND,
+    documentKind: serviceKey || instructions,
     jurisdiction: jurisdictionCode,
+    intent: 'email',
   })
   const skillsText = buildActiveSkillsText(await loadForcedSkills(ctx, autoSkillSlugs))
   if (skillsText.trim()) prompt += `\n\n${skillsText.trim()}`

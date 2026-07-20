@@ -210,9 +210,14 @@ export async function composeEmailDraft(
     .replaceAll('{{client_brief}}', () => clientBriefText)
     .replaceAll('{{firm_instructions}}', () => firmInstructionsBlock)
 
+  // WP A5 fix: keyed on the matter's own service (or, absent a service, the
+  // attorney's purpose text) plus intent: 'email's fixed vocabulary — NOT the
+  // sentinel CLIENT_EMAIL_DOCUMENT_KIND, which no seeded skill's words matched
+  // (a near-no-op auto-resolve).
   const autoSkillSlugs = await resolveJurisdictionSkillSlugs(agentCtx, {
-    documentKind: CLIENT_EMAIL_DOCUMENT_KIND,
+    documentKind: matter.serviceKey || purpose,
     jurisdiction: jurisdiction?.code,
+    intent: 'email',
   })
   const skillsText = buildActiveSkillsText(await loadForcedSkills(agentCtx, autoSkillSlugs))
   if (skillsText.trim()) prompt += `\n\n${skillsText.trim()}`
