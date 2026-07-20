@@ -365,11 +365,15 @@ export interface AssistantChatOptions {
   webSearch?: boolean
   // Tools the model may call, executed locally via a tool_use → tool_result loop.
   clientTools?: ClientTool[]
-  // Per-turn system text (live screen capture, current route, force-loaded
-  // skills) appended as a SECOND system block AFTER the prompt-cache breakpoint,
-  // so its churn never invalidates the cached stable prefix (the leading system
-  // message). See buildVolatileClaudeSystem in assistantChat.ts.
-  volatileSystem?: string
+  // Per-turn text (live screen capture, current route, live build brief) that
+  // changes EVERY turn. It is injected as a LEADING text block of the CURRENT
+  // user message — AFTER the conversation history — so its churn can never
+  // invalidate the cached history prefix. (It used to ride a second `system`
+  // block, which sat BEFORE the messages and re-billed the whole history every
+  // turn.) Built ONCE per turn (see buildVolatileClaudeSystem in
+  // assistantChat.ts) and reused across every tool-loop round, so the round-to-
+  // round cache within a turn survives.
+  volatile?: string
 }
 
 // Token usage for an assistant turn, summed across every API call the turn made
@@ -479,21 +483,43 @@ export function buildChatRequest(
   // else is a user/assistant turn. Anthropic requires the first messages[] entry
   // to be 'user', which the post-system turns satisfy.
   //
-  // PROMPT CACHING: the system prompt here is large (base prompt + matter
-  // context + wizard blocks + skill catalog) and stable across a conversation's
-  // turns AND across the several tool rounds within one turn, so it carries a
-  // cache_control breakpoint — every request after the first reads it at ~10% of
-  // the input price instead of re-paying full freight. Volatile per-turn text
-  // (opts.volatileSystem) goes in a second block AFTER the breakpoint so its
-  // churn never invalidates the cached prefix.
+  // PROMPT CACHING (three breakpoints, prefix-ordered so each is a stable byte
+  // prefix of the next):
+  //   1. system — large (base prompt + matter context + wizard blocks + skill
+  //      catalog) and stable across a conversation AND across a turn's tool
+  //      rounds. Marked here.
+  //   2. history tail — the LAST block of the LAST history message (every turn
+  //      but the current one). This caches the whole conversation-so-far, so
+  //      turn N+1 reads system + everything through turn N at ~10% of the input
+  //      price. Only added when there IS history.
+  //   3. moving tail — see withCacheBreakpoint; the current user message, or the
+  //      last carry turn during a tool loop.
+  // Volatile per-turn text (opts.volatile — live screen/route/build brief) is
+  // injected as a LEADING block of the CURRENT user message, i.e. AFTER the
+  // history-tail breakpoint, so its churn can never invalidate the history
+  // prefix. It carries NO breakpoint of its own.
   const systemText = messages[0]?.role === 'system' ? messages[0].content : undefined
   const system = systemText
-    ? [
-        { type: 'text', text: systemText, cache_control: { type: 'ephemeral' } },
-        ...(opts.volatileSystem ? [{ type: 'text', text: opts.volatileSystem }] : []),
-      ]
+    ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
     : undefined
-  const turns = messages.filter((m) => m.role !== 'system')
+  const turns: Array<{ role: string; content: unknown }> = messages.filter(
+    (m) => m.role !== 'system',
+  )
+  // History = every turn before the current (last) user message; that last turn
+  // is where the volatile block goes. Injecting volatile there keeps history a
+  // byte-stable prefix across turns.
+  const finalIdx = turns.length - 1
+  const built = turns.map((m, i) =>
+    i === finalIdx && opts.volatile
+      ? { role: m.role, content: prependVolatile(m.content, opts.volatile) }
+      : { role: m.role, content: m.content },
+  )
+  // Breakpoint 2: cache the conversation history so far. Only when a message
+  // precedes the current user turn (finalIdx > 0) — never on empty history.
+  if (finalIdx > 0) {
+    const lastHistory = built[finalIdx - 1]!
+    built[finalIdx - 1] = markTail(lastHistory)
+  }
   const { extra, maxTokens } = workRateParams(
     opts.workRate ?? 'balanced',
     opts.supportsWorkRate ?? false,
@@ -520,7 +546,7 @@ export function buildChatRequest(
     // final answer; give them headroom on top of the work-rate budget.
     max_tokens: tools.length ? maxTokens + 1024 : maxTokens,
     system,
-    messages: withCacheBreakpoint([...turns, ...carryTurns]),
+    messages: withCacheBreakpoint([...built, ...carryTurns]),
     ...(tools.length ? { tools } : {}),
     ...effectiveExtra,
   }
@@ -531,29 +557,55 @@ export function buildChatRequest(
 // so we skip the breakpoint rather than risk the request.
 const CACHEABLE_BLOCK_TYPES = new Set(['text', 'tool_use', 'tool_result', 'image', 'document'])
 
+// Prepend the per-turn volatile block as a LEADING text block of a message,
+// AHEAD of the real content but with NO cache_control of its own (the moving
+// breakpoint below lands on the message's LAST block). A string body becomes a
+// two-block array [volatile, userText]; an array body is prefixed in place.
+function prependVolatile(content: unknown, volatile: string): unknown {
+  const volBlock = { type: 'text', text: volatile }
+  if (typeof content === 'string') return [volBlock, { type: 'text', text: content }]
+  if (Array.isArray(content)) return [volBlock, ...content]
+  // Unexpected shape — keep the volatile in front, coerce the rest to text.
+  return [volBlock, { type: 'text', text: String(content ?? '') }]
+}
+
+// Return a copy of one message with a cache_control breakpoint on its LAST
+// cacheable block. Returns the message UNCHANGED (same reference) when its tail
+// block type can't carry a breakpoint, so callers can detect the no-op.
+function markTail(msg: { role: string; content: unknown }): { role: string; content: unknown } {
+  if (typeof msg.content === 'string' && msg.content) {
+    return {
+      role: msg.role,
+      content: [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } }],
+    }
+  }
+  if (Array.isArray(msg.content) && msg.content.length) {
+    const blocks = msg.content as Array<Record<string, unknown>>
+    const tail = blocks[blocks.length - 1]!
+    if (!CACHEABLE_BLOCK_TYPES.has(String(tail.type))) return msg
+    return {
+      role: msg.role,
+      content: [...blocks.slice(0, -1), { ...tail, cache_control: { type: 'ephemeral' } }],
+    }
+  }
+  return msg
+}
+
 // Moving prompt-cache breakpoint on the LAST message: within a turn's tool loop
 // each round re-sends the identical, growing message list, so marking the tail
 // lets round N+1 read everything through round N from cache — that loop is where
 // a guided build burns most of its input tokens. Copies rather than mutates, so
-// a carried turn never accumulates stale markers across rounds (max 4 markers
-// per request; this keeps us at exactly two: stable system + this one).
+// a carried turn never accumulates stale markers across rounds. Combined with
+// the stable-system and history-tail breakpoints this keeps us at ≤3 markers,
+// under Anthropic's cap of 4.
 function withCacheBreakpoint(
   msgs: Array<{ role: string; content: unknown }>,
 ): Array<{ role: string; content: unknown }> {
   const last = msgs[msgs.length - 1]
   if (!last) return msgs
-  let content: unknown
-  if (typeof last.content === 'string' && last.content) {
-    content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }]
-  } else if (Array.isArray(last.content) && last.content.length) {
-    const blocks = last.content as Array<Record<string, unknown>>
-    const tail = blocks[blocks.length - 1]!
-    if (!CACHEABLE_BLOCK_TYPES.has(String(tail.type))) return msgs
-    content = [...blocks.slice(0, -1), { ...tail, cache_control: { type: 'ephemeral' } }]
-  } else {
-    return msgs
-  }
-  return [...msgs.slice(0, -1), { role: last.role, content }]
+  const marked = markTail(last)
+  if (marked === last) return msgs
+  return [...msgs.slice(0, -1), marked]
 }
 
 // Drop the `thinking` request param (used on continuation turns — see above).
