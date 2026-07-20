@@ -252,6 +252,10 @@ function Shell({
 
   return (
     <main className="li-cp-auth">
+      {/* A1.1 — the funnel's aurora treatment, so a returning client landing
+          here from the chooser (or a bookmarked link) doesn't hit a visually
+          disconnected surface. Zero auth-flow changes below this line. */}
+      <div className="bk-aurora" aria-hidden />
       <div className="li-cp-auth-card">
         <div className="li-cp-auth-brand">
           <span className="li-cp-auth-crest" aria-hidden>
