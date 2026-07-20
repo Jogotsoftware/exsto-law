@@ -380,7 +380,7 @@ export default function QuestionLibraryPage(): ReactElement {
           part of the firm's full question inventory, edited in the service builder. */}
       {!loading && svcFiltered.length > 0 && (
         <>
-          <h3 className="li-int-section-title">In service intake forms</h3>
+          <h3 className="li-int-section-title">In Service Intake Forms</h3>
           <div className="li-int-list">
             {svcFiltered.map((it, i) => (
               <div key={`${it.serviceKey}-${it.token}-${i}`} className="li-int-row">

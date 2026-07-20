@@ -579,7 +579,7 @@ export function TrackedChangesEditor({
             <div className="li-edtr-ai">
               <div className="li-edtr-ai-head">
                 <GemSparkle size={17} />
-                <span>Edit with AI</span>
+                <span>Edit With AI</span>
               </div>
               <textarea
                 ref={aiTextareaRef}

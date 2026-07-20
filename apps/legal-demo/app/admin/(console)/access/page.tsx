@@ -126,7 +126,7 @@ export default function AdminAccessPage() {
       {loaded && (
         <>
           <section style={{ marginBottom: 'var(--space-5)' }}>
-            <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Invite a user</h2>
+            <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Invite A User</h2>
             <form
               onSubmit={invite}
               style={{ display: 'grid', gap: 'var(--space-2)', maxWidth: 460 }}

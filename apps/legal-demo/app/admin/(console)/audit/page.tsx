@@ -47,7 +47,7 @@ export default function AdminAuditPage() {
               <tr>
                 <th>When</th>
                 <th>Operation</th>
-                <th>Target tenant</th>
+                <th>Target Tenant</th>
                 <th>Detail</th>
               </tr>
             </thead>

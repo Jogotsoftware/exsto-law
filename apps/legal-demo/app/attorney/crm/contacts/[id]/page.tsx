@@ -201,7 +201,7 @@ export default function ContactDetailPage() {
       </div>
 
       <div className="li-crm-portal-card">
-        <h2 className="li-crm-panel-title">Portal access</h2>
+        <h2 className="li-crm-panel-title">Portal Access</h2>
         <p className="li-crm-portal-desc">
           Email this client a secure link to set a password and sign in to view their matters,
           documents, and invoices, and message you. Re-sending resets their password.

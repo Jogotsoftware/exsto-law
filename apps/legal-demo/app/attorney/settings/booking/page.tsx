@@ -170,7 +170,7 @@ export default function BookingPage(): React.ReactElement {
           {saved && <SettingsAlert tone="success">Saved.</SettingsAlert>}
 
           <div className="li-set-section-heading" style={{ marginTop: 0 }}>
-            Bookable days
+            Bookable Days
           </div>
           <div className="li-set-daybtns">
             {WEEKDAY_LABELS.map((label, day) => {
@@ -287,7 +287,7 @@ export default function BookingPage(): React.ReactElement {
           </div>
 
           <div className="li-set-section-heading">
-            Meeting lengths offered (public booking link)
+            Meeting Lengths Offered (Public Booking Link)
           </div>
           <div className="li-set-lenchips">
             {MEETING_LENGTH_OPTIONS.map((m) => {
@@ -419,7 +419,7 @@ function CalendarCategoriesCard(): React.ReactElement {
 
   return (
     <div className="li-set-card li-set-card--medium">
-      <div className="li-set-table-title">Calendar categories</div>
+      <div className="li-set-table-title">Calendar Categories</div>
       <p className="li-set-hint" style={{ margin: '0 0 16px' }}>
         Color-code consultations by call type. Tag any event with one of these from its edit menu on
         the calendar.

@@ -98,7 +98,7 @@ export function SendToClientModal({ matter, doc, onClose, onSent }: SendToClient
         onClick={(e) => e.stopPropagation()}
       >
         <div className="li-send-head">
-          <h2 className="li-send-title">Send to client — {docTitle}</h2>
+          <h2 className="li-send-title">Send To Client — {docTitle}</h2>
           <button
             type="button"
             className="li-send-x"
@@ -248,7 +248,7 @@ export function SendToClientModal({ matter, doc, onClose, onSent }: SendToClient
               disabled={busy || !to.trim()}
             >
               {busy ? <span className="spinner" /> : <SendIcon size={15} />}
-              {busy ? 'Sending…' : 'Send to client'}
+              {busy ? 'Sending…' : 'Send To Client'}
             </button>
           </span>
         </div>
