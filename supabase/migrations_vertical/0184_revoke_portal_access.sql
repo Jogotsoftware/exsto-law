@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0183: legal.client.revoke_portal_access action +
+-- Vertical migration 0184 (renumbered from 0183; 0183 = document_redlined on main): legal.client.revoke_portal_access action +
 -- portal.access_revoked event (A2.3)
 --
 -- PLANNED — NOT APPLIED to any environment (dev or prod) by this PR.
