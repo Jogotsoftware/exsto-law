@@ -34,7 +34,7 @@ import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 // ───────────────────────────────────────────────────────────────────────────
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent).
-const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
+import { resolveTenantAgentCtx } from './tenantActors.js'
 
 // The memo's document kind — a label on the draft entity (labels are payload
 // data, not registry kinds; the queue humanizes it as "document review memo").
@@ -376,7 +376,7 @@ export async function runDocumentReview(
   input: RunDocumentReviewInput,
   deps: RunDocumentReviewDeps,
 ): Promise<ActionResult | null> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const agentCtx = await resolveTenantAgentCtx(ctx)
 
   const fail = async (reason: string): Promise<null> => {
     await submitAction(agentCtx, {
@@ -647,7 +647,7 @@ async function persistReviewTrace(
       [
         id,
         ctx.tenantId,
-        CLAUDE_AGENT_ACTOR_ID,
+        ctx.actorId,
         args.prompt,
         JSON.stringify(args.result.reasoningTrace.evidence ?? []),
         JSON.stringify(args.result.reasoningTrace.alternatives_considered ?? []),

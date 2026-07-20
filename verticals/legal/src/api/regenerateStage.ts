@@ -22,7 +22,7 @@ import type { GenerationMode } from './generateDraft.js'
 
 // The AI agent actor (same id every AI write in the vertical uses — tenant-zero
 // seed; observation writes only, the drafting itself resolves its own actor).
-const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
+import { resolveTenantAgentCtx } from './tenantActors.js'
 
 async function loadGraphForMatter(
   ctx: ActionContext,
@@ -60,7 +60,7 @@ async function recordObservation(
   tag: string,
   data: Record<string, unknown>,
 ): Promise<void> {
-  const agentCtx: ActionContext = { tenantId: ctx.tenantId, actorId: CLAUDE_AGENT_ACTOR_ID }
+  const agentCtx = await resolveTenantAgentCtx(ctx)
   await submitAction(agentCtx, {
     actionKindName: 'event.record',
     intentKind: 'automatic_sync',
@@ -69,7 +69,7 @@ async function recordObservation(
       primary_entity_id: matterEntityId,
       data: { kind: tag, ...data },
       source_type: 'agent',
-      source_ref: CLAUDE_AGENT_ACTOR_ID,
+      source_ref: agentCtx.actorId,
     },
   })
 }
