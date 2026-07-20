@@ -24180,3 +24180,68 @@ details.li-brief-research summary:hover {
   color: var(--li-navy);
   min-width: 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ITEM-12 WP-2 — li-taginput: reusable Enter-to-add pills editor
+   (components/TagInput.tsx). Generalizes tpl-ai-skillchip (services/
+   [serviceKey]/templates/page.tsx) and mail-attach-chip / li-uac-pendingdoc-chip
+   (EmailComposeModal.tsx) into ONE shared control for any string[] setting:
+   the three custom-instructions cards (Settings → Assistant) and firm practice
+   areas (Settings → Firm details). Pills wrap (white-space: normal) rather than
+   ellipsis-truncate — the mail-attach-chip precedent for a label longer than a
+   filename (li-uac-pendingdoc-chip) — because an instruction is meant to stay
+   readable in place, not hide behind a hover. Append-only family from here;
+   see scripts/check-css-structure.mjs.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.li-taginput {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.li-taginput-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.li-taginput-pill {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  max-width: 28rem;
+  padding: 0.2rem 0.3rem 0.2rem 0.65rem;
+  border: 1px solid var(--accent, #1e3a8a);
+  border-radius: 999px;
+  background: var(--accent-attorney-soft, #e8efff);
+  color: var(--accent, #1e3a8a);
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: normal;
+  word-break: break-word;
+}
+.li-taginput-pill button {
+  flex: 0 0 auto;
+  margin-top: 0.05rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.15rem;
+}
+.li-taginput-pill button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.li-taginput-input {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.86rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg, #fff);
+  color: var(--fg);
+}
+.li-taginput-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

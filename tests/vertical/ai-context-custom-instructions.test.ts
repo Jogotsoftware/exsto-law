@@ -22,6 +22,7 @@ import {
   loadEmailDraftingPrompt,
   type AssistantFirmFacts,
 } from '@exsto/legal'
+import { normalizeFirmProfileFieldValue } from '../../verticals/legal/src/handlers/firmProfile.js'
 
 const FIRM_HEADER =
   '--- FIRM INSTRUCTIONS (standing guidance from this firm; follow unless it conflicts with the accuracy, no-invented-facts, or jurisdiction rules above) ---'
@@ -230,5 +231,181 @@ describe('email-drafting-prompt.md {{firm_instructions}} slot — filled/empty-s
     )
     expect(filled).toContain(FIRM_HEADER)
     expect(filled).toContain('Always CC my paralegal, paralegal@ourfirm.com.')
+  })
+})
+
+// ITEM-12 WP-2 — instructions as pills. Joe: "the instructions for each chat
+// need [to] save as pills when you put an instruction in and hit enter."
+// customInstructions / assistant_instructions / portal_assistant_instructions
+// are now saved as string[] (one item per pill) instead of one free-text
+// blob. Every block builder above already accepts `string | string[]` — these
+// tests lock in: an array renders as bullet lines, a legacy plain string
+// (pre-WP-2 data) still renders verbatim, the 2,000-char clip still bites on
+// the combined bulleted text, and the portal/attorney fence isolation proven
+// above for string input still holds for array input.
+describe('instructions as pills — array input renders as bullet lines', () => {
+  it('buildFirmInstructionsBlock: one "- item" bullet per array entry', () => {
+    const out = buildFirmInstructionsBlock([
+      'Always CC my paralegal.',
+      'Flag anything touching immigration status.',
+    ])
+    expect(out).toContain(FIRM_HEADER)
+    expect(out).toContain('- Always CC my paralegal.')
+    expect(out).toContain('- Flag anything touching immigration status.')
+  })
+
+  it('buildCustomInstructionsBlock: bullets on both the firm and attorney halves independently', () => {
+    const out = buildCustomInstructionsBlock(
+      ['Firm rule one.', 'Firm rule two.'],
+      ['Attorney rule one.', 'Attorney rule two.'],
+    )
+    expect(out).toContain('- Firm rule one.')
+    expect(out).toContain('- Firm rule two.')
+    expect(out).toContain('- Attorney rule one.')
+    expect(out).toContain('- Attorney rule two.')
+    expect(out.indexOf(FIRM_HEADER)).toBeLessThan(out.indexOf(ATTORNEY_HEADER))
+  })
+
+  it('buildPortalInstructionsBlock: bullets, same as the internal blocks', () => {
+    const out = buildPortalInstructionsBlock([
+      'Mention our office closes at 5pm.',
+      'Never quote a fee over chat.',
+    ])
+    expect(out).toContain(PORTAL_HEADER)
+    expect(out).toContain('- Mention our office closes at 5pm.')
+    expect(out).toContain('- Never quote a fee over chat.')
+  })
+
+  it('an empty array behaves exactly like unset — no header, no bullets', () => {
+    expect(buildFirmInstructionsBlock([])).toBe('')
+    expect(buildPortalInstructionsBlock([])).toBe('')
+    expect(buildCustomInstructionsBlock([], [])).toBe('')
+  })
+
+  it('array items are trimmed and blank entries dropped before bulleting', () => {
+    const out = buildFirmInstructionsBlock(['  Always CC my paralegal.  ', '   ', ''])
+    expect(out).toContain('- Always CC my paralegal.')
+    // No stray bullet for the blank/whitespace-only entries.
+    expect(out.match(/^- /gm)?.length).toBe(1)
+  })
+})
+
+describe('instructions as pills — a legacy plain string (pre-WP-2 data) still renders verbatim', () => {
+  it('buildFirmInstructionsBlock: no bullet prefix for a bare string', () => {
+    const out = buildFirmInstructionsBlock('Always CC my paralegal.')
+    expect(out).toContain(FIRM_HEADER)
+    expect(out).toContain('Always CC my paralegal.')
+    expect(out).not.toContain('- Always CC my paralegal.')
+  })
+
+  it('buildPortalInstructionsBlock: no bullet prefix for a bare string', () => {
+    const out = buildPortalInstructionsBlock('Mention our office closes at 5pm.')
+    expect(out).toContain(PORTAL_HEADER)
+    expect(out).not.toContain('- Mention our office closes at 5pm.')
+  })
+
+  it('buildCustomInstructionsBlock: a string firm block and a string attorney block mix freely', () => {
+    const out = buildCustomInstructionsBlock('Firm rule.', 'Attorney rule.')
+    expect(out).toContain('Firm rule.')
+    expect(out).toContain('Attorney rule.')
+    expect(out).not.toContain('- Firm rule.')
+  })
+})
+
+describe('instructions as pills — the 2,000-char clip still bites on array input', () => {
+  it('clips a single over-long pill (defensive backstop even though the UI caps items at 500 chars)', () => {
+    const out = buildFirmInstructionsBlock(['x'.repeat(2500)])
+    expect(out).toContain('- ' + 'x'.repeat(1998))
+    expect(out).toContain('…[truncated at 2000 characters]')
+  })
+
+  it('clips the COMBINED bulleted text of many short pills once it crosses 2,000 chars', () => {
+    // 25 items × ~90 chars each (with the "- " prefix and newline) comfortably
+    // crosses the 2,000-char cap on the joined text.
+    const items = Array.from({ length: 25 }, (_, i) => `Instruction number ${i}: `.padEnd(90, 'x'))
+    const out = buildFirmInstructionsBlock(items)
+    expect(out).toContain('…[truncated at 2000 characters]')
+  })
+
+  it('a short array under the cap is not marked truncated', () => {
+    const out = buildFirmInstructionsBlock(['Always CC my paralegal.'])
+    expect(out).not.toContain('truncated')
+  })
+})
+
+describe('instructions as pills — portal/attorney fence isolation holds for array input too', () => {
+  it('buildBaseSystem (portal) with array portal instructions never emits the internal fences', () => {
+    const portal = buildBaseSystem('Acme Legal', undefined, [
+      'Always mention our office hours.',
+      'Never promise a case outcome.',
+    ])
+    expect(portal).not.toContain('FIRM INSTRUCTIONS')
+    expect(portal).not.toContain(ATTORNEY_HEADER)
+    expect(portal).toContain(PORTAL_HEADER)
+    expect(portal).toContain('- Always mention our office hours.')
+  })
+
+  it('buildClaudeSystem (attorney) with array firm/attorney instructions never emits the portal fence', () => {
+    const firm: AssistantFirmFacts = {
+      firmName: 'Acme Legal',
+      firmInstructions: ['Always CC my paralegal.'],
+    }
+    const system = buildClaudeSystem('global', null, null, firm, '', '', ['Keep drafts short.'])
+    expect(system).not.toContain(PORTAL_HEADER)
+    expect(system).not.toContain('FOR CLIENT CONVERSATIONS')
+    expect(system).toContain('- Always CC my paralegal.')
+    expect(system).toContain('- Keep drafts short.')
+  })
+})
+
+describe('instructions as pills — round-trip through each store', () => {
+  // FIRM STORE (firm_profile.assistant_instructions / portal_assistant_instructions):
+  // the handler's array normalizer (firmProfile.ts) is the write path; the
+  // block builders (assistantPrompt.ts) are the read/render path. Piping one
+  // straight into the other proves the two agree on shape without a live DB.
+  it('firm store: normalizeFirmProfileFieldValue output renders correctly through buildFirmInstructionsBlock', () => {
+    const normalized = normalizeFirmProfileFieldValue('assistant_instructions', [
+      '  Always CC my paralegal.  ',
+      'Always CC my paralegal.', // duplicate, case-identical — deduped by the normalizer
+      'Flag immigration matters.',
+    ]) as string[]
+    expect(normalized).toEqual(['Always CC my paralegal.', 'Flag immigration matters.'])
+    const rendered = buildFirmInstructionsBlock(normalized)
+    expect(rendered).toContain('- Always CC my paralegal.')
+    expect(rendered).toContain('- Flag immigration matters.')
+    // The duplicate never reaches the prompt twice.
+    expect(rendered.match(/Always CC my paralegal\./g)?.length).toBe(1)
+  })
+
+  it('firm store: a cleared field ([] from the normalizer) renders as the pre-WP-2 unset prompt', () => {
+    const normalized = normalizeFirmProfileFieldValue(
+      'portal_assistant_instructions',
+      [],
+    ) as string[]
+    expect(normalized).toEqual([])
+    expect(buildPortalInstructionsBlock(normalized)).toBe('')
+  })
+
+  // ATTORNEY STORE (assistant_settings.customInstructions): persisted as one
+  // JSON attribute value (api/assistantSettings.ts setAssistantSettings does
+  // JSON.stringify(settings)); round-trip that exact serialize/deserialize
+  // step for both the new array shape and a pre-WP-2 legacy string, then
+  // render — proving parseSettings' "tolerant of both" contract end to end.
+  it('attorney store: an array survives a JSON stringify/parse round trip and renders as bullets', () => {
+    const saved = { customInstructions: ['Keep drafts short.', 'Flag immigration matters.'] }
+    const reloaded = JSON.parse(JSON.stringify(saved)) as typeof saved
+    const rendered = buildCustomInstructionsBlock(undefined, reloaded.customInstructions)
+    expect(rendered).toContain(ATTORNEY_HEADER)
+    expect(rendered).toContain('- Keep drafts short.')
+    expect(rendered).toContain('- Flag immigration matters.')
+  })
+
+  it('attorney store: a legacy string payload survives the same round trip and renders verbatim', () => {
+    const saved = { customInstructions: 'Keep drafts short.' }
+    const reloaded = JSON.parse(JSON.stringify(saved)) as typeof saved
+    const rendered = buildCustomInstructionsBlock(undefined, reloaded.customInstructions)
+    expect(rendered).toContain(ATTORNEY_HEADER)
+    expect(rendered).toContain('Keep drafts short.')
+    expect(rendered).not.toContain('- Keep drafts short.')
   })
 })

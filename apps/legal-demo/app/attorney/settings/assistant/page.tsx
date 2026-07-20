@@ -1,8 +1,8 @@
 'use client'
 
 // Settings → Assistant (WP FB-B — "the firm can finally talk back"; WP FB-B2
-// adds the portal's own instructions). Three independent free-text instruction
-// slots, each with its own save button (signature page's two-card pattern, not
+// adds the portal's own instructions). Three independent instruction slots,
+// each with its own save button (signature page's two-card pattern, not
 // firm/page.tsx's single edit-toggle form — these are unrelated settings, not
 // one record):
 //   1. Firm instructions — firm-wide, INTERNAL, legal.settings.firm_profile.set
@@ -19,8 +19,16 @@
 //      (portalAssistantInstructions, migration 0178). This is the ONLY one of
 //      the three the client-facing portal assistant ever reads — #1 and #2 are
 //      internal-only by design (leak risk).
-// All three cap at 2,000 characters (assistantPrompt.ts clips defensively at
-// injection time regardless).
+// ITEM-12 WP-2 — Joe: "the instructions for each chat need [to] save as pills
+// when you put an instruction in and hit enter. this way they can easily be
+// added or removed." All three are now TagInput pill editors instead of a
+// single free-text textarea: each Enter-to-add pill is one standing
+// instruction, capped at 500 chars/pill and 20 pills (INSTRUCTIONS_MAX_ITEMS
+// below — the same caps the server enforces on the two firm-profile fields,
+// see verticals/legal/src/handlers/firmProfile.ts normalizeInstructionsPills).
+// assistantPrompt.ts's block builders render the pills as `- item` bullet
+// lines and still clip the combined text at 2,000 chars defensively at
+// injection time.
 //
 // WP FB-D adds a FOURTH, unrelated card: the email drafting prompt + house-
 // voice doctrine, config-first (legal.email.prompt.get/update). Unlike the
@@ -29,13 +37,15 @@
 // custom prompt is rejected server-side if it drops a required slot.
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { TagInput } from '@/components/TagInput'
 import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
 
-const INSTRUCTIONS_CHAR_CAP = 2000
+const INSTRUCTIONS_ITEM_CHAR_CAP = 500
+const INSTRUCTIONS_MAX_ITEMS = 20
 
 interface FirmProfile {
-  assistantInstructions: string | null
-  portalAssistantInstructions: string | null
+  assistantInstructions: string[] | null
+  portalAssistantInstructions: string[] | null
 }
 
 // Mirrors verticals/legal/src/api/emailDraftingConfig.ts EmailDraftingConfigDoc.
@@ -57,7 +67,28 @@ interface AssistantSettings {
   webSearch?: boolean
   research?: boolean
   contextDepth?: 'lean' | 'balanced' | 'generous'
-  customInstructions?: string
+  // A settings row saved before ITEM-12 WP-2 still has this as a plain
+  // string — toItems() below normalizes either shape into pills on load.
+  customInstructions?: string | string[]
+}
+
+// ARRAY-OR-LEGACY-STRING, same convention as tenantSettings.ts'
+// listOrTextVal: a pre-WP-2 customInstructions save is a bare string, which
+// renders as a single pill rather than requiring a backfill.
+function toItems(v: string | string[] | null | undefined): string[] {
+  if (!v) return []
+  if (Array.isArray(v)) return v.filter((s) => s.trim())
+  const trimmed = v.trim()
+  return trimmed ? [trimmed] : []
+}
+
+function ItemCount({ items }: { items: string[] }): React.ReactElement {
+  const atMax = items.length >= INSTRUCTIONS_MAX_ITEMS
+  return (
+    <span className={atMax ? 'li-set-charcount li-set-charcount--limit' : 'li-set-charcount'}>
+      {items.length} / {INSTRUCTIONS_MAX_ITEMS} instructions
+    </span>
+  )
 }
 
 // Mirrors REQUIRED_EMAIL_PROMPT_SLOTS in verticals/legal/src/api/
@@ -78,31 +109,22 @@ function missingPromptSlots(text: string): string[] {
   return REQUIRED_EMAIL_PROMPT_SLOTS.filter((slot) => !text.includes(slot))
 }
 
-function CharCount({ text }: { text: string }): React.ReactElement {
-  const atCap = text.length >= INSTRUCTIONS_CHAR_CAP
-  return (
-    <span className={atCap ? 'li-set-charcount li-set-charcount--limit' : 'li-set-charcount'}>
-      {text.length.toLocaleString()} / {INSTRUCTIONS_CHAR_CAP.toLocaleString()} characters
-    </span>
-  )
-}
-
 export default function AssistantSettingsPage(): React.ReactElement {
   const [firmProfile, setFirmProfile] = useState<FirmProfile | null>(null)
-  const [firmDraft, setFirmDraft] = useState('')
+  const [firmDraft, setFirmDraft] = useState<string[]>([])
   const [firmBusy, setFirmBusy] = useState(false)
   const [firmSaved, setFirmSaved] = useState(false)
   const [firmError, setFirmError] = useState<string | null>(null)
 
   // WP FB-B2 — the portal's own draft/busy/saved/error state, independent of
   // firmDraft above (same firmProfile record, different field + save call).
-  const [portalDraft, setPortalDraft] = useState('')
+  const [portalDraft, setPortalDraft] = useState<string[]>([])
   const [portalBusy, setPortalBusy] = useState(false)
   const [portalSaved, setPortalSaved] = useState(false)
   const [portalError, setPortalError] = useState<string | null>(null)
 
   const [attorneySettings, setAttorneySettings] = useState<AssistantSettings | null>(null)
-  const [attorneyDraft, setAttorneyDraft] = useState('')
+  const [attorneyDraft, setAttorneyDraft] = useState<string[]>([])
   const [attorneyBusy, setAttorneyBusy] = useState(false)
   const [attorneySaved, setAttorneySaved] = useState(false)
   const [attorneyError, setAttorneyError] = useState<string | null>(null)
@@ -125,8 +147,8 @@ export default function AssistantSettingsPage(): React.ReactElement {
     callAttorneyMcp<{ profile: FirmProfile }>({ toolName: 'legal.settings.firm_profile.get' })
       .then((r) => {
         setFirmProfile(r.profile)
-        setFirmDraft(r.profile.assistantInstructions ?? '')
-        setPortalDraft(r.profile.portalAssistantInstructions ?? '')
+        setFirmDraft(toItems(r.profile.assistantInstructions))
+        setPortalDraft(toItems(r.profile.portalAssistantInstructions))
       })
       .catch((e) => {
         const msg = e instanceof Error ? e.message : String(e)
@@ -139,7 +161,7 @@ export default function AssistantSettingsPage(): React.ReactElement {
     })
       .then((r) => {
         setAttorneySettings(r.settings ?? {})
-        setAttorneyDraft(r.settings?.customInstructions ?? '')
+        setAttorneyDraft(toItems(r.settings?.customInstructions))
       })
       .catch((e) => setAttorneyError(e instanceof Error ? e.message : String(e)))
 
@@ -162,10 +184,10 @@ export default function AssistantSettingsPage(): React.ReactElement {
     try {
       const r = await callAttorneyMcp<{ profile: FirmProfile }>({
         toolName: 'legal.settings.firm_profile.set',
-        input: { assistantInstructions: firmDraft.trim() },
+        input: { assistantInstructions: firmDraft },
       })
       setFirmProfile(r.profile)
-      setFirmDraft(r.profile.assistantInstructions ?? '')
+      setFirmDraft(toItems(r.profile.assistantInstructions))
       setFirmSaved(true)
       setTimeout(() => setFirmSaved(false), 2000)
     } catch (e) {
@@ -181,10 +203,10 @@ export default function AssistantSettingsPage(): React.ReactElement {
     try {
       const r = await callAttorneyMcp<{ profile: FirmProfile }>({
         toolName: 'legal.settings.firm_profile.set',
-        input: { portalAssistantInstructions: portalDraft.trim() },
+        input: { portalAssistantInstructions: portalDraft },
       })
       setFirmProfile(r.profile)
-      setPortalDraft(r.profile.portalAssistantInstructions ?? '')
+      setPortalDraft(toItems(r.profile.portalAssistantInstructions))
       setPortalSaved(true)
       setTimeout(() => setPortalSaved(false), 2000)
     } catch (e) {
@@ -200,14 +222,14 @@ export default function AssistantSettingsPage(): React.ReactElement {
     try {
       const nextSettings: AssistantSettings = {
         ...(attorneySettings ?? {}),
-        customInstructions: attorneyDraft.trim(),
+        customInstructions: attorneyDraft,
       }
       await callAttorneyMcp({
         toolName: 'legal.assistant.settings_set',
         input: { settings: nextSettings },
       })
       setAttorneySettings(nextSettings)
-      setAttorneyDraft(nextSettings.customInstructions ?? '')
+      setAttorneyDraft(toItems(nextSettings.customInstructions))
       setAttorneySaved(true)
       setTimeout(() => setAttorneySaved(false), 2000)
     } catch (e) {
@@ -312,23 +334,22 @@ export default function AssistantSettingsPage(): React.ReactElement {
           <SettingsLoading />
         ) : (
           <>
-            <textarea
-              className="li-set-textarea"
-              rows={5}
-              maxLength={INSTRUCTIONS_CHAR_CAP}
-              placeholder="e.g. Always CC my paralegal, paralegal@ourfirm.com, on client emails."
-              value={firmDraft}
-              onChange={(e) => {
-                setFirmDraft(e.target.value)
+            <TagInput
+              values={firmDraft}
+              onChange={(next) => {
+                setFirmDraft(next)
                 setFirmSaved(false)
               }}
+              placeholder="e.g. Always CC my paralegal, paralegal@ourfirm.com, on client emails. Press Enter to add."
+              maxItemChars={INSTRUCTIONS_ITEM_CHAR_CAP}
+              maxItems={INSTRUCTIONS_MAX_ITEMS}
             />
-            <CharCount text={firmDraft} />
+            <ItemCount items={firmDraft} />
             <div className="li-set-actions-row">
               <button
                 className="li-set-btn li-set-btn-primary"
                 onClick={saveFirm}
-                disabled={firmBusy || firmDraft.length > INSTRUCTIONS_CHAR_CAP}
+                disabled={firmBusy}
               >
                 {firmBusy ? 'Saving…' : 'Save firm instructions'}
               </button>
@@ -348,23 +369,22 @@ export default function AssistantSettingsPage(): React.ReactElement {
           <SettingsLoading />
         ) : (
           <>
-            <textarea
-              className="li-set-textarea"
-              rows={5}
-              maxLength={INSTRUCTIONS_CHAR_CAP}
-              placeholder="e.g. Keep drafts short. Flag anything touching immigration status for my review."
-              value={attorneyDraft}
-              onChange={(e) => {
-                setAttorneyDraft(e.target.value)
+            <TagInput
+              values={attorneyDraft}
+              onChange={(next) => {
+                setAttorneyDraft(next)
                 setAttorneySaved(false)
               }}
+              placeholder="e.g. Keep drafts short. Flag anything touching immigration status for my review. Press Enter to add."
+              maxItemChars={INSTRUCTIONS_ITEM_CHAR_CAP}
+              maxItems={INSTRUCTIONS_MAX_ITEMS}
             />
-            <CharCount text={attorneyDraft} />
+            <ItemCount items={attorneyDraft} />
             <div className="li-set-actions-row">
               <button
                 className="li-set-btn li-set-btn-primary"
                 onClick={saveAttorney}
-                disabled={attorneyBusy || attorneyDraft.length > INSTRUCTIONS_CHAR_CAP}
+                disabled={attorneyBusy}
               >
                 {attorneyBusy ? 'Saving…' : 'Save my instructions'}
               </button>
@@ -388,23 +408,22 @@ export default function AssistantSettingsPage(): React.ReactElement {
           <SettingsLoading />
         ) : (
           <>
-            <textarea
-              className="li-set-textarea"
-              rows={5}
-              maxLength={INSTRUCTIONS_CHAR_CAP}
-              placeholder="e.g. Mention our office closes at 5pm ET and reopens at 9am the next business day."
-              value={portalDraft}
-              onChange={(e) => {
-                setPortalDraft(e.target.value)
+            <TagInput
+              values={portalDraft}
+              onChange={(next) => {
+                setPortalDraft(next)
                 setPortalSaved(false)
               }}
+              placeholder="e.g. Mention our office closes at 5pm ET and reopens at 9am the next business day. Press Enter to add."
+              maxItemChars={INSTRUCTIONS_ITEM_CHAR_CAP}
+              maxItems={INSTRUCTIONS_MAX_ITEMS}
             />
-            <CharCount text={portalDraft} />
+            <ItemCount items={portalDraft} />
             <div className="li-set-actions-row">
               <button
                 className="li-set-btn li-set-btn-primary"
                 onClick={savePortal}
-                disabled={portalBusy || portalDraft.length > INSTRUCTIONS_CHAR_CAP}
+                disabled={portalBusy}
               >
                 {portalBusy ? 'Saving…' : 'Save client portal instructions'}
               </button>
