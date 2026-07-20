@@ -163,7 +163,7 @@ export default function EsignPage() {
           onClick={() => router.push('/attorney/esign/new')}
         >
           <PlusIcon size={16} />
-          New envelope
+          New Envelope
         </button>
       </div>
 

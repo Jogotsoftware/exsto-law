@@ -45,7 +45,7 @@ export default function PortalSignList() {
   return (
     <div className="li-cp-shell">
       <div className="li-cp-main">
-        <h1 className="li-cp-h1">Documents to sign</h1>
+        <h1 className="li-cp-h1">Documents To Sign</h1>
         {sigs.length === 0 ? (
           <section className="li-cp-card li-cp-list">
             <div className="li-cp-empty-row">You have no documents awaiting your signature.</div>

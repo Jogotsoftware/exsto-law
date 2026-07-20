@@ -102,7 +102,7 @@ export default function UsersRolesPage(): React.ReactElement {
   return (
     <>
       <SettingsHeader
-        title="Users & roles"
+        title="Users & Roles"
         actions={
           me?.isAdmin ? (
             <button className="li-set-btn li-set-btn-primary" onClick={() => setShowInvite(true)}>

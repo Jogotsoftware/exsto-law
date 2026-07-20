@@ -9,7 +9,7 @@ export default function SignStatusPage({ params }: { params: Promise<{ envelopeI
   const { envelopeId } = use(params)
   return (
     <div className="page">
-      <h1>Signing status</h1>
+      <h1>Signing Status</h1>
       <EnvelopeStatusView envelopeId={envelopeId} />
     </div>
   )

@@ -776,7 +776,7 @@ function DocumentCard({
               disabled={signing}
               title="Send this document for e-signature"
             >
-              <SignatureIcon size={12} /> {signing ? 'Saving…' : 'Send for signature'}
+              <SignatureIcon size={12} /> {signing ? 'Saving…' : 'Send For Signature'}
             </button>
           </>
         )}
@@ -3190,7 +3190,7 @@ export function UnifiedAssistantChat({
           for signature (prepare_envelope) — the REAL wizard opens on it directly;
           the attorney confirms signers/fields and clicks Send there. ─────────── */}
       {envelopePrepare && (
-        <Modal title="Send for signature" onClose={() => setEnvelopePrepare(null)} size="wide">
+        <Modal title="Send For Signature" onClose={() => setEnvelopePrepare(null)} size="wide">
           {envelopePrepare.status !== 'approved' && (
             <p className="li-modal-muted" style={{ marginTop: 0 }}>
               This version is not yet approved — you can still send it for signature.

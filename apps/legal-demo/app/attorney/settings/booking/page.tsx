@@ -156,7 +156,7 @@ export default function BookingPage(): React.ReactElement {
 
   return (
     <>
-      <SettingsHeader title="Booking rules" />
+      <SettingsHeader title="Booking Rules" />
       {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
 
       {!bookingRules ? (

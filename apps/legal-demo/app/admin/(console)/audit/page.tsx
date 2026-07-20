@@ -29,7 +29,7 @@ export default function AdminAuditPage() {
 
   return (
     <main style={{ maxWidth: 1040 }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Control-plane audit</h1>
+      <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--space-1)' }}>Control-Plane Audit</h1>
       <p style={{ color: 'var(--muted)', marginTop: 0 }}>
         Every cross-tenant control-plane operation: who did what, against which tenant.
       </p>

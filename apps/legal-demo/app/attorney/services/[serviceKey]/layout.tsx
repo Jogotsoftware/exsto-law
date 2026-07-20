@@ -139,7 +139,7 @@ export default function ServiceEditorLayout({ children }: { children: React.Reac
           Back to services
         </Link>
         <div className="li-svc-head">
-          <h1 className="li-svc-title">New service</h1>
+          <h1 className="li-svc-title">New Service</h1>
         </div>
         {children}
       </main>

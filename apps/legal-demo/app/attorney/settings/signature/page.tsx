@@ -88,7 +88,7 @@ export default function SignaturePage(): React.ReactElement {
 
   return (
     <>
-      <SettingsHeader title="Email signature" />
+      <SettingsHeader title="Email Signature" />
       {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
       {saved && (
         <SettingsAlert tone="success">Saved. New emails will use this signature.</SettingsAlert>

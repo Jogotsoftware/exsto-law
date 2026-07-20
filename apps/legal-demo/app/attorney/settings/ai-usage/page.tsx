@@ -115,7 +115,7 @@ export default function AiUsagePage(): React.ReactElement {
 
   return (
     <>
-      <SettingsHeader title="AI usage" />
+      <SettingsHeader title="AI Usage" />
       <Tabs
         ariaLabel="Usage window"
         tabs={WINDOW_TABS}

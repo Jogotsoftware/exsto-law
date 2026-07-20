@@ -102,7 +102,7 @@ export default function InvoiceTemplatePage(): React.ReactElement {
 
   return (
     <>
-      <SettingsHeader title="Invoice template" />
+      <SettingsHeader title="Invoice Template" />
       {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
 
       {!cfg ? (

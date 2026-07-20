@@ -12604,20 +12604,22 @@ input[type='number'] {
 .li-svc-tabs {
   margin-bottom: 22px;
 }
-/* Canonical underline metrics (matches .nav-tabs.li-crm-tabs / .li-tabs). */
+/* Padded rhythm + gold active underline, matching the comp's serviceTabs
+   spec (legal-instruments.dc.html) — distinct from li-crm-tabs' wide-gap
+   underline-only look. */
 .li-svc-tabs .nav-tabs {
   display: flex;
-  gap: 28px;
-  border-bottom: 1px solid var(--li-border);
+  gap: 2px;
+  border-bottom: 1px solid #e1e6f0;
   margin: 0;
 }
 .li-svc-tabs .nav-tabs a {
   background: transparent;
   border: none;
-  padding: 0 0 12px;
-  font-size: 15px;
+  padding: 11px 15px;
+  font-size: 14px;
   font-weight: 500;
-  color: var(--li-muted);
+  color: var(--li-muted-2);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }
@@ -12628,7 +12630,7 @@ input[type='number'] {
 .li-svc-tabs .nav-tabs a.is-active {
   font-weight: 700;
   color: var(--li-navy);
-  border-bottom-color: var(--li-navy);
+  border-bottom-color: var(--li-gold);
 }
 
 .li-svc-airail {
@@ -13764,17 +13766,21 @@ fieldset.li-svc-fieldset legend {
 
 /* Tab strip — scoped to .nav-tabs.li-mat-tabs so the CRM/service-editor's
    .nav-tabs default look is untouched (NavTabs className is additive). */
-/* Canonical underline metrics (matches .nav-tabs.li-crm-tabs / .li-tabs). */
+/* Padded rhythm + gold active underline, matching the comp's matterTabs
+   spec (legal-instruments.dc.html) — distinct from li-crm-tabs' wide-gap
+   underline-only look. display:flex was missing here, which left the tabs
+   in inline text flow instead of an evenly gapped row. */
 .nav-tabs.li-mat-tabs {
-  gap: 28px;
-  border-bottom: 1px solid var(--li-border-input);
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #e1e6f0;
   margin-bottom: 22px;
 }
 .nav-tabs.li-mat-tabs a {
-  padding: 0 0 12px;
-  font-size: 15px;
+  padding: 11px 16px;
+  font-size: 14px;
   font-weight: 500;
-  color: var(--li-muted);
+  color: var(--li-muted-2);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }
@@ -13785,7 +13791,7 @@ fieldset.li-svc-fieldset legend {
 .nav-tabs.li-mat-tabs a.is-active {
   color: var(--li-navy);
   font-weight: 700;
-  border-bottom-color: var(--li-navy);
+  border-bottom-color: var(--li-gold);
 }
 
 /* ── Shared card shell (Overview / Activity / Documents / Tasks / Billing) ── */
@@ -15776,7 +15782,7 @@ fieldset.li-svc-fieldset legend {
   font-size: 15px;
   font-weight: 500;
   font-family: inherit;
-  color: var(--li-muted);
+  color: var(--li-muted-2);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   cursor: pointer;
@@ -15790,7 +15796,7 @@ fieldset.li-svc-fieldset legend {
 .li-tabs .li-tabs-tab.is-active:hover:not(:disabled) {
   font-weight: 700;
   color: var(--li-navy);
-  border-bottom-color: var(--li-navy);
+  border-bottom-color: var(--li-gold);
 }
 .li-tabs .li-tabs-tab:focus-visible {
   outline: none;
@@ -16307,7 +16313,7 @@ fieldset.li-svc-fieldset legend {
 .nav-tabs.li-crm-tabs a.is-active {
   font-weight: 700;
   color: var(--li-navy);
-  border-bottom-color: var(--li-navy);
+  border-bottom-color: var(--li-gold);
 }
 
 /* ── List header + toolbar ───────────────────────────────────────────────── */
