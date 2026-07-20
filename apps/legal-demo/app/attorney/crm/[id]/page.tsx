@@ -14,6 +14,15 @@
 // stub) — kept per the WP-C precedent ("AI review kept... real, pre-existing
 // capability the comp doesn't show"), just housed in its own panel here rather
 // than dropped.
+//
+// WP B3 (founder-approved, comp parity): the client's website is now real
+// (client_website attribute, migration 0172 — PLANNED, not yet applied). The
+// comp computes a `crmWebsite` value for this screen but never renders it
+// anywhere in the CRM CLIENT DETAIL markup (dead in the comp itself) — so this
+// adds a website subtitle line under the name (when set, a clickable external
+// link) plus an editable field in the edit card, in the comp's visual idiom
+// rather than a literal comp element. The Billing stat card is UNCHANGED here
+// (only the CRM LIST's column swapped to Website — see crm/page.tsx).
 
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -22,7 +31,7 @@ import { BackButton } from '@/components/BackButton'
 import { NotesSection } from '@/components/NotesSection'
 import { BriefButton } from '@/components/BriefButton'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
-import { MailIcon, CalendarIcon, EditIcon } from '@/components/icons'
+import { MailIcon, CalendarIcon, EditIcon, GlobeIcon } from '@/components/icons'
 import { CRM_STATUS_META, crmInitials, formatCrmDate, type CrmBucket } from '@/lib/crmStatus'
 
 type BillingType = '' | 'hourly' | 'fixed'
@@ -47,6 +56,7 @@ interface ClientDetail {
   name: string
   billableRate: string | null
   billingType: string | null
+  website: string | null
   portalSchedulingBillable?: boolean
   mainContactId: string | null
   mainContactName: string | null
@@ -67,6 +77,13 @@ function billingLabel(c: ClientDetail): string {
   if (!c.billingType) return 'Not set'
   const rate = c.billableRate ? ` · $${c.billableRate}` : ''
   return c.billingType === 'hourly' ? `Hourly${rate}` : `Fixed${rate}`
+}
+
+// WP B3: the stored value is free text (attorney-entered, no format enforced
+// by the handler) — add a scheme only for the href so a bare domain like
+// "acme.com" still opens correctly; the visible label stays exactly as typed.
+function websiteHref(website: string): string {
+  return /^https?:\/\//i.test(website) ? website : `https://${website}`
 }
 
 // Same 5-way dot as the matter list/detail (li-mat-status), read here to color
@@ -103,9 +120,17 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     name: string
     billingType: BillingType
     rate: string
+    website: string
     mainContactId: string
     portalSchedulingBillable: boolean
-  }>({ name: '', billingType: '', rate: '', mainContactId: '', portalSchedulingBillable: false })
+  }>({
+    name: '',
+    billingType: '',
+    rate: '',
+    website: '',
+    mainContactId: '',
+    portalSchedulingBillable: false,
+  })
 
   const load = useCallback(() => {
     callAttorneyMcp<{ client: ClientDetail | null }>({
@@ -126,6 +151,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       name: client.name ?? '',
       billingType: (client.billingType as BillingType) ?? '',
       rate: client.billableRate ?? '',
+      website: client.website ?? '',
       mainContactId: client.mainContactId ?? '',
       portalSchedulingBillable: Boolean(client.portalSchedulingBillable),
     })
@@ -156,6 +182,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       }
       if (form.mainContactId) input.main_contact_id = form.mainContactId
       input.portal_scheduling_billable = form.portalSchedulingBillable
+      // Always sent (even blank): the update handler's resolveWebsiteOp treats
+      // an explicit blank as a clear, mirroring billable_rate/billing_type.
+      input.website = form.website.trim()
       await callAttorneyMcp({ toolName: 'legal.client.update', input })
       setEditing(false)
       load()
@@ -214,6 +243,17 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
               {statusMeta.label}
             </span>
           </div>
+          {client.website && (
+            <a
+              className="li-crm-detail-website"
+              href={websiteHref(client.website)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <GlobeIcon size={13} />
+              {client.website}
+            </a>
+          )}
         </div>
         <div className="li-crm-actions">
           {/* Brief engine WP3: the Client Brief door — same shared modal WP2
@@ -281,6 +321,14 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
                 />
               </label>
             )}
+            <label>
+              <span>Website</span>
+              <input
+                value={form.website}
+                onChange={(e) => setForm({ ...form, website: e.target.value })}
+                placeholder="acme.com"
+              />
+            </label>
             <label className="form-field" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input
                 type="checkbox"

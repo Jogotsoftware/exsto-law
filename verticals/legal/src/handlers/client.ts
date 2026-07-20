@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { insertAttribute, insertEntity, insertRelationship, lookupKindId } from './common.js'
+import { resolveWebsiteOp } from '../api/clientWebsite.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Client as parent (beta sprint Objective 1). legal.client.create makes a client
@@ -17,6 +18,10 @@ interface ClientCreatePayload {
   billable_rate?: string | null // decimal string (ADR 0044)
   billing_type?: 'hourly' | 'fixed' | null
   main_contact_id?: string | null
+  // WP B3: CRM comp parity — the client's own website (trimmed text, no
+  // validation here; the brief-research privacy guard does its own
+  // plausibility check before ever sending it outbound).
+  website?: string | null
   // Existing entities to re-parent under this new client.
   contact_ids?: string[]
   matter_ids?: string[]
@@ -49,6 +54,32 @@ async function setClientAttr(
     sourceType: 'human',
     sourceRef: args.actorId,
   })
+}
+
+// WP B3: client_website (migration 0172) is PLANNED, not yet applied at
+// review time — lookupKindId (via setClientAttr) throws "<table> kind not
+// found: <name>" when the attribute kind row doesn't exist yet for this
+// tenant. Every other client attribute is safe to write strictly (their kinds
+// have always existed), so this tolerant wrapper is scoped to client_website
+// only: swallow exactly that "not found" failure as a no-op rather than
+// failing the whole create/update action, and re-throw anything else.
+async function trySetClientAttr(
+  client: DbClient,
+  args: {
+    tenantId: string
+    actionId: string
+    actorId: string
+    entityId: string
+    kind: string
+    value: unknown
+  },
+): Promise<void> {
+  try {
+    await setClientAttr(client, args)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (!/kind not found/i.test(message)) throw err
+  }
 }
 
 async function attach(
@@ -137,6 +168,17 @@ registerActionHandler('legal.client.create', async (ctx, client, payload, action
       value: p.main_contact_id,
     })
   }
+  const websiteOp = resolveWebsiteOp(p.website, false)
+  if (websiteOp.op === 'set') {
+    await trySetClientAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: clientEntityId,
+      kind: 'client_website',
+      value: websiteOp.value,
+    })
+  }
 
   for (const contactId of p.contact_ids ?? []) {
     await attach(client, {
@@ -166,6 +208,9 @@ interface ClientUpdatePayload {
   billable_rate?: string | null
   billing_type?: 'hourly' | 'fixed' | null
   main_contact_id?: string | null
+  // WP B3: an explicit blank clears it (resolveWebsiteOp), same as
+  // billable_rate/billing_type below.
+  website?: string | null
   // Optional re-parenting of an existing contact/matter under this client.
   attach_contact_id?: string | null
   attach_matter_id?: string | null
@@ -196,6 +241,21 @@ registerActionHandler('legal.client.update', async (ctx, client, payload, action
       entityId: p.client_entity_id,
       kind: u.kind,
       value: u.value,
+    })
+  }
+
+  // WP B3: kept out of the strict `updates` loop above — client_website
+  // (migration 0172) may not exist yet for this tenant, and trySetClientAttr
+  // is the one place that tolerates that.
+  const websiteOp = resolveWebsiteOp(p.website, true)
+  if (websiteOp.op !== 'skip') {
+    await trySetClientAttr(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      actorId: ctx.actorId,
+      entityId: p.client_entity_id,
+      kind: 'client_website',
+      value: websiteOp.op === 'set' ? websiteOp.value : '',
     })
   }
 

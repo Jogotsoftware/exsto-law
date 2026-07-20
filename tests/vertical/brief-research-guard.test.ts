@@ -4,6 +4,12 @@
 // caller widens the input object with matter/evidence-shaped fields — and
 // every outbound query string the guard can ever produce is templated from
 // PublicIdentifiers only and fully recorded (returned + audit-eventable).
+//
+// WP B3 adds a real source for `website` (client_website attribute) — the
+// tests below extend the SAME proofs: extractPublicIdentifiers normalizes/
+// plausibility-checks it (junk never passes through, exactly like the closed-
+// type discipline for every other field), and the closed-set/poison tests
+// cover it too.
 import { describe, expect, it } from 'vitest'
 import {
   buildBriefResearchQueries,
@@ -119,10 +125,86 @@ describe('extractPublicIdentifiers', () => {
     })
   })
 
+  it('WP B3: THE PROOF extends to a poisoned website field — matter content smuggled through website is dropped, a real website still passes', () => {
+    // Same attack shape as above, but targeting the field WP B3 just added a
+    // real source for: a caller sets `website` to matter-derived content
+    // (never a plausible domain/URL) alongside legitimate identifiers.
+    const poisoned = {
+      name: 'Acme Widgets LLC',
+      contacts: [{ fullName: 'Jane Doe', isMain: true }],
+      website: 'CONFIDENTIAL: the settlement amount is $50,000, do not disclose',
+    } as unknown as ClientProfileFields
+
+    const ids = extractPublicIdentifiers(poisoned)
+    const serialized = JSON.stringify(ids)
+    expect(serialized).not.toContain('CONFIDENTIAL')
+    expect(serialized).not.toContain('50,000')
+    expect(ids.website).toBeUndefined()
+    expect(ids).toEqual({
+      clientDisplayName: 'Acme Widgets LLC',
+      companyName: 'Acme Widgets LLC',
+      personName: 'Jane Doe',
+    })
+
+    // Sanity check: a REAL website on the same profile still passes — the
+    // guard rejects implausible junk, not the field itself.
+    const clean = extractPublicIdentifiers({ ...poisoned, website: 'acme.com' })
+    expect(clean.website).toBe('acme.com')
+  })
+
   it('handles a client with no contacts on file (no personName, never a throw)', () => {
     const ids = extractPublicIdentifiers({ name: 'Acme LLC', contacts: [] })
     expect(ids.personName).toBeUndefined()
     expect(ids.companyName).toBe('Acme LLC')
+  })
+
+  // ── WP B3: website passthrough + normalization ─────────────────────────────
+
+  it('passes through a plausible bare domain, trimmed', () => {
+    const ids = extractPublicIdentifiers({
+      name: 'Acme LLC',
+      contacts: [],
+      website: '  acme.com  ',
+    })
+    expect(ids.website).toBe('acme.com')
+  })
+
+  it('strips a trailing slash', () => {
+    const ids = extractPublicIdentifiers({
+      name: 'Acme LLC',
+      contacts: [],
+      website: 'https://acme.com/',
+    })
+    expect(ids.website).toBe('https://acme.com')
+  })
+
+  it('accepts a domain with a path', () => {
+    const ids = extractPublicIdentifiers({
+      name: 'Acme LLC',
+      contacts: [],
+      website: 'acme.com/about',
+    })
+    expect(ids.website).toBe('acme.com/about')
+  })
+
+  it('omits a junk website — never passes through unparseable input', () => {
+    for (const junk of [
+      'not a website',
+      'CONFIDENTIAL: see matter notes',
+      'just some text',
+      '   ',
+      '',
+    ]) {
+      const ids = extractPublicIdentifiers({ name: 'Acme LLC', contacts: [], website: junk })
+      expect(ids.website).toBeUndefined()
+    }
+  })
+
+  it('omits website when absent or null on the profile (never a throw)', () => {
+    expect(extractPublicIdentifiers({ name: 'Acme LLC', contacts: [] }).website).toBeUndefined()
+    expect(
+      extractPublicIdentifiers({ name: 'Acme LLC', contacts: [], website: null }).website,
+    ).toBeUndefined()
   })
 })
 
@@ -141,6 +223,25 @@ describe('sanitizePublicIdentifiers', () => {
   it('drops blank optional fields rather than carrying empty strings', () => {
     const out = sanitizePublicIdentifiers({ clientDisplayName: 'Jane Doe', companyName: '  ' })
     expect(out).toEqual({ clientDisplayName: 'Jane Doe' })
+  })
+
+  it('WP B3: website is in the closed set — a legitimate website passes belt-and-suspenders sanitize', () => {
+    const out = sanitizePublicIdentifiers({
+      clientDisplayName: 'Acme LLC',
+      website: 'acme.com',
+    })
+    expect(out).toEqual({ clientDisplayName: 'Acme LLC', website: 'acme.com' })
+  })
+
+  it('WP B3: a poisoned object carrying website alongside an out-of-set key still drops only the out-of-set key', () => {
+    const widened = {
+      clientDisplayName: 'Acme LLC',
+      website: 'acme.com',
+      matterSecret: 'CONFIDENTIAL',
+    } as unknown as PublicIdentifiers
+    const out = sanitizePublicIdentifiers(widened)
+    expect(out).toEqual({ clientDisplayName: 'Acme LLC', website: 'acme.com' })
+    expect(JSON.stringify(out)).not.toContain('CONFIDENTIAL')
   })
 })
 
@@ -183,6 +284,36 @@ describe('buildBriefResearchQueries', () => {
     } as unknown as PublicIdentifiers
     const queries = buildBriefResearchQueries(poisoned)
     for (const q of queries) expect(q.query).not.toContain('CONFIDENTIAL')
+  })
+
+  it('WP B3: appends the website to the business query when present', () => {
+    const queries = buildBriefResearchQueries({
+      clientDisplayName: 'Acme LLC',
+      companyName: 'Acme LLC',
+      website: 'acme.com',
+    })
+    const businessQuery = queries.find((q) => q.kind === 'business')!
+    expect(businessQuery.query).toContain('Their website is acme.com.')
+  })
+
+  it('WP B3: omits the website clause when not present (no dangling text)', () => {
+    const queries = buildBriefResearchQueries({
+      clientDisplayName: 'Acme LLC',
+      companyName: 'Acme LLC',
+    })
+    const businessQuery = queries.find((q) => q.kind === 'business')!
+    expect(businessQuery.query).not.toContain('Their website')
+  })
+
+  it('WP B3: the website clause never rides on the person query (name-only, decision 2)', () => {
+    const queries = buildBriefResearchQueries({
+      clientDisplayName: 'Acme LLC',
+      companyName: 'Acme LLC',
+      personName: 'Jane Doe',
+      website: 'acme.com',
+    })
+    const personQuery = queries.find((q) => q.kind === 'person')!
+    expect(personQuery.query).not.toContain('website')
   })
 })
 

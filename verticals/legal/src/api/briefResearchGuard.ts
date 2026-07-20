@@ -48,11 +48,12 @@ import type { EvidenceSection } from './briefEvidence.js'
  * The ONLY shape that may ever reach an external research call for a Client
  * Brief. Every field is a bare public identifier — nothing here can carry a
  * matter fact, a quote from a client email, a note body, or any other
- * firm-internal content. `personName` and `website`/`linkedinUrl` are
- * currently populated only when the underlying client-profile field exists
- * (website/linkedinUrl have no source field today — reserved for a future
- * client-profile attribute; `linkedinUrl` is otherwise filled by a MATCHED
- * research result, never accepted as an input).
+ * firm-internal content. `website` is populated from the real client_website
+ * attribute (WP B3, migration 0172) — normalized and plausibility-checked by
+ * extractPublicIdentifiers (see there) before it ever rides on this type;
+ * junk input is OMITTED, never passed through. `linkedinUrl` remains
+ * reserved — no client-profile source field exists for it; it is otherwise
+ * filled only by a MATCHED research result, never accepted as an input.
  */
 export interface PublicIdentifiers {
   /** The client's own display name, as entered on the client profile. */
@@ -61,7 +62,9 @@ export interface PublicIdentifiers {
   companyName?: string
   /** The primary contact's name — decision 2's "quick person search," name-only. */
   personName?: string
-  /** Reserved: no client-profile source field exists yet. */
+  /** The client's own website, from the client profile — trimmed, trailing
+   *  slash stripped, and only when it plausibly parses as a domain/URL (see
+   *  extractPublicIdentifiers's normalizeWebsite). */
   website?: string
   /** Reserved: an input only in the sense of "already confidently known"; research never receives this as a search seed today. */
   linkedinUrl?: string
@@ -93,16 +96,20 @@ export function sanitizePublicIdentifiers(ids: PublicIdentifiers): PublicIdentif
 /**
  * The narrow, DB-agnostic shape the extractor reads from. Deliberately has NO
  * field that could carry matter rows, communications, notes, or evidence —
- * only the client's own display name and its contacts' names. Callers (
- * clientBriefEngine.ts's loadPublicIdentifiers) must narrow whatever richer
- * object they loaded (e.g. queries/client.ts's ClientDetail, which also
- * carries matters/billing) down to exactly this shape before calling
- * extractPublicIdentifiers — the type boundary is what makes passing a wider,
- * matter-shaped object here a compile error rather than a runtime hazard.
+ * only the client's own display name, its contacts' names, and (WP B3) its
+ * own website. Callers (clientBriefEngine.ts's loadPublicIdentifiers) must
+ * narrow whatever richer object they loaded (e.g. queries/client.ts's
+ * ClientDetail, which also carries matters/billing) down to exactly this
+ * shape before calling extractPublicIdentifiers — the type boundary is what
+ * makes passing a wider, matter-shaped object here a compile error rather
+ * than a runtime hazard.
  */
 export interface ClientProfileFields {
   name: string
   contacts: Array<{ fullName: string; isMain?: boolean }>
+  /** The client_website attribute, as stored (untrimmed, unvalidated) — see
+   *  normalizeWebsite for what extractPublicIdentifiers does with it. */
+  website?: string | null
 }
 
 // Common U.S. business-entity suffixes. A conservative allowlist — a false
@@ -116,8 +123,28 @@ export function isLikelyBusinessName(name: string): boolean {
   return BUSINESS_SUFFIX_RE.test(name.trim())
 }
 
-/** Reads ONLY `profile.name` and `profile.contacts[].fullName/.isMain` — see
- * the module header for why that is the whole privacy guarantee. */
+// A conservative domain/URL plausibility check (WP B3) — deliberately not a
+// full RFC 3986/URL parse. Accepts a bare domain (acme.com), a domain with a
+// path (acme.com/about), or a full http(s) URL. Same asymmetric-risk logic as
+// isLikelyBusinessName: a false negative just omits the website from the
+// query (safe — no research is not a privacy problem); a false positive would
+// still only ever send a short public-looking string, never client content.
+const PLAUSIBLE_WEBSITE_RE =
+  /^(https?:\/\/)?([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(\/\S*)?$/i
+
+/** Trims, strips a trailing slash, and returns undefined for anything that
+ * doesn't plausibly parse as a domain/URL — junk NEVER passes through to
+ * PublicIdentifiers.website (and therefore never reaches an outbound query). */
+function normalizeWebsite(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined
+  const trimmed = raw.trim().replace(/\/+$/, '')
+  if (!trimmed || !PLAUSIBLE_WEBSITE_RE.test(trimmed)) return undefined
+  return trimmed
+}
+
+/** Reads ONLY `profile.name`, `profile.contacts[].fullName/.isMain`, and
+ * `profile.website` — see the module header for why that is the whole
+ * privacy guarantee. */
 export function extractPublicIdentifiers(profile: ClientProfileFields): PublicIdentifiers {
   const clientDisplayName = (profile.name ?? '').trim()
   const mainContact = profile.contacts.find((c) => c.isMain) ?? profile.contacts[0] ?? null
@@ -126,6 +153,7 @@ export function extractPublicIdentifiers(profile: ClientProfileFields): PublicId
     clientDisplayName,
     companyName: isLikelyBusinessName(clientDisplayName) ? clientDisplayName : undefined,
     personName,
+    website: normalizeWebsite(profile.website),
   })
 }
 
@@ -143,12 +171,18 @@ export interface RecordedResearchQuery {
 export function buildBriefResearchQueries(ids: PublicIdentifiers): RecordedResearchQuery[] {
   const queries: RecordedResearchQuery[] = []
   if (ids.companyName) {
+    // WP B3: when the client's own website is on file, tell the research
+    // model directly — it disambiguates same-named companies far better than
+    // asking it to guess, and it's still just the client's own public
+    // identifier, templated in exactly like companyName.
+    const websiteClause = ids.website ? ` Their website is ${ids.website}.` : ''
     queries.push({
       kind: 'business',
       query:
         `${ids.companyName}: what does this company do, what industry, roughly what size, ` +
         'and any public profile (official website, notable public information). If there are ' +
-        'multiple companies with a similar name, say so rather than guessing which one.',
+        'multiple companies with a similar name, say so rather than guessing which one.' +
+        websiteClause,
     })
   }
   if (ids.personName) {
