@@ -23,6 +23,7 @@ import {
   REPLY_LANGUAGE,
   CHAT_VOICE,
   portalLocaleLine,
+  buildPortalInstructionsBlock,
 } from './assistantPrompt.js'
 
 // PORTAL-1 (WP5) — the portal chatbot: same brain (the Claude adapter's chat
@@ -53,7 +54,19 @@ const MAX_HISTORY_TURNS = 12
 // (ask-vs-guess, no invented facts, reply language, chat voice) are imported from
 // assistantPrompt.ts so both surfaces carry ONE canonical wording. Jurisdiction
 // discipline is attorney-only — the portal bot does not draft or state law.
-export function buildBaseSystem(firmName: string, locale?: 'en' | 'es'): string {
+// WP FB-B2 — `portalInstructions` is the firm's own standing, client-safe
+// guidance (Settings → Assistant → "Client portal instructions",
+// portal_assistant_instructions off the firm_profile singleton, migration
+// 0178). It is a SEPARATE field from FB-B's internal assistant_instructions /
+// per-attorney customInstructions — those never reach this function, so the
+// portal structurally cannot see them. Composed via buildPortalInstructionsBlock
+// (assistantPrompt.ts) so the fence wording is defined in exactly one place;
+// omitted entirely when unset, same empty-safe posture as every other block here.
+export function buildBaseSystem(
+  firmName: string,
+  locale?: 'en' | 'es',
+  portalInstructions?: string,
+): string {
   return [
     `You are ${firmName}'s client portal assistant, chatting with a signed-in client of the firm.
 
@@ -69,6 +82,7 @@ When the client wants something new: if it matches a service the firm offers onl
     REPLY_LANGUAGE,
     portalLocaleLine(locale),
     CHAT_VOICE,
+    buildPortalInstructionsBlock(portalInstructions),
     'Keep replies short, warm, and in plain language.',
   ]
     .filter(Boolean)
@@ -318,7 +332,11 @@ export async function* clientAssistantChatStream(
   const skill = await getSkillBySlug(ctx, 'client-portal.portal-assistant')
   const firmSettings = await getTenantSettingsForMerge(ctx)
   const system = [
-    buildBaseSystem(firmSettings.firmName ?? 'the firm', input.locale),
+    buildBaseSystem(
+      firmSettings.firmName ?? 'the firm',
+      input.locale,
+      firmSettings.portalAssistantInstructions ?? undefined,
+    ),
     skill?.body ? `--- Firm guidance ---\n${skill.body}` : '',
     `--- Client ---\nYou are talking to ${who.displayName} (${who.email}).`,
   ]

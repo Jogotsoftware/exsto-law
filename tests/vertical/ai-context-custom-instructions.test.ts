@@ -5,11 +5,19 @@
 // into buildClaudeSystem, plus the email-prompt slot the same firm block fills
 // (generateEmail.ts). The client portal never receives either block —
 // client-facing, and firm instructions could leak internal guidance.
+// WP FB-B2 — a THIRD, independent slot: portal_assistant_instructions, a
+// SEPARATE client-safe field read ONLY by the client portal chat
+// (buildPortalInstructionsBlock / buildBaseSystem's portalInstructions param).
+// The tests below assert it is present/absent/clipped on the portal prompt the
+// same way the internal blocks are on the attorney prompt, AND that the two
+// internal fences (FIRM_HEADER / ATTORNEY_HEADER) never appear on the portal
+// side while the portal-only fence never appears on the attorney side.
 import { describe, it, expect } from 'vitest'
 import {
   buildClaudeSystem,
   buildCustomInstructionsBlock,
   buildFirmInstructionsBlock,
+  buildPortalInstructionsBlock,
   buildBaseSystem,
   loadEmailDraftingPrompt,
   type AssistantFirmFacts,
@@ -18,6 +26,8 @@ import {
 const FIRM_HEADER =
   '--- FIRM INSTRUCTIONS (standing guidance from this firm; follow unless it conflicts with the accuracy, no-invented-facts, or jurisdiction rules above) ---'
 const ATTORNEY_HEADER = "--- YOUR ATTORNEY'S INSTRUCTIONS ---"
+const PORTAL_HEADER =
+  '--- FIRM GUIDANCE FOR CLIENT CONVERSATIONS (standing guidance from this firm for talking with its clients; follow unless it conflicts with the accuracy or no-invented-facts rules) ---'
 
 describe('buildCustomInstructionsBlock — presence/absence', () => {
   it('empty string when both are unset', () => {
@@ -115,11 +125,85 @@ describe('buildClaudeSystem — FB-B injection into the attorney chat stable hal
   })
 })
 
-describe('the client portal never carries either instructions block', () => {
-  it('buildBaseSystem (portal) has no FB-B parameters and never emits the fence', () => {
+describe('the client portal never carries either INTERNAL instructions block', () => {
+  it('buildBaseSystem (portal) with no portal instructions never emits the internal fences', () => {
     const portal = buildBaseSystem('Acme Legal')
     expect(portal).not.toContain('FIRM INSTRUCTIONS')
     expect(portal).not.toContain(ATTORNEY_HEADER)
+  })
+
+  it('buildBaseSystem (portal) with portal instructions SET still never emits the internal fences', () => {
+    // The internal FIRM INSTRUCTIONS / attorney-instructions fences must never
+    // reach the portal even when the (separate, client-safe) portal block is
+    // populated — buildBaseSystem structurally has no parameter for the
+    // internal blocks at all, so this proves the wiring, not just the string.
+    const portal = buildBaseSystem('Acme Legal', undefined, 'Always mention our office hours.')
+    expect(portal).not.toContain('FIRM INSTRUCTIONS')
+    expect(portal).not.toContain(ATTORNEY_HEADER)
+    expect(portal).toContain(PORTAL_HEADER)
+  })
+})
+
+describe('buildPortalInstructionsBlock — WP FB-B2, presence/absence/clipping', () => {
+  it('empty string when unset', () => {
+    expect(buildPortalInstructionsBlock()).toBe('')
+    expect(buildPortalInstructionsBlock(undefined)).toBe('')
+    expect(buildPortalInstructionsBlock('')).toBe('')
+    expect(buildPortalInstructionsBlock('   ')).toBe('')
+  })
+
+  it('present when set', () => {
+    const out = buildPortalInstructionsBlock('Mention our office closes at 5pm.')
+    expect(out).toContain(PORTAL_HEADER)
+    expect(out).toContain('Mention our office closes at 5pm.')
+  })
+
+  it('clipped at 2,000 chars with a truncation marker', () => {
+    const long = 'p'.repeat(2500)
+    const out = buildPortalInstructionsBlock(long)
+    expect(out).toContain('p'.repeat(2000))
+    expect(out).not.toContain('p'.repeat(2001))
+    expect(out).toContain('…[truncated at 2000 characters]')
+  })
+
+  it('text at or under the cap is not marked truncated', () => {
+    const exact = 'q'.repeat(2000)
+    const out = buildPortalInstructionsBlock(exact)
+    expect(out).toContain(exact)
+    expect(out).not.toContain('truncated')
+  })
+})
+
+describe('buildBaseSystem (portal) — WP FB-B2 injection', () => {
+  it('omitted entirely when unset — byte-identical to the pre-FB-B2 call shape', () => {
+    const withoutParam = buildBaseSystem('Acme Legal')
+    const withExplicitEmpty = buildBaseSystem('Acme Legal', undefined, '')
+    expect(withoutParam).toBe(withExplicitEmpty)
+    expect(withoutParam).not.toContain(PORTAL_HEADER)
+  })
+
+  it('present when the firm has set portal instructions', () => {
+    const portal = buildBaseSystem('Acme Legal', undefined, 'Mention our office closes at 5pm.')
+    expect(portal).toContain(PORTAL_HEADER)
+    expect(portal).toContain('Mention our office closes at 5pm.')
+  })
+
+  it('lands after the ask-vs-guess / no-invented-facts rules (the fence says "the accuracy or no-invented-facts rules")', () => {
+    const portal = buildBaseSystem('Acme Legal', undefined, 'Mention our office closes at 5pm.')
+    expect(portal.indexOf('NO INVENTED MATTER FACTS')).toBeLessThan(portal.indexOf(PORTAL_HEADER))
+    expect(portal.indexOf("ASK, DON'T GUESS")).toBeLessThan(portal.indexOf(PORTAL_HEADER))
+  })
+})
+
+describe('attorney chat never carries the portal-only instructions block', () => {
+  it('buildClaudeSystem has no portal-instructions parameter and never emits the portal fence', () => {
+    const firm: AssistantFirmFacts = {
+      firmName: 'Acme Legal',
+      firmInstructions: 'Always CC my paralegal.',
+    }
+    const system = buildClaudeSystem('global', null, null, firm, '', '', 'Keep drafts short.')
+    expect(system).not.toContain(PORTAL_HEADER)
+    expect(system).not.toContain('FOR CLIENT CONVERSATIONS')
   })
 })
 

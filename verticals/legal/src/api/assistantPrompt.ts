@@ -108,8 +108,9 @@ export function portalLocaleLine(locale?: 'en' | 'es'): string {
 // why the fence says so explicitly and why this block is composed to land
 // AFTER those rules in the prompt (see buildClaudeSystem). Attorney chat only
 // (composeEmailDraft reuses buildFirmInstructionsBlock alone; the client
-// portal gets neither — client-facing, and firm instructions could leak
-// internal guidance to a client).
+// portal gets NEITHER of these two blocks — client-facing, and firm
+// instructions could leak internal guidance to a client. FB-B2 below gives the
+// portal its own, separate, client-safe instructions slot instead.)
 const CUSTOM_INSTRUCTIONS_CHAR_CAP = 2000
 
 function clipCustomInstructions(text: string): string {
@@ -146,6 +147,30 @@ export function buildCustomInstructionsBlock(
     parts.push(`${ATTORNEY_INSTRUCTIONS_HEADER}\n${clipCustomInstructions(attorneyText)}`)
   }
   return parts.join('\n\n')
+}
+
+// ── FB-B2 — custom instructions (client portal) ─────────────────────────────
+// A THIRD, independent free-text slot: the firm's standing guidance for the
+// CLIENT-FACING portal assistant (e.g. "mention our office closes at 5pm"),
+// set by an admin on the same firm_profile singleton (portal_assistant_
+// instructions, migration 0178) but read and injected ONLY by the portal chat
+// (clientAssistantChat.ts buildBaseSystem) — never the attorney chat and never
+// the email-drafting prompt. This is deliberately a SEPARATE field from
+// assistant_instructions (FB-B) rather than reusing it: FB-B's block is
+// internal guidance an attorney writes for their own tool, and letting that
+// leak into a client-facing conversation was the exact risk FB-B excluded the
+// portal to avoid. The header names it as guidance "for client conversations"
+// so its content is understood as client-safe from the moment it's written.
+const PORTAL_INSTRUCTIONS_HEADER =
+  '--- FIRM GUIDANCE FOR CLIENT CONVERSATIONS (standing guidance from this firm for talking with its clients; follow unless it conflicts with the accuracy or no-invented-facts rules) ---'
+
+// Empty-safe: '' in, '' out — a caller can always splice the result into the
+// portal prompt without a stray header. Same 2,000-char clip/truncation-marker
+// discipline as the internal blocks above.
+export function buildPortalInstructionsBlock(portalInstructions?: string): string {
+  const text = portalInstructions?.trim()
+  if (!text) return ''
+  return `${PORTAL_INSTRUCTIONS_HEADER}\n${clipCustomInstructions(text)}`
 }
 
 // Build the base (firm-agnostic apart from the facts passed in) system prompt

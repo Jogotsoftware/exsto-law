@@ -1,20 +1,26 @@
 'use client'
 
-// Settings → Assistant (WP FB-B — "the firm can finally talk back"). Two
-// independent free-text instruction slots, each with its own save button
-// (signature page's two-card pattern, not firm/page.tsx's single edit-toggle
-// form — these are two unrelated settings, not one record):
-//   1. Firm instructions — firm-wide, legal.settings.firm_profile.set
+// Settings → Assistant (WP FB-B — "the firm can finally talk back"; WP FB-B2
+// adds the portal's own instructions). Three independent free-text instruction
+// slots, each with its own save button (signature page's two-card pattern, not
+// firm/page.tsx's single edit-toggle form — these are unrelated settings, not
+// one record):
+//   1. Firm instructions — firm-wide, INTERNAL, legal.settings.firm_profile.set
 //      (assistantInstructions field, exactly the WP A1 firm_jurisdiction/
 //      practice_areas/attorney_name pattern). Injected into every attorney's
 //      chat AND the AI-drafted email prompt (that's where "always CC my
-//      paralegal" has to bite).
+//      paralegal" has to bite). Never reaches the client portal.
 //   2. My instructions — per-attorney, legal.assistant.settings_set (whole-
 //      payload save, so the current settings are read first and only
 //      customInstructions is overridden — never clobber modelId/workRate/
 //      webSearch/research/contextDepth another surface set).
-// Both cap at 2,000 characters (assistantPrompt.ts clips defensively at
-// injection time regardless). Neither reaches the client portal.
+//   3. Client portal instructions — firm-wide, CLIENT-SAFE, same
+//      legal.settings.firm_profile.set action but a SEPARATE field
+//      (portalAssistantInstructions, migration 0178). This is the ONLY one of
+//      the three the client-facing portal assistant ever reads — #1 and #2 are
+//      internal-only by design (leak risk).
+// All three cap at 2,000 characters (assistantPrompt.ts clips defensively at
+// injection time regardless).
 import { useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { SettingsHeader, SettingsLoading, SettingsAlert } from '../shared'
@@ -23,6 +29,7 @@ const INSTRUCTIONS_CHAR_CAP = 2000
 
 interface FirmProfile {
   assistantInstructions: string | null
+  portalAssistantInstructions: string | null
 }
 
 // Mirrors verticals/legal/src/api/assistantSettings.ts AssistantSettings —
@@ -53,6 +60,13 @@ export default function AssistantSettingsPage(): React.ReactElement {
   const [firmSaved, setFirmSaved] = useState(false)
   const [firmError, setFirmError] = useState<string | null>(null)
 
+  // WP FB-B2 — the portal's own draft/busy/saved/error state, independent of
+  // firmDraft above (same firmProfile record, different field + save call).
+  const [portalDraft, setPortalDraft] = useState('')
+  const [portalBusy, setPortalBusy] = useState(false)
+  const [portalSaved, setPortalSaved] = useState(false)
+  const [portalError, setPortalError] = useState<string | null>(null)
+
   const [attorneySettings, setAttorneySettings] = useState<AssistantSettings | null>(null)
   const [attorneyDraft, setAttorneyDraft] = useState('')
   const [attorneyBusy, setAttorneyBusy] = useState(false)
@@ -64,8 +78,13 @@ export default function AssistantSettingsPage(): React.ReactElement {
       .then((r) => {
         setFirmProfile(r.profile)
         setFirmDraft(r.profile.assistantInstructions ?? '')
+        setPortalDraft(r.profile.portalAssistantInstructions ?? '')
       })
-      .catch((e) => setFirmError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e)
+        setFirmError(msg)
+        setPortalError(msg)
+      })
 
     callAttorneyMcp<{ settings: AssistantSettings | null }>({
       toolName: 'legal.assistant.settings_get',
@@ -93,6 +112,25 @@ export default function AssistantSettingsPage(): React.ReactElement {
       setFirmError(e instanceof Error ? e.message : String(e))
     } finally {
       setFirmBusy(false)
+    }
+  }
+
+  async function savePortal(): Promise<void> {
+    setPortalBusy(true)
+    setPortalError(null)
+    try {
+      const r = await callAttorneyMcp<{ profile: FirmProfile }>({
+        toolName: 'legal.settings.firm_profile.set',
+        input: { portalAssistantInstructions: portalDraft.trim() },
+      })
+      setFirmProfile(r.profile)
+      setPortalDraft(r.profile.portalAssistantInstructions ?? '')
+      setPortalSaved(true)
+      setTimeout(() => setPortalSaved(false), 2000)
+    } catch (e) {
+      setPortalError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPortalBusy(false)
     }
   }
 
@@ -189,6 +227,46 @@ export default function AssistantSettingsPage(): React.ReactElement {
                 disabled={attorneyBusy || attorneyDraft.length > INSTRUCTIONS_CHAR_CAP}
               >
                 {attorneyBusy ? 'Saving…' : 'Save my instructions'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="li-set-card li-set-card--narrow">
+        <p className="li-set-hint" style={{ margin: '0 0 16px', fontSize: '13.5px' }}>
+          Standing guidance for the CLIENT PORTAL assistant, firm-wide — this is what the assistant
+          your clients chat with actually follows (e.g. &ldquo;mention our office closes at
+          5pm&rdquo;). A SEPARATE, client-safe field from the firm instructions above: it is the
+          ONLY one of the instructions on this page the portal ever reads, so anything written here
+          may be read by clients — keep it to guidance you&apos;re comfortable showing them, never
+          internal notes.
+        </p>
+        {portalError && <SettingsAlert tone="error">{portalError}</SettingsAlert>}
+        {portalSaved && <SettingsAlert tone="success">Saved.</SettingsAlert>}
+        {!firmProfile ? (
+          <SettingsLoading />
+        ) : (
+          <>
+            <textarea
+              className="li-set-textarea"
+              rows={5}
+              maxLength={INSTRUCTIONS_CHAR_CAP}
+              placeholder="e.g. Mention our office closes at 5pm ET and reopens at 9am the next business day."
+              value={portalDraft}
+              onChange={(e) => {
+                setPortalDraft(e.target.value)
+                setPortalSaved(false)
+              }}
+            />
+            <CharCount text={portalDraft} />
+            <div className="li-set-actions-row">
+              <button
+                className="li-set-btn li-set-btn-primary"
+                onClick={savePortal}
+                disabled={portalBusy || portalDraft.length > INSTRUCTIONS_CHAR_CAP}
+              >
+                {portalBusy ? 'Saving…' : 'Save client portal instructions'}
               </button>
             </div>
           </>
