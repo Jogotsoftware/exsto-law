@@ -189,6 +189,13 @@ export interface DocumentVersionSummary {
   source: 'original' | 'generated' | 'edited'
   // The attorney's edit note, when source === 'edited'.
   note: string | null
+  // B2.3 (SAVE-REDLINES-1) — the structured document.redlined event's source,
+  // when the edit that produced this version emitted one: whether the save
+  // was human-only, an accepted AI revision, or a mix. Null for versions from
+  // before B2.3 or from a path that doesn't send the redline group (a
+  // generated version, or a bare programmatic edit). Drives the "View
+  // Redlines" per-version badge — richer than the ai_generated boolean below.
+  redlineSource: 'human' | 'ai_accepted' | 'mixed' | null
 }
 
 // Every version of ONE document (resolved from any of its version ids), newest
@@ -207,6 +214,7 @@ export async function listDocumentVersions(
       ai_generated: boolean
       edited_from: string | null
       note: string | null
+      redline_source: string | null
     }>(
       `WITH target AS (
          SELECT document_entity_id FROM document_version
@@ -218,9 +226,20 @@ export async function listDocumentVersions(
               to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
               (dv.reasoning_trace_id IS NOT NULL) AS ai_generated,
               dv.metadata->>'edited_from_version_id' AS edited_from,
-              dv.metadata->>'note' AS note
+              dv.metadata->>'note' AS note,
+              rl.payload->>'source' AS redline_source
        FROM document_version dv
        JOIN target t ON t.document_entity_id = dv.document_entity_id
+       LEFT JOIN LATERAL (
+         SELECT ev.payload
+           FROM event ev
+           JOIN event_kind_definition ekd ON ekd.id = ev.event_kind_id
+          WHERE ev.tenant_id = dv.tenant_id
+            AND ekd.kind_name = 'document.redlined'
+            AND ev.payload->>'to_version_id' = dv.id::text
+          ORDER BY ev.occurred_at DESC
+          LIMIT 1
+       ) rl ON true
        WHERE dv.tenant_id = $1
        ORDER BY dv.version_number DESC`,
       [ctx.tenantId, documentVersionId],
@@ -232,6 +251,12 @@ export async function listDocumentVersions(
       recordedAt: row.recorded_at,
       source: row.version_number === 1 ? 'original' : row.edited_from ? 'edited' : 'generated',
       note: row.note,
+      redlineSource:
+        row.redline_source === 'human' ||
+        row.redline_source === 'ai_accepted' ||
+        row.redline_source === 'mixed'
+          ? row.redline_source
+          : null,
     }))
   })
 }

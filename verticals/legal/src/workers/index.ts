@@ -59,6 +59,24 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
   })
 })
 
+// B2.2 (MATTER-BRIEF-BACKGROUND-1) — runs one Matter Brief (re)generation OFF the
+// request. Enqueued by legal.matter.brief.request (BriefButton's Generate/Refresh
+// click, enqueueBriefJob in api/briefEngine.ts); calls the SAME getOrRefreshMatter-
+// Brief the synchronous legal.matter.brief.generate MCP tool uses — unchanged. This
+// handler only moves WHEN the model call runs, never what it does or what it writes.
+registerWorkerHandler('legal.brief.run', async (ctx, payload) => {
+  const p = payload as {
+    target_entity_id: string
+    depth?: 'lean' | 'balanced' | 'generous'
+    force?: boolean
+  }
+  const { getOrRefreshMatterBrief } = await import('../api/briefEngine.js')
+  await getOrRefreshMatterBrief(ctx, p.target_entity_id, {
+    depth: p.depth,
+    force: p.force === true,
+  })
+})
+
 // CAPABILITY-UNIFY-1 (WP3) — runs one invoke_capability step OFF the request. Enqueued
 // by the producing auto-run's post-commit callback (lifecycle/autoRun.ts) or the manual
 // /workflow/invoke route; the worker claims it here and runs invokeCapabilityForMatter,

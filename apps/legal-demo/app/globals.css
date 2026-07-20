@@ -24351,3 +24351,99 @@ details.li-brief-research summary:hover {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ==========================================================================
+ B2.2 — Matter Brief background lifecycle (MATTER-BRIEF-BACKGROUND-1). Self-
+ contained append: the always-visible refresh row's neutral (non-stale)
+ variant, the quiet refresh button, the completion flash, and the
+ BriefButton's primary/pulse states. Reuses existing li-brief-* tokens/layout
+ (li-brief-stale, li-brief-refresh-btn, li-brief-meta, li-brief-btn) —
+ does not edit them.
+ ========================================================================== */
+.li-brief-toprow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  margin-bottom: 14px;
+}
+.li-brief-toprow.li-brief-fresh {
+  background: var(--li-bg);
+  border: 1px solid var(--li-border);
+  color: var(--li-text-muted);
+}
+.li-brief-refresh-btn--quiet {
+  background: var(--li-card);
+  color: var(--li-navy);
+  border: 1px solid var(--li-border);
+}
+.li-brief-refresh-btn--quiet:hover {
+  border-color: var(--li-navy);
+}
+.li-brief-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.li-brief-updated-flash {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #1f8a4c;
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.li-brief-btn--primary {
+  background: var(--li-navy);
+  color: #fff;
+  border-color: var(--li-navy);
+}
+.li-brief-btn--primary:hover {
+  background: var(--li-navy-hover);
+}
+@keyframes li-brief-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(31, 138, 76, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(31, 138, 76, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(31, 138, 76, 0);
+  }
+}
+.li-brief-btn--pulse {
+  animation: li-brief-pulse 1.1s ease-out 2;
+}
+
+/* ==========================================================================
+ B2.3 — "View Redlines" word-level toggle (SAVE-REDLINES-1). Self-contained
+ append: VersionCompareDrawer's word-level tracked-changes rendering
+ (buildRedline), riding the existing .vcmp-drawer/.vdiff family (globals
+ ~8172) — same insertion/deletion color language as .vdiff-add/.vdiff-del,
+ just inline spans instead of whole gutter rows.
+ ========================================================================== */
+.vcmp-word {
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--li-body, #1b2a4a);
+}
+.vcmp-word p {
+  margin: 0 0 0.75em;
+}
+.vcmp-w-ins {
+  background: #e7f6ec;
+  color: #14532d;
+  text-decoration: underline;
+  text-decoration-color: #15803d;
+}
+.vcmp-w-del {
+  background: #fbe9e9;
+  color: #7f1d1d;
+  text-decoration: line-through;
+  text-decoration-color: #b91c1c;
+}

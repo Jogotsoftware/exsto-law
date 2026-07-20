@@ -21,6 +21,13 @@ export interface ServiceDraftNote {
   // from plain manual edit notes split on that prefix; see briefEvidence.ts).
   note: string
   recordedAt: string
+  // B2.3 (SAVE-REDLINES-1) — the structured document.redlined event for this
+  // version, when the save that produced it emitted one (the tracked-changes
+  // editor; optional group, verticals/legal/src/handlers/draft.ts). Optional:
+  // absent for edits from before B2.3, or from any path that doesn't send the
+  // redline group. buildServiceDigestEvidence prefers this over parsing the
+  // note-string "AI revision: " prefix.
+  redline?: { source: 'human' | 'ai_accepted' | 'mixed'; instructionText: string | null } | null
 }
 
 export interface ServiceRevisionRequest {
@@ -70,18 +77,34 @@ export async function listServiceDigestSignals(
       version_number: number
       note: string | null
       recorded_at: string
+      redline_source: string | null
+      redline_instruction: string | null
     }>(
       `SELECT m.id AS matter_id, m.name AS matter_number,
               coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
               dv.id AS document_version_id, dv.version_number,
               dv.metadata->>'note' AS note,
-              to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at
+              to_char(dv.recorded_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS recorded_at,
+              rl.payload->>'source' AS redline_source,
+              rl.payload->>'instruction_text' AS redline_instruction
          FROM document_version dv
          JOIN entity e_doc ON e_doc.id = dv.document_entity_id
          JOIN relationship r ON r.source_entity_id = dv.document_entity_id
          JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
               AND rkd.kind_name = 'draft_of'
          JOIN entity m ON m.id = r.target_entity_id
+         LEFT JOIN LATERAL (
+           -- B2.3: the document.redlined event this version's save emitted, if
+           -- any (structured-first source for buildServiceDigestEvidence).
+           SELECT ev.payload
+             FROM event ev
+             JOIN event_kind_definition ekd ON ekd.id = ev.event_kind_id
+            WHERE ev.tenant_id = dv.tenant_id
+              AND ekd.kind_name = 'document.redlined'
+              AND ev.payload->>'to_version_id' = dv.id::text
+            ORDER BY ev.occurred_at DESC
+            LIMIT 1
+         ) rl ON true
         WHERE dv.tenant_id = $1
           AND dv.metadata->>'note' IS NOT NULL
           AND ${notesScope}
@@ -126,6 +149,12 @@ export async function listServiceDigestSignals(
         versionNumber: r.version_number,
         note: r.note ?? '',
         recordedAt: r.recorded_at,
+        redline:
+          r.redline_source === 'human' ||
+          r.redline_source === 'ai_accepted' ||
+          r.redline_source === 'mixed'
+            ? { source: r.redline_source, instructionText: r.redline_instruction ?? null }
+            : null,
       })),
       revisionRequests: requestsRes.rows.map((r) => ({
         matterEntityId: r.matter_id,

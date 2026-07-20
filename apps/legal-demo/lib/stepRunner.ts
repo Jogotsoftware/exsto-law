@@ -50,21 +50,14 @@ async function postContractW<O>(path: string, body: unknown): Promise<O> {
 }
 
 // ── Approve (± send to client) ──────────────────────────────────────────────
-// POST /api/attorney/documents/[versionId]/approve { send } → { approved, sent }
-export interface ApproveResult {
-  approved: boolean
-  sent: boolean
-}
-export async function approveDocument(
-  versionId: string,
-  opts: { send: boolean },
-): Promise<ApproveResult> {
-  const r = await postContractW<{ approved?: boolean; sent?: boolean }>(
-    `/api/attorney/documents/${versionId}/approve`,
-    { send: opts.send },
-  )
-  return { approved: r.approved ?? true, sent: r.sent ?? opts.send }
-}
+// B2.1: retired. RunnerReview now embeds <DocumentReviewer>, which approves
+// through the MCP `legal.draft.approve` tool — the same review-reader path the
+// standalone queue always used. Fee-accrual parity is exact: this route's
+// `approveDocument` (verticals/legal/src/api/reviewDraft.ts) and the MCP tool
+// both call the identical `approveDraft` → `draft.approve` action underneath,
+// so nothing about fee accrual changes. The route this posted to
+// (`/api/attorney/documents/[versionId]/approve`) had no other caller and was
+// removed alongside this function.
 
 // ── Regenerate (re-draft with change notes) ─────────────────────────────────
 // POST /api/attorney/matters/[id]/steps/[stageKey]/regenerate { changeNotes }

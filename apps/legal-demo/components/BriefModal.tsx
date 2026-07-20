@@ -57,7 +57,7 @@ interface BriefResearchRecord {
   }>
 }
 
-interface BriefView {
+export interface BriefView {
   briefEntityId: string
   briefType: string
   markdown: string
@@ -70,10 +70,26 @@ interface BriefView {
   research?: BriefResearchRecord | null
 }
 
-interface BriefReadResult {
+export interface BriefReadResult {
   brief: BriefView | null
   stale: boolean
   watermark: string | null
+}
+
+// B2.2 (MATTER-BRIEF-BACKGROUND-1): the Matter Brief's generate now runs on the
+// worker, not in this modal's own request — BriefButton owns the enqueue+poll
+// (so it survives the modal being closed) and hands this shape down. When
+// present, this modal is a presentational view over it instead of managing its
+// own get/generate. Client Brief never passes this — its generate stays the
+// original synchronous in-modal call, unchanged.
+export interface MatterBriefController {
+  state: BriefReadResult | null
+  generating: boolean
+  error: string | null
+  // True for a short window right after a background generation lands — the
+  // one-time completion pulse (BriefButton clears it after PULSE_MS).
+  justCompleted: boolean
+  onGenerate: (force: boolean) => void
 }
 
 const TOOL_NAMES: Record<BriefScope['kind'], { get: string; generate: string }> = {
@@ -118,52 +134,71 @@ function ResearchStrip({ research }: { research: BriefResearchRecord }) {
   )
 }
 
-export function BriefModal({ scope, onClose }: { scope: BriefScope; onClose: () => void }) {
-  // null = the initial get is still in flight.
-  const [state, setState] = useState<BriefReadResult | null>(null)
-  const [generating, setGenerating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+export function BriefModal({
+  scope,
+  onClose,
+  matterController,
+}: {
+  scope: BriefScope
+  onClose: () => void
+  matterController?: MatterBriefController
+}) {
+  // null = the initial get is still in flight. Unused when matterController is
+  // present — the button already owns this read.
+  const [localState, setLocalState] = useState<BriefReadResult | null>(null)
+  const [localGenerating, setLocalGenerating] = useState(false)
+  const [localError, setLocalError] = useState<string | null>(null)
   const tools = TOOL_NAMES[scope.kind]
-  const title = scope.kind === 'matter' ? 'Matter brief' : 'Client brief'
+  const title = scope.kind === 'matter' ? 'Matter Brief' : 'Client Brief'
   const noun = scope.kind === 'matter' ? 'matter' : 'client'
   // scope's real identity, as two stable primitives — used as the effect's
   // dependency list directly (no JSON.stringify indirection needed).
   const targetId = scope.kind === 'matter' ? scope.matterEntityId : scope.clientEntityId
 
   useEffect(() => {
+    if (matterController) return // the button already owns this read (B2.2)
     let cancelled = false
     callAttorneyMcp<BriefReadResult>({
       toolName: tools.get,
       input: scopeInput(scope),
     })
       .then((r) => {
-        if (!cancelled) setState(r)
+        if (!cancelled) setLocalState(r)
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+        if (!cancelled) setLocalError(e instanceof Error ? e.message : String(e))
       })
     return () => {
       cancelled = true
     }
-  }, [scope.kind, targetId, tools.get])
+  }, [scope.kind, targetId, tools.get, matterController])
 
   async function generate(force: boolean) {
-    if (generating) return
-    setGenerating(true)
-    setError(null)
+    if (matterController) {
+      // Matter scope (B2.2): the button enqueues on the worker and polls —
+      // this modal just asked it to start (or restart) that.
+      matterController.onGenerate(force)
+      return
+    }
+    if (localGenerating) return
+    setLocalGenerating(true)
+    setLocalError(null)
     try {
       const r = await callAttorneyMcp<BriefReadResult>({
         toolName: tools.generate,
         input: force ? { ...scopeInput(scope), force: true } : scopeInput(scope),
       })
-      setState(r)
+      setLocalState(r)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setLocalError(e instanceof Error ? e.message : String(e))
     } finally {
-      setGenerating(false)
+      setLocalGenerating(false)
     }
   }
 
+  const state = matterController ? matterController.state : localState
+  const generating = matterController ? matterController.generating : localGenerating
+  const error = matterController ? matterController.error : localError
   const brief = state?.brief ?? null
 
   return (
@@ -177,7 +212,7 @@ export function BriefModal({ scope, onClose }: { scope: BriefScope; onClose: () 
             <div className="li-brief-working-title">Synthesizing the {noun} brief…</div>
             <div className="li-brief-working-sub">
               {scope.kind === 'matter'
-                ? 'Reading the matter’s history, communications, documents, notes, and billing, then writing the brief. This takes a moment.'
+                ? 'Reading the matter’s history, communications, documents, notes, and billing, then writing the brief. This takes a moment — running on the worker, so it is safe to close this window and come back.'
                 : 'Reading the client’s profile, every matter, notes, transcripts, and messages — plus a quick, privacy-guarded external search — then writing the brief. This takes a moment.'}
             </div>
           </div>
@@ -200,34 +235,44 @@ export function BriefModal({ scope, onClose }: { scope: BriefScope; onClose: () 
             onClick={() => void generate(false)}
           >
             <GemSparkle size={16} />
-            Generate brief
+            Generate Brief
           </button>
         </div>
       ) : (
         <div className="li-brief-view">
-          {state?.stale && (
-            <div className="li-brief-stale">
-              <span>
-                Out of date — the {noun} has activity newer than this brief
-                {brief.generatedAt ? ` (generated ${formatDateTime(brief.generatedAt)})` : ''}.
-              </span>
-              <button
-                type="button"
-                className="li-brief-refresh-btn"
-                onClick={() => void generate(true)}
-              >
-                <RefreshIcon size={14} />
-                Refresh
-              </button>
+          <div className={state?.stale ? 'li-brief-stale' : 'li-brief-toprow li-brief-fresh'}>
+            <span>
+              {state?.stale
+                ? `Out of date — the ${noun} has activity newer than this brief${
+                    brief.generatedAt ? ` (generated ${formatDateTime(brief.generatedAt)})` : ''
+                  }.`
+                : `Last Generated ${brief.generatedAt ? formatDateTime(brief.generatedAt) : '—'}.`}
+            </span>
+            <button
+              type="button"
+              className={
+                state?.stale
+                  ? 'li-brief-refresh-btn'
+                  : 'li-brief-refresh-btn li-brief-refresh-btn--quiet'
+              }
+              onClick={() => void generate(true)}
+              disabled={generating}
+            >
+              <RefreshIcon size={14} />
+              Refresh Brief
+            </button>
+          </div>
+          {matterController?.justCompleted && (
+            <div className="li-brief-updated-flash">Brief updated.</div>
+          )}
+          {(brief.modelIdentity || typeof brief.confidence === 'number') && (
+            <div className="li-brief-meta">
+              {brief.modelIdentity ?? ''}
+              {typeof brief.confidence === 'number'
+                ? `${brief.modelIdentity ? ' · ' : ''}confidence ${Math.round(brief.confidence * 100)}%`
+                : ''}
             </div>
           )}
-          <div className="li-brief-meta">
-            {brief.generatedAt ? `Generated ${formatDateTime(brief.generatedAt)}` : 'Generated'}
-            {brief.modelIdentity ? ` · ${brief.modelIdentity}` : ''}
-            {typeof brief.confidence === 'number'
-              ? ` · confidence ${Math.round(brief.confidence * 100)}%`
-              : ''}
-          </div>
           {brief.research && <ResearchStrip research={brief.research} />}
           <div
             className="li-brief-body"

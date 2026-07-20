@@ -252,6 +252,18 @@ export interface DraftEditInput {
   documentMarkdown: string
   // Optional one-liner describing the change; stored on the new version's metadata.
   note?: string
+  // B2.3 (SAVE-REDLINES-1) — present when this edit came from the tracked-
+  // changes editor. Optional as a GROUP: a bare programmatic edit (e.g.
+  // approve-time system-token resolution, resolveSystemTokensBeforeApprove)
+  // omits all of these and behaves exactly as before — no document.redlined
+  // event, no ops blob. `ops` is opaque here (the editor's AcceptedChange[]/
+  // RedlineOp[] session log) — stored verbatim as a content_blob by the
+  // handler, never interpreted server-side.
+  ops?: unknown
+  source?: 'human' | 'ai_accepted' | 'mixed'
+  instructionText?: string
+  reasoningTraceId?: string
+  counts?: { accepted: number; rejected: number; ai: number; manual: number }
 }
 
 // Attorney inline edit: saves the revised markdown as a NEW document_version
@@ -270,6 +282,11 @@ export async function editDraft(ctx: ActionContext, input: DraftEditInput): Prom
       document_version_id: input.documentVersionId,
       document_markdown: input.documentMarkdown,
       note: input.note?.trim() || undefined,
+      ops: input.ops,
+      source: input.source,
+      instruction_text: input.instructionText,
+      reasoning_trace_id: input.reasoningTraceId,
+      counts: input.counts,
     },
   })
 }

@@ -5,11 +5,36 @@
 // WP-M) and closes on backdrop click or Escape; locks body scroll while open.
 import { useEffect, useId, useRef } from 'react'
 
-// Open-modal stack so Escape closes only the TOPMOST dialog. Modals now stack
-// (e.g. an in-app confirm over the workflow runner — RUNNER-FIXES-1 WP3); every
-// instance listens for Escape on document, so without this one keypress would
-// close the whole stack at once.
+// Open-dialog stack so Escape closes only the TOPMOST dialog. Dialogs stack
+// (e.g. an in-app confirm over the workflow runner — RUNNER-FIXES-1 WP3; the
+// tracked-changes editor's own full-screen dialog can now render inside a
+// RunnerReview <Modal> too — B2.1); every instance listens for Escape on
+// document, so without this one keypress would close every open dialog at once.
 const OPEN_MODALS: symbol[] = []
+
+// Shared by <Modal> and any other bespoke full-screen dialog (currently
+// TrackedChangesEditor) that needs to join the SAME stack so Escape targets
+// only whichever dialog is actually on top, regardless of which component
+// rendered it.
+export function useDialogEscapeStack(onEscape: () => void, active = true): void {
+  useEffect(() => {
+    if (!active) return
+    const token = Symbol('dialog')
+    OPEN_MODALS.push(token)
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && OPEN_MODALS[OPEN_MODALS.length - 1] === token) onEscape()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      const i = OPEN_MODALS.indexOf(token)
+      if (i !== -1) OPEN_MODALS.splice(i, 1)
+      document.removeEventListener('keydown', onKey)
+    }
+    // Intentionally NOT depending on `onEscape` — re-running this effect on every
+    // render that gives it a fresh closure would pop/re-push the stack token,
+    // which can desync ordering with sibling dialogs mounted in between.
+  }, [active])
+}
 
 export function Modal({
   title,
