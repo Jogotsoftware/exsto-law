@@ -17,11 +17,75 @@ import {
   buildActiveSkillsText,
   resolveJurisdictionSkillSlugs,
 } from './skillContext.js'
+import {
+  assembleBriefEvidence,
+  renderEvidenceBundle,
+  type EvidenceBundle,
+} from './briefEvidence.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent).
 const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
 
 export type GenerationMode = 'ai_draft' | 'template_merge'
+
+// ── Service Digest injection (WP B1 — "generation gets smarter from accepted
+// edits") ─────────────────────────────────────────────────────────────────
+// The Brief Engine's service_digest scope (briefEvidence.ts) already assembles
+// accepted AI-revision instructions, manual edit notes, and revision requests
+// across every matter currently on a service — a standing record of how
+// attorneys have shaped this service's drafts. This wires that evidence INTO
+// drafting itself, so a new draft on the same service starts closer to what the
+// attorney actually wants, without the attorney re-typing the same instruction
+// every time. AI path only — template_merge is deterministic by contract and
+// must never see AI-sourced context.
+const SERVICE_DIGEST_MAX_CHARS = 2500
+
+const SERVICE_DIGEST_FRAMING_HEADER =
+  'Standing drafting preferences for this service, learned from edits attorneys have previously ' +
+  'accepted on drafts of it (accepted AI revisions, manual edits, and revision requests across ' +
+  "matters on this service). Treat these as defaults worth carrying forward. The attorney's " +
+  'instructions for THIS draft, given below if any, take precedence over these standing ' +
+  'preferences wherever they conflict.'
+
+// PURE — decides whether a draft should even attempt the digest read. Checked
+// defensively at the generationMode level too (not just by the caller only
+// reaching this in the AI-draft branch): template_merge must NEVER receive AI
+// context, and this stays true even if a future refactor moves the call site.
+export function shouldAssembleServiceDigest(
+  generationMode: GenerationMode,
+  serviceKey: string | null | undefined,
+  useServiceDigest: boolean | undefined,
+): boolean {
+  return generationMode === 'ai_draft' && !!serviceKey && useServiceDigest !== false
+}
+
+export interface ServiceDigestTraceMeta {
+  watermark: string
+  sections: number
+  chars: number
+}
+
+// PURE — turns an already-assembled digest EvidenceBundle into prompt text +
+// its trace metadata, or null when the service genuinely has no signals yet (an
+// empty bundle is a valid, common state — not a failure). Budget-capped so a
+// service with a long drafting history never balloons the drafting prompt.
+export function renderServiceDigestForDraft(
+  bundle: EvidenceBundle,
+): { text: string; meta: ServiceDigestTraceMeta } | null {
+  if (bundle.sections.length === 0) return null
+  const text = renderEvidenceBundle(bundle, {
+    header: SERVICE_DIGEST_FRAMING_HEADER,
+    maxChars: SERVICE_DIGEST_MAX_CHARS,
+  })
+  return {
+    text,
+    meta: {
+      watermark: bundle.sourceWatermark,
+      sections: bundle.sections.length,
+      chars: text.length,
+    },
+  }
+}
 
 export interface GenerateDraftInput {
   matterEntityId: string
@@ -51,6 +115,10 @@ export interface GenerateDraftInput {
   // version n+1 on this existing document_draft entity (prior versions retained)
   // instead of a fresh entity at v1. Set by the regenerate runtime only.
   supersedesDocumentEntityId?: string
+  // WP B1 — opt OUT of the service digest injection (standing drafting
+  // preferences learned from previously accepted edits on this service).
+  // Defaults to true; AI path only, no-ops on template_merge regardless.
+  useServiceDigest?: boolean
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -273,6 +341,32 @@ export async function runDraftGeneration(
   const forcedSkills = await loadForcedSkills(agentCtx, skillSlugs)
   const activeSkillsText = buildActiveSkillsText(forcedSkills)
 
+  // WP B1 — Service Digest injection. Graceful-degrade: this reads a
+  // cross-matter signal (briefEvidence.ts's service_digest scope) that is
+  // genuinely optional to a draft — a failure to assemble or render it must
+  // never block drafting, so any error here is logged and swallowed.
+  let serviceDigestText: string | undefined
+  let serviceDigestTrace: ServiceDigestTraceMeta | null = null
+  if (shouldAssembleServiceDigest('ai_draft', m.serviceKey, input.useServiceDigest)) {
+    try {
+      const digestBundle = await assembleBriefEvidence(
+        agentCtx,
+        { kind: 'service_digest', serviceKey: m.serviceKey },
+        'lean',
+      )
+      const rendered = renderServiceDigestForDraft(digestBundle)
+      if (rendered) {
+        serviceDigestText = rendered.text
+        serviceDigestTrace = rendered.meta
+      }
+    } catch (err) {
+      console.error(
+        `[generateDraft] service digest assembly failed for service "${m.serviceKey}" — proceeding without it.`,
+        err,
+      )
+    }
+  }
+
   const prompt = assembleDraftingPrompt({
     basePrompt,
     template,
@@ -285,6 +379,7 @@ export async function runDraftGeneration(
     documentKind: input.documentKind,
     guidance: input.guidance,
     activeSkillsText,
+    serviceDigestText,
   })
 
   const result = await callClaudeDrafter(agentCtx.tenantId, { prompt, task: 'draft_generate' })
@@ -306,6 +401,11 @@ export async function runDraftGeneration(
     // Name the BODY template the worker used too (config version vs bundled repo),
     // so the audit trail captures both inputs to the draft.
     templateId,
+    // Whether/how the Service Digest fired (WP B1) — null when not injected
+    // (opted out, no serviceKey, no signals yet, or a swallowed failure). The
+    // prompt column above already carries the injected text verbatim; this is
+    // the structured record of what happened, for the review-UI trace panel.
+    serviceDigest: serviceDigestTrace,
   })
 
   const generated = await submitAction(agentCtx, {
@@ -364,6 +464,12 @@ export interface AssembleArgs {
   // Selected-skill bodies (buildActiveSkillsText) injected so a picked playbook is
   // guaranteed to apply. Empty string when none selected.
   activeSkillsText?: string
+  // WP B1 — the rendered Service Digest (standing drafting preferences learned
+  // from previously accepted edits on this service). Appears AFTER the skills
+  // (a skill is an attorney-picked playbook; the digest is a softer, inferred
+  // default) and BEFORE guidance (the attorney's instructions for THIS draft
+  // always win). Undefined when there is nothing to inject.
+  serviceDigestText?: string
   // Attorney's free-text instructions for this redraft (revision notes). Appended
   // LAST so the model treats it as the highest-priority guidance for this pass.
   guidance?: string
@@ -387,10 +493,15 @@ export function assembleDraftingPrompt(args: AssembleArgs): string {
       args.documentKind === 'engagement_letter' ? 'engagement letter' : 'operating agreement',
     )
 
-  // Selected legal playbooks (force-applied), then the attorney's own revision
-  // instructions LAST — so they carry the most weight for this pass.
+  // Selected legal playbooks (force-applied), then the service digest (standing,
+  // inferred preferences), then the attorney's own revision instructions LAST —
+  // each layer outranks the one before it, ending with what the attorney typed
+  // for THIS pass carrying the most weight.
   if (args.activeSkillsText?.trim()) {
     prompt += `\n\n${args.activeSkillsText.trim()}`
+  }
+  if (args.serviceDigestText?.trim()) {
+    prompt += `\n\n${args.serviceDigestText.trim()}`
   }
   if (args.guidance?.trim()) {
     prompt +=
@@ -414,21 +525,43 @@ interface PersistTraceArgs {
   // audit.
   promptId?: string
   templateId?: string
+  // WP B1 — whether/how the Service Digest fired: null when not injected
+  // (opted out, no serviceKey, no signals yet, or a swallowed assembly
+  // failure), the watermark/section-count/char-count when it was. Folded into
+  // the trace jsonb beside prompt_config — same "no schema change, full audit"
+  // pattern. The digest TEXT itself already lives verbatim in `prompt`.
+  serviceDigest?: ServiceDigestTraceMeta | null
+}
+
+// PURE — the trace-jsonb fold, split out of persistReasoningTrace so it is
+// testable without a database. Returns fullTrace UNCHANGED when there is
+// nothing to add (byte-identical to the pre-WP-B1 behavior for any caller that
+// never sets serviceDigest).
+export function buildDraftTraceJson(
+  fullTrace: unknown,
+  meta: { promptId?: string; templateId?: string; serviceDigest?: ServiceDigestTraceMeta | null },
+): unknown {
+  const extras: Record<string, unknown> = {}
+  if (meta.promptId || meta.templateId) {
+    extras.prompt_config = {
+      prompt_id: meta.promptId ?? null,
+      template_id: meta.templateId ?? null,
+    }
+  }
+  if (meta.serviceDigest !== undefined) {
+    extras.service_digest = meta.serviceDigest
+  }
+  if (!Object.keys(extras).length || !fullTrace || typeof fullTrace !== 'object') return fullTrace
+  return { ...(fullTrace as Record<string, unknown>), ...extras }
 }
 
 async function persistReasoningTrace(ctx: ActionContext, args: PersistTraceArgs): Promise<string> {
   const id = randomUUID()
-  const promptConfig =
-    args.promptId || args.templateId
-      ? { prompt_id: args.promptId ?? null, template_id: args.templateId ?? null }
-      : null
-  const traceWithPromptId =
-    promptConfig && args.fullTrace && typeof args.fullTrace === 'object'
-      ? {
-          ...(args.fullTrace as Record<string, unknown>),
-          prompt_config: promptConfig,
-        }
-      : args.fullTrace
+  const traceWithPromptId = buildDraftTraceJson(args.fullTrace, {
+    promptId: args.promptId,
+    templateId: args.templateId,
+    serviceDigest: args.serviceDigest,
+  })
   await withActionContext(ctx, async (client) => {
     await client.query(
       `INSERT INTO reasoning_trace (
