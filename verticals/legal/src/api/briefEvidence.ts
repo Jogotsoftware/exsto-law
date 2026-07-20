@@ -43,6 +43,7 @@ import {
 } from './assistantContext.js'
 import { getMatter, type MatterDetail } from '../queries/matters.js'
 import { getDraftVersion } from '../queries/drafts.js'
+import { resolveMatterJurisdiction, type ResolvedJurisdiction } from './matterJurisdiction.js'
 import { getMatterHistory, type MatterHistory } from '../queries/history.js'
 import { listNotesForEntity, type NoteSummary } from '../queries/notes.js'
 import { listTasksByMatter, type Task } from '../queries/tasks.js'
@@ -296,6 +297,11 @@ interface MatterMaterial {
   invoiced: { items: MatterInvoicedItem[]; currency: string }
   envelopes: EnvelopeListItem[]
   research: MatterResearchEntry[]
+  // Generation integrity — the matter's own resolved jurisdiction (matter fact,
+  // else the firm's home jurisdiction, else honest unset), so the brief
+  // synthesis prompt can ground on the platform fact instead of inferring one
+  // from a client's street address (matterJurisdiction.ts).
+  jurisdiction: ResolvedJurisdiction | null
 }
 
 async function loadMatterMaterial(
@@ -319,6 +325,7 @@ async function loadMatterMaterial(
     invoiced,
     envelopesAll,
     research,
+    jurisdiction,
   ] = await Promise.all([
     getMatterHistory(ctx, matterEntityId),
     listNotesForEntity(ctx, matterEntityId),
@@ -338,6 +345,7 @@ async function loadMatterMaterial(
     // the existing tenant-scoped list in-process rather than forking a new query.
     listEnvelopes(ctx),
     listMatterResearch(ctx, matterEntityId),
+    resolveMatterJurisdiction(ctx, matterEntityId),
   ])
 
   return {
@@ -354,6 +362,7 @@ async function loadMatterMaterial(
     invoiced,
     envelopes: envelopesAll.filter((e) => e.matterEntityId === matterEntityId),
     research,
+    jurisdiction,
   }
 }
 
@@ -393,12 +402,23 @@ export function buildMatterEvidence(
     invoiced,
     envelopes,
     research,
+    jurisdiction,
   } = material
 
   // 1. Matter core — facts + intake + transcript.
   const coreLines = [
     `Matter ${safeField(matter.matterNumber)} — service: ${safeField(matter.serviceKey) || 'unspecified'}; status: ${safeField(matter.status)}; opened ${fmtDate(matter.createdAt)}.`,
     `Client: ${safeField(matter.clientName) || 'unknown'}${matter.clientEmail ? ` <${safeField(matter.clientEmail)}>` : ''}.`,
+    // Generation integrity — a PLATFORM FACT, not something for the synthesis
+    // model to infer from a street address (the M-MRTHA103 root cause: the
+    // brief narrated Georgia from a client address on an NC-firm matter with no
+    // jurisdiction fact ever set). See the "never infer" rule in
+    // buildBriefSynthesisPrompt (briefEngine.ts).
+    jurisdiction
+      ? `Governing jurisdiction: ${jurisdiction.displayName} (source: ${
+          jurisdiction.source === 'matter' ? 'matter fact' : 'firm default'
+        }).`
+      : 'Governing jurisdiction: not set — never asked at intake.',
   ]
   // Inner clips (intake/transcript) can each truncate independently of the
   // outer matterCoreChars safety net — track them so the section's `truncated`

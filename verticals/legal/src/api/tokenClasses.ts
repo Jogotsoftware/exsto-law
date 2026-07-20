@@ -66,3 +66,33 @@ export function isAutoInternalToken(name: string): boolean {
   const t = name.trim().toLowerCase()
   return SYSTEM_TOKENS.has(t) && !CLIENT_SOURCED_SLOTS.has(t)
 }
+
+// ── Unresolved-token honesty (generation integrity) ─────────────────────────
+// The AI drafting prompt instructs the model to LEAVE a `{{variable}}` token IN
+// PLACE UNCHANGED when it cannot honestly fill it (bundledPrompts.ts /
+// templateAuthoring.ts), rather than invent a value or write bracketed filler.
+// That is the correct behavior — but a token left in place is only honest to
+// the CLIENT if the attorney reviewing the draft is told about it too. The
+// model's own free-text `ambiguities` list is not a reliable signal for this
+// (a model can leave a token in place without mentioning it there), so this is
+// a deterministic scan of the produced body itself: the platform's own honesty
+// net, independent of what the model chose to self-report.
+const RAW_TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g
+
+// Every distinct `{{token}}` still present in a produced document body,
+// lower-cased and de-duplicated, sorted for a deterministic result. Empty when
+// the body is fully resolved — the common, expected case. Render-state
+// artifacts are excluded: {{signature}}/{{citation}} legitimately remain in the
+// text (RENDER_STATE_TOKENS above), and the e-sign markers ({{sign:key}},
+// {{date:key}}, …) never match RAW_TOKEN_RE at all (the colon is outside its
+// character class) — neither is a data gap the attorney needs a warning about.
+export function findUnresolvedTokens(body: string): string[] {
+  const found = new Set<string>()
+  for (const m of body.matchAll(RAW_TOKEN_RE)) {
+    const token = m[1]?.toLowerCase()
+    if (token && !(RENDER_STATE_TOKENS as readonly string[]).includes(token)) {
+      found.add(token)
+    }
+  }
+  return [...found].sort()
+}

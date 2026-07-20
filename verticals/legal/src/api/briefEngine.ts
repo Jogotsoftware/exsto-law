@@ -140,6 +140,19 @@ export const BRIEF_QUOTING_RULE =
   'commitments someone made, deadlines, and admissions. When a section contains any ' +
   'verbatim quote, set its "quoted" flag to true.'
 
+// Generation integrity — the matter-core evidence section (briefEvidence.ts)
+// now carries a "Governing jurisdiction: …" fact line whenever the platform
+// has resolved one; this rule stops the model from second-guessing that fact
+// with its own inference from a client's address or other circumstantial
+// evidence, which is exactly how a Georgia client's brief once narrated
+// Georgia governing law from an "Acworth, GA" street address on file. Exported
+// so the test asserts the rule text is present, same as BRIEF_QUOTING_RULE.
+export const BRIEF_JURISDICTION_RULE =
+  'Governing jurisdiction is a platform fact, not something to infer: when the evidence below ' +
+  'includes a "Governing jurisdiction:" line, state exactly that jurisdiction (or that none is ' +
+  "set) and never infer, guess, or override it from a client's address or any other " +
+  'circumstantial evidence.'
+
 export function buildBriefSynthesisPrompt(bundle: EvidenceBundle): string {
   // Shared with the Service Digest injection (briefEvidence.ts's
   // renderEvidenceBundle) — no header, no cap here, so this is byte-equivalent
@@ -154,6 +167,7 @@ export function buildBriefSynthesisPrompt(bundle: EvidenceBundle): string {
     '',
     'Rules:',
     `- ${BRIEF_QUOTING_RULE}`,
+    `- ${BRIEF_JURISDICTION_RULE}`,
     '- Be honest about gaps: when something is unknown, missing, or ambiguous in the ' +
       'evidence, say so plainly ("no engagement letter on file", "the deadline was never ' +
       'confirmed in writing"). Never invent or smooth over a gap.',
