@@ -1359,7 +1359,7 @@ export async function assistantChat(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      volatileSystem: buildVolatileClaudeSystem(input.pageContext, buildBrief),
+      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief),
       clientTools: buildAttorneyClientTools(ctx, input, {
         catalog,
         producedDocuments,
@@ -1658,7 +1658,7 @@ export async function* assistantChatStream(
       workRate: input.workRate,
       supportsWorkRate: model.supportsWorkRate,
       webSearch,
-      volatileSystem: buildVolatileClaudeSystem(input.pageContext, buildBrief),
+      volatile: buildVolatileClaudeSystem(input.pageContext, buildBrief),
       clientTools: buildAttorneyClientTools(ctx, input, {
         catalog,
         producedDocuments,
