@@ -110,7 +110,7 @@ export function getGranolaRedirectUri(): string {
   const base = (
     process.env.NEXT_PUBLIC_BASE_URL ??
     process.env.URL ??
-    'https://exstolaw.netlify.app'
+    'https://exsto-law.netlify.app'
   ).replace(/\/$/, '')
   return `${base}/api/auth/granola/callback`
 }

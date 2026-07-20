@@ -328,7 +328,7 @@ export async function tryCreateBookingEvent(
   const status = await getGoogleStatus(ctx, firmActor)
   if (!status.connected) return null
   const baseUrl =
-    process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? 'https://exstolaw.netlify.app'
+    process.env.NEXT_PUBLIC_BASE_URL ?? process.env.URL ?? 'https://exsto-law.netlify.app'
   const attorneyEmail = status.accountEmail ?? ATTORNEY_FALLBACK_EMAIL
 
   const descriptionHtml = `

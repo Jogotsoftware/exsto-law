@@ -13,7 +13,7 @@ import { queueNotification } from './notifications.js'
 const BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
   process.env.URL ??
-  'https://exstolaw.netlify.app'
+  'https://exsto-law.netlify.app'
 ).replace(/\/$/, '')
 
 const TYPE_LABEL: Record<RequestType, string> = {

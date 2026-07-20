@@ -628,7 +628,7 @@ export interface CreateEventInput {
   clientName: string
   matterId: string
   matterReschedulePath: string // e.g. /book/reschedule/<matter_id>
-  bookingBaseUrl: string // e.g. https://exstolaw.netlify.app
+  bookingBaseUrl: string // e.g. https://exsto-law.netlify.app
 }
 
 export interface CreatedEvent {
