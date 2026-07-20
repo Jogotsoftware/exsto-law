@@ -95,6 +95,7 @@ import { buildKindContextTool, buildProposeKindTool } from './kindAuthoringTools
 import { buildOpenEditorTool, type EditorLaunch } from './editorLaunchTools.js'
 import { buildComposeEmailTool, type EmailComposeCapture } from './composeEmailTool.js'
 import { buildPrepareEnvelopeTool, type EnvelopePrepareLaunch } from './esignLaunchTools.js'
+import { buildGetBriefTool } from './getBriefTool.js'
 import type { KindProposal } from './kindAuthoring.js'
 import { buildWizardEnabled } from '../lifecycle/flags.js'
 import { buildBuildBriefText } from './buildBrief.js'
@@ -652,6 +653,9 @@ export function buildAttorneyClientTools(
     input.useContext !== false && Boolean(input.matterEntityId || input.contactEntityId)
   if (scoped) {
     tools.push(buildComposeEmailTool(capture.emailComposes))
+    // WP B5: get_brief is READ-ONLY (never generates), so it rides the same
+    // scoping guard as compose_email — a matter or contact to resolve against.
+    tools.push(buildGetBriefTool(ctx, input))
   }
   if (input.useContext !== false && input.matterEntityId) {
     tools.push(buildPrepareEnvelopeTool(ctx, input.matterEntityId, capture.envelopePrepares))
@@ -797,6 +801,10 @@ export function buildClaudeSystem(
   if (scope === 'matter' || scope === 'contact') {
     system +=
       "\n\nCOMPOSING CLIENT EMAILS — when the attorney asks you to email, message, or send something to the CLIENT (a request for documents, a status update, findings, a follow-up), draft it and deliver it by CALLING the compose_email tool. That opens the firm's real composer prefilled with your draft; the ATTORNEY reviews, edits, attaches documents, and sends it themselves — their review in the composer IS the approval step, so NEVER say the email 'will go to the review queue', 'is queued', or 'was sent'. The composer resolves the client's address — never type or guess an email address. To attach a document, produce it FIRST with produce_document, then list its exact title in attach_document_titles. compose_email is for emails TO the client; produce_document is for standalone document deliverables. Put the email ONLY in the tool call; your reply is ONE short sentence pointing to the composer. All accuracy rules above apply to the email body."
+    // WP B5 — the brief tool-doctrine sentence: background, cited, never pasted
+    // wholesale; get_brief is read-only and must never be confused for generation.
+    system +=
+      "\n\nUSING THE BRIEF — before answering questions about this matter's or client's status, history, commitments, or open items, call get_brief for the firm's already-generated synthesis and use it as background, citing it in your own words — never paste it wholesale into your reply; get_brief only READS, it never generates or refreshes a brief, so if none exists yet or it reports out of date, tell the attorney and point them to the Brief button on this page."
   }
   if (scope === 'matter') {
     system +=

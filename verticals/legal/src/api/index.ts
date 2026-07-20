@@ -93,6 +93,8 @@ export * from './assistantChat.js'
 // ASSISTANT-ACTS-1 — the act-in-place chat tools (compose a client email into
 // the real composer; stage an e-sign envelope into the prepare wizard).
 export * from './composeEmailTool.js'
+// WP B5 — the read-only get_brief chat tool (brief fan-out).
+export * from './getBriefTool.js'
 export * from './esignLaunchTools.js'
 export * from './assistantMachinery.js'
 export * from './chatSession.js'

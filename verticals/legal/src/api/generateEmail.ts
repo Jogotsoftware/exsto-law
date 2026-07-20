@@ -27,6 +27,7 @@ import {
 import { loadEmailDraftingPrompt } from '../templates/loader.js'
 import { getMatter } from '../queries/matters.js'
 import { getClientContext, formatClientContext } from '../queries/clientContext.js'
+import { getBriefForTarget, type StoredBrief } from '../queries/briefs.js'
 import { getStandaloneTemplate } from '../queries/templates.js'
 import { renderTemplate, buildMergeData } from './templateMerge.js'
 import { resolveMatterJurisdiction } from './matterJurisdiction.js'
@@ -84,6 +85,24 @@ export function parseEmailDraftOutput(
     .replace(/^\s+/, '')
     .trim()
   return { subject, body: body || text }
+}
+
+// WP B5 — the {{client_brief}} slot: a READ of the stored CLIENT brief
+// (getBriefForTarget, never getOrRefreshClientBrief — email drafting must
+// never trigger generation), clipped to a hard character budget the same way
+// formatClientContext truncates (marked, never silent), with an honest marker
+// when no brief has been generated yet. Pure/exported for tests.
+export const CLIENT_BRIEF_MAX_CHARS = 4000
+export const NO_CLIENT_BRIEF_MARKER = '(no client brief generated yet)'
+
+export function formatClientBriefForEmail(
+  stored: StoredBrief | null,
+  maxChars: number = CLIENT_BRIEF_MAX_CHARS,
+): string {
+  if (!stored || !stored.markdown.trim()) return NO_CLIENT_BRIEF_MARKER
+  const text = stored.markdown.trim()
+  if (text.length <= maxChars) return text
+  return `${text.slice(0, Math.max(0, maxChars - 60))}\n…[client brief truncated at ${maxChars} chars]`
 }
 
 export async function composeEmailDraft(
@@ -153,9 +172,15 @@ export async function composeEmailDraft(
   // Client memory ALWAYS rides the email prompt (WP1.4 — this consumer is
   // unconditional by design). No client parent → an honest empty marker.
   let clientContextText = '(no client history on file for this matter)'
+  // WP B5 — the {{client_brief}} slot: a plain READ of the stored client brief
+  // (getBriefForTarget — never generates), clipped by formatClientBriefForEmail.
+  // No client parent → the same honest empty marker as clientContextText above.
+  let clientBriefText = NO_CLIENT_BRIEF_MARKER
   if (matter.clientEntityId) {
     const context = await getClientContext(agentCtx, matter.clientEntityId)
     if (context) clientContextText = formatClientContext(context)
+    const brief = await getBriefForTarget(agentCtx, matter.clientEntityId, 'client')
+    clientBriefText = formatClientBriefForEmail(brief)
   }
 
   const matterFacts = {
@@ -182,6 +207,7 @@ export async function composeEmailDraft(
     .replaceAll('{{recipient_role}}', () => recipientRole)
     .replaceAll('{{matter_facts_json}}', () => JSON.stringify(matterFacts, null, 2))
     .replaceAll('{{client_context}}', () => clientContextText)
+    .replaceAll('{{client_brief}}', () => clientBriefText)
     .replaceAll('{{firm_instructions}}', () => firmInstructionsBlock)
 
   const autoSkillSlugs = await resolveJurisdictionSkillSlugs(agentCtx, {

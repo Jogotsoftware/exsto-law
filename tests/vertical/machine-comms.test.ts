@@ -4,7 +4,12 @@
 // formatter's hard budget + archived-matter visibility. Pure — no DB, no model.
 import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
-import { parseEmailDraftOutput } from '../../verticals/legal/src/api/generateEmail.js'
+import {
+  parseEmailDraftOutput,
+  formatClientBriefForEmail,
+  CLIENT_BRIEF_MAX_CHARS,
+  NO_CLIENT_BRIEF_MARKER,
+} from '../../verticals/legal/src/api/generateEmail.js'
 import {
   checkEmailVoice,
   buildVoiceCorrectionSection,
@@ -15,6 +20,7 @@ import {
   formatClientContext,
   type ClientContext,
 } from '../../verticals/legal/src/queries/clientContext.js'
+import type { StoredBrief } from '../../verticals/legal/src/queries/briefs.js'
 
 describe('parseEmailDraftOutput — the SUBJECT-line contract', () => {
   it('splits subject and body', () => {
@@ -218,9 +224,54 @@ describe('loadEmailDraftingPrompt — composes the house-voice doctrine (STYLE-F
     expect(prompt).toContain('No em dashes anywhere.')
     // The data slots the compose path fills are untouched. {{firm_instructions}}
     // (WP FB-B) is one of these — see ai-context-custom-instructions.test.ts for
-    // its fill/empty-safe behavior.
+    // its fill/empty-safe behavior. {{client_brief}} is WP B5's — see below.
     expect(prompt).toContain('{{purpose}}')
     expect(prompt).toContain('{{client_context}}')
+    expect(prompt).toContain('{{client_brief}}')
     expect(prompt).toContain('{{firm_instructions}}')
+  })
+})
+
+// WP B5 — the {{client_brief}} slot: a plain, clipped READ of the stored
+// client brief, honest about absence. Pure — no DB.
+describe('formatClientBriefForEmail — the {{client_brief}} slot (WP B5)', () => {
+  function storedBrief(markdown: string): StoredBrief {
+    return {
+      briefEntityId: 'b1',
+      briefType: 'client',
+      markdown,
+      sections: [],
+      generatedAt: '2026-07-10T00:00:00.000Z',
+      sourceWatermark: '2026-07-10T00:00:00.000Z',
+      modelIdentity: 'claude-x',
+      confidence: 0.7,
+    }
+  }
+
+  it('returns the brief markdown verbatim when under budget', () => {
+    expect(
+      formatClientBriefForEmail(storedBrief('Dana is a repeat client in good standing.')),
+    ).toBe('Dana is a repeat client in good standing.')
+  })
+
+  it('the honest absence marker when no brief was ever generated (null)', () => {
+    expect(formatClientBriefForEmail(null)).toBe(NO_CLIENT_BRIEF_MARKER)
+  })
+
+  it('the honest absence marker for a stored-but-empty brief', () => {
+    expect(formatClientBriefForEmail(storedBrief('   '))).toBe(NO_CLIENT_BRIEF_MARKER)
+  })
+
+  it('clips long briefs to the budget and marks the truncation, never silently', () => {
+    const long = 'x'.repeat(CLIENT_BRIEF_MAX_CHARS + 500)
+    const out = formatClientBriefForEmail(storedBrief(long))
+    expect(out.length).toBeLessThanOrEqual(CLIENT_BRIEF_MAX_CHARS)
+    expect(out).toContain(`truncated at ${CLIENT_BRIEF_MAX_CHARS} chars`)
+  })
+
+  it('respects a custom maxChars override', () => {
+    const out = formatClientBriefForEmail(storedBrief('y'.repeat(500)), 100)
+    expect(out.length).toBeLessThanOrEqual(100)
+    expect(out).toContain('truncated at 100 chars')
   })
 })
