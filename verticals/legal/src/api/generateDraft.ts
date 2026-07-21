@@ -11,6 +11,7 @@ import { loadDraftingPrompt } from '../templates/loader.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
 import { renderTemplate, buildMergeData, longDate } from './templateMerge.js'
+import { canonicalizeExecutionLines } from '../esign/executionBlock.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
 import { resolveMatterJurisdiction, type ResolvedJurisdiction } from './matterJurisdiction.js'
 import { findUnresolvedTokens } from './tokenClasses.js'
@@ -288,13 +289,19 @@ export async function runDraftGeneration(
       }),
     )
 
+    // EDITOR-FIX-1 (item 6a): a legacy template body may end with a compound
+    // execution line (a printed name/role + an inline `Date: ____` rule). Split
+    // it so the trailing rule becomes a whole-line ruled signature/date line
+    // everywhere it renders — never literal broken underscores.
+    const canonicalMarkdown = canonicalizeExecutionLines(markdown)
+
     const merged = await submitAction(agentCtx, {
       actionKindName: 'draft.merge',
       intentKind: 'automatic_sync',
       payload: {
         matter_entity_id: input.matterEntityId,
         document_kind: input.documentKind,
-        document_markdown: markdown,
+        document_markdown: canonicalMarkdown,
         jurisdiction: jurisdiction?.code ?? null,
         template_id: templateId,
         missing_fields: missingFields,
