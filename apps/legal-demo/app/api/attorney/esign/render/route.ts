@@ -1,4 +1,9 @@
 import { NextResponse } from 'next/server'
+// @react-pdf/renderer is server-external (next.config.mjs) and is otherwise
+// reached only through @exsto/legal's lazy createRequire, which the function
+// tracer cannot follow — without this visible import the deployed function
+// omits the package and the render 500s with MODULE_NOT_FOUND (prod 2026-07-21).
+import '@react-pdf/renderer'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
 import { loadVersionForPlacement, renderMarkdownForPlacement } from '@exsto/legal'
 import { downloadObject } from '@/lib/documentStorage'
