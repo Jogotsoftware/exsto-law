@@ -8,6 +8,37 @@ import './handlers/index.js'
 export { WorkflowAdvanceGuardError } from './handlers/workflow.js'
 
 export * from './api/index.js'
+// ESIGN-UNIFY-1 ES-2 — executed-copy stamping (server-only: pdf-lib) plus the
+// placement bridge/data/geometry helpers for server callers (the render route,
+// the completion path, tests). Client components import the pure surface from
+// '@exsto/legal/esign' (executionBlock.ts) instead — stampPdf must never reach
+// a client bundle.
+export {
+  stampExecutedPdf,
+  placementsToStampFields,
+  type StampField,
+  type StampInput,
+} from './esign/stampPdf.js'
+export { buildCertificateTextLines } from './esign/fileCertificate.js'
+export { deriveMarkerMap, markerMapToPlacements, type MarkerMapEntry } from './esign/markerMap.js'
+export {
+  resolvePlacementData,
+  ALLOWED_MATTER_KEYS,
+  type PlacementRecipient,
+  type PlacementContactFacts,
+  type ResolvePlacementDataInput,
+} from './esign/placementData.js'
+export {
+  parseEnvelopePlacements,
+  denormalizeRect,
+  normalizeRect,
+  clampRect,
+  defaultRectForType,
+  DEFAULT_FIELD_POINTS,
+  LETTER_POINTS,
+  type PlacementRect,
+  type PlacementAnchor,
+} from './esign/placements.js'
 export * from './queries/index.js'
 export * from './templates/loader.js'
 // Platform control plane (ADR 0046) — cross-tenant operations behind guarded

@@ -23,6 +23,35 @@ export interface FileCertInput {
   signers: FileCertSigner[]
 }
 
+// ES-2 (§5.4) — the SAME certificate content as plain text lines, for the
+// pdf-lib executed-copy stamper's appended certificate page (stampPdf.ts). One
+// source of truth for what the certificate SAYS; markdown vs drawn-text is only
+// a rendering difference.
+export function buildCertificateTextLines(input: FileCertInput): string[] {
+  const lines: string[] = [
+    '',
+    'This document was executed electronically. Each signer below reviewed the',
+    'document and adopted their signature with intent to sign.',
+    '',
+    `Document: ${input.filename ?? 'uploaded document'} (${input.contentType ?? 'file'}${
+      input.sizeBytes ? `, ${input.sizeBytes} bytes` : ''
+    })`,
+    '',
+  ]
+  for (const sgn of input.signers) {
+    lines.push(
+      `• ${sgn.name ?? sgn.email ?? 'Signer'}${sgn.title ? `, ${sgn.title}` : ''} (${
+        sgn.email ?? '—'
+      }) — signed ${sgn.signed_at ?? '—'}`,
+    )
+    lines.push(`  Consent: "${sgn.consent ?? '—'}"`)
+  }
+  lines.push('')
+  lines.push(`Original file SHA-256: ${input.sha256Hex ?? '—'}`)
+  lines.push(`Envelope: ${input.envelopeId}`)
+  return lines
+}
+
 export function buildFileCertificateMarkdown(input: FileCertInput): string {
   const fileLine = `**Document:** ${input.filename ?? 'uploaded document'} (${
     input.contentType ?? 'file'

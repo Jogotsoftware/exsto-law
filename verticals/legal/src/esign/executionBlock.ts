@@ -37,6 +37,37 @@ export {
   type EsignMarkerRoleDrift,
 } from './fields.js'
 
+// ESIGN-UNIFY-1 ES-2 — the placement canvas's client-safe surface: the storage
+// model + normalized-coordinate geometry (placements.ts), the anchor→rect
+// bridge (markerMap.ts), and the send-time data resolver (placementData.ts).
+// All pure (no DB, no pdf-lib, no server deps) — same discipline as the
+// re-exports above. stampPdf.ts (pdf-lib) is deliberately NOT here: it is
+// server-only and exports via the package root instead.
+export {
+  parseEnvelopePlacements,
+  serializeEnvelopePlacements,
+  isPlacementFieldType,
+  PLACEMENT_FIELD_TYPES,
+  DEFAULT_FIELD_POINTS,
+  LETTER_POINTS,
+  clamp01,
+  clampRect,
+  normalizeRect,
+  denormalizeRect,
+  defaultRectForType,
+  type FieldPlacement,
+  type PlacementFieldType,
+  type PlacementAnchor,
+  type PlacementRect,
+} from './placements.js'
+export { deriveMarkerMap, markerMapToPlacements, type MarkerMapEntry } from './markerMap.js'
+export {
+  resolvePlacementData,
+  type PlacementRecipient,
+  type PlacementContactFacts,
+  type ResolvePlacementDataInput,
+} from './placementData.js'
+
 // A whole-line execution element is EITHER a marker line or a legacy underscore
 // run, each with an OPTIONAL "Label: " prefix. Anchored to the whole (trimmed)
 // line on purpose: only a line that is ENTIRELY one of these becomes a ruled line.

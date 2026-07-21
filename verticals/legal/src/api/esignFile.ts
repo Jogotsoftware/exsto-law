@@ -19,14 +19,20 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { assertCanSendOnMatter } from './matterAccess.js'
 import { notifyDelivered, signingCtx } from './esign.js'
 import { buildAndSubmitEnvelope, type RecipientRole } from './esignSend.js'
+import { loadPlacementContactFacts } from './esignRender.js'
 import { verifySigningToken } from '../esign/index.js'
 import type { FieldPlacement } from '../esign/placements.js'
+import { resolvePlacementData } from '../esign/placementData.js'
 
 export interface FileSigner {
   email: string
   name?: string
   title?: string
   order?: number
+  /** ES-2 (§5.1): the signer key the envelope's placements reference
+   *  (FieldPlacement.signerKey). The composer assigns one per recipient;
+   *  pre-composer callers omit it. */
+  key?: string
   /** ESIGN-UNIFY-1 (ES-1, §9.2): needs_to_sign (default) | needs_to_view |
    *  receives_copy. Pre-ES-1 callers omit it — unchanged behavior. */
   role?: RecipientRole
@@ -65,6 +71,7 @@ interface UploadedDocRow {
   content_type: string | null
   filename: string | null
   matter_entity_id: string | null
+  contact_entity_id: string | null
 }
 
 async function loadUploadedVersion(
@@ -77,7 +84,8 @@ async function loadUploadedVersion(
               dv.metadata->>'object_key' AS object_key,
               COALESCE(dv.metadata->>'content_type', cb.content_type) AS content_type,
               dv.metadata->>'original_filename' AS filename,
-              m.target_entity_id AS matter_entity_id
+              m.target_entity_id AS matter_entity_id,
+              c.target_entity_id AS contact_entity_id
          FROM document_version dv
          JOIN content_blob cb ON cb.id = dv.content_blob_id
          LEFT JOIN relationship m ON m.source_entity_id = dv.document_entity_id
@@ -86,6 +94,12 @@ async function loadUploadedVersion(
            AND m.relationship_kind_id =
                (SELECT id FROM relationship_kind_definition
                  WHERE kind_name = 'document_of' AND tenant_id = $1 LIMIT 1)
+         LEFT JOIN relationship c ON c.source_entity_id = dv.document_entity_id
+           AND c.tenant_id = dv.tenant_id
+           AND (c.valid_to IS NULL OR c.valid_to > now())
+           AND c.relationship_kind_id =
+               (SELECT id FROM relationship_kind_definition
+                 WHERE kind_name = 'document_of_contact' AND tenant_id = $1 LIMIT 1)
         WHERE dv.tenant_id = $1 AND dv.id = $2
         LIMIT 1`,
       [ctx.tenantId, documentVersionId],
@@ -114,7 +128,7 @@ export async function sendFileForSignature(
     .map((s, i) => ({
       email: s.email.trim(),
       name: s.name?.trim() || null,
-      key: null,
+      key: s.key?.trim() || null,
       title: s.title?.trim() || null,
       order: s.order ?? i + 1,
       channel: 'link' as const,
@@ -124,6 +138,33 @@ export async function sendFileForSignature(
 
   const subject =
     input.subject?.trim() || `Signature requested: ${doc.filename ?? 'uploaded document'}`
+
+  // ES-2 (§5.3) — resolve data-bound placements at SEND time: the signer's own
+  // recipient row first, then the bound contact's attributes. Resolved values
+  // are baked into each placement (`value`); unresolvable stays signer-fillable.
+  // FIRM_DEFAULTS can never reach this path — the facts come from the recipient
+  // rows and the contact entity only (loadPlacementContactFacts), and the
+  // resolver's matter allow-list drops any firm-identity key regardless.
+  let placements = input.placements
+  if (placements?.length) {
+    const contactFacts = doc.contact_entity_id
+      ? await loadPlacementContactFacts(ctx, doc.contact_entity_id).catch(() => null)
+      : null
+    const resolved = resolvePlacementData(placements, {
+      recipients: signers.map((s) => ({
+        signerKey: s.key || s.email,
+        name: s.name,
+        email: s.email,
+        title: s.title,
+      })),
+      contact: contactFacts,
+      matter: null,
+    })
+    placements = placements.map((p) => {
+      const value = resolved[p.id]
+      return value ? { ...p, value } : p
+    })
+  }
 
   // ESIGN-UNIFY-1 (ES-1, §5.5) — converge on the ONE builder the draft path
   // uses; roles/placements/message ride the same esign.send payload.
@@ -136,7 +177,7 @@ export async function sendFileForSignature(
     subject,
     recipients: signers,
     fields: [],
-    placements: input.placements,
+    placements,
     message: input.message ?? null,
   })
   const envelopeId = built.envelopeId

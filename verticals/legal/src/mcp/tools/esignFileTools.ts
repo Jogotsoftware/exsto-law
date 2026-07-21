@@ -19,6 +19,8 @@ interface Input {
     name?: string
     title?: string
     order?: number
+    /** ES-2: the signer key the envelope's placements reference. */
+    key?: string
     role?: RecipientRole
   }>
   subject?: string
@@ -29,8 +31,8 @@ interface Input {
 const sendFileTool: Tool<Input, SendFileForSignatureResult> = {
   name: 'legal.esign.send_file',
   description:
-    'Send an uploaded PDF document for e-signature (whole-document sign + signature certificate; ' +
-    'no inline field tags). Works standalone or attached to a matter/contact. Every signer gets a ' +
+    'Send an uploaded PDF document for e-signature (visual field placements when provided, else ' +
+    'whole-document sign + signature certificate). Works standalone or attached to a matter/contact. Every signer gets a ' +
     'secure email signing link; recipients not already in contacts are saved as new contacts. ' +
     'Each recipient may carry a role: needs_to_sign (default), needs_to_view (read-only link), or ' +
     'receives_copy (executed copy on completion). Optional `placements` stores the field-placement ' +

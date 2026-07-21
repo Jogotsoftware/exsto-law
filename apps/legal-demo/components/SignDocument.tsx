@@ -6,33 +6,38 @@
 // consent, and Sign / Decline. The caller supplies onSign/onDecline (portal MCP
 // vs /api/sign routes).
 //
-// LI PORTAL RESTYLE: the adopt-signature block now matches the comp's "Adopt your
-// signature" screen — a Type/Draw toggle, and in Type mode three cursive style
-// choices. Styles/draw are ADDITIVE: with no style chosen it behaves exactly as
-// before (typed legal name, no image). A chosen style or a drawn signature is
-// captured as `signatureData` (a data-URL image), which every caller/back end
-// already accepts.
-import { useRef, useState } from 'react'
+// ESIGN-UNIFY-1 ES-2 (§9.3): rebuilt on the overlay renderer. A FILE envelope
+// with coordinate placements renders the REAL PDF pages (PdfCanvas) with this
+// signer's field boxes at their true positions — tap a box to fill it (a
+// signature box jumps to the adopt capture below); `date` boxes read "(auto)"
+// and fill with the actual signing date at submit (the signer never types a
+// date); required text boxes gate the Sign button. Legacy envelopes (markdown
+// drafts, or files sent without placements) keep the exact pre-ES-2 flow. The
+// adopt-signature capture itself is extracted UNCHANGED to
+// components/esign/AdoptSignature.tsx and shared.
+import { useEffect, useMemo, useState } from 'react'
+import type { FieldPlacement } from '@exsto/legal/esign'
 import { useConfirm } from '@/components/ConfirmModal'
 import { ScaleIcon } from '@/components/icons'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
+import {
+  AdoptSignature,
+  CONSENT_TEXT,
+  type AdoptState,
+  type SavedSignature,
+} from '@/components/esign/AdoptSignature'
+import { PdfCanvas } from '@/components/esign/PdfCanvas'
+import { usePdfDocument } from '@/components/esign/usePdfDocument'
+
+export { CONSENT_TEXT }
+export type { SavedSignature }
 
 export interface SignField {
   id: string
   type: string
   label: string
   prefill?: string
-}
-// The signer's standing signature (P15), when the caller resolved one — today
-// that's a signed-in attorney opening their OWN signature request. Typed
-// prefills the name field; drawn/uploaded offers the saved image, passed
-// through onSign as signatureData. Callers that pass nothing (anonymous /
-// client signers) see the surface unchanged.
-export interface SavedSignature {
-  mode: 'typed' | 'drawn' | 'uploaded'
-  name: string
-  data: string | null
 }
 export interface SignableDoc {
   documentTitle: string
@@ -47,6 +52,8 @@ export interface SignableDoc {
   signerStatus: string
   envelopeStatus: string | null
   fields: SignField[]
+  /** ES-2 (§9.3) — this signer's coordinate placements (empty = legacy flow). */
+  placements?: FieldPlacement[]
   canSign: boolean
   alreadyResolved: boolean
   // FB-C — the resolved firm's name (never a hardcoded literal). Optional so
@@ -55,109 +62,10 @@ export interface SignableDoc {
   firmName?: string | null
 }
 
-export const CONSENT_TEXT =
-  'I agree to sign this document electronically and that my electronic signature ' +
-  'is the legal equivalent of my handwritten signature (ESIGN / UETA).'
-
-// Cursive style choices for typed adoption (comp "Choose a style"). Each renders
-// the typed name in the given font; the selection is rasterized to a data-URL on
-// submit so the chosen look travels as signatureData.
-const SIGNATURE_STYLES: Array<{ font: string; italic: boolean }> = [
-  { font: "'EB Garamond', Georgia, serif", italic: true },
-  { font: '"Brush Script MT", "Segoe Script", cursive', italic: false },
-  { font: '"Snell Roundhand", "Apple Chancery", cursive', italic: true },
-]
-
-// Rasterize the typed name in a chosen script font → data-URL (transparent bg).
-function renderTypedSignature(
-  name: string,
-  style: { font: string; italic: boolean },
-): string | null {
-  if (typeof document === 'undefined' || !name.trim()) return null
-  const canvas = document.createElement('canvas')
-  const scale = 2
-  canvas.width = 440 * scale
-  canvas.height = 120 * scale
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-  ctx.scale(scale, scale)
-  ctx.fillStyle = '#1b2a4a'
-  ctx.textBaseline = 'middle'
-  ctx.textAlign = 'center'
-  ctx.font = `${style.italic ? 'italic ' : ''}52px ${style.font}`
-  ctx.fillText(name.trim(), 220, 62, 420)
-  return canvas.toDataURL('image/png')
-}
-
-// A minimal draw pad → data-URL. Owns its own canvas ref and reports the drawn
-// signature (or null after a clear) up through onCommit, so the parent never has
-// to thread a DOM ref across the component boundary.
-function DrawPad({ onCommit }: { onCommit: (data: string | null) => void }) {
-  const ref = useRef<HTMLCanvasElement | null>(null)
-  const drawing = useRef(false)
-  const last = useRef<{ x: number; y: number } | null>(null)
-  const [hasInk, setHasInk] = useState(false)
-
-  function pos(e: React.PointerEvent<HTMLCanvasElement>) {
-    const c = ref.current!
-    const rect = c.getBoundingClientRect()
-    return {
-      x: (e.clientX - rect.left) * (c.width / rect.width),
-      y: (e.clientY - rect.top) * (c.height / rect.height),
-    }
-  }
-  function down(e: React.PointerEvent<HTMLCanvasElement>) {
-    e.currentTarget.setPointerCapture(e.pointerId)
-    drawing.current = true
-    last.current = pos(e)
-  }
-  function move(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!drawing.current || !ref.current) return
-    const ctx = ref.current.getContext('2d')
-    if (!ctx) return
-    const p = pos(e)
-    ctx.strokeStyle = '#1b2a4a'
-    ctx.lineWidth = 2.4
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.beginPath()
-    ctx.moveTo(last.current!.x, last.current!.y)
-    ctx.lineTo(p.x, p.y)
-    ctx.stroke()
-    last.current = p
-    setHasInk(true)
-  }
-  function up() {
-    drawing.current = false
-    last.current = null
-    if (hasInk && ref.current) onCommit(ref.current.toDataURL('image/png'))
-  }
-  function clear() {
-    const c = ref.current
-    if (c) c.getContext('2d')?.clearRect(0, 0, c.width, c.height)
-    setHasInk(false)
-    onCommit(null)
-  }
-  return (
-    <>
-      <canvas
-        ref={ref}
-        width={880}
-        height={300}
-        className="li-cp-adopt-pad"
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        onPointerLeave={up}
-      />
-      {hasInk && (
-        <button type="button" className="li-cp-linkbtn" onClick={clear}>
-          Clear
-        </button>
-      )}
-    </>
-  )
-}
+// The signer's own boxes all render in tone 1 (their color); the §4 multi-
+// signer tinting matters on the ATTORNEY canvas — here only this signer's
+// fields are shown.
+const SIGNER_TONE = 1
 
 export function SignDocument({
   doc,
@@ -178,21 +86,14 @@ export function SignDocument({
   }) => Promise<{ completed: boolean }>
   onDecline: () => Promise<void>
 }) {
-  // A saved image signature (drawn/uploaded) the signer can apply as-is.
-  const savedImage =
-    savedSignature && savedSignature.mode !== 'typed' && savedSignature.data
-      ? savedSignature.data
-      : null
-  const [signatureName, setSignatureName] = useState(
-    savedSignature?.mode === 'typed' && savedSignature.name.trim()
-      ? savedSignature.name
-      : (doc.signerName ?? ''),
-  )
-  const [useSavedImage, setUseSavedImage] = useState(true)
-  const [mode, setMode] = useState<'type' | 'draw'>('type')
-  const [styleIdx, setStyleIdx] = useState<number | null>(null)
-  const [drawData, setDrawData] = useState<string | null>(null)
-  const [consent, setConsent] = useState(false)
+  const placements = useMemo(() => doc.placements ?? [], [doc.placements])
+  const overlayMode = Boolean(doc.isFile && fileUrl && placements.length > 0)
+
+  const [adopt, setAdopt] = useState<AdoptState>({
+    signatureName: doc.signerName ?? '',
+    signatureData: null,
+    consent: false,
+  })
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(doc.fields.filter((f) => f.prefill).map((f) => [f.id, f.prefill!])),
   )
@@ -201,8 +102,66 @@ export function SignDocument({
   const [done, setDone] = useState<null | 'signed' | 'completed' | 'declined'>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Overlay mode (§9.3): fetch the PDF bytes through the token/session-gated
+  // URL and render REAL pages. Legacy file envelopes keep the plain iframe.
+  const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null)
+  useEffect(() => {
+    if (!overlayMode || !fileUrl) return
+    let cancelled = false
+    fetch(fileUrl)
+      .then(async (r) => {
+        if (!r.ok) throw new Error('Could not load the document.')
+        const buf = await r.arrayBuffer()
+        if (!cancelled) setPdfBytes(buf)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [overlayMode, fileUrl])
+  const pdf = usePdfDocument(overlayMode ? pdfBytes : null)
+
   // Fields the signer actually fills here (the adopted signature covers {{sign:…}}).
   const inputFields = doc.fields.filter((f) => f.type !== 'sign')
+
+  // §9.3 — what each overlay box shows right now: the send-time resolved value,
+  // the signer's live input, the adopted signature, or the "(auto)" date copy.
+  const overlayValues = useMemo(() => {
+    const out: Record<string, string | null> = {}
+    for (const p of placements) {
+      if (p.type === 'sign' || p.type === 'initial') {
+        out[p.id] =
+          adopt.signatureData || adopt.signatureName.trim()
+            ? p.type === 'initial'
+              ? initialsOf(adopt.signatureName)
+              : adopt.signatureName.trim()
+            : null
+      } else if (p.type === 'date') {
+        out[p.id] = null // the box label renders "(auto)"
+      } else if (p.type === 'name') {
+        out[p.id] = adopt.signatureName.trim() || doc.signerName || null
+      } else {
+        out[p.id] = p.value ?? fieldValues[p.id] ?? null
+      }
+    }
+    return out
+  }, [placements, adopt, fieldValues, doc.signerName])
+
+  // Required gate (§9.3): every required signer-fillable text box needs a value
+  // before Sign unlocks. Signature/initials ride the adopted name; date is auto.
+  const missingRequired = useMemo(
+    () =>
+      placements.filter(
+        (p) =>
+          p.required &&
+          !['sign', 'initial', 'name', 'date'].includes(p.type) &&
+          !(p.value ?? '').trim() &&
+          !(fieldValues[p.id] ?? '').trim(),
+      ),
+    [placements, fieldValues],
+  )
 
   function head() {
     return (
@@ -265,23 +224,13 @@ export function SignDocument({
     )
   }
 
-  // Resolve the signature image to attach (if any) at submit time.
-  function resolveSignatureData(): string | null {
-    if (savedImage && useSavedImage) return savedImage
-    if (mode === 'draw' && drawData) return drawData
-    if (mode === 'type' && styleIdx !== null) {
-      return renderTypedSignature(signatureName, SIGNATURE_STYLES[styleIdx]!)
-    }
-    return null
-  }
-
   async function submit() {
     setBusy('sign')
     setError(null)
     try {
       const r = await onSign({
-        signatureName,
-        signatureData: resolveSignatureData(),
+        signatureName: adopt.signatureName,
+        signatureData: adopt.signatureData,
         fieldValues,
         consent: CONSENT_TEXT,
       })
@@ -312,6 +261,22 @@ export function SignDocument({
     }
   }
 
+  // Tap-a-box (§9.3): a text-ish box focuses its input in the panel below; a
+  // signature/initials box jumps to the adopt capture.
+  function activateBox(id: string) {
+    const p = placements.find((x) => x.id === id)
+    if (!p) return
+    if (p.type === 'sign' || p.type === 'initial') {
+      document.getElementById('li-cp-adopt-anchor')?.scrollIntoView({ behavior: 'smooth' })
+      return
+    }
+    const input = document.getElementById(`esign-field-${id}`)
+    if (input) {
+      input.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      ;(input as HTMLInputElement).focus?.()
+    }
+  }
+
   return (
     <div className="public-draft li-cp-sign">
       {confirmElement}
@@ -321,7 +286,28 @@ export function SignDocument({
         {doc.signerTitle ? ` (${doc.signerTitle})` : ''}
       </div>
 
-      {doc.isFile && fileUrl ? (
+      {overlayMode ? (
+        <div className="li-esp-sign-overlay">
+          {pdf.error && <div className="alert alert-error">{pdf.error}</div>}
+          {!pdf.doc && !pdf.error && (
+            <div className="loading-block" role="status">
+              <span className="spinner" /> Loading document…
+            </div>
+          )}
+          {pdf.doc && (
+            <PdfCanvas
+              doc={pdf.doc}
+              pages={pdf.pages}
+              zoom="fit"
+              placements={placements}
+              toneBySigner={Object.fromEntries(placements.map((p) => [p.signerKey, SIGNER_TONE]))}
+              readOnly
+              valuesById={overlayValues}
+              onActivate={activateBox}
+            />
+          )}
+        </div>
+      ) : doc.isFile && fileUrl ? (
         <div className="li-cp-sign-file">
           <iframe
             src={fileUrl}
@@ -339,16 +325,19 @@ export function SignDocument({
         />
       )}
 
-      <div className="li-cp-adopt">
+      <div className="li-cp-adopt" id="li-cp-adopt-anchor">
         <h3 className="li-cp-adopt-h">Adopt your signature</h3>
 
         {inputFields.length > 0 && (
           <div className="li-cp-adopt-fields">
             {inputFields.map((f) => (
               <div key={f.id} className="li-cp-field">
-                <label className="li-cp-label">{f.label}</label>
+                <label className="li-cp-label" htmlFor={`esign-field-${f.id}`}>
+                  {f.label}
+                </label>
                 {f.type === 'check' ? (
                   <input
+                    id={`esign-field-${f.id}`}
                     type="checkbox"
                     checked={fieldValues[f.id] === 'true'}
                     onChange={(e) =>
@@ -357,6 +346,7 @@ export function SignDocument({
                   />
                 ) : (
                   <input
+                    id={`esign-field-${f.id}`}
                     className="li-cp-input"
                     type="text"
                     value={fieldValues[f.id] ?? ''}
@@ -368,104 +358,17 @@ export function SignDocument({
           </div>
         )}
 
-        {savedImage ? (
-          // Attorney standing signature — offer it directly (existing behavior).
-          <div className="li-cp-field">
-            <label className="li-cp-adopt-saved">
-              <input
-                type="checkbox"
-                checked={useSavedImage}
-                onChange={(e) => setUseSavedImage(e.target.checked)}
-              />
-              <span>Use my saved signature</span>
-            </label>
-            {useSavedImage && (
-              <img src={savedImage} alt="Your saved signature" className="li-cp-adopt-savedimg" />
-            )}
-          </div>
-        ) : (
-          <>
-            <div className="li-cp-seg li-cp-seg--wide">
-              <button
-                type="button"
-                className={`li-cp-seg-btn ${mode === 'type' ? 'active' : ''}`}
-                onClick={() => setMode('type')}
-              >
-                Type
-              </button>
-              <button
-                type="button"
-                className={`li-cp-seg-btn ${mode === 'draw' ? 'active' : ''}`}
-                onClick={() => setMode('draw')}
-              >
-                Draw
-              </button>
-            </div>
+        <AdoptSignature
+          initialName={doc.signerName ?? ''}
+          savedSignature={savedSignature}
+          onState={setAdopt}
+        />
 
-            <div className="li-cp-field">
-              <label className="li-cp-label" htmlFor="sig">
-                Full legal name
-              </label>
-              <input
-                id="sig"
-                className="li-cp-input"
-                type="text"
-                value={signatureName}
-                onChange={(e) => setSignatureName(e.target.value)}
-                placeholder="Your full name"
-              />
-            </div>
-
-            {mode === 'type' && signatureName.trim() && (
-              <div className="li-cp-field">
-                <label className="li-cp-label">Choose a style</label>
-                <div className="li-cp-adopt-styles">
-                  {SIGNATURE_STYLES.map((s, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      className={`li-cp-adopt-style ${styleIdx === i ? 'selected' : ''}`}
-                      onClick={() => setStyleIdx(i)}
-                    >
-                      <span
-                        style={{ fontFamily: s.font, fontStyle: s.italic ? 'italic' : 'normal' }}
-                      >
-                        {signatureName.trim()}
-                      </span>
-                      {styleIdx === i && (
-                        <svg
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="#c6a968"
-                          strokeWidth="2.4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden
-                        >
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {mode === 'draw' && (
-              <div className="li-cp-field">
-                <label className="li-cp-label">Draw your signature</label>
-                <DrawPad onCommit={setDrawData} />
-              </div>
-            )}
-          </>
+        {overlayMode && (
+          <p className="li-esp-adopt-autonote">
+            Date fields fill automatically with the date you sign — nothing to type.
+          </p>
         )}
-
-        <label className="li-cp-adopt-consent">
-          <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-          <span>{CONSENT_TEXT}</span>
-        </label>
 
         {error && (
           <div role="alert" className="alert alert-error">
@@ -477,8 +380,20 @@ export function SignDocument({
           <button
             type="button"
             className="li-cp-btn"
-            disabled={busy !== null || !signatureName.trim() || !consent}
+            disabled={
+              busy !== null ||
+              !adopt.signatureName.trim() ||
+              !adopt.consent ||
+              missingRequired.length > 0
+            }
             onClick={submit}
+            title={
+              missingRequired.length > 0
+                ? `Complete the required field${missingRequired.length === 1 ? '' : 's'}: ${missingRequired
+                    .map((p) => p.label || p.type)
+                    .join(', ')}`
+                : undefined
+            }
           >
             {busy === 'sign' && <span className="spinner" />}
             {busy === 'sign' ? 'Signing…' : 'Adopt & Sign'}
@@ -495,4 +410,13 @@ export function SignDocument({
       </div>
     </div>
   )
+}
+
+function initialsOf(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0]!.toUpperCase())
+    .join('')
 }

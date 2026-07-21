@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
-import { loadEnvelopeFileRef } from '@exsto/legal'
+import { loadEnvelopeFileRef, executedPdfObjectKey } from '@exsto/legal'
 import { downloadObject } from '@/lib/documentStorage'
 
 // 0170 — attorney view of a FILE envelope's document: streams the uploaded PDF
@@ -21,7 +21,11 @@ export async function GET(
   const ref = await loadEnvelopeFileRef(ctx, envelopeId).catch(() => null)
   if (!ref) return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
   try {
-    const bytes = await downloadObject(ref.objectKey)
+    // ES-2 (§5.4) — prefer the stamped executed copy once it exists (derived
+    // key, written on completion); the original streams until then.
+    const bytes = await downloadObject(executedPdfObjectKey(ref.objectKey)).catch(() =>
+      downloadObject(ref.objectKey),
+    )
     return new NextResponse(new Uint8Array(bytes), {
       headers: {
         'Content-Type': ref.contentType,

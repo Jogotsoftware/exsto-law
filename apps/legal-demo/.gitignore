@@ -1,0 +1,3 @@
+
+# ES-2: pdfjs worker staged at build time by scripts/copy-pdf-worker.mjs
+/public/pdf-worker/
