@@ -377,7 +377,7 @@ async function main(): Promise<void> {
   const probeGraph: Lifecycle = [
     {
       key: 'sign_step',
-      label: 'Send for signature',
+      label: 'eSign',
       entry: true,
       action: { kind: 'invoke_capability', config: { capability_slug: 'esignature' } },
       advances_to: [{ to: 'done', gate: 'system', on: 'esign.completed' }],

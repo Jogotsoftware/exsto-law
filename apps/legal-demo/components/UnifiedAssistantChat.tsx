@@ -912,7 +912,7 @@ function DocumentCard({
               disabled={signing}
               title="Send this document for e-signature"
             >
-              <SignatureIcon size={12} /> {signing ? 'Saving…' : 'Send For Signature'}
+              <SignatureIcon size={12} /> {signing ? 'Saving…' : 'eSign'}
             </button>
           </>
         )}
@@ -2844,7 +2844,7 @@ export function UnifiedAssistantChat({
     )
   }
 
-  // DocumentCard's "Send for signature" (item 6c): the card saves itself first
+  // DocumentCard's "eSign" (item 6c): the card saves itself first
   // when it has no draftVersionId yet, then opens the wizard on the result. A
   // manually-saved reply has no assistant-resolved kind/version/status, so a
   // reasonable stand-in seeds the wizard's own "not yet approved" line (it is

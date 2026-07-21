@@ -655,7 +655,7 @@ export const INVOCABLE_CONTRACTS: Record<
         source: 'prior_step_output',
         required: true,
         description:
-          'the approved document to send for signature — the latest approved version produced by the immediately preceding drafting step (whose template must declare signature.required)',
+          'the approved document to send for e-signature — the latest approved version produced by the immediately preceding drafting step (whose template must declare signature.required)',
       },
     ],
     outputs: [

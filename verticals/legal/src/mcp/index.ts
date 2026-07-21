@@ -80,7 +80,7 @@ import './tools/savedViewTools.js'
 // it sends through the attorney's Gmail (mail.send provenance). The matter page
 // already calls legal.email.send_draft_link.
 import './tools/sendDraftLinkEmail.js'
-// Session 5: "Send for signature" + envelope status + portal signing.
+// Session 5: eSign send + envelope status + portal signing.
 import './tools/sendForSignature.js'
 import './tools/esignAttorneyTools.js'
 import './tools/esignFileTools.js'

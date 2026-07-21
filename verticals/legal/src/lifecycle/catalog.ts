@@ -109,7 +109,7 @@ export const STEP_ACTION_CATALOG: StepActionSpec[] = [
     // in handlers/esign.ts (the #320 loop). esign.sent marks the step's own
     // action complete (the card reads "sent — awaiting signatures").
     kind: 'esign',
-    label: 'eSign — send for signature',
+    label: 'eSign',
     description:
       "Send the step's approved document for e-signature: the envelope is auto-built from the approved version, the template's signer roles, and its pre-placed fields — the attorney reviews and sends in place. The matter then waits until all signers have signed (esign.completed).",
     defaultGate: 'system',

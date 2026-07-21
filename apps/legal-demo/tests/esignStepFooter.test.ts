@@ -9,7 +9,7 @@ import { stepAdvanceControls, type WfStage } from '../app/attorney/matters/[id]/
 
 const esignStage: WfStage = {
   key: 'esign_operating_agreement',
-  label: 'eSign — send for signature',
+  label: 'eSign',
   action: { kind: 'esign', config: { document_kind: 'operating_agreement' } },
   documents: [{ docKind: 'operating_agreement', label: 'Operating agreement' }],
   advances_to: [{ to: 'approved', gate: 'system', on: 'esign.completed' }],

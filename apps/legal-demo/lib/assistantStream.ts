@@ -244,8 +244,8 @@ export interface AssistantStreamHandlers {
   // ASSISTANT-ACTS-1: the assistant composed a client email — open the edit/send
   // modal prefilled with it.
   onEmailCompose?: (draft: EmailComposeEvent) => void
-  // ASSISTANT-ACTS-1: the assistant resolved a document to send for signature —
-  // open the real prepare-signature wizard on it.
+  // ASSISTANT-ACTS-1: the assistant resolved a document to eSign — open the
+  // unified eSign composer (document mode) on it.
   onEnvelopePrepare?: (launch: EnvelopePrepareEvent) => void
   onDone?: (done: StreamDone) => void
   onError?: (message: string) => void
