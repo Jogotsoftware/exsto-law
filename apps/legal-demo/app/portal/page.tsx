@@ -2,9 +2,20 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ThumbsUp, ThumbsDown } from 'lucide-react'
-import { ScaleIcon } from '@/components/icons'
+import {
+  ScaleIcon,
+  BellIcon,
+  LayoutGridIcon,
+  FileTextIcon,
+  DollarSignIcon,
+  SignatureIcon,
+  SparklesIcon,
+  SettingsIcon,
+} from '@/components/icons'
 import { FeeConsentCard } from '@/components/FeeConsentCard'
 import { LanguageToggle } from '@/components/LanguageToggle'
+import { PortalSideNav, type PortalNavItem } from '@/components/PortalSideNav'
+import { portalNavKinds, type PortalNavKind } from '@/lib/portalNav'
 import { Tabs } from '@/components/Tabs'
 import { useI18n } from '@/lib/i18n'
 import { callClientPortalMcp, PortalSessionExpiredError } from '@/lib/mcpClientPortal'
@@ -12,13 +23,16 @@ import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
 
 // LI PORTAL RESTYLE — the client portal reshaped to the Legal Instruments comp
 // (docs/design/legal-instruments/legal-instruments.dc.html, Client Portal
-// section). Navy header + navy tab bar (Home · Documents · Invoices · Signatures
-// · Assistant · Settings) + light content, matching the comp; a notifications
+// section). Navy header + light content; PT-1 (founder walk 15.11) replaced the
+// comp's horizontal tab band with the platform's SIDE navigation (Home ·
+// Documents · Invoices · Signatures · Assistant · Settings) — PortalSideNav.tsx
+// ports the attorney rail's mechanics and li-rail-* chrome. A notifications
 // bell lives in the header (the comp has no notif tab, but #344 shipped it, so it
-// survives as a bell). Every capability from CLIENT-PORTAL-UI-1 / PORTAL-1 / #384
-// is preserved — this is a restyle + reshape, not a removal. Copy goes through the
-// i18n layer (client-copy doctrine: no internal step names or attorney verbiage).
-// New CSS family: li-cp-* (globals.css tail).
+// survives as a bell, wearing the attorney top-bar's li-top-bell treatment).
+// Every capability from CLIENT-PORTAL-UI-1 / PORTAL-1 / #384 is preserved —
+// this is a restyle + reshape, not a removal. Copy goes through the i18n layer
+// (client-copy doctrine: no internal step names or attorney verbiage).
+// CSS families: li-cp-* + li-cpnav-* (globals.css tail).
 
 interface MeFirm {
   tenantId: string
@@ -197,12 +211,27 @@ interface NotificationItem {
   unread: boolean
 }
 
-type TabKind = 'home' | 'documents' | 'invoices' | 'signatures' | 'assistant' | 'settings'
+// PT-1: the section-kind union lives in lib/portalNav (pure, unit-tested
+// Assistant gating); the old horizontal tab band is now the side rail.
+type TabKind = PortalNavKind
 type View =
   | { kind: TabKind }
   | { kind: 'notifications' }
   | { kind: 'schedule' }
   | { kind: 'matter'; matterEntityId: string }
+
+// Icon + i18n metadata per nav section (labels resolve through t() at render).
+const NAV_META: Record<
+  TabKind,
+  { key: string; fallback: string; Icon: (p: { size?: number }) => React.JSX.Element }
+> = {
+  home: { key: 'portal.nav.home', fallback: 'Home', Icon: LayoutGridIcon },
+  documents: { key: 'portal.nav.documents', fallback: 'Documents', Icon: FileTextIcon },
+  invoices: { key: 'portal.nav.invoices', fallback: 'Invoices', Icon: DollarSignIcon },
+  signatures: { key: 'portal.nav.signatures', fallback: 'Signatures', Icon: SignatureIcon },
+  assistant: { key: 'portal.nav.assistant', fallback: 'Assistant', Icon: SparklesIcon },
+  settings: { key: 'portal.nav.settings', fallback: 'Settings', Icon: SettingsIcon },
+}
 
 function humanizeKind(kind: string): string {
   return kind.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -276,142 +305,141 @@ export default function ClientPortalPage() {
   const locked = home ? !home.engagement.accepted : false
   const assistantEnabled = home?.assistantEnabled ?? false
 
-  // The six comp tabs. Assistant only appears for clients whose firm enabled it
-  // (WP-7) — no empty/dead tab.
-  const tabs: Array<{ kind: TabKind; label: string }> = [
-    { kind: 'home', label: t('portal.nav.home', undefined, 'Home') },
-    { kind: 'documents', label: t('portal.nav.documents', undefined, 'Documents') },
-    { kind: 'invoices', label: t('portal.nav.invoices', undefined, 'Invoices') },
-    { kind: 'signatures', label: t('portal.nav.signatures', undefined, 'Signatures') },
-    ...(assistantEnabled
-      ? [{ kind: 'assistant' as const, label: t('portal.nav.assistant', undefined, 'Assistant') }]
-      : []),
-    { kind: 'settings', label: t('portal.nav.settings', undefined, 'Settings') },
-  ]
+  // The six comp sections, now side-nav items. Assistant only appears for
+  // clients whose firm enabled it (WP-7) — no empty/dead item; the gating rule
+  // itself lives in lib/portalNav (unit-tested).
+  const navItems: PortalNavItem[] = portalNavKinds({ assistantEnabled }).map((kind) => ({
+    kind,
+    label: t(NAV_META[kind].key, undefined, NAV_META[kind].fallback),
+    Icon: NAV_META[kind].Icon,
+  }))
 
   return (
     <FirmNameContext.Provider value={me?.firmName ?? ''}>
-      <div className="li-cp-shell">
-        <header>
-          <div className="li-cp-top">
-            <div className="li-cp-top-inner">
-              <button
-                type="button"
-                className="li-cp-brand"
-                onClick={() => setView({ kind: 'home' })}
-                aria-label={t('portal.nav.home', undefined, 'Home')}
-              >
-                <span className="li-cp-brand-crest" aria-hidden>
-                  <ScaleIcon size={24} />
-                </span>
-                <span className="li-cp-brand-text">
-                  <span className="li-cp-brand-name">{me?.firmName ?? ' '}</span>
-                  <span className="li-cp-brand-sub">
-                    {t('portal.brand_sub', undefined, 'Client Portal')}
-                  </span>
-                </span>
-              </button>
-              {me && me.firms.length > 1 && <FirmSwitcher firms={me.firms} />}
-              <div className="li-cp-top-right">
-                <div className="li-cp-lang">
-                  <LanguageToggle />
-                </div>
+      <div className="li-cp-shell li-cpnav-shell">
+        <PortalSideNav items={navItems} active={view.kind} onSelect={(kind) => setView({ kind })} />
+        <div className="li-cpnav-col">
+          <header className="li-cpnav-header">
+            <div className="li-cp-top">
+              <div className="li-cp-top-inner">
                 <button
                   type="button"
-                  className={`li-cp-bell ${view.kind === 'notifications' ? 'active' : ''}`}
-                  aria-label={t('portal.nav.notifications', undefined, 'Notifications')}
-                  onClick={() => setView({ kind: 'notifications' })}
+                  className="li-cp-brand"
+                  onClick={() => setView({ kind: 'home' })}
+                  aria-label={t('portal.nav.home', undefined, 'Home')}
                 >
-                  <BellIcon />
-                  {badge > 0 && (
-                    <span className="li-cp-bell-badge">{badge > 9 ? '9+' : badge}</span>
-                  )}
-                </button>
-                {me && (
-                  <span className="li-cp-who" title={me.email}>
-                    <span className="li-cp-avatar" aria-hidden>
-                      {firmInitials(me.displayName)}
-                    </span>
-                    <span className="li-cp-who-name">{me.displayName}</span>
+                  <span className="li-cp-brand-crest" aria-hidden>
+                    <ScaleIcon size={24} />
                   </span>
-                )}
-                <a href="/api/client/auth/logout" className="li-cp-signout">
-                  {t('portal.signout', undefined, 'Sign out')}
-                </a>
+                  <span className="li-cp-brand-text">
+                    <span className="li-cp-brand-name">{me?.firmName ?? ' '}</span>
+                    <span className="li-cp-brand-sub">
+                      {t('portal.brand_sub', undefined, 'Client Portal')}
+                    </span>
+                  </span>
+                </button>
+                {me && me.firms.length > 1 && <FirmSwitcher firms={me.firms} />}
+                <div className="li-cp-top-right">
+                  <div className="li-cp-lang">
+                    <LanguageToggle />
+                  </div>
+                  {/* PT-1: the attorney top-bar bell treatment (li-top-bell +
+                    gold unread dot) replaces the old rounded-square button with
+                    the floating count badge; the count moves into the
+                    label/tooltip. */}
+                  <button
+                    type="button"
+                    className={`li-top-bell li-cpnav-bell${
+                      view.kind === 'notifications' ? ' active' : ''
+                    }`}
+                    aria-label={
+                      badge > 0
+                        ? `${t('portal.nav.notifications', undefined, 'Notifications')} (${badge})`
+                        : t('portal.nav.notifications', undefined, 'Notifications')
+                    }
+                    title={
+                      badge > 0
+                        ? `${t('portal.nav.notifications', undefined, 'Notifications')} (${badge})`
+                        : t('portal.nav.notifications', undefined, 'Notifications')
+                    }
+                    onClick={() => setView({ kind: 'notifications' })}
+                  >
+                    <BellIcon size={19} />
+                    {badge > 0 && <span className="li-top-bell-dot" aria-hidden="true" />}
+                  </button>
+                  {me && (
+                    <span className="li-cp-who" title={me.email}>
+                      <span className="li-cp-avatar" aria-hidden>
+                        {firmInitials(me.displayName)}
+                      </span>
+                      <span className="li-cp-who-name">{me.displayName}</span>
+                    </span>
+                  )}
+                  <a href="/api/client/auth/logout" className="li-cp-signout">
+                    {t('portal.signout', undefined, 'Sign out')}
+                  </a>
+                </div>
               </div>
             </div>
-          </div>
-          <nav className="li-cp-nav" aria-label="Portal sections">
-            <div className="li-cp-nav-inner">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.kind}
-                  type="button"
-                  className={`li-cp-tab ${view.kind === tab.kind ? 'active' : ''}`}
-                  aria-current={view.kind === tab.kind ? 'page' : undefined}
-                  onClick={() => setView({ kind: tab.kind })}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </nav>
-        </header>
+          </header>
 
-        <main className="li-cp-main">
-          {error && (
-            <div className="alert alert-error" role="alert">
-              {error}
-            </div>
-          )}
+          <div className="li-cpnav-scroll">
+            <main className="li-cp-main">
+              {error && (
+                <div className="alert alert-error" role="alert">
+                  {error}
+                </div>
+              )}
 
-          {!me || !home ? (
-            <div className="loading-block" role="status">
-              <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
-            </div>
-          ) : (
-            <>
-              {view.kind === 'home' && (
-                <HomeView
-                  home={home}
-                  locked={locked}
-                  onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
-                  onOpenInvoices={() => setView({ kind: 'invoices' })}
-                  onOpenSchedule={() => setView({ kind: 'schedule' })}
-                  onOpenGate={() => setGateOpen(true)}
-                />
-              )}
-              {view.kind === 'documents' && <DocumentsView matters={home.matters} />}
-              {view.kind === 'invoices' && <InvoicesView />}
-              {view.kind === 'signatures' && <SignaturesView />}
-              {view.kind === 'assistant' && assistantEnabled && <AssistantView />}
-              {view.kind === 'settings' && <SettingsView me={me} />}
-              {view.kind === 'notifications' && (
-                <NotificationsView
-                  onBadge={setBadge}
-                  onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
-                  onOpenInvoices={() => setView({ kind: 'invoices' })}
-                  onOpenSignatures={() => setView({ kind: 'signatures' })}
-                />
-              )}
-              {view.kind === 'schedule' && (
+              {!me || !home ? (
+                <div className="loading-block" role="status">
+                  <span className="spinner" /> {t('portal.loading', undefined, 'Loading…')}
+                </div>
+              ) : (
                 <>
-                  <BackHome onBack={() => setView({ kind: 'home' })} />
-                  <ScheduleView />
+                  {view.kind === 'home' && (
+                    <HomeView
+                      home={home}
+                      locked={locked}
+                      onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
+                      onOpenInvoices={() => setView({ kind: 'invoices' })}
+                      onOpenSchedule={() => setView({ kind: 'schedule' })}
+                      onOpenGate={() => setGateOpen(true)}
+                    />
+                  )}
+                  {view.kind === 'documents' && <DocumentsView matters={home.matters} />}
+                  {view.kind === 'invoices' && <InvoicesView />}
+                  {view.kind === 'signatures' && <SignaturesView />}
+                  {view.kind === 'assistant' && assistantEnabled && <AssistantView />}
+                  {view.kind === 'settings' && <SettingsView me={me} />}
+                  {view.kind === 'notifications' && (
+                    <NotificationsView
+                      onBadge={setBadge}
+                      onOpenMatter={(id) => setView({ kind: 'matter', matterEntityId: id })}
+                      onOpenInvoices={() => setView({ kind: 'invoices' })}
+                      onOpenSignatures={() => setView({ kind: 'signatures' })}
+                    />
+                  )}
+                  {view.kind === 'schedule' && (
+                    <>
+                      <BackHome onBack={() => setView({ kind: 'home' })} />
+                      <ScheduleView />
+                    </>
+                  )}
+                  {view.kind === 'matter' && (
+                    <MatterView
+                      matterEntityId={view.matterEntityId}
+                      matters={home.matters}
+                      locked={locked}
+                      onBack={() => setView({ kind: 'home' })}
+                      onOpenGate={() => setGateOpen(true)}
+                    />
+                  )}
                 </>
               )}
-              {view.kind === 'matter' && (
-                <MatterView
-                  matterEntityId={view.matterEntityId}
-                  matters={home.matters}
-                  locked={locked}
-                  onBack={() => setView({ kind: 'home' })}
-                  onOpenGate={() => setGateOpen(true)}
-                />
-              )}
-            </>
-          )}
-        </main>
+            </main>
+          </div>
+        </div>
 
         {gateOpen && home && (
           <EngagementGateModal
@@ -508,25 +536,6 @@ function FirmSwitcher({ firms }: { firms: MeFirm[] }) {
         </div>
       )}
     </div>
-  )
-}
-
-function BellIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.9"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-    </svg>
   )
 }
 
