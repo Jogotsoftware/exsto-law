@@ -154,6 +154,10 @@ export interface DocumentReviewerLoadedInfo {
 
 // The result of a successful Approve/Reject dispose call, passed to onCompleted.
 export interface DocumentReviewerDisposeResult {
+  // EDITOR-FIX-1 (item 3) — which disposition ran, so a host (the workflow
+  // runner) can advance the matter + close its modal on approve but refresh in
+  // place on reject. Approve advances the workflow; reject does not.
+  disposition: 'approved' | 'rejected'
   approvedDocumentVersionId?: string
 }
 
@@ -285,6 +289,7 @@ export function DocumentReviewer({
         input: { documentVersionId: activeVersionId },
       })
       const handled = await onCompleted?.({
+        disposition: label === 'approve' ? 'approved' : 'rejected',
         approvedDocumentVersionId: res?.approvedDocumentVersionId,
       })
       if (handled) return

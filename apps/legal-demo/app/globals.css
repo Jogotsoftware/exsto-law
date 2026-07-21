@@ -26008,3 +26008,14 @@ details.li-brief-research summary:hover {
   box-shadow: 0 1px 6px rgba(20, 30, 45, 0.14);
   background: #fff;
 }
+
+/* Item 3 — after an Approve advances the matter, the runner programmatically
+   focuses the new current step; a soft ring makes "the matter moved" obvious.
+   :focus (not :focus-visible) so it reliably shows on the programmatic focus
+   (any flash on a plain row click is hidden behind the step modal that opens). */
+.li-mat-wf-row:focus {
+  outline: 2px solid var(--li-gold, #b8892b);
+  outline-offset: -2px;
+  border-radius: 6px;
+  background: var(--li-warn-bg, #fbefd6);
+}
