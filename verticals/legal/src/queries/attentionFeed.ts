@@ -157,6 +157,101 @@ export function renderAttentionSnapshot(items: AttentionItem[]): string {
   return items.map(renderAttentionLine).join('\n')
 }
 
+// ── Deep links (PO-2, founder walk 15.9) ────────────────────────────────────
+// Every item type links straight to its real subject, not a generic list page.
+// Small, pure, exported so the shape is unit-testable without a DB — the same
+// reasoning that keeps rankAttentionItems pure and exported.
+export function taskDeepLink(matterEntityId: string, taskId: string): string {
+  return `/attorney/matters/${matterEntityId}/tasks/${taskId}`
+}
+export function matterActivityDeepLink(matterEntityId: string): string {
+  return `/attorney/matters/${matterEntityId}/activity`
+}
+export function mailThreadDeepLink(gmailThreadId: string | null): string {
+  return gmailThreadId ? `/attorney/mail?thread=${gmailThreadId}` : '/attorney/mail'
+}
+export function draftDeepLink(documentVersionId: string): string {
+  return `/attorney/review/${documentVersionId}`
+}
+export function envelopeDeepLink(envelopeId: string): string {
+  return `/attorney/esign/${envelopeId}`
+}
+export function invoiceDeepLink(invoiceEntityId: string): string {
+  return `/attorney/billing?tab=invoices&invoiceId=${invoiceEntityId}`
+}
+
+// ── Awaiting-reply grouping + copy (PO-2) ───────────────────────────────────
+// The row shape read out of the SQL in readAwaitingReply, one per THREAD whose
+// last message is inbound. Pulled out as a plain type + pure function so the
+// grouping/copy logic — where every founder complaint (fake matter-as-sender
+// copy, duplicate rows, dead links) actually lives — is unit-testable with
+// fixture rows, no DB.
+export interface AwaitingReplyThreadRow {
+  threadId: string
+  matterId: string | null
+  matterNumber: string | null
+  gmailThreadId: string | null
+  channel: string | null
+  occurredAt: string
+  senderName: string | null
+}
+
+// Groups threads by (matter, sender) — never by matter alone (several people
+// can write in on one matter) and never merges unrelated threads that both
+// happen to lack a matter (grouped by thread id instead, so they stay
+// distinct). This is the fix for the founder-walk duplicate: two threads for
+// the SAME client on the SAME matter (e.g. a portal message and an email)
+// previously rendered as two pixel-identical rows because the old copy showed
+// only the matter number; grouping collapses them into one row with a count.
+export function buildAwaitingReplyItems(
+  rows: AwaitingReplyThreadRow[],
+  nowMs: number,
+): AttentionItem[] {
+  const groups = new Map<string, AwaitingReplyThreadRow[]>()
+  for (const r of rows) {
+    const senderKey = (r.senderName || 'a client').trim().toLowerCase()
+    const scopeKey = r.matterId ?? `thread:${r.threadId}`
+    const key = `${scopeKey}::${senderKey}`
+    const bucket = groups.get(key)
+    if (bucket) bucket.push(r)
+    else groups.set(key, [r])
+  }
+
+  const items: AttentionItem[] = []
+  for (const groupRows of groups.values()) {
+    // Oldest-first: the longest-unanswered thread sets the group's age (the
+    // true "how long have they been waiting" figure) and its deep link.
+    const sorted = [...groupRows].sort(
+      (a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt),
+    )
+    const oldest = sorted[0]!
+    const count = sorted.length
+    const senderName = oldest.senderName || 'A client'
+    const days = daysSince(oldest.occurredAt, nowMs) ?? 0
+    const isPortal = sorted.every((r) => r.channel === 'portal')
+    const noun = count > 1 ? `${count} messages` : isPortal ? 'a portal message' : 'a message'
+    const onMatter = oldest.matterNumber ? ` on ${oldest.matterNumber}` : ''
+    // The matter's Activity tab shows BOTH the portal thread and every matched
+    // email thread for that matter — the real "communications thread" surface
+    // (linking to the matter OVERVIEW tab showed neither, which is what made
+    // clicking the old row "go to nothing"). With no matter, fall back to the
+    // firm inbox scoped to that Gmail thread, or the bare inbox as a last resort.
+    const deepLink = oldest.matterId
+      ? matterActivityDeepLink(oldest.matterId)
+      : mailThreadDeepLink(oldest.gmailThreadId)
+    items.push({
+      kind: 'awaiting_reply',
+      title: `Reply needed: ${senderName}`,
+      why: `${senderName} sent ${noun}${onMatter} ${agoPhrase(days)} and is waiting for your reply.`,
+      deepLink,
+      rank: 0,
+      occurredAt: oldest.occurredAt,
+      entityId: oldest.matterId ?? undefined,
+    })
+  }
+  return items
+}
+
 // ── Bucket readers ──────────────────────────────────────────────────────────
 // Each returns UNRANKED AttentionItems (rank filled in later by the ranker).
 // Grouped behind an injectable interface so feed assembly is unit-testable with
@@ -213,13 +308,17 @@ async function readTasks(
     const occurredAt = `${task.dueDate}T00:00:00.000Z`
     const overdue = task.dueDate < today
     const label = task.title || 'Task'
+    // Deep-link straight to the task itself (matters/[id]/tasks/[taskId]), not
+    // just the matter — the founder walk flagged generic matter links as
+    // "goes to nothing useful" for items that have a more specific home.
+    const link = taskDeepLink(task.matterEntityId, task.taskId)
     if (overdue) {
       const days = daysSince(occurredAt, nowMs) ?? 0
       items.push({
         kind: 'overdue_task',
         title: `Overdue: ${label}`,
         why: `The task "${label}" (${task.matterNumber}) was due ${agoPhrase(days)} and is not done.`,
-        deepLink: `/attorney/matters/${task.matterEntityId}`,
+        deepLink: link,
         rank: 0,
         occurredAt,
         entityId: task.matterEntityId,
@@ -229,7 +328,7 @@ async function readTasks(
         kind: 'due_soon_task',
         title: `Due soon: ${label}`,
         why: `The task "${label}" (${task.matterNumber}) is due ${task.dueDate}.`,
-        deepLink: `/attorney/matters/${task.matterEntityId}`,
+        deepLink: link,
         rank: 0,
         occurredAt,
         entityId: task.matterEntityId,
@@ -243,58 +342,99 @@ async function readTasks(
 // ingested communication record (mail.ingest for email, client.message.post for
 // portal), so it works offline from Gmail and covers BOTH sources in one query:
 // a mail message is client-sent when payload.direction = 'inbound'; a portal
-// message when payload.author = 'client'. The last message per thread decides.
+// message when payload.author = 'client'. The last message per thread decides
+// which threads qualify; PO-2 then GROUPS those threads by (matter, sender) so
+// a client who has both a portal thread and an email thread open on the same
+// matter — the exact case that produced two pixel-identical "M-… sent a message"
+// rows in the founder walk — surfaces as ONE row with a count, not two.
+//
+// PO-2 (founder walk 15.9): the old copy named only the MATTER as the sender
+// ("M-MRTHA103 sent a message…") — matters don't send messages, people do. This
+// resolves the ACTUAL sender's name: for a portal message that is the
+// client_contact entity behind sender_entity_id (exact); for an inbound email
+// there is no entity link on the message, so we match the bare From address
+// against every client_contact's latest `email` attribute (same pattern
+// mailWorkspace.ts's clientNameIndex uses for the inbox), falling back to the
+// display name in the From header, then the bare address, only ever landing on
+// the generic "A client" if literally nothing could be read.
 async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<AttentionItem[]> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       thread_id: string
-      subject: string | null
       matter_id: string | null
       matter_number: string | null
+      gmail_thread_id: string | null
       channel: string | null
       occurred_at: string
+      sender_name: string | null
     }>(
-      `SELECT t.id AS thread_id,
-              t.subject,
-              t.related_entity_ids[1] AS matter_id,
-              mt.name AS matter_number,
-              lm.channel,
-              lm.occurred_at
-         FROM communication_thread t
-         JOIN LATERAL (
-              SELECT m.payload->>'direction' AS direction,
-                     m.payload->>'author'    AS author,
-                     m.payload->>'channel'   AS channel,
-                     to_char(m.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
-                FROM communication_message m
-               WHERE m.tenant_id = t.tenant_id AND m.thread_id = t.id
-               ORDER BY m.occurred_at DESC
-               LIMIT 1
-              ) lm ON true
-         LEFT JOIN entity mt ON mt.tenant_id = $1 AND mt.id = t.related_entity_ids[1]
-        WHERE t.tenant_id = $1
-          AND t.status = 'active'
-          AND (lm.direction = 'inbound' OR lm.author = 'client')
+      `WITH last_msg AS (
+         SELECT t.id AS thread_id,
+                t.related_entity_ids[1] AS matter_id,
+                t.participants->>'gmail_thread_id' AS gmail_thread_id,
+                lm.channel,
+                lm.sender_entity_id,
+                lm.from_raw,
+                lm.occurred_at
+           FROM communication_thread t
+           JOIN LATERAL (
+                SELECT m.payload->>'direction'    AS direction,
+                       m.payload->>'author'       AS author,
+                       m.payload->>'channel'      AS channel,
+                       m.payload->>'from'         AS from_raw,
+                       m.sender_entity_id         AS sender_entity_id,
+                       to_char(m.occurred_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS occurred_at
+                  FROM communication_message m
+                 WHERE m.tenant_id = t.tenant_id AND m.thread_id = t.id
+                 ORDER BY m.occurred_at DESC
+                 LIMIT 1
+                ) lm ON true
+          WHERE t.tenant_id = $1
+            AND t.status = 'active'
+            AND (lm.direction = 'inbound' OR lm.author = 'client')
+       ),
+       -- Every client_contact's latest email + full_name, for matching an
+       -- inbound email's bare From address to a real person.
+       contact_names AS (
+         SELECT e.id AS entity_id,
+                lower((SELECT a.value #>> '{}' FROM attribute a
+                         JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+                        WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'email'
+                        ORDER BY a.valid_from DESC LIMIT 1)) AS email,
+                (SELECT a.value #>> '{}' FROM attribute a
+                   JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+                  WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'full_name'
+                  ORDER BY a.valid_from DESC LIMIT 1) AS full_name
+           FROM entity e
+           JOIN entity_kind_definition ekd ON ekd.id = e.entity_kind_id AND ekd.kind_name = 'client_contact'
+          WHERE e.tenant_id = $1
+       )
+       SELECT lm.thread_id, lm.matter_id, mt.name AS matter_number,
+              lm.gmail_thread_id, lm.channel, lm.occurred_at,
+              COALESCE(
+                by_entity.full_name,
+                by_email.full_name,
+                NULLIF(trim(split_part(lm.from_raw, '<', 1)), ''),
+                lower(regexp_replace(coalesce(lm.from_raw, ''), '^.*<([^>]+)>.*$', '\\1'))
+              ) AS sender_name
+         FROM last_msg lm
+         LEFT JOIN entity mt ON mt.tenant_id = $1 AND mt.id = lm.matter_id
+         LEFT JOIN contact_names by_entity ON by_entity.entity_id = lm.sender_entity_id
+         LEFT JOIN contact_names by_email
+           ON by_email.email = lower(regexp_replace(coalesce(lm.from_raw, ''), '^.*<([^>]+)>.*$', '\\1'))
         ORDER BY lm.occurred_at ASC`,
       [ctx.tenantId],
     )
-    return res.rows.map((r): AttentionItem => {
-      const isPortal = r.channel === 'portal'
-      const days = daysSince(r.occurred_at, nowMs) ?? 0
-      const who = r.matter_number || r.subject || 'A client'
-      // Portal messages are read on the matter page's messages; mail in the inbox.
-      const deepLink =
-        isPortal && r.matter_id ? `/attorney/matters/${r.matter_id}` : '/attorney/mail'
-      return {
-        kind: 'awaiting_reply',
-        title: `Reply needed: ${who}`,
-        why: `${who} sent a ${isPortal ? 'portal message' : 'message'} ${agoPhrase(days)} and is waiting for your reply.`,
-        deepLink,
-        rank: 0,
-        occurredAt: r.occurred_at,
-        entityId: r.matter_id ?? undefined,
-      }
-    })
+    const rows: AwaitingReplyThreadRow[] = res.rows.map((r) => ({
+      threadId: r.thread_id,
+      matterId: r.matter_id,
+      matterNumber: r.matter_number,
+      gmailThreadId: r.gmail_thread_id,
+      channel: r.channel,
+      occurredAt: r.occurred_at,
+      senderName: r.sender_name,
+    }))
+    return buildAwaitingReplyItems(rows, nowMs)
   })
 }
 
@@ -314,7 +454,9 @@ async function readPendingDrafts(
       kind: 'draft_pending_review',
       title: `Review draft: ${who}`,
       why: `A ${d.channel === 'communication' ? 'message' : 'document'} draft for ${who} has been waiting for your review for ${days} days.`,
-      deepLink: '/attorney/review',
+      // The specific draft's review detail page, not the generic queue —
+      // "goes straight to where to act" (founder walk 15.9, bullet 1).
+      deepLink: draftDeepLink(d.documentVersionId),
       rank: 0,
       occurredAt: d.recordedAt,
       entityId: d.matterEntityId,
@@ -345,7 +487,8 @@ async function readUnsignedEnvelopes(
       kind: 'envelope_unsigned',
       title: `Unsigned: ${label}`,
       why,
-      deepLink: '/attorney/esign',
+      // The specific envelope's detail page, not the generic e-sign list.
+      deepLink: envelopeDeepLink(e.envelopeId),
       rank: 0,
       occurredAt: e.sentAt ?? new Date(nowMs).toISOString(),
       entityId: e.matterEntityId ?? undefined,
@@ -382,7 +525,9 @@ async function readUnpaidInvoices(
       kind: 'invoice_unpaid',
       title: `Unpaid invoice: ${who}`,
       why: `Invoice ${inv.invoiceNumber} to ${who} (${inv.currency} ${inv.total}) has been unpaid for ${days} days.`,
-      deepLink: '/attorney/billing',
+      // The specific invoice, opened on the Invoices tab (billing/page.tsx
+      // reads ?tab= and ?invoiceId= on mount — PO-2).
+      deepLink: invoiceDeepLink(inv.invoiceEntityId),
       rank: 0,
       occurredAt,
       entityId: inv.invoiceEntityId,
