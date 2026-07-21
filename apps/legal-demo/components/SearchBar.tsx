@@ -26,10 +26,26 @@ interface ClientRow {
   matterCount: number
 }
 
+// Draft documents awaiting review (tenant-wide) — the same rows the Review Queue
+// lists via legal.draft.list_pending. Searching them makes the topbar's
+// "documents" placeholder true. A subset of PendingDraftSummary; we only read
+// the fields the result row needs.
+interface DocumentRow {
+  documentVersionId: string
+  documentKind: string
+  matterNumber: string
+  clientName: string
+}
+
+function humanizeKind(kind: string): string {
+  return kind.replace(/_/g, ' ')
+}
+
 type Result =
   | { type: 'contact'; id: string; primary: string; secondary: string }
   | { type: 'matter'; id: string; primary: string; secondary: string }
   | { type: 'client'; id: string; primary: string; secondary: string }
+  | { type: 'document'; id: string; primary: string; secondary: string }
 
 // `default` renders the legacy inline search (still used by the retired
 // AttorneyTopNav); `topbar` renders the Legal Instruments comp's expandable
@@ -46,6 +62,7 @@ export function SearchBar({ variant = 'default' }: { variant?: 'default' | 'topb
   const [contacts, setContacts] = useState<ContactRow[]>([])
   const [matters, setMatters] = useState<MatterRow[]>([])
   const [clients, setClients] = useState<ClientRow[]>([])
+  const [documents, setDocuments] = useState<DocumentRow[]>([])
   const [loaded, setLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
   const isTopbar = variant === 'topbar'
@@ -54,14 +71,16 @@ export function SearchBar({ variant = 'default' }: { variant?: 'default' | 'topb
     if (loaded || loading) return
     setLoading(true)
     try {
-      const [c, m, cl] = await Promise.all([
+      const [c, m, cl, d] = await Promise.all([
         callAttorneyMcp<{ contacts: ContactRow[] }>({ toolName: 'legal.contact.list' }),
         callAttorneyMcp<{ matters: MatterRow[] }>({ toolName: 'legal.matter.list' }),
         callAttorneyMcp<{ clients: ClientRow[] }>({ toolName: 'legal.client.list' }),
+        callAttorneyMcp<{ drafts: DocumentRow[] }>({ toolName: 'legal.draft.list_pending' }),
       ])
       setContacts(c.contacts)
       setMatters(m.matters)
       setClients(cl.clients)
+      setDocuments(d.drafts)
       setLoaded(true)
     } catch {
       // Silent — search will just show "No matches"
@@ -151,6 +170,22 @@ export function SearchBar({ variant = 'default' }: { variant?: 'default' | 'topb
         })
       }
     }
+    for (const d of documents) {
+      if (results.length >= 20) break
+      const kindLabel = humanizeKind(d.documentKind)
+      if (
+        kindLabel.toLowerCase().includes(q) ||
+        d.matterNumber.toLowerCase().includes(q) ||
+        d.clientName.toLowerCase().includes(q)
+      ) {
+        results.push({
+          type: 'document',
+          id: d.documentVersionId,
+          primary: kindLabel || d.matterNumber,
+          secondary: d.clientName ? `${d.matterNumber} · ${d.clientName}` : d.matterNumber,
+        })
+      }
+    }
   }
 
   function go(r: Result) {
@@ -159,6 +194,7 @@ export function SearchBar({ variant = 'default' }: { variant?: 'default' | 'topb
     setQuery('')
     if (r.type === 'contact') router.push(`/attorney/crm/contacts/${r.id}`)
     else if (r.type === 'client') router.push(`/attorney/crm/${r.id}`)
+    else if (r.type === 'document') router.push(`/attorney/review/${r.id}`)
     else router.push(`/attorney/matters/${r.id}`)
   }
 
