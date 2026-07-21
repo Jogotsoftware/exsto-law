@@ -1501,13 +1501,14 @@ export async function assistantChat(
     // attached documents — appended to the user message. Load the skill catalog so
     // the model can pull a playbook on demand (load_skill), plus any skills the
     // attorney force-selected from the /skills menu, and pass the current route.
-    const catalog = await listSkillCatalog(ctx)
-    const forced = await loadForcedSkills(
-      ctx,
-      wizardForcedSkillSlugs(message, input.skillSlugs, input.buildMode),
-    )
-    const firm = await resolveAssistantFirmFacts(ctx)
-    const attorneySettings = await getAssistantSettings(ctx)
+    // Four independent reads — run concurrently instead of one-at-a-time so this
+    // turn's context assembly isn't paying for their sum on the hot path.
+    const [catalog, forced, firm, attorneySettings] = await Promise.all([
+      listSkillCatalog(ctx),
+      loadForcedSkills(ctx, wizardForcedSkillSlugs(message, input.skillSlugs, input.buildMode)),
+      resolveAssistantFirmFacts(ctx),
+      getAssistantSettings(ctx),
+    ])
     const system = buildClaudeSystem(
       scope,
       primaryEntityId,
@@ -1810,15 +1811,24 @@ export async function* assistantChatStream(
     // attached documents — appended to the user message. Load the skill catalog so
     // the model can pull a playbook on demand (load_skill), plus any skills the
     // attorney force-selected from the /skills menu, and pass the current route.
-    const catalog = await listSkillCatalog(ctx)
-    const forced = await loadForcedSkills(
+    // Kick off all four independent reads concurrently, but still await `forced`
+    // first (not via Promise.all) so the skill chips can surface the instant
+    // they're known — the other three keep resolving in the background either way.
+    const catalogPromise = listSkillCatalog(ctx)
+    const forcedPromise = loadForcedSkills(
       ctx,
       wizardForcedSkillSlugs(message, input.skillSlugs, input.buildMode),
     )
+    const firmPromise = resolveAssistantFirmFacts(ctx)
+    const attorneySettingsPromise = getAssistantSettings(ctx)
+    const forced = await forcedPromise
     // Surface the picked skills as chips immediately, before the reply streams.
     for (const s of forced) yield { type: 'skill', slug: s.slug, name: s.name }
-    const firm = await resolveAssistantFirmFacts(ctx)
-    const attorneySettings = await getAssistantSettings(ctx)
+    const [catalog, firm, attorneySettings] = await Promise.all([
+      catalogPromise,
+      firmPromise,
+      attorneySettingsPromise,
+    ])
     const system = buildClaudeSystem(
       scope,
       primaryEntityId,

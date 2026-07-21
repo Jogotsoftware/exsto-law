@@ -1,13 +1,17 @@
-// FB-H — the ATTENTION ENGINE. What matters here:
-// (1) RANKING is a pure, deterministic function — overdue first, then
-//     awaiting-reply, then the slipped-cracks band by age, then due-soon; equal
-//     inputs always sort the same way regardless of input order.
-// (2) FEED ASSEMBLY concatenates every bucket, dedupes the stale/parked overlap,
-//     and honors the item + char caps — all with FAKE readers (no DB, no model).
-// (3) The get_attention_feed tool is registered on EVERY attorney turn (global
-//     included) and its read-back cites the why + deepLink honestly.
-// (4) The global-scope snapshot rides the VOLATILE half and ONLY on global turns.
-// (5) The stable prompt names the attorney it serves.
+// FB-H / ATTN-FIX-1 — the ATTENTION ENGINE. What matters here:
+// (1) The feed is INBOUND-only: the sole item class is awaiting_reply (a client
+//     sent a message and no one has replied). Firm-self-generated state (tasks,
+//     drafts, envelopes, invoices, stale matters, parked workflows) was removed.
+// (2) DIRECTION FILTER: only genuinely inbound client mail counts — the firm's
+//     OWN ingested email (mail.ingest stamps everything 'inbound') and firm-side
+//     portal replies are excluded; an outbound-last thread is not an item.
+// (3) EVERY item names the actual PERSON — the sender contact, else the matter's
+//     client, else the generic "A client"; never a mailbox display name/code.
+// (4) RANKING is a pure, deterministic function (oldest-waiting first).
+// (5) FEED ASSEMBLY honors the item + char caps with FAKE readers (no DB).
+// (6) The get_attention_feed tool is registered on EVERY attorney turn; its
+//     read-back cites why + deepLink honestly; the global snapshot rides the
+//     VOLATILE half and ONLY on global turns; the stable prompt names the attorney.
 import { describe, it, expect } from 'vitest'
 import {
   rankAttentionItems,
@@ -20,12 +24,10 @@ import {
   buildVolatileClaudeSystem,
   buildBaseSystemPrompt,
   buildAwaitingReplyItems,
-  taskDeepLink,
+  isInboundClientMessage,
+  awaitingReplyDisplayName,
   matterActivityDeepLink,
   mailThreadDeepLink,
-  draftDeepLink,
-  envelopeDeepLink,
-  invoiceDeepLink,
   type AttentionItem,
   type AttentionReaderDeps,
   type AssistantChatInput,
@@ -60,9 +62,9 @@ function item(
 }
 
 // A fixture thread row for buildAwaitingReplyItems — the pure grouping+copy
-// function that fixes founder walk 15.9 (fake matter-as-sender copy,
-// pixel-identical duplicate rows, dead links). No DB: this is the exact shape
-// readAwaitingReply maps its SQL rows into.
+// function. Defaults to a PORTAL client message (author:'client'); email rows
+// override author→null, direction→'inbound'|'outbound', and fromAddress. This is
+// the exact shape readAwaitingReply maps its SQL rows into.
 function threadRow(over: Partial<AwaitingReplyThreadRow> = {}): AwaitingReplyThreadRow {
   return {
     threadId: 'thread-1',
@@ -71,9 +73,26 @@ function threadRow(over: Partial<AwaitingReplyThreadRow> = {}): AwaitingReplyThr
     gmailThreadId: null,
     channel: 'portal',
     occurredAt: daysAgo(1),
+    author: 'client',
+    direction: null,
+    fromAddress: null,
     senderName: 'Maria Fernanda',
+    matterClientName: null,
     ...over,
   }
+}
+
+// An inbound client EMAIL row (author is null on ingested mail; mail.ingest
+// stamps direction 'inbound'; the From is the discriminator).
+function emailRow(over: Partial<AwaitingReplyThreadRow> = {}): AwaitingReplyThreadRow {
+  return threadRow({
+    channel: null,
+    author: null,
+    direction: 'inbound',
+    fromAddress: 'riley@client.example',
+    senderName: 'Riley Chen',
+    ...over,
+  })
 }
 
 describe('buildAwaitingReplyItems — sender+matter copy (founder walk 15.9)', () => {
@@ -88,14 +107,11 @@ describe('buildAwaitingReplyItems — sender+matter copy (founder walk 15.9)', (
   })
 
   it('says "a message" (not "a portal message") for an email-channel thread', () => {
-    const [it0] = buildAwaitingReplyItems(
-      [threadRow({ channel: null, senderName: 'Riley Chen' })],
-      NOW,
-    )
+    const [it0] = buildAwaitingReplyItems([emailRow({ senderName: 'Riley Chen' })], NOW)
     expect(it0!.why).toContain('Riley Chen sent a message on M-MRTHA103')
   })
 
-  it('falls back to "A client" only when literally no sender name resolved', () => {
+  it('falls back to "A client" only when literally no name resolved', () => {
     const [it0] = buildAwaitingReplyItems([threadRow({ senderName: null })], NOW)
     expect(it0!.why).toContain('A client sent')
   })
@@ -111,15 +127,146 @@ describe('buildAwaitingReplyItems — sender+matter copy (founder walk 15.9)', (
   })
 })
 
+describe('buildAwaitingReplyItems — direction filter (ATTN-FIX-1: inbound-only)', () => {
+  // The founder bug: the firm's OWN sent mail showed as an inbound "client is
+  // waiting" item, because mail.ingest stamps every synced message 'inbound'.
+  it("excludes the firm's own ingested email (From = firm mailbox)", () => {
+    const rows = [emailRow({ fromAddress: 'firm@pacheco.law', senderName: null })]
+    expect(buildAwaitingReplyItems(rows, NOW, new Set(['firm@pacheco.law']))).toHaveLength(0)
+  })
+
+  it("matches the firm's From case-insensitively", () => {
+    const rows = [emailRow({ fromAddress: 'Firm@Pacheco.Law', senderName: null })]
+    expect(buildAwaitingReplyItems(rows, NOW, new Set(['firm@pacheco.law']))).toHaveLength(0)
+  })
+
+  it('keeps a genuinely inbound client email (From not the firm) and names the sender', () => {
+    const rows = [emailRow({ fromAddress: 'riley@client.example', senderName: 'Riley Chen' })]
+    const items = buildAwaitingReplyItems(rows, NOW, new Set(['firm@pacheco.law']))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.why).toContain('Riley Chen sent a message on M-MRTHA103')
+  })
+
+  it('excludes an OUTBOUND-last thread (nothing pending)', () => {
+    const rows = [emailRow({ direction: 'outbound', fromAddress: 'firm@pacheco.law' })]
+    expect(buildAwaitingReplyItems(rows, NOW)).toHaveLength(0)
+  })
+
+  it('excludes a firm-side portal reply (author is attorney, not client)', () => {
+    expect(buildAwaitingReplyItems([threadRow({ author: 'attorney' })], NOW)).toHaveLength(0)
+  })
+})
+
+describe('buildAwaitingReplyItems — always names a person (ATTN-FIX-1 second half)', () => {
+  it("falls back to the matter's client when the sender did not resolve — never the matter code", () => {
+    const rows = [
+      emailRow({
+        fromAddress: 'unknown@x.test',
+        senderName: null,
+        matterClientName: 'Juan Carlos Pacheco',
+      }),
+    ]
+    const [it0] = buildAwaitingReplyItems(rows, NOW)
+    expect(it0!.why).toBe(
+      'Juan Carlos Pacheco sent a message on M-MRTHA103 yesterday and is waiting for your reply.',
+    )
+    expect(it0!.title).toBe('Reply needed: Juan Carlos Pacheco')
+    expect(it0!.why).not.toContain('M-MRTHA103 sent')
+  })
+
+  it('prefers the sender contact over the matter client', () => {
+    const rows = [threadRow({ senderName: 'Riley Chen', matterClientName: 'Juan Carlos Pacheco' })]
+    expect(buildAwaitingReplyItems(rows, NOW)[0]!.title).toBe('Reply needed: Riley Chen')
+  })
+
+  it('never renders a mailbox display name/address — a matterless unresolved thread is "A client"', () => {
+    const rows = [
+      emailRow({
+        matterId: null,
+        matterNumber: null,
+        gmailThreadId: 'g-1',
+        fromAddress: 'weird-alias@x.test',
+        senderName: null,
+        matterClientName: null,
+      }),
+    ]
+    expect(buildAwaitingReplyItems(rows, NOW)[0]!.title).toBe('Reply needed: A client')
+  })
+})
+
+describe('isInboundClientMessage — the direction predicate', () => {
+  const firm = new Set(['firm@pacheco.law'])
+  it('portal client post is inbound; portal attorney post is not', () => {
+    expect(
+      isInboundClientMessage({ author: 'client', direction: null, fromAddress: null }, firm),
+    ).toBe(true)
+    expect(
+      isInboundClientMessage({ author: 'attorney', direction: null, fromAddress: null }, firm),
+    ).toBe(false)
+  })
+  it('inbound email from a client is inbound; from the firm is not (case-insensitive)', () => {
+    expect(
+      isInboundClientMessage(
+        { author: null, direction: 'inbound', fromAddress: 'riley@client.example' },
+        firm,
+      ),
+    ).toBe(true)
+    expect(
+      isInboundClientMessage(
+        { author: null, direction: 'inbound', fromAddress: 'firm@pacheco.law' },
+        firm,
+      ),
+    ).toBe(false)
+    expect(
+      isInboundClientMessage(
+        { author: null, direction: 'inbound', fromAddress: 'FIRM@PACHECO.LAW' },
+        firm,
+      ),
+    ).toBe(false)
+  })
+  it('outbound email is never inbound', () => {
+    expect(
+      isInboundClientMessage(
+        { author: null, direction: 'outbound', fromAddress: 'riley@client.example' },
+        firm,
+      ),
+    ).toBe(false)
+  })
+  it('an inbound email with an unreadable From is included (we only exclude what we can prove is the firm)', () => {
+    expect(
+      isInboundClientMessage({ author: null, direction: 'inbound', fromAddress: null }, firm),
+    ).toBe(true)
+  })
+})
+
+describe('awaitingReplyDisplayName — sender, then matter client, then "A client"', () => {
+  it('uses the sender contact when present', () => {
+    expect(awaitingReplyDisplayName(threadRow({ senderName: 'Riley Chen' }))).toBe('Riley Chen')
+  })
+  it('falls back to the matter client when the sender is null/blank', () => {
+    expect(
+      awaitingReplyDisplayName(
+        threadRow({ senderName: null, matterClientName: 'Juan Carlos Pacheco' }),
+      ),
+    ).toBe('Juan Carlos Pacheco')
+    expect(
+      awaitingReplyDisplayName(
+        threadRow({ senderName: '   ', matterClientName: 'Juan Carlos Pacheco' }),
+      ),
+    ).toBe('Juan Carlos Pacheco')
+  })
+  it('falls back to "A client" when neither resolves', () => {
+    expect(awaitingReplyDisplayName(threadRow({ senderName: null, matterClientName: null }))).toBe(
+      'A client',
+    )
+  })
+})
+
 describe('buildAwaitingReplyItems — dedupe/grouping (the founder-walk duplicate)', () => {
   it('collapses two threads for the SAME sender on the SAME matter into ONE row with a count', () => {
-    // This is exactly the founder-walk symptom: two threads (e.g. a portal
-    // message and a separate email) on one matter, both from the same
-    // person — the old code showed two pixel-identical "M-… sent a message"
-    // rows because the copy only named the matter.
     const rows = [
       threadRow({ threadId: 't-1', occurredAt: daysAgo(1), channel: 'portal' }),
-      threadRow({ threadId: 't-2', occurredAt: daysAgo(3), channel: null }),
+      threadRow({ threadId: 't-2', occurredAt: daysAgo(3), channel: 'portal' }),
     ]
     const items = buildAwaitingReplyItems(rows, NOW)
     expect(items).toHaveLength(1)
@@ -185,10 +332,7 @@ describe('buildAwaitingReplyItems — deep links (real subject, not a generic pa
   })
 })
 
-describe('per-item-type deep links (founder walk 15.9, bullet 1: click straight to the subject)', () => {
-  it('taskDeepLink points at the task itself, not the matter overview', () => {
-    expect(taskDeepLink('matter-1', 'task-9')).toBe('/attorney/matters/matter-1/tasks/task-9')
-  })
+describe('awaiting-reply deep-link helpers', () => {
   it('matterActivityDeepLink points at the Activity tab', () => {
     expect(matterActivityDeepLink('matter-1')).toBe('/attorney/matters/matter-1/activity')
   })
@@ -196,116 +340,63 @@ describe('per-item-type deep links (founder walk 15.9, bullet 1: click straight 
     expect(mailThreadDeepLink('g-1')).toBe('/attorney/mail?thread=g-1')
     expect(mailThreadDeepLink(null)).toBe('/attorney/mail')
   })
-  it('draftDeepLink points at the specific draft review page', () => {
-    expect(draftDeepLink('version-7')).toBe('/attorney/review/version-7')
-  })
-  it('envelopeDeepLink points at the specific envelope', () => {
-    expect(envelopeDeepLink('env-3')).toBe('/attorney/esign/env-3')
-  })
-  it('invoiceDeepLink opens the Invoices tab on the specific invoice', () => {
-    expect(invoiceDeepLink('inv-5')).toBe('/attorney/billing?tab=invoices&invoiceId=inv-5')
-  })
 })
 
-describe('rankAttentionItems — deterministic ordering', () => {
-  // One fixture per bucket, ages chosen so the tier order and the by-age
-  // tiebreak within the slipped-cracks band are both exercised.
+describe('rankAttentionItems — deterministic ordering (oldest-waiting first)', () => {
   const fixtures: AttentionItem[] = [
-    item('due_soon_task', daysAgo(-2)), // due in 2 days (future)
-    item('stale_matter', daysAgo(9), { entityId: 'm-stale' }),
-    item('invoice_unpaid', daysAgo(20)),
-    item('overdue_task', daysAgo(4)),
-    item('envelope_unsigned', daysAgo(30)), // oldest in the band
-    item('awaiting_reply', daysAgo(1)),
-    item('draft_pending_review', daysAgo(6)),
-    item('workflow_parked', daysAgo(12), { entityId: 'm-parked' }),
+    item('awaiting_reply', daysAgo(1), { deepLink: '/a' }),
+    item('awaiting_reply', daysAgo(5), { deepLink: '/b' }),
+    item('awaiting_reply', daysAgo(3), { deepLink: '/c' }),
   ]
 
-  it('orders by tier: overdue → awaiting-reply → review → (unsigned/unpaid/parked/stale by age) → due-soon', () => {
-    const ranked = rankAttentionItems(fixtures, NOW).map((i) => i.kind)
-    expect(ranked).toEqual([
-      'overdue_task',
-      'awaiting_reply',
-      'draft_pending_review',
-      // Same tier (3), oldest first: envelope(30d) > invoice(20d) > parked(12d) > stale(9d).
-      'envelope_unsigned',
-      'invoice_unpaid',
-      'workflow_parked',
-      'stale_matter',
-      'due_soon_task',
-    ])
+  it('orders by age — the longest-unanswered reply is most pressing', () => {
+    expect(rankAttentionItems(fixtures, NOW).map((i) => i.deepLink)).toEqual(['/b', '/c', '/a'])
   })
 
   it('assigns a monotonic 0-based rank', () => {
-    const ranked = rankAttentionItems(fixtures, NOW)
-    expect(ranked.map((i) => i.rank)).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    expect(rankAttentionItems(fixtures, NOW).map((i) => i.rank)).toEqual([0, 1, 2])
   })
 
   it('is stable under input reordering (deterministic)', () => {
-    const a = rankAttentionItems(fixtures, NOW).map((i) => i.kind)
-    const b = rankAttentionItems([...fixtures].reverse(), NOW).map((i) => i.kind)
+    const a = rankAttentionItems(fixtures, NOW).map((i) => i.deepLink)
+    const b = rankAttentionItems([...fixtures].reverse(), NOW).map((i) => i.deepLink)
     expect(a).toEqual(b)
   })
 
-  it('breaks equal-tier equal-age ties stably by kind+link', () => {
+  it('breaks equal-age ties stably by kind+link', () => {
     const same = [
-      item('invoice_unpaid', daysAgo(15), { deepLink: '/attorney/billing' }),
-      item('envelope_unsigned', daysAgo(15), { deepLink: '/attorney/esign' }),
+      item('awaiting_reply', daysAgo(2), { deepLink: '/z' }),
+      item('awaiting_reply', daysAgo(2), { deepLink: '/a' }),
     ]
-    const first = rankAttentionItems(same, NOW).map((i) => i.kind)
-    const second = rankAttentionItems([...same].reverse(), NOW).map((i) => i.kind)
+    const first = rankAttentionItems(same, NOW).map((i) => i.deepLink)
+    const second = rankAttentionItems([...same].reverse(), NOW).map((i) => i.deepLink)
     expect(first).toEqual(second)
-    // envelope_unsigned sorts before invoice_unpaid (same tier, same age → kind order).
-    expect(first[0]).toBe('envelope_unsigned')
+    expect(first[0]).toBe('/a') // localeCompare: '/a' sorts before '/z'
   })
 })
 
-// A full set of fake readers, each yielding one item, so getAttentionFeed runs
-// end-to-end with no DB. Overridable per test.
+// A fake reader so getAttentionFeed runs end-to-end with no DB. Overridable.
 function fakeReaders(over: Partial<AttentionReaderDeps> = {}): AttentionReaderDeps {
   return {
-    overdueAndDueSoonTasks: async () => [item('overdue_task', daysAgo(3))],
-    awaitingReplyThreads: async () => [item('awaiting_reply', daysAgo(1))],
-    pendingReviewDrafts: async () => [item('draft_pending_review', daysAgo(5))],
-    unsignedEnvelopes: async () => [item('envelope_unsigned', daysAgo(9))],
-    unpaidInvoices: async () => [item('invoice_unpaid', daysAgo(20))],
-    staleMatters: async () => [item('stale_matter', daysAgo(10), { entityId: 'm1' })],
-    parkedWorkflows: async () => [item('workflow_parked', daysAgo(11), { entityId: 'm2' })],
+    awaitingReplyThreads: async () => [
+      item('awaiting_reply', daysAgo(1), { deepLink: '/a' }),
+      item('awaiting_reply', daysAgo(5), { deepLink: '/b' }),
+    ],
     ...over,
   }
 }
 
-describe('getAttentionFeed — assembly', () => {
-  it('concatenates every bucket and ranks them', async () => {
+describe('getAttentionFeed — assembly (inbound-only)', () => {
+  it('returns the awaiting-reply bucket, ranked oldest-first', async () => {
     const feed = await getAttentionFeed(ctx, { now: NOW, readers: fakeReaders() })
-    expect(feed.map((i) => i.kind)).toEqual([
-      'overdue_task',
-      'awaiting_reply',
-      'draft_pending_review',
-      'invoice_unpaid', // 20d
-      'workflow_parked', // 11d
-      'stale_matter', // 10d
-      'envelope_unsigned', // 9d
-    ])
-  })
-
-  it('dedupes a stale matter that is also a parked workflow (parked wins)', async () => {
-    const feed = await getAttentionFeed(ctx, {
-      now: NOW,
-      readers: fakeReaders({
-        staleMatters: async () => [item('stale_matter', daysAgo(10), { entityId: 'shared' })],
-        parkedWorkflows: async () => [item('workflow_parked', daysAgo(11), { entityId: 'shared' })],
-      }),
-    })
-    const shared = feed.filter((i) => i.entityId === 'shared')
-    expect(shared).toHaveLength(1)
-    expect(shared[0]!.kind).toBe('workflow_parked')
+    expect(feed.map((i) => i.deepLink)).toEqual(['/b', '/a'])
+    expect(feed.every((i) => i.kind === 'awaiting_reply')).toBe(true)
   })
 
   it('honors maxItems', async () => {
-    const feed = await getAttentionFeed(ctx, { now: NOW, readers: fakeReaders(), maxItems: 3 })
-    expect(feed).toHaveLength(3)
-    expect(feed[0]!.kind).toBe('overdue_task')
+    const feed = await getAttentionFeed(ctx, { now: NOW, readers: fakeReaders(), maxItems: 1 })
+    expect(feed).toHaveLength(1)
+    expect(feed[0]!.deepLink).toBe('/b')
   })
 
   it('honors maxChars (keeps at least one, then stops)', async () => {
@@ -313,17 +404,16 @@ describe('getAttentionFeed — assembly', () => {
     expect(feed).toHaveLength(1)
   })
 
-  it('a failing bucket is non-fatal — the rest of the feed still assembles', async () => {
+  it('a failing bucket is non-fatal — the feed is empty, not a crash', async () => {
     const feed = await getAttentionFeed(ctx, {
       now: NOW,
-      readers: fakeReaders({
-        unpaidInvoices: async () => {
-          throw new Error('billing read blew up')
+      readers: {
+        awaitingReplyThreads: async () => {
+          throw new Error('inbox read blew up')
         },
-      }),
+      },
     })
-    expect(feed.some((i) => i.kind === 'invoice_unpaid')).toBe(false)
-    expect(feed.some((i) => i.kind === 'overdue_task')).toBe(true)
+    expect(feed).toEqual([])
   })
 })
 
@@ -364,12 +454,12 @@ describe('get_attention_feed tool registration (matrix extension)', () => {
 
 describe('global-scope volatile snapshot', () => {
   const snap = renderAttentionSnapshot([
-    item('overdue_task', daysAgo(3), { why: 'The task "file annual report" is overdue.' }),
+    item('awaiting_reply', daysAgo(3), { why: 'Riley Chen is waiting on your reply.' }),
   ])
 
   it('renderAttentionSnapshot produces one-liners with the deepLink', () => {
-    expect(snap).toContain('file annual report')
-    expect(snap).toContain('→ /attorney/matters/overdue_task')
+    expect(snap).toContain('Riley Chen is waiting on your reply.')
+    expect(snap).toContain('→ /attorney/matters/awaiting_reply')
     expect(renderAttentionSnapshot([])).toBe('')
   })
 
@@ -382,7 +472,7 @@ describe('global-scope volatile snapshot', () => {
   it('buildVolatileClaudeSystem injects the snapshot block only when given one', () => {
     const withSnap = buildVolatileClaudeSystem(undefined, '', snap)
     expect(withSnap).toContain('What is most pressing for the attorney right now')
-    expect(withSnap).toContain('file annual report')
+    expect(withSnap).toContain('Riley Chen is waiting on your reply.')
     const without = buildVolatileClaudeSystem(undefined, '', '')
     expect(without).not.toContain('What is most pressing for the attorney right now')
   })
@@ -392,15 +482,15 @@ describe('get_attention_feed read-back (honesty)', () => {
   it('cites each item why + deepLink', async () => {
     const tool = buildAttentionFeedTool(ctx, {
       getAttentionFeed: async () => [
-        item('overdue_task', daysAgo(2), {
-          why: 'The task "file annual report" is overdue.',
-          deepLink: '/attorney/matters/abc',
+        item('awaiting_reply', daysAgo(2), {
+          why: 'Riley Chen is waiting on your reply.',
+          deepLink: '/attorney/matters/abc/activity',
         }),
       ],
     })
     const ack = (await tool.run({})) as string
-    expect(ack).toContain('file annual report')
-    expect(ack).toContain('/attorney/matters/abc')
+    expect(ack).toContain('Riley Chen is waiting on your reply.')
+    expect(ack).toContain('/attorney/matters/abc/activity')
   })
 
   it('says plainly when nothing is pressing (never invents)', async () => {

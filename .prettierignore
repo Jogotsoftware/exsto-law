@@ -13,3 +13,6 @@ pnpm-lock.yaml
 .agents
 # Vendored design export — byte-exact source of truth, never reformat
 docs/design/legal-instruments/
+# Build artifact: copy-pdf-worker.mjs drops the minified pdfjs worker here
+# (git-ignored); without this, format:check fails locally after any app build.
+apps/legal-demo/public/pdf-worker/
