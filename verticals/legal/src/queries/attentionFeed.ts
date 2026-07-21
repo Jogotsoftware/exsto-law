@@ -33,9 +33,9 @@ export interface AttentionItem {
   // The timestamp the item's age is measured from (ISO). Older = more pressing
   // within a tier. This is the ranker's tiebreaker and the "n days" in `why`.
   occurredAt: string
-  // The primary matter/entity this item is about, when it has one — used to
-  // dedupe overlapping slipped-cracks signals on the same matter, and as a
-  // stable React key on the home card. Optional (inbox items may lack one).
+  // The primary matter/entity this item is about, when it has one — a stable
+  // React key on the home card and the item's deep-link subject. Optional (a
+  // matter-less inbox thread has none).
   entityId?: string
 }
 
@@ -138,7 +138,12 @@ export interface AwaitingReplyThreadRow {
   author: string | null
   direction: string | null
   fromAddress: string | null
+  // The resolved SENDER contact name (the actual person who wrote), or null when
+  // the sender is not a known client_contact.
   senderName: string | null
+  // The matter's primary client contact name — the fallback the item names when
+  // the sender did not resolve to a person. Null when the thread has no matter.
+  matterClientName: string | null
 }
 
 // Is this thread's LAST message a genuinely INBOUND client communication the
@@ -168,6 +173,16 @@ export function isInboundClientMessage(
   return false
 }
 
+// The PERSON an item names (ATTN-FIX-1 second half): the resolved sender contact
+// (the actual human who wrote), else the matter's primary client, else the
+// generic "A client" — NEVER a mailbox display name (the founder bug rendered the
+// firm mailbox "Pacheco Law - Legal Instruments (beta)"), a bare From address, or
+// the matter code ("M-MRTHA103 sent a message"). Pure so the fallback order is
+// unit-tested with fixture rows, no DB.
+export function awaitingReplyDisplayName(r: AwaitingReplyThreadRow): string {
+  return r.senderName?.trim() || r.matterClientName?.trim() || 'A client'
+}
+
 // Groups threads by (matter, sender) — never by matter alone (several people
 // can write in on one matter) and never merges unrelated threads that both
 // happen to lack a matter (grouped by thread id instead, so they stay
@@ -185,7 +200,7 @@ export function buildAwaitingReplyItems(
     // Direction filter: only genuinely inbound client communications count. An
     // outbound thread with no inbound reply pending is not an attention item.
     if (!isInboundClientMessage(r, firmAddresses)) continue
-    const senderKey = (r.senderName || 'a client').trim().toLowerCase()
+    const senderKey = awaitingReplyDisplayName(r).toLowerCase()
     const scopeKey = r.matterId ?? `thread:${r.threadId}`
     const key = `${scopeKey}::${senderKey}`
     const bucket = groups.get(key)
@@ -202,7 +217,7 @@ export function buildAwaitingReplyItems(
     )
     const oldest = sorted[0]!
     const count = sorted.length
-    const senderName = oldest.senderName || 'A client'
+    const senderName = awaitingReplyDisplayName(oldest)
     const days = daysSince(oldest.occurredAt, nowMs) ?? 0
     const isPortal = sorted.every((r) => r.channel === 'portal')
     const noun = count > 1 ? `${count} messages` : isPortal ? 'a portal message' : 'a message'
@@ -309,6 +324,7 @@ async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<Att
       from_address: string | null
       occurred_at: string
       sender_name: string | null
+      matter_client_name: string | null
     }>(
       `WITH last_msg AS (
          SELECT t.id AS thread_id,
@@ -357,12 +373,21 @@ async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<Att
               lm.gmail_thread_id, lm.channel, lm.direction, lm.author,
               lower(regexp_replace(coalesce(lm.from_raw, ''), '^.*<([^>]+)>.*$', '\\1')) AS from_address,
               lm.occurred_at,
-              COALESCE(
-                by_entity.full_name,
-                by_email.full_name,
-                NULLIF(trim(split_part(lm.from_raw, '<', 1)), ''),
-                lower(regexp_replace(coalesce(lm.from_raw, ''), '^.*<([^>]+)>.*$', '\\1'))
-              ) AS sender_name
+              -- The actual SENDER contact (portal sender_entity_id, else the
+              -- inbound email's From matched to a client_contact email). NULL when
+              -- no known contact resolves — we NEVER fall back to the From-header
+              -- display name or the bare address here (that is how the firm
+              -- mailbox name leaked in); the matter's client is the fallback below.
+              COALESCE(by_entity.full_name, by_email.full_name) AS sender_name,
+              -- The matter's primary client contact (the client_of source), so an
+              -- item always names a person even when the sender did not resolve.
+              (SELECT a2.value #>> '{}'
+                 FROM relationship r
+                 JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+                 JOIN attribute a2 ON a2.tenant_id = $1 AND a2.entity_id = r.source_entity_id
+                 JOIN attribute_kind_definition akd2 ON akd2.id = a2.attribute_kind_id AND akd2.kind_name = 'full_name'
+                WHERE r.tenant_id = $1 AND r.target_entity_id = lm.matter_id AND rkd.kind_name = 'client_of'
+                ORDER BY a2.valid_from DESC LIMIT 1) AS matter_client_name
          FROM last_msg lm
          LEFT JOIN entity mt ON mt.tenant_id = $1 AND mt.id = lm.matter_id
          LEFT JOIN contact_names by_entity ON by_entity.entity_id = lm.sender_entity_id
@@ -382,6 +407,7 @@ async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<Att
       fromAddress: r.from_address,
       occurredAt: r.occurred_at,
       senderName: r.sender_name,
+      matterClientName: r.matter_client_name,
     }))
     return buildAwaitingReplyItems(rows, nowMs, firmAddresses)
   })
