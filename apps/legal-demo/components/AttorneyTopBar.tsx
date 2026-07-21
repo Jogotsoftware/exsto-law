@@ -115,7 +115,7 @@ export function AttorneyTopBar(): React.JSX.Element {
       <div className="li-topbar-firm">{firmName ?? PRODUCT_TAGLINE}</div>
       <div className="li-topbar-spacer" />
 
-      <SearchBar variant="topbar" />
+      <SearchBar />
 
       <div className="li-top-bell-wrap" ref={notifRef}>
         <button
