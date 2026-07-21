@@ -13,8 +13,8 @@ export default function EsignComposePage() {
         <div>
           <h1 className="li-esign-title">eSign</h1>
           <p className="li-esign-sub">
-            Upload a PDF, add recipients with roles, and send — signers get a secure signing
-            link, viewers a read-only link, copy recipients the executed document.
+            Upload a PDF, add recipients with roles, and send — signers get a secure signing link,
+            viewers a read-only link, copy recipients the executed document.
           </p>
         </div>
       </div>

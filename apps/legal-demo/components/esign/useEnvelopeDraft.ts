@@ -125,7 +125,13 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
 
   const moveRecipient = useCallback((from: number, to: number) => {
     setDraft((d) => {
-      if (from === to || from < 0 || to < 0 || from >= d.recipients.length || to >= d.recipients.length) {
+      if (
+        from === to ||
+        from < 0 ||
+        to < 0 ||
+        from >= d.recipients.length ||
+        to >= d.recipients.length
+      ) {
         return d
       }
       const rows = [...d.recipients]

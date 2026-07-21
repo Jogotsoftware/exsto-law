@@ -101,7 +101,6 @@ export function EsignComposer({
   // Seed from the launch source: a pre-picked file arrives pre-attached.
   useEffect(() => {
     if (source.kind === 'upload' && source.file) setFile(source.file)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -246,8 +245,8 @@ export function EsignComposer({
         </span>
         <h3 className="li-esign-wiz-sent-title">Envelope sent</h3>
         <p className="li-esign-wiz-sent-body">
-          Signers received a secure signing link; viewers received a read-only link; copy
-          recipients get the executed document once everyone has signed.
+          Signers received a secure signing link; viewers received a read-only link; copy recipients
+          get the executed document once everyone has signed.
           {result.savedContacts.length > 0 &&
             ` ${result.savedContacts.length} new ${
               result.savedContacts.length === 1 ? 'recipient was' : 'recipients were'
@@ -378,7 +377,11 @@ export function EsignComposer({
                   />
                   Set signing order
                 </label>
-                <button type="button" className="li-esign-btn li-esign-btn--sm" onClick={addRecipient}>
+                <button
+                  type="button"
+                  className="li-esign-btn li-esign-btn--sm"
+                  onClick={addRecipient}
+                >
                   <PlusIcon size={14} />
                   Add recipient
                 </button>
@@ -519,7 +522,10 @@ export function EsignComposer({
                   </span>
                 )}
                 {signingRecipients.map((r, i) => (
-                  <span key={i} className={`li-esign2-signer-chip ${signerToneClass(draft.recipients.indexOf(r))}`}>
+                  <span
+                    key={i}
+                    className={`li-esign2-signer-chip ${signerToneClass(draft.recipients.indexOf(r))}`}
+                  >
                     <span className="li-esign2-signer-dot" aria-hidden="true" />
                     {r.name.trim() || r.email.trim()}
                     {draft.useSigningOrder ? ` · signs ${ordinal(r.order)}` : ''}
@@ -527,8 +533,8 @@ export function EsignComposer({
                 ))}
               </div>
               <p className="li-esign-wiz-hint">
-                Drag-and-drop field placement on the rendered PDF arrives with the placement
-                canvas; envelopes sent now use whole-document signing.
+                Drag-and-drop field placement on the rendered PDF arrives with the placement canvas;
+                envelopes sent now use whole-document signing.
               </p>
             </div>
           </div>
@@ -567,7 +573,10 @@ export function EsignComposer({
                 <span className="li-esign-wiz-reviewk">Recipients</span>
                 <span className="li-esign-wiz-reviewv li-esign2-review-recips">
                   {filledRecipients.map((r, i) => (
-                    <span key={i} className={`li-esign2-rolechip ${signerToneClass(draft.recipients.indexOf(r))}`}>
+                    <span
+                      key={i}
+                      className={`li-esign2-rolechip ${signerToneClass(draft.recipients.indexOf(r))}`}
+                    >
                       <span className="li-esign2-signer-dot" aria-hidden="true" />
                       {r.name.trim() || r.email.trim()}
                       <em>{ROLE_LABELS[r.role]}</em>
@@ -579,8 +588,7 @@ export function EsignComposer({
                 <div className="li-esign-wiz-reviewrow">
                   <span className="li-esign-wiz-reviewk">New contacts</span>
                   <span className="li-esign-wiz-reviewv">
-                    {newRecipients.map((r) => r.email.trim()).join(', ')} will be saved to
-                    Contacts.
+                    {newRecipients.map((r) => r.email.trim()).join(', ')} will be saved to Contacts.
                   </span>
                 </div>
               )}

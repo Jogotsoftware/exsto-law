@@ -169,15 +169,9 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
   })
   // ESIGN-UNIFY-1 (ES-1, §5.1) — the placement plan always writes (defaults to
   // an empty array); legacy readers ignore it and keep using `envelope_fields`.
-  await setAttr(
-    client,
-    tenantId,
-    actionId,
-    envelopeId,
-    'envelope_placements',
-    p.placements ?? [],
-    { sourceRef: ctx.actorId },
-  )
+  await setAttr(client, tenantId, actionId, envelopeId, 'envelope_placements', p.placements ?? [], {
+    sourceRef: ctx.actorId,
+  })
   // §9.4 — the sender's personal note. Only written when non-empty: an omitted
   // message should read as "no message" (unset), not an empty-string history
   // entry on every send.

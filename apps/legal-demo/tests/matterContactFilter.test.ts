@@ -24,7 +24,7 @@ const CONTACTS: ContactOption[] = [
   { contactEntityId: 'c3', fullName: 'Ana López', email: 'ana.other@example.com' },
 ]
 
-describe('rule (a): matter picked → contacts narrow to that matter\'s client', () => {
+describe("rule (a): matter picked → contacts narrow to that matter's client", () => {
   it('narrows by the matter client EMAIL (not display name)', () => {
     const out = filterContacts(CONTACTS, 'm1', {
       contactMatterIds: null,
@@ -47,7 +47,7 @@ describe('rule (a): matter picked → contacts narrow to that matter\'s client',
   })
 })
 
-describe('rule (b): contact picked → matters narrow to that contact\'s matters', () => {
+describe("rule (b): contact picked → matters narrow to that contact's matters", () => {
   it('narrows by relationship ids', () => {
     const out = filterMatters(MATTERS, 'c1', {
       contactMatterIds: ['m1', 'm3'],
@@ -67,7 +67,7 @@ describe('rule (b): contact picked → matters narrow to that contact\'s matters
   })
 })
 
-describe('rule (c): clearing one side restores the other\'s full list', () => {
+describe("rule (c): clearing one side restores the other's full list", () => {
   it('no selection = full lists, regardless of stale link data', () => {
     const links = { contactMatterIds: ['m1'], matterClientEmail: 'ana@example.com' }
     expect(filterMatters(MATTERS, null, links)).toHaveLength(3)
@@ -75,7 +75,7 @@ describe('rule (c): clearing one side restores the other\'s full list', () => {
   })
 })
 
-describe('isSelectionConsistent — a narrowed list strands the other side\'s pick', () => {
+describe("isSelectionConsistent — a narrowed list strands the other side's pick", () => {
   it('flags a selection that fell out of its narrowed options', () => {
     const narrowed = filterContacts(CONTACTS, 'm2', {
       contactMatterIds: null,

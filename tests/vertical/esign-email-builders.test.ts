@@ -35,7 +35,7 @@ describe('esign-sign-request (§9.4 shape)', () => {
     expect(built.subject).toBe('Commercial Lease Agreement')
     expect(built.html).toContain('Juan Carlos Pacheco via Pacheco Law Firm, PLLC')
     expect(built.html).toContain('sent you a document to review and sign')
-    expect(built.html).toContain('>Review document') // the ONE CTA label
+    expect(built.html).toMatch(/Review document\s*<\/a>/) // the ONE CTA label
     expect(built.html).toContain('https://firm.example/sign/tok123')
     expect(built.html).toContain('Please review section 4 before signing.')
     // Plaintext part always ships (multipart/alternative house rule).
@@ -63,7 +63,7 @@ describe('esign-sign-request-portal', () => {
     const built = buildEmail('esign-sign-request-portal', BASE_VARS)!
     expect(built.html).toContain('https://firm.example/portal/sign/req123')
     expect(built.html).toContain('client portal')
-    expect(built.html).toContain('>Review document')
+    expect(built.html).toMatch(/Review document\s*<\/a>/)
   })
 })
 
@@ -72,7 +72,7 @@ describe('esign-copy-delivered', () => {
     const built = buildEmail('esign-copy-delivered', BASE_VARS)!
     expect(built.subject).toBe('Executed copy: Commercial Lease Agreement')
     expect(built.html).toContain('executed copy of a signed document')
-    expect(built.html).toContain('>View executed document')
+    expect(built.html).toMatch(/View executed document\s*<\/a>/)
     expect(built.html).toContain('https://firm.example/sign/tok456')
   })
 })

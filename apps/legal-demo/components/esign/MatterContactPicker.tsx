@@ -93,13 +93,11 @@ export function MatterContactPicker({
     if (!isSelectionConsistent(contactId, contactOptions, 'contactEntityId')) {
       onChange({ matterId, contactId: null })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matterClientEmail])
   useEffect(() => {
     if (!isSelectionConsistent(matterId, matterOptions, 'matterEntityId')) {
       onChange({ matterId: null, contactId })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contactMatterIds])
 
   return (

@@ -60,10 +60,10 @@ export function filterContacts(
 // After a narrowing selection, a previously-picked value on the OTHER side may
 // no longer be in its narrowed list — the picker clears it rather than keeping
 // an inconsistent pair on screen.
-export function isSelectionConsistent(
+export function isSelectionConsistent<T>(
   selectedId: string | null,
-  options: Array<{ [k: string]: unknown }>,
-  idKey: string,
+  options: T[],
+  idKey: keyof T,
 ): boolean {
   if (!selectedId) return true
   return options.some((o) => o[idKey] === selectedId)

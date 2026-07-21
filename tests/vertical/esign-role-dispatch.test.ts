@@ -33,9 +33,11 @@ describe('normalizeRole (defensive default)', () => {
 
 describe('planInitialDispatch — send-time matrix (role × order)', () => {
   it('legacy shape (no roles): first order delivered, later orders pending', () => {
-    expect(
-      planInitialDispatch([{ order: 1 }, { order: 2 }, { order: 1 }]),
-    ).toEqual(['delivered', 'pending', 'delivered'])
+    expect(planInitialDispatch([{ order: 1 }, { order: 2 }, { order: 1 }])).toEqual([
+      'delivered',
+      'pending',
+      'delivered',
+    ])
   })
 
   it('defaults orders 1-based by position when absent (parallel stays all-delivered)', () => {

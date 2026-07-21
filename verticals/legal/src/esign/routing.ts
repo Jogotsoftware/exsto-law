@@ -36,7 +36,9 @@ export function planInitialDispatch(
 ): Array<'delivered' | 'pending'> {
   const orders = recipients.map((r, i) => Number(r.order ?? i + 1) || 1)
   const firstSigningOrder = Math.min(
-    ...recipients.flatMap((r, i) => (normalizeRole(r.role as string) === 'needs_to_sign' ? [orders[i]!] : [])),
+    ...recipients.flatMap((r, i) =>
+      normalizeRole(r.role as string) === 'needs_to_sign' ? [orders[i]!] : [],
+    ),
   )
   return recipients.map((r, i) => {
     const role = normalizeRole(r.role as string)

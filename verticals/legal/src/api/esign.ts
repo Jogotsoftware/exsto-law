@@ -163,8 +163,7 @@ export async function sendForSignature(
   const signingCount = signers.filter(isSigning).length
   signers = signers.map((s, i) => ({
     ...s,
-    key:
-      s.key ?? (isSigning(s) && signingCount === 1 ? (distinctKeys[0] ?? 'client') : s.key),
+    key: s.key ?? (isSigning(s) && signingCount === 1 ? (distinctKeys[0] ?? 'client') : s.key),
     order: s.order ?? i + 1,
   }))
   if (fields.length && signers.some((s) => isSigning(s) && !s.key)) {
@@ -288,7 +287,13 @@ export async function sendForSignature(
 async function loadEnvelopeMailContext(
   ctx: ActionContext,
   envelopeId: string,
-): Promise<{ title: string; envelopeSubject: string | null; message: string | null; attorneyName: string | null; firmName: string | null }> {
+): Promise<{
+  title: string
+  envelopeSubject: string | null
+  message: string | null
+  attorneyName: string | null
+  firmName: string | null
+}> {
   const [subject, message] = await withActionContext(ctx, (c) =>
     Promise.all([
       latestAttr(c, ctx.tenantId, envelopeId, 'envelope_subject'),
