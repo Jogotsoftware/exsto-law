@@ -24,19 +24,38 @@ export interface DraftRecipient {
   key?: string | null
 }
 
+/** ES-MULTIDOC-1 — one uploaded document in the envelope's ordered set. Its
+ *  array position IS the docIndex placements bind to. */
+export interface DraftDocument {
+  /** Stable local id for React keys + reorder/remove (NOT the substrate id). */
+  id: string
+  file: File
+  title: string
+}
+
 export interface EnvelopeDraft {
-  file: File | null
+  /** ES-MULTIDOC-1 — the ordered set of uploaded PDFs (upload/blank source).
+   *  Empty for a locked source (document/workflow-step), which carries its one
+   *  document on the ComposerSource itself. Order = docIndex. */
+  documents: DraftDocument[]
   subject: string
   message: string
   matterId: string | null
   contactId: string | null
   recipients: DraftRecipient[]
-  /** §5.1 — resolved coordinate placements; the ES-2 canvas writes these. */
+  /** §5.1 — resolved coordinate placements across ALL documents; the ES-2 canvas
+   *  writes these. Each placement's docIndex binds it to a document. */
   placements: FieldPlacement[]
   useSigningOrder: boolean
   /** ES-4: the document is fixed by the launch source (the workflow step's
-   *  approved version) — step 1 needs no file and offers no replace. */
+   *  approved version) — step 1 needs no file and offers no replace/add. */
   documentLocked: boolean
+}
+
+let draftDocSeq = 0
+function makeDraftDocument(file: File): DraftDocument {
+  draftDocSeq += 1
+  return { id: `d${draftDocSeq}`, file, title: file.name.replace(/\.pdf$/i, '') }
 }
 
 export const EMPTY_RECIPIENT: DraftRecipient = {
@@ -52,7 +71,12 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export interface EnvelopeDraftApi {
   draft: EnvelopeDraft
-  setFile: (file: File | null) => void
+  /** ES-MULTIDOC-1 — append uploaded PDFs to the ordered set (Documents step). */
+  addDocuments: (files: File[]) => void
+  removeDocument: (id: string) => void
+  /** Reorder a document up (-1) or down (+1); rebinds nothing (placements carry
+   *  the docIndex, remapped by the composer on reorder). */
+  moveDocument: (id: string, dir: -1 | 1) => void
   setSubject: (subject: string) => void
   setMessage: (message: string) => void
   setAttach: (next: { matterId: string | null; contactId: string | null }) => void
@@ -77,7 +101,7 @@ export interface EnvelopeDraftApi {
 
 export function useEnvelopeDraft(): EnvelopeDraftApi {
   const [draft, setDraft] = useState<EnvelopeDraft>({
-    file: null,
+    documents: [],
     subject: '',
     message: '',
     matterId: null,
@@ -88,14 +112,56 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
     documentLocked: false,
   })
 
-  const setFile = useCallback((file: File | null) => {
+  const addDocuments = useCallback((files: File[]) => {
+    const added = files.filter((f) => f instanceof File).map(makeDraftDocument)
+    if (added.length === 0) return
     setDraft((d) => ({
       ...d,
-      file,
-      // Subject default = document title, never a "Signature requested:" prefix
-      // (§3 step 4). Only fills an untouched subject.
-      subject: d.subject.trim() ? d.subject : (file?.name.replace(/\.pdf$/i, '') ?? ''),
+      documents: [...d.documents, ...added],
+      // Subject default (§3 step 4): the first document's title when the attorney
+      // hasn't typed one, never a "Signature requested:" prefix. For a 2+ doc
+      // envelope the sender usually names it; a single-doc upload is unchanged.
+      subject: d.subject.trim()
+        ? d.subject
+        : d.documents.length + added.length > 1
+          ? ''
+          : (added[0]?.title ?? ''),
     }))
+  }, [])
+
+  const removeDocument = useCallback((id: string) => {
+    setDraft((d) => {
+      const idx = d.documents.findIndex((doc) => doc.id === id)
+      if (idx < 0) return d
+      const documents = d.documents.filter((doc) => doc.id !== id)
+      // Remap placements: drop the removed document's, shift higher docs down.
+      const placements = d.placements
+        .filter((p) => (p.docIndex ?? 0) !== idx)
+        .map((p) => {
+          const di = p.docIndex ?? 0
+          return di > idx ? { ...p, docIndex: di - 1 } : p
+        })
+      return { ...d, documents, placements }
+    })
+  }, [])
+
+  const moveDocument = useCallback((id: string, dir: -1 | 1) => {
+    setDraft((d) => {
+      const from = d.documents.findIndex((doc) => doc.id === id)
+      const to = from + dir
+      if (from < 0 || to < 0 || to >= d.documents.length) return d
+      const documents = [...d.documents]
+      const [moved] = documents.splice(from, 1)
+      documents.splice(to, 0, moved!)
+      // Swap the two documents' placements (their docIndexes trade places).
+      const placements = d.placements.map((p) => {
+        const di = p.docIndex ?? 0
+        if (di === from) return { ...p, docIndex: to }
+        if (di === to) return { ...p, docIndex: from }
+        return p
+      })
+      return { ...d, documents, placements }
+    })
   }, [])
 
   const setSubject = useCallback((subject: string) => {
@@ -199,7 +265,8 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
 
   const stepError = useCallback(
     (step: number): string | null => {
-      if (step === 0 && !draft.file && !draft.documentLocked) return 'Choose a PDF to send.'
+      if (step === 0 && draft.documents.length === 0 && !draft.documentLocked)
+        return 'Choose a PDF to send.'
       if (step === 1) {
         if (filledRecipients.length === 0) {
           return 'Add at least one recipient with an email address.'
@@ -212,12 +279,14 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
       }
       return null
     },
-    [draft.file, draft.documentLocked, filledRecipients],
+    [draft.documents.length, draft.documentLocked, filledRecipients],
   )
 
   return {
     draft,
-    setFile,
+    addDocuments,
+    removeDocument,
+    moveDocument,
     setSubject,
     setMessage,
     setAttach,

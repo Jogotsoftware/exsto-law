@@ -19,6 +19,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
 import {
   CheckIcon,
+  ChevronDownIcon,
   FileTextIcon,
   PlusIcon,
   ShieldCheckIcon,
@@ -34,6 +35,7 @@ import { workflowStepRecipientRows } from '@/lib/esignComposeSource'
 import {
   markerMapToPlacements,
   resolvePlacementData,
+  type FieldPlacement,
   type MarkerMapEntry,
 } from '@exsto/legal/esign'
 import { FieldPlacer, type PlacerSigner } from './FieldPlacer'
@@ -100,6 +102,23 @@ interface SendResult {
   savedContacts: Array<{ email: string; contactEntityId: string }>
 }
 
+// ES-MULTIDOC-1 — one document the wizard iterates. Upload/blank sources carry
+// N uploaded files (each with `file`); document/workflow-step sources carry one
+// locked version (`documentVersionId`). Array position IS the docIndex.
+interface ComposerDoc {
+  id: string
+  title: string
+  file?: File
+  documentVersionId?: string
+}
+// Per-document render: the PDF bytes the canvas draws + (for rendered drafts)
+// the anchor marker map, or an error. Keyed by ComposerDoc.id in docRenders.
+interface DocRender {
+  bytes: ArrayBuffer | null
+  markers: MarkerMapEntry[]
+  error: string | null
+}
+
 function devAuthHeaders(): Record<string, string> {
   if (process.env.NODE_ENV === 'production') return {}
   const dev = readDevSession()
@@ -124,17 +143,20 @@ export function EsignComposer({
   const [suggestFor, setSuggestFor] = useState<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  // ES-2 — the bytes the placement canvas renders. Upload mode: the picked
-  // file's own bytes (no round-trip); document mode: the §5.2 render route's
-  // export-pipeline PDF plus its marker map (anchors pre-seed the canvas).
-  const [docBytes, setDocBytes] = useState<ArrayBuffer | null>(null)
-  const [docMarkers, setDocMarkers] = useState<MarkerMapEntry[]>([])
-  const [renderError, setRenderError] = useState<string | null>(null)
+  // ES-MULTIDOC-1 — per-document render (bytes + marker map + error), keyed by
+  // the composer doc id so a fetched render survives reorder/remove. Upload
+  // mode: each file's own bytes (no round-trip, no markers); document/workflow
+  // mode: the §5.2 render route's export-pipeline PDF + its marker map.
+  const [docRenders, setDocRenders] = useState<Record<string, DocRender>>({})
+  // The document whose fields the Fields-step canvas is placing (switcher).
+  const [activeDoc, setActiveDoc] = useState(0)
   const seededMarkers = useRef(false)
 
   const {
     draft,
-    setFile,
+    addDocuments,
+    removeDocument,
+    moveDocument,
     setSubject,
     setMessage,
     setAttach,
@@ -151,6 +173,28 @@ export function EsignComposer({
   } = useEnvelopeDraft()
 
   const isWorkflowStep = source.kind === 'workflow-step'
+  const isLocked = source.kind === 'document' || source.kind === 'workflow-step'
+
+  // ES-MULTIDOC-1 — the ordered document set the whole wizard iterates.
+  const srcVersionId = isLocked ? source.documentVersionId : ''
+  const srcTitle =
+    source.kind === 'document'
+      ? (source.title ?? '')
+      : source.kind === 'workflow-step'
+        ? source.documentTitle
+        : ''
+  const composerDocs: ComposerDoc[] = useMemo(() => {
+    if (isLocked) {
+      return [{ id: 'src', title: srcTitle.trim() || 'Document', documentVersionId: srcVersionId }]
+    }
+    return draft.documents.map((d) => ({ id: d.id, title: d.title, file: d.file }))
+  }, [isLocked, srcVersionId, srcTitle, draft.documents])
+
+  // The primary (doc 0) render backs marker seeding + the locked-source status
+  // line; a single-doc or locked envelope has exactly this one render.
+  const primaryRender = docRenders[composerDocs[0]?.id ?? '']
+  const docMarkers = primaryRender?.markers ?? []
+  const renderError = primaryRender?.error ?? null
 
   // Seed from the launch source: a pre-picked file arrives pre-attached; a
   // document launch (ES-5: review toolbar / matter docs / chat) pre-attaches
@@ -158,7 +202,7 @@ export function EsignComposer({
   // subject from the document title; a workflow step arrives with the
   // document locked and recipients resolved.
   useEffect(() => {
-    if (source.kind === 'upload' && source.file) setFile(source.file)
+    if (source.kind === 'upload' && source.file) addDocuments([source.file])
     if (source.kind === 'document') {
       if (source.title?.trim()) setSubject(source.title.trim())
       if (source.matterEntityId) setAttach({ matterId: source.matterEntityId, contactId: null })
@@ -180,59 +224,54 @@ export function EsignComposer({
       .catch(() => setContacts([]))
   }, [])
 
-  // ES-2 — upload mode: the picked file's bytes feed the canvas directly.
-  // (document / workflow-step modes get bytes from the render route below.)
+  // ES-MULTIDOC-1 — resolve bytes + marker map for EVERY document in the set.
+  // Upload docs read their own file bytes (no round-trip, no markers); a
+  // document/workflow-step doc goes through the §5.2 render route once (its
+  // marker map pre-seeds the canvas, §7). Keyed by doc id so a render survives
+  // reorder/remove — only docs without a render yet are fetched.
   useEffect(() => {
-    if (source.kind === 'document' || source.kind === 'workflow-step') return
-    if (!draft.file) {
-      setDocBytes(null)
-      return
-    }
     let cancelled = false
-    draft.file
-      .arrayBuffer()
-      .then((buf) => {
-        if (!cancelled) setDocBytes(buf)
-      })
-      .catch(() => {})
+    const setRender = (id: string, r: DocRender) => {
+      if (!cancelled) setDocRenders((prev) => ({ ...prev, [id]: r }))
+    }
+    for (const doc of composerDocs) {
+      if (docRenders[doc.id]) continue
+      if (doc.file) {
+        doc.file
+          .arrayBuffer()
+          .then((buf) => setRender(doc.id, { bytes: buf, markers: [], error: null }))
+          .catch(() => setRender(doc.id, { bytes: null, markers: [], error: 'Could not read this file.' }))
+      } else if (doc.documentVersionId) {
+        fetch('/api/attorney/esign/render', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...devAuthHeaders() },
+          body: JSON.stringify({ documentVersionId: doc.documentVersionId }),
+        })
+          .then(async (r) => {
+            const data = (await r.json().catch(() => ({}))) as {
+              pdf?: string
+              markers?: MarkerMapEntry[]
+              error?: string
+            }
+            if (!r.ok || !data.pdf) throw new Error(data.error || 'Could not render the document.')
+            const bin = atob(data.pdf)
+            const bytes = new Uint8Array(bin.length)
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+            setRender(doc.id, { bytes: bytes.buffer, markers: data.markers ?? [], error: null })
+          })
+          .catch((e) =>
+            setRender(doc.id, {
+              bytes: null,
+              markers: [],
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          )
+      }
+    }
     return () => {
       cancelled = true
     }
-  }, [draft.file, source.kind])
-
-  // ES-2 — document + ES-4 workflow-step modes: render the version through the
-  // §5.2 route once; its marker map pre-seeds the placement canvas (§7:
-  // "placements pre-seeded from template anchors").
-  useEffect(() => {
-    if (source.kind !== 'document' && source.kind !== 'workflow-step') return
-    let cancelled = false
-    setRenderError(null)
-    fetch('/api/attorney/esign/render', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...devAuthHeaders() },
-      body: JSON.stringify({ documentVersionId: source.documentVersionId }),
-    })
-      .then(async (r) => {
-        const data = (await r.json().catch(() => ({}))) as {
-          pdf?: string
-          markers?: MarkerMapEntry[]
-          error?: string
-        }
-        if (!r.ok || !data.pdf) throw new Error(data.error || 'Could not render the document.')
-        if (cancelled) return
-        const bin = atob(data.pdf)
-        const bytes = new Uint8Array(bin.length)
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-        setDocBytes(bytes.buffer)
-        setDocMarkers(data.markers ?? [])
-      })
-      .catch((e) => {
-        if (!cancelled) setRenderError(e instanceof Error ? e.message : String(e))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [source.kind])
+  }, [composerDocs, docRenders])
 
   // Recipient pre-fill (15.6, the #439 rule): the attached matter's client
   // (client_of contact) takes priority, else the directly attached contact →
@@ -362,25 +401,28 @@ export function EsignComposer({
     [draft.placements, signingIndexes, draft.recipients, signerKeyForRow],
   )
 
-  // Review-step preview rides the same bytes/doc as the canvas.
-  const reviewPdf = usePdfDocument(step === 3 ? docBytes : null)
+  // ES-MULTIDOC-1 — the active document (clamped as docs are removed).
+  const activeDocSafe = Math.min(activeDoc, Math.max(0, composerDocs.length - 1))
 
-  function pickFile(f: File | null | undefined) {
+  function addFiles(files: FileList | File[] | null | undefined) {
     setError(null)
-    if (!f) return
-    if (f.type && f.type !== 'application/pdf' && !/\.pdf$/i.test(f.name)) {
+    if (!files) return
+    const list = Array.from(files)
+    if (list.length === 0) return
+    const bad = list.find((f) => f.type && f.type !== 'application/pdf' && !/\.pdf$/i.test(f.name))
+    if (bad) {
       setError('Only PDF files can be sent for signature.')
       return
     }
-    setFile(f)
+    addDocuments(list)
   }
 
-  // Document-mode launches carry no upload — the render route's bytes stand in
-  // for the file on step-0 validation.
+  // Locked launches (document/workflow-step) carry no upload — the render
+  // route's bytes stand in for the file on step-0 validation.
   function effectiveStepError(s: number): string | null {
-    if (source.kind === 'document' && s === 0) {
+    if (isLocked && s === 0) {
       if (renderError) return renderError
-      return docBytes ? null : 'The document is still rendering — one moment.'
+      return primaryRender?.bytes ? null : 'The document is still rendering — one moment.'
     }
     return stepError(s)
   }
@@ -443,27 +485,42 @@ export function EsignComposer({
         return
       }
 
-      const form = new FormData()
-      form.append('file', draft.file!)
-      if (draft.matterId) form.append('matterId', draft.matterId)
-      if (draft.contactId) form.append('contactId', draft.contactId)
-      const up = await fetch('/api/attorney/esign/upload', {
-        method: 'POST',
-        headers: devAuthHeaders(),
-        body: form,
-      })
-      const upData = (await up.json().catch(() => ({}))) as {
-        documentVersionId?: string
-        error?: string
+      // ES-MULTIDOC-1 — upload every document IN ORDER, then send one envelope
+      // carrying them all. The upload document order == the docIndex the
+      // placements reference; the first is the primary.
+      const uploaded: Array<{ documentVersionId: string }> = []
+      for (const d of draft.documents) {
+        const form = new FormData()
+        form.append('file', d.file)
+        if (draft.matterId) form.append('matterId', draft.matterId)
+        if (draft.contactId) form.append('contactId', draft.contactId)
+        const up = await fetch('/api/attorney/esign/upload', {
+          method: 'POST',
+          headers: devAuthHeaders(),
+          body: form,
+        })
+        const upData = (await up.json().catch(() => ({}))) as {
+          documentVersionId?: string
+          error?: string
+        }
+        if (!up.ok || !upData.documentVersionId) throw new Error(upData.error || 'Upload failed.')
+        uploaded.push({ documentVersionId: upData.documentVersionId })
       }
-      if (!up.ok || !upData.documentVersionId) throw new Error(upData.error || 'Upload failed.')
+      if (uploaded.length === 0) throw new Error('Choose a PDF to send.')
 
       const res = await callAttorneyMcp<SendResult>({
         toolName: 'legal.esign.send_file',
         input: {
-          documentVersionId: upData.documentVersionId,
-          // Subject default = the document title — no prefix (§3 step 4).
-          subject: draft.subject.trim() || draft.file!.name.replace(/\.pdf$/i, ''),
+          documentVersionId: uploaded[0]!.documentVersionId,
+          // The full ordered set when there is more than one document.
+          documents: uploaded.length > 1 ? uploaded : undefined,
+          // Subject default = the document title (single doc) or a count — no
+          // "Signature requested:" prefix (§3 step 4).
+          subject:
+            draft.subject.trim() ||
+            (draft.documents.length > 1
+              ? `${draft.documents.length} documents`
+              : (draft.documents[0]?.title ?? 'Document')),
           message: draft.message.trim() || undefined,
           placements: draft.placements.length ? draft.placements : undefined,
           signers: signerPayload,
@@ -568,7 +625,7 @@ export function EsignComposer({
                     {draft.subject.trim() || 'Document draft'}
                   </span>
                   <span className="li-esign-wiz-doc-sub">
-                    {docBytes ? 'Rendered for placement' : 'Rendering…'}
+                    {primaryRender?.bytes ? 'Rendered for placement' : 'Rendering…'}
                     {docMarkers.length > 0 &&
                       ` · ${docMarkers.length} signature anchor${docMarkers.length === 1 ? '' : 's'} pre-placed`}
                   </span>
@@ -587,46 +644,50 @@ export function EsignComposer({
           </div>
         )}
 
-        {step === 0 && source.kind !== 'document' && source.kind !== 'workflow-step' && (
+        {step === 0 && !isLocked && (
           <div>
-            <div className="li-esign-wiz-h">Document</div>
+            <div className="li-esign-wiz-h">
+              {draft.documents.length > 1 ? 'Documents' : 'Document'}
+            </div>
             <input
               ref={fileRef}
               type="file"
               accept="application/pdf,.pdf"
+              multiple
               style={{ display: 'none' }}
-              onChange={(e) => pickFile(e.target.files?.[0])}
+              onChange={(e) => {
+                addFiles(e.target.files)
+                if (fileRef.current) fileRef.current.value = ''
+              }}
             />
-            {draft.file ? (
-              // Single-slot document card (multi-document envelopes deferred).
-              <div className="li-esign2-doccard">
-                <span className="li-esign-doc-ico" aria-hidden="true">
-                  <FileTextIcon size={20} />
-                </span>
-                <span className="li-esign2-doccard-meta">
-                  <span className="li-esign-wiz-doc-name">{draft.file.name}</span>
-                  <span className="li-esign-wiz-doc-sub">
-                    {(draft.file.size / 1024).toFixed(0)} KB · PDF
-                  </span>
-                </span>
-                <span className="li-esign2-doccard-actions">
-                  <button
-                    type="button"
-                    className="li-esign-btn li-esign-btn--sm"
-                    onClick={() => fileRef.current?.click()}
-                  >
-                    Replace
-                  </button>
-                  <button
-                    type="button"
-                    className="li-esign-btn li-esign-btn--sm"
-                    aria-label="Remove document"
-                    onClick={() => setFile(null)}
-                  >
-                    <XIcon size={14} />
-                  </button>
-                </span>
-              </div>
+            {draft.documents.length > 0 ? (
+              // ES-MULTIDOC-1 — one card per document; a single upload looks the
+              // same as before (one card, no reorder chevrons shown for 1 doc).
+              <>
+                <div className="li-esign2-doclist">
+                  {draft.documents.map((d, i) => (
+                    <DocCard
+                      key={d.id}
+                      index={i}
+                      total={draft.documents.length}
+                      name={d.file.name}
+                      sizeKb={d.file.size / 1024}
+                      bytes={docRenders[d.id]?.bytes ?? null}
+                      onUp={() => moveDocument(d.id, -1)}
+                      onDown={() => moveDocument(d.id, 1)}
+                      onRemove={() => removeDocument(d.id)}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="li-esign-btn li-esign-btn--sm li-esign2-addmore"
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <PlusIcon size={14} />
+                  Add another PDF
+                </button>
+              </>
             ) : (
               <button
                 type="button"
@@ -635,16 +696,16 @@ export function EsignComposer({
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault()
-                  pickFile(e.dataTransfer.files?.[0])
+                  addFiles(e.dataTransfer.files)
                 }}
               >
                 <span className="li-esign-doc-ico" aria-hidden="true">
                   <UploadIcon size={20} />
                 </span>
                 <span className="li-esign-filedrop-text">
-                  <span className="li-esign-wiz-doc-name">Upload a PDF</span>
+                  <span className="li-esign-wiz-doc-name">Upload PDFs</span>
                   <span className="li-esign-wiz-doc-sub">
-                    Drop it here or click to choose — an agreement, a letter, a form
+                    Drop them here or click to choose — one document or several in one envelope
                   </span>
                 </span>
               </button>
@@ -828,7 +889,12 @@ export function EsignComposer({
                 </p>
                 {renderError && <div className="alert alert-error">{renderError}</div>}
                 <FieldPlacer
-                  pdfData={docBytes}
+                  documents={composerDocs.map((d) => ({
+                    title: d.title,
+                    pdfData: docRenders[d.id]?.bytes ?? null,
+                  }))}
+                  activeDocIndex={activeDocSafe}
+                  onActiveDocChange={setActiveDoc}
                   signers={placerSigners}
                   placements={draft.placements}
                   onChange={setPlacements}
@@ -842,32 +908,24 @@ export function EsignComposer({
         {step === 3 && (
           <div>
             <div className="li-esign-wiz-h">Review &amp; send</div>
-            {reviewPdf.doc && (
-              <div className="li-esp-review">
-                {/* Item 7 — the review preview mirrors the Fields step: ALL pages
-                    stacked and fit to the container width, with EVERY placed
-                    field drawn read-only at its position (previously only page 0
-                    and its fields showed, so fields on later pages vanished).
-                    Presentation only — the send payload is untouched. */}
-                <PdfCanvas
-                  doc={reviewPdf.doc}
-                  pages={reviewPdf.pages}
-                  zoom="fit"
+            {/* ES-MULTIDOC-1 — preview EVERY document in order; each shows all of
+                its pages stacked with its own placed fields drawn read-only.
+                Presentation only — the send payload is untouched. */}
+            <div className="li-esp-review-docs">
+              {composerDocs.map((d, i) => (
+                <ReviewDocPreview
+                  key={d.id}
+                  title={composerDocs.length > 1 ? d.title : null}
+                  docIndex={i}
+                  bytes={docRenders[d.id]?.bytes ?? null}
                   placements={draft.placements}
                   toneBySigner={Object.fromEntries(
                     placerSigners.map((s) => [s.signerKey, s.toneIndex]),
                   )}
-                  readOnly
                   valuesById={canvasValues}
                 />
-                {draft.placements.length > 0 && (
-                  <div className="li-esign-wiz-doc-sub li-esp-review-sub">
-                    {draft.placements.length} field{draft.placements.length === 1 ? '' : 's'} placed
-                    {reviewPdf.pages.length > 1 ? ` · ${reviewPdf.pages.length} pages` : ''}
-                  </div>
-                )}
-              </div>
-            )}
+              ))}
+            </div>
             <div className="li-esign-wiz-review">
               <div className="li-esign-wiz-reviewrow">
                 <span className="li-esign-wiz-reviewk">Subject</span>
@@ -878,13 +936,15 @@ export function EsignComposer({
                   placeholder={
                     (source.kind === 'workflow-step'
                       ? source.documentTitle
-                      : draft.file?.name.replace(/\.pdf$/i, '')) || 'Document title'
+                      : draft.documents[0]?.title) || 'Document title'
                   }
                   aria-label="Envelope subject"
                 />
               </div>
               <div className="li-esign-wiz-reviewrow">
-                <span className="li-esign-wiz-reviewk">Document</span>
+                <span className="li-esign-wiz-reviewk">
+                  {draft.documents.length > 1 ? 'Documents' : 'Document'}
+                </span>
                 <span className="li-esign-wiz-reviewv">
                   {source.kind === 'workflow-step'
                     ? `${source.documentTitle}${
@@ -892,7 +952,11 @@ export function EsignComposer({
                       }`
                     : source.kind === 'document'
                       ? source.title || draft.subject.trim() || 'Document'
-                      : (draft.file?.name ?? '—')}
+                      : draft.documents.length > 1
+                        ? `${draft.documents.length} documents · ${draft.documents
+                            .map((d) => d.file.name)
+                            .join(', ')}`
+                        : (draft.documents[0]?.file.name ?? '—')}
                 </span>
               </div>
               <div className="li-esign-wiz-reviewrow">
@@ -998,6 +1062,128 @@ export function EsignComposer({
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+// ES-MULTIDOC-1 — one document card in the Documents step: name + page count,
+// reorder chevrons (only when the envelope has 2+ documents), remove. Page count
+// comes from the loaded PDF; a single-document upload reads exactly as before.
+function DocCard({
+  index,
+  total,
+  name,
+  sizeKb,
+  bytes,
+  onUp,
+  onDown,
+  onRemove,
+}: {
+  index: number
+  total: number
+  name: string
+  sizeKb: number
+  bytes: ArrayBuffer | null
+  onUp: () => void
+  onDown: () => void
+  onRemove: () => void
+}) {
+  const { pages } = usePdfDocument(bytes)
+  const pageLabel = pages.length ? `${pages.length} page${pages.length === 1 ? '' : 's'} · ` : ''
+  return (
+    <div className="li-esign2-doccard">
+      {total > 1 && (
+        <span className="li-esign2-docorder" aria-hidden="true">
+          {index + 1}
+        </span>
+      )}
+      <span className="li-esign-doc-ico" aria-hidden="true">
+        <FileTextIcon size={20} />
+      </span>
+      <span className="li-esign2-doccard-meta">
+        <span className="li-esign-wiz-doc-name">{name}</span>
+        <span className="li-esign-wiz-doc-sub">
+          {pageLabel}
+          {sizeKb.toFixed(0)} KB · PDF
+        </span>
+      </span>
+      <span className="li-esign2-doccard-actions">
+        {total > 1 && (
+          <>
+            <button
+              type="button"
+              className="li-esign-btn li-esign-btn--sm"
+              onClick={onUp}
+              disabled={index === 0}
+              aria-label="Move document up"
+              title="Move up"
+            >
+              <ChevronDownIcon size={14} style={{ transform: 'rotate(180deg)' }} />
+            </button>
+            <button
+              type="button"
+              className="li-esign-btn li-esign-btn--sm"
+              onClick={onDown}
+              disabled={index === total - 1}
+              aria-label="Move document down"
+              title="Move down"
+            >
+              <ChevronDownIcon size={14} />
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          className="li-esign-btn li-esign-btn--sm"
+          aria-label="Remove document"
+          onClick={onRemove}
+        >
+          <XIcon size={14} />
+        </button>
+      </span>
+    </div>
+  )
+}
+
+// ES-MULTIDOC-1 — one document's read-only preview on the Review step: all pages
+// stacked with that document's placed fields drawn at their positions. Its own
+// pdfjs load (the review step mounts these only when reached).
+function ReviewDocPreview({
+  title,
+  docIndex,
+  bytes,
+  placements,
+  toneBySigner,
+  valuesById,
+}: {
+  title: string | null
+  docIndex: number
+  bytes: ArrayBuffer | null
+  placements: FieldPlacement[]
+  toneBySigner: Record<string, number>
+  valuesById?: Record<string, string | null>
+}) {
+  const { doc, pages } = usePdfDocument(bytes)
+  const docPlacements = placements.filter((p) => (p.docIndex ?? 0) === docIndex)
+  if (!doc) return null
+  return (
+    <div className="li-esp-review">
+      {title && <div className="li-esign-wiz-doc-name li-esp-review-title">{title}</div>}
+      <PdfCanvas
+        doc={doc}
+        pages={pages}
+        zoom="fit"
+        placements={docPlacements}
+        toneBySigner={toneBySigner}
+        readOnly
+        valuesById={valuesById}
+      />
+      {docPlacements.length > 0 && (
+        <div className="li-esign-wiz-doc-sub li-esp-review-sub">
+          {docPlacements.length} field{docPlacements.length === 1 ? '' : 's'} placed
+          {pages.length > 1 ? ` · ${pages.length} pages` : ''}
+        </div>
+      )}
     </div>
   )
 }

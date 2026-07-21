@@ -25917,3 +25917,84 @@ details.li-brief-research summary:hover {
 .li-edtr-tb-select--size {
   width: 58px;
 }
+
+/* ==========================================================================
+   ES-MULTIDOC-1 — one envelope, many documents
+   Documents-step list (reorder/remove/add), Fields-step document switcher,
+   Review-step per-document preview. Reuses the li-esign2 / li-esp tokens.
+   ========================================================================== */
+.li-esign2-doclist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.li-esign2-docorder {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--li-navy);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.li-esign2-addmore {
+  margin-top: 10px;
+}
+.li-esp-docswitch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.li-esp-docbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 240px;
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  background: var(--li-card);
+  color: var(--li-text);
+  padding: 6px 11px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.li-esp-docbtn:hover {
+  border-color: var(--li-navy);
+}
+.li-esp-docbtn.is-active {
+  border-color: var(--li-navy);
+  background: color-mix(in srgb, var(--li-navy) 8%, var(--li-card));
+  font-weight: 600;
+}
+.li-esp-docbtn-num {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--li-navy);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.li-esp-docbtn-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-esp-review-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.li-esp-review-title {
+  margin-bottom: 8px;
+}
