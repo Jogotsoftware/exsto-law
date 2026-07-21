@@ -15,9 +15,13 @@ import type { PDFDocumentProxy } from 'pdfjs-dist'
 export interface PdfPageInfo {
   /** 0-based page index (placement rects use the same base). */
   index: number
-  /** Base size in PDF points (viewport scale 1). */
+  /** VISUAL size in PDF points at scale 1 — pdfjs's getViewport bakes in the
+   *  page's /Rotate, so for a 90°/270° page width & height are ALREADY swapped.
+   *  Placement rects normalize against these (rotated) dims (ESIGN-ROTATE-FIX). */
   width: number
   height: number
+  /** The page's intrinsic /Rotate, normalized to 0/90/180/270. */
+  rotation: number
 }
 
 export interface PdfDocState {
@@ -66,8 +70,12 @@ export function usePdfDocument(data: ArrayBuffer | Uint8Array | null): PdfDocSta
       const pages: PdfPageInfo[] = []
       for (let i = 1; i <= doc.numPages; i++) {
         const page = await doc.getPage(i)
+        // getViewport() defaults rotation to page.rotate, so vp.width/height are
+        // the VISUAL (rotation-honored) dimensions — the layout and placement
+        // overlay use these directly, which is why a rotated page lays out
+        // upright without any manual transform (ESIGN-ROTATE-FIX).
         const vp = page.getViewport({ scale: 1 })
-        pages.push({ index: i - 1, width: vp.width, height: vp.height })
+        pages.push({ index: i - 1, width: vp.width, height: vp.height, rotation: page.rotate })
       }
       if (cancelled) return
       setState({ doc, pages, loading: false, error: null })
@@ -102,6 +110,9 @@ export function renderPageToCanvas(
   ;(async () => {
     const page = await doc.getPage(pageIndex + 1)
     if (cancelled) return
+    // Both viewports default rotation to page.rotate, so the raster is drawn in
+    // the page's /Rotate-corrected orientation and the canvas dims match the
+    // rotated aspect — no explicit rotation override, no manual transform.
     const base = page.getViewport({ scale: 1 })
     const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio ?? 1) : 1
     const scale = (cssWidth / base.width) * dpr

@@ -89,6 +89,15 @@ export function isPlacementFieldType(value: unknown): value is PlacementFieldTyp
 // points, all from the SAME record. The two conversions below are exact
 // inverses (round-trip tested) so a box the attorney drops on a 900px-wide
 // canvas stamps at the identical spot on the 612pt PDF page.
+//
+// ESIGN-ROTATE-FIX — the canonical storage space is the ROTATED, VISUAL page
+// (what the human sees). pdfjs's default getViewport honors each page's /Rotate
+// (90/270 swap width & height), so the fraction is taken against the visual
+// page dimensions the canvas laid out — NOT the raw MediaBox. A page with no
+// /Rotate has visual dims == MediaBox dims, so every existing zero-rotation
+// envelope is byte-compatible and no migration is needed. The one place that
+// must undo this is the pdf-lib executed-copy stamper (stampPdf.ts), which
+// draws in unrotated MediaBox points — see placementRectToMediaBox there.
 // ─────────────────────────────────────────────────────────────────────────
 
 /** Default box size per field type, in PDF POINTS (72pt = 1in), per §5.2. */
