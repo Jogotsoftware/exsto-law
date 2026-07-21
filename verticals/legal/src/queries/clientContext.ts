@@ -118,7 +118,9 @@ export async function getClientContext(
               (SELECT a.value #>> '{}' FROM attribute a
                  JOIN attribute_kind_definition ak ON ak.id = a.attribute_kind_id
                 WHERE a.tenant_id = e.tenant_id AND a.entity_id = e.id
-                  AND ak.kind_name = 'matter_status' ORDER BY a.valid_from DESC LIMIT 1) AS matter_status,
+                  AND ak.kind_name = 'matter_status'
+                  AND (a.valid_to IS NULL OR a.valid_to > now())
+                  ORDER BY a.valid_from DESC LIMIT 1) AS matter_status,
               (SELECT a.value FROM attribute a
                  JOIN attribute_kind_definition ak ON ak.id = a.attribute_kind_id
                  JOIN relationship rr ON rr.source_entity_id = a.entity_id

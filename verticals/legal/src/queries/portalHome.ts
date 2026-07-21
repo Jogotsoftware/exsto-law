@@ -80,6 +80,7 @@ async function listUpcomingConsultations(
                  JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
                  WHERE a.tenant_id = $1 AND a.entity_id = e.id
                    AND akd.kind_name = 'matter_status'
+                   AND (a.valid_to IS NULL OR a.valid_to > now())
                  ORDER BY a.valid_from DESC LIMIT 1) AS status
        FROM entity e
        WHERE e.tenant_id = $1 AND e.id = ANY($2::uuid[])

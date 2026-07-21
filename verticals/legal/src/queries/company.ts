@@ -154,7 +154,7 @@ export async function getCompany(
       `
        SELECT e.id AS matter_entity_id, e.name AS matter_number,
          (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'service_key' ORDER BY a.valid_from DESC LIMIT 1)   AS service_key,
-         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_status' ORDER BY a.valid_from DESC LIMIT 1) AS status,
+         (SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_status' AND (a.valid_to IS NULL OR a.valid_to > now()) ORDER BY a.valid_from DESC LIMIT 1) AS status,
          e.created_at
        FROM entity e
        JOIN relationship r ON r.source_entity_id = e.id
