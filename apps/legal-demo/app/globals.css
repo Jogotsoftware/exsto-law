@@ -25220,3 +25220,12 @@ details.li-brief-research summary:hover {
   padding: 9px 10px;
   resize: vertical;
 }
+
+/* PO-2 — attention-feed rows deep-link to a real subject now (task, thread,
+   draft, envelope, invoice); a trailing chevron makes the click affordance
+   explicit instead of relying on the hover background alone. */
+.li-attn-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--li-muted-2, #9aa3b8);
+}
