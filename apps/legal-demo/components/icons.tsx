@@ -515,3 +515,89 @@ export const ImageIcon = (p: IconProps) => (
     <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
   </Svg>
 )
+
+// ── ESIGN-UNIFY-1 ES-2 — placement palette icons (lucide line set, §4/E6) ──
+
+// Initials chip (lucide `type`).
+export const TypeIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <polyline points="4 7 4 4 20 4 20 7" />
+    <line x1="9" x2="15" y1="20" y2="20" />
+    <line x1="12" x2="12" y1="4" y2="20" />
+  </Svg>
+)
+
+// Date-signed chip (lucide `calendar-check`).
+export const CalendarCheckIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 2v4" />
+    <path d="M16 2v4" />
+    <rect width="18" height="18" x="3" y="4" rx="2" />
+    <path d="M3 10h18" />
+    <path d="m9 16 2 2 4-4" />
+  </Svg>
+)
+
+// Email chip (lucide `at-sign`).
+export const AtSignIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
+  </Svg>
+)
+
+// Address chip (lucide `map-pin`).
+export const MapPinIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0" />
+    <circle cx="12" cy="10" r="3" />
+  </Svg>
+)
+
+// Text chip (lucide `text-cursor-input`).
+export const TextCursorInputIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 4h1a3 3 0 0 1 3 3 3 3 0 0 1 3-3h1" />
+    <path d="M13 20h-1a3 3 0 0 1-3-3 3 3 0 0 1-3 3H5" />
+    <path d="M5 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1" />
+    <path d="M13 8h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-7" />
+    <path d="M9 7v10" />
+  </Svg>
+)
+
+// Checkbox chip (lucide `square-check`).
+export const SquareCheckIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="m9 12 2 2 4-4" />
+  </Svg>
+)
+
+// Zoom-out / zoom-in (canvas toolbar).
+export const ZoomInIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" x2="16.65" y1="21" y2="16.65" />
+    <line x1="11" x2="11" y1="8" y2="14" />
+    <line x1="8" x2="14" y1="11" y2="11" />
+  </Svg>
+)
+
+export const ZoomOutIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" x2="16.65" y1="21" y2="16.65" />
+    <line x1="8" x2="14" y1="11" y2="11" />
+  </Svg>
+)
+
+// Trash (per-field delete on the properties panel / box kebab).
+export const TrashIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 6h18" />
+    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    <line x1="10" x2="10" y1="11" y2="17" />
+    <line x1="14" x2="14" y1="11" y2="17" />
+  </Svg>
+)

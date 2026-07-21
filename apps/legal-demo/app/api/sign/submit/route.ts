@@ -1,8 +1,9 @@
 // Public sign submission (native e-sign). Verifies the signing token and records
 // the signature through the operation core (esign.sign). Token-gated, rate-limited.
 import { NextResponse } from 'next/server'
-import { recordSignature } from '@exsto/legal'
+import { recordSignature, loadExecutedStampPlanByToken, stampExecutedPdf } from '@exsto/legal'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
+import { downloadObject, uploadObject } from '@/lib/documentStorage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -40,6 +41,30 @@ export async function POST(request: Request) {
       fieldValues,
       signerIp: clientIpFrom(request),
     })
+    // ES-2 (§5.4) — the final signature completes the envelope: stamp the
+    // executed copy of a placement-carrying FILE envelope (each field's resolved
+    // value drawn at its rect + the certificate page appended) and store it
+    // beside the original. Best-effort: the signature is already recorded and
+    // the certificate-markdown executed version already exists (the handler
+    // wrote it in the same transaction); a stamping failure must never turn a
+    // successful signing into an error. This route owns Storage bytes — the
+    // vertical never touches Storage (CI storage-guard).
+    if (result.completed) {
+      try {
+        const plan = await loadExecutedStampPlanByToken(token)
+        if (plan) {
+          const original = await downloadObject(plan.objectKey)
+          const stamped = await stampExecutedPdf({
+            pdfBytes: original,
+            fields: plan.fields,
+            certificate: plan.certificate,
+          })
+          await uploadObject(plan.executedObjectKey, Buffer.from(stamped), 'application/pdf')
+        }
+      } catch (stampErr) {
+        console.error('esign executed-copy stamping failed:', stampErr)
+      }
+    }
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json(

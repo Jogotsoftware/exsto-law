@@ -28,6 +28,16 @@ import {
 import { MatterContactPicker } from './MatterContactPicker'
 import type { ContactOption, MatterOption } from './matterContactFilter'
 import { useEnvelopeDraft, type RecipientRole } from './useEnvelopeDraft'
+// ES-2 (§4) — the placement surface + the real preview, all client-safe pure
+// imports (the esign subpath ships no server code).
+import {
+  markerMapToPlacements,
+  resolvePlacementData,
+  type MarkerMapEntry,
+} from '@exsto/legal/esign'
+import { FieldPlacer, type PlacerSigner } from './FieldPlacer'
+import { PdfCanvas } from './PdfCanvas'
+import { usePdfDocument } from './usePdfDocument'
 
 const STEPS = ['Documents', 'Recipients', 'Fields', 'Review & send'] as const
 
@@ -108,6 +118,13 @@ export function EsignComposer({
   const [suggestFor, setSuggestFor] = useState<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // ES-2 — the bytes the placement canvas renders. Upload mode: the picked
+  // file's own bytes (no round-trip); document mode: the §5.2 render route's
+  // export-pipeline PDF plus its marker map (anchors pre-seed the canvas).
+  const [docBytes, setDocBytes] = useState<ArrayBuffer | null>(null)
+  const [docMarkers, setDocMarkers] = useState<MarkerMapEntry[]>([])
+  const [renderError, setRenderError] = useState<string | null>(null)
+  const seededMarkers = useRef(false)
 
   const {
     draft,
@@ -120,6 +137,7 @@ export function EsignComposer({
     removeRecipient,
     moveRecipient,
     setUseSigningOrder,
+    setPlacements,
     prefillFirstRecipient,
     seedWorkflowStep,
     filledRecipients,
@@ -155,6 +173,60 @@ export function EsignComposer({
       .then((r) => setContacts(r.contacts))
       .catch(() => setContacts([]))
   }, [])
+
+  // ES-2 — upload mode: the picked file's bytes feed the canvas directly.
+  // (document / workflow-step modes get bytes from the render route below.)
+  useEffect(() => {
+    if (source.kind === 'document' || source.kind === 'workflow-step') return
+    if (!draft.file) {
+      setDocBytes(null)
+      return
+    }
+    let cancelled = false
+    draft.file
+      .arrayBuffer()
+      .then((buf) => {
+        if (!cancelled) setDocBytes(buf)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [draft.file, source.kind])
+
+  // ES-2 — document + ES-4 workflow-step modes: render the version through the
+  // §5.2 route once; its marker map pre-seeds the placement canvas (§7:
+  // "placements pre-seeded from template anchors").
+  useEffect(() => {
+    if (source.kind !== 'document' && source.kind !== 'workflow-step') return
+    let cancelled = false
+    setRenderError(null)
+    fetch('/api/attorney/esign/render', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...devAuthHeaders() },
+      body: JSON.stringify({ documentVersionId: source.documentVersionId }),
+    })
+      .then(async (r) => {
+        const data = (await r.json().catch(() => ({}))) as {
+          pdf?: string
+          markers?: MarkerMapEntry[]
+          error?: string
+        }
+        if (!r.ok || !data.pdf) throw new Error(data.error || 'Could not render the document.')
+        if (cancelled) return
+        const bin = atob(data.pdf)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        setDocBytes(bytes.buffer)
+        setDocMarkers(data.markers ?? [])
+      })
+      .catch((e) => {
+        if (!cancelled) setRenderError(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [source.kind])
 
   // Recipient pre-fill (15.6, the #439 rule): the attached matter's client
   // (client_of contact) takes priority, else the directly attached contact →
@@ -207,6 +279,86 @@ export function EsignComposer({
       .slice(0, 6)
   }
 
+  // ES-2 — stable signer keys for placement binding: in document mode the
+  // template's marker keys map onto recipient rows in order (first marker
+  // signer → first signing recipient), so anchor-seeded boxes bind without
+  // manual re-assignment; extra recipients get s<n>. Upload mode: s1, s2, ….
+  const markerKeys = useMemo(() => {
+    const seen: string[] = []
+    for (const m of docMarkers) if (!seen.includes(m.anchor.key)) seen.push(m.anchor.key)
+    return seen
+  }, [docMarkers])
+  const signingIndexes = useMemo(
+    () =>
+      draft.recipients
+        .map((r, i) => ({ r, i }))
+        .filter(({ r }) => r.email.trim() && r.role === 'needs_to_sign')
+        .map(({ i }) => i),
+    [draft.recipients],
+  )
+  const signerKeyForRow = useMemo(() => {
+    const map = new Map<number, string>()
+    signingIndexes.forEach((rowIndex, signerIdx) => {
+      // ES-4: a workflow-step row arrives ALREADY keyed by its template role
+      // ({{sign:<key>}}) — that key wins so anchor-seeded boxes and the send
+      // payload bind to the config's signer, not positional order.
+      const seededKey = draft.recipients[rowIndex]?.key
+      map.set(rowIndex, seededKey || markerKeys[signerIdx] || `s${rowIndex + 1}`)
+    })
+    return map
+  }, [signingIndexes, markerKeys, draft.recipients])
+
+  const placerSigners: PlacerSigner[] = useMemo(
+    () =>
+      signingIndexes.map((rowIndex) => {
+        const r = draft.recipients[rowIndex]!
+        return {
+          signerKey: signerKeyForRow.get(rowIndex)!,
+          name: r.name.trim() || r.email.trim(),
+          toneIndex: (rowIndex % 8) + 1,
+        }
+      }),
+    [signingIndexes, draft.recipients, signerKeyForRow],
+  )
+
+  // Template anchors pre-seed the canvas ONCE (§5.2) — the attorney adjusts
+  // from there; re-seeding on every recipients change would clobber edits.
+  useEffect(() => {
+    if (seededMarkers.current || docMarkers.length === 0 || placerSigners.length === 0) return
+    if (draft.placements.length > 0) return
+    seededMarkers.current = true
+    const known = new Set(placerSigners.map((s) => s.signerKey))
+    setPlacements(
+      markerMapToPlacements(docMarkers, {
+        signerKeyFor: (k) => (known.has(k) ? k : (placerSigners[0]?.signerKey ?? k)),
+      }),
+    )
+  }, [docMarkers, placerSigners, draft.placements.length, setPlacements])
+
+  // §5.3 — the sender sees real data in the canvas: recipient-sourced values
+  // (name/email/title) resolve client-side from the rows themselves. Contact/
+  // matter-sourced values resolve server-side at send.
+  const canvasValues = useMemo(
+    () =>
+      resolvePlacementData(draft.placements, {
+        recipients: signingIndexes.map((rowIndex) => {
+          const r = draft.recipients[rowIndex]!
+          return {
+            signerKey: signerKeyForRow.get(rowIndex)!,
+            name: r.name.trim() || null,
+            email: r.email.trim() || null,
+            title: r.title.trim() || null,
+          }
+        }),
+        contact: null,
+        matter: null,
+      }),
+    [draft.placements, signingIndexes, draft.recipients, signerKeyForRow],
+  )
+
+  // Review-step preview rides the same bytes/doc as the canvas.
+  const reviewPdf = usePdfDocument(step === 3 ? docBytes : null)
+
   function pickFile(f: File | null | undefined) {
     setError(null)
     if (!f) return
@@ -217,8 +369,18 @@ export function EsignComposer({
     setFile(f)
   }
 
+  // Document-mode launches carry no upload — the render route's bytes stand in
+  // for the file on step-0 validation.
+  function effectiveStepError(s: number): string | null {
+    if (source.kind === 'document' && s === 0) {
+      if (renderError) return renderError
+      return docBytes ? null : 'The document is still rendering — one moment.'
+    }
+    return stepError(s)
+  }
+
   function goNext() {
-    const err = stepError(step)
+    const err = effectiveStepError(step)
     if (err) {
       setError(err)
       return
@@ -232,7 +394,7 @@ export function EsignComposer({
   }
 
   async function send() {
-    const err = stepError(0) ?? stepError(1)
+    const err = effectiveStepError(0) ?? effectiveStepError(1)
     if (err) {
       setError(err)
       return
@@ -240,42 +402,41 @@ export function EsignComposer({
     setBusy(true)
     setError(null)
 
-    // ES-4 workflow-step mode: the document is the approved draft version — ONE
-    // send through legal.esign.send_for_signature (no upload). Recipient rows
-    // carry their template signer keys so the body's {{type:key}} markers bind.
-    if (source.kind === 'workflow-step') {
-      try {
-        const res = await callAttorneyMcp<{
-          envelopeId: string
-          savedContacts?: Array<{ email: string; contactEntityId: string }>
-        }>({
+    try {
+      // ES-2 — every signer carries the key its placements bind to (§5.1).
+      const signerPayload = filledRecipients.map((r, i) => {
+        const rowIndex = draft.recipients.indexOf(r)
+        return {
+          email: r.email.trim(),
+          name: r.name.trim() || undefined,
+          title: r.title.trim() || undefined,
+          order: draft.useSigningOrder ? r.order || i + 1 : 1,
+          role: r.role,
+          key: signerKeyForRow.get(rowIndex),
+        }
+      })
+
+      if (source.kind === 'document' || source.kind === 'workflow-step') {
+        // Draft/document envelope — same composer, the draft send tool (§5.5).
+        // ES-4 workflow-step: the approved version this step is locked to; its
+        // subject falls back to the document title (never the legacy prefix).
+        const res = await callAttorneyMcp<SendResult>({
           toolName: 'legal.esign.send_for_signature',
           input: {
             documentVersionId: source.documentVersionId,
-            subject: draft.subject.trim() || source.documentTitle,
+            subject:
+              draft.subject.trim() ||
+              (source.kind === 'workflow-step' ? source.documentTitle : undefined),
             message: draft.message.trim() || undefined,
             placements: draft.placements.length ? draft.placements : undefined,
-            signers: filledRecipients.map((r, i) => ({
-              email: r.email.trim(),
-              name: r.name.trim() || undefined,
-              title: r.title.trim() || undefined,
-              order: draft.useSigningOrder ? r.order || i + 1 : 1,
-              key: r.key ?? undefined,
-              role: r.role,
-            })),
+            signers: signerPayload,
           },
         })
-        setResult({ envelopeId: res.envelopeId, savedContacts: res.savedContacts ?? [] })
+        setResult(res)
         onSent?.(res.envelopeId)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
-      } finally {
-        setBusy(false)
+        return
       }
-      return
-    }
 
-    try {
       const form = new FormData()
       form.append('file', draft.file!)
       if (draft.matterId) form.append('matterId', draft.matterId)
@@ -299,13 +460,7 @@ export function EsignComposer({
           subject: draft.subject.trim() || draft.file!.name.replace(/\.pdf$/i, ''),
           message: draft.message.trim() || undefined,
           placements: draft.placements.length ? draft.placements : undefined,
-          signers: filledRecipients.map((r, i) => ({
-            email: r.email.trim(),
-            name: r.name.trim() || undefined,
-            title: r.title.trim() || undefined,
-            order: draft.useSigningOrder ? r.order || i + 1 : 1,
-            role: r.role,
-          })),
+          signers: signerPayload,
         },
       })
       setResult(res)
@@ -365,11 +520,12 @@ export function EsignComposer({
       </div>
 
       <div className="li-esign-wiz-body">
-        {step === 0 && isWorkflowStep && source.kind === 'workflow-step' && (
+        {step === 0 && source.kind === 'workflow-step' && (
           <div>
             <div className="li-esign-wiz-h">Document</div>
             {/* ES-4: locked to the approved version this workflow step sends —
                 no replace, no upload; the attorney reviews it on the matter. */}
+            {renderError && <div className="alert alert-error">{renderError}</div>}
             <div className="li-esign2-doccard">
               <span className="li-esign-doc-ico" aria-hidden="true">
                 <FileTextIcon size={20} />
@@ -380,6 +536,8 @@ export function EsignComposer({
                   {source.versionNumber != null
                     ? `Version ${source.versionNumber} · Approved`
                     : 'Approved version'}
+                  {docMarkers.length > 0 &&
+                    ` · ${docMarkers.length} signature anchor${docMarkers.length === 1 ? '' : 's'} pre-placed`}
                 </span>
               </span>
             </div>
@@ -389,7 +547,41 @@ export function EsignComposer({
             </p>
           </div>
         )}
-        {step === 0 && !isWorkflowStep && (
+        {step === 0 && source.kind === 'document' && (
+          <div>
+            <div className="li-esign-wiz-h">Document</div>
+            {renderError ? (
+              <div className="alert alert-error">{renderError}</div>
+            ) : (
+              <div className="li-esign2-doccard">
+                <span className="li-esign-doc-ico" aria-hidden="true">
+                  <FileTextIcon size={20} />
+                </span>
+                <span className="li-esign2-doccard-meta">
+                  <span className="li-esign-wiz-doc-name">
+                    {draft.subject.trim() || 'Document draft'}
+                  </span>
+                  <span className="li-esign-wiz-doc-sub">
+                    {docBytes ? 'Rendered for placement' : 'Rendering…'}
+                    {docMarkers.length > 0 &&
+                      ` · ${docMarkers.length} signature anchor${docMarkers.length === 1 ? '' : 's'} pre-placed`}
+                  </span>
+                </span>
+              </div>
+            )}
+            <div className="li-esign-wiz-h li-esign-attach-h">Attach to (optional)</div>
+            <MatterContactPicker
+              matters={matters}
+              contacts={contacts}
+              matterId={draft.matterId}
+              contactId={draft.contactId}
+              onChange={setAttach}
+              disabled={busy}
+            />
+          </div>
+        )}
+
+        {step === 0 && source.kind !== 'document' && source.kind !== 'workflow-step' && (
           <div>
             <div className="li-esign-wiz-h">Document</div>
             <input
@@ -612,41 +804,59 @@ export function EsignComposer({
         )}
 
         {step === 2 && (
-          <div>
+          <div className="li-esp-step">
             <div className="li-esign-wiz-h">Fields</div>
-            <div className="li-esign2-fields-note">
-              <p className="li-esign-wiz-hint">
-                Each signer executes the whole document and their signature, name, and date are
-                recorded on the signature certificate. Signers on this envelope:
-              </p>
-              <div className="li-esign2-signer-chips">
-                {signingRecipients.length === 0 && (
-                  <span className="li-esign-wiz-hint">
-                    No signing recipients yet — add one on the Recipients step.
-                  </span>
-                )}
-                {signingRecipients.map((r, i) => (
-                  <span
-                    key={i}
-                    className={`li-esign2-signer-chip ${signerToneClass(draft.recipients.indexOf(r))}`}
-                  >
-                    <span className="li-esign2-signer-dot" aria-hidden="true" />
-                    {r.name.trim() || r.email.trim()}
-                    {draft.useSigningOrder ? ` · signs ${ordinal(r.order)}` : ''}
-                  </span>
-                ))}
+            {signingRecipients.length === 0 ? (
+              <div className="li-esign2-fields-note">
+                <p className="li-esign-wiz-hint">
+                  No signing recipients yet — add one on the Recipients step, then place their
+                  fields here.
+                </p>
               </div>
-              <p className="li-esign-wiz-hint">
-                Drag-and-drop field placement on the rendered PDF arrives with the placement canvas;
-                envelopes sent now use whole-document signing.
-              </p>
-            </div>
+            ) : (
+              <>
+                <p className="li-esign-wiz-hint li-esp-step-hint">
+                  Drag fields from the palette onto the document — each lands where you drop it,
+                  color-coded per signer. A document sent with no placed fields uses whole-document
+                  signing with the signature certificate.
+                </p>
+                {renderError && <div className="alert alert-error">{renderError}</div>}
+                <FieldPlacer
+                  pdfData={docBytes}
+                  signers={placerSigners}
+                  placements={draft.placements}
+                  onChange={setPlacements}
+                  valuesById={canvasValues}
+                />
+              </>
+            )}
           </div>
         )}
 
         {step === 3 && (
           <div>
             <div className="li-esign-wiz-h">Review &amp; send</div>
+            {reviewPdf.doc && (
+              <div className="li-esp-review">
+                <PdfCanvas
+                  doc={reviewPdf.doc}
+                  pages={reviewPdf.pages.slice(0, 1)}
+                  zoom="fit"
+                  placements={draft.placements.filter((p) => p.rect.page === 0)}
+                  toneBySigner={Object.fromEntries(
+                    placerSigners.map((s) => [s.signerKey, s.toneIndex]),
+                  )}
+                  readOnly
+                  valuesById={canvasValues}
+                />
+                {draft.placements.length > 0 && (
+                  <div className="li-esign-wiz-doc-sub li-esp-review-sub">
+                    {draft.placements.length} field{draft.placements.length === 1 ? '' : 's'} placed
+                    {reviewPdf.pages.length > 1 ? ` · ${reviewPdf.pages.length} pages` : ''}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="li-esign-wiz-review">
               <div className="li-esign-wiz-reviewrow">
                 <span className="li-esign-wiz-reviewk">Subject</span>
@@ -774,10 +984,4 @@ export function EsignComposer({
       </div>
     </div>
   )
-}
-
-function ordinal(n: number): string {
-  const s = ['th', 'st', 'nd', 'rd']
-  const v = n % 100
-  return `${n}${s[(v - 20) % 10] ?? s[v] ?? 'th'}`
 }
