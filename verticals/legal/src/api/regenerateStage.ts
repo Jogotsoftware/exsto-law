@@ -13,11 +13,14 @@
 // the model call runs on the worker — no LLM in-request, ever.
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
-import { stageByKey } from '../lifecycle/resolve.js'
-import type { Lifecycle, LifecycleStage } from '../lifecycle/types.js'
+import { stageByKey, stageProducesDocument } from '../lifecycle/resolve.js'
+import type { Lifecycle } from '../lifecycle/types.js'
 import type { CapabilityStepConfig } from '../lifecycle/types.js'
 import { CAPABILITY_RUN_JOB_KIND, slugifyDocKind } from './capabilityRuntime.js'
-import { resolveStageDocumentKind } from './generateDocumentRuntime.js'
+import {
+  resolveStageDocumentKind,
+  resolveStagePinnedTemplateOverride,
+} from './generateDocumentRuntime.js'
 import type { GenerationMode } from './generateDraft.js'
 
 // The AI agent actor (same id every AI write in the vertical uses — tenant-zero
@@ -43,15 +46,6 @@ async function loadGraphForMatter(
     }
     return { currentState: instance.currentState, graph }
   })
-}
-
-function isDocumentProducing(stage: LifecycleStage): boolean {
-  if (stage.action?.kind === 'generate_document') return true
-  if (stage.action?.kind === 'invoke_capability') {
-    const cfg = (stage.action.config ?? {}) as unknown as CapabilityStepConfig
-    return (cfg.capability_slug ?? '').trim() === 'document_generation'
-  }
-  return false
 }
 
 async function recordObservation(
@@ -96,7 +90,7 @@ export async function enqueueRegenerateJob(
   }
   const stage = stageByKey(info.graph, stageKey)
   if (!stage) throw new Error(`Stage "${stageKey}" is not in this matter's workflow.`)
-  if (!isDocumentProducing(stage)) {
+  if (!stageProducesDocument(stage)) {
     throw new Error(
       `Stage "${stageKey}" does not produce a document — regenerate applies only to a drafting stage.`,
     )
@@ -139,7 +133,7 @@ export async function regenerateStageDocument(
 ): Promise<RegenerateStageResult> {
   const info = await loadGraphForMatter(ctx, matterEntityId)
   const stage = info ? stageByKey(info.graph, stageKey) : null
-  if (!info || !stage || !isDocumentProducing(stage)) {
+  if (!info || !stage || !stageProducesDocument(stage)) {
     // The graph changed between enqueue and run — record and stop, never guess.
     await recordObservation(ctx, matterEntityId, 'regenerate_stage_missing', {
       stage: stageKey,
@@ -187,11 +181,16 @@ export async function regenerateStageDocument(
       (capabilityConfig.instructions as string | undefined) ?? '',
     ).trim()
   } else {
+    // generate_document / review_send_document: resolve the SAME pinned template
+    // the stage NAMES (stage.documents[].templateEntityId) and re-draft from it —
+    // never the repo/convention default (WF-FIX-2 #4). Same resolver the producing
+    // autorun uses (generateDocumentRuntime), so regenerate and first-draft agree.
     const kind = await resolveStageDocumentKind(ctx, matterEntityId, stage)
     if (!kind) {
       throw new Error(`Stage "${stageKey}" names no document kind — cannot regenerate.`)
     }
     documentKind = kind
+    templateOverride = await resolveStagePinnedTemplateOverride(ctx, stage)
   }
 
   // The existing draft entity for this (matter, documentKind) — the supersede

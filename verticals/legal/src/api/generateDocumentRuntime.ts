@@ -79,12 +79,50 @@ async function resolveCurrentStage(
 }
 
 // WF-FIX-1 (WP3): the stage's template annotation, when it names a firm-library
-// template by entity id. A review_send_document step authored in the step editor
-// carries exactly this shape ("1 doc" = a DocumentRef with templateEntityId); the
-// draft must come from THAT template, not a same-kind library default.
+// template by entity id. A review_send_document / generate_document step authored
+// in the step editor carries exactly this shape ("1 doc" = a DocumentRef with
+// templateEntityId); an invoke_capability{document_generation} step pins it in
+// capability_config.template_entity_id instead (WF-FIX-2 #4/#5 — cover both so
+// every producing shape's PINNED template is the one that drafts, never a
+// same-kind library default). The draft must come from THAT template.
 export function resolveStageTemplateRef(stage: LifecycleStage): string | null {
-  const ref = stage.documents?.map((d) => d.templateEntityId).find((t): t is string => !!t?.trim())
-  return ref ?? null
+  const fromDocs = stage.documents
+    ?.map((d) => d.templateEntityId)
+    .find((t): t is string => !!t?.trim())
+  if (fromDocs) return fromDocs.trim()
+  if (stage.action?.kind === 'invoke_capability') {
+    const cfg = (stage.action.config ?? {}) as {
+      capability_config?: Record<string, unknown>
+    }
+    const fromCap = String(
+      ((cfg.capability_config ?? {}).template_entity_id as string | undefined) ?? '',
+    ).trim()
+    if (fromCap) return fromCap
+  }
+  return null
+}
+
+// Resolve the stage's PINNED template ENTITY body as a runDraftGeneration
+// templateOverride, or undefined when the stage pins none (caller then falls back
+// to the repo/convention template — the last resort). Throws when a template IS
+// pinned but is not an active firm template (honest failure, never silently
+// draft from a different template). The ONE resolver every producing path shares:
+// generateDocumentForMatter (autorun), regenerateStage (#4), and the manual draft
+// path (#5) all resolve the stage's pinned template through here.
+export async function resolveStagePinnedTemplateOverride(
+  ctx: ActionContext,
+  stage: LifecycleStage,
+): Promise<{ templateText: string; templateId: string } | undefined> {
+  const templateEntityId = resolveStageTemplateRef(stage)
+  if (!templateEntityId) return undefined
+  const { getStandaloneTemplate } = await import('../queries/templates.js')
+  const tmpl = await getStandaloneTemplate(ctx, templateEntityId)
+  if (!tmpl || !tmpl.body.trim()) {
+    throw new Error(
+      `Stage "${stage.key}" names template "${templateEntityId}" but it is not an active firm template — cannot draft.`,
+    )
+  }
+  return { templateText: tmpl.body, templateId: `template:${templateEntityId}` }
 }
 
 // The document kind this producing stage produces: the stage's own document ref wins
@@ -285,22 +323,17 @@ export async function generateDocumentForMatter(
   // recorded) — park WITHOUT advancing; never move a matter to review with no document.
   // WF-FIX-1 (WP3): when the stage annotates a specific firm template, draft from THAT
   // template (the document_generation capability's templateOverride seam) — a firm with
-  // several templates of the same kind must get the one the step names.
-  const templateEntityId = resolveStageTemplateRef(stage)
+  // several templates of the same kind must get the one the step names. The shared
+  // resolver throws on a pinned-but-inactive template; record the observation first.
   let templateOverride: { templateText: string; templateId: string } | undefined
-  if (templateEntityId) {
-    const { getStandaloneTemplate } = await import('../queries/templates.js')
-    const tmpl = await getStandaloneTemplate(agentCtx, templateEntityId)
-    if (!tmpl || !tmpl.body.trim()) {
-      await recordObservation(agentCtx, matterEntityId, 'generate_document_template_missing', {
-        stage: stage.key,
-        template_entity_id: templateEntityId,
-      })
-      throw new Error(
-        `Stage "${stage.key}" names template "${templateEntityId}" but it is not an active firm template — cannot draft.`,
-      )
-    }
-    templateOverride = { templateText: tmpl.body, templateId: `template:${templateEntityId}` }
+  try {
+    templateOverride = await resolveStagePinnedTemplateOverride(agentCtx, stage)
+  } catch (err) {
+    await recordObservation(agentCtx, matterEntityId, 'generate_document_template_missing', {
+      stage: stage.key,
+      template_entity_id: resolveStageTemplateRef(stage),
+    })
+    throw err
   }
   const produced = await runDraftGeneration(agentCtx, {
     matterEntityId,
