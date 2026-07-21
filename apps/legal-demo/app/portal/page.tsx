@@ -318,7 +318,12 @@ export default function ClientPortalPage() {
   return (
     <FirmNameContext.Provider value={me?.firmName ?? ''}>
       <div className="li-cp-shell li-cpnav-shell">
-        <PortalSideNav items={navItems} active={view.kind} onSelect={(kind) => setView({ kind })} />
+        <PortalSideNav
+          items={navItems}
+          active={view.kind}
+          onSelect={(kind) => setView({ kind })}
+          user={me ? { displayName: me.displayName, email: me.email } : null}
+        />
         <div className="li-cpnav-col">
           <header className="li-cpnav-header">
             <div className="li-cp-top">
@@ -368,17 +373,6 @@ export default function ClientPortalPage() {
                     <BellIcon size={19} />
                     {badge > 0 && <span className="li-top-bell-dot" aria-hidden="true" />}
                   </button>
-                  {me && (
-                    <span className="li-cp-who" title={me.email}>
-                      <span className="li-cp-avatar" aria-hidden>
-                        {firmInitials(me.displayName)}
-                      </span>
-                      <span className="li-cp-who-name">{me.displayName}</span>
-                    </span>
-                  )}
-                  <a href="/api/client/auth/logout" className="li-cp-signout">
-                    {t('portal.signout', undefined, 'Sign out')}
-                  </a>
                 </div>
               </div>
             </div>
