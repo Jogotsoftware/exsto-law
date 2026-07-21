@@ -1,13 +1,14 @@
 'use client'
 
-import { Fragment, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { readDevSession } from '@/lib/auth'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { CheckIcon, EditIcon } from '@/components/icons'
 import type { OnApproved } from '@/components/ServiceProposalCard'
 import { ProposalCardShell } from '@/components/ProposalCardShell'
-import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
+import { DocumentSheet } from '@/components/DocumentSheet'
 import { TemplateEditorModal } from '@/components/TemplateEditorModal'
+import { buildPreview } from '@/lib/templatePreview'
 import type { TemplateEsignConfig } from '@exsto/legal'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
@@ -75,33 +76,6 @@ function humanKind(k: string): string {
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-// WP-L: the comp's proportional doc preview — the first lines of the body on a
-// DocumentSheet thumb, {{token}} markers rendered as gold TokenChips (the same
-// mini-doc idiom the service Templates tab uses).
-const THUMB_TOKEN_RE = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi
-function renderThumbLines(body: string, max = 8): ReactNode[] {
-  const lines = body
-    .split(/\r?\n/)
-    .map((l) =>
-      l
-        .replace(/^#+\s*/, '')
-        .replace(/[*_>#-]/g, '')
-        .trim(),
-    )
-    .filter(Boolean)
-    .slice(0, max)
-  return lines.map((line, i) => {
-    const parts = line.split(THUMB_TOKEN_RE)
-    return (
-      <div key={i} className="li-uac-prop-docline">
-        {parts.map((part, j) =>
-          j % 2 === 1 ? <TokenChip key={j}>{part}</TokenChip> : <Fragment key={j}>{part}</Fragment>,
-        )}
-      </div>
-    )
-  })
-}
-
 // The inline approval card for an AI-proposed document TEMPLATE (Build-Wizard Phase
 // 3). It is the HUMAN GATE: the proposing chat turn wrote nothing; clicking Approve
 // POSTs the body to the templates approve-from-ai route, the only place the template
@@ -162,6 +136,12 @@ export function TemplateProposalCard({
     }
     setEditing(true)
   }
+
+  // The FORMATTED preview — the same buildPreview() pipeline (renderDocumentHtml +
+  // sample-data merge + gap highlighting) that drives the pop-up editor's preview
+  // pane, so the inline chat card shows the real document shape (headings, lists,
+  // bold, merged fields) instead of a stripped, hard-truncated plain-text dump.
+  const { html: previewHtml } = useMemo(() => buildPreview(currentBody), [currentBody])
 
   const orphans = new Set((proposal.orphanTokens ?? []).map((t) => t.toLowerCase()))
   const reusable = new Set((proposal.reusableFromFirm ?? []).map((t) => t.toLowerCase()))
@@ -301,13 +281,15 @@ export function TemplateProposalCard({
     >
       {proposal.summary && <div className="li-uac-prop-summary">{proposal.summary}</div>}
 
-      {/* WP-L (comp): the proposed document as a proportional letter page with
-          gold TokenChips — the same DocumentSheet every other surface uses. The
-          FULL body opens in the real editor via "Open & edit". */}
+      {/* The proposed document as a proportional letter page (the same DocumentSheet
+          every other surface uses), rendering the REAL formatted preview — not a
+          stripped/truncated line dump. Long bodies clip cleanly at the page edge,
+          same as any other document thumbnail; the FULL body opens in the real
+          editor via "Open & edit". */}
       <div className="li-uac-prop-doc">
         <DocumentSheet variant="thumb" serif className="li-uac-prop-sheet">
           <div className="li-uac-prop-dochead">{humanKind(proposal.docKind).toUpperCase()}</div>
-          {renderThumbLines(currentBody)}
+          <div className="li-uac-prop-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
         </DocumentSheet>
       </div>
 
