@@ -59,6 +59,19 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
   })
 })
 
+// EDITOR-FIX-1 (item 1) — runs one async Edit-with-AI revision OFF the request
+// (model calls are ASYNC ALWAYS; a synchronous revise 504'd the gateway). Enqueued
+// by legal.draft.revise.request (the tracked-changes editor's "Generate tracked
+// changes"); runs the SAME reviseDraftText pipeline the synchronous tool used and
+// records the proposal (or a readable failure) as an observation the editor polls
+// via legal.draft.revise.result. runDraftRevisionJob catches its own errors and
+// records a failure observation rather than rethrowing, so a bad instruction is a
+// visible retry in the rail, not five silent worker retries.
+registerWorkerHandler('legal.draft.revise.run', async (ctx, payload) => {
+  const { runDraftRevisionJob } = await import('../api/reviseDraftJob.js')
+  await runDraftRevisionJob(ctx, payload)
+})
+
 // B2.2 (MATTER-BRIEF-BACKGROUND-1) — runs one Matter Brief (re)generation OFF the
 // request. Enqueued by legal.matter.brief.request (BriefButton's Generate/Refresh
 // click, enqueueBriefJob in api/briefEngine.ts); calls the SAME getOrRefreshMatter-

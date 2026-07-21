@@ -25900,3 +25900,46 @@ details.li-brief-research summary:hover {
     flex-direction: row;
   }
 }
+
+/* ============================================================================
+   EDITOR-FIX-1 — founder-priority document review/editor fixes (append-only).
+   Flat family blocks at the tail per the css:check structural guard.
+   ============================================================================ */
+
+/* Item 1 — async Edit-with-AI: a readable failure in the AI rail with a Retry
+   (the revise now runs on the worker; a slow/failed job surfaces here, never a
+   silent 504). Tinted with the shared danger tokens, matching li-edtr-ai-note. */
+.li-edtr-ai-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--li-danger-bg);
+  color: var(--li-danger);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.li-edtr-ai-error-msg {
+  flex: 1 1 auto;
+}
+.li-edtr-ai-retry {
+  flex: 0 0 auto;
+  border: 1px solid var(--li-danger);
+  color: var(--li-danger);
+  background: transparent;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-edtr-ai-retry:hover:not(:disabled) {
+  background: var(--li-danger);
+  color: #fff;
+}
+.li-edtr-ai-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
