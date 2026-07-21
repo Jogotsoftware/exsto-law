@@ -4,6 +4,7 @@ import { callClaudeDrafter } from '../adapters/claude.js'
 import { getDraftVersion } from '../queries/drafts.js'
 import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 import { assembleBriefEvidence, renderEvidenceBundle } from './briefEvidence.js'
+import { FORMATTING_DIRECTIVES } from './formattingDirectives.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
 // same actor generateDraft.ts records its reasoning traces under.
@@ -149,9 +150,11 @@ Use this background only to avoid contradicting known facts or undoing a prior f
 
 `
     : ''
-  return `You are a legal drafting assistant revising an existing ${kindLabel} at the reviewing attorney's request, ${governingLawLine}
+  return `${FORMATTING_DIRECTIVES}
 
-Output the COMPLETE revised document as clean markdown — not a diff, not a summary, the whole document. The attorney will review your changes as tracked redlines (deletions and insertions) against the current version, then accept or reject them. Make ONLY the changes the instruction calls for: preserve the document's structure, headings, parties, defined terms, and every passage the instruction does not touch, so the redline stays tight and legible.
+You are a legal drafting assistant revising an existing ${kindLabel} at the reviewing attorney's request, ${governingLawLine}
+
+Output the COMPLETE revised document as clean markdown — not a diff, not a summary, the whole document. The attorney will review your changes as tracked redlines (deletions and insertions) against the current version, then accept or reject them. Make ONLY the changes the instruction calls for: preserve the document's structure, headings, parties, defined terms, and every passage the instruction does not touch, so the redline stays tight and legible. Apply the formatting and drafting standards above throughout, and if the current document contains underscore/dash signature or date lines, replace them with the canonical execution markers.
 
 ${contextSection}--- CURRENT DOCUMENT (the version to revise) ---
 ${args.currentMarkdown}

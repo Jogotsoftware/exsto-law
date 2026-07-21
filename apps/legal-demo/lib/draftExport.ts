@@ -318,11 +318,16 @@ const PRINT_STYLES = `
 export function downloadAsPdf(
   markdown: string,
   title: string,
-  opts?: { status?: string | null },
+  // EDITOR-FIX-1 (item 7): `font` (CSS stack + pt size) applies the per-document
+  // base font to the printed page, so a PDF export matches the editor/reader.
+  opts?: { status?: string | null; font?: { family: string; size: number } },
 ): void {
   const html = renderDocumentHtml(markdown)
   const wm = watermarkForStatus(opts?.status)
-  const body = wm ? `${watermarkHtml(wm, true)}${html}` : html
+  const inner = wm ? `${watermarkHtml(wm, true)}${html}` : html
+  const body = opts?.font
+    ? `<div style="font-family:${opts.font.family};font-size:${opts.font.size}pt">${inner}</div>`
+    : inner
   const w = window.open('', '_blank')
   if (!w) {
     alert('Pop-up blocked. Allow pop-ups for this site to export PDF.')
@@ -337,12 +342,15 @@ export function downloadAsPdf(
 export function downloadAsWord(
   markdown: string,
   filename: string,
-  opts?: { status?: string | null },
+  opts?: { status?: string | null; font?: { family: string; size: number } },
 ): void {
   const html = renderDocumentHtml(markdown)
   const wm = watermarkForStatus(opts?.status)
   // Word ignores position:fixed — the banner alone marks every Word export.
-  const body = wm ? `${watermarkHtml(wm, false)}${html}` : html
+  const inner = wm ? `${watermarkHtml(wm, false)}${html}` : html
+  const body = opts?.font
+    ? `<div style="font-family:${opts.font.family};font-size:${opts.font.size}pt">${inner}</div>`
+    : inner
   const fullHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head><meta charset="utf-8"><title>${escapeHtml(filename)}</title><style>${PRINT_STYLES}${WATERMARK_PRINT_STYLES}</style></head>
 <body>${body}</body>

@@ -801,6 +801,27 @@ function WorkflowWindow({
   const steps = workflowStepStates(workflow.graph, workflow.currentState)
   const openEntry = openKey ? steps.find((s) => s.stage.key === openKey) : null
 
+  // EDITOR-FIX-1 (item 3): when a step's disposition ADVANCES the matter (an
+  // Approve in the runner closes its modal), bring the NEW current step into view
+  // and focus it so the attorney sees the matter moved. We snapshot the current
+  // step key when a step opens; when the modal closes and that key has changed,
+  // scroll + focus the new current row. A plain close (no advance) leaves focus
+  // alone — no yank.
+  const stepRowRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map())
+  const openedCurrentRef = useRef<string | null>(null)
+  const currentStageKey = steps.find((s) => s.state === 'current')?.stage.key ?? null
+  useEffect(() => {
+    if (openKey !== null) return
+    const wasCurrent = openedCurrentRef.current
+    openedCurrentRef.current = null
+    if (wasCurrent === null || wasCurrent === currentStageKey || !currentStageKey) return
+    const row = stepRowRefs.current.get(currentStageKey)
+    if (row) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      row.focus()
+    }
+  }, [openKey, currentStageKey])
+
   return (
     <>
       <section className="li-mat-card">
@@ -824,7 +845,13 @@ function WorkflowWindow({
                 key={stage.key}
                 type="button"
                 className="li-mat-wf-row"
-                onClick={() => setOpenKey(stage.key)}
+                ref={(el) => {
+                  stepRowRefs.current.set(stage.key, el)
+                }}
+                onClick={() => {
+                  openedCurrentRef.current = currentStageKey
+                  setOpenKey(stage.key)
+                }}
               >
                 <span className={`li-mat-wf-ico li-mat-wf-ico-${role}`}>
                   {role === 'automatic' ? <GemCluster size={18} /> : i + 1}

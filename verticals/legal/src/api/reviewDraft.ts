@@ -264,6 +264,11 @@ export interface DraftEditInput {
   instructionText?: string
   reasoningTraceId?: string
   counts?: { accepted: number; rejected: number; ai: number; manual: number }
+  // EDITOR-FIX-1 (item 7) — the per-document base font, saved onto the new
+  // version's metadata (a real persisted setting). Optional: a bare programmatic
+  // edit omits them and the metadata keys stay absent.
+  fontFamily?: string
+  fontSize?: number
 }
 
 // Attorney inline edit: saves the revised markdown as a NEW document_version
@@ -287,6 +292,8 @@ export async function editDraft(ctx: ActionContext, input: DraftEditInput): Prom
       instruction_text: input.instructionText,
       reasoning_trace_id: input.reasoningTraceId,
       counts: input.counts,
+      font_family: input.fontFamily,
+      font_size: input.fontSize,
     },
   })
 }

@@ -138,6 +138,33 @@ const styles = StyleSheet.create({
 
 const HEADING_STYLE = [styles.h1, styles.h2, styles.h3, styles.h4, styles.h5, styles.h6]
 
+// EDITOR-FIX-1 (item 7) — the per-document base font flows into this export.
+// react-pdf ships only three built-in font families, so the editor's logical
+// family (apps/legal-demo/lib/docFonts.ts — keep the NAME list in sync) maps to
+// the nearest built-in and its bold/italic variants. activeFonts is set at the
+// top of renderDraftPdf and read by the style helpers below; the whole element
+// tree is built synchronously (before renderToBuffer), so there is no async
+// interleaving between renders.
+interface PdfFontSet {
+  base: string
+  bold: string
+  italic: string
+}
+const PDF_FONT_MAP: Record<string, PdfFontSet> = {
+  'Public Sans': { base: 'Helvetica', bold: 'Helvetica-Bold', italic: 'Helvetica-Oblique' },
+  Georgia: { base: 'Times-Roman', bold: 'Times-Bold', italic: 'Times-Italic' },
+  'Times New Roman': { base: 'Times-Roman', bold: 'Times-Bold', italic: 'Times-Italic' },
+  Courier: { base: 'Courier', bold: 'Courier-Bold', italic: 'Courier-Oblique' },
+}
+const DEFAULT_PDF_FONTS: PdfFontSet = PDF_FONT_MAP['Public Sans']!
+let activeFonts: PdfFontSet = DEFAULT_PDF_FONTS
+function pdfFontsFor(name: string | null | undefined): PdfFontSet {
+  return (name ? PDF_FONT_MAP[name] : undefined) ?? DEFAULT_PDF_FONTS
+}
+const strongStyle = () => [styles.strong, { fontFamily: activeFonts.bold }]
+const emStyle = () => [styles.em, { fontFamily: activeFonts.italic }]
+const headingStyleFor = (i: number) => [HEADING_STYLE[i]!, { fontFamily: activeFonts.bold }]
+
 // Inline tokens (text/strong/em/codespan/link/...) are flattened into nested
 // <Text> spans so a single block <Text> can carry mixed formatting. Unknown
 // inline tokens fall back to their `.raw`/`.text` so nothing is silently dropped.
@@ -153,13 +180,13 @@ function renderInline(
       case 'strong':
         return h(
           Text,
-          { key, style: styles.strong },
+          { key, style: strongStyle() },
           renderInline((tok as Tokens.Strong).tokens, (tok as Tokens.Strong).text, key),
         )
       case 'em':
         return h(
           Text,
-          { key, style: styles.em },
+          { key, style: emStyle() },
           renderInline((tok as Tokens.Em).tokens, (tok as Tokens.Em).text, key),
         )
       case 'del':
@@ -260,7 +287,7 @@ function renderBlock(token: Token, key: string): React.ReactNode {
       const depth = Math.min(Math.max(heading.depth, 1), 6)
       return h(
         Text,
-        { key, style: HEADING_STYLE[depth - 1] },
+        { key, style: headingStyleFor(depth - 1) },
         renderInline(heading.tokens, heading.text, key),
       )
     }
@@ -270,7 +297,11 @@ function renderBlock(token: Token, key: string): React.ReactNode {
       return h(View, { key, style: styles.paragraph }, renderListItems(token as Tokens.List, key))
     case 'blockquote': {
       const bq = token as Tokens.Blockquote
-      return h(Text, { key, style: styles.blockquote }, renderInline(bq.tokens, bq.text, key))
+      return h(
+        Text,
+        { key, style: [styles.blockquote, { fontFamily: activeFonts.italic }] },
+        renderInline(bq.tokens, bq.text, key),
+      )
     }
     case 'code': {
       const c = token as Tokens.Code
@@ -315,12 +346,25 @@ export function draftWatermarkText(status: string | null | undefined): string | 
 
 export async function renderDraftPdf(
   markdown: string,
-  opts?: { title?: string; watermark?: string | null },
+  // EDITOR-FIX-1 (item 7): fontFamily/fontSize thread the per-document base font
+  // through the export (mapped to the nearest react-pdf built-in). Absent → the
+  // long-standing Helvetica/11 default, so existing callers are unchanged.
+  opts?: { title?: string; watermark?: string | null; fontFamily?: string; fontSize?: number },
 ): Promise<Buffer> {
   const md = markdown ?? ''
   if (md.length > MAX_DRAFT_MARKDOWN_BYTES) {
     throw new Error('Draft is too large to render as a PDF attachment.')
   }
+  // Set the active font set for THIS render (read by the style helpers as the
+  // element tree is built synchronously below, before renderToBuffer).
+  activeFonts = pdfFontsFor(opts?.fontFamily)
+  const pageStyle = [
+    styles.page,
+    {
+      fontFamily: activeFonts.base,
+      ...(typeof opts?.fontSize === 'number' ? { fontSize: opts.fontSize } : {}),
+    },
+  ]
   const tokens = marked.lexer(md)
 
   const body = tokens.map((tok, i) => renderBlock(tok, `b-${i}`)).filter(Boolean)
@@ -338,7 +382,7 @@ export async function renderDraftPdf(
       : []),
     ...(title
       ? [
-          h(Text, { key: 'title', style: styles.title }, title),
+          h(Text, { key: 'title', style: [styles.title, { fontFamily: activeFonts.bold }] }, title),
           h(View, { key: 'titleRule', style: styles.titleRule }),
         ]
       : []),
@@ -349,7 +393,7 @@ export async function renderDraftPdf(
     null,
     // Body is a flowing sequence of elements directly under <Page> (no fixed
     // wrapping View), so react-pdf wraps content across pages instead of clipping.
-    h(Page, { size: 'LETTER', style: styles.page }, [...head, ...body]),
+    h(Page, { size: 'LETTER', style: pageStyle }, [...head, ...body]),
   )
 
   return renderToBuffer(doc)

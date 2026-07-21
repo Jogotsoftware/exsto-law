@@ -81,6 +81,15 @@ const MARKER_LINE_RE = new RegExp(
 )
 // Six or more underscores stops false positives on ordinary prose (a stray `___`).
 const UNDERSCORE_LINE_RE = /^\s*(?:([^_{}<>\n:][^_{}<>\n]*?)\s*:\s*)?_{6,}\s*$/
+// EDITOR-FIX-1 (item 6) — a LABELED rule line: a caption, a colon, then a run of
+// underscores OR dashes (en/em dashes included), e.g. "Signature: ____",
+// "Date: ------", "Print Name: ___". The label prefix is what disambiguates it
+// from ordinary prose, so a run of 3 is enough here (a BARE run still needs 6 —
+// UNDERSCORE_LINE_RE — and a BARE DASH run is deliberately NOT matched, so a
+// markdown `---` thematic break / section separator is never swallowed). The
+// caption cannot start with a rule char and forbids `{ } < > :` so it can't eat a
+// marker's braces, an HTML tag, or its own label colon.
+const LABELED_RULE_LINE_RE = /^\s*([^_\-{}<>\n:–—][^{}<>\n:]*?)\s*:\s*[_\-–—]{3,}\s*$/
 
 export interface ExecutionLine {
   /** The caption shown beneath the ruled line ("Signature", "Date", …). */
@@ -101,7 +110,47 @@ export function classifyExecutionLine(line: string): ExecutionLine | null {
     const prefix = underscore[1]?.trim()
     return { label: prefix || '' }
   }
+  // A labeled underscore/dash rule line (shorter runs, or dash runs, that the
+  // bare-underscore rule above intentionally skips) — the founder's "the lines
+  // at the bottom … are all dashed" case renders as a clean ruled line too.
+  const labeled = LABELED_RULE_LINE_RE.exec(line)
+  if (labeled) {
+    return { label: labeled[1]!.trim() }
+  }
   return null
+}
+
+// EDITOR-FIX-1 (item 6a) — merge-time post-processing for LEGACY template bodies
+// whose execution section is drawn with underscore/dash runs rather than the
+// canonical markers. It splits a COMPOUND execution line — a printed name/role
+// followed by an inline date/signature rule, e.g.
+// `{{member_name}}, Sole Member / Date: ____` (after merge:
+// `Jane Roe, Sole Member / Date: ____`) — into the name/role line and a
+// standalone `Date: ____` line, so that trailing rule becomes a WHOLE-line
+// execution element classifyExecutionLine renders as a clean ruled line
+// everywhere. Bare runs and whole labeled runs already classify on their own, so
+// they pass through untouched; a body with no compound line is returned verbatim
+// (referential no-op). Pure — safe to run in the merge path and unit tests alike.
+const COMPOUND_EXECUTION_TAIL_RE =
+  /^(.*\S)\s+\/\s+([^_\-{}<>\n:–—][^{}<>\n:]*?\s*:\s*[_\-–—]{2,})\s*$/
+
+export function canonicalizeExecutionLines(markdown: string): string {
+  if (!markdown) return markdown
+  const lines = markdown.split('\n')
+  let changed = false
+  const out: string[] = []
+  for (const line of lines) {
+    const m = COMPOUND_EXECUTION_TAIL_RE.exec(line)
+    if (m) {
+      changed = true
+      out.push(m[1]!.trimEnd())
+      out.push('')
+      out.push(m[2]!.trim())
+    } else {
+      out.push(line)
+    }
+  }
+  return changed ? out.join('\n') : markdown
 }
 
 function escapeHtmlText(s: string): string {

@@ -25936,3 +25936,169 @@ details.li-brief-research summary:hover {
     flex-direction: row;
   }
 }
+
+/* ============================================================================
+   EDITOR-FIX-1 — founder-priority document review/editor fixes (append-only).
+   Flat family blocks at the tail per the css:check structural guard.
+   ============================================================================ */
+
+/* Item 1 — async Edit-with-AI: a readable failure in the AI rail with a Retry
+   (the revise now runs on the worker; a slow/failed job surfaces here, never a
+   silent 504). Tinted with the shared danger tokens, matching li-edtr-ai-note. */
+.li-edtr-ai-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--li-danger-bg);
+  color: var(--li-danger);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.li-edtr-ai-error-msg {
+  flex: 1 1 auto;
+}
+.li-edtr-ai-retry {
+  flex: 0 0 auto;
+  border: 1px solid var(--li-danger);
+  color: var(--li-danger);
+  background: transparent;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.li-edtr-ai-retry:hover:not(:disabled) {
+  background: var(--li-danger);
+  color: #fff;
+}
+.li-edtr-ai-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Item 2 — file-backed (uploaded PDF) rendering in the review reader: real pdfjs
+   pages in a scrolling frame, never the storage-path string through markdown. */
+.li-rev-pdf {
+  margin-top: 16px;
+  max-height: 78vh;
+  overflow-y: auto;
+  background: var(--li-canvas, #eef1f5);
+  border: 1px solid var(--li-border, #d9dee6);
+  border-radius: 10px;
+}
+.li-rev-pdf-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--li-surface, #fff);
+  border-bottom: 1px solid var(--li-border, #d9dee6);
+  border-radius: 10px 10px 0 0;
+}
+.li-rev-pdf-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-ink, #1b2430);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-rev-pdf-dl {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-info, #3b6fd4);
+  text-decoration: none;
+}
+.li-rev-pdf-dl:hover {
+  text-decoration: underline;
+}
+.li-rev-pdf-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 16px;
+  color: var(--li-muted, #5b6472);
+  font-size: 13px;
+  text-align: center;
+}
+.li-rev-pdf-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 12px;
+}
+.li-rev-pdf-page {
+  display: block;
+  max-width: 100%;
+  box-shadow: 0 1px 6px rgba(20, 30, 45, 0.14);
+  background: #fff;
+}
+
+/* Item 3 — after an Approve advances the matter, the runner programmatically
+   focuses the new current step; a soft ring makes "the matter moved" obvious.
+   :focus (not :focus-visible) so it reliably shows on the programmatic focus
+   (any flash on a plain row click is hidden behind the step modal that opens). */
+.li-mat-wf-row:focus {
+  outline: 2px solid var(--li-gold, #b8892b);
+  outline-offset: -2px;
+  border-radius: 6px;
+  background: var(--li-warn-bg, #fbefd6);
+}
+
+/* Item 4 — [[MISSING: field]] merge-gap markers render as small warn chips (the
+   #444 unresolved-field warn tone) in both the reader and the editor. The
+   underlying text stays the marker; li-missing-raw hides it in the editor while
+   the chip widget shows in its place. Sized in em so it scales with the doc. */
+.li-missing-chip {
+  display: inline-block;
+  vertical-align: baseline;
+  font-size: 0.8em;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid var(--li-warn, #9a6e1e);
+  background: var(--li-warn-bg, #fbefd6);
+  color: var(--li-warn, #9a6e1e);
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+.li-missing-raw {
+  display: none;
+}
+
+/* Item 7 — the editor toolbar's font family + size selects, in the li-edtr
+   toolbar's design language (matches the tb-btn height and the navy ink). */
+.li-edtr-tb-select {
+  height: 30px;
+  border: 1px solid #dce2ee;
+  border-radius: 7px;
+  background: #fff;
+  color: #3c4a63;
+  font-size: 13px;
+  padding: 0 6px;
+  cursor: pointer;
+  max-width: 148px;
+}
+.li-edtr-tb-select:hover {
+  border-color: #b9c3da;
+}
+.li-edtr-tb-select:focus-visible {
+  outline: 2px solid var(--li-gold, #c6a968);
+  outline-offset: 1px;
+}
+.li-edtr-tb-select--size {
+  width: 58px;
+}

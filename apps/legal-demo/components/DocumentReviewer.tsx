@@ -21,6 +21,8 @@ import { downloadAsPdf, downloadAsWord, shareUrlFor, watermarkForStatus } from '
 import { formatDateTimeShort } from '@/lib/datetime'
 import { lineDiff, diffStats } from '@/lib/lineDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { renderMissingChipsHtml } from '@/lib/missingFields'
+import { docFontCss, normalizeDocFontFamily, normalizeDocFontSize } from '@/lib/docFonts'
 import { ActionsMenu } from '@/components/ActionsMenu'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { DocumentSheet, DocumentCanvas } from '@/components/DocumentSheet'
@@ -28,6 +30,7 @@ import { GemCluster } from '@/components/GemSparkle'
 import { ChevronDownIcon, MailIcon, Share2Icon, XIcon } from '@/components/icons'
 import { SendToClientModal, type SendToClientMatter } from '@/components/SendToClientModal'
 import { TrackedChangesEditor } from '@/components/TrackedChangesEditor'
+import { DocumentPdfView } from '@/components/DocumentPdfView'
 import { VersionDiff } from '@/components/VersionDiff'
 import { VersionCompareDrawer } from '@/components/VersionCompareDrawer'
 
@@ -58,6 +61,17 @@ interface DraftDetail {
     sourceText: string | null
     redlineText: string | null
   } | null
+  // EDITOR-FIX-1 (item 2) — non-null for a FILE-BACKED version (uploaded PDF/doc):
+  // the body is a storage path, not markdown, so the reader renders the real PDF
+  // and Edit / AI revision / markdown export are suppressed.
+  file: {
+    contentType: string
+    originalFilename: string
+  } | null
+  // EDITOR-FIX-1 (item 7) — the per-document base font (persisted setting); null
+  // pre-setting → reader/editor/export use their defaults.
+  fontFamily: string | null
+  fontSize: number | null
 }
 
 interface ReasoningTrace {
@@ -146,6 +160,10 @@ export interface DocumentReviewerLoadedInfo {
 
 // The result of a successful Approve/Reject dispose call, passed to onCompleted.
 export interface DocumentReviewerDisposeResult {
+  // EDITOR-FIX-1 (item 3) — which disposition ran, so a host (the workflow
+  // runner) can advance the matter + close its modal on approve but refresh in
+  // place on reject. Approve advances the workflow; reject does not.
+  disposition: 'approved' | 'rejected'
   approvedDocumentVersionId?: string
 }
 
@@ -277,6 +295,7 @@ export function DocumentReviewer({
         input: { documentVersionId: activeVersionId },
       })
       const handled = await onCompleted?.({
+        disposition: label === 'approve' ? 'approved' : 'rejected',
         approvedDocumentVersionId: res?.approvedDocumentVersionId,
       })
       if (handled) return
@@ -410,7 +429,11 @@ export function DocumentReviewer({
 
   const isEmail = draft.channel === 'communication'
   const isMemo = Boolean(draft.aiReview)
-  const canRevise = !isEmail && !isMemo
+  // EDITOR-FIX-1 (item 2) — an uploaded PDF/doc version: no markdown to edit,
+  // export, or diff, so those controls are hidden and the body renders as real
+  // PDF pages (never the storage-path string through the markdown pipeline).
+  const isFileBacked = Boolean(draft.file)
+  const canRevise = !isEmail && !isMemo && !isFileBacked
   const hasTrace = Boolean(
     draft.reasoningTrace ||
     draft.modelIdentity ||
@@ -467,95 +490,117 @@ export function DocumentReviewer({
       {/* action toolbar */}
       <div className="li-rev-toolbar">
         <div className="li-rev-toolbar-group">
-          <button
-            type="button"
-            className="li-rev-tbtn"
-            onClick={() => openEditor('page')}
-            disabled={busy !== null}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M12 20h9"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            Edit
-          </button>
+          {/* EDITOR-FIX-1 (item 2): no Edit for a file-backed PDF — there is no
+              markdown to edit; the reader renders the real pages below. */}
+          {!isFileBacked && (
+            <button
+              type="button"
+              className="li-rev-tbtn"
+              onClick={() => openEditor('page')}
+              disabled={busy !== null}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M12 20h9"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Edit
+            </button>
+          )}
           {!isEmail && (
             <>
-              <ActionsMenu
-                align="left"
-                triggerClassName="li-rev-tbtn"
-                triggerContent={
-                  <>
-                    <Share2Icon size={15} />
-                    Share
-                    <ChevronDownIcon size={13} />
-                  </>
-                }
-                triggerTitle="Download or send this document"
-                items={[
-                  {
-                    label: 'Download PDF',
-                    icon: (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path
-                          d="M4 4h9l5 5v11H4z"
-                          stroke="#c4443b"
-                          strokeWidth="1.7"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M13 4v5h5"
-                          stroke="#c4443b"
-                          strokeWidth="1.7"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    ),
-                    onClick: () =>
-                      downloadAsPdf(draft.bodyMarkdown, docFileBase, { status: draft.status }),
-                  },
-                  {
-                    label: 'Download Word',
-                    icon: (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path
-                          d="M4 4h9l5 5v11H4z"
-                          stroke="#2b579a"
-                          strokeWidth="1.7"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M13 4v5h5"
-                          stroke="#2b579a"
-                          strokeWidth="1.7"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    ),
-                    onClick: () =>
-                      downloadAsWord(draft.bodyMarkdown, docFileBase, { status: draft.status }),
-                  },
-                  {
-                    label: 'Email to client',
-                    icon: <MailIcon size={15} />,
-                    onClick: () => void openSendToClient(),
-                    disabled: busy !== null || sendOpening,
-                    title: sendOpening ? 'Opening…' : undefined,
-                  },
-                ]}
-              />
+              {/* Markdown export (PDF/Word/Email) reads bodyMarkdown — meaningless
+                  for a file-backed PDF (the body is a storage path), so hide it
+                  there. The DocumentActionBar (eSign) below is version-id based and
+                  stays available for uploaded PDFs (ES-5 owns its wiring). */}
+              {!isFileBacked && (
+                <ActionsMenu
+                  align="left"
+                  triggerClassName="li-rev-tbtn"
+                  triggerContent={
+                    <>
+                      <Share2Icon size={15} />
+                      Share
+                      <ChevronDownIcon size={13} />
+                    </>
+                  }
+                  triggerTitle="Download or send this document"
+                  items={[
+                    {
+                      label: 'Download PDF',
+                      icon: (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M4 4h9l5 5v11H4z"
+                            stroke="#c4443b"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M13 4v5h5"
+                            stroke="#c4443b"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      ),
+                      onClick: () =>
+                        downloadAsPdf(draft.bodyMarkdown, docFileBase, {
+                          status: draft.status,
+                          font: {
+                            family: docFontCss(normalizeDocFontFamily(draft.fontFamily)),
+                            size: normalizeDocFontSize(draft.fontSize),
+                          },
+                        }),
+                    },
+                    {
+                      label: 'Download Word',
+                      icon: (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M4 4h9l5 5v11H4z"
+                            stroke="#2b579a"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M13 4v5h5"
+                            stroke="#2b579a"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      ),
+                      onClick: () =>
+                        downloadAsWord(draft.bodyMarkdown, docFileBase, {
+                          status: draft.status,
+                          font: {
+                            family: docFontCss(normalizeDocFontFamily(draft.fontFamily)),
+                            size: normalizeDocFontSize(draft.fontSize),
+                          },
+                        }),
+                    },
+                    {
+                      label: 'Email to client',
+                      icon: <MailIcon size={15} />,
+                      onClick: () => void openSendToClient(),
+                      disabled: busy !== null || sendOpening,
+                      title: sendOpening ? 'Opening…' : undefined,
+                    },
+                  ]}
+                />
+              )}
               <DocumentActionBar
                 context={{
                   documentVersionId: draft.documentVersionId,
@@ -595,7 +640,7 @@ export function DocumentReviewer({
               Matter context
             </button>
           )}
-          {!isEmail && !isMemo && draft.versionNumber > 1 && (
+          {!isEmail && !isMemo && !isFileBacked && draft.versionNumber > 1 && (
             <button type="button" className="li-rev-tbtn" onClick={() => setCompareOpen(true)}>
               View Redlines
             </button>
@@ -789,15 +834,32 @@ export function DocumentReviewer({
         </div>
       )}
 
-      {/* the document, as a proportional letter page */}
-      <DocumentCanvas>
-        <DocumentSheet variant="full" watermark={watermark}>
-          <div
-            className="doc-rendered li-rev-doc"
-            dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
-          />
-        </DocumentSheet>
-      </DocumentCanvas>
+      {/* the document — real PDF pages for a file-backed upload (item 2), else the
+          markdown body as a proportional letter page. Never the storage-path
+          string through the markdown pipeline. */}
+      {isFileBacked ? (
+        <DocumentPdfView
+          documentVersionId={draft.documentVersionId}
+          filename={draft.file?.originalFilename ?? 'Document'}
+        />
+      ) : (
+        <DocumentCanvas>
+          <DocumentSheet variant="full" watermark={watermark}>
+            <div
+              className="doc-rendered li-rev-doc"
+              // EDITOR-FIX-1 (item 7): the persisted per-document base font, so the
+              // reader shows the document exactly as the editor set it.
+              style={{
+                fontFamily: docFontCss(normalizeDocFontFamily(draft.fontFamily)),
+                fontSize: `${normalizeDocFontSize(draft.fontSize)}pt`,
+              }}
+              dangerouslySetInnerHTML={{
+                __html: renderMissingChipsHtml(renderDocumentHtml(draft.bodyMarkdown)),
+              }}
+            />
+          </DocumentSheet>
+        </DocumentCanvas>
+      )}
 
       {/* The tracked-changes editor (li-edtr flagship) — Edit and AI revision are
           one flow; it persists nothing until its own Save (legal.draft.edit). */}
@@ -811,6 +873,8 @@ export function DocumentReviewer({
             clientName: draft.clientName,
             versionNumber: draft.versionNumber,
             status: draft.status,
+            fontFamily: draft.fontFamily,
+            fontSize: draft.fontSize,
           }}
           title={title}
           statusLine={
