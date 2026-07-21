@@ -111,10 +111,13 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [tab, setTab] = useState<BillTab>('accrued')
-  // "Add time"/"Add expense"/"Add fee" buttons at the top of the matter deep-link
-  // here with ?add=time|expense|fee to open the corresponding form on arrival.
+  // "Add time"/"Add expense"/"Add fee" (matter-level Actions menu, layout.tsx)
+  // deep-link here with ?add=time|expense|fee to open the corresponding form on
+  // arrival — the only trigger for these forms now (WF-RUNNER-TOOLBAR-1 removed
+  // this tab's own duplicate buttons; each form keeps its own Cancel).
   const [initialForm, setInitialForm] = useState<'time' | 'expense' | null>(null)
-  // Manual "Add fee" form + service-completion / void actions.
+  // Manual "Add fee" form (opened via Actions ▾, or ?add=fee) + service-
+  // completion / void actions.
   const [showFee, setShowFee] = useState(false)
   const [feeType, setFeeType] = useState<'service' | 'document'>('service')
   const [feeAmount, setFeeAmount] = useState('')
@@ -359,14 +362,6 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
               <button
                 type="button"
                 className="li-mat-btn-ghost"
-                onClick={() => setShowFee((v) => !v)}
-                disabled={busy === 'add-fee'}
-              >
-                {showFee ? 'Cancel' : 'Add fee'}
-              </button>
-              <button
-                type="button"
-                className="li-mat-btn-ghost"
                 onClick={markComplete}
                 disabled={busy === 'complete'}
               >
@@ -406,14 +401,24 @@ export default function MatterBillingPage({ params }: { params: Promise<{ id: st
                     placeholder="e.g. Filing package"
                   />
                 </label>
-                <button
-                  type="button"
-                  className="li-mat-btn-primary"
-                  onClick={() => void addFee()}
-                  disabled={busy === 'add-fee'}
-                >
-                  {busy === 'add-fee' ? 'Saving…' : 'Save fee'}
-                </button>
+                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                  <button
+                    type="button"
+                    className="li-mat-btn-primary"
+                    onClick={() => void addFee()}
+                    disabled={busy === 'add-fee'}
+                  >
+                    {busy === 'add-fee' ? 'Saving…' : 'Save fee'}
+                  </button>
+                  <button
+                    type="button"
+                    className="li-mat-btn-ghost"
+                    onClick={() => setShowFee(false)}
+                    disabled={busy === 'add-fee'}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
 

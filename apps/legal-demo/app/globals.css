@@ -24515,6 +24515,61 @@ details.li-brief-research summary:hover {
 }
 
 /* ==========================================================================
+ WF-RUNNER-TOOLBAR-1 (2026-07-20) — three self-contained appends:
+ 1. The runner step modal's Continue button, when it catches the
+    legal.matter.advance guard's 409 (defense in depth — the parent hides
+    Continue whenever an edge names its own completing action, so this is a
+    stale-graph-race fallback), renders `.li-modal-foot-guard` instead of the
+    plain `.li-modal-foot-error` text: a wrapping alert box, not a raw
+    "Request failed (409): …" wall squeezed into the slim footer row.
+ 2. TrackedChangesEditor's AI rail gained a "Regenerate from scratch" mode
+    (folding in the runner's old standalone "Regenerate…" toolbar button) —
+    `.li-edtr-regen-*` styles its hint text, action row, and the two toggle
+    links, all sized to match the existing `.li-edtr-ai-*` family beside them.
+ ========================================================================== */
+.li-modal-foot-guard {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+}
+.li-edtr-regen-hint {
+  font-size: 12px;
+  color: #7a8699;
+  line-height: 1.45;
+  margin: 0;
+}
+.li-edtr-regen-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-edtr-regen-back,
+.li-edtr-regen-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #7a8699;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.li-edtr-regen-link {
+  color: var(--li-navy);
+}
+.li-edtr-regen-back:hover:not(:disabled),
+.li-edtr-regen-link:hover:not(:disabled) {
+  color: var(--li-gold);
+}
+.li-edtr-regen-back:disabled,
+.li-edtr-regen-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
    PO-1 — BRIEF MODAL POLISH (product-walk 2026-07-20). Self-contained append,
    three pieces, none touching any rule above:
 
@@ -24688,6 +24743,104 @@ details.li-brief-research summary:hover {
   color: var(--li-warn);
   font-weight: 700;
   flex: 0 0 auto;
+}
+
+/* ==========================================================================
+ FB-0 — thumbs up/down feedback on an assistant reply (attorney chat and the
+ client-portal chat) and the tiny note modal it opens. Self-contained append,
+ two new class families: "li-fbk-" (the note-modal body, shared by both
+ surfaces — the attorney side wraps it in the existing Modal component, the
+ portal side wraps it in the existing "li-cp-modal-" chrome) and
+ "li-cp-asst-fbk-" together with li-cp-asst-msgcol (the portal's thumbs row,
+ and the column wrapper that stacks a reply bubble over its thumbs row inside
+ li-cp-asst-msgrow's existing start/end flex). The attorney thumbs buttons
+ reuse the existing uac-reply-btn base class (globals ~5066) with a
+ li-fbk-btn modifier for the filled "rated" state — no changes to any
+ existing selector.
+ ========================================================================== */
+.li-fbk-btn {
+  padding: 0.2rem 0.35rem;
+}
+.li-fbk-btn.li-fbk-btn-active {
+  color: var(--li-gold-text, #8c7534);
+  border-color: var(--li-gold, #c6a968);
+  background: var(--li-gold-bg-soft, #fbf6ea);
+}
+.li-fbk-modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-fbk-modal-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-body, #23324f);
+  margin-bottom: 6px;
+}
+.li-fbk-modal-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  border: 1px solid var(--li-border-input, #dce2ee);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--li-body, #23324f);
+  background: #fff;
+}
+.li-fbk-modal-textarea:focus {
+  outline: none;
+  border-color: var(--li-navy, #1b2a4a);
+}
+
+/* Portal: the column wrapper lets li-cp-asst-msgrow keep aligning the WHOLE
+   turn (bubble + thumbs row) start/end while the bubble and its thumbs stack
+   vertically inside it. */
+.li-cp-asst-msgcol {
+  display: flex;
+  flex-direction: column;
+  max-width: 78%;
+}
+/* The column itself now owns the 78% cap — let the bubble inside fill it
+   rather than compounding two 78% caps (globals ~23565's .li-cp-asst-msg). */
+.li-cp-asst-msgcol .li-cp-asst-msg {
+  max-width: 100%;
+}
+.li-cp-asst-msgrow.me .li-cp-asst-msgcol {
+  align-items: flex-end;
+}
+.li-cp-asst-fbk {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.li-cp-asst-fbk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--li-border, #dce2ee);
+  border-radius: 7px;
+  background: #fff;
+  color: #6b7690;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+.li-cp-asst-fbk-btn:hover {
+  background: #fbfaf4;
+  border-color: var(--li-gold, #c6a968);
+  color: var(--li-navy, #1b2a4a);
+}
+.li-cp-asst-fbk-btn.li-cp-asst-fbk-btn-active {
+  color: var(--li-gold-text, #8c7534);
+  border-color: var(--li-gold, #c6a968);
+  background: var(--li-gold-bg-soft, #fbf6ea);
 }
 
 /* ── li-tplsign — template editor eSign panel (ESIGN-UNIFY-1 ES-3) ──────────

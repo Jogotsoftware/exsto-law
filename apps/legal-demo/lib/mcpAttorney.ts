@@ -18,6 +18,23 @@ export class SessionExpiredError extends Error {
   }
 }
 
+// Thrown on any other non-2xx. Carries the HTTP status and the server's raw
+// `error` detail (undecorated) alongside the existing `Request failed (…): …`
+// message, so a caller that cares — e.g. the runner's Continue button
+// distinguishing a domain guard rejection (409) from a real failure — can branch
+// on `status` without string-matching. `message` is unchanged for every existing
+// `e instanceof Error ? e.message : String(e)` catch site.
+export class McpToolError extends Error {
+  status: number
+  detail: string
+  constructor(status: number, detail: string) {
+    super(`Request failed (${status})${detail ? `: ${detail}` : ''}`)
+    this.name = 'McpToolError'
+    this.status = status
+    this.detail = detail
+  }
+}
+
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
 export async function callAttorneyMcp<O = unknown, I = unknown>(req: McpCall<I>): Promise<O> {
@@ -60,7 +77,7 @@ export async function callAttorneyMcp<O = unknown, I = unknown>(req: McpCall<I>)
     } catch {
       // ignore
     }
-    throw new Error(`Request failed (${res.status})${detail ? `: ${detail}` : ''}`)
+    throw new McpToolError(res.status, detail)
   }
   const data = (await res.json()) as McpEnvelope<O>
   return data.result

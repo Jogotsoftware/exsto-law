@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { ThumbsUp, ThumbsDown } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import {
   streamAssistant,
@@ -111,9 +112,18 @@ interface ProducedDoc {
   markdown: string
 }
 
+// FB-0 — a thumbs verdict on one assistant reply.
+type MessageFeedbackVerdict = 'up' | 'down'
+
 interface DisplayTurn {
   role: 'user' | 'assistant'
   content: string
+  // FB-0 — the persisted assistant.turn event id for an ASSISTANT turn (from
+  // StreamDone.eventId live, or ThreadTurn.eventId on reload). Undefined for
+  // user turns and for turns that streamed but never committed (a dropped
+  // stream reconciles without one). Lets the thumbs-feedback modal record
+  // WHICH reply was rated, not just its position.
+  eventId?: string
   // Model-facing record of this turn, used when building the next request's history.
   // Differs from `content` when the turn spoke through cards (ask_build_question /
   // proposal tool calls produce no prose): `content` is what the UI shows (possibly
@@ -191,6 +201,10 @@ interface SkillCatalogItem {
 
 interface ThreadTurn {
   role: 'user' | 'assistant'
+  // FB-0 — the persisted assistant.turn event id (AssistantThreadEntry.eventId
+  // server-side), threaded through so a reopened thread's thumbs feedback can
+  // still record which reply it rates.
+  eventId?: string
   message: string
   reply: string
   reasoning?: string
@@ -543,6 +557,121 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />} Copy
     </button>
+  )
+}
+
+// FB-0 — thumbs up/down on an assistant reply. `verdict` is the ALREADY-
+// SUBMITTED rating for this message (null until the attorney rates it) —
+// the rated button renders filled as a quiet confirmation state; clicking
+// either button (including the one already filled) reopens the note modal,
+// so changing your mind is just re-rating.
+function MessageFeedbackButtons({
+  verdict,
+  onRate,
+}: {
+  verdict: MessageFeedbackVerdict | null
+  onRate: (verdict: MessageFeedbackVerdict) => void
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        className={`uac-reply-btn li-fbk-btn${verdict === 'up' ? ' li-fbk-btn-active' : ''}`}
+        onClick={() => onRate('up')}
+        aria-pressed={verdict === 'up'}
+        aria-label={
+          verdict === 'up' ? 'Marked helpful — click to change' : 'Mark this reply helpful'
+        }
+        title={verdict === 'up' ? 'Marked helpful' : 'Helpful'}
+      >
+        <ThumbsUp size={12} fill={verdict === 'up' ? 'currentColor' : 'none'} />
+      </button>
+      <button
+        type="button"
+        className={`uac-reply-btn li-fbk-btn${verdict === 'down' ? ' li-fbk-btn-active' : ''}`}
+        onClick={() => onRate('down')}
+        aria-pressed={verdict === 'down'}
+        aria-label={
+          verdict === 'down'
+            ? 'Marked not helpful — click to change'
+            : 'Mark this reply not helpful'
+        }
+        title={verdict === 'down' ? 'Marked not helpful' : 'Not helpful'}
+      >
+        <ThumbsDown size={12} fill={verdict === 'down' ? 'currentColor' : 'none'} />
+      </button>
+    </>
+  )
+}
+
+// FB-0 — the tiny modal a thumbs click opens: the verdict is preselected (the
+// button just clicked), one optional note, Cancel/Submit.
+function MessageFeedbackModal({
+  verdict,
+  note,
+  busy,
+  error,
+  onNoteChange,
+  onCancel,
+  onSubmit,
+}: {
+  verdict: MessageFeedbackVerdict
+  note: string
+  busy: boolean
+  error: string | null
+  onNoteChange: (note: string) => void
+  onCancel: () => void
+  onSubmit: () => void
+}) {
+  return (
+    <Modal
+      title={
+        <span className="li-fbk-modal-title">
+          {verdict === 'up' ? (
+            <ThumbsUp size={16} fill="currentColor" />
+          ) : (
+            <ThumbsDown size={16} fill="currentColor" />
+          )}
+          {verdict === 'up' ? 'Marked helpful' : 'Marked not helpful'}
+        </span>
+      }
+      onClose={onCancel}
+      footer={
+        <>
+          <button type="button" className="uac-reply-btn" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="uac-reply-btn uac-reply-btn-primary"
+            onClick={onSubmit}
+            disabled={busy}
+          >
+            {busy ? 'Submitting…' : 'Submit'}
+          </button>
+        </>
+      }
+    >
+      <label className="li-fbk-modal-label" htmlFor="li-fbk-note">
+        Add a note (optional)
+      </label>
+      <textarea
+        id="li-fbk-note"
+        className="li-fbk-modal-textarea"
+        rows={3}
+        value={note}
+        onChange={(e) => onNoteChange(e.target.value)}
+        placeholder={
+          verdict === 'up' ? 'What made this reply good?' : 'What went wrong with this reply?'
+        }
+        autoFocus
+      />
+      {error && (
+        <div className="alert alert-error" role="alert" style={{ marginTop: 8 }}>
+          {error}
+        </div>
+      )}
+    </Modal>
   )
 }
 
@@ -1068,6 +1197,68 @@ export function UnifiedAssistantChat({
   // trail" beta asks).
   const [fbRef, setFbRef] = useState<string | null>(null)
 
+  // FB-0 — per-message thumbs feedback. Keyed by the message's position within
+  // `visibleTurns` (stable: turns only append, hiddenFromUi never changes after
+  // commit — see the render loop below), so re-opening to change a verdict
+  // resolves to the same turn. The modal captures an optional note, then
+  // submits the verdict + note + a snapshot of the WHOLE visible conversation.
+  // Re-submitting is fine — a new event always wins on display; the substrate
+  // is append-only, so nothing is overwritten.
+  const [messageFeedback, setMessageFeedback] = useState<Record<number, MessageFeedbackVerdict>>({})
+  const [feedbackModal, setFeedbackModal] = useState<{
+    turnIndex: number
+    verdict: MessageFeedbackVerdict
+    eventId?: string
+    note: string
+    busy: boolean
+    error: string | null
+  } | null>(null)
+
+  function openFeedbackModal(turnIndex: number, verdict: MessageFeedbackVerdict, eventId?: string) {
+    setFeedbackModal({ turnIndex, verdict, eventId, note: '', busy: false, error: null })
+  }
+
+  // Plain function (not memoized): closes over the latest `feedbackModal` and
+  // `visibleTurns` each render, which is what a modal-driven one-shot submit
+  // needs (no stale-closure risk from an empty dep array).
+  async function submitFeedbackModal() {
+    const m = feedbackModal
+    if (!m || m.busy) return
+    setFeedbackModal({ ...m, busy: true, error: null })
+    try {
+      const snapshot = visibleTurns.filter((t) => !t.contextNote)
+      const transcript = snapshot.map((t) => ({
+        role: t.role,
+        content: stripMachinery(t.content),
+      }))
+      // messageIndex must index into the SUBMITTED transcript, which excludes
+      // the contextNote dividers `turnIndex` (a visibleTurns index) counts —
+      // re-derive it as the rated turn's position among the kept turns.
+      const ratedTurn = visibleTurns[m.turnIndex]
+      const messageIndex = ratedTurn ? Math.max(0, snapshot.indexOf(ratedTurn)) : m.turnIndex
+      await callAttorneyMcp({
+        toolName: 'legal.assistant.message_feedback_submit',
+        input: {
+          verdict: m.verdict,
+          note: m.note.trim() || undefined,
+          messageEventId: m.eventId,
+          messageIndex,
+          matterEntityId: activeScope.matterEntityId,
+          contactEntityId: activeScope.contactEntityId,
+          chatSessionId: chatSessionIdRef.current ?? undefined,
+          buildSessionId: buildSessionIdRef.current ?? undefined,
+          transcript,
+        },
+      })
+      setMessageFeedback((prev) => ({ ...prev, [m.turnIndex]: m.verdict }))
+      setFeedbackModal(null)
+    } catch (e) {
+      setFeedbackModal((prev) =>
+        prev ? { ...prev, busy: false, error: e instanceof Error ? e.message : String(e) } : null,
+      )
+    }
+  }
+
   // Documents attached to the NEXT message. Cleared after each send (per-message,
   // like email attachments). Claude only — see canAttach below.
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -1309,6 +1500,7 @@ export function UnifiedAssistantChat({
             : {
                 role: 'assistant',
                 content: t.reply,
+                eventId: t.eventId,
                 reasoning: t.reasoning,
                 citations: t.citations,
                 model: t.model,
@@ -2252,6 +2444,9 @@ export function UnifiedAssistantChat({
                 {
                   role: 'assistant',
                   content: d.reply,
+                  // FB-0 — the persisted event id this reply committed to, so the
+                  // thumbs-feedback modal can record which reply it rates.
+                  eventId: d.eventId,
                   // Relocate the reasoning the "Thinking…" indicator streamed live into
                   // the committed turn's expandable disclosure — not destroyed, moved.
                   reasoning: partial.thinking.trim() || undefined,
@@ -3218,6 +3413,19 @@ export function UnifiedAssistantChat({
         </div>
       )}
 
+      {/* ── FB-0: the tiny thumbs-feedback note modal ───────────────────────── */}
+      {feedbackModal && (
+        <MessageFeedbackModal
+          verdict={feedbackModal.verdict}
+          note={feedbackModal.note}
+          busy={feedbackModal.busy}
+          error={feedbackModal.error}
+          onNoteChange={(note) => setFeedbackModal((prev) => (prev ? { ...prev, note } : prev))}
+          onCancel={() => setFeedbackModal(null)}
+          onSubmit={() => void submitFeedbackModal()}
+        />
+      )}
+
       {/* ── ASSISTANT-ACTS-1: a produced doc open in the rich-text editor. A
           LOCAL edit — Save rewrites the card's markdown; saving to the matter
           stays the card's own explicit action. No AI rail (the doc has no
@@ -3784,6 +3992,10 @@ export function UnifiedAssistantChat({
                   {stripMachinery(t.content).trim() && (
                     <div className="uac-reply-actions">
                       <CopyButton text={stripMachinery(t.content)} />
+                      <MessageFeedbackButtons
+                        verdict={messageFeedback[i] ?? null}
+                        onRate={(verdict) => openFeedbackModal(i, verdict, t.eventId)}
+                      />
                     </div>
                   )}
                 </>

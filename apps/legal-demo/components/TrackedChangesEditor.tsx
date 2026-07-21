@@ -108,6 +108,7 @@ export function TrackedChangesEditor({
   initialFocus = 'page',
   onClose,
   onSaved,
+  onRegenerateFromScratch,
 }: {
   draft: TrackedEditorDraft
   title: string
@@ -116,6 +117,14 @@ export function TrackedChangesEditor({
   initialFocus?: 'page' | 'ai'
   onClose: () => void
   onSaved: (newVersionId: string | null) => void
+  // WF-RUNNER-TOOLBAR-1: the workflow runner's stage-level "Regenerate…" button
+  // was deleted and its capability folded in here as a distinct AI-rail mode —
+  // a full WORKER redraft from the matter's questionnaire/consultation (async,
+  // supersedes with a new version), not this editor's in-place tracked-changes
+  // revision. Only the runner (which has the matterEntityId + stage.key the
+  // stage-scoped regenerate route needs) passes this; the standalone review
+  // reader leaves it unset and the option doesn't appear there.
+  onRegenerateFromScratch?: (changeNotes: string) => Promise<void>
 }) {
   const [trackOn, setTrackOnState] = useState(true)
   const trackOnRef = useRef(true)
@@ -153,6 +162,14 @@ export function TrackedChangesEditor({
   // record anywhere; kept here so a rejected AI suggestion is still counted
   // and stored in the redline ops blob, not silently dropped.
   const rejectedRef = useRef<RedlineOp[]>([])
+
+  // "Regenerate from scratch instead" — a distinct AI-rail mode, worker-driven,
+  // superseding this version rather than revising it in place (see
+  // onRegenerateFromScratch above). Own busy/error so it never fights aiWorking.
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [regenNotes, setRegenNotes] = useState('')
+  const [regenBusy, setRegenBusy] = useState(false)
+  const [regenError, setRegenError] = useState<string | null>(null)
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -433,6 +450,27 @@ export function TrackedChangesEditor({
     [aiWorking, draft.documentVersionId, recompute],
   )
 
+  // ── Regenerate from scratch (worker full redraft with change notes) ────────
+  // Distinct from runAi above: this supersedes the version entirely, off-request
+  // on the worker, using the matter's questionnaire/consultation — not an
+  // in-place revision of THIS text. Any unsaved tracked changes in this session
+  // are moot once a fresh draft is coming, so success closes the editor outright
+  // (not requestClose's discard-confirm). A failure keeps the panel open with
+  // the error inline so the attorney can retry without losing their notes.
+  const runRegenerateFromScratch = useCallback(async (): Promise<void> => {
+    if (!onRegenerateFromScratch || !regenNotes.trim() || regenBusy) return
+    setRegenBusy(true)
+    setRegenError(null)
+    try {
+      await onRegenerateFromScratch(regenNotes.trim())
+      onClose()
+    } catch (err) {
+      setRegenError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRegenBusy(false)
+    }
+  }, [onRegenerateFromScratch, regenNotes, regenBusy, onClose])
+
   // ── Save: ONE new version through the append-only legal.draft.edit ──────────
   const canSave = changed && pending.length === 0 && !busy && !aiWorking
   const handleSave = useCallback(async (): Promise<void> => {
@@ -648,51 +686,111 @@ export function TrackedChangesEditor({
         <aside className="li-edtr-rail">
           {aiEnabled && (
             <div className="li-edtr-ai">
-              <div className="li-edtr-ai-head">
-                <GemSparkle size={17} />
-                <span>Edit With AI</span>
-              </div>
-              <textarea
-                ref={aiTextareaRef}
-                className="li-edtr-ai-prompt"
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder="Describe a change — e.g. make the tone firmer…"
-                disabled={aiWorking}
-                rows={3}
-              />
-              <div className="li-edtr-ai-chips">
-                {AI_CHIPS.map((chip) => (
+              {regenOpen ? (
+                // ── Regenerate from scratch (worker full redraft) ─────────────────
+                <>
+                  <div className="li-edtr-ai-head">
+                    <GemSparkle size={17} />
+                    <span>Regenerate From Scratch</span>
+                  </div>
+                  <p className="li-edtr-regen-hint">
+                    Re-drafts this document on the worker from the matter’s questionnaire and
+                    consultation — not an in-place edit like Edit With AI. The current version is
+                    kept; the redraft supersedes it, append-only.
+                  </p>
+                  <textarea
+                    className="li-edtr-ai-prompt"
+                    value={regenNotes}
+                    onChange={(e) => setRegenNotes(e.target.value)}
+                    placeholder="What needs to change — e.g. name the alternate executor as the client’s sister."
+                    disabled={regenBusy}
+                    rows={4}
+                    autoFocus
+                  />
+                  {regenError && <div className="li-edtr-ai-note">{regenError}</div>}
+                  <div className="li-edtr-regen-actions">
+                    <button
+                      type="button"
+                      className="li-edtr-ai-generate"
+                      onClick={() => void runRegenerateFromScratch()}
+                      disabled={regenBusy || !regenNotes.trim()}
+                    >
+                      {regenBusy && <span className="spinner" />}
+                      {regenBusy ? 'Starting…' : 'Regenerate'}
+                    </button>
+                    <button
+                      type="button"
+                      className="li-edtr-regen-back"
+                      onClick={() => {
+                        setRegenOpen(false)
+                        setRegenError(null)
+                      }}
+                      disabled={regenBusy}
+                    >
+                      Back to Edit With AI
+                    </button>
+                  </div>
+                </>
+              ) : (
+                // ── Edit With AI (in-place tracked-changes revision) ──────────────
+                <>
+                  <div className="li-edtr-ai-head">
+                    <GemSparkle size={17} />
+                    <span>Edit With AI</span>
+                  </div>
+                  <textarea
+                    ref={aiTextareaRef}
+                    className="li-edtr-ai-prompt"
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="Describe a change — e.g. make the tone firmer…"
+                    disabled={aiWorking}
+                    rows={3}
+                  />
+                  <div className="li-edtr-ai-chips">
+                    {AI_CHIPS.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        className="li-edtr-ai-chip"
+                        onClick={() => void runAi(chip)}
+                        disabled={aiWorking || toggleBlocked}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
                   <button
-                    key={chip}
                     type="button"
-                    className="li-edtr-ai-chip"
-                    onClick={() => void runAi(chip)}
-                    disabled={aiWorking || toggleBlocked}
+                    className="li-edtr-ai-generate"
+                    onClick={() => void runAi(aiPrompt)}
+                    disabled={aiWorking || !aiPrompt.trim() || toggleBlocked}
+                    title={toggleBlocked ? 'Accept or reject the pending changes first' : undefined}
                   >
-                    {chip}
+                    <GemSparkle size={16} />
+                    {aiWorking ? 'Generating…' : 'Generate tracked changes'}
                   </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                className="li-edtr-ai-generate"
-                onClick={() => void runAi(aiPrompt)}
-                disabled={aiWorking || !aiPrompt.trim() || toggleBlocked}
-                title={toggleBlocked ? 'Accept or reject the pending changes first' : undefined}
-              >
-                <GemSparkle size={16} />
-                {aiWorking ? 'Generating…' : 'Generate tracked changes'}
-              </button>
-              {toggleBlocked && (
-                <div className="li-edtr-ai-note">
-                  Accept or reject the pending changes before generating more.
-                </div>
-              )}
-              {aiNoChange && (
-                <div className="li-edtr-ai-note">
-                  The AI returned the document unchanged — try a more specific instruction.
-                </div>
+                  {toggleBlocked && (
+                    <div className="li-edtr-ai-note">
+                      Accept or reject the pending changes before generating more.
+                    </div>
+                  )}
+                  {aiNoChange && (
+                    <div className="li-edtr-ai-note">
+                      The AI returned the document unchanged — try a more specific instruction.
+                    </div>
+                  )}
+                  {onRegenerateFromScratch && (
+                    <button
+                      type="button"
+                      className="li-edtr-regen-link"
+                      onClick={() => setRegenOpen(true)}
+                      disabled={aiWorking}
+                    >
+                      Regenerate from scratch instead
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}
