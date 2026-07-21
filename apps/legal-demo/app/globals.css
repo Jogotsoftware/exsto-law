@@ -24766,15 +24766,6 @@ details.li-brief-research summary:hover {
   background: var(--li-gold-bg-soft, #fbf6ea);
 }
 
-<<<<<<< HEAD
-/* PO-2 — attention-feed rows deep-link to a real subject now (task, thread,
-   draft, envelope, invoice); a trailing chevron makes the click affordance
-   explicit instead of relying on the hover background alone. */
-.li-attn-chevron {
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--li-muted-2, #9aa3b8);
-=======
 /* ==========================================================================
    PT-1 — CLIENT PORTAL SIDE NAV (li-cpnav-*)  — append-only family.
    Founder walk 15.11: the portal's horizontal tab band is replaced by the
@@ -24850,7 +24841,6 @@ details.li-brief-research summary:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.24);
->>>>>>> origin/main
 }
 
 /* ── li-tplsign — template editor eSign panel (ESIGN-UNIFY-1 ES-3) ──────────
@@ -25229,4 +25219,13 @@ details.li-brief-research summary:hover {
   font-family: inherit;
   padding: 9px 10px;
   resize: vertical;
+}
+
+/* PO-2 — attention-feed rows deep-link to a real subject now (task, thread,
+   draft, envelope, invoice); a trailing chevron makes the click affordance
+   explicit instead of relying on the hover background alone. */
+.li-attn-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--li-muted-2, #9aa3b8);
 }
