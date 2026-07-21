@@ -25105,6 +25105,12 @@ details.li-brief-research summary:hover {
   font-weight: 400;
   color: var(--li-muted);
 }
+/* ES-5b — the recipient's full email, shown in the Review-step chip so a
+   mistyped address is caught before the envelope goes out. */
+.li-esign2-rolechip-email {
+  font-weight: 400;
+  color: var(--li-muted-2);
+}
 .li-esign2-signer-dot {
   width: 9px;
   height: 9px;

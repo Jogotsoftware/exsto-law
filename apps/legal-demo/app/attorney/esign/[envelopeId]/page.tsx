@@ -72,7 +72,9 @@ const SIGNER_META: Record<string, { label: string; fg: string; bg: string }> = {
   declined: { label: 'Declined', fg: 'var(--li-danger)', bg: 'var(--li-danger-bg)' },
   voided: { label: 'Voided', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
   opened: { label: 'Opened', fg: 'var(--li-warn)', bg: 'var(--li-warn-bg)' },
-  delivered: { label: 'Delivered', fg: 'var(--li-info)', bg: 'var(--li-info-bg)' },
+  // ES-5b — honest status: we dispatched the signing email but have NOT confirmed
+  // inbox delivery, so this reads "Sent" (to the email shown), never "Delivered".
+  delivered: { label: 'Sent', fg: 'var(--li-info)', bg: 'var(--li-info-bg)' },
   pending: { label: 'Pending', fg: 'var(--li-muted)', bg: 'var(--li-border-soft)' },
 }
 function signerMeta(status: string): { label: string; fg: string; bg: string } {
@@ -398,8 +400,9 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
               )
             })}
             <div className="li-esign-routing-foot">
-              Progress: Pending → Delivered → Opened → Signed. Sequential signers become “Delivered”
-              only when prior signers finish.
+              Progress: Pending → Sent → Opened → Signed. “Sent” means the signing email was
+              dispatched to the address shown — delivery to the inbox is not confirmed. Sequential
+              signers become “Sent” only when prior signers finish.
             </div>
           </div>
         </div>

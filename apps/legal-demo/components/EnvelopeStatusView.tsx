@@ -27,13 +27,19 @@ export interface EnvelopeStatus {
   executedDocumentVersionId: string | null
 }
 
-const STEP = ['pending', 'delivered', 'opened', 'signed']
+const STEP = ['Pending', 'Sent', 'Opened', 'Signed']
 function badge(status: string): string {
   if (status === 'signed') return 'badge ok'
   if (status === 'declined') return 'badge danger'
   if (status === 'opened') return 'badge warn'
   if (status === 'delivered') return 'badge'
   return 'badge muted'
+}
+// ES-5b — honest per-recipient status: 'delivered' is only a dispatch (the email
+// was sent, inbox delivery unconfirmed), shown as "Sent"; never "Delivered".
+function statusLabel(status: string): string {
+  if (status === 'delivered') return 'Sent'
+  return status.charAt(0).toUpperCase() + status.slice(1)
 }
 
 export function EnvelopeStatusView({
@@ -108,7 +114,7 @@ export function EnvelopeStatusView({
               <td>{s.title ?? '—'}</td>
               <td>{s.channel === 'portal' ? 'Client portal' : 'Email link'}</td>
               <td>
-                <span className={badge(s.status)}>{s.status}</span>
+                <span className={badge(s.status)}>{statusLabel(s.status)}</span>
               </td>
               <td>{s.signedAt ? new Date(s.signedAt).toLocaleString() : '—'}</td>
             </tr>
@@ -116,8 +122,9 @@ export function EnvelopeStatusView({
         </tbody>
       </table>
       <p className="text-sm text-muted" style={{ marginTop: 'var(--space-2)' }}>
-        Progress: {STEP.join(' → ')} (or declined). Sequential signers become “delivered” only when
-        prior signers finish.
+        Progress: {STEP.join(' → ')} (or declined). “Sent” means the signing email was dispatched to
+        the address shown — inbox delivery is not confirmed. Sequential signers become “Sent” only
+        when prior signers finish.
       </p>
     </div>
   )

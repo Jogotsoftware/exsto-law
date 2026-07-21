@@ -918,7 +918,10 @@ export function EsignComposer({
                       className={`li-esign2-rolechip ${signerToneClass(draft.recipients.indexOf(r))}`}
                     >
                       <span className="li-esign2-signer-dot" aria-hidden="true" />
-                      {r.name.trim() || r.email.trim()}
+                      {r.name.trim() && `${r.name.trim()} `}
+                      {/* ES-5b (founder-priority): the full email is always shown so
+                          a mistyped address is caught here, before sending. */}
+                      <span className="li-esign2-rolechip-email">{r.email.trim()}</span>
                       <em>{ROLE_LABELS[r.role]}</em>
                     </span>
                   ))}
