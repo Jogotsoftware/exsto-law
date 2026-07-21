@@ -4,7 +4,7 @@
 # plugin handles serverless function wiring for the /api/* routes.
 
 [build]
-  command = "corepack enable && pnpm install --frozen-lockfile && pnpm build && pnpm --filter @exsto/legal-demo exec next build"
+  command = "corepack enable && pnpm install --frozen-lockfile && pnpm build && pnpm --filter @exsto/legal-demo build"
   publish = "apps/legal-demo/.next"
 
 [build.environment]
