@@ -17,7 +17,7 @@ const TOOL_FEED_LIMIT = 15
 const GET_ATTENTION_FEED_TOOL_DEF = {
   name: 'get_attention_feed',
   description:
-    "Read the firm's ranked ATTENTION FEED — the attorney's most pressing items right now, computed deterministically from real firm data: overdue and due-soon tasks, client messages awaiting a reply (inbox), drafts waiting in the review queue, envelopes out unsigned, invoices unpaid, matters with no recent activity, and workflows stuck on a step. READ-ONLY: it never changes anything. Call it whenever the attorney asks what is most pressing, what to work on, to check their inbox, what is overdue, or what may have slipped through the cracks. Each item comes with a plain one-sentence reason (`why`) and a clickable in-app link (`deepLink`): answer by citing the reason in your own words and offering the link to act. Do NOT invent items or deadlines — report only what the feed returns, and if it is empty, say plainly that nothing is pressing.",
+    "Read the firm's ATTENTION FEED — the INBOUND client events that need the attorney right now, computed deterministically from real firm data: client messages awaiting a reply (portal + email inbox). READ-ONLY: it never changes anything. Call it whenever the attorney asks what is most pressing, what to work on, to check their inbox, or what may have slipped through the cracks. Each item comes with a plain one-sentence reason (`why`) and a clickable in-app link (`deepLink`): answer by citing the reason in your own words and offering the link to act. Do NOT invent items or deadlines — report only what the feed returns, and if it is empty, say plainly that nothing is pressing.",
   input_schema: {
     type: 'object',
     properties: {},
