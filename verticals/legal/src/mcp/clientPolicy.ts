@@ -69,6 +69,7 @@ export const CLIENT_PORTAL_AUTHED_TOOLS: ReadonlySet<string> = new Set([
   'legal.client.documents', // attorney-approved documents on the client's matters (view via /d shared-draft)
   'legal.client.uploads', // the documents the signed-in client has uploaded (metadata only)
   'legal.client.feedback_submit', // the portal chat widget: client feedback about the portal
+  'legal.client.message_feedback_submit', // FB-0: thumbs up/down + note on ONE portal-assistant reply
   'legal.client.payment_methods', // the firm's Zelle/crypto payment options for the pay page (read)
   'legal.client.report_payment', // report a Zelle/crypto payment made on the client's own invoice
   'legal.draft.get_shared', // the portal door of the shared-draft view (scoped in-tool to the client's matters)

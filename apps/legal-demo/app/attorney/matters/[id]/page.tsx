@@ -7,7 +7,7 @@
 // Actions menu and Back live in the layout header.
 import { use, useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { callAttorneyMcp } from '@/lib/mcpAttorney'
+import { callAttorneyMcp, McpToolError } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
 import {
   CheckCircleIcon,
@@ -891,13 +891,24 @@ function WorkflowStepWindow({
     : null
   const waitsOnSystem = isCurrent && !attorneyEdge && !clientEdge && !!systemEdge
 
-  // The advance control appended to a step's footer: Continue (attorney gate) or
-  // Skip (client gate — advance without the client). A system-only gate has none.
-  const advanceFooter = attorneyEdge ? (
-    <ContinueButton matter={matter} edge={attorneyEdge} onChanged={onChanged} onClose={onClose} />
-  ) : clientEdge ? (
-    <SkipButton matter={matter} stageKey={stage.key} onChanged={onChanged} onClose={onClose} />
-  ) : null
+  // An attorney edge whose `via` names a DIFFERENT action (e.g. review_send_document's
+  // draft.approve) is finished by that step's own embedded control (Approve/Reject),
+  // never by a bare Continue — legal.matter.advance's GUARD 2 rejects it outright (the
+  // M-MRJHEC8X defect this exists to prevent). Mirror that guard here so Continue is
+  // never offered where it would just bounce off a 409.
+  const attorneyEdgeHasOwnAction =
+    !!attorneyEdge?.via && attorneyEdge.via !== 'legal.matter.advance'
+
+  // The advance control appended to a step's footer: Continue (attorney gate, plain
+  // advance only) or Skip (client gate — advance without the client). A step whose
+  // attorney edge has its own completing action gets neither here — its embedded
+  // surface is the completion path. A system-only gate has none.
+  const advanceFooter =
+    attorneyEdge && !attorneyEdgeHasOwnAction ? (
+      <ContinueButton matter={matter} edge={attorneyEdge} onChanged={onChanged} onClose={onClose} />
+    ) : clientEdge ? (
+      <SkipButton matter={matter} stageKey={stage.key} onChanged={onChanged} onClose={onClose} />
+    ) : null
   const waitsNote = waitsOnSystem ? <WaitingNote /> : null
 
   const kind = stage.action?.kind
@@ -997,9 +1008,16 @@ function ContinueButton({
 }) {
   const [advancing, setAdvancing] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // A 409 from the advance-guard (this step has its own completing action, e.g.
+  // a review step's Approve) is shown as styled in-modal guidance, never the raw
+  // "Request failed (409): …" wall a real failure gets. Defense in depth — the
+  // parent hides Continue entirely once an edge's `via` names its own action, so
+  // this should be unreachable in normal use; it still guards a stale-graph race.
+  const [guardMessage, setGuardMessage] = useState<string | null>(null)
   async function advance() {
     setAdvancing(true)
     setErr(null)
+    setGuardMessage(null)
     try {
       await callAttorneyMcp({
         toolName: 'legal.matter.advance',
@@ -1013,16 +1031,20 @@ function ContinueButton({
       await onChanged()
       onClose()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
+      if (e instanceof McpToolError && e.status === 409) {
+        setGuardMessage(e.detail || e.message)
+      } else {
+        setErr(e instanceof Error ? e.message : String(e))
+      }
       setAdvancing(false)
     }
   }
   return (
     <>
-      {err && (
-        <span className="text-sm" style={{ color: 'var(--danger)', marginRight: 'auto' }}>
-          {err}
-        </span>
+      {guardMessage ? (
+        <div className="alert alert-warn li-modal-foot-guard">{guardMessage}</div>
+      ) : (
+        err && <span className="li-modal-foot-error">{err}</span>
       )}
       <button className="primary" onClick={() => void advance()} disabled={advancing}>
         {advancing && <span className="spinner" />}

@@ -1,0 +1,34 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`assembleDraftingPrompt — system facts land first > jurisdiction SET: the prompt opens with the system-facts block, slots still fill (snapshot) 1`] = `
+"--- System facts (authoritative platform facts — ground the document in these; never contradict, guess around, or default to a different jurisdiction) ---
+Governing jurisdiction: North Carolina (source: matter fact)
+Today's date: July 20, 2026
+Firm name: Pacheco Law Firm
+
+Draft an LLC operating agreement.
+## Questionnaire
+{
+  "company_name": "Acme LLC"
+}
+## Transcript
+Members agreed on terms.
+## Template
+TEMPLATE BODY"
+`;
+
+exports[`assembleDraftingPrompt — system facts land first > jurisdiction UNSET: the honest-unset instruction opens the prompt (snapshot) 1`] = `
+"--- System facts (authoritative platform facts — ground the document in these; never contradict, guess around, or default to a different jurisdiction) ---
+Governing jurisdiction: NOT SET — do not assume any state; write "Governing law to be confirmed"
+Today's date: July 20, 2026
+
+Draft an LLC operating agreement.
+## Questionnaire
+{
+  "company_name": "Acme LLC"
+}
+## Transcript
+Members agreed on terms.
+## Template
+TEMPLATE BODY"
+`;

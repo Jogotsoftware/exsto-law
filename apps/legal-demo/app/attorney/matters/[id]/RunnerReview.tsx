@@ -5,20 +5,25 @@
 // Opening the step IS opening the review; there is no intermediate confirm and no
 // navigation to /attorney/review. B2.1 (DOCUMENTREVIEWER-UNIFY-1): the review
 // itself is now the SAME <DocumentReviewer> the standalone /attorney/review
-// reader uses — same toolbar, tracked-changes Edit/AI-revision, Approve/Reject
-// (unified on MCP legal.draft.approve/reject), Send to client. This file keeps
-// only what's specific to running inside a workflow step: the producing/
-// spinner/failed states before a draft exists (#414), and the stage-level
-// "Regenerate…" full-redraft-with-notes capability (worker-driven, distinct
-// from DocumentReviewer's in-place Edit/AI revision — Contract W only, per
-// RUNNER-FIXES-1 WP5).
+// reader uses — same toolbar (Edit / Share ▾ / eSign / Matter context + Reject /
+// AI Revision / Approve), tracked-changes Edit/AI-revision, Approve/Reject
+// (unified on MCP legal.draft.approve/reject). This file keeps only what's
+// specific to running inside a workflow step: the producing/spinner/failed
+// states before a draft exists (#414), and the stage-level full-redraft-with-
+// notes "Regenerate from scratch" capability (worker-driven, distinct from
+// DocumentReviewer's in-place Edit/AI revision — Contract W only, per
+// RUNNER-FIXES-1 WP5). WF-RUNNER-TOOLBAR-1 removed this file's own standalone
+// "Regenerate…" toolbar button + subpanel — the call + poll-for-landing still
+// live here (only the runner has the stage context the route needs), but the
+// entry point is now the AI-revision editor's "Regenerate from scratch" option
+// (onRegenerateFromScratch, threaded through DocumentReviewer).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { Modal } from '@/components/Modal'
 import { ConfirmModal } from '@/components/ConfirmModal'
-import { DocumentReviewer, type DocumentReviewerLoadedInfo } from '@/components/DocumentReviewer'
+import { DocumentReviewer } from '@/components/DocumentReviewer'
 import { acceptClientStep, regenerateStep, skipStep, completeMatter } from '@/lib/stepRunner'
-import { humanizeKind, humanizeService, type MatterDetail, type WfStage } from './shared'
+import { humanizeService, type MatterDetail, type WfStage } from './shared'
 
 // Poll interval + attempts for a draft landing off the worker (regenerate, or the
 // auto-run producing capability on stage entry). Honest: we poll the real read;
@@ -99,37 +104,23 @@ export function RunnerReview({
     // for a given matter and re-running on its identity would restart the poll.
   }, [producing, isCurrent, versionId])
 
-  // Draft summary reported by DocumentReviewer on load — just enough for the
-  // Regenerate panel's copy below (this file no longer fetches the draft itself;
-  // DocumentReviewer owns that read).
-  const [loaded, setLoaded] = useState<DocumentReviewerLoadedInfo | null>(null)
-
-  // ── Regenerate (stage-level, worker full redraft with change notes) ────────
-  const [regenOpen, setRegenOpen] = useState(false)
-  const [changeNotes, setChangeNotes] = useState('')
-  const [busy, setBusy] = useState<string | null>(null)
-  const [err, setErr] = useState<string | null>(null)
+  // ── Regenerate from scratch (stage-level, worker full redraft with change
+  // notes) — the toolbar's old standalone "Regenerate…" button was deleted;
+  // this file still owns the actual call + poll-for-landing (only the runner
+  // has the matterEntityId + stage.key the stage-scoped regenerate route
+  // needs), but the entry point now lives inside DocumentReviewer's AI-revision
+  // editor as a "Regenerate from scratch" option (WF-RUNNER-TOOLBAR-1).
   const [notice, setNotice] = useState<string | null>(null)
 
-  async function runRegenerate() {
-    if (!changeNotes.trim()) return
-    setBusy('regenerate')
-    setErr(null)
-    try {
+  const runRegenerateFromScratch = useCallback(
+    async (changeNotes: string): Promise<void> => {
       const startVersionId = versionId
-      await regenerateStep(matter.matterEntityId, stage.key, {
-        changeNotes: changeNotes.trim(),
-      })
-      setRegenOpen(false)
-      setChangeNotes('')
+      await regenerateStep(matter.matterEntityId, stage.key, { changeNotes })
       setNotice('Re-drafting on the worker — the new version will appear here when it lands.')
       void pollForNewVersion(startVersionId)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(null)
-    }
-  }
+    },
+    [matter.matterEntityId, stage.key, versionId, pollForNewVersion],
+  )
 
   const footer = (
     <>
@@ -140,7 +131,6 @@ export function RunnerReview({
 
   return (
     <Modal title={stage.label} onClose={onClose} size="wide" footer={advanceFooter ? footer : null}>
-      {err && <div className="alert alert-error">{err}</div>}
       {notice && <div className="alert alert-success">{notice}</div>}
 
       {/* No draft yet ------------------------------------------------------- */}
@@ -179,40 +169,6 @@ export function RunnerReview({
             {producing ? ' It drafts when this step becomes current.' : ''}
           </p>
         )
-      ) : regenOpen ? (
-        // ── Regenerate window (in-place) ──────────────────────────────────────
-        <div className="runner-subpanel">
-          <h3 style={{ marginTop: 0 }}>Regenerate document</h3>
-          <p className="text-muted text-sm">
-            Re-drafts this {loaded ? humanizeKind(loaded.documentKind) : 'document'}
-            {loaded ? ` (v${loaded.versionNumber})` : ''} on the worker. The matter’s questionnaire
-            and consultation are always included; describe what should change. The current version
-            is kept — the redraft supersedes it, append-only.
-          </p>
-          <label>
-            <span>What needs to change</span>
-            <textarea
-              rows={4}
-              value={changeNotes}
-              onChange={(e) => setChangeNotes(e.target.value)}
-              placeholder="e.g. Name the alternate executor as the client’s sister; add a no-contest clause."
-              autoFocus
-            />
-          </label>
-          <div className="runner-toolbar" style={{ marginTop: 'var(--space-3)', marginBottom: 0 }}>
-            <button
-              className="primary"
-              onClick={() => void runRegenerate()}
-              disabled={busy === 'regenerate' || !changeNotes.trim()}
-            >
-              {busy === 'regenerate' && <span className="spinner" />}
-              {busy === 'regenerate' ? 'Starting…' : 'Regenerate'}
-            </button>
-            <button onClick={() => setRegenOpen(false)} disabled={busy === 'regenerate'}>
-              Cancel
-            </button>
-          </div>
-        </div>
       ) : (
         // ── The document, via the SAME review surface the queue uses ──────────
         <>
@@ -231,21 +187,11 @@ export function RunnerReview({
           <DocumentReviewer
             versionId={versionId}
             embedded
-            onLoaded={setLoaded}
             onVersionChanged={() => void onChanged()}
             onCompleted={() => {
               void onChanged()
             }}
-            extraToolbar={
-              <button
-                type="button"
-                className="li-rev-tbtn"
-                onClick={() => setRegenOpen(true)}
-                disabled={phase === 'running'}
-              >
-                Regenerate…
-              </button>
-            }
+            onRegenerateFromScratch={runRegenerateFromScratch}
           />
         </>
       )}

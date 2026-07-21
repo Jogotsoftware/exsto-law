@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 
-// Per-matter time & expense ledgers. Two buttons — Add time / Add expense — each
-// opening a small inline form, with running totals. Receipts upload inline (small
-// files) and download on demand. All writes go through the MCP tools, which
-// record time.logged / expense.recorded events on the matter timeline.
+// Per-matter time & expense ledgers, with running totals. The matter-level
+// Actions menu's "Add time" / "Add expense" (layout.tsx) deep-link here with
+// ?add=time|expense to open the matching inline form via `initialForm` — this
+// panel no longer duplicates that trigger itself (WF-RUNNER-TOOLBAR-1); each
+// open form keeps its own Cancel so it can be dismissed without navigating
+// back through Actions. Receipts upload inline (small files) and download on
+// demand. All writes go through the MCP tools, which record time.logged /
+// expense.recorded events on the matter timeline.
 
 interface TimeEntry {
   eventId: string
@@ -197,23 +201,6 @@ export function TimeExpensePanel({
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-        <button
-          className="primary"
-          onClick={() => setForm(form === 'time' ? null : 'time')}
-          disabled={busy}
-        >
-          Add time
-        </button>
-        <button
-          className="primary"
-          onClick={() => setForm(form === 'expense' ? null : 'expense')}
-          disabled={busy}
-        >
-          Add expense
-        </button>
-      </div>
-
       {error && <div className="alert alert-error">{error}</div>}
 
       {form === 'time' && (
@@ -227,6 +214,7 @@ export function TimeExpensePanel({
             gap: 'var(--space-2)',
           }}
         >
+          <strong>Add time</strong>
           <div style={fieldRow}>
             <label>
               <div className="text-muted text-sm">Hours</div>
@@ -260,9 +248,12 @@ export function TimeExpensePanel({
               style={{ width: '100%' }}
             />
           </label>
-          <div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <button className="primary" onClick={() => void submitTime()} disabled={busy}>
               {busy ? 'Saving…' : 'Save time'}
+            </button>
+            <button onClick={resetForms} disabled={busy}>
+              Cancel
             </button>
           </div>
         </div>
@@ -279,6 +270,7 @@ export function TimeExpensePanel({
             gap: 'var(--space-2)',
           }}
         >
+          <strong>Add expense</strong>
           <div style={fieldRow}>
             <label>
               <div className="text-muted text-sm">Amount (USD)</div>
@@ -309,9 +301,12 @@ export function TimeExpensePanel({
               onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
             />
           </label>
-          <div>
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
             <button className="primary" onClick={() => void submitExpense()} disabled={busy}>
               {busy ? 'Saving…' : 'Save expense'}
+            </button>
+            <button onClick={resetForms} disabled={busy}>
+              Cancel
             </button>
           </div>
         </div>

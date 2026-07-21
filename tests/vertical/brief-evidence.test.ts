@@ -77,6 +77,7 @@ function baseMaterial(
     invoiced: { items: [], currency: 'USD' },
     envelopes: [],
     research: [],
+    jurisdiction: null,
     ...overrides,
   }
 }

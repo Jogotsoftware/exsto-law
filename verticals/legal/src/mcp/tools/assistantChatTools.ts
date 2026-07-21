@@ -16,6 +16,8 @@ import {
   recordBuildArtifactEdited,
   listBuildSessions,
   listBuildSessionThread,
+  submitAssistantMessageFeedback,
+  listAssistantMessageFeedback,
   type BuildSessionSummary,
   type BuildThreadEntry,
   type AssistantChatInput,
@@ -29,6 +31,8 @@ import {
   type SaveAssistantReplyInput,
   type ChatSessionSummary,
   type AssistantSettings,
+  type SubmitMessageFeedbackInput,
+  type AssistantMessageFeedbackEntry,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -342,6 +346,68 @@ registerTool({
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   handler: async (ctx: ActionContext) => ({ feedback: await listAssistantFeedback(ctx) }),
 } satisfies Tool<Record<string, never>, { feedback: AssistantFeedbackEntry[] }>)
+
+// FB-0 — message-level thumbs feedback: a verdict + optional note on ONE
+// assistant reply, distinct from the beta-feedback pair above (which is
+// free-text feedback about the app, not a rating of a specific reply). Saves
+// the WHOLE visible transcript at submit time as a content_blob.
+registerTool({
+  name: 'legal.assistant.message_feedback_submit',
+  description:
+    "Record the attorney's thumbs up/down on ONE assistant reply, with an optional note, plus a snapshot of the WHOLE visible conversation so far (for later review). Re-submitting on the same message is fine — the latest verdict is what read paths should show.",
+  mode: 'write',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      verdict: { type: 'string', enum: ['up', 'down'], description: 'Thumbs up or down.' },
+      note: { type: 'string', description: 'Optional free-text note from the attorney.' },
+      messageEventId: {
+        type: 'string',
+        description: "The rated reply's assistant.turn event id, when known.",
+      },
+      messageIndex: {
+        type: 'number',
+        description: '0-based position of the rated message within `transcript`.',
+      },
+      matterEntityId: { type: 'string', description: 'This chat’s matter scope, if any.' },
+      contactEntityId: { type: 'string', description: 'This chat’s client scope, if any.' },
+      chatSessionId: {
+        type: 'string',
+        description: 'The saved conversation this turn belongs to.',
+      },
+      buildSessionId: { type: 'string', description: 'The build session this turn belongs to.' },
+      transcript: {
+        type: 'array',
+        description: 'The whole visible conversation, oldest-first.',
+        items: {
+          type: 'object',
+          properties: {
+            role: { type: 'string', enum: ['user', 'assistant'] },
+            content: { type: 'string' },
+          },
+          required: ['role', 'content'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['verdict', 'messageIndex', 'transcript'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) =>
+    submitAssistantMessageFeedback(ctx, { ...input, surface: 'attorney' }),
+} satisfies Tool<
+  Omit<SubmitMessageFeedbackInput, 'surface' | 'clientContactId'>,
+  { eventId: string; transcriptBlobId: string }
+>)
+
+registerTool({
+  name: 'legal.assistant.message_feedback_list',
+  description:
+    'All message-level thumbs feedback (newest first) — verdict, note, which surface (attorney/portal), and the transcript blob id for later review. Attorney-only; not exposed to the client portal.',
+  mode: 'read',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  handler: async (ctx: ActionContext) => ({ feedback: await listAssistantMessageFeedback(ctx) }),
+} satisfies Tool<Record<string, never>, { feedback: AssistantMessageFeedbackEntry[] }>)
 
 registerTool({
   name: 'legal.assistant.usage',

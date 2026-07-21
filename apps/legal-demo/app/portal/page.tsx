@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, ThumbsUp, ThumbsDown } from 'lucide-react'
 import { ScaleIcon } from '@/components/icons'
 import { FeeConsentCard } from '@/components/FeeConsentCard'
 import { LanguageToggle } from '@/components/LanguageToggle'
@@ -2573,9 +2573,49 @@ function AssistantView() {
   const [cardDone, setCardDone] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
+  // FB-0 — per-message thumbs feedback, keyed by position in `messages` (stable:
+  // messages only append). The modal captures an optional note, then submits
+  // the verdict + note + a snapshot of the whole visible conversation.
+  const [messageFeedback, setMessageFeedback] = useState<Record<number, 'up' | 'down'>>({})
+  const [feedbackModal, setFeedbackModal] = useState<{
+    messageIndex: number
+    verdict: 'up' | 'down'
+    note: string
+    busy: boolean
+    error: string | null
+  } | null>(null)
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [messages, card, cardDone])
+
+  function openFeedbackModal(messageIndex: number, verdict: 'up' | 'down') {
+    setFeedbackModal({ messageIndex, verdict, note: '', busy: false, error: null })
+  }
+
+  async function submitFeedbackModal() {
+    const m = feedbackModal
+    if (!m || m.busy) return
+    setFeedbackModal({ ...m, busy: true, error: null })
+    try {
+      await callClientPortalMcp({
+        toolName: 'legal.client.message_feedback_submit',
+        input: {
+          verdict: m.verdict,
+          note: m.note.trim() || undefined,
+          messageIndex: m.messageIndex,
+          transcript: messages.map((msg) => ({ role: msg.role, content: msg.content })),
+        },
+      })
+      setMessageFeedback((prev) => ({ ...prev, [m.messageIndex]: m.verdict }))
+      setFeedbackModal(null)
+    } catch (e) {
+      if (e instanceof PortalSessionExpiredError) return
+      setFeedbackModal((prev) =>
+        prev ? { ...prev, busy: false, error: e instanceof Error ? e.message : String(e) } : null,
+      )
+    }
+  }
 
   const suggestions = [
     t('portal.assistant.s1', undefined, 'What’s the status of my matter?'),
@@ -2735,8 +2775,50 @@ function AssistantView() {
             ) : (
               messages.map((m, i) => (
                 <div key={i} className={`li-cp-asst-msgrow ${m.role === 'user' ? 'me' : ''}`}>
-                  <div className={`li-cp-asst-msg ${m.role === 'user' ? 'me' : ''}`}>
-                    {m.content || (busy && i === messages.length - 1 ? '…' : '')}
+                  <div className="li-cp-asst-msgcol">
+                    <div className={`li-cp-asst-msg ${m.role === 'user' ? 'me' : ''}`}>
+                      {m.content || (busy && i === messages.length - 1 ? '…' : '')}
+                    </div>
+                    {/* FB-0 — thumbs on every assistant reply, once it has settled
+                        (not the still-streaming last bubble). */}
+                    {m.role === 'assistant' &&
+                      m.content &&
+                      !(busy && i === messages.length - 1) && (
+                        <div className="li-cp-asst-fbk">
+                          <button
+                            type="button"
+                            className={`li-cp-asst-fbk-btn${messageFeedback[i] === 'up' ? ' li-cp-asst-fbk-btn-active' : ''}`}
+                            aria-pressed={messageFeedback[i] === 'up'}
+                            aria-label={t(
+                              'portal.assistant.fb_helpful',
+                              undefined,
+                              'Mark this reply helpful',
+                            )}
+                            onClick={() => openFeedbackModal(i, 'up')}
+                          >
+                            <ThumbsUp
+                              size={13}
+                              fill={messageFeedback[i] === 'up' ? 'currentColor' : 'none'}
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            className={`li-cp-asst-fbk-btn${messageFeedback[i] === 'down' ? ' li-cp-asst-fbk-btn-active' : ''}`}
+                            aria-pressed={messageFeedback[i] === 'down'}
+                            aria-label={t(
+                              'portal.assistant.fb_unhelpful',
+                              undefined,
+                              'Mark this reply not helpful',
+                            )}
+                            onClick={() => openFeedbackModal(i, 'down')}
+                          >
+                            <ThumbsDown
+                              size={13}
+                              fill={messageFeedback[i] === 'down' ? 'currentColor' : 'none'}
+                            />
+                          </button>
+                        </div>
+                      )}
                   </div>
                 </div>
               ))
@@ -2809,7 +2891,110 @@ function AssistantView() {
           )}
         </p>
       </div>
+      {feedbackModal && (
+        <PortalMessageFeedbackModal
+          verdict={feedbackModal.verdict}
+          note={feedbackModal.note}
+          busy={feedbackModal.busy}
+          error={feedbackModal.error}
+          onNoteChange={(note) => setFeedbackModal((prev) => (prev ? { ...prev, note } : prev))}
+          onCancel={() => setFeedbackModal(null)}
+          onSubmit={() => void submitFeedbackModal()}
+        />
+      )}
     </>
+  )
+}
+
+// FB-0 — the tiny thumbs-feedback note modal for the portal assistant chat,
+// styled like the portal's own modal chrome (EngagementGateModal above).
+function PortalMessageFeedbackModal({
+  verdict,
+  note,
+  busy,
+  error,
+  onNoteChange,
+  onCancel,
+  onSubmit,
+}: {
+  verdict: 'up' | 'down'
+  note: string
+  busy: boolean
+  error: string | null
+  onNoteChange: (note: string) => void
+  onCancel: () => void
+  onSubmit: () => void
+}) {
+  const { t } = useI18n()
+  return (
+    <div
+      className="li-cp-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('portal.assistant.fb_title', undefined, 'Rate this reply')}
+      onClick={onCancel}
+    >
+      <div className="li-cp-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="li-cp-modal-head">
+          <h2 className="li-cp-modal-title li-fbk-modal-title">
+            {verdict === 'up' ? (
+              <ThumbsUp size={16} fill="currentColor" />
+            ) : (
+              <ThumbsDown size={16} fill="currentColor" />
+            )}
+            {verdict === 'up'
+              ? t('portal.assistant.fb_marked_helpful', undefined, 'Marked helpful')
+              : t('portal.assistant.fb_marked_unhelpful', undefined, 'Marked not helpful')}
+          </h2>
+          <button
+            type="button"
+            className="li-cp-modal-x"
+            aria-label={t('portal.gate.cancel', undefined, 'Cancel')}
+            onClick={onCancel}
+          >
+            <CloseIcon />
+          </button>
+        </div>
+        <div className="li-cp-modal-body">
+          <label className="li-fbk-modal-label" htmlFor="li-cp-fbk-note">
+            {t('portal.assistant.fb_note_label', undefined, 'Add a note (optional)')}
+          </label>
+          <textarea
+            id="li-cp-fbk-note"
+            className="li-fbk-modal-textarea"
+            rows={3}
+            value={note}
+            onChange={(e) => onNoteChange(e.target.value)}
+            placeholder={t(
+              'portal.assistant.fb_note_placeholder',
+              undefined,
+              'What made this reply good or bad?',
+            )}
+            autoFocus
+          />
+          {error && (
+            <div className="alert alert-error" role="alert">
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="li-cp-modal-foot">
+          <button
+            type="button"
+            className="li-cp-btn li-cp-btn--ghost"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            {t('portal.assistant.fb_cancel', undefined, 'Cancel')}
+          </button>
+          <button type="button" className="li-cp-btn" onClick={onSubmit} disabled={busy}>
+            {busy
+              ? t('portal.assistant.fb_submitting', undefined, 'Submitting…')
+              : t('portal.assistant.fb_submit', undefined, 'Submit')}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

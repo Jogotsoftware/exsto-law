@@ -10,9 +10,10 @@ import { callClaudeDrafter } from '../adapters/claude.js'
 import { loadDraftingPrompt } from '../templates/loader.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
-import { renderTemplate, buildMergeData } from './templateMerge.js'
+import { renderTemplate, buildMergeData, longDate } from './templateMerge.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
-import { resolveMatterJurisdiction } from './matterJurisdiction.js'
+import { resolveMatterJurisdiction, type ResolvedJurisdiction } from './matterJurisdiction.js'
+import { findUnresolvedTokens } from './tokenClasses.js'
 import {
   loadForcedSkills,
   buildActiveSkillsText,
@@ -376,6 +377,18 @@ export async function runDraftGeneration(
     }
   }
 
+  // Generation-integrity fix — the SAME resolved jurisdiction from the top of
+  // this function (never re-resolved), today's date, and the firm's name
+  // (anti-forgery read — never the demo-firm default), stated as facts the
+  // model must ground the document in. Mirrors the template_merge branch
+  // above, which has always stamped these onto a merged document.
+  const firmForFacts = await getTenantSettingsForMerge(agentCtx)
+  const systemFactsText = buildSystemFactsBlock({
+    jurisdiction,
+    todayIso: new Date().toISOString(),
+    firmName: firmForFacts.firmName,
+  })
+
   const prompt = assembleDraftingPrompt({
     basePrompt,
     template,
@@ -387,11 +400,17 @@ export async function runDraftGeneration(
       '(No consultation transcript yet — draft from the intake questionnaire answers above.)',
     documentKind: input.documentKind,
     guidance: input.guidance,
+    systemFactsText,
     activeSkillsText,
     serviceDigestText,
   })
 
   const result = await callClaudeDrafter(agentCtx.tenantId, { prompt, task: 'draft_generate' })
+
+  // Generation-integrity fix — the platform's own honesty net: every raw
+  // {{token}} the model left behind, recorded regardless of what its own
+  // `ambiguities` list says (see PersistTraceArgs.unresolvedTokens).
+  const unresolvedTokens = findUnresolvedTokens(result.documentMarkdown)
 
   const reasoningTraceId = await persistReasoningTrace(agentCtx, {
     prompt,
@@ -415,6 +434,7 @@ export async function runDraftGeneration(
     // prompt column above already carries the injected text verbatim; this is
     // the structured record of what happened, for the review-UI trace panel.
     serviceDigest: serviceDigestTrace,
+    unresolvedTokens,
   })
 
   const generated = await submitAction(agentCtx, {
@@ -464,12 +484,52 @@ export async function runDraftGeneration(
   return generated
 }
 
+// ── System facts injection (generation integrity) ───────────────────────────
+// The three-slot AI prompt contract (questionnaire, transcript, template) never
+// carried the matter's resolved jurisdiction or today's date, even though
+// runDraftGeneration already resolves the jurisdiction (for skills/audit) and
+// the deterministic template_merge path (buildMergeData) has always stamped
+// both onto a merged document. This is the AI path's equivalent: the SAME
+// resolved jurisdiction — never re-resolved here — plus today's date and the
+// firm's name, stated as facts the model must ground the document in rather
+// than guess. An unset jurisdiction is stated explicitly (never silently
+// omitted), matching buildMergeData's honest-[[MISSING]] posture: this is what
+// stops a model from picking a state on its own, which is how a North Carolina
+// governing-law clause once shipped for a Georgia client with no jurisdiction
+// fact ever in its context.
+export interface SystemFacts {
+  jurisdiction: ResolvedJurisdiction | null
+  todayIso: string
+  // Anti-forgery: pass the getTenantSettingsForMerge read (honest-unset), never
+  // getTenantSettings's demo-firm-default fallback.
+  firmName?: string | null
+}
+
+export function buildSystemFactsBlock(facts: SystemFacts): string {
+  const jurisdictionLine = facts.jurisdiction
+    ? `Governing jurisdiction: ${facts.jurisdiction.displayName} (source: ${
+        facts.jurisdiction.source === 'matter' ? 'matter fact' : 'firm default'
+      })`
+    : 'Governing jurisdiction: NOT SET — do not assume any state; write "Governing law to be confirmed"'
+  const lines = [jurisdictionLine, `Today's date: ${longDate(facts.todayIso)}`]
+  if (facts.firmName?.trim()) lines.push(`Firm name: ${facts.firmName.trim()}`)
+  return [
+    '--- System facts (authoritative platform facts — ground the document in these; never contradict, guess around, or default to a different jurisdiction) ---',
+    ...lines,
+  ].join('\n')
+}
+
 export interface AssembleArgs {
   basePrompt: string
   template: string
   questionnaireResponses: Record<string, unknown>
   transcriptText: string
   documentKind: string
+  // Generation integrity — resolved jurisdiction + today's date + firm name,
+  // rendered by buildSystemFactsBlock. Prepended BEFORE the base prompt (the
+  // model's first read), unlike skills/digest/guidance below which append.
+  // Undefined only in tests exercising the pre-existing slot contract alone.
+  systemFactsText?: string
   // Selected-skill bodies (buildActiveSkillsText) injected so a picked playbook is
   // guaranteed to apply. Empty string when none selected.
   activeSkillsText?: string
@@ -501,6 +561,14 @@ export function assembleDraftingPrompt(args: AssembleArgs): string {
       /operating agreement/gi,
       args.documentKind === 'engagement_letter' ? 'engagement letter' : 'operating agreement',
     )
+
+  // System facts (jurisdiction, today, firm name) go FIRST — the model reads
+  // them before anything else, and they are platform facts, not attorney
+  // guidance, so they precede the skills/digest/guidance layers below rather
+  // than joining their append order.
+  if (args.systemFactsText?.trim()) {
+    prompt = `${args.systemFactsText.trim()}\n\n${prompt}`
+  }
 
   // Selected legal playbooks (force-applied), then the service digest (standing,
   // inferred preferences), then the attorney's own revision instructions LAST —
@@ -540,15 +608,27 @@ interface PersistTraceArgs {
   // the trace jsonb beside prompt_config — same "no schema change, full audit"
   // pattern. The digest TEXT itself already lives verbatim in `prompt`.
   serviceDigest?: ServiceDigestTraceMeta | null
+  // Generation integrity — every `{{token}}` findUnresolvedTokens still found in
+  // the produced body, recorded REGARDLESS of what the model's own `ambiguities`
+  // list says (that list is free-text the model writes and can omit a token it
+  // left in place; this is a deterministic scan of the actual output). Always
+  // set by the caller (an empty array is the honest, expected, common case) —
+  // see buildDraftTraceJson for the pre-existing-caller no-op guarantee.
+  unresolvedTokens?: string[]
 }
 
 // PURE — the trace-jsonb fold, split out of persistReasoningTrace so it is
 // testable without a database. Returns fullTrace UNCHANGED when there is
 // nothing to add (byte-identical to the pre-WP-B1 behavior for any caller that
-// never sets serviceDigest).
+// never sets serviceDigest/unresolvedTokens).
 export function buildDraftTraceJson(
   fullTrace: unknown,
-  meta: { promptId?: string; templateId?: string; serviceDigest?: ServiceDigestTraceMeta | null },
+  meta: {
+    promptId?: string
+    templateId?: string
+    serviceDigest?: ServiceDigestTraceMeta | null
+    unresolvedTokens?: string[]
+  },
 ): unknown {
   const extras: Record<string, unknown> = {}
   if (meta.promptId || meta.templateId) {
@@ -560,6 +640,9 @@ export function buildDraftTraceJson(
   if (meta.serviceDigest !== undefined) {
     extras.service_digest = meta.serviceDigest
   }
+  if (meta.unresolvedTokens !== undefined) {
+    extras.unresolved_tokens = meta.unresolvedTokens
+  }
   if (!Object.keys(extras).length || !fullTrace || typeof fullTrace !== 'object') return fullTrace
   return { ...(fullTrace as Record<string, unknown>), ...extras }
 }
@@ -570,6 +653,7 @@ async function persistReasoningTrace(ctx: ActionContext, args: PersistTraceArgs)
     promptId: args.promptId,
     templateId: args.templateId,
     serviceDigest: args.serviceDigest,
+    unresolvedTokens: args.unresolvedTokens,
   })
   await withActionContext(ctx, async (client) => {
     await client.query(
