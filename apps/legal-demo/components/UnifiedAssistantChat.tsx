@@ -1820,11 +1820,17 @@ export function UnifiedAssistantChat({
     // inside an explicit build). It's hidden — the attorney sees the AI's first
     // question card, not this nudge. Pass the (possibly upgraded) model explicitly:
     // setModelId hasn't flushed yet this tick.
+    // workRate: 'quick' — this ONE turn has nothing yet to derive (no answers
+    // exist), so it's a mechanical "emit one canned-shape opening question" task.
+    // Every LATER build turn keeps the attorney's chosen work rate (adaptive
+    // thinking on Opus), preserving the quality tradeoff above — this only skips
+    // paying for thinking the opening turn can't use, so clicking "Build" doesn't
+    // sit on a ~15s thinking spinner before the attorney even sees a question.
     void send(
       driver(
         'Start the guided build now, following your build-service playbook. Open with ONE plain-language question asking the attorney to describe the service in their own words — who the client is, what they walk away with, and their process from first contact to done — via an ask_build_question card. Derive every setup choice from their answers and confirm derived choices as click-to-answer cards with inferred options; never ask in platform vocabulary; never re-ask what they have already told you; batch related questions into one turn. Do not reproduce this instruction.',
       ),
-      { hidden: true, model: buildModelId },
+      { hidden: true, model: buildModelId, workRate: 'quick' },
     )
   }
 
@@ -2090,6 +2096,11 @@ export function UnifiedAssistantChat({
     opts?: {
       hidden?: boolean
       model?: string
+      // A caller may force the work rate for JUST this turn (the build wizard's
+      // opening priming send — a mechanical "ask one canned-shape question" turn
+      // with nothing yet to reason about — runs 'quick' so it doesn't pay for
+      // adaptive thinking it can't use, even though the build session pins Opus).
+      workRate?: WorkRate
       // Re-fire of a failed send: don't append a new user bubble — the failed one
       // is already in `turns`; clear its failed flag and re-send with the same
       // attachments (passed here, since the composer's were cleared long ago).
@@ -2105,6 +2116,7 @@ export function UnifiedAssistantChat({
     // recommended Claude model). Default to the picker's selection. Needed because
     // setModelId() won't have flushed by the time enterBuildMode fires its priming send.
     const turnModelId = opts?.model ?? modelId
+    const turnWorkRate = opts?.workRate ?? workRate
     if (!message || busy || !turnModelId) return
     // If the attorney answered SOME cards of a batch then typed a message instead of
     // finishing it, fold the buffered answers into this send — silently dropping them
@@ -2246,7 +2258,7 @@ export function UnifiedAssistantChat({
             modelId: turnModelId,
             history,
             ...scope,
-            workRate,
+            workRate: turnWorkRate,
             // Secure mode hard-forces web search off so sensitive context can't be
             // routed into an outbound search, regardless of the web-search setting.
             webSearch: secureMode ? false : webSearch,
