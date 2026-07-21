@@ -66,6 +66,13 @@ export interface FieldPlacement {
   source: 'anchor' | 'placed'
   /** Present when source='anchor': which body marker produced this placement. */
   anchor?: PlacementAnchor
+  /** ES-MULTIDOC-1: which document in the envelope this placement lands on
+   *  (0-based index into the envelope's ordered document set). ABSENT means
+   *  document 0 — so every single-document envelope's placements (and every
+   *  pre-multidoc envelope) read byte-identically without this key. `rect.page`
+   *  is the page WITHIN this document; (docIndex, rect.page) together bind a
+   *  placement to (document, page) unambiguously. Only written when > 0. */
+  docIndex?: number
   /** ALWAYS present: normalized page coords (0..1 of page width/height), y from top. */
   rect: PlacementRect
   /** ES-2 (§5.3): the send-time resolved auto-fill value for a data-bound
@@ -231,6 +238,10 @@ function parsePlacement(value: unknown): FieldPlacement | null {
   }
   if (typeof o.label === 'string' && o.label) placement.label = o.label
   if (typeof o.value === 'string' && o.value) placement.value = o.value
+  // ES-MULTIDOC-1: only carry docIndex when it's a positive integer — a 0 or
+  // absent value IS document 0, so single-doc plans never grow the key and read
+  // byte-identically (parseEnvelopePlacements round-trip tests assert this).
+  if (isFiniteNumber(o.docIndex) && o.docIndex >= 1) placement.docIndex = Math.floor(o.docIndex)
   const anchor = parseAnchor(o.anchor)
   if (anchor) placement.anchor = anchor
   return placement
@@ -257,4 +268,54 @@ export function parseEnvelopePlacements(raw: unknown): FieldPlacement[] {
 // [0,1]) has a single call site.
 export function serializeEnvelopePlacements(placements: FieldPlacement[]): FieldPlacement[] {
   return placements
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ES-MULTIDOC-1 — one envelope, many documents. The placement plan is a FLAT
+// list; each entry's `docIndex` (default 0) says which document it lands on.
+// These pure helpers are the one place the "absent = doc 0" convention lives,
+// so the handler, the stamp planner, and the canvas all group identically.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** A placement's document index (0-based). Absent/negative ⇒ 0 (document 0). */
+export function placementDocIndex(p: FieldPlacement): number {
+  const d = p.docIndex ?? 0
+  return Number.isFinite(d) && d >= 1 ? Math.floor(d) : 0
+}
+
+/** The placements that land on one document, in input order. */
+export function placementsForDoc(
+  placements: FieldPlacement[],
+  docIndex: number,
+): FieldPlacement[] {
+  return placements.filter((p) => placementDocIndex(p) === docIndex)
+}
+
+/** Group placements by document index → a map keyed by 0-based docIndex. Every
+ *  document that owns at least one placement appears; a document with none does
+ *  not (callers iterate the envelope's document set, not this map, so a
+ *  field-less document is still stamped/rendered — it just has no fields). */
+export function groupPlacementsByDoc(
+  placements: FieldPlacement[],
+): Map<number, FieldPlacement[]> {
+  const byDoc = new Map<number, FieldPlacement[]>()
+  for (const p of placements) {
+    const d = placementDocIndex(p)
+    const list = byDoc.get(d)
+    if (list) list.push(p)
+    else byDoc.set(d, [p])
+  }
+  return byDoc
+}
+
+/** The highest document index any placement references (0 when the plan is
+ *  empty or entirely on document 0). Lets a reader size the document set from
+ *  the placements alone when it has nothing else to go on. */
+export function maxPlacementDocIndex(placements: FieldPlacement[]): number {
+  let max = 0
+  for (const p of placements) {
+    const d = placementDocIndex(p)
+    if (d > max) max = d
+  }
+  return max
 }
