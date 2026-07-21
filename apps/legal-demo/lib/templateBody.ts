@@ -115,6 +115,64 @@ turndown.addRule('strike', {
   replacement: (content) => `~~${content}~~`,
 })
 
+// DOC-TABLES-1: GFM pipe-table serialization. marked (gfm: true) has always
+// PARSED pipe tables into <table> HTML, but turndown had no table rule — so a
+// table loaded into the editor flattened to bare text on save (silent data
+// loss). These rules reverse the parse: cells emit `content |`, rows emit a
+// `| … |` line (the FIRST row also emits the `| --- |` separator GFM requires —
+// header-or-not, so a headerless TipTap table still survives as a table), and
+// the table wraps in blank lines. Multi-line cell content (TipTap wraps every
+// cell in <p>, hard breaks emit \n) collapses to `<br>`, which marked's
+// breaks-mode round-trips back into the cell. Column alignment (marked's
+// `align` attr from `:---` colons) is display-only and not round-tripped —
+// the editor's cells don't model it — so an edited table saves with plain
+// `---` separators. Cell pipes are escaped so a literal `|` in cell prose
+// can't break the row grammar.
+function tableCellContent(content: string): string {
+  return content
+    .trim()
+    .replace(/\s*\n+\s*/g, '<br>')
+    .replace(/\|/g, '\\|')
+}
+
+function isFirstTableRow(row: HTMLElement): boolean {
+  return row.closest('table')?.querySelector('tr') === row
+}
+
+turndown.addRule('liTableCell', {
+  filter: ['th', 'td'],
+  replacement: (content, node) => {
+    const el = node as HTMLElement
+    // First cell opens the row's pipe; each cell closes its own, so the
+    // concatenated row reads `| a | b |`.
+    const lead = el.previousElementSibling ? ' ' : '| '
+    return `${lead}${tableCellContent(content)} |`
+  },
+})
+
+turndown.addRule('liTableRow', {
+  filter: 'tr',
+  replacement: (content, node) => {
+    const el = node as HTMLElement
+    let out = `\n${content}`
+    if (isFirstTableRow(el)) {
+      const cells = el.querySelectorAll('th, td').length
+      if (cells > 0) out += `\n|${' --- |'.repeat(cells)}`
+    }
+    return out
+  },
+})
+
+turndown.addRule('liTable', {
+  filter: 'table',
+  replacement: (content) => `\n\n${content.trim()}\n\n`,
+})
+
+turndown.addRule('liTableSection', {
+  filter: ['thead', 'tbody', 'tfoot'],
+  replacement: (content) => content,
+})
+
 // Alignment lives on block elements that DO have built-in commonmark rules
 // (heading → `#`, paragraph → text), which out-prioritize keep(). So an aligned
 // block needs an addRule (user rules win) that emits it as raw HTML; an unaligned

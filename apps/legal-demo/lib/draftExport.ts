@@ -305,6 +305,12 @@ const PRINT_STYLES = `
     padding: 1pt 3pt;
     border-radius: 2px;
   }
+  table { border-collapse: collapse; width: 100%; margin: 0 0 12pt; }
+  th, td { border: 1pt solid #888; padding: 4pt 8pt; vertical-align: top; text-align: left; }
+  th { background: #f0f0f0; font-weight: 700; }
+  th p, td p { margin: 0; }
+  th[align='center'], td[align='center'] { text-align: center; }
+  th[align='right'], td[align='right'] { text-align: right; }
   hr { border: none; border-top: 1px solid #999; margin: 18pt 0; }
   @media print {
     @page { margin: 1in; }
