@@ -160,10 +160,10 @@ export default function EsignPage() {
         <button
           type="button"
           className="li-esign-newbtn"
-          onClick={() => router.push('/attorney/esign/new')}
+          onClick={() => router.push('/attorney/esign/compose')}
         >
           <PlusIcon size={16} />
-          New Envelope
+          eSign
         </button>
       </div>
 
@@ -208,7 +208,7 @@ export default function EsignPage() {
       {view && view.length === 0 && (
         <div className="li-esign-empty">
           {envelopes && envelopes.length === 0
-            ? 'No envelopes yet. Upload a PDF with “New envelope”, or send a drafted document from Review.'
+            ? 'No envelopes yet. Upload a PDF with “eSign”, or eSign a drafted document from Review.'
             : 'No envelopes in this filter.'}
         </div>
       )}
