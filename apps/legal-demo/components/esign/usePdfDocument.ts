@@ -61,7 +61,19 @@ export function usePdfDocument(data: ArrayBuffer | Uint8Array | null): PdfDocSta
       // caller's bytes stay usable (e.g. re-render on zoom, upload later).
       const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
       const copy = bytes.slice()
-      const doc = await pdfjs.getDocument({ data: copy }).promise
+      // isOffscreenCanvasSupported: false — pdfjs v4's worker rasterizes via
+      // OffscreenCanvas by default when the browser supports it, and on some
+      // browser/GPU stacks that path renders the page VERTICALLY FLIPPED (a
+      // known class of pdfjs bugs; upright bytes come out upside-down on
+      // screen). This PDF is byte-correct (MediaBox origin 0, no CropBox,
+      // Rotate 0) and node renders it upright with the worker disabled —
+      // the flip only reproduces via the browser worker's OffscreenCanvas
+      // rasterizer. Forcing the worker onto a normal <canvas> keeps what
+      // the attorney SEES in sync with what stampPdf.ts stamps onto the
+      // executed copy (both read the same upright bytes) — without this,
+      // fields placed on the flipped preview land in the wrong spot on the
+      // final signed PDF.
+      const doc = await pdfjs.getDocument({ data: copy, isOffscreenCanvasSupported: false }).promise
       if (cancelled) {
         void doc.destroy()
         return
