@@ -66,6 +66,19 @@ function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; mime: string } | 
 // inverse of pdfjs's viewport transform for each rotation (verified: /Rotate
 // 180 → transform [-1,0,0,1,W,0]; 90/270 → axes swapped), so a box stamps at
 // the identical spot the attorney placed it.
+//
+// CROPBOX-FIX (defensive hardening, not the ESIGN-ROTATE-FIX bug above): the
+// "visual box" pdfjs lays out is actually the page's CropBox (getViewport's
+// dims come from it), which is not always the MediaBox — a PDF can crop
+// smaller than its media, and a MediaBox's lower-left corner need not be
+// (0,0). page.getSize()/getMediaBox() ignore that: they're right on SCALE
+// (same width/height as the CropBox for the common no-crop case) but wrong on
+// ORIGIN whenever CropBox ≠ MediaBox. Reading page.getCropBox() and adding its
+// (x, y) back onto the rotation-mapped point keeps capture (pdfjs) and stamp
+// (pdf-lib) in agreement in both cases. getCropBox() falls back to the
+// MediaBox at the MediaBox's own origin when no CropBox is set, so an
+// origin-0, CropBox-equals-MediaBox page — every envelope stamped before this
+// fix — computes byte-identically to the old getSize()-keyed math.
 // ─────────────────────────────────────────────────────────────────────────
 
 export type PageRotation = 0 | 90 | 180 | 270
@@ -115,23 +128,34 @@ export function visualToMediaPoint(
  *  MediaBox box (bottom-left origin, unrotated) plus the counter-clockwise
  *  degrees to rotate drawn content so it reads upright once /Rotate is applied.
  *  Pure — unit-tested for all four rotations. For /Rotate 0 this reduces exactly
- *  to the previous `rectToBox` (x = rect.x·W, y = H − rect.y·H − rect.h·H). */
+ *  to the previous `rectToBox` (x = rect.x·W, y = H − rect.y·H − rect.h·H).
+ *
+ *  `boxW`/`boxH` must be the CROP box's width/height — what pdfjs actually
+ *  rendered and what placement rects are normalized against (usePdfDocument.ts
+ *  bakes `getViewport({scale:1})`'s dims, which come from the CropBox, not the
+ *  MediaBox). `origin` is that CropBox's lower-left corner in the page's
+ *  default user space — pd-lib draws in that absolute space, not relative to
+ *  the crop box, so a page whose CropBox doesn't start at (0,0) needs the
+ *  offset added back after the rotation math. Defaults to (0,0) so callers
+ *  passing MediaBox-equals-CropBox, origin-0 dimensions (the regression bar)
+ *  get byte-identical output to before this parameter existed (CROPBOX-FIX). */
 export function placementRectToMediaBox(
   rect: PlacementRect,
-  mediaW: number,
-  mediaH: number,
+  boxW: number,
+  boxH: number,
   rot: PageRotation,
+  origin: { x: number; y: number } = { x: 0, y: 0 },
 ): { x: number; y: number; w: number; h: number; rotate: PageRotation } {
-  const vis = visualPageSize(mediaW, mediaH, rot)
+  const vis = visualPageSize(boxW, boxH, rot)
   const vx = rect.x * vis.w
   const vy = rect.y * vis.h
   const vw = rect.w * vis.w
   const vh = rect.h * vis.h
-  const a = visualToMediaPoint(vx, vy, mediaW, mediaH, rot)
-  const b = visualToMediaPoint(vx + vw, vy + vh, mediaW, mediaH, rot)
+  const a = visualToMediaPoint(vx, vy, boxW, boxH, rot)
+  const b = visualToMediaPoint(vx + vw, vy + vh, boxW, boxH, rot)
   return {
-    x: Math.min(a.x, b.x),
-    y: Math.min(a.y, b.y),
+    x: Math.min(a.x, b.x) + origin.x,
+    y: Math.min(a.y, b.y) + origin.y,
     w: Math.abs(a.x - b.x),
     h: Math.abs(a.y - b.y),
     rotate: rot,
@@ -152,20 +176,32 @@ async function stampOne(
   sigFont: PDFFont,
   field: StampField,
 ): Promise<void> {
-  // page.getSize() is the UNROTATED MediaBox; the rect is normalized against the
-  // VISUAL (rotation-honored) page, so lay the field out in visual points and
-  // map each anchor back to MediaBox. rotate = 0 for an un-rotated page, in
-  // which case every mapped coordinate and call is identical to the pre-fix
-  // behavior (the regression bar).
-  const { width, height } = page.getSize()
+  // CROPBOX-FIX: pdfjs renders (and usePdfDocument.ts normalizes placement
+  // rects against) the page's CropBox, not its MediaBox — page.getViewport()
+  // bakes in the CropBox dims. page.getSize() reports the MediaBox instead, so
+  // for an upload whose CropBox is smaller than its MediaBox, or whose
+  // MediaBox doesn't start at (0,0), the old getSize()-keyed math agreed with
+  // pdfjs on SCALE but not on ORIGIN — every field landed at a uniform offset
+  // from where the attorney placed it. page.getCropBox() falls back to the
+  // MediaBox (at the MediaBox's own origin) when no CropBox is set, so this is
+  // byte-identical to the old page.getSize() path for that common case — the
+  // regression bar.
+  const cropBox = page.getCropBox()
+  const { width, height } = cropBox
   const rot = normalizePageRotation(page.getRotation().angle)
   const vis = visualPageSize(width, height, rot)
   const vx = field.rect.x * vis.w
   const vy = field.rect.y * vis.h
   const vw = field.rect.w * vis.w
   const vh = field.rect.h * vis.h
-  // Visual point (top-left origin, y down) → MediaBox point (bottom-left, y up).
-  const toMedia = (px: number, py: number) => visualToMediaPoint(px, py, width, height, rot)
+  // Visual point (top-left origin, y down) → point relative to the CropBox's
+  // own bottom-left corner (y up) → shifted by the CropBox's origin into the
+  // page's absolute default user space, which is what pdf-lib's drawing calls
+  // expect (NOT relative to the crop box).
+  const toMedia = (px: number, py: number) => {
+    const m = visualToMediaPoint(px, py, width, height, rot)
+    return { x: m.x + cropBox.x, y: m.y + cropBox.y }
+  }
   // Only carry a rotate option when the page is actually rotated, so unrotated
   // pages emit byte-identical draw calls.
   const rotateOpt = rot === 0 ? {} : { rotate: degrees(rot) }
