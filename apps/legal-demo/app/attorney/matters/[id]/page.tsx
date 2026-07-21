@@ -26,6 +26,7 @@ import {
   TranscriptView,
   deriveMatterSteps,
   questionnaireToMarkdown,
+  stepAdvanceControls,
   workflowStepStates,
   type MatterDetail,
   type StepKey,
@@ -42,6 +43,7 @@ import {
   ClientReviewStep,
   CompleteMatterStep,
 } from './RunnerReview'
+import { EsignWorkflowStep } from './EsignWorkflowStep'
 import { skipStep } from '@/lib/stepRunner'
 import { US_STATE_OPTIONS } from '@/lib/usStates'
 import { useConfirm } from '@/components/ConfirmModal'
@@ -881,34 +883,21 @@ function WorkflowStepWindow({
   onChanged: () => Promise<void>
 }) {
   const isCurrent = state === 'current'
-  // Human advance edges for the current stage (attorney → Continue, client → Skip).
-  const attorneyEdge = isCurrent
-    ? (stage.advances_to.find((e) => e.gate === 'attorney') ?? null)
-    : null
-  const clientEdge = isCurrent ? (stage.advances_to.find((e) => e.gate === 'client') ?? null) : null
-  const systemEdge = isCurrent
-    ? (stage.advances_to.find((e) => e.gate === 'system' || e.gate === 'automatic') ?? null)
-    : null
-  const waitsOnSystem = isCurrent && !attorneyEdge && !clientEdge && !!systemEdge
-
-  // An attorney edge whose `via` names a DIFFERENT action (e.g. review_send_document's
-  // draft.approve) is finished by that step's own embedded control (Approve/Reject),
-  // never by a bare Continue — legal.matter.advance's GUARD 2 rejects it outright (the
-  // M-MRJHEC8X defect this exists to prevent). Mirror that guard here so Continue is
-  // never offered where it would just bounce off a 409.
-  const attorneyEdgeHasOwnAction =
-    !!attorneyEdge?.via && attorneyEdge.via !== 'legal.matter.advance'
-
-  // The advance control appended to a step's footer: Continue (attorney gate, plain
-  // advance only) or Skip (client gate — advance without the client). A step whose
-  // attorney edge has its own completing action gets neither here — its embedded
-  // surface is the completion path. A system-only gate has none.
-  const advanceFooter =
-    attorneyEdge && !attorneyEdgeHasOwnAction ? (
-      <ContinueButton matter={matter} edge={attorneyEdge} onChanged={onChanged} onClose={onClose} />
-    ) : clientEdge ? (
-      <SkipButton matter={matter} stageKey={stage.key} onChanged={onChanged} onClose={onClose} />
-    ) : null
+  // The footer doctrine (#442) lives in ONE pure helper (shared.tsx, unit-tested):
+  // Continue only on a plain attorney gate (an edge via its own completing action
+  // — draft.approve, the e-sign step's Review & send — is finished by that step's
+  // embedded control; legal.matter.advance's GUARD 2 rejects the bare advance,
+  // the M-MRJHEC8X defect this prevents), Skip on a client gate, neither on a
+  // system/automatic-only gate.
+  const { attorneyEdge, clientEdge, continueEdge, skipEdge, waitsOnSystem } = stepAdvanceControls(
+    stage,
+    isCurrent,
+  )
+  const advanceFooter = continueEdge ? (
+    <ContinueButton matter={matter} edge={continueEdge} onChanged={onChanged} onClose={onClose} />
+  ) : skipEdge ? (
+    <SkipButton matter={matter} stageKey={stage.key} onChanged={onChanged} onClose={onClose} />
+  ) : null
   const waitsNote = waitsOnSystem ? <WaitingNote /> : null
 
   const kind = stage.action?.kind
@@ -953,6 +942,23 @@ function WorkflowStepWindow({
         onChanged={onChanged}
         title={stage.label}
         extraFooter={advanceFooter}
+      />
+    )
+  }
+
+  // ── ESIGN-UNIFY-1 ES-4: the workflow-embedded e-sign step ───────────────────
+  // Own-action step (Review & send inside the window); its only edge is the
+  // system gate on esign.completed, so advanceFooter is null here by
+  // construction — no dead Continue (#442). The window itself shows the honest
+  // sent/awaiting state and the composer.
+  if (kind === 'esign') {
+    return (
+      <EsignWorkflowStep
+        stage={stage}
+        matter={matter}
+        state={state}
+        onChanged={onChanged}
+        onClose={onClose}
       />
     )
   }

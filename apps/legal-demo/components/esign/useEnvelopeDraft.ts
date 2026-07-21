@@ -17,6 +17,10 @@ export interface DraftRecipient {
   role: RecipientRole
   /** 1-based signing order; collapsed to 1 for every row when ordering is OFF. */
   order: number
+  /** ES-4 (workflow-step mode): the marker signer key this recipient owns
+   *  ({{type:key}}) — seeded from the template's e-sign roles so the draft
+   *  send binds fields to the right signer. Null for free-typed rows. */
+  key?: string | null
 }
 
 export interface EnvelopeDraft {
@@ -29,6 +33,9 @@ export interface EnvelopeDraft {
   /** §5.1 — resolved coordinate placements; the ES-2 canvas writes these. */
   placements: FieldPlacement[]
   useSigningOrder: boolean
+  /** ES-4: the document is fixed by the launch source (the workflow step's
+   *  approved version) — step 1 needs no file and offers no replace. */
+  documentLocked: boolean
 }
 
 export const EMPTY_RECIPIENT: DraftRecipient = {
@@ -37,6 +44,7 @@ export const EMPTY_RECIPIENT: DraftRecipient = {
   title: '',
   role: 'needs_to_sign',
   order: 1,
+  key: null,
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -56,6 +64,10 @@ export interface EnvelopeDraftApi {
   /** Pre-fill row 1 from the attached matter/contact — never overwrites a row
    *  the attorney already touched (the #439 rule). */
   prefillFirstRecipient: (name: string, email: string) => void
+  /** ES-4 (workflow-step mode): seed the whole draft from the step's
+   *  pre-resolved context — subject, recipient rows (keys/roles/orders kept),
+   *  document locked. Rows stay fully editable afterwards. */
+  seedWorkflowStep: (seed: { subject?: string; recipients: DraftRecipient[] }) => void
   /** Recipients with a non-empty email (what actually sends). */
   filledRecipients: DraftRecipient[]
   /** Per-step validation error, or null when the step is complete. */
@@ -72,6 +84,7 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
     recipients: [{ ...EMPTY_RECIPIENT }],
     placements: [],
     useSigningOrder: false,
+    documentLocked: false,
   })
 
   const setFile = useCallback((file: File | null) => {
@@ -163,6 +176,21 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
     })
   }, [])
 
+  const seedWorkflowStep = useCallback(
+    (seed: { subject?: string; recipients: DraftRecipient[] }) => {
+      setDraft((d) => ({
+        ...d,
+        documentLocked: true,
+        subject: seed.subject?.trim() ? seed.subject : d.subject,
+        recipients: seed.recipients.length ? seed.recipients : [{ ...EMPTY_RECIPIENT }],
+        // Sequential template orders arrive as a real signing order; all-equal
+        // orders mean parallel — the toggle reflects what the config declared.
+        useSigningOrder: seed.recipients.some((r) => r.order > 1),
+      }))
+    },
+    [],
+  )
+
   const filledRecipients = useMemo(
     () => draft.recipients.filter((r) => r.email.trim()),
     [draft.recipients],
@@ -170,7 +198,7 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
 
   const stepError = useCallback(
     (step: number): string | null => {
-      if (step === 0 && !draft.file) return 'Choose a PDF to send.'
+      if (step === 0 && !draft.file && !draft.documentLocked) return 'Choose a PDF to send.'
       if (step === 1) {
         if (filledRecipients.length === 0) {
           return 'Add at least one recipient with an email address.'
@@ -183,7 +211,7 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
       }
       return null
     },
-    [draft.file, filledRecipients],
+    [draft.file, draft.documentLocked, filledRecipients],
   )
 
   return {
@@ -199,6 +227,7 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
     setUseSigningOrder,
     setPlacements,
     prefillFirstRecipient,
+    seedWorkflowStep,
     filledRecipients,
     stepError,
   }

@@ -25294,3 +25294,75 @@ details.li-brief-research summary:hover {
   margin-left: auto;
   color: var(--li-muted-2, #9aa3b8);
 }
+
+/* ── ESIGN-UNIFY-1 ES-4 — workflow e-sign step window (li-esign2 family,
+   append-only). The step's summary card (approved doc · resolved recipients ·
+   pre-placed fields), its sent/awaiting + completed status panels, and the
+   Review & send CTA row. */
+.li-esign2-step-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.li-esign2-step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--li-text);
+  line-height: 1.45;
+}
+.li-esign2-step-row-ico {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--li-border);
+  background: var(--li-card);
+  color: var(--li-navy);
+}
+.li-esign2-step-warn {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--li-gold-ink, #8a5a00);
+  background: var(--li-gold-soft, rgba(180, 83, 9, 0.08));
+  border: 1px solid var(--li-gold-line, rgba(180, 83, 9, 0.25));
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.li-esign2-step-cta {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+.li-esign2-step-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  background: var(--li-card);
+  padding: 12px 14px;
+  color: var(--li-navy);
+  margin-bottom: 12px;
+}
+.li-esign2-step-status.is-done {
+  color: var(--li-ok, #15803d);
+}
+.li-esign2-step-status-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--li-text);
+}
+.li-esign2-step-status-sub {
+  font-size: 12.5px;
+  color: var(--li-muted);
+  margin-top: 2px;
+}
+.li-esign2-step-status-sub a {
+  color: var(--li-navy);
+  text-decoration: underline;
+}

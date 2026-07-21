@@ -31,6 +31,19 @@ import { useEnvelopeDraft, type RecipientRole } from './useEnvelopeDraft'
 
 const STEPS = ['Documents', 'Recipients', 'Fields', 'Review & send'] as const
 
+/** ES-4: a recipient row pre-resolved from the template's e-sign roles (via
+ *  esignPrefill) — arrives editable; `key` binds the row to its {{type:key}}
+ *  markers, `label` names the unresolved role ("Client", "Managing Member"). */
+export interface WorkflowStepRecipientSeed {
+  name: string
+  email: string
+  title: string
+  role: RecipientRole
+  order: number
+  key: string | null
+  label?: string
+}
+
 export type ComposerSource =
   | { kind: 'blank' }
   | { kind: 'upload'; file?: File }
@@ -39,6 +52,20 @@ export type ComposerSource =
       documentEntityId: string
       documentVersionId: string
       matterEntityId?: string
+    }
+  // ESIGN-UNIFY-1 ES-4 (design §7): launched from the matter workflow's e-sign
+  // step — the document is LOCKED to the approved version, recipients arrive
+  // pre-resolved from the template's roles, and Send goes through the draft
+  // send surface (legal.esign.send_for_signature), not the upload path.
+  | {
+      kind: 'workflow-step'
+      matterEntityId: string
+      documentEntityId: string
+      documentVersionId: string
+      documentTitle: string
+      versionNumber: number | null
+      subject?: string
+      recipients: WorkflowStepRecipientSeed[]
     }
 
 const ROLE_LABELS: Record<RecipientRole, string> = {
@@ -94,13 +121,30 @@ export function EsignComposer({
     moveRecipient,
     setUseSigningOrder,
     prefillFirstRecipient,
+    seedWorkflowStep,
     filledRecipients,
     stepError,
   } = useEnvelopeDraft()
 
-  // Seed from the launch source: a pre-picked file arrives pre-attached.
+  const isWorkflowStep = source.kind === 'workflow-step'
+
+  // Seed from the launch source: a pre-picked file arrives pre-attached; a
+  // workflow step arrives with the document locked and recipients resolved.
   useEffect(() => {
     if (source.kind === 'upload' && source.file) setFile(source.file)
+    if (source.kind === 'workflow-step') {
+      seedWorkflowStep({
+        subject: source.subject,
+        recipients: source.recipients.map((r) => ({
+          name: r.name,
+          email: r.email,
+          title: r.title,
+          role: r.role,
+          order: r.order,
+          key: r.key,
+        })),
+      })
+    }
   }, [])
 
   useEffect(() => {
@@ -195,6 +239,42 @@ export function EsignComposer({
     }
     setBusy(true)
     setError(null)
+
+    // ES-4 workflow-step mode: the document is the approved draft version — ONE
+    // send through legal.esign.send_for_signature (no upload). Recipient rows
+    // carry their template signer keys so the body's {{type:key}} markers bind.
+    if (source.kind === 'workflow-step') {
+      try {
+        const res = await callAttorneyMcp<{
+          envelopeId: string
+          savedContacts?: Array<{ email: string; contactEntityId: string }>
+        }>({
+          toolName: 'legal.esign.send_for_signature',
+          input: {
+            documentVersionId: source.documentVersionId,
+            subject: draft.subject.trim() || source.documentTitle,
+            message: draft.message.trim() || undefined,
+            placements: draft.placements.length ? draft.placements : undefined,
+            signers: filledRecipients.map((r, i) => ({
+              email: r.email.trim(),
+              name: r.name.trim() || undefined,
+              title: r.title.trim() || undefined,
+              order: draft.useSigningOrder ? r.order || i + 1 : 1,
+              key: r.key ?? undefined,
+              role: r.role,
+            })),
+          },
+        })
+        setResult({ envelopeId: res.envelopeId, savedContacts: res.savedContacts ?? [] })
+        onSent?.(res.envelopeId)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+
     try {
       const form = new FormData()
       form.append('file', draft.file!)
@@ -285,7 +365,31 @@ export function EsignComposer({
       </div>
 
       <div className="li-esign-wiz-body">
-        {step === 0 && (
+        {step === 0 && isWorkflowStep && source.kind === 'workflow-step' && (
+          <div>
+            <div className="li-esign-wiz-h">Document</div>
+            {/* ES-4: locked to the approved version this workflow step sends —
+                no replace, no upload; the attorney reviews it on the matter. */}
+            <div className="li-esign2-doccard">
+              <span className="li-esign-doc-ico" aria-hidden="true">
+                <FileTextIcon size={20} />
+              </span>
+              <span className="li-esign2-doccard-meta">
+                <span className="li-esign-wiz-doc-name">{source.documentTitle}</span>
+                <span className="li-esign-wiz-doc-sub">
+                  {source.versionNumber != null
+                    ? `Version ${source.versionNumber} · Approved`
+                    : 'Approved version'}
+                </span>
+              </span>
+            </div>
+            <p className="li-esign-wiz-hint">
+              This envelope sends the approved version from the workflow step and files under this
+              matter.
+            </p>
+          </div>
+        )}
+        {step === 0 && !isWorkflowStep && (
           <div>
             <div className="li-esign-wiz-h">Document</div>
             <input
@@ -550,23 +654,35 @@ export function EsignComposer({
                   className="li-esign-wiz-in li-esign-subject-in"
                   value={draft.subject}
                   onChange={(e) => setSubject(e.target.value)}
-                  placeholder={draft.file?.name.replace(/\.pdf$/i, '') || 'Document title'}
+                  placeholder={
+                    (source.kind === 'workflow-step'
+                      ? source.documentTitle
+                      : draft.file?.name.replace(/\.pdf$/i, '')) || 'Document title'
+                  }
                   aria-label="Envelope subject"
                 />
               </div>
               <div className="li-esign-wiz-reviewrow">
                 <span className="li-esign-wiz-reviewk">Document</span>
-                <span className="li-esign-wiz-reviewv">{draft.file?.name ?? '—'}</span>
+                <span className="li-esign-wiz-reviewv">
+                  {source.kind === 'workflow-step'
+                    ? `${source.documentTitle}${
+                        source.versionNumber != null ? ` (v${source.versionNumber}, approved)` : ''
+                      }`
+                    : (draft.file?.name ?? '—')}
+                </span>
               </div>
               <div className="li-esign-wiz-reviewrow">
                 <span className="li-esign-wiz-reviewk">Filed under</span>
                 <span className="li-esign-wiz-reviewv">
-                  {[
-                    attachedMatter ? `Matter ${attachedMatter.matterNumber}` : null,
-                    attachedContact ? attachedContact.fullName || attachedContact.email : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ') || 'Standalone (eSign only)'}
+                  {isWorkflowStep
+                    ? 'This matter (workflow e-sign step)'
+                    : [
+                        attachedMatter ? `Matter ${attachedMatter.matterNumber}` : null,
+                        attachedContact ? attachedContact.fullName || attachedContact.email : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || 'Standalone (eSign only)'}
                 </span>
               </div>
               <div className="li-esign-wiz-reviewrow">
