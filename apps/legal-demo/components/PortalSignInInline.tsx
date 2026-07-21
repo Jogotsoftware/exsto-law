@@ -4,6 +4,7 @@ import { useId, useState } from 'react'
 import { LockIcon, MailIcon } from '@/components/icons'
 import { useI18n } from '@/lib/i18n'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
+import { PasswordField } from '@/components/PasswordField'
 
 // The password sign-in + session-bridge leg, extracted from /portal/login so the
 // booking flow can sign a returning client in WITHOUT navigating (the wizard's
@@ -129,20 +130,16 @@ export function PortalSignInInline({
           <label className="bk-label" htmlFor={passwordId}>
             {t('signin.password', undefined, 'Password')}
           </label>
-          <div className="bk-input-wrap">
-            <span className="bk-input-icon" aria-hidden>
-              <LockIcon size={18} />
-            </span>
-            <input
-              id={passwordId}
-              className="bk-input"
-              type="password"
-              required
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+          <PasswordField
+            id={passwordId}
+            value={password}
+            onChange={setPassword}
+            wrapClassName="bk-input-wrap"
+            inputClassName="bk-input"
+            leadingIcon={<LockIcon size={18} />}
+            required
+            autoComplete="current-password"
+          />
         </div>
       </div>
       <button

@@ -14,6 +14,8 @@ const CLIENT_FACING_PAGES = [
   '../app/page.tsx',
   '../app/portal/login/page.tsx',
   '../app/portal/set-password/page.tsx',
+  '../app/portal/forgot-password/page.tsx',
+  '../app/portal/reset-password/page.tsx',
   '../app/portal/pay/[invoice]/page.tsx',
   '../app/book/manage/[token]/page.tsx',
   '../components/SignDocument.tsx',

@@ -36,6 +36,7 @@ import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { verifyCaptchaIfConfigured } from '@/lib/captcha'
 import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
+import { validatePassword } from '@/lib/passwordPolicy'
 
 export const runtime = 'nodejs'
 // Booking a service whose workflow opens on a producing stage can draft
@@ -43,7 +44,6 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 
 // MULTI-TENANT-1: tenant + public-intake actor resolved per request (lib/publicTenant.ts).
-const MIN_PASSWORD_LENGTH = 8
 const BASE_URL = (
   process.env.NEXT_PUBLIC_BASE_URL ??
   process.env.URL ??
@@ -125,11 +125,9 @@ export async function POST(request: Request) {
   if (!email || !fullName || !serviceKey) {
     return NextResponse.json({ error: 'Name, email and service are required.' }, { status: 400 })
   }
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return NextResponse.json(
-      { error: `Choose a password of at least ${MIN_PASSWORD_LENGTH} characters.` },
-      { status: 400 },
-    )
+  const pwErr = validatePassword(password)
+  if (pwErr) {
+    return NextResponse.json({ error: pwErr }, { status: 400 })
   }
 
   let tenantId: string
