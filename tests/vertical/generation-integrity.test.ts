@@ -23,12 +23,13 @@ import {
   assembleDraftingPrompt,
   buildSystemFactsBlock,
   buildDraftTraceJson,
+  buildRevisionPrompt,
   findUnresolvedTokens,
   buildMatterEvidence,
   buildBriefSynthesisPrompt,
   BRIEF_JURISDICTION_RULE,
+  DOCUMENT_STYLE_INSTRUCTION,
   FORMATTING_DIRECTIVES,
-  buildRevisionPrompt,
   renderEvidenceBundle,
   type BriefScope,
   type EvidenceBundle,
@@ -197,6 +198,60 @@ describe('assembleDraftingPrompt — system facts land first', () => {
   it('no systemFactsText: byte-identical to the pre-fix assembly (existing callers unaffected)', () => {
     expect(assembleDraftingPrompt(args)).toBe(assembleDraftingPrompt({ ...args }))
     expect(assembleDraftingPrompt(args).startsWith('Draft an LLC')).toBe(true)
+  })
+})
+
+// ── document-formatting standard reaches every generation path ───────────────
+
+describe('DOCUMENT_STYLE_INSTRUCTION reaches the generation prompts', () => {
+  const args = {
+    basePrompt: basePrompt(),
+    template: 'TEMPLATE BODY',
+    questionnaireResponses: { company_name: 'Acme LLC' },
+    transcriptText: 'Members agreed on terms.',
+    documentKind: 'operating_agreement',
+  }
+
+  it('the style standard is a real block, matched to the renderer (u + text-align:center only)', () => {
+    expect(DOCUMENT_STYLE_INSTRUCTION).toMatch(/Document formatting and drafting standard/)
+    expect(DOCUMENT_STYLE_INSTRUCTION).toContain('<u>underline</u>')
+    expect(DOCUMENT_STYLE_INSTRUCTION).toContain('text-align:center')
+  })
+
+  it('draft generation: the style standard is injected, ahead of the base prompt', () => {
+    const prompt = assembleDraftingPrompt({ ...args, styleText: DOCUMENT_STYLE_INSTRUCTION })
+    expect(prompt).toContain(DOCUMENT_STYLE_INSTRUCTION)
+    expect(prompt.indexOf(DOCUMENT_STYLE_INSTRUCTION)).toBeLessThan(prompt.indexOf('Draft an LLC'))
+    for (const slot of REQUIRED_SLOTS) expect(prompt).not.toContain(slot)
+  })
+
+  it('style standard sits with the system facts: [facts][style][base prompt]', () => {
+    const prompt = assembleDraftingPrompt({
+      ...args,
+      systemFactsText: 'FACTS-MARKER',
+      styleText: DOCUMENT_STYLE_INSTRUCTION,
+    })
+    expect(prompt.indexOf('FACTS-MARKER')).toBe(0)
+    expect(prompt.indexOf('FACTS-MARKER')).toBeLessThan(prompt.indexOf(DOCUMENT_STYLE_INSTRUCTION))
+    expect(prompt.indexOf(DOCUMENT_STYLE_INSTRUCTION)).toBeLessThan(prompt.indexOf('Draft an LLC'))
+  })
+
+  it('no styleText: byte-identical to the pre-fix assembly (existing callers unaffected)', () => {
+    expect(assembleDraftingPrompt(args)).toBe(assembleDraftingPrompt({ ...args }))
+    expect(assembleDraftingPrompt(args)).not.toContain(DOCUMENT_STYLE_INSTRUCTION)
+  })
+
+  it('draft revision: the style standard guides new/rewritten text', () => {
+    const prompt = buildRevisionPrompt({
+      currentMarkdown: '# Operating Agreement\n\nBody.',
+      documentKind: 'operating_agreement',
+      instruction: 'Make the indemnification clause mutual.',
+      jurisdictionDisplayName: 'North Carolina',
+    })
+    expect(prompt).toContain(DOCUMENT_STYLE_INSTRUCTION)
+    // Scoped so the redline stays tight — new text follows the standard, existing
+    // structure is preserved.
+    expect(prompt).toMatch(/text you ADD or REWRITE/)
   })
 })
 

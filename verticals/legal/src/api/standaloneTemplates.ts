@@ -2,6 +2,7 @@ import { submitAction, type ActionContext } from '@exsto/substrate'
 import { archiveEntity } from '@exsto/primitives'
 import { chatWithAssistantDetailed, streamChatWithAssistant } from '../adapters/claude.js'
 import { withSkills, loadForcedSkills, buildActiveSkillsText } from './skillContext.js'
+import { DOCUMENT_STYLE_INSTRUCTION } from '../templates/documentStyle.js'
 import { resolveConcreteAssistantModelId, resolveModelForTask } from '../lib/modelRouter.js'
 import {
   getStandaloneTemplate,
@@ -213,6 +214,14 @@ async function buildTemplateAiPrompt(
       .filter(Boolean)
       .join(' ')
     userMsg = instructions
+  }
+
+  // Hold legal-document templates to the same professional formatting standard as
+  // generated drafts (a template is the pattern the finished document renders
+  // from). Skipped for email templates — the standard's title/section/signature
+  // conventions don't fit an email body.
+  if (input.category !== 'email') {
+    baseSystem = `${baseSystem}\n\n${DOCUMENT_STYLE_INSTRUCTION}`
   }
 
   // Skill-aware (load_skill auto-routing) + any force-picked skills.
