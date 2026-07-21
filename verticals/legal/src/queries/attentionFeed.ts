@@ -11,6 +11,7 @@
 // buckets need their own SQL, each `WHERE tenant_id = $1` (hard rule) under
 // withActionContext (RLS).
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { listConnections } from '../adapters/connectionStore.js'
 import { listDueTasks } from './tasks.js'
 import { listPendingDraftVersions } from './drafts.js'
 import { listInvoices } from './billing.js'
@@ -193,7 +194,43 @@ export interface AwaitingReplyThreadRow {
   gmailThreadId: string | null
   channel: string | null
   occurredAt: string
+  // The genuinely-inbound discriminators for the thread's LAST message. Portal
+  // messages carry `author` ('client' | 'attorney'); ingested email carries
+  // `direction` ('inbound' | 'outbound') plus the raw From — but mail.ingest
+  // stamps EVERY synced message 'inbound' (handlers/mail.ts), so `fromAddress`
+  // (bare, lowercased) is what actually tells the firm's own sent mail apart
+  // from a client's. isInboundClientMessage reads these three.
+  author: string | null
+  direction: string | null
+  fromAddress: string | null
   senderName: string | null
+}
+
+// Is this thread's LAST message a genuinely INBOUND client communication the
+// attorney still owes a reply to? The founder bug: the feed counted the firm's
+// OWN outbound email as an inbound client message, because mail.ingest stamps
+// every synced message 'inbound' (handlers/mail.ts) — so a thread the firm
+// replied to last looked like the client was waiting. Exclusions:
+//   (a) firm-side portal replies — author is 'attorney', never 'client';
+//   (b) the firm's own ingested email — From is one of the firm's connected
+//       mailbox(es) / staff sign-in addresses (firmAddresses, matched
+//       case-insensitively);
+//   (c) AI/assistant mail — it goes out via mail.send as 'outbound', excluded by
+//       the direction test below.
+// Pure + exported so the exclusion is unit-tested with fixture rows, no DB.
+export function isInboundClientMessage(
+  row: Pick<AwaitingReplyThreadRow, 'author' | 'direction' | 'fromAddress'>,
+  firmAddresses: ReadonlySet<string>,
+): boolean {
+  // Portal: only a client-authored post is inbound (attorney posts are 'attorney').
+  if (row.author === 'client') return true
+  if (row.author != null) return false
+  // Email: inbound only when stamped inbound AND not sent from a firm identity.
+  if (row.direction === 'inbound') {
+    const from = row.fromAddress?.trim().toLowerCase()
+    return !(from && firmAddresses.has(from))
+  }
+  return false
 }
 
 // Groups threads by (matter, sender) — never by matter alone (several people
@@ -206,9 +243,13 @@ export interface AwaitingReplyThreadRow {
 export function buildAwaitingReplyItems(
   rows: AwaitingReplyThreadRow[],
   nowMs: number,
+  firmAddresses: ReadonlySet<string> = new Set(),
 ): AttentionItem[] {
   const groups = new Map<string, AwaitingReplyThreadRow[]>()
   for (const r of rows) {
+    // Direction filter: only genuinely inbound client communications count. An
+    // outbound thread with no inbound reply pending is not an attention item.
+    if (!isInboundClientMessage(r, firmAddresses)) continue
     const senderKey = (r.senderName || 'a client').trim().toLowerCase()
     const scopeKey = r.matterId ?? `thread:${r.threadId}`
     const key = `${scopeKey}::${senderKey}`
@@ -357,7 +398,42 @@ async function readTasks(
 // mailWorkspace.ts's clientNameIndex uses for the inbox), falling back to the
 // display name in the From header, then the bare address, only ever landing on
 // the generic "A client" if literally nothing could be read.
+// The firm's OWN sending identities — the addresses that, appearing as an
+// ingested email's From, mean the firm sent it (NOT the client). Two sources,
+// unioned + lowercased: (1) the firm's connected mailbox(es) — the Google/Gmail
+// integration identity (legal_integration_connection.account_email), which is
+// exactly the address `mail.ingest` records on the firm's own sent mail; (2)
+// every firm staff sign-in email (actor.external_id for active human actors),
+// the address an attorney replying from their own Gmail sends From. Best-effort
+// on the connection read so a store hiccup never blanks the whole bucket.
+async function readFirmSendingAddresses(ctx: ActionContext): Promise<Set<string>> {
+  const addresses = new Set<string>()
+  try {
+    for (const c of await listConnections(ctx.tenantId)) {
+      if ((c.provider === 'google' || c.provider === 'gmail') && c.accountEmail) {
+        addresses.add(c.accountEmail.trim().toLowerCase())
+      }
+    }
+  } catch (err) {
+    console.warn(
+      '[attentionFeed] firm mailbox read failed:',
+      err instanceof Error ? err.message : err,
+    )
+  }
+  await withActionContext(ctx, async (client) => {
+    const res = await client.query<{ external_id: string }>(
+      `SELECT external_id FROM actor
+        WHERE tenant_id = $1 AND actor_type = 'human' AND status = 'active'
+          AND external_id LIKE '%@%'`,
+      [ctx.tenantId],
+    )
+    for (const r of res.rows) addresses.add(r.external_id.trim().toLowerCase())
+  })
+  return addresses
+}
+
 async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<AttentionItem[]> {
+  const firmAddresses = await readFirmSendingAddresses(ctx)
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       thread_id: string
@@ -365,6 +441,9 @@ async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<Att
       matter_number: string | null
       gmail_thread_id: string | null
       channel: string | null
+      direction: string | null
+      author: string | null
+      from_address: string | null
       occurred_at: string
       sender_name: string | null
     }>(
@@ -373,6 +452,8 @@ async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<Att
                 t.related_entity_ids[1] AS matter_id,
                 t.participants->>'gmail_thread_id' AS gmail_thread_id,
                 lm.channel,
+                lm.direction,
+                lm.author,
                 lm.sender_entity_id,
                 lm.from_raw,
                 lm.occurred_at
@@ -410,7 +491,9 @@ async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<Att
           WHERE e.tenant_id = $1
        )
        SELECT lm.thread_id, lm.matter_id, mt.name AS matter_number,
-              lm.gmail_thread_id, lm.channel, lm.occurred_at,
+              lm.gmail_thread_id, lm.channel, lm.direction, lm.author,
+              lower(regexp_replace(coalesce(lm.from_raw, ''), '^.*<([^>]+)>.*$', '\\1')) AS from_address,
+              lm.occurred_at,
               COALESCE(
                 by_entity.full_name,
                 by_email.full_name,
@@ -431,10 +514,13 @@ async function readAwaitingReply(ctx: ActionContext, nowMs: number): Promise<Att
       matterNumber: r.matter_number,
       gmailThreadId: r.gmail_thread_id,
       channel: r.channel,
+      direction: r.direction,
+      author: r.author,
+      fromAddress: r.from_address,
       occurredAt: r.occurred_at,
       senderName: r.sender_name,
     }))
-    return buildAwaitingReplyItems(rows, nowMs)
+    return buildAwaitingReplyItems(rows, nowMs, firmAddresses)
   })
 }
 
