@@ -39,6 +39,18 @@ export interface SignField {
   label: string
   prefill?: string
 }
+/** ES-MULTIDOC-1 — one document the signer sees, with THIS signer's fields on
+ *  it. An envelope carrying one document has exactly one of these (mirroring the
+ *  flat fields below); a multi-document envelope has several, rendered in order. */
+export interface SignerDocView {
+  docIndex: number
+  documentTitle: string
+  bodyMarkdown: string
+  isFile?: boolean
+  fileName?: string | null
+  fields: SignField[]
+  placements?: FieldPlacement[]
+}
 export interface SignableDoc {
   documentTitle: string
   bodyMarkdown: string
@@ -54,6 +66,10 @@ export interface SignableDoc {
   fields: SignField[]
   /** ES-2 (§9.3) — this signer's coordinate placements (empty = legacy flow). */
   placements?: FieldPlacement[]
+  /** ES-MULTIDOC-1 — every document in the envelope, in order. When present with
+   *  2+ entries the surface renders them all; absent/one entry reads exactly as
+   *  the single-document flow (the flat fields above). */
+  documents?: SignerDocView[]
   canSign: boolean
   alreadyResolved: boolean
   // FB-C — the resolved firm's name (never a hardcoded literal). Optional so
@@ -70,13 +86,19 @@ const SIGNER_TONE = 1
 export function SignDocument({
   doc,
   fileUrl,
+  fileUrlForDoc,
   savedSignature,
   onSign,
   onDecline,
 }: {
   doc: SignableDoc
-  /** 0170: token/session-gated streaming URL for a file (PDF) envelope. */
+  /** 0170: token/session-gated streaming URL for a file (PDF) envelope. The
+   *  primary (document 0) for a single-document envelope. */
   fileUrl?: string | null
+  /** ES-MULTIDOC-1: the streaming URL for one document of the set (`?doc=N`).
+   *  When provided, the multi-document surface fetches each document's bytes
+   *  through it; falls back to `fileUrl` for document 0. */
+  fileUrlForDoc?: (docIndex: number) => string | null
   savedSignature?: SavedSignature | null
   onSign: (a: {
     signatureName: string
@@ -86,8 +108,37 @@ export function SignDocument({
   }) => Promise<{ completed: boolean }>
   onDecline: () => Promise<void>
 }) {
-  const placements = useMemo(() => doc.placements ?? [], [doc.placements])
-  const overlayMode = Boolean(doc.isFile && fileUrl && placements.length > 0)
+  // ES-MULTIDOC-1 — the ordered documents the signer sees. The flat fields
+  // describe the primary (document 0), so a one-document envelope synthesizes a
+  // single view and reads exactly as the pre-multidoc flow.
+  const docs: SignerDocView[] = useMemo(
+    () =>
+      doc.documents && doc.documents.length > 0
+        ? doc.documents
+        : [
+            {
+              docIndex: 0,
+              documentTitle: doc.documentTitle,
+              bodyMarkdown: doc.bodyMarkdown,
+              isFile: doc.isFile,
+              fileName: doc.fileName,
+              fields: doc.fields,
+              placements: doc.placements ?? [],
+            },
+          ],
+    [doc],
+  )
+  // The signature capture, the required-gate, and the Sign action are ONE per
+  // envelope — signing completes every document at once. So values aggregate
+  // across ALL documents (placement ids are envelope-unique).
+  const allPlacements = useMemo(() => docs.flatMap((d) => d.placements ?? []), [docs])
+  // Fields the signer actually fills here (the adopted signature covers {{sign:…}}).
+  const inputFields = useMemo(
+    () => docs.flatMap((d) => d.fields).filter((f) => f.type !== 'sign'),
+    [docs],
+  )
+  const fileUrlFor = (docIndex: number): string | null =>
+    fileUrlForDoc ? fileUrlForDoc(docIndex) : docIndex === 0 ? (fileUrl ?? null) : null
 
   const [adopt, setAdopt] = useState<AdoptState>({
     signatureName: doc.signerName ?? '',
@@ -95,42 +146,23 @@ export function SignDocument({
     consent: false,
   })
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(doc.fields.filter((f) => f.prefill).map((f) => [f.id, f.prefill!])),
+    Object.fromEntries(
+      docs
+        .flatMap((d) => d.fields)
+        .filter((f) => f.prefill)
+        .map((f) => [f.id, f.prefill!]),
+    ),
   )
   const [busy, setBusy] = useState<null | 'sign' | 'decline'>(null)
   const { confirm, confirmElement } = useConfirm()
   const [done, setDone] = useState<null | 'signed' | 'completed' | 'declined'>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Overlay mode (§9.3): fetch the PDF bytes through the token/session-gated
-  // URL and render REAL pages. Legacy file envelopes keep the plain iframe.
-  const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null)
-  useEffect(() => {
-    if (!overlayMode || !fileUrl) return
-    let cancelled = false
-    fetch(fileUrl)
-      .then(async (r) => {
-        if (!r.ok) throw new Error('Could not load the document.')
-        const buf = await r.arrayBuffer()
-        if (!cancelled) setPdfBytes(buf)
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [overlayMode, fileUrl])
-  const pdf = usePdfDocument(overlayMode ? pdfBytes : null)
-
-  // Fields the signer actually fills here (the adopted signature covers {{sign:…}}).
-  const inputFields = doc.fields.filter((f) => f.type !== 'sign')
-
   // §9.3 — what each overlay box shows right now: the send-time resolved value,
   // the signer's live input, the adopted signature, or the "(auto)" date copy.
   const overlayValues = useMemo(() => {
     const out: Record<string, string | null> = {}
-    for (const p of placements) {
+    for (const p of allPlacements) {
       if (p.type === 'sign' || p.type === 'initial') {
         out[p.id] =
           adopt.signatureData || adopt.signatureName.trim()
@@ -147,20 +179,20 @@ export function SignDocument({
       }
     }
     return out
-  }, [placements, adopt, fieldValues, doc.signerName])
+  }, [allPlacements, adopt, fieldValues, doc.signerName])
 
   // Required gate (§9.3): every required signer-fillable text box needs a value
   // before Sign unlocks. Signature/initials ride the adopted name; date is auto.
   const missingRequired = useMemo(
     () =>
-      placements.filter(
+      allPlacements.filter(
         (p) =>
           p.required &&
           !['sign', 'initial', 'name', 'date'].includes(p.type) &&
           !(p.value ?? '').trim() &&
           !(fieldValues[p.id] ?? '').trim(),
       ),
-    [placements, fieldValues],
+    [allPlacements, fieldValues],
   )
 
   function head() {
@@ -264,7 +296,7 @@ export function SignDocument({
   // Tap-a-box (§9.3): a text-ish box focuses its input in the panel below; a
   // signature/initials box jumps to the adopt capture.
   function activateBox(id: string) {
-    const p = placements.find((x) => x.id === id)
+    const p = allPlacements.find((x) => x.id === id)
     if (!p) return
     if (p.type === 'sign' || p.type === 'initial') {
       document.getElementById('li-cp-adopt-anchor')?.scrollIntoView({ behavior: 'smooth' })
@@ -286,44 +318,22 @@ export function SignDocument({
         {doc.signerTitle ? ` (${doc.signerTitle})` : ''}
       </div>
 
-      {overlayMode ? (
-        <div className="li-esp-sign-overlay">
-          {pdf.error && <div className="alert alert-error">{pdf.error}</div>}
-          {!pdf.doc && !pdf.error && (
-            <div className="loading-block" role="status">
-              <span className="spinner" /> Loading document…
-            </div>
-          )}
-          {pdf.doc && (
-            <PdfCanvas
-              doc={pdf.doc}
-              pages={pdf.pages}
-              zoom="fit"
-              placements={placements}
-              toneBySigner={Object.fromEntries(placements.map((p) => [p.signerKey, SIGNER_TONE]))}
-              readOnly
-              valuesById={overlayValues}
-              onActivate={activateBox}
-            />
-          )}
-        </div>
-      ) : doc.isFile && fileUrl ? (
-        <div className="li-cp-sign-file">
-          <iframe
-            src={fileUrl}
-            title={doc.fileName ?? doc.documentTitle}
-            className="li-cp-sign-pdfframe"
+      {/* ES-MULTIDOC-1 — render EVERY document in order; a one-document envelope
+          shows exactly one (no heading), reading as the pre-multidoc surface.
+          The signature capture + Sign action below are shared across them all. */}
+      <div className="li-esp-sign-docs">
+        {docs.map((d, i) => (
+          <SignerDoc
+            key={i}
+            view={d}
+            fileUrl={fileUrlFor(d.docIndex)}
+            overlayValues={overlayValues}
+            onActivate={activateBox}
+            showTitle={docs.length > 1}
+            onError={setError}
           />
-          <a href={fileUrl} target="_blank" rel="noreferrer" className="li-cp-linkbtn">
-            Open {doc.fileName ?? 'document'} in a new tab
-          </a>
-        </div>
-      ) : (
-        <div
-          className="doc-rendered"
-          dangerouslySetInnerHTML={{ __html: renderDocumentHtml(doc.bodyMarkdown) }}
-        />
-      )}
+        ))}
+      </div>
 
       <div className="li-cp-adopt" id="li-cp-adopt-anchor">
         <h3 className="li-cp-adopt-h">Adopt your signature</h3>
@@ -364,7 +374,7 @@ export function SignDocument({
           onState={setAdopt}
         />
 
-        {overlayMode && (
+        {allPlacements.some((p) => p.type === 'date') && (
           <p className="li-esp-adopt-autonote">
             Date fields fill automatically with the date you sign — nothing to type.
           </p>
@@ -408,6 +418,103 @@ export function SignDocument({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ES-MULTIDOC-1 — one document in the signer surface. A file document with this
+// signer's placements renders the REAL PDF pages (PdfCanvas overlay); a file
+// without placements renders the inline iframe; a markdown draft renders its
+// HTML. Each file document owns its own byte fetch + pdfjs load.
+function SignerDoc({
+  view,
+  fileUrl,
+  overlayValues,
+  onActivate,
+  showTitle,
+  onError,
+}: {
+  view: SignerDocView
+  fileUrl: string | null
+  overlayValues: Record<string, string | null>
+  onActivate: (id: string) => void
+  showTitle: boolean
+  onError: (message: string) => void
+}) {
+  const placements = view.placements ?? []
+  const overlayMode = Boolean(view.isFile && fileUrl && placements.length > 0)
+  const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null)
+  useEffect(() => {
+    if (!overlayMode || !fileUrl) return
+    let cancelled = false
+    fetch(fileUrl)
+      .then(async (r) => {
+        if (!r.ok) throw new Error('Could not load the document.')
+        const buf = await r.arrayBuffer()
+        if (!cancelled) setPdfBytes(buf)
+      })
+      .catch((e) => {
+        if (!cancelled) onError(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [overlayMode, fileUrl, onError])
+  const pdf = usePdfDocument(overlayMode ? pdfBytes : null)
+
+  const title = showTitle ? <div className="li-esp-sign-doctitle">{view.documentTitle}</div> : null
+
+  if (overlayMode) {
+    return (
+      <div className="li-esp-sign-doc">
+        {title}
+        <div className="li-esp-sign-overlay">
+          {pdf.error && <div className="alert alert-error">{pdf.error}</div>}
+          {!pdf.doc && !pdf.error && (
+            <div className="loading-block" role="status">
+              <span className="spinner" /> Loading document…
+            </div>
+          )}
+          {pdf.doc && (
+            <PdfCanvas
+              doc={pdf.doc}
+              pages={pdf.pages}
+              zoom="fit"
+              placements={placements}
+              toneBySigner={Object.fromEntries(placements.map((p) => [p.signerKey, SIGNER_TONE]))}
+              readOnly
+              valuesById={overlayValues}
+              onActivate={onActivate}
+            />
+          )}
+        </div>
+      </div>
+    )
+  }
+  if (view.isFile && fileUrl) {
+    return (
+      <div className="li-esp-sign-doc">
+        {title}
+        <div className="li-cp-sign-file">
+          <iframe
+            src={fileUrl}
+            title={view.fileName ?? view.documentTitle}
+            className="li-cp-sign-pdfframe"
+          />
+          <a href={fileUrl} target="_blank" rel="noreferrer" className="li-cp-linkbtn">
+            Open {view.fileName ?? 'document'} in a new tab
+          </a>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="li-esp-sign-doc">
+      {title}
+      <div
+        className="doc-rendered"
+        dangerouslySetInnerHTML={{ __html: renderDocumentHtml(view.bodyMarkdown) }}
+      />
     </div>
   )
 }

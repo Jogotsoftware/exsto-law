@@ -13,6 +13,13 @@ export {
   type PlacementAnchor,
   type PlacementRect,
 } from './placements.js'
+// ES-MULTIDOC-1 — one envelope, many documents: placement↔document grouping.
+export {
+  placementDocIndex,
+  placementsForDoc,
+  groupPlacementsByDoc,
+  maxPlacementDocIndex,
+} from './placements.js'
 // ESIGN-UNIFY-1 (ES-1) — pure role-aware routing decisions (§9.2).
 export {
   normalizeRole,

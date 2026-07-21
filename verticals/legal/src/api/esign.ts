@@ -25,6 +25,7 @@ import {
   EsignNotConfiguredError,
   getEsignDriver,
   parseEnvelopePlacements,
+  placementsForDoc,
   signSigningToken,
   verifySigningToken,
   type EsignCallbackEvent,
@@ -437,6 +438,22 @@ export interface EnvelopeSignerStatus {
   // the firm's own signature slot (used to classify the "action needed" bucket).
   key: string | null
 }
+/** ES-MULTIDOC-1 — one document within an envelope's ordered set. The primary
+ *  (docIndex 0) is mirrored onto the flat EnvelopeStatus fields for every
+ *  single-doc reader; the detail UI iterates `documents` to render them all. */
+export interface EnvelopeDocument {
+  documentEntityId: string
+  docIndex: number
+  documentKind: string | null
+  isFile: boolean
+  fileName: string | null
+  executedDocumentVersionId: string | null
+  originalDocumentVersionId: string | null
+  /** File envelopes only, once completed: the executed signature-certificate
+   *  markdown for THIS document. */
+  executedCertificateMarkdown: string | null
+}
+
 export interface EnvelopeStatus {
   envelopeId: string
   status: string | null
@@ -444,6 +461,7 @@ export interface EnvelopeStatus {
   signers: EnvelopeSignerStatus[]
   // The document this envelope executes, and — once `completed` — the executed
   // copy (a document_version with metadata.executed = 'true') for the review step.
+  // (ES-MULTIDOC-1: the PRIMARY document; see `documents` for the full set.)
   documentEntityId: string | null
   executedDocumentVersionId: string | null
   // WP-N detail header: the matter + document + when it was sent, and the derived
@@ -466,8 +484,12 @@ export interface EnvelopeStatus {
    *  envelopes; the detail preview falls back to the whole-line view). */
   placements: FieldPlacement[]
   /** ES-2 — the ORIGINAL (non-executed) document_version this envelope sent;
-   *  the render route's input for the real draft preview. */
+   *  the render route's input for the real draft preview. (Primary document.) */
   originalDocumentVersionId: string | null
+  /** ES-MULTIDOC-1 — every document in the envelope, in send order. Always
+   *  contains at least the primary; single-doc envelopes have exactly one entry
+   *  that mirrors the flat fields above. */
+  documents: EnvelopeDocument[]
 }
 
 export async function getEnvelopeStatus(
@@ -547,9 +569,65 @@ export async function getEnvelopeStatus(
          LEFT JOIN entity e_contact ON e_contact.id = dc.target_entity_id
         WHERE r.tenant_id = $1 AND r.source_entity_id = $2
           AND (r.valid_to IS NULL OR r.valid_to > now())
+        ORDER BY COALESCE((r.properties->>'order')::int, 0), r.recorded_at
         LIMIT 1`,
       [ctx.tenantId, envelopeId],
     )
+    // ES-MULTIDOC-1 — every document in send order (per-document file/executed
+    // info) so the detail surface can render them all. The primary (row 0)
+    // mirrors the flat fields; a single-doc envelope yields one row.
+    const docsRes = await client.query<{
+      document_entity_id: string
+      document_kind: string | null
+      executed_version_id: string | null
+      object_key: string | null
+      file_name: string | null
+      original_version_id: string | null
+      executed_body: string | null
+    }>(
+      `SELECT r.target_entity_id AS document_entity_id,
+              coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
+              (SELECT dv.id FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') = 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS executed_version_id,
+              (SELECT dv.metadata->>'object_key' FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS object_key,
+              (SELECT dv.metadata->>'original_filename' FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS file_name,
+              (SELECT dv.id FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS original_version_id,
+              (SELECT cb2.body FROM document_version dv2
+                 JOIN content_blob cb2 ON cb2.id = dv2.content_blob_id
+                 WHERE dv2.document_entity_id = r.target_entity_id AND dv2.tenant_id = $1
+                   AND (dv2.metadata->>'executed') = 'true'
+                   AND cb2.content_type = 'text/markdown'
+                 ORDER BY dv2.version_number DESC LIMIT 1) AS executed_body
+         FROM relationship r
+         JOIN relationship_kind_definition rkd
+           ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
+         LEFT JOIN entity e_doc ON e_doc.id = r.target_entity_id
+        WHERE r.tenant_id = $1 AND r.source_entity_id = $2
+          AND (r.valid_to IS NULL OR r.valid_to > now())
+        ORDER BY COALESCE((r.properties->>'order')::int, 0), r.recorded_at`,
+      [ctx.tenantId, envelopeId],
+    )
+    const documents: EnvelopeDocument[] = docsRes.rows.map((row, i) => ({
+      documentEntityId: row.document_entity_id,
+      docIndex: i,
+      documentKind: row.document_kind,
+      isFile: Boolean(row.object_key),
+      fileName: row.file_name,
+      executedDocumentVersionId: row.executed_version_id,
+      originalDocumentVersionId: row.original_version_id,
+      executedCertificateMarkdown: row.object_key ? (row.executed_body ?? null) : null,
+    }))
     const a = (k: string) =>
       `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
           ON akd.id = a.attribute_kind_id AND akd.kind_name = '${k}'
@@ -612,6 +690,7 @@ export async function getEnvelopeStatus(
         await latestAttrRaw(client, ctx.tenantId, envelopeId, 'envelope_placements'),
       ),
       originalDocumentVersionId: doc.rows[0]?.original_version_id ?? null,
+      documents,
       signers,
     }
   })
@@ -729,6 +808,7 @@ export async function listEnvelopes(ctx: ActionContext): Promise<EnvelopeListIte
        LEFT JOIN relationship eo
          ON eo.source_entity_id = e.id AND eo.tenant_id = $1
         AND (eo.valid_to IS NULL OR eo.valid_to > now())
+        AND COALESCE((eo.properties->>'order')::int, 0) = 0
         AND eo.relationship_kind_id =
             (SELECT id FROM relationship_kind_definition
               WHERE kind_name = 'envelope_of' AND tenant_id = $1 LIMIT 1)
@@ -876,6 +956,7 @@ export async function voidEnvelope(
            ON dfk.id = df.relationship_kind_id AND dfk.kind_name = 'draft_of'
         WHERE eo.tenant_id = $1 AND eo.source_entity_id = $2
           AND (eo.valid_to IS NULL OR eo.valid_to > now())
+          AND COALESCE((eo.properties->>'order')::int, 0) = 0
           AND (df.valid_to IS NULL OR df.valid_to > now())
         LIMIT 1`,
       [ctx.tenantId, envelopeId],
@@ -894,6 +975,22 @@ export async function voidEnvelope(
 }
 
 // ── Signable document + the signer's fields ──────────────────────────────────
+
+/** ES-MULTIDOC-1 — one document the signer sees, with THIS signer's fields on
+ *  it. The primary (docIndex 0) is mirrored onto the flat SignableDocument
+ *  fields; the signer surface iterates `documents` to render them all in order. */
+export interface SignerDocument {
+  docIndex: number
+  documentTitle: string
+  bodyMarkdown: string
+  isFile: boolean
+  fileName: string | null
+  fileContentType: string | null
+  /** This signer's fillable fields on THIS document. */
+  fields: Array<{ id: string; type: EsignFieldType; label: string; prefill?: string }>
+  /** This signer's coordinate placements on THIS document. */
+  placements: FieldPlacement[]
+}
 
 export interface SignableDocument {
   requestId: string
@@ -915,8 +1012,13 @@ export interface SignableDocument {
   fields: Array<{ id: string; type: EsignFieldType; label: string; prefill?: string }>
   /** ES-2 (§9.3) — THIS signer's coordinate placements (empty for legacy
    *  envelopes → the surface keeps the whole-line flow). Rects are normalized
-   *  page coords; `value` carries the send-time resolved auto-fill. */
+   *  page coords; `value` carries the send-time resolved auto-fill. (Primary
+   *  document only — see `documents` for the full per-document split.) */
   placements: FieldPlacement[]
+  /** ES-MULTIDOC-1 — every document in the envelope, in order, each with THIS
+   *  signer's fields/placements on it. Always ≥1 entry (the primary mirrors the
+   *  flat fields above); the signer surface renders them all. */
+  documents: SignerDocument[]
   /** True when this signer can act now (their turn, not yet resolved). */
   canSign: boolean
   alreadyResolved: boolean
@@ -944,30 +1046,38 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
     const signerRole = await latestAttr(client, ctx.tenantId, requestId, 'signer_role')
     const viewOnly = signerRole === 'needs_to_view'
     const envelopeStatus = await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_status')
-    const docRes = await client.query<{
+    // ES-MULTIDOC-1 — resolve EVERY document in the envelope, in send order.
+    // A LATERAL join picks each document's latest non-executed (original)
+    // version; a single-doc envelope yields exactly one row.
+    const docsRes = await client.query<{
+      doc_name: string | null
       body: string
       object_key: string | null
       content_type: string | null
       original_filename: string | null
     }>(
-      `SELECT cb.body,
+      `SELECT e.name AS doc_name, cb.body,
               dv.metadata->>'object_key' AS object_key,
               COALESCE(dv.metadata->>'content_type', cb.content_type) AS content_type,
               dv.metadata->>'original_filename' AS original_filename
          FROM relationship r
          JOIN relationship_kind_definition rkd
            ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
-         JOIN document_version dv ON dv.document_entity_id = r.target_entity_id
-           AND dv.tenant_id = r.tenant_id AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+         JOIN LATERAL (
+           SELECT dv2.* FROM document_version dv2
+            WHERE dv2.document_entity_id = r.target_entity_id AND dv2.tenant_id = r.tenant_id
+              AND (dv2.metadata->>'executed') IS DISTINCT FROM 'true'
+            ORDER BY dv2.version_number DESC LIMIT 1
+         ) dv ON true
          JOIN content_blob cb ON cb.id = dv.content_blob_id
+         LEFT JOIN entity e ON e.id = r.target_entity_id AND e.tenant_id = r.tenant_id
         WHERE r.tenant_id = $1 AND r.source_entity_id = $2
           AND (r.valid_to IS NULL OR r.valid_to > now())
-        ORDER BY dv.version_number DESC LIMIT 1`,
+        ORDER BY COALESCE((r.properties->>'order')::int, 0), r.recorded_at`,
       [ctx.tenantId, envelopeId],
     )
-    // 0170: an uploaded-file envelope's body is a storage object key, not
-    // signable text — flag it so the surfaces render the file instead.
-    const isFile = Boolean(docRes.rows[0]?.object_key)
+    const subject =
+      (await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_subject')) ?? 'Document'
     const fieldsJson = await latestAttrRaw(client, ctx.tenantId, envelopeId, 'envelope_fields')
     const allFields: EsignField[] = fieldsJson ? (JSON.parse(fieldsJson) as EsignField[]) : []
     // ES-2 (§9.3) — placement envelopes: this signer's boxes drive both the
@@ -979,41 +1089,77 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       await latestAttrRaw(client, ctx.tenantId, envelopeId, 'envelope_placements'),
     )
     const myPlacements = allPlacements.filter((p) => p.signerKey === signerKey)
-    const myFields = myPlacements.length
-      ? myPlacements
-          .filter(
-            (p) => !['sign', 'initial', 'name', 'date'].includes(p.type) && !(p.value ?? '').trim(),
-          )
-          .map((p) => ({
-            id: p.id,
-            type: p.type as EsignFieldType,
-            label: p.label ?? labelFor(p.type as EsignFieldType),
-            prefill: p.type === 'title' ? (signerTitle ?? undefined) : undefined,
-          }))
-      : allFields
-          .filter((f) => f.signerKey === signerKey && FILLABLE_FIELD_TYPES.includes(f.type))
-          .map((f) => ({
-            id: f.id,
-            type: f.type,
-            label: labelFor(f.type),
-            prefill: f.type === 'title' ? (signerTitle ?? undefined) : undefined,
-          }))
+    // This signer's fillable fields for ONE document. Placement envelopes derive
+    // per-document (by docIndex); a legacy whole-line envelope has no docIndex
+    // and applies only to the primary (document 0) markdown body.
+    const deriveFields = (
+      docPlacements: FieldPlacement[],
+      isPrimary: boolean,
+    ): SignerDocument['fields'] =>
+      docPlacements.length
+        ? docPlacements
+            .filter(
+              (p) =>
+                !['sign', 'initial', 'name', 'date'].includes(p.type) && !(p.value ?? '').trim(),
+            )
+            .map((p) => ({
+              id: p.id,
+              type: p.type as EsignFieldType,
+              label: p.label ?? labelFor(p.type as EsignFieldType),
+              prefill: p.type === 'title' ? (signerTitle ?? undefined) : undefined,
+            }))
+        : isPrimary && myPlacements.length === 0
+          ? allFields
+              .filter((f) => f.signerKey === signerKey && FILLABLE_FIELD_TYPES.includes(f.type))
+              .map((f) => ({
+                id: f.id,
+                type: f.type,
+                label: labelFor(f.type),
+                prefill: f.type === 'title' ? (signerTitle ?? undefined) : undefined,
+              }))
+          : []
+    const documents: SignerDocument[] = docsRes.rows.map((row, i) => {
+      const isFileDoc = Boolean(row.object_key)
+      const docPlacements = placementsForDoc(myPlacements, i)
+      return {
+        docIndex: i,
+        documentTitle: row.doc_name ?? subject,
+        bodyMarkdown: isFileDoc ? '' : (row.body ?? ''),
+        isFile: isFileDoc,
+        fileName: isFileDoc ? (row.original_filename ?? null) : null,
+        fileContentType: isFileDoc ? (row.content_type ?? null) : null,
+        fields: deriveFields(docPlacements, i === 0),
+        placements: docPlacements,
+      }
+    })
+    // The primary (document 0) mirrors the flat fields for every reader that
+    // predates multi-doc; the signer surface iterates `documents`.
+    const primary: SignerDocument = documents[0] ?? {
+      docIndex: 0,
+      documentTitle: subject,
+      bodyMarkdown: '',
+      isFile: false,
+      fileName: null,
+      fileContentType: null,
+      fields: [],
+      placements: [],
+    }
     return {
       requestId,
       envelopeId,
-      documentTitle:
-        (await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_subject')) ?? 'Document',
-      bodyMarkdown: isFile ? '' : (docRes.rows[0]?.body ?? ''),
-      isFile,
-      fileName: isFile ? (docRes.rows[0]?.original_filename ?? null) : null,
-      fileContentType: isFile ? (docRes.rows[0]?.content_type ?? null) : null,
+      documentTitle: subject,
+      bodyMarkdown: primary.bodyMarkdown,
+      isFile: primary.isFile,
+      fileName: primary.fileName,
+      fileContentType: primary.fileContentType,
       signerName: await latestAttr(client, ctx.tenantId, requestId, 'signer_name'),
       signerEmail: await latestAttr(client, ctx.tenantId, requestId, 'signer_email'),
       signerTitle,
       signerStatus,
       envelopeStatus,
-      fields: myFields,
-      placements: myPlacements,
+      fields: primary.fields,
+      placements: primary.placements,
+      documents,
       canSign:
         !viewOnly &&
         (signerStatus === 'delivered' || signerStatus === 'opened') &&
@@ -1132,6 +1278,7 @@ export async function listClientSignatures(p: ClientPrincipal): Promise<PendingS
        JOIN relationship_kind_definition reqk ON reqk.id=req.relationship_kind_id AND reqk.kind_name='request_of'
        JOIN entity env ON env.id=req.target_entity_id
        JOIN relationship eo ON eo.source_entity_id=env.id AND eo.tenant_id=env.tenant_id
+         AND COALESCE((eo.properties->>'order')::int, 0) = 0
        JOIN relationship_kind_definition eok ON eok.id=eo.relationship_kind_id AND eok.kind_name='envelope_of'
        LEFT JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=env.tenant_id
          AND (df.valid_to IS NULL OR df.valid_to > now())
@@ -1209,6 +1356,7 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
        JOIN relationship_kind_definition reqk ON reqk.id=req.relationship_kind_id AND reqk.kind_name='request_of'
        JOIN entity env ON env.id=req.target_entity_id
        JOIN relationship eo ON eo.source_entity_id=env.id AND eo.tenant_id=env.tenant_id
+         AND COALESCE((eo.properties->>'order')::int, 0) = 0
        JOIN relationship_kind_definition eok ON eok.id=eo.relationship_kind_id AND eok.kind_name='envelope_of'
        LEFT JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=env.tenant_id
          AND (df.valid_to IS NULL OR df.valid_to > now())
@@ -1272,6 +1420,7 @@ async function assertClientOwnsRequest(p: ClientPrincipal, requestId: string): P
          JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=eo.tenant_id
          JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
         WHERE eo.tenant_id=$1 AND eo.source_entity_id=$2 AND (eo.valid_to IS NULL OR eo.valid_to>now())
+          AND COALESCE((eo.properties->>'order')::int, 0) = 0
         LIMIT 1`,
       [p.tenantId, envelopeId],
     )

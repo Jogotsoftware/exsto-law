@@ -18,9 +18,13 @@ export async function GET(request: Request) {
       { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
     )
   }
-  const token = new URL(request.url).searchParams.get('token') ?? ''
+  const params = new URL(request.url).searchParams
+  const token = params.get('token') ?? ''
+  // ES-MULTIDOC-1 — `?doc=N` selects one document in a multi-document envelope
+  // (0-based, in send order). Absent ⇒ the primary (doc 0), unchanged.
+  const docIndex = Math.max(0, Number.parseInt(params.get('doc') ?? '0', 10) || 0)
   try {
-    const ref = await loadEnvelopeFileRefByToken(token)
+    const ref = await loadEnvelopeFileRefByToken(token, docIndex)
     if (!ref) return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
     // ES-2 (§5.4) — once the envelope completes, a stamped executed copy exists
     // beside the original (derived key); prefer it so a signer returning to

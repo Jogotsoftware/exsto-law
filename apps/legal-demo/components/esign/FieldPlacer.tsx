@@ -59,23 +59,38 @@ function resizedRect(
   return { ...p, rect: clampRect({ page: p.rect.page, x, y, w, h }) }
 }
 
+export interface PlacerDocument {
+  title: string
+  pdfData: ArrayBuffer | Uint8Array | null
+}
+
 export function FieldPlacer({
-  pdfData,
+  documents,
+  activeDocIndex,
+  onActiveDocChange,
   loadingLabel,
   signers,
   placements,
   onChange,
   valuesById,
 }: {
-  /** The document bytes (upload: the picked file; draft: the render route). */
-  pdfData: ArrayBuffer | Uint8Array | null
+  /** ES-MULTIDOC-1 — the envelope's ordered document set. The canvas places
+   *  onto the ACTIVE document; a doc switcher (rendered only for 2+ docs) picks
+   *  it. A single-document envelope is one entry — the switcher never shows and
+   *  the surface reads exactly as before. */
+  documents: PlacerDocument[]
+  activeDocIndex: number
+  onActiveDocChange: (index: number) => void
   loadingLabel?: string
   signers: PlacerSigner[]
+  /** ALL placements across every document; the canvas shows only the active
+   *  document's (filtered by docIndex), mutations run on the whole list. */
   placements: FieldPlacement[]
   onChange: (placements: FieldPlacement[]) => void
   /** §5.3 — resolved auto-fill preview values by placement id. */
   valuesById?: Record<string, string | null>
 }) {
+  const pdfData = documents[activeDocIndex]?.pdfData ?? null
   const { doc, pages, loading, error } = usePdfDocument(pdfData)
   const [activeSigner, setActiveSigner] = useState<string | null>(signers[0]?.signerKey ?? null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -154,10 +169,13 @@ export function FieldPlacer({
         source: 'placed',
         rect: defaultRectForType(type, pageIndex, topLeft, pagePoints),
       }
+      // ES-MULTIDOC-1 — bind the box to the active document. docIndex 0 (the
+      // primary) is left implicit so single-document plans stay byte-identical.
+      if (activeDocIndex > 0) placement.docIndex = activeDocIndex
       commit([...working.current, placement])
       setSelectedId(placement.id)
     },
-    [activeKey, pages, nextId, commit],
+    [activeKey, activeDocIndex, pages, nextId, commit],
   )
 
   // Palette click (keyboard/touch path): drop at the visible page's center.
@@ -233,35 +251,81 @@ export function FieldPlacer({
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedId, deleteField, undo, redo])
 
+  // ES-MULTIDOC-1 — the canvas, thumbnails and field counts see ONLY the active
+  // document's placements (mutations still run on the whole cross-document list).
+  const docPlacements = useMemo(
+    () => placements.filter((p) => (p.docIndex ?? 0) === activeDocIndex),
+    [placements, activeDocIndex],
+  )
+  // Switching documents clears the selection + returns to the first page (a box
+  // on another document must not stay "selected" on this one).
+  useEffect(() => {
+    setSelectedId(null)
+    setCurrentPage(0)
+  }, [activeDocIndex])
+
   const fieldCountByPage = useMemo(() => {
     const counts: Record<number, number> = {}
-    for (const p of placements) counts[p.rect.page] = (counts[p.rect.page] ?? 0) + 1
+    for (const p of docPlacements) counts[p.rect.page] = (counts[p.rect.page] ?? 0) + 1
     return counts
-  }, [placements])
+  }, [docPlacements])
 
-  const selected = placements.find((p) => p.id === selectedId) ?? null
+  const selected = docPlacements.find((p) => p.id === selectedId) ?? null
   const switcherSigners: SwitcherSigner[] = signers
 
+  // ES-MULTIDOC-1 — the document switcher (only for 2+ documents), rendered
+  // above every state so it never flickers out while a document re-parses.
+  const docSwitcher =
+    documents.length > 1 ? (
+      <div className="li-esp-docswitch" role="tablist" aria-label="Documents">
+        {documents.map((d, i) => (
+          <button
+            key={i}
+            type="button"
+            role="tab"
+            aria-selected={i === activeDocIndex}
+            className={`li-esp-docbtn${i === activeDocIndex ? ' is-active' : ''}`}
+            onClick={() => onActiveDocChange(i)}
+          >
+            <span className="li-esp-docbtn-num">{i + 1}</span>
+            <span className="li-esp-docbtn-name">{d.title}</span>
+          </button>
+        ))}
+      </div>
+    ) : null
+
   if (error) {
-    return <div className="alert alert-error li-esp-state">{error}</div>
+    return (
+      <>
+        {docSwitcher}
+        <div className="alert alert-error li-esp-state">{error}</div>
+      </>
+    )
   }
   if (loading || (!doc && pdfData)) {
     return (
-      <div className="loading-block li-esp-state" role="status">
-        <span className="spinner" /> {loadingLabel ?? 'Rendering document…'}
-      </div>
+      <>
+        {docSwitcher}
+        <div className="loading-block li-esp-state" role="status">
+          <span className="spinner" /> {loadingLabel ?? 'Rendering document…'}
+        </div>
+      </>
     )
   }
   if (!pdfData) {
     return (
-      <div className="li-esp-state li-esign-wiz-hint">
-        Add a document on the Documents step to place fields.
-      </div>
+      <>
+        {docSwitcher}
+        <div className="li-esp-state li-esign-wiz-hint">
+          Add a document on the Documents step to place fields.
+        </div>
+      </>
     )
   }
 
   return (
     <div className={`li-esp${preview ? ' is-preview' : ''}`}>
+      {docSwitcher}
       <div className="li-esp-topbar">
         <SignerSwitcher
           signers={switcherSigners}
@@ -334,7 +398,9 @@ export function FieldPlacer({
           doc={doc}
           pages={pages}
           zoom={zoom}
-          placements={preview ? placements.filter((p) => p.signerKey === activeKey) : placements}
+          placements={
+            preview ? docPlacements.filter((p) => p.signerKey === activeKey) : docPlacements
+          }
           toneBySigner={toneBySigner}
           activeSignerKey={activeKey}
           selectedId={selectedId}

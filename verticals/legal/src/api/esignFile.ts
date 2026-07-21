@@ -39,12 +39,21 @@ export interface FileSigner {
 }
 
 export interface SendFileForSignatureInput {
-  /** The uploaded document_version to send (metadata.object_key present). */
+  /** The uploaded document_version to send (metadata.object_key present). When
+   *  `documents` is provided this is ignored in favor of documents[0]; kept for
+   *  every pre-multidoc caller (single document). */
   documentVersionId: string
+  /** ES-MULTIDOC-1: the FULL ordered set of uploaded PDFs for a multi-document
+   *  envelope. Each is an uploaded document_version (object_key present). When
+   *  present and non-empty it defines the envelope's documents in order; absent
+   *  ⇒ the single `documentVersionId` is the set (unchanged behavior). */
+  documents?: Array<{ documentVersionId: string }>
   signers: FileSigner[]
   subject?: string
-  /** ESIGN-UNIFY-1 (ES-1, §5.1): the composer's coordinate placement plan for
-   *  this PDF (all source:'placed' — an uploaded file has no markers). */
+  /** ESIGN-UNIFY-1 (ES-1, §5.1): the composer's coordinate placement plan across
+   *  ALL documents in the envelope (all source:'placed' — an uploaded file has no
+   *  markers). Each placement's docIndex (ES-MULTIDOC-1; absent ⇒ 0) binds it to
+   *  a document in the ordered set above. */
   placements?: FieldPlacement[]
   /** §9.4: the sender's personal note, shown in the branded signing email. */
   message?: string
@@ -112,16 +121,41 @@ export async function sendFileForSignature(
   ctx: ActionContext,
   input: SendFileForSignatureInput,
 ): Promise<SendFileForSignatureResult> {
-  const doc = await loadUploadedVersion(ctx, input.documentVersionId)
-  if (!doc?.object_key) {
-    throw new Error(`Uploaded document version not found: ${input.documentVersionId}`)
+  // ES-MULTIDOC-1 — the ordered document set. Absent/empty `documents` ⇒ the
+  // single `documentVersionId` (the pre-multidoc shape). documents[0] is the
+  // primary the envelope keys on (subject default, matter/contact binding).
+  const versionIds = (
+    input.documents && input.documents.length > 0
+      ? input.documents.map((d) => d.documentVersionId)
+      : [input.documentVersionId]
+  )
+    .map((id) => id?.trim())
+    .filter((id): id is string => Boolean(id))
+  if (versionIds.length === 0) throw new Error('No document to send for signature.')
+
+  const docs: UploadedDocRow[] = []
+  for (const versionId of versionIds) {
+    const row = await loadUploadedVersion(ctx, versionId)
+    if (!row?.object_key) {
+      throw new Error(`Uploaded document version not found: ${versionId}`)
+    }
+    if (row.content_type !== 'application/pdf') {
+      throw new Error('Only PDF documents can be sent for signature this way.')
+    }
+    docs.push(row)
   }
-  if (doc.content_type !== 'application/pdf') {
-    throw new Error('Only PDF documents can be sent for signature this way.')
-  }
+  const doc = docs[0]!
   // Send authz mirrors the draft path: a matter-attached upload dispatches under
   // the matter's ownership gate; a standalone upload has no ownership to gate.
-  if (doc.matter_entity_id) await assertCanSendOnMatter(ctx, doc.matter_entity_id)
+  // Every matter-attached document in the set is gated (they usually share one
+  // matter, but a mixed set must clear each).
+  const gatedMatters = new Set<string>()
+  for (const d of docs) {
+    if (d.matter_entity_id && !gatedMatters.has(d.matter_entity_id)) {
+      await assertCanSendOnMatter(ctx, d.matter_entity_id)
+      gatedMatters.add(d.matter_entity_id)
+    }
+  }
 
   const signers = (input.signers ?? [])
     .filter((s) => s.email?.trim())
@@ -137,7 +171,10 @@ export async function sendFileForSignature(
   if (signers.length === 0) throw new Error('Add at least one signer with an email address.')
 
   const subject =
-    input.subject?.trim() || `Signature requested: ${doc.filename ?? 'uploaded document'}`
+    input.subject?.trim() ||
+    (docs.length > 1
+      ? `Signature requested: ${docs.length} documents`
+      : `Signature requested: ${doc.filename ?? 'uploaded document'}`)
 
   // ES-2 (§5.3) — resolve data-bound placements at SEND time: the signer's own
   // recipient row first, then the bound contact's attributes. Resolved values
@@ -168,9 +205,16 @@ export async function sendFileForSignature(
 
   // ESIGN-UNIFY-1 (ES-1, §5.5) — converge on the ONE builder the draft path
   // uses; roles/placements/message ride the same esign.send payload.
+  // ES-MULTIDOC-1: pass the full ordered document set; the builder writes one
+  // envelope_of per document. documents[0] is the primary (matter/version the
+  // envelope entity keys on).
   const built = await buildAndSubmitEnvelope(ctx, {
     documentEntityId: doc.document_entity_id,
-    documentVersionId: input.documentVersionId,
+    documentVersionId: versionIds[0]!,
+    documents: docs.map((d, i) => ({
+      documentEntityId: d.document_entity_id,
+      documentVersionId: versionIds[i]!,
+    })),
     matterEntityId: doc.matter_entity_id,
     provider: 'native',
     dispatched: true,
@@ -189,7 +233,7 @@ export async function sendFileForSignature(
 
   return {
     envelopeId,
-    documentVersionId: input.documentVersionId,
+    documentVersionId: versionIds[0]!,
     signerCount: signers.length,
     signers: signers.map((s, i) => {
       const requestId = requestIds[i] ?? ''
@@ -213,13 +257,14 @@ export interface EnvelopeFileRef {
   filename: string
 }
 
-/** The stored file behind an envelope's document (latest non-executed version),
- *  or null when the envelope executes a markdown draft. Tenant-scoped via RLS;
- *  the caller owns byte access (lib/documentStorage) and response headers. */
-export async function loadEnvelopeFileRef(
+/** ES-MULTIDOC-1 — every stored file behind an envelope's documents, in send
+ *  order (the `order` on each envelope_of relationship). A markdown-draft
+ *  document contributes no entry (null object_key). Tenant-scoped via RLS; the
+ *  caller owns byte access (lib/documentStorage) and response headers. */
+export async function loadEnvelopeFileRefs(
   ctx: ActionContext,
   envelopeId: string,
-): Promise<EnvelopeFileRef | null> {
+): Promise<EnvelopeFileRef[]> {
   return withActionContext(ctx, async (client) => {
     const res = await client.query<{
       object_key: string | null
@@ -232,28 +277,53 @@ export async function loadEnvelopeFileRef(
          FROM relationship r
          JOIN relationship_kind_definition rkd
            ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
-         JOIN document_version dv ON dv.document_entity_id = r.target_entity_id
-           AND dv.tenant_id = r.tenant_id AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+         JOIN LATERAL (
+           SELECT dv2.* FROM document_version dv2
+            WHERE dv2.document_entity_id = r.target_entity_id AND dv2.tenant_id = r.tenant_id
+              AND (dv2.metadata->>'executed') IS DISTINCT FROM 'true'
+            ORDER BY dv2.version_number DESC LIMIT 1
+         ) dv ON true
          JOIN content_blob cb ON cb.id = dv.content_blob_id
         WHERE r.tenant_id = $1 AND r.source_entity_id = $2
           AND (r.valid_to IS NULL OR r.valid_to > now())
-        ORDER BY dv.version_number DESC LIMIT 1`,
+        ORDER BY COALESCE((r.properties->>'order')::int, 0), r.recorded_at`,
       [ctx.tenantId, envelopeId],
     )
-    const row = res.rows[0]
-    if (!row?.object_key) return null
-    return {
-      objectKey: row.object_key,
-      contentType: row.content_type ?? 'application/pdf',
-      filename: row.filename ?? 'document.pdf',
-    }
+    return res.rows
+      .filter((row) => row.object_key)
+      .map((row) => ({
+        objectKey: row.object_key!,
+        contentType: row.content_type ?? 'application/pdf',
+        filename: row.filename ?? 'document.pdf',
+      }))
   })
 }
 
+/** The stored file behind ONE of an envelope's documents (default: the primary,
+ *  order-0). `docIndex` selects a document in a multi-document envelope; out of
+ *  range or a markdown-draft document ⇒ null. A single-document envelope with
+ *  docIndex 0 returns exactly what the pre-multidoc single-ref loader did. */
+export async function loadEnvelopeFileRef(
+  ctx: ActionContext,
+  envelopeId: string,
+  docIndex = 0,
+): Promise<EnvelopeFileRef | null> {
+  const refs = await loadEnvelopeFileRefs(ctx, envelopeId)
+  return refs[docIndex] ?? null
+}
+
 /** Token door for the public signer's file view: verify the signed token, then
- *  resolve the envelope's file under the token's tenant. Null when the token's
- *  envelope isn't a file envelope. Throws on a bad/expired token. */
-export async function loadEnvelopeFileRefByToken(token: string): Promise<EnvelopeFileRef | null> {
+ *  resolve the envelope's file(s) under the token's tenant. */
+export async function loadEnvelopeFileRefByToken(
+  token: string,
+  docIndex = 0,
+): Promise<EnvelopeFileRef | null> {
   const tok = verifySigningToken(token)
-  return loadEnvelopeFileRef(signingCtx(tok.tenantId), tok.envelopeId)
+  return loadEnvelopeFileRef(signingCtx(tok.tenantId), tok.envelopeId, docIndex)
+}
+
+/** Token door for all of an envelope's files, in order (multi-doc signer view). */
+export async function loadEnvelopeFileRefsByToken(token: string): Promise<EnvelopeFileRef[]> {
+  const tok = verifySigningToken(token)
+  return loadEnvelopeFileRefs(signingCtx(tok.tenantId), tok.envelopeId)
 }

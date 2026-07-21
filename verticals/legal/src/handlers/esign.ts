@@ -66,9 +66,21 @@ interface SendSigner {
   role?: SignerRole | null
 }
 
+/** One document in an envelope's ordered set (ES-MULTIDOC-1). */
+interface EsignSendDocument {
+  document_entity_id: string
+  document_version_id: string
+}
+
 interface EsignSendPayload {
   document_entity_id: string
   document_version_id: string
+  /** ES-MULTIDOC-1: the FULL ordered document set when the envelope carries more
+   *  than one document. documents[0] equals (document_entity_id,
+   *  document_version_id) — the primary the envelope entity + single-doc readers
+   *  key on. Absent/empty ⇒ the single primary IS the set (pre-multidoc shape,
+   *  every existing caller unchanged). */
+  documents?: EsignSendDocument[]
   matter_entity_id?: string | null
   provider: string
   provider_envelope_ref?: string | null
@@ -194,20 +206,33 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     )
   }
 
+  // ES-MULTIDOC-1 — link every document in the envelope's ordered set. NO new
+  // relationship kind and NO migration: the existing `envelope_of` relationship
+  // (one per document) plus an `order` in its properties carries the whole set.
+  // A single-document envelope writes exactly one relationship with order 0 —
+  // byte-identical to the pre-multidoc write except for the additive `order`
+  // key, which every existing reader ignores.
+  const envelopeDocs: EsignSendDocument[] =
+    p.documents && p.documents.length > 0
+      ? p.documents
+      : [{ document_entity_id: p.document_entity_id, document_version_id: p.document_version_id }]
   const envelopeOfId = await lookupKindId(
     client,
     'relationship_kind_definition',
     tenantId,
     'envelope_of',
   )
-  await insertRelationship(client, {
-    tenantId,
-    actionId,
-    sourceEntityId: envelopeId,
-    targetEntityId: p.document_entity_id,
-    relationshipKindId: envelopeOfId,
-    properties: { document_version_id: p.document_version_id },
-  })
+  for (let d = 0; d < envelopeDocs.length; d++) {
+    const doc = envelopeDocs[d]!
+    await insertRelationship(client, {
+      tenantId,
+      actionId,
+      sourceEntityId: envelopeId,
+      targetEntityId: doc.document_entity_id,
+      relationshipKindId: envelopeOfId,
+      properties: { document_version_id: doc.document_version_id, order: d },
+    })
+  }
 
   const requestOfId = await lookupKindId(
     client,
@@ -303,6 +328,9 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
       dispatched: p.dispatched,
       document_entity_id: p.document_entity_id,
       document_version_id: p.document_version_id,
+      // ES-MULTIDOC-1: how many documents ride this envelope (1 for the classic
+      // single-doc send). Additive — no reader depends on its absence.
+      document_count: envelopeDocs.length,
       signer_count: requestIds.length,
       correlation_id: p.correlation_id,
     },
@@ -471,19 +499,30 @@ registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
     sourceType: 'system',
     sourceRef,
   })
-  const documentEntityId = await resolveEnvelopeDocument(client, tenantId, p.envelope_entity_id)
+  // ES-MULTIDOC-1 — write the executed copy of EVERY document in the envelope,
+  // in order. Each document is its own entity with its own version chain, so
+  // writeExecutedVersion runs once per document (the placement subset that lands
+  // on document d is resolved inside, by docIndex). The primary (order-0)
+  // document keeps driving the lifecycle + the single-value event fields so
+  // every existing reader is unchanged; a single-doc envelope loops exactly once.
+  const documentEntityIds = await resolveEnvelopeDocuments(client, tenantId, p.envelope_entity_id)
+  const documentEntityId = documentEntityIds[0] ?? null
+  const executedVersionIds: string[] = []
   let executedVersionId: string | null = null
   let executedVersionNumber: number | null = null
-  if (documentEntityId) {
+  for (let d = 0; d < documentEntityIds.length; d++) {
     const executed = await writeExecutedVersion(
       client,
       tenantId,
       actionId,
       p.envelope_entity_id,
-      documentEntityId,
+      documentEntityIds[d]!,
     )
-    executedVersionId = executed.versionId
-    executedVersionNumber = executed.versionNumber
+    executedVersionIds.push(executed.versionId)
+    if (d === 0) {
+      executedVersionId = executed.versionId
+      executedVersionNumber = executed.versionNumber
+    }
   }
   await insertEvent(client, {
     tenantId,
@@ -495,6 +534,10 @@ registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
       document_entity_id: documentEntityId,
       executed_document_version_id: executedVersionId,
       executed_version_number: executedVersionNumber,
+      // ES-MULTIDOC-1: every executed version, in document order (length 1 for a
+      // single-doc envelope). Additive alongside the primary fields above.
+      executed_document_version_ids: executedVersionIds,
+      document_count: documentEntityIds.length,
     },
     sourceType: 'system',
     sourceRef,
@@ -823,21 +866,37 @@ async function latestEnvelopeStatus(
   return res.rows[0]?.status ?? 'pending_dispatch'
 }
 
-async function resolveEnvelopeDocument(
+// ES-MULTIDOC-1 — every document linked to the envelope, in send order (the
+// `order` written into each envelope_of relationship's properties; legacy
+// single-doc envelopes have one row whose absent order reads as 0). The order
+// tiebreaker is recorded_at so a pre-multidoc envelope (no order key) is stable.
+async function resolveEnvelopeDocuments(
   client: DbClient,
   tenantId: string,
   envelopeId: string,
-): Promise<string | null> {
+): Promise<string[]> {
   const res = await client.query<{ document_id: string }>(
     `SELECT r.target_entity_id AS document_id
        FROM relationship r
        JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
       WHERE r.tenant_id = $1 AND r.source_entity_id = $2 AND rkd.kind_name = 'envelope_of'
         AND (r.valid_to IS NULL OR r.valid_to > now())
-      LIMIT 1`,
+      ORDER BY COALESCE((r.properties->>'order')::int, 0), r.recorded_at`,
     [tenantId, envelopeId],
   )
-  return res.rows[0]?.document_id ?? null
+  return res.rows.map((row) => row.document_id)
+}
+
+// The primary (order-0) document — what the lifecycle dispatch, the matter
+// resolution, and every single-doc reader key on. Deterministic now that an
+// envelope can carry many documents (ordered by the same rule).
+async function resolveEnvelopeDocument(
+  client: DbClient,
+  tenantId: string,
+  envelopeId: string,
+): Promise<string | null> {
+  const docs = await resolveEnvelopeDocuments(client, tenantId, envelopeId)
+  return docs[0] ?? null
 }
 
 // The matter a signed document belongs to, via the draft_of relationship
