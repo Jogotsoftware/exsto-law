@@ -1,8 +1,8 @@
 // ASSISTANT-ACTS-1 — stage an e-sign envelope from chat. "Send the engagement
 // letter for signature" resolves the matter document server-side (by the
 // attorney's words, never an id the model could hallucinate) and the chat opens
-// the firm's real 4-step prepare wizard (PrepareSignature) in a pop-up. The
-// ATTORNEY confirms signers/fields and clicks Send there — this tool writes
+// the firm's unified eSign composer (EsignComposer, document mode) in a pop-up.
+// The ATTORNEY confirms signers/fields and clicks Send there — this tool writes
 // nothing and sends nothing, mirroring the open_artifact_editor launch pattern.
 import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'

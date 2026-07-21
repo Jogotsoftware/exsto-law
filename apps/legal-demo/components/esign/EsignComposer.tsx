@@ -2,10 +2,10 @@
 
 // ESIGN-UNIFY-1 (ES-1, design §3) — the ONE eSign send wizard.
 //
-// Four steps: Documents → Recipients → Fields → Review & send. This PR ships
-// the composer ALONGSIDE the old flows (PrepareSignature / NewEnvelopeWizard
-// stay live untouched — ES-5 does the cutover); the ES-2 placement canvas
-// mounts inside the Fields step this component reserves.
+// Four steps: Documents → Recipients → Fields → Review & send. This is the ONE
+// eSign flow (ES-5b deleted the old PrepareSignature / NewEnvelopeWizard and
+// retargeted every launcher here); the ES-2 placement canvas mounts inside the
+// Fields step this component reserves.
 //
 // v1 send scope (founder decisions): ONE document per envelope (multi-doc
 // deferred); upload-sourced envelopes send via legal.esign.send_file with

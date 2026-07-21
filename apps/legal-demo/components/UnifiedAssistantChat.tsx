@@ -17,7 +17,7 @@ import { QuestionnaireEditorModal } from '@/components/QuestionnaireEditorModal'
 import { TemplateEditorModal } from '@/components/TemplateEditorModal'
 import { WorkflowEditorModal } from '@/components/WorkflowEditorModal'
 import { EmailComposeModal } from '@/components/EmailComposeModal'
-import { PrepareSignature, type SendResult } from '@/components/PrepareSignature'
+import { EsignComposer } from '@/components/esign/EsignComposer'
 import { Modal } from '@/components/Modal'
 import type { QuestionnaireSchema } from '@/components/QuestionnaireBuilder'
 import type { WfLifecycle } from '@/lib/workflowBuilderModel'
@@ -951,8 +951,8 @@ function buildPendingDocs(
   return { pendingDocs, unmatchedTitles }
 }
 
-// "attorney_letter" → "Attorney letter" — mirrors PrepareSignature's own kind
-// formatting; used only for the hidden driver line after an envelope send.
+// "attorney_letter" → "Attorney letter" — the doc-kind humanizer; used for the
+// composer's subject seed and the hidden driver line after an envelope send.
 function humanizeDocKind(kind: string): string {
   const s = kind.replace(/_/g, ' ').trim() || 'document'
   return s.charAt(0).toUpperCase() + s.slice(1)
@@ -2858,11 +2858,11 @@ export function UnifiedAssistantChat({
     })
   }
 
-  function onEnvelopeSent(result: SendResult) {
+  function onEnvelopeSent(envelopeId: string) {
     const label = envelopePrepare ? humanizeDocKind(envelopePrepare.documentKind) : 'document'
     const version = envelopePrepare?.versionNumber ?? 1
     setEnvelopePrepare(null)
-    setEnvelopeSentNotice({ envelopeId: result.envelopeId, label: `${label} v${version}` })
+    setEnvelopeSentNotice({ envelopeId, label: `${label} v${version}` })
     setTimeout(() => setEnvelopeSentNotice(null), 8000)
     void send(driver(`The attorney sent the ${label} v${version} for signature from the wizard.`), {
       hidden: true,
@@ -3404,14 +3404,24 @@ export function UnifiedAssistantChat({
           for signature (prepare_envelope) — the REAL wizard opens on it directly;
           the attorney confirms signers/fields and clicks Send there. ─────────── */}
       {envelopePrepare && (
-        <Modal title="Send For Signature" onClose={() => setEnvelopePrepare(null)} size="wide">
+        <Modal title="eSign" onClose={() => setEnvelopePrepare(null)} size="wide">
           {envelopePrepare.status !== 'approved' && (
             <p className="li-modal-muted" style={{ marginTop: 0 }}>
               This version is not yet approved — you can still send it for signature.
             </p>
           )}
-          <PrepareSignature
-            documentVersionId={envelopePrepare.documentVersionId}
+          {/* ESIGN-UNIFY-1 (ES-5b, §11) — the deleted PrepareSignature is
+              retargeted to the ONE unified composer in document mode; the
+              matter scope pre-attaches and onSent keeps the chat's post-send
+              notice + hidden driver line unchanged. */}
+          <EsignComposer
+            source={{
+              kind: 'document',
+              documentVersionId: envelopePrepare.documentVersionId,
+              matterEntityId: activeScope.matterEntityId,
+              title: humanizeDocKind(envelopePrepare.documentKind),
+            }}
+            onClose={() => setEnvelopePrepare(null)}
             onSent={onEnvelopeSent}
           />
         </Modal>
