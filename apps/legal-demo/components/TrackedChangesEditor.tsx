@@ -18,6 +18,8 @@ import type { JSONContent } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { TextStyle, FontFamily, FontSize } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
+import { TableKit } from '@tiptap/extension-table'
+import { TextSelection } from '@tiptap/pm/state'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
 import { watermarkForStatus } from '@/lib/draftExport'
@@ -48,6 +50,13 @@ import {
   setTrackDecorations,
 } from '@/components/trackedChangesDoc'
 import { MissingFieldDecorations } from '@/components/missingFieldDoc'
+import {
+  SearchDecorations,
+  buildSearchDecorations,
+  findMatches,
+  setSearchDecorations,
+  type SearchTextMatch,
+} from '@/components/searchDoc'
 import { DocumentSheet } from '@/components/DocumentSheet'
 import {
   DOC_FONT_OPTIONS,
@@ -78,6 +87,10 @@ import {
   XIcon,
   EditIcon,
   FileTextIcon,
+  SearchIcon,
+  TableIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
 } from '@/components/icons'
 
 export interface TrackedEditorDraft {
@@ -227,8 +240,37 @@ export function TrackedChangesEditor({
   const confirmRef = useRef(false)
   confirmRef.current = confirmDiscard
 
+  // EDITOR-FIND-1 — find & replace. Matches live in extractDocText text-space
+  // (the tracked-changes model's coordinate system) and are refreshed inside
+  // recompute, so they stay honest through typing, AI revisions, and
+  // accept/reject. Replacements are ordinary editor splices: under Track
+  // changes they surface as pending hunks like any other edit.
+  const [findOpen, setFindOpenState] = useState(false)
+  const findOpenRef = useRef(false)
+  const [findQuery, setFindQueryState] = useState('')
+  const findQueryRef = useRef('')
+  const [replaceWith, setReplaceWith] = useState('')
+  const [findCount, setFindCount] = useState(0)
+  const [findActive, setFindActiveState] = useState(0)
+  const findActiveRef = useRef(0)
+  const findMatchesRef = useRef<SearchTextMatch[]>([])
+  const findInputRef = useRef<HTMLInputElement | null>(null)
+  const setFindActive = (i: number): void => {
+    findActiveRef.current = i
+    setFindActiveState(i)
+  }
+
+  // DOC-TABLES-1 — the toolbar's table menu; word count rides recompute too.
+  const [tableMenuOpen, setTableMenuOpen] = useState(false)
+  const tableMenuRef = useRef<HTMLDivElement | null>(null)
+  const [wordCount, setWordCount] = useState(0)
+
   const initialBaseTextRef = useRef('')
   const seedHtmlRef = useRef('')
+  // Assigned below once refreshSearch exists; recompute (defined first) calls
+  // through the ref so find results track every doc change without a hook-order
+  // dependency cycle.
+  const searchRefreshRef = useRef<() => void>(() => {})
   const untrackedEditsRef = useRef(false)
   const debounceRef = useRef<number | null>(null)
   const didFocusRef = useRef(false)
@@ -277,6 +319,8 @@ export function TrackedChangesEditor({
         map.text !== initialBaseTextRef.current ||
         ed.getHTML() !== seedHtmlRef.current,
     )
+    setWordCount(countWords(map.text))
+    searchRefreshRef.current()
   }, [])
 
   const scheduleRecompute = useCallback((): void => {
@@ -293,6 +337,139 @@ export function TrackedChangesEditor({
     }
   }, [])
 
+  // ── EDITOR-FIND-1: find & replace ───────────────────────────────────────────
+  const refreshSearch = useCallback((): void => {
+    const ed = editorRef.current
+    if (!ed || ed.isDestroyed) return
+    const map = extractDocText(ed.state.doc)
+    const matches = findOpenRef.current ? findMatches(map.text, findQueryRef.current) : []
+    findMatchesRef.current = matches
+    setFindActive(matches.length === 0 ? 0 : Math.min(findActiveRef.current, matches.length - 1))
+    setFindCount(matches.length)
+    setSearchDecorations(
+      ed.view,
+      buildSearchDecorations(ed.state.doc, map, matches, findActiveRef.current),
+    )
+  }, [])
+  searchRefreshRef.current = refreshSearch
+
+  const setFindQuery = (q: string): void => {
+    findQueryRef.current = q
+    setFindQueryState(q)
+    findActiveRef.current = 0
+    refreshSearch()
+  }
+
+  const openFind = useCallback((): void => {
+    findOpenRef.current = true
+    setFindOpenState(true)
+    window.setTimeout(() => findInputRef.current?.select(), 0)
+    refreshSearch()
+  }, [refreshSearch])
+
+  const closeFind = useCallback((): void => {
+    findOpenRef.current = false
+    setFindOpenState(false)
+    refreshSearch()
+    editorRef.current?.commands.focus()
+  }, [refreshSearch])
+
+  // Step to the next/previous match: repaint the active highlight and move the
+  // editor selection there (a plain transaction — no focus steal, so Enter in
+  // the find input can be pressed repeatedly).
+  const gotoMatch = useCallback((dir: 1 | -1): void => {
+    const ed = editorRef.current
+    const matches = findMatchesRef.current
+    if (!ed || matches.length === 0) return
+    const next = (findActiveRef.current + dir + matches.length) % matches.length
+    setFindActive(next)
+    const map = extractDocText(ed.state.doc)
+    setSearchDecorations(ed.view, buildSearchDecorations(ed.state.doc, map, matches, next))
+    const m = matches[next]!
+    const from = map.posAt(m.start, 'start')
+    const to = map.posAt(m.end, 'end')
+    ed.view.dispatch(
+      ed.state.tr.setSelection(TextSelection.create(ed.state.doc, from, to)).scrollIntoView(),
+    )
+  }, [])
+
+  // Replace is an ordinary editor splice: under Track changes it becomes a
+  // pending hunk (reviewable, rejectable) exactly like typing the words would.
+  const replaceActive = useCallback((): void => {
+    const ed = editorRef.current
+    const matches = findMatchesRef.current
+    if (!ed || matches.length === 0) return
+    const m = matches[Math.min(findActiveRef.current, matches.length - 1)]!
+    const map = extractDocText(ed.state.doc)
+    const from = map.posAt(m.start, 'start')
+    const to = map.posAt(m.end, 'end')
+    if (replaceWith === '') {
+      ed.chain().deleteRange({ from, to }).run()
+    } else {
+      ed.chain()
+        .insertContentAt(
+          { from, to },
+          { type: 'text', text: replaceWith },
+          {
+            updateSelection: false,
+          },
+        )
+        .run()
+    }
+    recompute()
+  }, [replaceWith, recompute])
+
+  const replaceAll = useCallback((): void => {
+    const ed = editorRef.current
+    const matches = findMatchesRef.current
+    if (!ed || matches.length === 0) return
+    // All positions come from ONE map of the pre-splice doc; applying
+    // back-to-front keeps every earlier position valid while later ones splice
+    // (matches never overlap, so the ranges are independent).
+    const map = extractDocText(ed.state.doc)
+    let chain = ed.chain()
+    for (const m of [...matches].sort((a, b) => b.start - a.start)) {
+      const from = map.posAt(m.start, 'start')
+      const to = map.posAt(m.end, 'end')
+      if (replaceWith === '') chain = chain.deleteRange({ from, to })
+      else
+        chain = chain.insertContentAt(
+          { from, to },
+          { type: 'text', text: replaceWith },
+          {
+            updateSelection: false,
+          },
+        )
+    }
+    chain.run()
+    recompute()
+  }, [replaceWith, recompute])
+
+  // ⌘F / Ctrl+F opens the find bar (replacing the browser's find, which can't
+  // see match positions inside the editor).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !e.altKey && !e.shiftKey) {
+        e.preventDefault()
+        openFind()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [openFind])
+
+  // DOC-TABLES-1: the table menu closes on any press outside it.
+  useEffect(() => {
+    if (!tableMenuOpen) return
+    const onDown = (e: MouseEvent): void => {
+      if (tableMenuRef.current && !tableMenuRef.current.contains(e.target as Node)) {
+        setTableMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [tableMenuOpen])
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
@@ -303,6 +480,10 @@ export function TrackedChangesEditor({
       FontFamily,
       FontSize,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      // DOC-TABLES-1: tables (GFM pipe tables in the stored markdown). Cell
+      // edits are ordinary text edits to the hunk model; table structure is
+      // furniture (like lists), dirty via the HTML compare.
+      TableKit,
       TemplateVariable.configure({ resolve: () => 'matched' }),
       SignatureLine,
       PageBreak,
@@ -310,6 +491,7 @@ export function TrackedChangesEditor({
       // EDITOR-FIX-1 (item 4): render [[MISSING: field]] merge gaps as warn chips
       // (the raw marker stays in the model — presentation only).
       MissingFieldDecorations,
+      SearchDecorations,
     ],
     content: seedHtml,
     immediatelyRender: false,
@@ -322,6 +504,7 @@ export function TrackedChangesEditor({
       setAcceptState(acceptRef.current)
       initialBaseTextRef.current = text
       seedHtmlRef.current = editor.getHTML()
+      setWordCount(countWords(text))
     },
     onUpdate: () => scheduleRecompute(),
   })
@@ -344,6 +527,7 @@ export function TrackedChangesEditor({
       bulletList: ctx.editor?.isActive('bulletList') ?? false,
       orderedList: ctx.editor?.isActive('orderedList') ?? false,
       blockquote: ctx.editor?.isActive('blockquote') ?? false,
+      inTable: ctx.editor?.isActive('table') ?? false,
     }),
   })
 
@@ -848,6 +1032,96 @@ export function TrackedChangesEditor({
           () => editor?.chain().focus().insertPageBreak().run(),
           { toggle: false },
         )}
+        {/* DOC-TABLES-1: table insert + in-table row/column controls */}
+        <div className="li-edtr-tbmenu" ref={tableMenuRef}>
+          {markBtn(
+            marks?.inTable ?? false,
+            <TableIcon size={15} />,
+            'Table',
+            () => setTableMenuOpen((v) => !v),
+            { toggle: false },
+          )}
+          {tableMenuOpen && (
+            <div className="li-edtr-tbmenu-pop" role="menu" aria-label="Table">
+              {(
+                [
+                  {
+                    label: 'Insert table',
+                    run: () =>
+                      editor
+                        ?.chain()
+                        .focus()
+                        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                        .run(),
+                    needsTable: false,
+                  },
+                  {
+                    label: 'Add row above',
+                    run: () => editor?.chain().focus().addRowBefore().run(),
+                    needsTable: true,
+                  },
+                  {
+                    label: 'Add row below',
+                    run: () => editor?.chain().focus().addRowAfter().run(),
+                    needsTable: true,
+                  },
+                  {
+                    label: 'Add column left',
+                    run: () => editor?.chain().focus().addColumnBefore().run(),
+                    needsTable: true,
+                  },
+                  {
+                    label: 'Add column right',
+                    run: () => editor?.chain().focus().addColumnAfter().run(),
+                    needsTable: true,
+                  },
+                  {
+                    label: 'Toggle header row',
+                    run: () => editor?.chain().focus().toggleHeaderRow().run(),
+                    needsTable: true,
+                  },
+                  {
+                    label: 'Delete row',
+                    run: () => editor?.chain().focus().deleteRow().run(),
+                    needsTable: true,
+                    danger: true,
+                  },
+                  {
+                    label: 'Delete column',
+                    run: () => editor?.chain().focus().deleteColumn().run(),
+                    needsTable: true,
+                    danger: true,
+                  },
+                  {
+                    label: 'Delete table',
+                    run: () => editor?.chain().focus().deleteTable().run(),
+                    needsTable: true,
+                    danger: true,
+                  },
+                ] as Array<{
+                  label: string
+                  run: () => void
+                  needsTable: boolean
+                  danger?: boolean
+                }>
+              ).map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  role="menuitem"
+                  className={`li-edtr-tbmenu-item${item.danger ? ' li-edtr-tbmenu-item--danger' : ''}`}
+                  disabled={item.needsTable && !(marks?.inTable ?? false)}
+                  onClick={() => {
+                    item.run()
+                    setTableMenuOpen(false)
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="li-edtr-tb-sep" aria-hidden />
         {markBtn(
           false,
@@ -866,6 +1140,11 @@ export function TrackedChangesEditor({
           {
             toggle: false,
           },
+        )}
+        <div className="li-edtr-tb-sep" aria-hidden />
+        {/* EDITOR-FIND-1: find & replace (⌘F) */}
+        {markBtn(findOpen, <SearchIcon size={15} />, 'Find & replace (⌘F)', () =>
+          findOpen ? closeFind() : openFind(),
         )}
         <div className="li-edtr-tb-sep" aria-hidden />
         <button
@@ -905,6 +1184,96 @@ export function TrackedChangesEditor({
           </div>
         )}
       </div>
+
+      {/* EDITOR-FIND-1: the find & replace bar (a second toolbar row) */}
+      {findOpen && (
+        <div className="li-edtr-findbar" role="search" aria-label="Find and replace">
+          <SearchIcon size={14} aria-hidden />
+          <input
+            ref={findInputRef}
+            className="li-edtr-find-input"
+            placeholder="Find in document"
+            value={findQuery}
+            onChange={(e) => setFindQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                gotoMatch(e.shiftKey ? -1 : 1)
+              } else if (e.key === 'Escape') {
+                e.stopPropagation()
+                closeFind()
+              }
+            }}
+            autoFocus
+            aria-label="Find"
+          />
+          <span className="li-edtr-find-count" aria-live="polite">
+            {findCount > 0
+              ? `${findActive + 1} of ${findCount}`
+              : findQuery.trim()
+                ? 'No matches'
+                : ''}
+          </span>
+          <button
+            type="button"
+            className="li-edtr-tb-btn"
+            onClick={() => gotoMatch(-1)}
+            disabled={findCount === 0}
+            title="Previous match"
+            aria-label="Previous match"
+          >
+            <ChevronUpIcon size={14} />
+          </button>
+          <button
+            type="button"
+            className="li-edtr-tb-btn"
+            onClick={() => gotoMatch(1)}
+            disabled={findCount === 0}
+            title="Next match"
+            aria-label="Next match"
+          >
+            <ChevronDownIcon size={14} />
+          </button>
+          <input
+            className="li-edtr-find-input li-edtr-find-input--replace"
+            placeholder="Replace with"
+            value={replaceWith}
+            onChange={(e) => setReplaceWith(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                closeFind()
+              }
+            }}
+            aria-label="Replace with"
+          />
+          <button
+            type="button"
+            className="li-edtr-find-btn"
+            onClick={replaceActive}
+            disabled={findCount === 0 || busy || aiWorking}
+          >
+            Replace
+          </button>
+          <button
+            type="button"
+            className="li-edtr-find-btn"
+            onClick={replaceAll}
+            disabled={findCount === 0 || busy || aiWorking}
+          >
+            Replace all
+          </button>
+          <button
+            type="button"
+            className="li-edtr-tb-btn li-edtr-find-close"
+            onClick={closeFind}
+            title="Close find"
+            aria-label="Close find"
+          >
+            <XIcon size={14} />
+          </button>
+        </div>
+      )}
 
       {error && <div className="alert alert-error li-edtr-alert">{error}</div>}
 
@@ -1126,6 +1495,8 @@ export function TrackedChangesEditor({
       {/* footer */}
       <div className="li-edtr-foot">
         <span className="li-edtr-foot-hint">
+          <span className="li-edtr-foot-words">{wordCount.toLocaleString()} words</span>
+          {' · '}
           {pending.length > 0
             ? 'Accept or reject the pending changes to save'
             : 'Type on the page to edit · use Edit with AI for tracked changes'}
@@ -1153,6 +1524,12 @@ export function TrackedChangesEditor({
       </div>
     </div>
   )
+}
+
+// Word count over the extracted document text (the same text the diff sees).
+function countWords(text: string): number {
+  const trimmed = text.trim()
+  return trimmed === '' ? 0 : trimmed.split(/\s+/).length
 }
 
 // Literal text (or paragraphs, for multi-line text) as TipTap JSON content —

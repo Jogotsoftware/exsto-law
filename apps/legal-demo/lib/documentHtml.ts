@@ -73,12 +73,27 @@ export const DOCUMENT_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     'span',
     'div',
     'a',
+    // DOC-TABLES-1: GFM pipe tables (fee schedules, member/capital tables) —
+    // marked has always parsed them, but the missing allowlist entries meant a
+    // table's structure was stripped from every rendered surface. Structural
+    // tags only: no colspan/rowspan (pipe tables can't express them, so the
+    // editor round-trip would silently drop them anyway).
+    'table',
+    'thead',
+    'tbody',
+    'tfoot',
+    'tr',
+    'th',
+    'td',
   ],
   allowedAttributes: {
     '*': ['style'],
     a: ['href', 'target', 'rel'],
     span: ['style', 'class', 'data-variable'],
     div: ['style', 'class'],
+    // marked expresses GFM column alignment (`:---:`) as an align attribute.
+    th: ['style', 'align'],
+    td: ['style', 'align'],
   },
   allowedClasses: {
     // Classes that carry meaning in a finished document: the signature line and
