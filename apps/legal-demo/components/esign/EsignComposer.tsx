@@ -28,6 +28,7 @@ import {
 import { MatterContactPicker } from './MatterContactPicker'
 import type { ContactOption, MatterOption } from './matterContactFilter'
 import { useEnvelopeDraft, type RecipientRole } from './useEnvelopeDraft'
+import { workflowStepRecipientRows } from '@/lib/esignComposeSource'
 // ES-2 (§4) — the placement surface + the real preview, all client-safe pure
 // imports (the esign subpath ships no server code).
 import {
@@ -165,14 +166,7 @@ export function EsignComposer({
     if (source.kind === 'workflow-step') {
       seedWorkflowStep({
         subject: source.subject,
-        recipients: source.recipients.map((r) => ({
-          name: r.name,
-          email: r.email,
-          title: r.title,
-          role: r.role,
-          order: r.order,
-          key: r.key,
-        })),
+        recipients: workflowStepRecipientRows(source.recipients),
       })
     }
   }, [])

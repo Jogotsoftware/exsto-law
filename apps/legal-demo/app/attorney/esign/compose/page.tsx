@@ -8,20 +8,12 @@
 // matter pre-attached).
 import { Suspense, type ReactElement } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { EsignComposer, type ComposerSource } from '@/components/esign/EsignComposer'
+import { EsignComposer } from '@/components/esign/EsignComposer'
+import { composerSourceFromParams } from '@/lib/esignComposeSource'
 
 function ComposerFromParams(): ReactElement {
   const params = useSearchParams()
-  const documentVersionId = params.get('documentVersionId')
-  const source: ComposerSource = documentVersionId
-    ? {
-        kind: 'document',
-        documentVersionId,
-        documentEntityId: params.get('documentEntityId') ?? undefined,
-        matterEntityId: params.get('matterEntityId') ?? undefined,
-        title: params.get('title') ?? undefined,
-      }
-    : { kind: 'upload' }
+  const source = composerSourceFromParams((k) => params.get(k))
 
   return (
     <div className="li-esign li-esign-prepare">

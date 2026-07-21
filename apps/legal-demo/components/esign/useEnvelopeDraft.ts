@@ -7,6 +7,7 @@ import { useCallback, useMemo, useState } from 'react'
 // Type-only import from the vertical package — erased at build, so no server
 // code reaches the client bundle (same pattern as configEditors.tsx).
 import type { FieldPlacement } from '@exsto/legal'
+import { workflowStepUsesSigningOrder } from '@/lib/esignComposeSource'
 
 export type RecipientRole = 'needs_to_sign' | 'needs_to_view' | 'receives_copy'
 
@@ -185,7 +186,7 @@ export function useEnvelopeDraft(): EnvelopeDraftApi {
         recipients: seed.recipients.length ? seed.recipients : [{ ...EMPTY_RECIPIENT }],
         // Sequential template orders arrive as a real signing order; all-equal
         // orders mean parallel — the toggle reflects what the config declared.
-        useSigningOrder: seed.recipients.some((r) => r.order > 1),
+        useSigningOrder: workflowStepUsesSigningOrder(seed.recipients),
       }))
     },
     [],
