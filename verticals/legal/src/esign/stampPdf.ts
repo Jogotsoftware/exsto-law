@@ -11,7 +11,7 @@
 // the original bytes, calls stampExecutedPdf, and writes the result back — this
 // module is pure over bytes-in → bytes-out so it unit-tests against a golden.
 
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
+import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
 import type { FieldPlacement, PlacementFieldType, PlacementRect } from './placements.js'
 import { isSignatureImageDataUrl } from './fields.js'
 import { buildCertificateTextLines, type FileCertInput } from './fileCertificate.js'
@@ -45,17 +45,97 @@ function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; mime: string } | 
   return { bytes: new Uint8Array(Buffer.from(m[2]!, 'base64')), mime: m[1]! }
 }
 
-/** Normalized top-left rect → pdf-lib bottom-left box in page points. */
-function rectToBox(
+// ─────────────────────────────────────────────────────────────────────────
+// ESIGN-ROTATE-FIX — honor each page's /Rotate when stamping (design §5.4).
+//
+// THE STORAGE-SPACE DECISION (shared with placements.ts): a placement rect is
+// stored normalized in the ROTATED, VISUAL page space — exactly what the human
+// saw and dropped the box onto in the placement canvas. pdfjs's default
+// `getViewport` already bakes in /Rotate (90/270 swap width & height), so the
+// canvas, the signer overlay and the stored rect all live in that one visual
+// space. This keeps zero-rotation envelopes byte-compatible (visual == MediaBox
+// when /Rotate is 0) and needs NO migration — legacy rects are already valid.
+//
+// pdf-lib, by contrast, draws in UNROTATED MediaBox coordinates (bottom-left
+// origin, y up) and its `page.getSize()` reports the MediaBox, NOT the visual
+// box. So the executed-copy stamper must convert the visual rect back to
+// MediaBox points AND pre-rotate the drawn content so it reads upright once the
+// viewer applies /Rotate. Without this, on a rotated page every signature/date
+// landed in the diagonally-opposite corner, un-rotated — a wrong-corner
+// signature on a legal document. The two conversions below are the exact
+// inverse of pdfjs's viewport transform for each rotation (verified: /Rotate
+// 180 → transform [-1,0,0,1,W,0]; 90/270 → axes swapped), so a box stamps at
+// the identical spot the attorney placed it.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type PageRotation = 0 | 90 | 180 | 270
+
+/** Normalize any pdf-lib rotation angle (any multiple of 90, possibly negative)
+ *  to one of 0/90/180/270. */
+export function normalizePageRotation(angle: number): PageRotation {
+  const a = (((Math.round(angle / 90) * 90) % 360) + 360) % 360
+  return a as PageRotation
+}
+
+/** The VISUAL (on-screen, rotation-honored) page size given the UNROTATED
+ *  MediaBox size. 90/270 swap width and height — the canvas lays the page out
+ *  this way and placement rects are normalized against THIS size. */
+export function visualPageSize(
+  mediaW: number,
+  mediaH: number,
+  rot: PageRotation,
+): { w: number; h: number } {
+  return rot === 90 || rot === 270 ? { w: mediaH, h: mediaW } : { w: mediaW, h: mediaH }
+}
+
+/** Map a point in VISUAL space (origin top-left, y DOWN, in visual points) to a
+ *  point in pdf-lib MediaBox space (origin bottom-left, y UP, unrotated). This
+ *  is the exact inverse of pdfjs's default `getViewport` transform for each
+ *  /Rotate value. */
+export function visualToMediaPoint(
+  px: number,
+  py: number,
+  mediaW: number,
+  mediaH: number,
+  rot: PageRotation,
+): { x: number; y: number } {
+  switch (rot) {
+    case 90:
+      return { x: py, y: px }
+    case 180:
+      return { x: mediaW - px, y: py }
+    case 270:
+      return { x: mediaW - py, y: mediaH - px }
+    default:
+      return { x: px, y: mediaH - py }
+  }
+}
+
+/** A normalized (visual-space) placement rect → the axis-aligned pdf-lib
+ *  MediaBox box (bottom-left origin, unrotated) plus the counter-clockwise
+ *  degrees to rotate drawn content so it reads upright once /Rotate is applied.
+ *  Pure — unit-tested for all four rotations. For /Rotate 0 this reduces exactly
+ *  to the previous `rectToBox` (x = rect.x·W, y = H − rect.y·H − rect.h·H). */
+export function placementRectToMediaBox(
   rect: PlacementRect,
-  pageWidth: number,
-  pageHeight: number,
-): { x: number; y: number; w: number; h: number } {
-  const w = rect.w * pageWidth
-  const h = rect.h * pageHeight
-  const x = rect.x * pageWidth
-  const yTop = rect.y * pageHeight
-  return { x, y: pageHeight - yTop - h, w, h }
+  mediaW: number,
+  mediaH: number,
+  rot: PageRotation,
+): { x: number; y: number; w: number; h: number; rotate: PageRotation } {
+  const vis = visualPageSize(mediaW, mediaH, rot)
+  const vx = rect.x * vis.w
+  const vy = rect.y * vis.h
+  const vw = rect.w * vis.w
+  const vh = rect.h * vis.h
+  const a = visualToMediaPoint(vx, vy, mediaW, mediaH, rot)
+  const b = visualToMediaPoint(vx + vw, vy + vh, mediaW, mediaH, rot)
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(a.x - b.x),
+    h: Math.abs(a.y - b.y),
+    rotate: rot,
+  }
 }
 
 // Fit a font size so `text` fits `maxWidth` at up to `maxSize`, floor 6pt.
@@ -72,19 +152,29 @@ async function stampOne(
   sigFont: PDFFont,
   field: StampField,
 ): Promise<void> {
+  // page.getSize() is the UNROTATED MediaBox; the rect is normalized against the
+  // VISUAL (rotation-honored) page, so lay the field out in visual points and
+  // map each anchor back to MediaBox. rotate = 0 for an un-rotated page, in
+  // which case every mapped coordinate and call is identical to the pre-fix
+  // behavior (the regression bar).
   const { width, height } = page.getSize()
-  const box = rectToBox(field.rect, width, height)
+  const rot = normalizePageRotation(page.getRotation().angle)
+  const vis = visualPageSize(width, height, rot)
+  const vx = field.rect.x * vis.w
+  const vy = field.rect.y * vis.h
+  const vw = field.rect.w * vis.w
+  const vh = field.rect.h * vis.h
+  // Visual point (top-left origin, y down) → MediaBox point (bottom-left, y up).
+  const toMedia = (px: number, py: number) => visualToMediaPoint(px, py, width, height, rot)
+  // Only carry a rotate option when the page is actually rotated, so unrotated
+  // pages emit byte-identical draw calls.
+  const rotateOpt = rot === 0 ? {} : { rotate: degrees(rot) }
 
   if (field.type === 'check') {
     if (field.checked) {
-      const s = Math.min(box.w, box.h)
-      page.drawText('X', {
-        x: box.x + s * 0.2,
-        y: box.y + s * 0.15,
-        size: s * 0.8,
-        font,
-        color: TEXT_COLOR,
-      })
+      const s = Math.min(vw, vh)
+      const m = toMedia(vx + s * 0.2, vy + vh - s * 0.15)
+      page.drawText('X', { x: m.x, y: m.y, size: s * 0.8, font, color: TEXT_COLOR, ...rotateOpt })
     }
     return
   }
@@ -97,10 +187,14 @@ async function stampOne(
         decoded.mime === 'image/png'
           ? await pdf.embedPng(decoded.bytes)
           : await pdf.embedJpg(decoded.bytes)
-      const scale = Math.min(box.w / img.width, box.h / img.height)
+      const scale = Math.min(vw / img.width, vh / img.height)
       const w = img.width * scale
       const h = img.height * scale
-      page.drawImage(img, { x: box.x, y: box.y + (box.h - h) / 2, width: w, height: h })
+      // Image anchor = its VISUAL bottom-left corner (left of box, vertically
+      // centered); pdf-lib's drawImage origin + rotate then fills up-and-right
+      // in the visual frame.
+      const m = toMedia(vx, vy + (vh + h) / 2)
+      page.drawImage(img, { x: m.x, y: m.y, width: w, height: h, ...rotateOpt })
       return
     }
   }
@@ -111,21 +205,18 @@ async function stampOne(
   if (!text) return
   const isSig = field.type === 'sign' || field.type === 'initial'
   const usedFont = isSig ? sigFont : font
-  const size = fitFontSize(usedFont, text, box.w - 4, isSig ? 20 : 11)
-  page.drawText(text, {
-    x: box.x + 2,
-    y: box.y + Math.max(3, (box.h - size) / 2),
-    size,
-    font: usedFont,
-    color: TEXT_COLOR,
-  })
+  const size = fitFontSize(usedFont, text, vw - 4, isSig ? 20 : 11)
+  const pad = Math.max(3, (vh - size) / 2)
+  // Baseline-left anchor in the visual box (2pt in from the left, `pad` up from
+  // the visual bottom edge), mapped to MediaBox with the content pre-rotated.
+  const t = toMedia(vx + 2, vy + vh - pad)
+  page.drawText(text, { x: t.x, y: t.y, size, font: usedFont, color: TEXT_COLOR, ...rotateOpt })
   if (isSig) {
-    page.drawLine({
-      start: { x: box.x, y: box.y },
-      end: { x: box.x + box.w, y: box.y },
-      thickness: 0.75,
-      color: RULE_COLOR,
-    })
+    // The signature baseline rule runs along the visual box bottom edge — two
+    // endpoints mapped to MediaBox (a line needs no per-glyph rotation).
+    const start = toMedia(vx, vy + vh)
+    const end = toMedia(vx + vw, vy + vh)
+    page.drawLine({ start, end, thickness: 0.75, color: RULE_COLOR })
   }
 }
 
