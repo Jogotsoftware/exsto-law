@@ -8,6 +8,7 @@ import type { OnApproved } from '@/components/ServiceProposalCard'
 import { ProposalCardShell } from '@/components/ProposalCardShell'
 import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
 import { TemplateEditorModal } from '@/components/TemplateEditorModal'
+import type { TemplateEsignConfig } from '@exsto/legal'
 
 // CONSTRAINT (mirrors ServiceProposalCard): no server-package imports. This shape is
 // a structural mirror of the TemplateProposal captured in
@@ -22,7 +23,15 @@ export interface TemplateProposal {
   confidence: number
   // BUILDER-CERT-1 (WP3) — signability declared on the card; forwarded on approve so
   // the firm-library template carries it (what lets an e-sign step compose after it).
+  // Superseded by esignConfig below.
   signature?: { required: boolean; signer_roles: string[] }
+  // ESIGN-UNIFY-1 ES-3 — the full role/bind/order declaration (structural mirror of
+  // TemplateEsignConfig; plain JSON over SSE). Forwarded on approve; the server
+  // validates marker↔role drift before any write.
+  esignConfig?: {
+    signable: boolean
+    roles: Array<{ key: string; label: string; recipientRole: string; bind: string; order: number }>
+  }
   // The {{tokens}} the body references, and the orphans (no matching question on THIS
   // service). With the documents→variables→questionnaire flow, orphans before the
   // questionnaire exists are NOT broken — they're the fields the questionnaire collects
@@ -38,6 +47,27 @@ export interface TemplateProposal {
 }
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
+
+// The SSE mirror shape → the typed config the shared eSign panel edits. Roles
+// with unknown recipientRole/bind coerce to safe defaults (the server-side
+// parseTemplateEsignConfig applies the same rules on write).
+function toEsignConfig(m: TemplateProposal['esignConfig']): TemplateEsignConfig {
+  return {
+    signable: m?.signable === true,
+    roles: (m?.roles ?? [])
+      .filter((r) => r.key)
+      .map((r) => ({
+        key: r.key,
+        label: r.label || r.key,
+        recipientRole:
+          r.recipientRole === 'needs_to_view' || r.recipientRole === 'receives_copy'
+            ? r.recipientRole
+            : 'needs_to_sign',
+        bind: (r.bind || 'manual') as TemplateEsignConfig['roles'][number]['bind'],
+        order: typeof r.order === 'number' && Number.isFinite(r.order) ? r.order : 1,
+      })),
+  }
+}
 
 // Display form of a kind slug ("operating_agreement" → "Operating Agreement"),
 // matching the templates pages — attorneys never see snake_case.
@@ -96,6 +126,11 @@ export function TemplateProposalCard({
   // WP-H: the card's CURRENT body — the proposal until the attorney edits it in
   // the pop-up; Approve always captures this (the attorney's version).
   const [currentBody, setCurrentBody] = useState(proposal.body)
+  // ES-3: the card's CURRENT e-sign config — the proposal's until the attorney
+  // edits it in the pop-up's eSign panel; Approve always sends this version.
+  const [currentEsign, setCurrentEsign] = useState<TemplateEsignConfig>(() =>
+    toEsignConfig(proposal.esignConfig),
+  )
   const [editing, setEditing] = useState(false)
   const [editSeedBody, setEditSeedBody] = useState<string | null>(null)
   const [editLoading, setEditLoading] = useState(false)
@@ -167,6 +202,9 @@ export function TemplateProposalCard({
             summary: proposal.summary,
             confidence: proposal.confidence,
             ...(proposal.signature ? { signature: proposal.signature } : {}),
+            ...(currentEsign.signable || currentEsign.roles.length
+              ? { esignConfig: currentEsign }
+              : {}),
           }),
         },
       )
@@ -203,9 +241,14 @@ export function TemplateProposalCard({
       meta={
         <>
           {humanKind(proposal.docKind)}
-          {proposal.signature?.required
-            ? ` · signed by ${proposal.signature.signer_roles.join(', ')}`
-            : ''}
+          {currentEsign.signable
+            ? ` · signed by ${currentEsign.roles
+                .filter((r) => r.recipientRole === 'needs_to_sign')
+                .map((r) => r.label)
+                .join(', ')}`
+            : proposal.signature?.required
+              ? ` · signed by ${proposal.signature.signer_roles.join(', ')}`
+              : ''}
         </>
       }
       actions={
@@ -329,12 +372,14 @@ export function TemplateProposalCard({
               : `Edit proposed template — ${proposal.name}`
           }
           initialBody={editSeedBody ?? currentBody}
+          initialEsignConfig={currentEsign}
           regenerateTargetId={
             approveState === 'approved' && templateEntityId
               ? templateEntityId
               : `proposal:${proposal.serviceKey}`
           }
-          onSave={async (body) => {
+          onSave={async (body, esignConfig) => {
+            if (esignConfig) setCurrentEsign(esignConfig)
             if (approveState === 'approved' && templateEntityId) {
               // Post-approval: approve wrote TWO stores (createTemplateAI's dual
               // write) — the SERVICE-BOUND body drafting + completeness read, and the
@@ -350,7 +395,11 @@ export function TemplateProposalCard({
               })
               await callAttorneyMcp({
                 toolName: 'legal.template.update',
-                input: { templateEntityId, body },
+                input: {
+                  templateEntityId,
+                  body,
+                  ...(esignConfig ? { esignConfig } : {}),
+                },
               })
               setCurrentBody(body)
               onEdited?.(`template "${proposal.name}" for "${proposal.serviceKey}" (saved)`)

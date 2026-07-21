@@ -74,6 +74,73 @@ export function hasFields(markdown: string): boolean {
   return TAG_RE.test(markdown)
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// ESIGN-UNIFY-1 ES-3 (§6.1/§6.2) — whole-line marker detection, for the
+// template editor bridge (apps/legal-demo/lib/templateBody.ts): a template
+// body line that is ENTIRELY one `{{type:key}}` tag (with an optional
+// "Label: " prefix) hydrates as a ruled SignatureLine node instead of raw
+// marker text (15.16b — attorneys never see the marker literally). Same
+// anchor rule as executionBlock.ts's MARKER_LINE_RE, but this one CAPTURES
+// the signer key too (that file only needs the caption label).
+// ─────────────────────────────────────────────────────────────────────────
+const WHOLE_MARKER_LINE_RE = new RegExp(
+  `^\\s*(?:([^{}<>\\n:][^{}<>\\n]*?)\\s*:\\s*)?\\{\\{\\s*(${MARKER_TYPE_PATTERN})\\s*:\\s*([A-Za-z0-9_-]+)\\s*\\}\\}\\s*$`,
+)
+
+export interface MarkerLine {
+  type: EsignFieldType
+  signerKey: string
+  /** The caption to show on the ruled line — the prefix if given, else the type's default label. */
+  label: string
+}
+
+// Classify one physical line as a whole marker line, or null (an ordinary line
+// — including an INLINE marker mid-sentence, which is deliberately left as
+// prose; see MARKER_LINE_RE's header comment in executionBlock.ts).
+export function parseMarkerLine(line: string): MarkerLine | null {
+  const m = WHOLE_MARKER_LINE_RE.exec(line)
+  if (!m) return null
+  const type = m[2] as EsignFieldType
+  return { type, signerKey: m[3]!, label: m[1]?.trim() || LABELS[type] }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Marker ↔ role drift (§6.2 editor warning, §6.3 AI-proposal validation). Given
+// a template body and the config's roles, report:
+//   • markerKeysWithoutRole — a signer key some marker in the body references
+//     that no role row declares (an orphan marker: nothing will ever resolve
+//     who that key belongs to at send time).
+//   • rolesWithoutSignMarker — a `needs_to_sign` role with no {{sign:key}}
+//     marker anywhere in the body (nothing for that signer to actually sign).
+// Pure — no DB — so it runs identically in the editor (live, client-side) and
+// the AI-proposal validator (server-side gate before persisting).
+// ─────────────────────────────────────────────────────────────────────────
+export interface EsignRoleKeyLike {
+  key: string
+  recipientRole?: string
+}
+
+export interface EsignMarkerRoleDrift {
+  markerKeysWithoutRole: string[]
+  rolesWithoutSignMarker: string[]
+}
+
+export function computeMarkerRoleDrift(
+  body: string,
+  roles: readonly EsignRoleKeyLike[],
+): EsignMarkerRoleDrift {
+  const fields = parseFields(body ?? '')
+  const markerKeys = new Set(fields.map((f) => f.signerKey))
+  const signMarkerKeys = new Set(fields.filter((f) => f.type === 'sign').map((f) => f.signerKey))
+  const roleKeys = new Set(roles.map((r) => r.key))
+  const markerKeysWithoutRole = [...markerKeys].filter((k) => !roleKeys.has(k)).sort()
+  const rolesWithoutSignMarker = roles
+    .filter((r) => (r.recipientRole ?? 'needs_to_sign') === 'needs_to_sign')
+    .filter((r) => !signMarkerKeys.has(r.key))
+    .map((r) => r.key)
+  return { markerKeysWithoutRole, rolesWithoutSignMarker }
+}
+
 // Replace each tag, in appearance order, with its resolved value (keyed by the
 // positional field id). A missing value renders blank.
 export function resolveExecutedMarkdown(
