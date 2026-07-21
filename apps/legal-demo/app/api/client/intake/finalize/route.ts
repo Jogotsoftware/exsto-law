@@ -4,10 +4,11 @@
 // One request does, in order:
 //   1. ensure the staged contact exists (the stage endpoint normally already
 //      created it; a direct call self-heals),
-//   2. create the Supabase Auth account (anon signUp → GoTrue sends its own
-//      confirmation email; the account is UNCONFIRMED so possession of the
-//      typed email is never assumed — portal login stays behind
-//      email_confirmed_at, the existing fail-closed gate),
+//   2. create the Supabase Auth account (N1: admin.generateLink mints an
+//      UNCONFIRMED account + token WITHOUT Supabase sending its own email —
+//      we send our own firm-branded one via issuePortalConfirmationEmail.
+//      Portal login stays behind email_confirmed_at, the existing fail-closed
+//      gate),
 //   3. provision the client's OWN actor (idempotent),
 //   4. record fee consent when the service declares a cost (fee.quoted +
 //      fee.accepted by the client's actor; a costed service with no acceptance
@@ -16,12 +17,13 @@
 //      TO THE CLIENT'S ACTOR (contact deduped by email, so the staged lead is
 //      reused, not duplicated).
 //
-// If the email already has an auth account, the password is NOT touched (no
-// reset without an invite-token proof — anti-takeover); the booking still
-// proceeds bound to that contact and the client signs in with their existing
-// password.
+// If the email already has a CONFIRMED auth account, the password is NOT
+// touched (no reset without an invite-token proof — anti-takeover); the
+// booking still proceeds bound to that contact and the client signs in with
+// their existing password. An existing but UNCONFIRMED account gets a fresh
+// token + a re-sent email (mintSignupConfirmation regenerates it) — that's
+// the same path a stalled first attempt takes on retry.
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 import '@exsto/legal/mcp'
 import {
   stageIntakeLead,
@@ -37,6 +39,8 @@ import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { verifyCaptchaIfConfigured } from '@/lib/captcha'
 import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
 import { validatePassword } from '@/lib/passwordPolicy'
+import { issuePortalConfirmationEmail } from '@/lib/portalConfirmationEmail'
+import type { ConfirmationEmailLang } from '@/lib/confirmationEmailTemplate'
 
 export const runtime = 'nodejs'
 // Booking a service whose workflow opens on a producing stage can draft
@@ -64,39 +68,10 @@ interface FinalizeBody {
   password?: unknown
   feeAccepted?: unknown
   captchaToken?: unknown
+  lang?: unknown
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
-
-// Anon-key signUp, server-side: GoTrue sends the confirmation email and hands
-// existing emails back as an obfuscated user with no identities.
-async function createUnconfirmedAccount(
-  email: string,
-  password: string,
-): Promise<'created' | 'exists'> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY
-  if (!url || !anon) throw new Error('Account creation is not configured.')
-  const supabase = createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { emailRedirectTo: `${BASE_URL}/portal/login` },
-  })
-  if (error) {
-    const m = error.message.toLowerCase()
-    if (m.includes('already registered') || m.includes('already exists')) return 'exists'
-    // GoTrue rate-limits confirmation resends per email; a quick retry after a
-    // failed attempt means the account from that attempt already exists.
-    if (m.includes('you can only request this after')) return 'exists'
-    throw new Error(error.message)
-  }
-  // Existing-email signUp "succeeds" with an identity-less stub user.
-  if (data.user && (data.user.identities ?? []).length === 0) return 'exists'
-  return 'created'
-}
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`intake-finalize:${clientIpFrom(request)}`)
@@ -185,9 +160,18 @@ export async function POST(request: Request) {
       )
     }
 
-    // 3. The auth account. 'exists' is NOT an error: the booking proceeds and
-    // the client signs in with the password they already have.
-    const account = await createUnconfirmedAccount(email, password)
+    // 3. The auth account. 'exists' (already CONFIRMED) is NOT an error: the
+    // booking proceeds and the client signs in with the password they already
+    // have. 'created' covers both a brand-new account and an existing-but-
+    // UNCONFIRMED one (mintSignupConfirmation regenerates its token) — either
+    // way a fresh confirmation email goes out.
+    const lang: ConfirmationEmailLang = str(body.lang) === 'es' ? 'es' : 'en'
+    const account = await issuePortalConfirmationEmail(publicCtx, {
+      email,
+      password,
+      baseUrl: BASE_URL,
+      lang,
+    })
 
     // 4. The client's own actor (idempotent; also self-heals the RBAC scope
     // assignment for actors provisioned before 0136).
@@ -226,9 +210,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      accountCreated: account === 'created',
-      accountExisted: account === 'exists',
-      emailConfirmationRequired: account === 'created',
+      accountCreated: account.status === 'created',
+      accountExisted: account.status === 'exists',
+      emailConfirmationRequired: account.status === 'created',
+      confirmationEmailSent: account.status === 'created' ? account.emailSent : null,
       matterNumber: effect.matterNumber ?? null,
       scheduledAt: effect.scheduledAt ?? null,
     })

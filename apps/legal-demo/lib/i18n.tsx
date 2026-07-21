@@ -20,6 +20,7 @@ const en: Record<string, string> = {
   // Common
   'common.continue': 'Continue',
   'common.back': 'Back',
+  'common.sending': 'Sending…',
   'common.loading': 'Loading…',
 
   // Service step
@@ -407,6 +408,11 @@ const en: Record<string, string> = {
   'account.known': 'It looks like you already have an account — sign in to link this request.',
   'account.signin_toggle': 'Already have a portal account? Sign in instead',
   'account.create_toggle': 'New here, or can’t sign in? Create your account instead',
+  'account.pending_confirm':
+    'It looks like you already started creating an account — check {email} for the confirmation link, then come back and sign in.',
+  'account.pending_confirm_sent':
+    'If that address needs confirming, we’ve sent a fresh link. Check your inbox.',
+  'account.resend': 'Resend confirmation email',
 
   // Confirmation — portal account outcomes
   'confirm.account_created':
@@ -445,6 +451,7 @@ const es: Record<string, string> = {
   // Common
   'common.continue': 'Continuar',
   'common.back': 'Atrás',
+  'common.sending': 'Enviando…',
   'common.loading': 'Cargando…',
 
   // Service step
@@ -833,6 +840,11 @@ const es: Record<string, string> = {
   'account.known': 'Parece que ya tienes una cuenta — inicia sesión para vincular esta solicitud.',
   'account.signin_toggle': '¿Ya tienes una cuenta del portal? Inicia sesión',
   'account.create_toggle': '¿Nuevo aquí o no puedes iniciar sesión? Crea tu cuenta',
+  'account.pending_confirm':
+    'Parece que ya comenzaste a crear una cuenta — revisa {email} para el enlace de confirmación y luego vuelve a iniciar sesión.',
+  'account.pending_confirm_sent':
+    'Si esa dirección necesita confirmación, hemos enviado un enlace nuevo. Revisa tu bandeja de entrada.',
+  'account.resend': 'Reenviar correo de confirmación',
 
   // Confirmación — resultados de la cuenta del portal
   'confirm.account_created':

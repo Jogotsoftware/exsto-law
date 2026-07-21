@@ -20,6 +20,7 @@ import type { ActionContext } from '@exsto/substrate'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { verifyCaptchaIfConfigured } from '@/lib/captcha'
 import { resolvePublicTenant, FirmNotFoundError } from '@/lib/publicTenant'
+import { isEmailConfirmed } from '@/lib/supabaseAdmin'
 
 export const runtime = 'nodejs'
 
@@ -71,10 +72,14 @@ export async function POST(request: Request) {
     // so the returning-client default works in captcha-guarded deployments too.
     let quote = null
     let hasPortalAccount = false
+    let portalAccountConfirmed: boolean | null = null
     try {
       const contactId = await findClientContactIdByEmail(ctx, str(body.clientEmail))
       hasPortalAccount =
         contactId != null && (await resolvePortalActorId(tenantId, contactId)) != null
+      if (hasPortalAccount) {
+        portalAccountConfirmed = await isEmailConfirmed(str(body.clientEmail))
+      }
       const q = await resolveServiceFeeQuote(ctx, str(body.serviceKey), contactId)
       if (q) {
         quote = {
@@ -88,7 +93,13 @@ export async function POST(request: Request) {
     } catch {
       quote = null
     }
-    return NextResponse.json({ ok: true, staged: false, quote, hasPortalAccount })
+    return NextResponse.json({
+      ok: true,
+      staged: false,
+      quote,
+      hasPortalAccount,
+      portalAccountConfirmed,
+    })
   }
   try {
     const staged = await stageIntakeLead(ctx, {
@@ -124,8 +135,12 @@ export async function POST(request: Request) {
     // sign-in instead of a doomed create. Disclosure is bounded — finalize
     // already returns accountExisted post-submit — and the copy stays neutral.
     let hasPortalAccount = false
+    let portalAccountConfirmed: boolean | null = null
     try {
       hasPortalAccount = (await resolvePortalActorId(tenantId, staged.clientEntityId)) != null
+      if (hasPortalAccount) {
+        portalAccountConfirmed = await isEmailConfirmed(str(body.clientEmail))
+      }
     } catch {
       hasPortalAccount = false
     }
@@ -135,6 +150,7 @@ export async function POST(request: Request) {
       leadId: staged.questionnaireEntityId,
       quote,
       hasPortalAccount,
+      portalAccountConfirmed,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
