@@ -18,6 +18,25 @@
 
 import { type EsignFieldType, labelFor, MARKER_TYPE_PATTERN } from './fields.js'
 
+// ESIGN-UNIFY-1 ES-3 — re-exported here (not just from fields.js) because this
+// module is the `@exsto/legal/esign` package subpath entry (package.json
+// "exports"."./esign") — the CLIENT-SAFE surface documentHtml.ts and the
+// template editor bridge (apps/legal-demo/lib/templateBody.ts) import from.
+// parseFields/parseMarkerLine/computeMarkerRoleDrift are pure (no DB, no
+// server-only deps), so shipping them here is the same discipline as
+// renderSigMarkersForPreview below.
+export {
+  parseFields,
+  parseMarkerLine,
+  computeMarkerRoleDrift,
+  labelFor,
+  type EsignField,
+  type EsignFieldType,
+  type MarkerLine,
+  type EsignRoleKeyLike,
+  type EsignMarkerRoleDrift,
+} from './fields.js'
+
 // A whole-line execution element is EITHER a marker line or a legacy underscore
 // run, each with an OPTIONAL "Label: " prefix. Anchored to the whole (trimmed)
 // line on purpose: only a line that is ENTIRELY one of these becomes a ruled line.

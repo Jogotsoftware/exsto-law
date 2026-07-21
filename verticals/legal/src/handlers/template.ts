@@ -63,6 +63,81 @@ function normalizeSignature(raw: unknown): { required: boolean; signer_roles: st
   return { required, signer_roles: roles as string[] }
 }
 
+// ESIGN-UNIFY-1 ES-3 (0187 planned, §6.1) — the SHAPE-ONLY write-side guard for
+// template_esign_config, mirroring normalizeSignature's discipline exactly
+// (structural validity + the one hard invariant that must never reach the
+// substrate malformed). Marker↔role DRIFT (does every needs_to_sign role
+// actually have a {{sign:key}} marker in the body?) is NOT checked here — the
+// handler does not reliably see the current body on a partial update. That
+// check lives at the API layer with body context: validateProposedTemplate
+// (the AI-proposal gate, hard) and the editor panel's live warning (soft, via
+// esign/fields.js computeMarkerRoleDrift) — see templateAuthoring.ts.
+const ESIGN_RECIPIENT_ROLES = ['needs_to_sign', 'needs_to_view', 'receives_copy'] as const
+type EsignRecipientRoleLiteral = (typeof ESIGN_RECIPIENT_ROLES)[number]
+
+interface RawEsignRole {
+  key?: unknown
+  label?: unknown
+  recipientRole?: unknown
+  bind?: unknown
+  order?: unknown
+}
+
+function isValidBind(v: unknown): boolean {
+  if (typeof v !== 'string' || !v) return false
+  if (v === 'matter_primary_contact' || v === 'attorney_of_record' || v === 'manual') return true
+  return v.startsWith('contact_role:') && v.length > 'contact_role:'.length
+}
+
+function normalizeEsignConfig(raw: unknown): {
+  signable: boolean
+  roles: Array<{
+    key: string
+    label: string
+    recipientRole: EsignRecipientRoleLiteral
+    bind: string
+    order: number
+  }>
+} {
+  const o = (raw && typeof raw === 'object' ? raw : {}) as {
+    signable?: unknown
+    roles?: unknown
+  }
+  const seen = new Set<string>()
+  const roles: Array<{
+    key: string
+    label: string
+    recipientRole: EsignRecipientRoleLiteral
+    bind: string
+    order: number
+  }> = []
+  if (Array.isArray(o.roles)) {
+    for (const entry of o.roles as RawEsignRole[]) {
+      const key = typeof entry?.key === 'string' ? entry.key.trim() : ''
+      if (!key) throw new Error('Every e-sign role needs a key (the marker signer key it owns).')
+      if (seen.has(key)) throw new Error(`Duplicate e-sign role key "${key}".`)
+      seen.add(key)
+      const recipientRole: EsignRecipientRoleLiteral = ESIGN_RECIPIENT_ROLES.includes(
+        entry.recipientRole as EsignRecipientRoleLiteral,
+      )
+        ? (entry.recipientRole as EsignRecipientRoleLiteral)
+        : 'needs_to_sign'
+      const bind = isValidBind(entry.bind) ? (entry.bind as string) : 'manual'
+      const order =
+        typeof entry.order === 'number' && Number.isFinite(entry.order) ? entry.order : 1
+      const label = typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : key
+      roles.push({ key, label, recipientRole, bind, order })
+    }
+  }
+  const signable = o.signable === true
+  if (signable && !roles.some((r) => r.recipientRole === 'needs_to_sign')) {
+    throw new Error(
+      'esignConfig.signable is true but no role is set to "needs_to_sign" — declare at least one signer.',
+    )
+  }
+  return { signable, roles }
+}
+
 interface TemplateCreatePayload {
   name: string
   category: TemplateCategory
@@ -70,6 +145,7 @@ interface TemplateCreatePayload {
   doc_kind?: string | null
   variables?: TemplateVariables
   signature?: unknown
+  esign_config?: unknown
 }
 
 registerActionHandler('legal.template.create', async (ctx, client, payload, actionId) => {
@@ -104,6 +180,11 @@ registerActionHandler('legal.template.create', async (ctx, client, payload, acti
   if (p.signature != null) {
     attrs.push({ kind: 'template_signature', value: normalizeSignature(p.signature) })
   }
+  // Absent esign_config = the read layer falls back to legacy template_signature
+  // (or unsignable, if that's absent too) — see parseTemplateEsignConfig.
+  if (p.esign_config != null) {
+    attrs.push({ kind: 'template_esign_config', value: normalizeEsignConfig(p.esign_config) })
+  }
   for (const a of attrs) {
     await setTemplateAttr(client, {
       tenantId: ctx.tenantId,
@@ -125,6 +206,7 @@ interface TemplateUpdatePayload {
   doc_kind?: string | null
   variables?: TemplateVariables
   signature?: unknown
+  esign_config?: unknown
 }
 
 registerActionHandler('legal.template.update', async (ctx, client, payload, actionId) => {
@@ -150,6 +232,10 @@ registerActionHandler('legal.template.update', async (ctx, client, payload, acti
   // A non-null signature supersedes the prior declaration; {required:false} unsigns.
   if (p.signature != null) {
     updates.push({ kind: 'template_signature', value: normalizeSignature(p.signature) })
+  }
+  // A non-null esign_config supersedes the prior config; {signable:false} unsigns.
+  if (p.esign_config != null) {
+    updates.push({ kind: 'template_esign_config', value: normalizeEsignConfig(p.esign_config) })
   }
 
   for (const u of updates) {

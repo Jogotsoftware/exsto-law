@@ -26,12 +26,18 @@ import {
 import { TemplateEditor, type TemplateEditorHandle } from '@/components/templates/TemplateEditor'
 import type { VariableStatus } from '@/components/templates/TemplateVariableNode'
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
+import { TemplateEsignPanel, roleBlockHtml } from '@/components/templates/TemplateEsignPanel'
 import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
 import { GemCluster } from '@/components/GemSparkle'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
 import { buildPreview } from '@/lib/templatePreview'
 import { streamTemplateAi } from '@/lib/templateAiStream'
-import type { TemplateVariables, TemplateVariableSpec } from '@exsto/legal'
+import type {
+  TemplateVariables,
+  TemplateVariableSpec,
+  TemplateEsignConfig,
+  TemplateEsignRole,
+} from '@exsto/legal'
 
 type Category = 'document' | 'email'
 
@@ -42,6 +48,9 @@ interface Template {
   body: string
   docKind: string | null
   variables: TemplateVariables
+  // ES-3: resolved server-side (template_esign_config, falling back to the
+  // legacy template_signature declaration) — see queries/templates.ts.
+  esignConfig: TemplateEsignConfig
   updatedAt: string
 }
 
@@ -52,6 +61,7 @@ interface Draft {
   body: string
   docKind: string
   variables: TemplateVariables
+  esignConfig: TemplateEsignConfig
 }
 
 // A questionnaire from the firm library — used to seed a new template with its
@@ -63,6 +73,8 @@ interface QuestionnaireOpt {
   schema?: { sections?: Array<{ fields?: Array<{ id?: string; label?: string }> }> }
 }
 
+const EMPTY_ESIGN: TemplateEsignConfig = { signable: false, roles: [] }
+
 const EMPTY_DRAFT: Draft = {
   templateEntityId: null,
   name: '',
@@ -70,6 +82,7 @@ const EMPTY_DRAFT: Draft = {
   body: '',
   docKind: '',
   variables: {},
+  esignConfig: EMPTY_ESIGN,
 }
 
 // Standard merge fields offered in every template, click-to-insert. Authors can
@@ -486,6 +499,7 @@ export default function TemplatesPage() {
       body: t.body,
       docKind: t.docKind ?? '',
       variables: t.variables ?? {},
+      esignConfig: t.esignConfig ?? EMPTY_ESIGN,
     })
     setAiText('')
     setAiError(null)
@@ -527,6 +541,7 @@ export default function TemplatesPage() {
       body: t.body,
       docKind: t.docKind ?? '',
       variables: t.variables ?? {},
+      esignConfig: t.esignConfig ?? EMPTY_ESIGN,
     })
     setAiText('')
     setAiError(null)
@@ -554,6 +569,7 @@ export default function TemplatesPage() {
       body: lines.join('\n\n'),
       docKind: '',
       variables,
+      esignConfig: EMPTY_ESIGN,
     })
     setAiText('')
     setAiError(null)
@@ -575,6 +591,15 @@ export default function TemplatesPage() {
   // Insert a {{token}} chip at the cursor via the editor's imperative handle.
   function insertToken(id: string) {
     editorRef.current?.insertVariable(id)
+  }
+
+  // ES-3: insert a role's signature/name/date execution lines at the cursor as
+  // ruled lines (marker-carrying SignatureLine nodes — never raw {{sign:…}}
+  // text). The canonical heading is added once, when the body has no execution
+  // section yet.
+  function insertEsignBlock(role: TemplateEsignRole) {
+    const hasExecution = /\{\{\s*sign\s*:/.test(draftBodyRef.current)
+    editorRef.current?.insertHtml(roleBlockHtml(role, !hasExecution))
   }
 
   // Parse an uploaded file (PDF / Word / text) to plain text via the shared server
@@ -717,6 +742,7 @@ export default function TemplatesPage() {
             body: draft.body,
             docKind: draft.category === 'document' ? draft.docKind.trim() || null : null,
             variables,
+            esignConfig: draft.esignConfig,
           },
         })
       } else {
@@ -728,6 +754,9 @@ export default function TemplatesPage() {
             body: draft.body,
             docKind: draft.category === 'document' ? draft.docKind.trim() || undefined : undefined,
             variables,
+            ...(draft.esignConfig.signable || draft.esignConfig.roles.length
+              ? { esignConfig: draft.esignConfig }
+              : {}),
           },
         })
       }
@@ -1250,6 +1279,14 @@ export default function TemplatesPage() {
                 onChange={onVariablesChange}
                 onInsert={insertToken}
               />
+              {draft.category === 'document' && (
+                <TemplateEsignPanel
+                  body={draft.body}
+                  config={draft.esignConfig}
+                  onChange={(esignConfig) => setDraft((d) => (d ? { ...d, esignConfig } : d))}
+                  onInsertBlock={insertEsignBlock}
+                />
+              )}
               <div className="li-tpl-rail-subtitle">Standard Fields</div>
               <div className="li-tpl-standard-chips">
                 {STANDARD_TOKENS.map((t) => (

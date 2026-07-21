@@ -8,6 +8,7 @@ import {
   type StandaloneTemplate,
   type StandaloneTemplateCategory,
   type TemplateSignature,
+  type TemplateEsignConfig,
   type TemplateVariables,
 } from '../queries/templates.js'
 
@@ -22,8 +23,13 @@ export interface CreateTemplateInput {
   docKind?: string | null
   variables?: TemplateVariables
   // ESIGN-BLOCK-1 (WP1) — does the finished document get signed, and by whom?
-  // Omitted = unsigned (the read default).
+  // Omitted = unsigned (the read default). Superseded by esignConfig below
+  // (ES-3, §6.1); kept so the legacy write path (older callers, MCP tools that
+  // haven't moved to the new shape) still works.
   signature?: TemplateSignature
+  // ESIGN-UNIFY-1 ES-3 (0187 planned) — the full role/bind/order declaration.
+  // Omitted = the read layer falls back to `signature` above (or unsignable).
+  esignConfig?: TemplateEsignConfig
 }
 
 export async function createTemplate(
@@ -40,6 +46,7 @@ export async function createTemplate(
       doc_kind: input.docKind ?? null,
       variables: input.variables,
       signature: input.signature,
+      esign_config: input.esignConfig,
     },
   })
   const { templateEntityId } = res.effects[0] as { templateEntityId: string }
@@ -55,6 +62,7 @@ export interface UpdateTemplateInput {
   docKind?: string | null
   variables?: TemplateVariables
   signature?: TemplateSignature
+  esignConfig?: TemplateEsignConfig
 }
 
 export async function updateTemplate(
@@ -71,6 +79,7 @@ export async function updateTemplate(
       doc_kind: input.docKind,
       variables: input.variables,
       signature: input.signature,
+      esign_config: input.esignConfig,
     },
   })
   const updated = await getStandaloneTemplate(ctx, input.templateEntityId)

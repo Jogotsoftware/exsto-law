@@ -24,6 +24,38 @@ import type { ActionContext } from '@exsto/substrate'
 // aggregate catalog; these tools drive the standalone editor (create/edit/archive).
 // Attorney-only (not in CLIENT_PORTAL_TOOLS; clientPolicy.ts is default-deny).
 
+// ESIGN-UNIFY-1 ES-3 (0187 planned, §6.1) — the full role/bind/order e-sign
+// declaration, shared by the create and update tool schemas below. `bind`
+// accepts the three fixed kinds or a `contact_role:<name>` string (validated
+// server-side by normalizeEsignConfig — the schema only checks it is a string).
+const ESIGN_CONFIG_SCHEMA = {
+  type: 'object',
+  description:
+    "Template-embedded e-sign config (supersedes `signature`): { signable: boolean, roles: [{ key, label, recipientRole: 'needs_to_sign'|'needs_to_view'|'receives_copy', bind: 'matter_primary_contact'|'attorney_of_record'|'manual'|'contact_role:<name>', order: number }] }. `key` must match the marker signer key ({{sign:<key>}}) the role owns in the body. A provided config supersedes the prior; { signable: false } unsigns.",
+  properties: {
+    signable: { type: 'boolean' },
+    roles: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          key: { type: 'string' },
+          label: { type: 'string' },
+          recipientRole: {
+            type: 'string',
+            enum: ['needs_to_sign', 'needs_to_view', 'receives_copy'],
+          },
+          bind: { type: 'string' },
+          order: { type: 'number' },
+        },
+        required: ['key'],
+        additionalProperties: false,
+      },
+    },
+  },
+  additionalProperties: false,
+}
+
 const listTool: Tool<Record<string, never>, { templates: StandaloneTemplate[] }> = {
   name: 'legal.template.list',
   description:
@@ -103,7 +135,7 @@ const createTool: Tool<CreateTemplateInput, { template: StandaloneTemplate }> = 
       signature: {
         type: 'object',
         description:
-          "Signability declaration: { required: boolean, signer_roles: ('client'|'attorney'|'witness'|'notary')[] }. Omit for an unsigned document (the default). Declaring required: true is what lets the workflow builder compose an e-signature step after this document's drafting step.",
+          "Signability declaration: { required: boolean, signer_roles: ('client'|'attorney'|'witness'|'notary')[] }. Omit for an unsigned document (the default). Declaring required: true is what lets the workflow builder compose an e-signature step after this document's drafting step. Superseded by esignConfig below — set esignConfig when the caller supports it.",
         properties: {
           required: { type: 'boolean' },
           signer_roles: {
@@ -113,6 +145,7 @@ const createTool: Tool<CreateTemplateInput, { template: StandaloneTemplate }> = 
         },
         additionalProperties: false,
       },
+      esignConfig: ESIGN_CONFIG_SCHEMA,
     },
     required: ['name', 'category', 'body'],
     additionalProperties: false,
@@ -141,7 +174,7 @@ const updateTool: Tool<UpdateTemplateInput, { template: StandaloneTemplate }> = 
       signature: {
         type: 'object',
         description:
-          "Signability declaration: { required: boolean, signer_roles: ('client'|'attorney'|'witness'|'notary')[] }. A provided declaration supersedes the prior; { required: false } unsigns.",
+          "Signability declaration: { required: boolean, signer_roles: ('client'|'attorney'|'witness'|'notary')[] }. A provided declaration supersedes the prior; { required: false } unsigns. Superseded by esignConfig below.",
         properties: {
           required: { type: 'boolean' },
           signer_roles: {
@@ -151,6 +184,7 @@ const updateTool: Tool<UpdateTemplateInput, { template: StandaloneTemplate }> = 
         },
         additionalProperties: false,
       },
+      esignConfig: ESIGN_CONFIG_SCHEMA,
     },
     required: ['templateEntityId'],
     additionalProperties: false,

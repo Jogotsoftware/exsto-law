@@ -34,6 +34,9 @@ import {
 export interface TemplateEditorHandle {
   getHTML: () => string
   insertVariable: (name: string) => void
+  // ES-3: insert an HTML fragment at the cursor (the eSign panel's role-tagged
+  // signature/date/name blocks — sig-line divs the SignatureLine node parses).
+  insertHtml: (html: string) => void
   focus: () => void
   // Replace the document content imperatively (e.g. applying an AI proposal) —
   // works even when the incoming HTML equals the last SEED (the prop-resync path
@@ -175,6 +178,9 @@ export function TemplateEditor({
         (editor.chain().focus() as unknown as { insertVariable(n: string): { run(): boolean } })
           .insertVariable(name)
           .run(),
+      insertHtml: (html: string) => {
+        editor.chain().focus().insertContent(html).run()
+      },
       focus: () => editor.commands.focus(),
       setContent: (html: string) => {
         editor.commands.setContent(html || '<p></p>', { emitUpdate: false })
