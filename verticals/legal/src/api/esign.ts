@@ -1405,6 +1405,14 @@ export async function listClientDocuments(p: ClientPrincipal): Promise<ClientDoc
   })
 }
 
+// Fail-closed ownership test: the signer email must match AND the request's
+// primary (order-0) document must resolve to something THIS client owns —
+// either a matter they're on (draft_of, the AI-drafted lane, OR document_of,
+// the ESIGN-ANY-DOC uploaded lane) or, for a standalone upload with no matter,
+// a direct document_of_contact link to the client themselves. Mirrors the
+// draft_of/document_of COALESCE pattern used by listClientSignatures/
+// listClientDocuments above, plus the document_of_contact leg those don't need
+// (they're matter-scoped lists; a request has no matter to list under).
 async function assertClientOwnsRequest(p: ClientPrincipal, requestId: string): Promise<string> {
   const ctx = signingCtx(p.tenantId)
   const ok = await withActionContext(ctx, async (client) => {
@@ -1412,24 +1420,56 @@ async function assertClientOwnsRequest(p: ClientPrincipal, requestId: string): P
     if (!envelopeId) return null
     const email = await latestAttr(client, p.tenantId, requestId, 'signer_email')
     if (!email || email.toLowerCase() !== p.email.toLowerCase()) return null
-    // The request's matter must be one the client is on.
-    const matterRes = await client.query<{ matter_id: string }>(
-      `SELECT df.target_entity_id AS matter_id
+    const ownerRes = await client.query<{
+      matter_id_draft: string | null
+      matter_id_document: string | null
+      contact_id: string | null
+    }>(
+      `SELECT df.target_entity_id AS matter_id_draft,
+              du.target_entity_id AS matter_id_document,
+              dc.target_entity_id AS contact_id
          FROM relationship eo
          JOIN relationship_kind_definition eok ON eok.id=eo.relationship_kind_id AND eok.kind_name='envelope_of'
-         JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=eo.tenant_id
-         JOIN relationship_kind_definition dfk ON dfk.id=df.relationship_kind_id AND dfk.kind_name='draft_of'
+         LEFT JOIN relationship df ON df.source_entity_id=eo.target_entity_id AND df.tenant_id=eo.tenant_id
+           AND (df.valid_to IS NULL OR df.valid_to > now())
+           AND df.relationship_kind_id =
+               (SELECT id FROM relationship_kind_definition
+                 WHERE kind_name = 'draft_of' AND tenant_id = eo.tenant_id LIMIT 1)
+         LEFT JOIN relationship du ON du.source_entity_id=eo.target_entity_id AND du.tenant_id=eo.tenant_id
+           AND (du.valid_to IS NULL OR du.valid_to > now())
+           AND du.relationship_kind_id =
+               (SELECT id FROM relationship_kind_definition
+                 WHERE kind_name = 'document_of' AND tenant_id = eo.tenant_id LIMIT 1)
+         LEFT JOIN relationship dc ON dc.source_entity_id=eo.target_entity_id AND dc.tenant_id=eo.tenant_id
+           AND (dc.valid_to IS NULL OR dc.valid_to > now())
+           AND dc.relationship_kind_id =
+               (SELECT id FROM relationship_kind_definition
+                 WHERE kind_name = 'document_of_contact' AND tenant_id = eo.tenant_id LIMIT 1)
         WHERE eo.tenant_id=$1 AND eo.source_entity_id=$2 AND (eo.valid_to IS NULL OR eo.valid_to>now())
           AND COALESCE((eo.properties->>'order')::int, 0) = 0
         LIMIT 1`,
       [p.tenantId, envelopeId],
     )
-    const matterId = matterRes.rows[0]?.matter_id
-    if (!matterId || !p.matterIds.includes(matterId)) return null
+    const row = ownerRes.rows[0]
+    const matterId = row?.matter_id_draft ?? row?.matter_id_document ?? null
+    const ownsViaMatter = Boolean(matterId && p.matterIds.includes(matterId))
+    const ownsViaContact = Boolean(row?.contact_id && row.contact_id === p.clientContactId)
+    if (!ownsViaMatter && !ownsViaContact) return null
     return envelopeId
   })
   if (!ok) throw new Error('You are not authorized to sign this document.')
   return ok
+}
+
+// Public door for callers that only need authz + the envelope id (no side
+// effects) — e.g. the portal's file-byte route. loadSignableForClient also
+// records an 'open' event, which a file stream should NOT trigger on every
+// PDF-viewer page load.
+export async function resolveClientEnvelopeId(
+  p: ClientPrincipal,
+  requestId: string,
+): Promise<string> {
+  return assertClientOwnsRequest(p, requestId)
 }
 
 export async function loadSignableForClient(

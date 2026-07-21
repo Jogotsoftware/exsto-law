@@ -394,9 +394,13 @@ const BUILDERS: Record<string, (v: Vars) => BuiltEmail> = {
 }
 
 // One shell for the three signing-mail variants: navy hero panel (document
-// glyph + "<Attorney> sent you a document…"), ONE gold CTA "Review document",
-// the sender's personal message, clean footer. Table-based + inline styles
-// (same email-client constraints layout.ts documents).
+// glyph + "<Attorney> has a document ready for you…"), ONE gold CTA "Open
+// your document", the sender's personal message, clean footer. Copy is
+// deliberately plain — no "review and sign electronically" / "secure link"
+// phrasing, which reads as a phishing-classic fingerprint to mail providers
+// (see the branch's PR description for the deliverability rationale).
+// Table-based + inline styles (same email-client constraints layout.ts
+// documents).
 function buildEsignMail(v: Vars, variant: 'sign' | 'portal' | 'copy', ctaUrl: string): BuiltEmail {
   const docTitle = val(v.document_title, val(v.envelope_subject, 'a document'))
   const attorney = val(v.attorney_name, '')
@@ -407,33 +411,33 @@ function buildEsignMail(v: Vars, variant: 'sign' | 'portal' | 'copy', ctaUrl: st
   const heroLine =
     variant === 'copy'
       ? `${esc(senderLine)} sent you the executed copy of a signed document.`
-      : `${esc(senderLine)} sent you a document to review and sign.`
+      : `${esc(senderLine)} has a document ready for your signature.`
   const subject =
     variant === 'copy'
       ? `Executed copy: ${val(v.envelope_subject, docTitle)}`
-      : val(v.envelope_subject, `Please sign: ${docTitle}`)
+      : val(v.envelope_subject, `Ready for your signature — ${docTitle}`)
   const preheader =
     variant === 'copy' ? `Your executed copy of ${docTitle}.` : `${docTitle} is ready for you.`
-  const cta = variant === 'copy' ? 'View executed document' : 'Review document'
+  const cta = variant === 'copy' ? 'View your copy' : 'Open your document'
   const message = val(v.envelope_message, '')
 
   const messageBlock = message
     ? callout(
-        `<span style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:${COLORS.muted};">Message from ${esc(senderLine)}</span><br>` +
+        `<span style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:${COLORS.muted};">Note from ${esc(senderLine)}</span><br>` +
           `<span style="color:${COLORS.fg};">${esc(message)}</span>`,
         'gold',
       )
     : ''
   const bodyIntro =
     variant === 'portal'
-      ? 'Sign in to your secure client portal to review the document and add your signature.'
+      ? 'Sign in to your client portal to review it and add your signature.'
       : variant === 'copy'
-        ? 'All parties have signed. Use the secure link below to view the executed document.'
-        : 'Use the secure link below to review the document and add your signature.'
+        ? 'Your executed copy is ready below.'
+        : 'Review it and add your signature below.'
   const fine =
     variant === 'copy'
       ? 'This link is unique to you — please don&rsquo;t forward this email.'
-      : 'This link is unique to you — please don&rsquo;t forward this email. If you weren&rsquo;t expecting this, you can safely ignore it.'
+      : 'This link is unique to you and stays open for 14 days. If you weren&rsquo;t expecting this, you can safely ignore it.'
 
   // A small CSS-drawn document glyph (text bars on a white sheet) — no
   // images/SVG: Gmail strips SVG and remote images defeat CSP/offline discipline.
@@ -515,14 +519,14 @@ function buildEsignMail(v: Vars, variant: 'sign' | 'portal' | 'copy', ctaUrl: st
     '',
     variant === 'copy'
       ? `${senderLine} sent you the executed copy of ${docTitle}.`
-      : `${senderLine} sent you a document to review and sign: ${docTitle}.`,
-    ...(message ? ['', `Message from ${senderLine}:`, message] : []),
+      : `${senderLine} has a document ready for your signature: ${docTitle}.`,
+    ...(message ? ['', `Note from ${senderLine}:`, message] : []),
     '',
     `${cta}: ${ctaUrl}`,
     '',
     variant === 'copy'
       ? 'This link is unique to you.'
-      : "This link is unique to you. If you weren't expecting this, you can safely ignore it.",
+      : "This link is unique to you and stays open for 14 days. If you weren't expecting this, you can safely ignore it.",
     ...(firm ? ['', `— ${firm}`] : []),
   ]
 
