@@ -21093,6 +21093,11 @@ a.li-uac-done-primary:hover {
   border-color: #cfd8e8;
   color: var(--li-navy);
 }
+.li-edtr-tb-btn--txt {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
 .li-edtr-tb-sep {
   width: 1px;
   height: 20px;
