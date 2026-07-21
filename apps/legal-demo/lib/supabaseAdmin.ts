@@ -87,6 +87,18 @@ export async function upsertConfirmedPasswordAccount(
   throw error
 }
 
+// PT-3 — the forgot/reset-password flow's write. The caller has ALREADY proven
+// control of the account by successfully exchanging a Supabase recovery code
+// for a session (verified server-side via auth.getUser(accessToken) before
+// this is called — see api/client/auth/reset-password/route.ts), so no
+// re-verification happens here; this just performs the privileged write for
+// the uid that proof was already checked against.
+export async function setPasswordByUserId(userId: string, password: string): Promise<void> {
+  const admin = getSupabaseAdmin()
+  const { error } = await admin.auth.admin.updateUserById(userId, { password })
+  if (error) throw error
+}
+
 // A2.3 — the Auth-side half of removing a client's portal access. Best-effort:
 // no matching Auth user (never signed up, or already removed) is NOT an error
 // — the caller's substrate-side revoke (actor deactivated + contact archived)

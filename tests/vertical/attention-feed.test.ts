@@ -19,10 +19,18 @@ import {
   buildAttorneyClientTools,
   buildVolatileClaudeSystem,
   buildBaseSystemPrompt,
+  buildAwaitingReplyItems,
+  taskDeepLink,
+  matterActivityDeepLink,
+  mailThreadDeepLink,
+  draftDeepLink,
+  envelopeDeepLink,
+  invoiceDeepLink,
   type AttentionItem,
   type AttentionReaderDeps,
   type AssistantChatInput,
   type AssistantFirmFacts,
+  type AwaitingReplyThreadRow,
 } from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -50,6 +58,154 @@ function item(
     ...over,
   }
 }
+
+// A fixture thread row for buildAwaitingReplyItems — the pure grouping+copy
+// function that fixes founder walk 15.9 (fake matter-as-sender copy,
+// pixel-identical duplicate rows, dead links). No DB: this is the exact shape
+// readAwaitingReply maps its SQL rows into.
+function threadRow(over: Partial<AwaitingReplyThreadRow> = {}): AwaitingReplyThreadRow {
+  return {
+    threadId: 'thread-1',
+    matterId: 'matter-1',
+    matterNumber: 'M-MRTHA103',
+    gmailThreadId: null,
+    channel: 'portal',
+    occurredAt: daysAgo(1),
+    senderName: 'Maria Fernanda',
+    ...over,
+  }
+}
+
+describe('buildAwaitingReplyItems — sender+matter copy (founder walk 15.9)', () => {
+  it('names the real SENDER, not the matter — matters do not send messages', () => {
+    const [it0] = buildAwaitingReplyItems([threadRow()], NOW)
+    expect(it0!.why).toBe(
+      'Maria Fernanda sent a portal message on M-MRTHA103 yesterday and is waiting for your reply.',
+    )
+    expect(it0!.title).toBe('Reply needed: Maria Fernanda')
+    // The old bug: "M-MRTHA103 sent a message…" — the matter as the subject.
+    expect(it0!.why).not.toMatch(/^M-MRTHA103 sent/)
+  })
+
+  it('says "a message" (not "a portal message") for an email-channel thread', () => {
+    const [it0] = buildAwaitingReplyItems(
+      [threadRow({ channel: null, senderName: 'Riley Chen' })],
+      NOW,
+    )
+    expect(it0!.why).toContain('Riley Chen sent a message on M-MRTHA103')
+  })
+
+  it('falls back to "A client" only when literally no sender name resolved', () => {
+    const [it0] = buildAwaitingReplyItems([threadRow({ senderName: null })], NOW)
+    expect(it0!.why).toContain('A client sent')
+  })
+
+  it('omits the matter clause when the thread has no linked matter', () => {
+    const [it0] = buildAwaitingReplyItems(
+      [threadRow({ matterId: null, matterNumber: null, gmailThreadId: 'g-1' })],
+      NOW,
+    )
+    expect(it0!.why).toBe(
+      'Maria Fernanda sent a portal message yesterday and is waiting for your reply.',
+    )
+  })
+})
+
+describe('buildAwaitingReplyItems — dedupe/grouping (the founder-walk duplicate)', () => {
+  it('collapses two threads for the SAME sender on the SAME matter into ONE row with a count', () => {
+    // This is exactly the founder-walk symptom: two threads (e.g. a portal
+    // message and a separate email) on one matter, both from the same
+    // person — the old code showed two pixel-identical "M-… sent a message"
+    // rows because the copy only named the matter.
+    const rows = [
+      threadRow({ threadId: 't-1', occurredAt: daysAgo(1), channel: 'portal' }),
+      threadRow({ threadId: 't-2', occurredAt: daysAgo(3), channel: null }),
+    ]
+    const items = buildAwaitingReplyItems(rows, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0]!.why).toContain('Maria Fernanda sent 2 messages on M-MRTHA103')
+    // Age reflects the LONGER wait (the oldest unanswered thread), not the newest.
+    expect(items[0]!.why).toContain('3 days ago')
+    expect(items[0]!.occurredAt).toBe(daysAgo(3))
+  })
+
+  it('does NOT merge two different senders on the same matter', () => {
+    const rows = [
+      threadRow({ threadId: 't-1', senderName: 'Maria Fernanda' }),
+      threadRow({ threadId: 't-2', senderName: 'Carlos Ruiz' }),
+    ]
+    const items = buildAwaitingReplyItems(rows, NOW)
+    expect(items).toHaveLength(2)
+    expect(items.map((i) => i.title).sort()).toEqual([
+      'Reply needed: Carlos Ruiz',
+      'Reply needed: Maria Fernanda',
+    ])
+  })
+
+  it('does NOT merge two matter-less threads from the same sender (grouped by thread instead)', () => {
+    const rows = [
+      threadRow({ threadId: 't-1', matterId: null, matterNumber: null, gmailThreadId: 'g-1' }),
+      threadRow({ threadId: 't-2', matterId: null, matterNumber: null, gmailThreadId: 'g-2' }),
+    ]
+    const items = buildAwaitingReplyItems(rows, NOW)
+    expect(items).toHaveLength(2)
+  })
+
+  it('sender-name matching is case-insensitive (same person, different casing)', () => {
+    const rows = [
+      threadRow({ threadId: 't-1', senderName: 'Maria Fernanda' }),
+      threadRow({ threadId: 't-2', senderName: 'MARIA FERNANDA' }),
+    ]
+    expect(buildAwaitingReplyItems(rows, NOW)).toHaveLength(1)
+  })
+})
+
+describe('buildAwaitingReplyItems — deep links (real subject, not a generic page)', () => {
+  it('links to the matter Activity tab when a matter is known — shows BOTH portal + email threads', () => {
+    const [it0] = buildAwaitingReplyItems([threadRow({ matterId: 'm-42' })], NOW)
+    expect(it0!.deepLink).toBe('/attorney/matters/m-42/activity')
+    expect(it0!.entityId).toBe('m-42')
+  })
+
+  it('links to the firm inbox scoped to the Gmail thread when there is no matter', () => {
+    const [it0] = buildAwaitingReplyItems(
+      [threadRow({ matterId: null, matterNumber: null, gmailThreadId: 'gmail-abc' })],
+      NOW,
+    )
+    expect(it0!.deepLink).toBe('/attorney/mail?thread=gmail-abc')
+    expect(it0!.entityId).toBeUndefined()
+  })
+
+  it('falls back to the bare inbox when there is neither a matter nor a Gmail thread id', () => {
+    const [it0] = buildAwaitingReplyItems(
+      [threadRow({ matterId: null, matterNumber: null, gmailThreadId: null })],
+      NOW,
+    )
+    expect(it0!.deepLink).toBe('/attorney/mail')
+  })
+})
+
+describe('per-item-type deep links (founder walk 15.9, bullet 1: click straight to the subject)', () => {
+  it('taskDeepLink points at the task itself, not the matter overview', () => {
+    expect(taskDeepLink('matter-1', 'task-9')).toBe('/attorney/matters/matter-1/tasks/task-9')
+  })
+  it('matterActivityDeepLink points at the Activity tab', () => {
+    expect(matterActivityDeepLink('matter-1')).toBe('/attorney/matters/matter-1/activity')
+  })
+  it('mailThreadDeepLink scopes to the thread, or falls back to the inbox', () => {
+    expect(mailThreadDeepLink('g-1')).toBe('/attorney/mail?thread=g-1')
+    expect(mailThreadDeepLink(null)).toBe('/attorney/mail')
+  })
+  it('draftDeepLink points at the specific draft review page', () => {
+    expect(draftDeepLink('version-7')).toBe('/attorney/review/version-7')
+  })
+  it('envelopeDeepLink points at the specific envelope', () => {
+    expect(envelopeDeepLink('env-3')).toBe('/attorney/esign/env-3')
+  })
+  it('invoiceDeepLink opens the Invoices tab on the specific invoice', () => {
+    expect(invoiceDeepLink('inv-5')).toBe('/attorney/billing?tab=invoices&invoiceId=inv-5')
+  })
+})
 
 describe('rankAttentionItems — deterministic ordering', () => {
   // One fixture per bucket, ages chosen so the tier order and the by-age

@@ -9,7 +9,7 @@ import {
   type CalendarItem,
   type CalendarCategory,
 } from '@/components/WeeklyCalendar'
-import { ChevronDownIcon, ClockIcon, Share2Icon } from '@/components/icons'
+import { ChevronDownIcon, ChevronRightIcon, ClockIcon, Share2Icon } from '@/components/icons'
 import { parseTimestamp } from '@/lib/datetime'
 import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
 
@@ -311,6 +311,7 @@ export default function AttorneyHome() {
                     {meta.label}
                   </span>
                   <span className="li-attn-why">{it.why}</span>
+                  <ChevronRightIcon size={15} className="li-attn-chevron" />
                 </Link>
               )
             })}

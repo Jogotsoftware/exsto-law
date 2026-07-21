@@ -459,7 +459,14 @@ function UnbilledTab({ onIssued }: { onIssued: () => void }): React.ReactElement
 }
 
 // ── Invoices tab ─────────────────────────────────────────────────────────────
-function InvoicesTab({ reloadKey }: { reloadKey: number }): React.ReactElement {
+function InvoicesTab({
+  reloadKey,
+  openInvoiceIdParam,
+}: {
+  reloadKey: number
+  // PO-2 — an attention-feed deep link (?invoiceId=<id>) to auto-open on load.
+  openInvoiceIdParam?: string | null
+}): React.ReactElement {
   const [invoices, setInvoices] = useState<InvoiceSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -494,6 +501,14 @@ function InvoicesTab({ reloadKey }: { reloadKey: number }): React.ReactElement {
   useEffect(() => {
     refresh()
   }, [refresh, reloadKey])
+
+  // Auto-open the invoice named by ?invoiceId= once the list has loaded (a
+  // deep link's invoice must actually be found before we try to open it).
+  useEffect(() => {
+    if (!openInvoiceIdParam || !invoices) return
+    const match = invoices.find((inv) => inv.invoiceEntityId === openInvoiceIdParam)
+    if (match) void open(match.invoiceEntityId, match.invoiceNumber)
+  }, [openInvoiceIdParam, invoices])
 
   // Revoke a previously-opened PDF blob URL so we don't leak object URLs.
   function clearPdf() {
@@ -1075,6 +1090,20 @@ export default function BillingPage(): React.ReactElement {
   // Bump to re-pull the Invoices tab after issuing from the Unbilled tab.
   const [reloadKey, setReloadKey] = useState(0)
   const [tab, setTab] = useState<BillTabKey>('unbilled')
+  // PO-2 (attention feed deep links) — a "Reply"/"Unpaid" row can land here
+  // with ?tab=invoices&invoiceId=<id> to open a specific invoice directly,
+  // same window.location convention as the matter page's ?closeMatter=1 and
+  // the tasks tab's ?new=1 (no Suspense boundary needed).
+  const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const requestedTab = params.get('tab')
+    if (requestedTab === 'unbilled' || requestedTab === 'invoices' || requestedTab === 'rates') {
+      setTab(requestedTab)
+    }
+    setOpenInvoiceId(params.get('invoiceId'))
+  }, [])
 
   return (
     <main>
@@ -1090,7 +1119,9 @@ export default function BillingPage(): React.ReactElement {
       />
       <div role="tabpanel">
         {tab === 'unbilled' && <UnbilledTab onIssued={() => setReloadKey((k) => k + 1)} />}
-        {tab === 'invoices' && <InvoicesTab reloadKey={reloadKey} />}
+        {tab === 'invoices' && (
+          <InvoicesTab reloadKey={reloadKey} openInvoiceIdParam={openInvoiceId} />
+        )}
         {tab === 'rates' && <RatesTab />}
       </div>
     </main>

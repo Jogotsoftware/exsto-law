@@ -6599,6 +6599,12 @@ button.danger.outline:hover:not(:disabled) {
 .bk-stage .bk-input-wrap input.bk-input {
   padding-left: 2.7rem;
 }
+/* Password fields additionally reserve room on the right for the li-pw-toggle
+   eye button (components/PasswordField.tsx) — same specificity pattern as
+   the padding-left override above, so it wins over the base shorthand. */
+.bk-stage .bk-input-wrap input.bk-input.li-pw-input {
+  padding-right: 2.6rem;
+}
 .bk-stage input:not([type='checkbox']):not([type='radio']):focus,
 .bk-stage select:focus,
 .bk-stage textarea:focus {
@@ -23803,6 +23809,65 @@ details.li-brief-research summary:hover {
   font-size: 13.5px;
   color: var(--li-muted-2);
 }
+.li-cp-auth-forgot {
+  margin-top: 10px;
+  text-align: right;
+}
+
+/* --- Password reveal toggle (li-pw-*), PT-3 —
+   used by every password input in the portal (set/claim, confirm, sign-in,
+   reset) via components/PasswordField.tsx. wrapClassName is either this
+   bare .li-pw-wrap (the portal auth cards, which render a plain <input> with
+   no existing wrapper) or the booking flow's own .bk-input-wrap (already
+   position:relative + flex, so it just gains the trailing button below). The
+   toggle button's colors nest a --li-*  fallback into a --bk-* fallback so
+   the SAME class works correctly in both token scopes without knowing which
+   one it's in. */
+.li-pw-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.li-pw-toggle {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--li-muted-3, var(--bk-slate-400, #64748b));
+}
+.li-pw-toggle:hover {
+  color: var(--li-navy, var(--bk-navy, #1e3a8a));
+  background: rgba(15, 23, 42, 0.06);
+}
+.li-pw-toggle:focus-visible {
+  outline: 2px solid var(--li-gold, var(--bk-gold, #b45309));
+  outline-offset: 1px;
+}
+.li-cp-input.li-pw-input {
+  padding-right: 2.4rem;
+}
+.li-pw-hint {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--li-muted-3);
+}
+.li-pw-hint[data-strength='fair'] {
+  color: var(--li-gold-text, var(--li-gold-deep));
+}
+.li-pw-hint[data-strength='strong'] {
+  color: #15803d;
+}
 
 /* --- Portal feedback bubble (li-cp-fb) --- */
 .li-cp-fb-root {
@@ -25219,6 +25284,15 @@ details.li-brief-research summary:hover {
   font-family: inherit;
   padding: 9px 10px;
   resize: vertical;
+}
+
+/* PO-2 — attention-feed rows deep-link to a real subject now (task, thread,
+   draft, envelope, invoice); a trailing chevron makes the click affordance
+   explicit instead of relying on the hover background alone. */
+.li-attn-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--li-muted-2, #9aa3b8);
 }
 
 /* ══ li-esp — ESIGN-UNIFY-1 ES-2: the visual field-placement surface (§4).

@@ -71,9 +71,20 @@ export function middleware(request: NextRequest): NextResponse {
   return response
 }
 
-// Only the PUBLIC funnel: the booking page and the unauthenticated client API. The
-// attorney and authed-portal surfaces resolve tenant from their session cookie and are
-// deliberately untouched.
+// Only the PUBLIC funnel: the booking page, the unauthenticated client API, and
+// the pre-session portal auth screens (sign-in, invite/set-password,
+// forgot/reset-password — PT-3) whose ?firm= a client may land on cold (a
+// reset-email click on a device with no firm_slug cookie yet, e.g.). The
+// authed portal dashboard and its subpaths resolve tenant from their session
+// cookie and are deliberately NOT in this list — only these specific
+// unauthenticated entry points.
 export const config = {
-  matcher: ['/book', '/api/client/:path*'],
+  matcher: [
+    '/book',
+    '/api/client/:path*',
+    '/portal/login',
+    '/portal/set-password',
+    '/portal/forgot-password',
+    '/portal/reset-password',
+  ],
 }

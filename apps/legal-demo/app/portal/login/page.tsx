@@ -9,6 +9,8 @@ import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowse
 import { bridgeSupabaseSession, signInWithPasswordAndBridge } from '@/components/PortalSignInInline'
 import { callClientMcp } from '@/lib/mcpClient'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
+import { PasswordField } from '@/components/PasswordField'
+import { validatePassword, passwordStrength, PASSWORD_STRENGTH_LABEL } from '@/lib/passwordPolicy'
 
 // The client-portal sign-in page — email + password (Supabase Auth). On sign in
 // or a confirmed sign-up we POST the verified token to /api/client/auth/supabase,
@@ -29,6 +31,22 @@ export default function ClientPortalLoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [continueParam, setContinueParam] = useState('/portal')
+  const [firmParam, setFirmParam] = useState<string | null>(null)
+  // A2.2/PT-3 follow-on — the confirmation ?code= exchange can fail because the
+  // link expired or was already used. Rather than a dead end, offer to resend
+  // (same anti-enumeration posture as forgot-password: always the same message).
+  const [resendEmail, setResendEmail] = useState('')
+  const [resendStatus, setResendStatus] = useState<'idle' | 'sending' | 'sent'>('idle')
+
+  // Forward whatever selected the current tenant (the funnel's ?firm= slug,
+  // MULTI-TENANT-1) into a link the client is about to follow, so the forgot/
+  // reset round-trip keeps showing the same firm's branding instead of falling
+  // back to the generic product tagline.
+  function withFirm(path: string): string {
+    return firmParam
+      ? `${path}${path.includes('?') ? '&' : '?'}firm=${encodeURIComponent(firmParam)}`
+      : path
+  }
 
   // Exchange a verified Supabase access token for our portal session cookie
   // (shared bridge), then navigate — this page's job, not the shared leg's.
@@ -43,6 +61,8 @@ export default function ClientPortalLoginPage() {
     const params = new URLSearchParams(window.location.search)
     const cont = safeInternalPath(params.get('continue'), '/portal')
     setContinueParam(cont)
+    const firm = params.get('firm')
+    if (firm) setFirmParam(firm)
 
     const code = params.get('code')
     const sb = getSupabaseBrowser()
@@ -74,6 +94,8 @@ export default function ClientPortalLoginPage() {
     setError(null)
     try {
       if (isSignUp) {
+        const pwErr = validatePassword(password)
+        if (pwErr) throw new Error(pwErr)
         const { error: upErr } = await sb.auth.signUp({
           email: email.trim(),
           password,
@@ -125,11 +147,62 @@ export default function ClientPortalLoginPage() {
     )
   }
   if (phase === 'error') {
+    // A confirmation link only reaches this branch after a failed code
+    // exchange — expired, already used, or tampered. Never a bare dead end:
+    // offer to resend (same always-say-the-same-thing posture as
+    // forgot-password, so this can't be used to probe which emails exist).
     return (
-      <Shell>
-        <div className="alert alert-error" style={{ marginTop: 'var(--space-3)' }}>
-          {error}
-        </div>
+      <Shell title="That link didn’t work">
+        <p className="li-cp-auth-lead">
+          This confirmation link is invalid or has expired. {error ? `(${error})` : ''}
+        </p>
+        {resendStatus === 'sent' ? (
+          <div className="alert alert-success" style={{ marginTop: 'var(--space-3)' }}>
+            If that address needs confirming, we&rsquo;ve sent a fresh link. Check your inbox.
+          </div>
+        ) : (
+          <form
+            className="li-cp-auth-form"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              const sb = getSupabaseBrowser()
+              setResendStatus('sending')
+              try {
+                await sb?.auth.resend({
+                  type: 'signup',
+                  email: resendEmail.trim(),
+                  options: { emailRedirectTo: `${window.location.origin}/portal/login` },
+                })
+              } catch {
+                // Swallow — the confirmation message below is deliberately the
+                // same whether or not the address is a real account.
+              } finally {
+                setResendStatus('sent')
+              }
+            }}
+          >
+            <label className="li-cp-label" htmlFor="resend-email">
+              Email
+            </label>
+            <input
+              id="resend-email"
+              type="email"
+              required
+              autoComplete="email"
+              value={resendEmail}
+              onChange={(e) => setResendEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="li-cp-input"
+            />
+            <button
+              type="submit"
+              className="li-cp-btn li-cp-btn--block li-cp-auth-submit"
+              disabled={resendStatus === 'sending'}
+            >
+              {resendStatus === 'sending' ? 'Sending…' : 'Resend confirmation email'}
+            </button>
+          </form>
+        )}
         <p style={{ marginTop: 'var(--space-3)' }}>
           <a href="/portal/login">Back to sign in</a>
         </p>
@@ -196,22 +269,39 @@ export default function ClientPortalLoginPage() {
           placeholder="you@example.com"
           className="li-cp-input"
         />
-        <label className="li-cp-label" htmlFor="cauth-pass">
-          Password
-        </label>
-        <input
+        <PasswordField
           id="cauth-pass"
-          type="password"
+          label="Password"
+          value={password}
+          onChange={setPassword}
+          wrapClassName="li-pw-wrap"
+          inputClassName="li-cp-input"
           required
           // Enforce a minimum only when creating an account; an existing
           // password may be shorter (don't lock a returning client out).
+          // The authoritative check is validatePassword() in submit() —
+          // this is just the native inline nudge.
           minLength={isSignUp ? 8 : undefined}
           autoComplete={isSignUp ? 'new-password' : 'current-password'}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
           placeholder={isSignUp ? 'At least 8 characters' : 'Your password'}
-          className="li-cp-input"
         />
+        {isSignUp && password.length > 0 && (
+          <p className="li-pw-hint" data-strength={passwordStrength(password)}>
+            Strength: {PASSWORD_STRENGTH_LABEL[passwordStrength(password)]}
+          </p>
+        )}
+        {!isSignUp && (
+          <p className="li-cp-auth-forgot">
+            <a
+              href={withFirm(
+                `/portal/forgot-password?continue=${encodeURIComponent(continueParam)}`,
+              )}
+              className="li-cp-linkbtn"
+            >
+              Forgot password?
+            </a>
+          </p>
+        )}
         <button
           type="submit"
           className="li-cp-btn li-cp-btn--block li-cp-auth-submit"
