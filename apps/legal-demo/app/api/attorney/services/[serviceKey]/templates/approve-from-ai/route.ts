@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createTemplateAI } from '@exsto/legal'
+import { createTemplateAI, parseTemplateEsignConfig } from '@exsto/legal'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
 
 export const runtime = 'nodejs'
@@ -30,8 +30,13 @@ export async function POST(
     summary?: string
     confidence?: number
     // BUILDER-CERT-1 (WP3) — the card's signability declaration; validated by the
-    // template handler's normalizeSignature on write.
+    // template handler's normalizeSignature on write. Superseded by esignConfig.
     signature?: { required: boolean; signer_roles: string[] }
+    // ESIGN-UNIFY-1 ES-3 (§6.3) — the card's full role/bind/order declaration;
+    // parsed defensively below (parseTemplateEsignConfig — same reader every
+    // other surface uses), then validated for marker↔role drift by
+    // createTemplateAI before any write.
+    esignConfig?: unknown
   } | null
   const docBody = (body?.body ?? '').trim()
   const docKind = (body?.docKind ?? '').trim()
@@ -66,6 +71,9 @@ export async function POST(
                 ),
               },
             }
+          : {}),
+        ...(body?.esignConfig != null
+          ? { esignConfig: parseTemplateEsignConfig(body.esignConfig) }
           : {}),
       },
       {

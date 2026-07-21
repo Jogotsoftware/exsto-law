@@ -1,5 +1,6 @@
 import TurndownService from 'turndown'
 import { Marked } from 'marked'
+import { parseMarkerLine, labelFor, type EsignFieldType } from '@exsto/legal/esign'
 
 // Client-side markdown ⇆ HTML conversion for the rich template editor.
 //
@@ -49,6 +50,30 @@ turndown.addRule('templateVariableSpan', {
   filter: (node) => node.nodeName === 'SPAN' && (node as HTMLElement).hasAttribute('data-variable'),
   replacement: (_content, node) =>
     `{{${(node as HTMLElement).getAttribute('data-variable') ?? ''}}}`,
+})
+
+// ESIGN-UNIFY-1 ES-3 (15.16b): a marker-carrying signature line (data-sig-type
+// + data-sig-key, inserted by the eSign panel or hydrated from a stored marker
+// line) converts BACK to its {{type:key}} marker line — the markers are the
+// storage; the ruled line is only the display. A label that matches the type's
+// default ("Signature", "Date", …) emits the bare marker; a custom label emits
+// the `Label: {{type:key}}` prefix form the parser (classifyExecutionLine /
+// parseMarkerLine) round-trips. Label-only sig-lines fall through to keep().
+turndown.addRule('sigMarkerLine', {
+  filter: (node) =>
+    node.nodeName === 'DIV' &&
+    (node as HTMLElement).classList?.contains('sig-line') &&
+    !!(node as HTMLElement).getAttribute('data-sig-type') &&
+    !!(node as HTMLElement).getAttribute('data-sig-key'),
+  replacement: (_content, node) => {
+    const el = node as HTMLElement
+    const type = el.getAttribute('data-sig-type') ?? ''
+    const key = el.getAttribute('data-sig-key') ?? ''
+    const label = el.querySelector('.sig-line-label')?.textContent?.trim() ?? ''
+    const marker = `{{${type}:${key}}}`
+    const isDefault = !label || label === labelFor(type as EsignFieldType)
+    return `\n\n${isDefault ? marker : `${label}: ${marker}`}\n\n`
+  },
 })
 
 // Rich typography must survive the save (markdown can't express per-run font /
@@ -106,8 +131,36 @@ export function htmlToMarkdown(html: string): string {
   return turndown.turndown(html ?? '')
 }
 
+// ES-3: whole-line {{type:key}} markers (with an optional "Label:" prefix)
+// hydrate as ruled sig-line nodes carrying the marker in data attributes, so
+// the attorney sees the ruled line, never the raw marker (15.16b). Runs BEFORE
+// the markdown parser; each div is isolated by blank lines so it parses as a
+// standalone HTML block. Inline markers mid-sentence are left as text (same
+// whole-line rule as renderSigMarkersForPreview).
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function hydrateMarkerLines(body: string): string {
+  if (!body || !body.includes('{{')) return body
+  const lines = body.split('\n')
+  let changed = false
+  const out = lines.map((line) => {
+    const m = parseMarkerLine(line)
+    if (!m) return line
+    changed = true
+    return `\n<div class="sig-line" data-sig-type="${escapeAttr(m.type)}" data-sig-key="${escapeAttr(m.signerKey)}"><span class="sig-line-label">${escapeAttr(m.label)}</span></div>\n`
+  })
+  if (!changed) return body
+  return out.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
 export function markdownToHtml(body: string): string {
-  const html = md.parse(body ?? '', { async: false }) as string
+  const html = md.parse(hydrateMarkerLines(body ?? ''), { async: false }) as string
   // Re-hydrate {{token}} markers into TipTap variable spans so they load as
   // atomic chips (not editable literal text). The turndown rule above reverses this.
   return html.replace(

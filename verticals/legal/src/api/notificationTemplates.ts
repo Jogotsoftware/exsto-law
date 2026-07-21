@@ -101,28 +101,65 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `Sign in to your client portal for details: ${s(v.portal_url, '(portal link unavailable)')}`,
     ].join('\n'),
   }),
+  // ESIGN-UNIFY-1 (ES-1, §9.4): tenant-aware — sender identity comes from the
+  // notification variables (firm_name/attorney_name threaded by notifyDelivered
+  // from getTenantSettings), never a hardcoded firm. The subject is the
+  // envelope subject when present (the composer defaults it to the document
+  // title). deliverNotification takes its SUBJECT from here (the branded HTML
+  // part rides alongside), so this is where §9.4's subject rule lands.
   'esign-sign-request': (v) => ({
-    subject: `Please sign: ${s(v.document_title, 'your document')} — Pacheco Law`,
+    subject: s(v.envelope_subject, `Please sign: ${s(v.document_title, 'your document')}`),
     bodyText: [
       `Hi ${s(v.signer_name, 'there')},`,
       ``,
-      `Pacheco Law has prepared a document for your electronic signature. Use the`,
-      `secure link below to review it and sign. The link expires in 14 days.`,
+      `${s(v.firm_name, 'Your attorney')} has prepared a document for your electronic`,
+      `signature. Use the secure link below to review it and sign. The link expires in 14 days.`,
       ``,
       `${s(v.sign_url, '(signing link unavailable)')}`,
+      ...(v.envelope_message
+        ? [
+            ``,
+            `Message from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
+          ]
+        : []),
       ``,
       `If you weren't expecting this, you can safely ignore this email.`,
     ].join('\n'),
   }),
   'esign-sign-request-portal': (v) => ({
-    subject: `Action needed: sign ${s(v.document_title, 'a document')} — Pacheco Law`,
+    subject: s(v.envelope_subject, `Action needed: sign ${s(v.document_title, 'a document')}`),
     bodyText: [
       `Hi ${s(v.signer_name, 'there')},`,
       ``,
-      `Pacheco Law has prepared a document that needs your signature. Sign in to`,
-      `your secure client portal to review and sign it.`,
+      `${s(v.firm_name, 'Your attorney')} has prepared a document that needs your`,
+      `signature. Sign in to your secure client portal to review and sign it.`,
       ``,
       `${s(v.portal_url, '(portal link unavailable)')}`,
+      ...(v.envelope_message
+        ? [
+            ``,
+            `Message from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
+          ]
+        : []),
+    ].join('\n'),
+  }),
+  // ESIGN-UNIFY-1 (ES-1, §9.2, 0186): the receives_copy recipient's executed-
+  // copy email, sent once the envelope completes.
+  'esign-copy-delivered': (v) => ({
+    subject: `Executed copy: ${s(v.envelope_subject, s(v.document_title, 'your document'))}`,
+    bodyText: [
+      `Hi ${s(v.signer_name, 'there')},`,
+      ``,
+      `All parties have signed ${s(v.document_title, 'the document')}. Use the secure`,
+      `link below to view the executed copy.`,
+      ``,
+      `${s(v.copy_url, '(link unavailable)')}`,
+      ...(v.envelope_message
+        ? [
+            ``,
+            `Message from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
+          ]
+        : []),
     ].join('\n'),
   }),
   'attorney-portal-message': (v) => ({
@@ -184,6 +221,7 @@ const TEMPLATE_TITLES: Record<string, string> = {
   'client-request-update': 'Client — request status update',
   'esign-sign-request': 'Signer — e-signature request (link)',
   'esign-sign-request-portal': 'Signer — e-signature request (portal)',
+  'esign-copy-delivered': 'Recipient — executed copy delivered',
   'attorney-portal-message': 'Attorney — new client message',
   'client-portal-message': 'Client — new attorney message',
   'prospect-booking-confirmation': 'Prospect — consultation booked',

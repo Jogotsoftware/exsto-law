@@ -12,6 +12,7 @@ import {
   resolveRepoDocumentTemplate,
   type IntakeQuestionnaire,
 } from '../templates/loader.js'
+import { parseTemplateEsignConfig, type TemplateEsignConfig } from '../queries/templates.js'
 import { tryCreateBookingEvent } from './google.js'
 import { queueNotification } from './notifications.js'
 import { signBookingManageToken } from './bookingManageToken.js'
@@ -1452,6 +1453,10 @@ export async function updateDraftingPrompt(
 export interface DocumentTemplateConfig {
   template_version?: number
   templates?: Record<string, string>
+  // ESIGN-UNIFY-1 ES-3 (§6.1) — service-bound templates nest their e-sign
+  // config here, keyed by document kind exactly like `templates` above. Pure
+  // config inside this already-versioned service upsert store — no new kind.
+  esign?: Record<string, TemplateEsignConfig>
 }
 
 export interface DocumentTemplateDoc {
@@ -1565,6 +1570,10 @@ export async function updateDocumentTemplate(
   const merged: DocumentTemplateConfig = {
     template_version: nextVersion,
     templates: { ...(existing.templates ?? {}), [documentKind]: validated },
+    // `document_templates` is replaced WHOLESALE by transitions_patch (no deep
+    // merge below the top level) — carry the esign map through unchanged, or a
+    // plain body save would silently erase every doc kind's e-sign config.
+    ...(existing.esign ? { esign: existing.esign } : {}),
   }
 
   await submitAction(ctx, {
@@ -1579,6 +1588,93 @@ export async function updateDocumentTemplate(
 
   const saved = await getDocumentTemplate(ctx, serviceKey, documentKind)
   if (!saved) throw new Error(`Document template not found after update: ${serviceKey}`)
+  return saved
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ESIGN-UNIFY-1 ES-3 (§6.1) — the service-bound twin of the standalone
+// template's e-sign config, for a service's OWN authored document kinds
+// (transitions.document_templates.esign[docKind]). Same versioned upsert path
+// as updateDocumentTemplate; MERGES into the existing config (so other kinds'
+// bodies AND esign declarations survive).
+// ─────────────────────────────────────────────────────────────────────────
+
+// Pure resolver: config wins, else the empty/unsignable default. Shared by
+// getDocumentTemplateEsignConfig and the AI-authoring context loader
+// (templateAuthoring.ts) so both read the SAME defensive parse.
+export function resolveDocumentTemplateEsignConfig(
+  documentTemplates: DocumentTemplateConfig | undefined,
+  documentKind: string,
+): TemplateEsignConfig {
+  return parseTemplateEsignConfig(documentTemplates?.esign?.[documentKind])
+}
+
+export async function getDocumentTemplateEsignConfig(
+  ctx: ActionContext,
+  serviceKey: string,
+  documentKind: string,
+): Promise<TemplateEsignConfig | null> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    const r = res.rows[0]
+    if (!r) return null
+    return resolveDocumentTemplateEsignConfig(r.transitions.document_templates, documentKind)
+  })
+}
+
+export async function updateDocumentTemplateEsignConfig(
+  ctx: ActionContext,
+  serviceKey: string,
+  documentKind: string,
+  esignConfig: TemplateEsignConfig,
+): Promise<TemplateEsignConfig> {
+  if (!documentKind || typeof documentKind !== 'string') {
+    throw new Error('A document kind is required.')
+  }
+  // Re-parse through the defensive reader so a malformed caller payload can
+  // never persist a shape the reader would otherwise reject at read time.
+  const validated = parseTemplateEsignConfig(esignConfig)
+  if (validated.signable && !validated.roles.some((r) => r.recipientRole === 'needs_to_sign')) {
+    throw new Error(
+      'esignConfig.signable is true but no role is set to "needs_to_sign" — declare at least one signer.',
+    )
+  }
+
+  const row = await withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0] ?? null
+  })
+  if (!row) throw new Error(`Service not found: ${serviceKey}`)
+
+  const existing: DocumentTemplateConfig = row.transitions.document_templates ?? {}
+  const merged: DocumentTemplateConfig = {
+    ...existing,
+    esign: { ...(existing.esign ?? {}), [documentKind]: validated },
+  }
+
+  await submitAction(ctx, {
+    actionKindName: 'legal.service.upsert',
+    intentKind: 'adjustment',
+    payload: {
+      service_key: serviceKey,
+      display_name: row.display_name,
+      transitions_patch: { document_templates: merged },
+    },
+  })
+
+  const saved = await getDocumentTemplateEsignConfig(ctx, serviceKey, documentKind)
+  if (!saved)
+    throw new Error(`Document template e-sign config not found after update: ${serviceKey}`)
   return saved
 }
 
