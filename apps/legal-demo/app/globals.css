@@ -24907,3 +24907,381 @@ details.li-brief-research summary:hover {
   border-color: var(--li-gold, #c6a968);
   background: var(--li-gold-bg-soft, #fbf6ea);
 }
+
+/* ── li-tplsign — template editor eSign panel (ESIGN-UNIFY-1 ES-3) ──────────
+   Appended family (append-only tail discipline). The panel lives in the
+   template editor rail / pop-up modal: Signable toggle, role rows, per-role
+   "Insert signature block", drift warnings. LI navy/gold language. */
+.li-tplsign {
+  margin-top: 14px;
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  background: var(--li-card);
+  padding: 10px 12px;
+}
+.li-tplsign-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--li-navy);
+}
+.li-tplsign-title {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.li-tplsign-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--li-text);
+  cursor: pointer;
+}
+.li-tplsign-toggle input {
+  accent-color: var(--li-gold-deep);
+}
+.li-tplsign-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--li-text-muted);
+  line-height: 1.45;
+}
+.li-tplsign-role {
+  margin-top: 10px;
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  padding: 8px 9px;
+  background: color-mix(in srgb, var(--li-navy) 3%, transparent);
+}
+.li-tplsign-role-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.li-tplsign-role-row--meta {
+  margin-top: 6px;
+}
+.li-tplsign-role-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-navy);
+  border: 1px solid var(--li-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  background: var(--li-card);
+}
+.li-tplsign-role-remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--li-border);
+  border-radius: 6px;
+  background: var(--li-card);
+  color: var(--li-text-muted);
+  cursor: pointer;
+}
+.li-tplsign-role-remove:hover {
+  color: var(--li-danger, #b91c1c);
+  border-color: currentColor;
+}
+.li-tplsign-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--li-text-muted);
+}
+.li-tplsign-field > span {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+.li-tplsign-field input,
+.li-tplsign-field select {
+  width: 100%;
+  font-size: 12.5px;
+  color: var(--li-text);
+  border: 1px solid var(--li-border);
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: var(--li-card);
+}
+.li-tplsign-insert {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--li-gold-text);
+  border: 1px solid var(--li-gold);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--li-gold) 10%, transparent);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.li-tplsign-insert:hover {
+  background: color-mix(in srgb, var(--li-gold) 20%, transparent);
+}
+.li-tplsign-insert:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.li-tplsign-add {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-navy);
+  border: 1px dashed var(--li-border);
+  border-radius: 7px;
+  background: transparent;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.li-tplsign-add:hover {
+  border-color: var(--li-navy);
+}
+.li-tplsign-warn {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--li-text);
+  border: 1px solid var(--li-warn, #b45309);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--li-warn, #b45309) 8%, transparent);
+  padding: 7px 9px;
+}
+.li-tplsign-warn-chip {
+  display: inline-flex;
+  margin: 0 3px;
+  font-size: 11.5px;
+  font-family: var(--font-mono, monospace);
+  color: var(--li-navy);
+  border: 1px solid var(--li-border);
+  border-radius: 6px;
+  background: var(--li-card);
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.li-tplsign-warn-chip:hover {
+  border-color: var(--li-gold-deep);
+}
+.li-tplsign-warn-hint {
+  color: var(--li-text-muted);
+}
+
+/* ══ li-esign2 — ESIGN-UNIFY-1 unified composer (ES-1; §3/§4 of the design).
+   Append-only family. The 8 signer tones are the §4 palette — recipient row
+   edges, signer chips, and (ES-2) placement boxes all share these tokens. ══ */
+:root {
+  --li-esign2-s1: #1e3a8a;
+  --li-esign2-s2: #b45309;
+  --li-esign2-s3: #0f766e;
+  --li-esign2-s4: #7c3aed;
+  --li-esign2-s5: #be185d;
+  --li-esign2-s6: #4d7c0f;
+  --li-esign2-s7: #b91c1c;
+  --li-esign2-s8: #475569;
+}
+.li-esign2-tone-1 {
+  --li-esign2-tone: var(--li-esign2-s1);
+}
+.li-esign2-tone-2 {
+  --li-esign2-tone: var(--li-esign2-s2);
+}
+.li-esign2-tone-3 {
+  --li-esign2-tone: var(--li-esign2-s3);
+}
+.li-esign2-tone-4 {
+  --li-esign2-tone: var(--li-esign2-s4);
+}
+.li-esign2-tone-5 {
+  --li-esign2-tone: var(--li-esign2-s5);
+}
+.li-esign2-tone-6 {
+  --li-esign2-tone: var(--li-esign2-s6);
+}
+.li-esign2-tone-7 {
+  --li-esign2-tone: var(--li-esign2-s7);
+}
+.li-esign2-tone-8 {
+  --li-esign2-tone: var(--li-esign2-s8);
+}
+.li-esign2-doccard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  background: var(--li-card);
+  padding: 14px 16px;
+}
+.li-esign2-doccard-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.li-esign2-doccard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.li-esign2-attach-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .li-esign2-attach-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.li-esign2-attach-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--li-muted);
+  font-weight: 600;
+}
+.li-esign2-attach-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.li-esign2-attach-input .cbx {
+  flex: 1;
+  min-width: 0;
+}
+.li-esign2-attach-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--li-border);
+  border-radius: 6px;
+  background: var(--li-card);
+  color: var(--li-muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.li-esign2-attach-clear:hover {
+  color: var(--li-text);
+}
+.li-esign2-recip-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.li-esign2-ordertoggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--li-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.li-esign2-recipient {
+  position: relative;
+  border-left: 3px solid var(--li-esign2-tone, var(--li-border));
+  border-radius: 6px;
+  padding-left: 8px;
+}
+.li-esign2-recipient.is-dragging {
+  opacity: 0.5;
+}
+.li-esign2-recip-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--li-esign2-tone, var(--li-navy)) 12%, transparent);
+  color: var(--li-esign2-tone, var(--li-navy));
+  font-size: 12.5px;
+  font-weight: 700;
+  flex: 0 0 auto;
+  cursor: grab;
+}
+.li-esign2-role {
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  background: var(--li-card);
+  color: var(--li-text);
+  font-size: 13px;
+  padding: 7px 8px;
+  flex: 0 0 auto;
+}
+.li-esign2-in-title {
+  max-width: 150px;
+}
+.li-esign2-fields-note {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.li-esign2-signer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.li-esign2-signer-chip,
+.li-esign2-rolechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--li-border);
+  border-radius: 999px;
+  background: var(--li-card);
+  padding: 4px 12px;
+  font-size: 12.5px;
+  color: var(--li-text);
+  font-weight: 600;
+}
+.li-esign2-rolechip em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--li-muted);
+}
+.li-esign2-signer-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--li-esign2-tone, var(--li-navy));
+  flex: 0 0 auto;
+}
+.li-esign2-review-recips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.li-esign2-message {
+  width: 100%;
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  background: var(--li-card);
+  color: var(--li-text);
+  font-size: 13.5px;
+  font-family: inherit;
+  padding: 9px 10px;
+  resize: vertical;
+}

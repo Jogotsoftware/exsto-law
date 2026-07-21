@@ -377,6 +377,156 @@ const BUILDERS: Record<string, (v: Vars) => BuiltEmail> = {
     }),
     text: `A client posted a new message${v.matter_number ? ` on matter ${val(v.matter_number)}` : ''}. Open to read and reply: ${val(v.matter_url, '(set NEXT_PUBLIC_BASE_URL)')}`,
   }),
+
+  // ── ESIGN-UNIFY-1 (ES-1, design §9.4) — tenant-branded signing mail ────────
+  // These three builders deliberately do NOT use renderShell: the shell stamps
+  // the hardcoded FIRM constant (Pacheco) into its header/footer, and signing
+  // mail goes out on behalf of whichever TENANT owns the envelope. Firm
+  // identity comes exclusively from the notification variables (attorney_name /
+  // firm_name, threaded by notifyDelivered/notifyCopyDelivered from
+  // getTenantSettings); unknown identity degrades to neutral copy — never to
+  // another firm's name. Full de-hardcoding of the shared shell rides FB-D; no
+  // NEW hardcoding lands here.
+
+  'esign-sign-request': (v) => buildEsignMail(v, 'sign', val(v.sign_url, '#')),
+  'esign-sign-request-portal': (v) => buildEsignMail(v, 'portal', val(v.portal_url, '#')),
+  'esign-copy-delivered': (v) => buildEsignMail(v, 'copy', val(v.copy_url, '#')),
+}
+
+// One shell for the three signing-mail variants: navy hero panel (document
+// glyph + "<Attorney> sent you a document…"), ONE gold CTA "Review document",
+// the sender's personal message, clean footer. Table-based + inline styles
+// (same email-client constraints layout.ts documents).
+function buildEsignMail(v: Vars, variant: 'sign' | 'portal' | 'copy', ctaUrl: string): BuiltEmail {
+  const docTitle = val(v.document_title, val(v.envelope_subject, 'a document'))
+  const attorney = val(v.attorney_name, '')
+  const firm = val(v.firm_name, '')
+  // "<Attorney> via <Firm>" (§9.4); degrade through the pieces we have.
+  const senderLine =
+    attorney && firm ? `${attorney} via ${firm}` : attorney || firm || 'Your attorney'
+  const heroLine =
+    variant === 'copy'
+      ? `${esc(senderLine)} sent you the executed copy of a signed document.`
+      : `${esc(senderLine)} sent you a document to review and sign.`
+  const subject =
+    variant === 'copy'
+      ? `Executed copy: ${val(v.envelope_subject, docTitle)}`
+      : val(v.envelope_subject, `Please sign: ${docTitle}`)
+  const preheader =
+    variant === 'copy' ? `Your executed copy of ${docTitle}.` : `${docTitle} is ready for you.`
+  const cta = variant === 'copy' ? 'View executed document' : 'Review document'
+  const message = val(v.envelope_message, '')
+
+  const messageBlock = message
+    ? callout(
+        `<span style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:${COLORS.muted};">Message from ${esc(senderLine)}</span><br>` +
+          `<span style="color:${COLORS.fg};">${esc(message)}</span>`,
+        'gold',
+      )
+    : ''
+  const bodyIntro =
+    variant === 'portal'
+      ? 'Sign in to your secure client portal to review the document and add your signature.'
+      : variant === 'copy'
+        ? 'All parties have signed. Use the secure link below to view the executed document.'
+        : 'Use the secure link below to review the document and add your signature.'
+  const fine =
+    variant === 'copy'
+      ? 'This link is unique to you — please don&rsquo;t forward this email.'
+      : 'This link is unique to you — please don&rsquo;t forward this email. If you weren&rsquo;t expecting this, you can safely ignore it.'
+
+  // A small CSS-drawn document glyph (text bars on a white sheet) — no
+  // images/SVG: Gmail strips SVG and remote images defeat CSP/offline discipline.
+  const docGlyph = `
+    <td width="44" valign="middle" style="padding:0 16px 0 0;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tr><td style="width:36px;height:44px;background:#ffffff;border-radius:4px;padding:9px 7px;">
+          <div style="height:3px;background:${COLORS.gold400};margin-bottom:5px;width:14px;font-size:0;line-height:0;">&nbsp;</div>
+          <div style="height:3px;background:${COLORS.navy100};margin-bottom:5px;font-size:0;line-height:0;">&nbsp;</div>
+          <div style="height:3px;background:${COLORS.navy100};margin-bottom:5px;font-size:0;line-height:0;">&nbsp;</div>
+          <div style="height:3px;background:${COLORS.navy100};width:18px;font-size:0;line-height:0;">&nbsp;</div>
+        </td></tr>
+      </table>
+    </td>`
+
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en" xmlns="https://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>${esc(subject)}</title>
+  <!--[if mso]><style>td,a,span{font-family:Arial,Helvetica,sans-serif !important;}</style><![endif]-->
+</head>
+<body style="margin:0;padding:0;background:${COLORS.bg};">
+  <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;overflow:hidden;mso-hide:all;">${esc(preheader)}</span>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:${COLORS.bg};">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="width:600px;max-width:600px;">
+
+          <!-- Navy hero panel: document glyph + the sender line -->
+          <tr>
+            <td style="background:${COLORS.navy900};border-radius:12px 12px 0 0;padding:28px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                <tr>
+                  ${docGlyph}
+                  <td valign="middle">
+                    <span style="font-family:${FONTS.serif};font-size:20px;line-height:1.35;color:#ffffff;font-weight:700;">${heroLine}</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td style="height:4px;background:${COLORS.gold};font-size:0;line-height:0;">&nbsp;</td></tr>
+
+          <!-- Body card -->
+          <tr>
+            <td style="background:${COLORS.surface};padding:32px;">
+              ${paragraph(`Hi ${esc(val(v.signer_name, 'there'))},`)}
+              ${paragraph(`<strong>${esc(docTitle)}</strong> — ${bodyIntro}`)}
+              ${messageBlock}
+              ${button(cta, ctaUrl, 'gold')}
+              ${finePrint(fine)}
+            </td>
+          </tr>
+
+          <!-- Footer: firm line only when we KNOW the firm — never a default. -->
+          <tr>
+            <td style="background:${COLORS.surface};border-radius:0 0 12px 12px;border-top:1px solid ${COLORS.border};padding:20px 32px;">
+              ${firm ? `<p style="margin:0 0 6px;font-family:${FONTS.sans};font-size:13px;line-height:1.5;color:${COLORS.fg};font-weight:600;">${esc(firm)}</p>` : ''}
+              <p style="margin:0;font-family:${FONTS.sans};font-size:11px;line-height:1.5;color:${COLORS.muted};">
+                This message may contain confidential or attorney&ndash;client privileged information intended only for the
+                named recipient. If you received it in error, please delete it and notify the sender.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+
+  const textLines = [
+    `Hi ${val(v.signer_name, 'there')},`,
+    '',
+    variant === 'copy'
+      ? `${senderLine} sent you the executed copy of ${docTitle}.`
+      : `${senderLine} sent you a document to review and sign: ${docTitle}.`,
+    ...(message ? ['', `Message from ${senderLine}:`, message] : []),
+    '',
+    `${cta}: ${ctaUrl}`,
+    '',
+    variant === 'copy'
+      ? 'This link is unique to you.'
+      : "This link is unique to you. If you weren't expecting this, you can safely ignore it.",
+    ...(firm ? ['', `— ${firm}`] : []),
+  ]
+
+  return { subject, preheader, html, text: textLines.join('\n') }
 }
 
 export function buildEmail(templateRef: string, variables: Vars): BuiltEmail | null {

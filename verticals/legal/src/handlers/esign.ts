@@ -36,6 +36,18 @@ import {
   type EsignField,
 } from '../esign/fields.js'
 import { buildFileCertificateMarkdown } from '../esign/fileCertificate.js'
+import type { FieldPlacement } from '../esign/placements.js'
+// ESIGN-UNIFY-1 (ES-1, design §9.2): role-aware dispatch/completion decisions
+// are PURE functions (esign/routing.ts) so the sign/view/copy × order matrix is
+// unit-testable without a DB; this handler only executes the plan (attribute
+// writes + events).
+import {
+  copyRecipients,
+  normalizeRole,
+  planInitialDispatch,
+  planNextDelivery,
+  type SignerRole,
+} from '../esign/routing.js'
 import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
 import { findContactByEmail } from './intake.js'
 
@@ -47,6 +59,9 @@ interface SendSigner {
   order?: number | null
   channel?: 'portal' | 'link' | null
   signer_provider_ref?: string | null
+  /** ESIGN-UNIFY-1 (ES-1): defaults to 'needs_to_sign' when absent — every
+   *  caller written before this migration keeps its exact prior behavior. */
+  role?: SignerRole | null
 }
 
 interface EsignSendPayload {
@@ -59,8 +74,15 @@ interface EsignSendPayload {
   correlation_id: string
   subject: string
   signers: SendSigner[]
-  /** The parsed field plan for the document (anchor tags). */
+  /** The parsed field plan for the document (anchor tags) — the legacy
+   *  whole-line marker model (0044). */
   fields?: EsignField[]
+  /** ESIGN-UNIFY-1 (ES-1, §5.1): the resolved coordinate placement plan —
+   *  supersedes `fields` for envelopes sent by the unified composer. */
+  placements?: FieldPlacement[]
+  /** ESIGN-UNIFY-1 (ES-1, §9.4): the sender's personal note, shown in the
+   *  branded signing email. */
+  message?: string | null
   /** 0170: create a client_contact for any signer email not already in contacts
    *  (same dedupe-by-email rule as intake.submit) — "people you send to become
    *  contacts", DocuSign-style. */
@@ -145,6 +167,19 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
   await setAttr(client, tenantId, actionId, envelopeId, 'envelope_fields', p.fields ?? [], {
     sourceRef: ctx.actorId,
   })
+  // ESIGN-UNIFY-1 (ES-1, §5.1) — the placement plan always writes (defaults to
+  // an empty array); legacy readers ignore it and keep using `envelope_fields`.
+  await setAttr(client, tenantId, actionId, envelopeId, 'envelope_placements', p.placements ?? [], {
+    sourceRef: ctx.actorId,
+  })
+  // §9.4 — the sender's personal note. Only written when non-empty: an omitted
+  // message should read as "no message" (unset), not an empty-string history
+  // entry on every send.
+  if (p.message?.trim()) {
+    await setAttr(client, tenantId, actionId, envelopeId, 'envelope_message', p.message.trim(), {
+      sourceRef: ctx.actorId,
+    })
+  }
   if (p.dispatched && p.provider_envelope_ref) {
     await setAttr(
       client,
@@ -185,9 +220,13 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     'signature_request',
   )
   const requestIds: string[] = []
-  // The lowest routing order is the group delivered at send time (sequential
-  // routing delivers group 1; pure-parallel envelopes share one order).
-  const firstOrder = Math.min(...p.signers.map((sg, ix) => Number(sg.order ?? ix + 1) || 1))
+  // ESIGN-UNIFY-1 (ES-1, §9.2) — role-aware dispatch plan, computed up front by
+  // the pure planner: needs_to_sign follows the existing lowest-order routing
+  // (sequential delivers group 1; pure-parallel envelopes share one order);
+  // needs_to_view is delivered WITH the first group regardless of its own
+  // order (viewers gate nothing); receives_copy is never delivered at send
+  // (notified only once the envelope completes).
+  const initialStatuses = planInitialDispatch(p.signers)
   const deliveredAtSend: string[] = []
   for (let i = 0; i < p.signers.length; i++) {
     const s = p.signers[i]!
@@ -220,6 +259,13 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     await setAttr(client, tenantId, actionId, requestId, 'signer_channel', s.channel ?? 'link', {
       sourceRef: ctx.actorId,
     })
+    // ESIGN-UNIFY-1 (ES-1, §9.2) — always written (explicit), so every NEW
+    // envelope carries its role; reads of pre-migration rows default via
+    // `normalizeRole` at the call sites, never here.
+    const role: SignerRole = normalizeRole(s.role)
+    await setAttr(client, tenantId, actionId, requestId, 'signer_role', role, {
+      sourceRef: ctx.actorId,
+    })
     // BUILDER-CERT-1 (WP4) — write each signer's INITIAL status exactly once.
     // The first routing group starts 'delivered' directly; later groups start
     // 'pending' (deliverNextGroup promotes them on later sign actions). The old
@@ -228,8 +274,8 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     // valid_from — an UNDEFINED current state that the first workflow-driven
     // e-sign run hit for real: latestAttr read back 'pending' and
     // assertSignerTurn blocked the envelope's only signer forever.
-    const signerOrder = Number(s.order ?? i + 1) || 1
-    const initialStatus = signerOrder === firstOrder ? 'delivered' : 'pending'
+    // Role-aware statuses come from planInitialDispatch (index-aligned).
+    const initialStatus = initialStatuses[i] ?? 'pending'
     await setAttr(client, tenantId, actionId, requestId, 'signer_status', initialStatus, {
       sourceRef: ctx.actorId,
     })
@@ -465,6 +511,30 @@ registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
       await dispatchLifecycleEvent(client, ctx, matterEntityId, 'esign.completed', actionId)
     }
   }
+
+  // ESIGN-UNIFY-1 (ES-1, §9.2/§10, 0186) — receives_copy recipients get NO link
+  // at send; now that the envelope is complete, record one esign.copy_delivered
+  // event per copy recipient (same shape as esign.delivered) and hand their
+  // request ids back so the api layer can queue the executed-copy email
+  // (notifications are a side effect of the action layer, never written from
+  // inside a handler — see notifyCopyDelivered in api/esign.ts).
+  const copyDeliveredRequestIds = await loadCopyRecipientRequests(
+    client,
+    tenantId,
+    p.envelope_entity_id,
+  )
+  for (const requestId of copyDeliveredRequestIds) {
+    await insertEvent(client, {
+      tenantId,
+      actionId,
+      eventKindName: 'esign.copy_delivered',
+      primaryEntityId: p.envelope_entity_id,
+      secondaryEntityIds: [requestId],
+      sourceType: 'system',
+      sourceRef,
+    })
+  }
+
   return {
     envelopeId: p.envelope_entity_id,
     status: 'completed' as const,
@@ -472,6 +542,7 @@ registerActionHandler('esign.sign', async (ctx, client, payload, actionId) => {
     deliveredRequestIds: [],
     executedDocumentVersionId: executedVersionId,
     executedVersionNumber,
+    copyDeliveredRequestIds,
   }
 })
 
@@ -831,6 +902,7 @@ interface RoutingRequest {
   requestId: string
   order: number
   status: string
+  role: SignerRole
 }
 
 async function loadRoutingRequests(
@@ -838,7 +910,7 @@ async function loadRoutingRequests(
   tenantId: string,
   envelopeId: string,
 ): Promise<RoutingRequest[]> {
-  const res = await client.query<{ request_id: string; ord: string; status: string }>(
+  const res = await client.query<{ request_id: string; ord: string; status: string; role: string }>(
     `SELECT r.source_entity_id AS request_id,
         COALESCE((SELECT a.value #>> '{}' FROM attribute a
             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id AND akd.kind_name='signer_order'
@@ -847,7 +919,11 @@ async function loadRoutingRequests(
         COALESCE((SELECT a.value #>> '{}' FROM attribute a
             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id AND akd.kind_name='signer_status'
             WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
-            ORDER BY a.valid_from DESC LIMIT 1), 'pending') AS status
+            ORDER BY a.valid_from DESC LIMIT 1), 'pending') AS status,
+        COALESCE((SELECT a.value #>> '{}' FROM attribute a
+            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id AND akd.kind_name='signer_role'
+            WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
+            ORDER BY a.valid_from DESC LIMIT 1), 'needs_to_sign') AS role
      FROM relationship r
      JOIN relationship_kind_definition rkd
        ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'request_of'
@@ -859,6 +935,7 @@ async function loadRoutingRequests(
     requestId: row.request_id,
     order: Number(row.ord) || 1,
     status: row.status,
+    role: normalizeRole(row.role),
   }))
 }
 
@@ -866,6 +943,12 @@ async function loadRoutingRequests(
 // the newly-delivered request ids and whether the envelope is now fully signed.
 // Pure-sequential (distinct orders) and pure-parallel (one order) both fall out
 // of this: a group becomes active only once every prior group has signed.
+//
+// ESIGN-UNIFY-1 (ES-1, §9.2) — the decision is planNextDelivery (pure,
+// esign/routing.ts): "all signers signed" iterates ONLY needs_to_sign
+// requests; needs_to_view was delivered once at send (never re-delivered
+// here) and never blocks completion; receives_copy is never delivered here
+// (notified separately once the envelope completes — see esign.sign above).
 async function deliverNextGroup(
   client: DbClient,
   tenantId: string,
@@ -874,15 +957,11 @@ async function deliverNextGroup(
   sourceRef: string,
 ): Promise<{ delivered: string[]; completed: boolean }> {
   const reqs = await loadRoutingRequests(client, tenantId, envelopeId)
-  if (reqs.length === 0) return { delivered: [], completed: false }
-  const unresolved = reqs.filter((r) => r.status !== 'signed' && r.status !== 'declined')
-  if (unresolved.length === 0) return { delivered: [], completed: true }
-
-  const minOrder = Math.min(...unresolved.map((r) => r.order))
-  const activePending = unresolved.filter((r) => r.order === minOrder && r.status === 'pending')
+  const plan = planNextDelivery(reqs)
+  if (plan.completed) return { delivered: [], completed: true }
   const delivered: string[] = []
-  for (const r of activePending) {
-    await setAttr(client, tenantId, actionId, r.requestId, 'signer_status', 'delivered', {
+  for (const requestId of plan.deliver) {
+    await setAttr(client, tenantId, actionId, requestId, 'signer_status', 'delivered', {
       sourceType: 'system',
       sourceRef,
     })
@@ -891,13 +970,24 @@ async function deliverNextGroup(
       actionId,
       eventKindName: 'esign.delivered',
       primaryEntityId: envelopeId,
-      secondaryEntityIds: [r.requestId],
+      secondaryEntityIds: [requestId],
       sourceType: 'system',
       sourceRef,
     })
-    delivered.push(r.requestId)
+    delivered.push(requestId)
   }
   return { delivered, completed: false }
+}
+
+// The receives_copy requests on an envelope — resolved separately from
+// deliverNextGroup (which only ever looks at needs_to_sign requests) because
+// copy recipients are notified once, at completion, regardless of routing.
+async function loadCopyRecipientRequests(
+  client: DbClient,
+  tenantId: string,
+  envelopeId: string,
+): Promise<string[]> {
+  return copyRecipients(await loadRoutingRequests(client, tenantId, envelopeId))
 }
 
 // The latest NON-executed version — the original we are executing. For a
