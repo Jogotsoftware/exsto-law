@@ -42,7 +42,7 @@ import {
 import { getServiceLifecycle } from './serviceLifecycle.js'
 import { getService, listDocumentTemplateEsignConfigs } from './services.js'
 import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
-import { listStandaloneTemplates } from '../queries/templates.js'
+import { listStandaloneTemplates, type StandaloneTemplate } from '../queries/templates.js'
 import { listWorkflowStepTemplates } from '../queries/workflowStepLibrary.js'
 import { listCapabilities, type Capability } from '../queries/capabilities.js'
 import type { CapabilityStepConfig } from '../lifecycle/types.js'
@@ -231,6 +231,101 @@ function producingStageTemplateIds(s: Lifecycle[number]): string[] {
   return ids
 }
 
+// ESIGN-AUTHORING-BRIDGE — a template's signability as it can be known DURING a build
+// turn. propose_template is capture-only (nothing persists until the attorney approves
+// the template card), so a template the model proposed EARLIER THIS TURN carries its
+// signability declaration only here, not in the persisted library the validator reads.
+// This mirrors PendingBilling (a same-turn propose_cost). Structurally a superset of
+// TemplateProposal, so the captured proposals array threads straight in.
+export interface PendingTemplateSignal {
+  serviceKey: string
+  docKind: string
+  // BUILDER-CERT-1 signature declaration and/or the ES-3 esignConfig — either marks
+  // the document signable (esignConfig supersedes signature when both are present).
+  signature?: { required: boolean; signer_roles: string[] }
+  esignConfig?: { signable: boolean }
+}
+
+// Is a document-producing stage's output SIGNABLE? True when the bound PERSISTED
+// template declares it (legacy signature.required or the ES-3 esignConfig.signable),
+// OR a template proposed THIS turn for the same service + docKind declares it. The
+// same-turn bridge is what lets an in-flight build proceed: without it the validator
+// only ever sees the persisted (unsignable) template and the turn dead-ends, since
+// the model's only lever — re-proposing — never persists mid-turn. Pure: the caller
+// loads the firm library once and passes it in.
+export function isProducedDocumentSignable(
+  templateIds: string[],
+  library: Pick<StandaloneTemplate, 'templateEntityId' | 'docKind' | 'signature' | 'esignConfig'>[],
+  serviceKey: string | undefined,
+  pendingTemplates: PendingTemplateSignal[] | undefined,
+): boolean {
+  const byId = new Map(library.map((t) => [t.templateEntityId, t]))
+  return templateIds.some((id) => {
+    const t = byId.get(id)
+    if (t && (t.signature.required === true || t.esignConfig.signable === true)) return true
+    // Same-turn bridge: match the persisted template's docKind against a proposal
+    // for THIS service (a re-propose that adds the e-sign declaration to a template
+    // the producing stage already binds by id).
+    const docKind = t?.docKind ?? null
+    if (docKind && pendingTemplates?.length) {
+      return pendingTemplates.some(
+        (p) =>
+          p.serviceKey === serviceKey &&
+          p.docKind === docKind &&
+          (p.signature?.required === true || p.esignConfig?.signable === true),
+      )
+    }
+    return false
+  })
+}
+
+// Does the graph carry an e-sign step, in either shape — the first-class `esign`
+// kind (ES-4, auto-added) or an invoke_capability{esignature} stage the model
+// hand-composed (ESIGN-BLOCK-1)?
+export function graphHasEsignStep(graph: Lifecycle): boolean {
+  return graph.some((s) => {
+    if (s.action?.kind === 'esign') return true
+    if (s.action?.kind === 'invoke_capability') {
+      const cfg = (s.action.config ?? {}) as { capability_slug?: string }
+      return (cfg.capability_slug ?? '').trim() === 'esignature'
+    }
+    return false
+  })
+}
+
+// ESIGN-AUTHORING-BRIDGE ordering pre-gate (mirrors the billing pre-gate in
+// buildProposeWorkflowTool): an e-sign step only composes over a SIGNABLE document.
+// When the graph has an e-sign step and a producing stage, but NONE of the produced
+// documents are signable — not in persisted state, not in a template proposed this
+// turn — redirect the model to declare the e-sign config on the template first (and
+// get it approved) rather than letting the validator burn the turn's correction
+// budget on an unfixable-in-turn error. Returns the redirect text, or null when the
+// graph is fine (no e-sign step, no producer, or a signable document is declared).
+export async function esignOrderingRedirect(
+  ctx: ActionContext,
+  graph: Lifecycle,
+  serviceKey: string | undefined,
+  pendingTemplates: PendingTemplateSignal[] | undefined,
+): Promise<string | null> {
+  const producers = graph.filter(isDocumentProducingStage)
+  // No e-sign step, or an e-sign step with no producer at all: not this gate's job —
+  // the validator's own "does not follow a document-producing step" error covers the
+  // latter, and nothing to sign covers the former.
+  if (!graphHasEsignStep(graph) || producers.length === 0) return null
+  const library = (await listStandaloneTemplates(ctx)).filter((t) => t.category === 'document')
+  const anySignable = producers.some((p) =>
+    isProducedDocumentSignable(producingStageTemplateIds(p), library, serviceKey, pendingTemplates),
+  )
+  if (anySignable) return null
+  return (
+    `Nothing was captured (this does not count as a failed attempt): this workflow has an e-sign step, ` +
+    `but no document it produces is marked signable yet. First declare the e-sign config on the ` +
+    `template — call propose_template with esign_config (signable + signer roles) and have the attorney ` +
+    `click Approve on that template card — then propose the workflow again. Or drop the e-sign step: ` +
+    `once the template is signable the platform auto-adds the e-sign stage for you.`
+  )
+}
+
 // Validate a PROPOSED graph the way the authoring path will write it: structural
 // validity (incl. the closed action-kind vocabulary), linear-only, every referenced
 // templateEntityId real, and — ADR 0046 — every invoke_capability stage names a
@@ -271,6 +366,14 @@ export async function validateProposedLifecycle(
   graph: Lifecycle,
   serviceKey?: string,
   pendingBilling?: PendingBilling,
+  // ESIGN-AUTHORING-BRIDGE — templates proposed EARLIER THIS TURN (propose_template
+  // is capture-only, exactly like pendingBilling's propose_cost). The e-sign
+  // signability check accepts one for the same service + docKind as a signable
+  // declaration so an in-flight build validates within one turn. Every other caller
+  // omits it and stays persisted-only — setServiceLifecycleAI (the approve write
+  // path) never passes it, so a workflow physically cannot persist before its
+  // template's e-sign declaration has landed.
+  pendingTemplates?: PendingTemplateSignal[],
 ): Promise<{ ok: boolean; errors: string[]; warnings: string[] }> {
   const errors: string[] = []
   const warnings: string[] = []
@@ -548,7 +651,10 @@ export async function validateProposedLifecycle(
     }
     const library = await loadDocTemplates()
     const byId = new Map(library.map((t) => [t.templateEntityId, t]))
-    const signable = templateIds.some((id) => byId.get(id)?.signature.required === true)
+    // Signable if the persisted template declares it OR a template proposed THIS turn
+    // for the same service + docKind does (ESIGN-AUTHORING-BRIDGE) — see
+    // isProducedDocumentSignable for why the same-turn bridge is load-bearing.
+    const signable = isProducedDocumentSignable(templateIds, library, serviceKey, pendingTemplates)
     if (!signable) {
       const named = templateIds
         .map((id) => {
@@ -557,7 +663,7 @@ export async function validateProposedLifecycle(
         })
         .join(', ')
       errors.push(
-        `stage "${s.key}" runs the esignature capability, but the preceding stage "${predecessor.key}" drafts from ${named}, which does not declare signature.required — this document is unsigned, so an e-sign step cannot follow it. Either declare the signature block on the template (signature: { required: true, signer_roles: [...] } via legal.template.update) or remove the e-sign step.`,
+        `stage "${s.key}" runs the esignature capability, but the preceding stage "${predecessor.key}" drafts from ${named}, which is not marked signable — an e-sign step can't follow an unsigned document. Fix it one of these ways: re-propose that template with propose_template including its esign_config (signable + signer roles) AND have the attorney click Approve on that template card FIRST (the proposal must be approved before this workflow can be saved), or mark the document signable on the service's Templates tab. Once the template is signable the platform auto-adds the e-sign step, so you can also just drop this e-sign step.`,
       )
     }
   }

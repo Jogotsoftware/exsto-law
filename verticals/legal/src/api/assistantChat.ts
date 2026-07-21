@@ -645,6 +645,10 @@ export function buildAttorneyClientTools(
       // The P4 ordering pre-gate redirects to propose_cost / the service shell,
       // which only exist when the wizard is on; flag-off keeps validator behavior.
       buildWizardEnabled(),
+      // ESIGN-AUTHORING-BRIDGE — the SAME captured template-proposals array the
+      // template card feeds from, so a template proposed earlier this turn satisfies
+      // the e-sign signability check and its ordering pre-gate (mirrors costProposals).
+      capture.templateProposals,
     ),
   )
   // WP-H2: open a real editor on an EXISTING artifact from chat (unflagged —
