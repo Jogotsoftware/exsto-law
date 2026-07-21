@@ -104,6 +104,7 @@ export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> 
             FROM attribute a
             JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
            WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_status'
+             AND (a.valid_to IS NULL OR a.valid_to > now())
            ORDER BY a.valid_from DESC
            LIMIT 1) AS status,
          e.metadata->>'scheduled_at' AS scheduled_at,
@@ -304,10 +305,15 @@ async function loadCurrentAttributes(
   entityId: string,
 ): Promise<Record<string, unknown>> {
   const res = await client.query<{ kind_name: string; value: unknown }>(
+    // Current = latest OPEN row per kind. The open filter is load-bearing: a matter
+    // that carries stacked/closed status rows (pre-supersede data, or the one-time
+    // repair) must resolve to the single open value, not an arbitrary tied row
+    // (WF-FIX-2 #2). matter_status detail reads this map's `matter_status` key.
     `SELECT DISTINCT ON (akd.kind_name) akd.kind_name, a.value
      FROM attribute a
      JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
      WHERE a.tenant_id = $1 AND a.entity_id = $2
+       AND (a.valid_to IS NULL OR a.valid_to > now())
      ORDER BY akd.kind_name, a.valid_from DESC`,
     [tenantId, entityId],
   )

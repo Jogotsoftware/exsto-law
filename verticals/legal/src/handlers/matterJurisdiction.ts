@@ -13,8 +13,7 @@
 // normalizes both. Supersession is the established matterAccess.ts pattern:
 // close the open row, then insert the new one (append-only fact history).
 import { registerActionHandler } from '@exsto/substrate'
-import type { DbClient } from '@exsto/shared'
-import { insertAttribute, lookupKindId } from './common.js'
+import { closeOpenAttribute, insertAttribute, lookupKindId } from './common.js'
 import { normalizeJurisdiction } from '../api/jurisdictions.js'
 
 interface MatterSetGoverningLawPayload {
@@ -36,22 +35,6 @@ export function normalizeGoverningLawValue(raw: string | null | undefined): stri
     )
   }
   return code
-}
-
-// Close the open value of a matter attribute (valid_to is the only mutable
-// column on an open fact row — append-only invariant) so the freshly-inserted
-// row is the sole open value. Mirrors handlers/matterAccess.ts's closeOpen.
-async function closeOpenAttribute(
-  client: DbClient,
-  tenantId: string,
-  entityId: string,
-  attrKindId: string,
-): Promise<void> {
-  await client.query(
-    `UPDATE attribute SET valid_to = now()
-      WHERE tenant_id = $1 AND entity_id = $2 AND attribute_kind_id = $3 AND valid_to IS NULL`,
-    [tenantId, entityId, attrKindId],
-  )
 }
 
 registerActionHandler('legal.matter.set_governing_law', async (ctx, client, payload, actionId) => {

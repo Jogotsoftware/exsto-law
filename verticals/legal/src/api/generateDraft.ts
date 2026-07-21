@@ -11,9 +11,11 @@ import { loadDraftingPrompt } from '../templates/loader.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
 import { renderTemplate, buildMergeData, longDate } from './templateMerge.js'
+import { canonicalizeExecutionLines } from '../esign/executionBlock.js'
 import { getTenantSettingsForMerge } from './tenantSettings.js'
 import { resolveMatterJurisdiction, type ResolvedJurisdiction } from './matterJurisdiction.js'
 import { findUnresolvedTokens } from './tokenClasses.js'
+import { FORMATTING_DIRECTIVES } from './formattingDirectives.js'
 import {
   loadForcedSkills,
   buildActiveSkillsText,
@@ -287,13 +289,19 @@ export async function runDraftGeneration(
       }),
     )
 
+    // EDITOR-FIX-1 (item 6a): a legacy template body may end with a compound
+    // execution line (a printed name/role + an inline `Date: ____` rule). Split
+    // it so the trailing rule becomes a whole-line ruled signature/date line
+    // everywhere it renders — never literal broken underscores.
+    const canonicalMarkdown = canonicalizeExecutionLines(markdown)
+
     const merged = await submitAction(agentCtx, {
       actionKindName: 'draft.merge',
       intentKind: 'automatic_sync',
       payload: {
         matter_entity_id: input.matterEntityId,
         document_kind: input.documentKind,
-        document_markdown: markdown,
+        document_markdown: canonicalMarkdown,
         jurisdiction: jurisdiction?.code ?? null,
         template_id: templateId,
         missing_fields: missingFields,
@@ -508,7 +516,11 @@ export interface SystemFacts {
 export function buildSystemFactsBlock(facts: SystemFacts): string {
   const jurisdictionLine = facts.jurisdiction
     ? `Governing jurisdiction: ${facts.jurisdiction.displayName} (source: ${
-        facts.jurisdiction.source === 'matter' ? 'matter fact' : 'firm default'
+        facts.jurisdiction.source === 'matter'
+          ? 'matter fact'
+          : facts.jurisdiction.source === 'client_address'
+            ? 'client address'
+            : 'firm default'
       })`
     : 'Governing jurisdiction: NOT SET — do not assume any state; write "Governing law to be confirmed"'
   const lines = [jurisdictionLine, `Today's date: ${longDate(facts.todayIso)}`]
@@ -516,6 +528,12 @@ export function buildSystemFactsBlock(facts: SystemFacts): string {
   return [
     '--- System facts (authoritative platform facts — ground the document in these; never contradict, guess around, or default to a different jurisdiction) ---',
     ...lines,
+    // EDITOR-FIX-1 (item 5): the shared formatting/drafting standards ride the
+    // SAME prepended block, so every path that assembles a draft through the
+    // system-facts seam (AI draft + stage regenerate) carries them. Revise
+    // injects FORMATTING_DIRECTIVES itself (reviseDraft.ts).
+    '',
+    FORMATTING_DIRECTIVES,
   ].join('\n')
 }
 

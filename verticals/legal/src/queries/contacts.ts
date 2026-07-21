@@ -147,6 +147,7 @@ export async function listContacts(ctx: ActionContext): Promise<ContactSummary[]
            FROM attribute a
            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
            WHERE a.tenant_id = $1 AND a.entity_id = cm.matter_id AND akd.kind_name = 'matter_status'
+             AND (a.valid_to IS NULL OR a.valid_to > now())
            ORDER BY a.valid_from DESC
            LIMIT 1
          ) ms ON true
@@ -285,6 +286,7 @@ export async function getContact(
          (SELECT a.value #>> '{}' FROM attribute a
            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
           WHERE a.tenant_id = $1 AND a.entity_id = e.id AND akd.kind_name = 'matter_status'
+            AND (a.valid_to IS NULL OR a.valid_to > now())
           ORDER BY a.valid_from DESC LIMIT 1) AS status,
          (SELECT a.value #>> '{}' FROM attribute a
            JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id

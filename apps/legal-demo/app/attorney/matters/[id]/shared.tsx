@@ -83,9 +83,14 @@ export interface MatterDetail {
   // HAS an authored lifecycle — the page shows the honest repair panel instead of
   // the legacy derived-step window.
   workflowRepairAvailable?: boolean
-  // WP A1 — resolved governing law: matter override > firm home jurisdiction >
-  // null (honest unset). Display + edit control on the Overview facts card.
-  governingLaw?: { code: string; displayName: string; source: 'matter' | 'firm' } | null
+  // WP A1 — resolved governing law: matter override > client-address state >
+  // firm home jurisdiction > null (honest unset). Display + edit control on the
+  // Overview facts card.
+  governingLaw?: {
+    code: string
+    displayName: string
+    source: 'matter' | 'client_address' | 'firm'
+  } | null
 }
 
 // ── The runner footer doctrine (#442, pinned by ES-4) ──────────────────────

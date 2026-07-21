@@ -96,14 +96,16 @@ describe('review_send_document producing auto-run (WF-FIX-1 WP3)', () => {
     expect(afterCommit).toHaveLength(0)
   })
 
-  it('resolveStageTemplateRef finds the first template annotation and tolerates none', () => {
+  it('resolveStageTemplateRef finds the first template annotation (trimmed) and tolerates none', () => {
     expect(resolveStageTemplateRef(annotatedReview)).toBe('tmpl-oa-1')
     expect(resolveStageTemplateRef(bareReview)).toBeNull()
+    // WF-FIX-2 #4: the resolved entity id is trimmed — a stored id with stray
+    // whitespace must still resolve the template, never miss the lookup.
     expect(
       resolveStageTemplateRef({
         ...bareReview,
         documents: [{ docKind: 'nda' }, { templateEntityId: ' tmpl-2 ' }],
       }),
-    ).toBe(' tmpl-2 ')
+    ).toBe('tmpl-2')
   })
 })

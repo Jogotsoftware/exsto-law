@@ -50,13 +50,37 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
     await generateDocumentForMatter(ctx, p.matter_entity_id)
     return
   }
+  // WF-FIX-2 #5: the manual draft path must draft from the stage/capability-PINNED
+  // template ENTITY, not the (serviceKey, docKind) repo/convention default (the prod
+  // repro: a stale North Carolina draft while the stage's pinned entity — the store
+  // the autorun uses — was already fixed). Resolve the matter's current stage's
+  // pinned template with the SAME resolver generateDocumentRuntime uses; when the
+  // stage pins none, templateOverride is undefined and runDraftGeneration falls back
+  // to the repo template (last resort).
   const { runDraftGeneration } = await import('../api/generateDraft.js')
+  const { resolveMatterStagePinnedTemplateOverride } =
+    await import('../api/generateDocumentRuntime.js')
+  const templateOverride = await resolveMatterStagePinnedTemplateOverride(ctx, p.matter_entity_id)
   await runDraftGeneration(ctx, {
     matterEntityId: p.matter_entity_id,
     documentKind: p.document_kind,
     guidance: p.guidance,
     skillSlugs: p.skill_slugs,
+    ...(templateOverride ? { templateOverride } : {}),
   })
+})
+
+// EDITOR-FIX-1 (item 1) — runs one async Edit-with-AI revision OFF the request
+// (model calls are ASYNC ALWAYS; a synchronous revise 504'd the gateway). Enqueued
+// by legal.draft.revise.request (the tracked-changes editor's "Generate tracked
+// changes"); runs the SAME reviseDraftText pipeline the synchronous tool used and
+// records the proposal (or a readable failure) as an observation the editor polls
+// via legal.draft.revise.result. runDraftRevisionJob catches its own errors and
+// records a failure observation rather than rethrowing, so a bad instruction is a
+// visible retry in the rail, not five silent worker retries.
+registerWorkerHandler('legal.draft.revise.run', async (ctx, payload) => {
+  const { runDraftRevisionJob } = await import('../api/reviseDraftJob.js')
+  await runDraftRevisionJob(ctx, payload)
 })
 
 // B2.2 (MATTER-BRIEF-BACKGROUND-1) — runs one Matter Brief (re)generation OFF the

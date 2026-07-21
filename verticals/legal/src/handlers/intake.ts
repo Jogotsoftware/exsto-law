@@ -16,6 +16,7 @@ import { createWorkflowInstance } from '../lifecycle/instance.js'
 import { entryStage } from '../lifecycle/resolve.js'
 import { settleStage } from '../lifecycle/settle.js'
 import { dispatchLifecycleEvent } from '../lifecycle/executor.js'
+import { dispatchClientDelivery } from './clientDelivery.js'
 import { normalizeJurisdiction } from '../api/jurisdictions.js'
 import { GOVERNING_JURISDICTION_FIELD_ID } from '../api/intakeFieldLibrary.js'
 
@@ -165,6 +166,14 @@ interface MatterOpenPayload {
   // when the intake had one, else the person's full name). Optional: callers
   // that omit it fall back to the contact entity's own name.
   client_display_name?: string | null
+  // WF-FIX-2 #6 — this matter was opened BY the client's OWN funnel intake (the
+  // finalize/booking path: intake submitted + fee consent recorded, as the
+  // client's actor). The submission IS the client's acceptance, so the entry
+  // intake stage's client-accept edge auto-advances (no attorney "Record client
+  // acceptance" click). ONLY the funnel paths (submitBooking) set this; an
+  // attorney-opened matter (openMatter) omits it and parks at intake for the
+  // manual acceptance card. Never inferred — set explicitly by the creator.
+  client_intake?: boolean
 }
 
 // Find the client-parent account this contact already belongs to (contact_of),
@@ -405,6 +414,26 @@ registerActionHandler('matter.open', async (ctx, client, payload, actionId) => {
         sourceRef: 'system:workflow_engine',
       })
       await dispatchLifecycleEvent(client, ctx, matterEntityId, 'intake.completed', actionId)
+      // WF-FIX-2 #6 — a CLIENT-created matter (funnel finalize: intake + fee
+      // consent, as the client's actor) has ALREADY been accepted by the client:
+      // the submission IS the acceptance. So auto-advance the entry intake stage's
+      // CLIENT-accept edge (via 'legal.client_request.accept') via the SAME
+      // dispatchClientDelivery every other client action uses, attributed to the
+      // acting (client) actor — advancing intake → drafting with zero attorney
+      // clicks. A no-op when the stage has no such client edge (e.g. it already
+      // advanced on the intake.completed SYSTEM edge above, or it waits on a
+      // different token). ONLY for client-created matters: an attorney-opened
+      // matter omits the flag and PARKS at intake so the manual "Record client
+      // acceptance / Skip" card still governs (attorney/phone acceptance).
+      if (p.client_intake === true) {
+        await dispatchClientDelivery(
+          client,
+          ctx,
+          matterEntityId,
+          'legal.client_request.accept',
+          actionId,
+        )
+      }
       await client.query('RELEASE SAVEPOINT workflow_engine')
     } catch (err) {
       // Roll back ONLY the engine work; the matter is opened either way.

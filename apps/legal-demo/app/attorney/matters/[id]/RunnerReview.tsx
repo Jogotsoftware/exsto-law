@@ -188,8 +188,20 @@ export function RunnerReview({
             versionId={versionId}
             embedded
             onVersionChanged={() => void onChanged()}
-            onCompleted={() => {
-              void onChanged()
+            onCompleted={async (result) => {
+              // EDITOR-FIX-1 (item 3): approve advances the workflow — refresh the
+              // matter (so the step strip recomputes), then CLOSE this modal so the
+              // attorney lands back on the strip with the matter visibly moved (the
+              // parent focuses/scrolls the new current step). Returning true tells
+              // DocumentReviewer the host handled the aftermath (skip its in-place
+              // swap/refresh). Reject does NOT advance — refresh in place and stay
+              // open so the rejected status shows.
+              await onChanged()
+              if (result.disposition === 'approved') {
+                onClose()
+                return true
+              }
+              return false
             }}
             onRegenerateFromScratch={runRegenerateFromScratch}
           />

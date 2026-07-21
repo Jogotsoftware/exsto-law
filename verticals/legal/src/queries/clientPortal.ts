@@ -238,6 +238,7 @@ export async function getClientMatterTimeline(
        FROM attribute a
        JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
        WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'matter_status'
+         AND (a.valid_to IS NULL OR a.valid_to > now())
        ORDER BY a.valid_from DESC
        LIMIT 1`,
       [ctx.tenantId, matterEntityId],
@@ -347,6 +348,7 @@ export async function listClientMatters(
                  JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
                  WHERE a.tenant_id = $1 AND a.entity_id = m.id
                    AND akd.kind_name = 'matter_status'
+                   AND (a.valid_to IS NULL OR a.valid_to > now())
                  ORDER BY a.valid_from DESC LIMIT 1) AS status,
               (SELECT a.value #>> '{}'
                  FROM attribute a

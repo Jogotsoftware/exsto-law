@@ -23,7 +23,13 @@
 // repin REFUSES unless clear_override is passed (the successor simply does not
 // copy it, which IS the clear).
 import { registerActionHandler } from '@exsto/substrate'
-import { getLatestAttributeValue, insertAttribute, insertEvent, lookupKindId } from './common.js'
+import {
+  closeOpenAttribute,
+  getLatestAttributeValue,
+  insertAttribute,
+  insertEvent,
+  lookupKindId,
+} from './common.js'
 import { getWorkflowInstanceForMatter, resolveCurrentServiceVersion } from '../lifecycle/binding.js'
 import { createWorkflowInstance } from '../lifecycle/instance.js'
 import { settleStage } from '../lifecycle/settle.js'
@@ -168,6 +174,7 @@ registerActionHandler('legal.matter.repin_workflow', async (ctx, client, payload
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, p.matter_entity_id, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
