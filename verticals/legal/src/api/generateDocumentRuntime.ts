@@ -125,6 +125,22 @@ export async function resolveStagePinnedTemplateOverride(
   return { templateText: tmpl.body, templateId: `template:${templateEntityId}` }
 }
 
+// The manual draft path (WF-FIX-2 #5): resolve the matter's CURRENT stage's pinned
+// template override, or undefined when the matter has no running stage / the stage
+// pins no template — the caller then falls back to the repo/convention template
+// (the LAST resort). An attorney-triggered draft (requestDraft → worker non-autorun
+// branch) must draft from the SAME pinned template entity the producing autorun
+// would, not a same-kind repo default (the prod repro: a stale North Carolina draft
+// while the stage's pinned template entity was already fixed).
+export async function resolveMatterStagePinnedTemplateOverride(
+  ctx: ActionContext,
+  matterEntityId: string,
+): Promise<{ templateText: string; templateId: string } | undefined> {
+  const info = await resolveCurrentStage(ctx, matterEntityId)
+  if (!info?.stage) return undefined
+  return resolveStagePinnedTemplateOverride(ctx, info.stage)
+}
+
 // The document kind this producing stage produces: the stage's own document ref wins
 // (explicit docKind, else the annotated template's own kind); else the service's first
 // registered document kind (transitions.documents). Exported for the WP4 regenerate
