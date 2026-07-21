@@ -150,7 +150,12 @@ export async function listWorkspaceEvents(
             AND cn.attribute_kind_id IN
               (SELECT id FROM attribute_kind_definition WHERE tenant_id = $1 AND kind_name = 'full_name')
        WHERE ce.tenant_id = $1 AND ce.status = 'active'
-         AND gid.value #>> '{}' = ANY($2)`,
+         AND gid.value #>> '{}' = ANY($2)
+       -- Deterministic dedupe: two active calendar_events can share one Google
+       -- event id. Order oldest→newest so the most recently created row lands
+       -- last and wins the meetingLinks Map below (last-write-wins on key),
+       -- rather than relying on arbitrary row order.
+       ORDER BY ce.created_at ASC`,
       [ctx.tenantId, ids],
     )
 
