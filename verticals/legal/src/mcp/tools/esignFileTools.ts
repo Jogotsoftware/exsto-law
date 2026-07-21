@@ -13,7 +13,13 @@ import type { ActionContext } from '@exsto/substrate'
 // `placements` (the composer's coordinate plan — all source:'placed' for a
 // file), and `message`. All optional — pre-ES-1 callers are unchanged.
 interface Input {
+  /** The uploaded PDF to send. Ignored when `documents` is provided (multi-doc);
+   *  kept for single-document callers. */
   documentVersionId: string
+  /** ES-MULTIDOC-1: the FULL ordered set of uploaded PDFs for a multi-document
+   *  envelope — one envelope carrying many documents. Absent ⇒ the single
+   *  `documentVersionId`. */
+  documents?: Array<{ documentVersionId: string }>
   signers: Array<{
     email: string
     name?: string
@@ -31,12 +37,14 @@ interface Input {
 const sendFileTool: Tool<Input, SendFileForSignatureResult> = {
   name: 'legal.esign.send_file',
   description:
-    'Send an uploaded PDF document for e-signature (visual field placements when provided, else ' +
-    'whole-document sign + signature certificate). Works standalone or attached to a matter/contact. Every signer gets a ' +
-    'secure email signing link; recipients not already in contacts are saved as new contacts. ' +
-    'Each recipient may carry a role: needs_to_sign (default), needs_to_view (read-only link), or ' +
-    'receives_copy (executed copy on completion). Optional `placements` stores the field-placement ' +
-    "plan; optional `message` is the sender's personal note for the signing email.",
+    'Send one or more uploaded PDF documents as a single e-signature envelope (visual field ' +
+    'placements when provided, else whole-document sign + signature certificate). Pass `documents` ' +
+    '(ordered) for a multi-document envelope, or a single `documentVersionId`. Works standalone or ' +
+    'attached to a matter/contact. Every signer gets a secure email signing link; recipients not ' +
+    'already in contacts are saved as new contacts. Each recipient may carry a role: needs_to_sign ' +
+    '(default), needs_to_view (read-only link), or receives_copy (executed copy on completion). ' +
+    'Optional `placements` stores the field-placement plan across all documents (each placement’s ' +
+    "docIndex binds it to a document); optional `message` is the sender's personal note.",
   mode: 'write',
   handler: async (ctx: ActionContext, input) => sendFileForSignature(ctx, input),
 }

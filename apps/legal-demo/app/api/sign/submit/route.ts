@@ -41,18 +41,23 @@ export async function POST(request: Request) {
       fieldValues,
       signerIp: clientIpFrom(request),
     })
-    // ES-2 (§5.4) — the final signature completes the envelope: stamp the
-    // executed copy of a placement-carrying FILE envelope (each field's resolved
-    // value drawn at its rect + the certificate page appended) and store it
-    // beside the original. Best-effort: the signature is already recorded and
-    // the certificate-markdown executed version already exists (the handler
-    // wrote it in the same transaction); a stamping failure must never turn a
-    // successful signing into an error. This route owns Storage bytes — the
-    // vertical never touches Storage (CI storage-guard).
+    // ES-2 (§5.4) / ES-MULTIDOC-1 — the final signature completes the envelope:
+    // stamp the executed copy of EVERY placement-carrying PDF document in the
+    // envelope (each field's resolved value drawn at its rect + the certificate
+    // page appended) and store it beside its original. Best-effort: the
+    // signature is already recorded and the certificate-markdown executed
+    // versions already exist (the handler wrote one per document in the same
+    // transaction); a stamping failure must never turn a successful signing into
+    // an error. This route owns Storage bytes — the vertical never touches
+    // Storage (CI storage-guard). Each document is stamped independently so one
+    // bad document never blocks the rest.
     if (result.completed) {
-      try {
-        const plan = await loadExecutedStampPlanByToken(token)
-        if (plan) {
+      const plans = await loadExecutedStampPlanByToken(token).catch((planErr) => {
+        console.error('esign executed-copy plan load failed:', planErr)
+        return []
+      })
+      for (const plan of plans) {
+        try {
           const original = await downloadObject(plan.objectKey)
           const stamped = await stampExecutedPdf({
             pdfBytes: original,
@@ -60,9 +65,9 @@ export async function POST(request: Request) {
             certificate: plan.certificate,
           })
           await uploadObject(plan.executedObjectKey, Buffer.from(stamped), 'application/pdf')
+        } catch (stampErr) {
+          console.error('esign executed-copy stamping failed:', stampErr)
         }
-      } catch (stampErr) {
-        console.error('esign executed-copy stamping failed:', stampErr)
       }
     }
     return NextResponse.json(result)

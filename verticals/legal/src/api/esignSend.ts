@@ -46,9 +46,21 @@ export interface EnvelopeRecipient {
   role?: RecipientRole | null
 }
 
+/** One document in an envelope's ordered set (ES-MULTIDOC-1). */
+export interface EnvelopeDocumentRef {
+  documentEntityId: string
+  documentVersionId: string
+}
+
 export interface BuildEnvelopeInput {
   documentEntityId: string
   documentVersionId: string
+  /** ES-MULTIDOC-1: the FULL ordered document set when the envelope carries more
+   *  than one document. When present, documentEntityId/documentVersionId are the
+   *  first entry (kept for the envelope entity's primary-document property and
+   *  every single-doc reader). Absent ⇒ the single (documentEntityId,
+   *  documentVersionId) IS the set — every pre-multidoc caller is unchanged. */
+  documents?: EnvelopeDocumentRef[]
   matterEntityId?: string | null
   provider: string
   providerEnvelopeRef?: string | null
@@ -57,7 +69,8 @@ export interface BuildEnvelopeInput {
   recipients: EnvelopeRecipient[]
   /** Legacy whole-line marker plan (0044) — drafts still parse and store it. */
   fields?: EsignField[]
-  /** Resolved coordinate placements (§5.1) — the composer's plan. */
+  /** Resolved coordinate placements (§5.1) — the composer's plan. Each carries a
+   *  docIndex into the document set above (ES-MULTIDOC-1; absent ⇒ document 0). */
   placements?: FieldPlacement[]
   /** The sender's personal note (§9.4). */
   message?: string | null
@@ -99,12 +112,30 @@ export async function buildAndSubmitEnvelope(
     }
   }
 
+  // ES-MULTIDOC-1: the ordered document set. documents[0] is the primary the
+  // envelope entity + every single-doc reader keys on; the handler writes one
+  // envelope_of per entry with its order. An empty/absent list ⇒ the single
+  // (documentEntityId, documentVersionId), i.e. exactly the pre-multidoc shape.
+  const documents = (input.documents ?? []).filter(
+    (d) => d.documentEntityId?.trim() && d.documentVersionId?.trim(),
+  )
+  const primary = documents[0] ?? {
+    documentEntityId: input.documentEntityId,
+    documentVersionId: input.documentVersionId,
+  }
+
   const result = await submitAction(ctx, {
     actionKindName: 'esign.send',
     intentKind: 'enforcement',
     payload: {
-      document_entity_id: input.documentEntityId,
-      document_version_id: input.documentVersionId,
+      document_entity_id: primary.documentEntityId,
+      document_version_id: primary.documentVersionId,
+      documents: documents.length
+        ? documents.map((d) => ({
+            document_entity_id: d.documentEntityId,
+            document_version_id: d.documentVersionId,
+          }))
+        : undefined,
       matter_entity_id: input.matterEntityId ?? null,
       provider: input.provider,
       provider_envelope_ref: input.providerEnvelopeRef ?? null,

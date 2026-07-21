@@ -12,7 +12,8 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { signingCtx } from './esign.js'
 import { deriveMarkerMap, type MarkerMapEntry } from '../esign/markerMap.js'
 import type { PlacementContactFacts } from '../esign/placementData.js'
-import { parseEnvelopePlacements, verifySigningToken } from '../esign/index.js'
+import { parseEnvelopePlacements, placementsForDoc, verifySigningToken } from '../esign/index.js'
+import type { FieldPlacement } from '../esign/placements.js'
 import { isSignatureImageDataUrl } from '../esign/fields.js'
 import type { StampField } from '../esign/stampPdf.js'
 import type { FileCertInput } from '../esign/fileCertificate.js'
@@ -161,19 +162,75 @@ interface PlanSignerRow {
   field_values_json: string | null
 }
 
+interface PlanSigner extends PlanSignerRow {
+  field_values: Record<string, string> | null
+}
+
+/** Resolve one document's placement subset to StampFields (§5.4). Pure over the
+ *  loaded signers — shared by every document in a multi-document envelope. */
+function buildStampFields(placements: FieldPlacement[], byKey: Map<string, PlanSigner>): StampField[] {
+  return placements.map((p) => {
+    const signer = byKey.get(p.signerKey)
+    const filled = signer?.field_values?.[p.id]
+    switch (p.type) {
+      case 'sign':
+      case 'initial': {
+        const sig = signer?.signature_data ?? null
+        if (sig && isSignatureImageDataUrl(sig)) {
+          return { type: p.type, rect: p.rect, signatureDataUrl: sig }
+        }
+        // Typed adoption: the stamper draws the name in the oblique sig font.
+        const name = signer?.name ?? sig ?? ''
+        return {
+          type: p.type,
+          rect: p.rect,
+          value: p.type === 'initial' ? initialsOf(name) : name,
+        }
+      }
+      case 'name':
+        return { type: p.type, rect: p.rect, value: signer?.name ?? '' }
+      case 'date':
+        // Auto-date (15.7): the ACTUAL signing moment, recorded server-side —
+        // the signer never typed it.
+        return { type: p.type, rect: p.rect, value: (signer?.signed_at ?? '').slice(0, 10) }
+      case 'title':
+        return { type: p.type, rect: p.rect, value: filled ?? p.value ?? signer?.title ?? '' }
+      case 'email':
+        return { type: p.type, rect: p.rect, value: p.value ?? filled ?? signer?.email ?? '' }
+      case 'check':
+        return { type: p.type, rect: p.rect, checked: (filled ?? '').toLowerCase() === 'true' }
+      default:
+        // company/phone/address/text — send-time resolved value, else what the
+        // signer typed. Never invented.
+        return { type: p.type, rect: p.rect, value: p.value ?? filled ?? '' }
+    }
+  })
+}
+
+interface StampDocRow {
+  object_key: string | null
+  content_type: string | null
+  filename: string | null
+  sha256_hex: string | null
+  size_bytes: string | null
+}
+
 /**
- * The stamping plan for a COMPLETED file envelope with placements: every
- * placement resolved to its final value (adopted signature image / typed name /
- * signing date / send-time data value / signer-filled value) plus the §5.4
- * certificate input. Null when the envelope isn't a completed placement-carrying
- * file envelope — the caller (a byte-having Next route; the vertical never
- * touches Storage) then simply skips stamping and the certificate-markdown
- * executed version stands alone, exactly the pre-ES-2 behavior.
+ * The stamping plans for a COMPLETED envelope: ONE plan per PDF document that
+ * carries placements (ES-MULTIDOC-1). Each plan resolves that document's
+ * placement subset (grouped by docIndex) to its final values (adopted signature
+ * image / typed name / signing date / send-time data value / signer-filled
+ * value) plus the §5.4 certificate for that document. Empty array when there is
+ * nothing to stamp (not completed, no placements, no PDF document) — the caller
+ * (a byte-having Next route; the vertical never touches Storage) then simply
+ * skips stamping and the certificate-markdown executed versions stand alone,
+ * exactly the pre-ES-2 behavior. A single-document envelope yields exactly one
+ * plan — byte-identical to the pre-multidoc single return, just wrapped.
  */
 export async function loadExecutedStampPlan(
   ctx: ActionContext,
   envelopeId: string,
-): Promise<ExecutedStampPlan | null> {
+): Promise<ExecutedStampPlan[]> {
   return withActionContext(ctx, async (client) => {
     const status = await client.query<{ value: string }>(
       `SELECT a.value #>> '{}' AS value FROM attribute a
@@ -182,7 +239,7 @@ export async function loadExecutedStampPlan(
         ORDER BY a.valid_from DESC LIMIT 1`,
       [ctx.tenantId, envelopeId],
     )
-    if (status.rows[0]?.value !== 'completed') return null
+    if (status.rows[0]?.value !== 'completed') return []
 
     const placementsRes = await client.query<{ value: string }>(
       `SELECT a.value::text AS value FROM attribute a
@@ -197,15 +254,15 @@ export async function loadExecutedStampPlan(
     } catch {
       placements = []
     }
-    if (placements.length === 0) return null
+    if (placements.length === 0) return []
 
-    const doc = await client.query<{
-      object_key: string | null
-      content_type: string | null
-      filename: string | null
-      sha256_hex: string | null
-      size_bytes: string | null
-    }>(
+    // ES-MULTIDOC-1 — every document in send order (the `order` on each
+    // envelope_of relationship; a legacy single-doc envelope's absent order
+    // reads as 0). A LATERAL join picks each document's latest NON-executed
+    // (original) version. The row position IS the docIndex the placements
+    // reference (the handler wrote order = position; the composer tags
+    // placements with the same position).
+    const docsRes = await client.query<StampDocRow>(
       `SELECT dv.metadata->>'object_key' AS object_key,
               COALESCE(dv.metadata->>'content_type', cb.content_type) AS content_type,
               dv.metadata->>'original_filename' AS filename,
@@ -214,16 +271,19 @@ export async function loadExecutedStampPlan(
          FROM relationship r
          JOIN relationship_kind_definition rkd
            ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
-         JOIN document_version dv ON dv.document_entity_id = r.target_entity_id
-           AND dv.tenant_id = r.tenant_id AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+         JOIN LATERAL (
+           SELECT dv2.* FROM document_version dv2
+            WHERE dv2.document_entity_id = r.target_entity_id AND dv2.tenant_id = r.tenant_id
+              AND (dv2.metadata->>'executed') IS DISTINCT FROM 'true'
+            ORDER BY dv2.version_number DESC LIMIT 1
+         ) dv ON true
          JOIN content_blob cb ON cb.id = dv.content_blob_id
         WHERE r.tenant_id = $1 AND r.source_entity_id = $2
           AND (r.valid_to IS NULL OR r.valid_to > now())
-        ORDER BY dv.version_number DESC LIMIT 1`,
+        ORDER BY COALESCE((r.properties->>'order')::int, 0), r.recorded_at`,
       [ctx.tenantId, envelopeId],
     )
-    const docRow = doc.rows[0]
-    if (!docRow?.object_key || docRow.content_type !== 'application/pdf') return null
+    if (docsRes.rows.length === 0) return []
 
     const attr = (k: string) =>
       `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
@@ -247,79 +307,56 @@ export async function loadExecutedStampPlan(
         ORDER BY ${attr('signer_order')} NULLS LAST, r.recorded_at`,
       [ctx.tenantId, envelopeId],
     )
-    const signers = signersRes.rows.map((row) => ({
+    const signers: PlanSigner[] = signersRes.rows.map((row) => ({
       ...row,
       field_values: safeParseRecord(row.field_values_json),
     }))
     const byKey = new Map(signers.filter((s) => s.signer_key).map((s) => [s.signer_key!, s]))
+    const certSigners = signers.map((s) => ({
+      name: s.name,
+      email: s.email,
+      title: s.title,
+      signed_at: s.signed_at,
+      consent: s.consent,
+    }))
 
-    const fields: StampField[] = placements.map((p) => {
-      const signer = byKey.get(p.signerKey)
-      const filled = signer?.field_values?.[p.id]
-      switch (p.type) {
-        case 'sign':
-        case 'initial': {
-          const sig = signer?.signature_data ?? null
-          if (sig && isSignatureImageDataUrl(sig)) {
-            return { type: p.type, rect: p.rect, signatureDataUrl: sig }
-          }
-          // Typed adoption: the stamper draws the name in the oblique sig font.
-          const name = signer?.name ?? sig ?? ''
-          return {
-            type: p.type,
-            rect: p.rect,
-            value: p.type === 'initial' ? initialsOf(name) : name,
-          }
-        }
-        case 'name':
-          return { type: p.type, rect: p.rect, value: signer?.name ?? '' }
-        case 'date':
-          // Auto-date (15.7): the ACTUAL signing moment, recorded server-side —
-          // the signer never typed it.
-          return { type: p.type, rect: p.rect, value: (signer?.signed_at ?? '').slice(0, 10) }
-        case 'title':
-          return { type: p.type, rect: p.rect, value: filled ?? p.value ?? signer?.title ?? '' }
-        case 'email':
-          return { type: p.type, rect: p.rect, value: p.value ?? filled ?? signer?.email ?? '' }
-        case 'check':
-          return { type: p.type, rect: p.rect, checked: (filled ?? '').toLowerCase() === 'true' }
-        default:
-          // company/phone/address/text — send-time resolved value, else what the
-          // signer typed. Never invented.
-          return { type: p.type, rect: p.rect, value: p.value ?? filled ?? '' }
-      }
-    })
-
-    return {
-      envelopeId,
-      objectKey: docRow.object_key,
-      executedObjectKey: executedPdfObjectKey(docRow.object_key),
-      filename: docRow.filename ?? 'document.pdf',
-      fields,
-      certificate: {
+    const plans: ExecutedStampPlan[] = []
+    for (let d = 0; d < docsRes.rows.length; d++) {
+      const docRow = docsRes.rows[d]!
+      // Only PDF documents can be stamped; a non-PDF (or bodyless) document keeps
+      // its markdown-certificate executed version and is skipped here.
+      if (!docRow.object_key || docRow.content_type !== 'application/pdf') continue
+      const docPlacements = placementsForDoc(placements, d)
+      // A document with no placements has nothing to stamp — its original bytes
+      // ARE its executed copy (the pre-ES-2 single-doc rule, applied per doc).
+      if (docPlacements.length === 0) continue
+      plans.push({
         envelopeId,
-        filename: docRow.filename,
-        contentType: docRow.content_type,
-        sizeBytes: docRow.size_bytes ? Number(docRow.size_bytes) : null,
-        sha256Hex: docRow.sha256_hex,
-        signers: signers.map((s) => ({
-          name: s.name,
-          email: s.email,
-          title: s.title,
-          signed_at: s.signed_at,
-          consent: s.consent,
-        })),
-      },
+        objectKey: docRow.object_key,
+        executedObjectKey: executedPdfObjectKey(docRow.object_key),
+        filename: docRow.filename ?? 'document.pdf',
+        fields: buildStampFields(docPlacements, byKey),
+        certificate: {
+          envelopeId,
+          filename: docRow.filename,
+          contentType: docRow.content_type,
+          sizeBytes: docRow.size_bytes ? Number(docRow.size_bytes) : null,
+          sha256Hex: docRow.sha256_hex,
+          signers: certSigners,
+        },
+      })
     }
+    return plans
   })
 }
 
 /** Token door for the stamping step in /api/sign/submit: the final signer's
  *  submit completes the envelope, then the route (which owns Storage bytes)
- *  stamps the executed copy. Throws on a bad token, null when nothing to stamp. */
+ *  stamps the executed copy of every placement-carrying document. Throws on a
+ *  bad token, empty array when nothing to stamp. */
 export async function loadExecutedStampPlanByToken(
   token: string,
-): Promise<ExecutedStampPlan | null> {
+): Promise<ExecutedStampPlan[]> {
   const tok = verifySigningToken(token)
   return loadExecutedStampPlan(signingCtx(tok.tenantId), tok.envelopeId)
 }
