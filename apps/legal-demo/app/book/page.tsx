@@ -339,12 +339,18 @@ export default function BookPage() {
   // response's hasPortalAccount defaults it for known emails.
   const [password, setPassword] = useState('')
   const [password2, setPassword2] = useState('')
-  const [accountMode, setAccountMode] = useState<'create' | 'signin'>('create')
+  // N1 — 'pending-confirm': a known email whose account exists but has NOT
+  // confirmed yet (portalAccountConfirmed === false). Neither 'signin' (sign-in
+  // will just fail behind the email_confirmed_at gate) nor 'create' (there's
+  // nothing to create) fits — this state shows "check your email" + resend
+  // instead of dead-ending them in either doomed form.
+  const [accountMode, setAccountMode] = useState<'create' | 'signin' | 'pending-confirm'>('create')
   // Once the user has interacted with the account step (toggled modes, typed a
   // password, or submitted), a late stage response must not yank the form —
   // the hasPortalAccount default only applies to a pristine step.
   const accountTouchedRef = useRef(false)
   const [hasPortalAccount, setHasPortalAccount] = useState(false)
+  const [resendStatus, setResendStatus] = useState<'idle' | 'sending' | 'sent'>('idle')
   const [feeQuote, setFeeQuote] = useState<FeeQuote | null>(null)
   const [feeAccepted, setFeeAccepted] = useState(false)
   // One hint at a time (steps are exclusive): explains a consent-gated submit.
@@ -653,6 +659,7 @@ export default function BookPage() {
     setFeeAccepted(false)
     setAccountMode('create')
     setHasPortalAccount(false)
+    setResendStatus('idle')
     accountTouchedRef.current = false
     try {
       const res = await fetch('/api/client/intake/stage', {
@@ -670,16 +677,36 @@ export default function BookPage() {
       const data = (await res.json().catch(() => null)) as {
         quote?: FeeQuote | null
         hasPortalAccount?: boolean
+        portalAccountConfirmed?: boolean | null
       } | null
       setFeeQuote(data?.quote ?? null)
       // Known email with a portal account: default the step to sign-in (neutral
-      // copy) — the create path stays one toggle away as the fallback.
+      // copy) — UNLESS it's still unconfirmed, in which case sign-in would just
+      // fail behind the email_confirmed_at gate, so lead with check-email
+      // instead. The create path stays one toggle away as the fallback either way.
       if (data?.hasPortalAccount === true) {
         setHasPortalAccount(true)
-        if (!accountTouchedRef.current && busy === null) setAccountMode('signin')
+        if (!accountTouchedRef.current && busy === null) {
+          setAccountMode(data.portalAccountConfirmed === false ? 'pending-confirm' : 'signin')
+        }
       }
     } catch {
       setFeeQuote(null)
+    }
+  }
+
+  async function resendAccountConfirmation() {
+    setResendStatus('sending')
+    try {
+      await fetch('/api/client/auth/resend-confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: contact.email.trim(), lang }),
+      })
+    } catch {
+      // Swallow — same anti-enumeration posture as every other resend surface.
+    } finally {
+      setResendStatus('sent')
     }
   }
 
@@ -849,6 +876,7 @@ export default function BookPage() {
           password,
           feeAccepted: feeQuote ? feeAccepted : undefined,
           captchaToken: captchaToken ?? undefined,
+          lang,
         }),
       })
       const data = (await res.json().catch(() => null)) as {
@@ -933,13 +961,35 @@ export default function BookPage() {
               </div>
             )}
             {confirmation.accountCreated && (
-              <p className="bk-sub">
-                {t(
-                  'confirm.account_created',
-                  undefined,
-                  'Your client portal account is ready — check your email for a confirmation link, then sign in to track this matter, read documents, and pay invoices.',
+              <>
+                <p className="bk-sub">
+                  {t(
+                    'confirm.account_created',
+                    undefined,
+                    'Your client portal account is ready — check your email for a confirmation link, then sign in to track this matter, read documents, and pay invoices.',
+                  )}
+                </p>
+                {resendStatus === 'sent' ? (
+                  <div className="alert alert-success" style={{ marginTop: 'var(--space-2)' }}>
+                    {t(
+                      'account.pending_confirm_sent',
+                      undefined,
+                      'If that address needs confirming, we’ve sent a fresh link. Check your inbox.',
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="bk-linklike"
+                    disabled={resendStatus === 'sending'}
+                    onClick={() => void resendAccountConfirmation()}
+                  >
+                    {resendStatus === 'sending'
+                      ? t('common.sending', undefined, 'Sending…')
+                      : t('account.resend', undefined, 'Resend confirmation email')}
+                  </button>
                 )}
-              </p>
+              </>
             )}
             {confirmation.accountExisted && (
               <p className="bk-sub">
@@ -1409,6 +1459,63 @@ export default function BookPage() {
                     {t('fee.hint', undefined, 'Accept the fee above to continue.')}
                   </p>
                 )}
+              </>
+            )}
+
+            {step === 'account' && accountMode === 'pending-confirm' && (
+              <>
+                <div className="bk-notice" role="note">
+                  {t(
+                    'account.pending_confirm',
+                    { email: contact.email },
+                    'It looks like you already started creating an account — check {email} for the confirmation link, then come back and sign in.',
+                  )}
+                </div>
+                {resendStatus === 'sent' ? (
+                  <div className="alert alert-success" style={{ marginTop: 'var(--space-3)' }}>
+                    {t(
+                      'account.pending_confirm_sent',
+                      undefined,
+                      'If that address needs confirming, we’ve sent a fresh link. Check your inbox.',
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="bk-btn bk-btn-ghost"
+                    disabled={resendStatus === 'sending'}
+                    onClick={() => void resendAccountConfirmation()}
+                  >
+                    {resendStatus === 'sending'
+                      ? t('common.sending', undefined, 'Sending…')
+                      : t('account.resend', undefined, 'Resend confirmation email')}
+                  </button>
+                )}
+                <div className="bk-actions">
+                  <button
+                    className="bk-btn bk-btn-ghost"
+                    onClick={() => setStep(needsSlot ? 'slot' : 'intake')}
+                  >
+                    <ChevronLeftIcon size={18} />
+                    {t('common.back')}
+                  </button>
+                </div>
+                <p className="bk-secure" style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="bk-linklike"
+                    onClick={() => {
+                      accountTouchedRef.current = true
+                      setAccountMode('signin')
+                    }}
+                  >
+                    {t(
+                      'account.signin_toggle',
+                      undefined,
+                      'Already have a portal account? Sign in instead',
+                    )}
+                  </button>
+                </p>
               </>
             )}
 

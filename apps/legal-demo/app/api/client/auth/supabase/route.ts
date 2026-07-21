@@ -12,7 +12,11 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import '@exsto/legal/mcp'
-import { findClientContactMembershipsByEmail } from '@exsto/legal'
+import {
+  findClientContactMembershipsByEmail,
+  resolvePortalActorId,
+  confirmPortalEmail,
+} from '@exsto/legal'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
@@ -46,9 +50,11 @@ export async function POST(request: Request) {
     accessToken?: unknown
     continue?: unknown
     tenantId?: unknown
+    confirmed?: unknown
   } | null
   const accessToken = typeof body?.accessToken === 'string' ? body.accessToken : ''
   const requestedTenantId = typeof body?.tenantId === 'string' ? body.tenantId : null
+  const justConfirmed = body?.confirmed === true
   const dest = safeInternalPath(
     typeof body?.continue === 'string' ? body.continue : null,
     '/portal',
@@ -120,6 +126,22 @@ export async function POST(request: Request) {
       },
       { status: 403 },
     )
+  }
+
+  // N1 — record the confirmation as a provenanced action on the client's OWN
+  // actor. Only fires for the two confirmation-return callers (verifyOtp /
+  // exchangeCodeForSession on /portal/login just proved control of this
+  // email), never a plain password sign-in. Best-effort: the handler is
+  // idempotent (packages/handlers/clientPortalActor.ts reuses an existing
+  // event), and a failure here must never block the sign-in it's riding on.
+  if (justConfirmed) {
+    const actorId = await resolvePortalActorId(contact.tenantId, contact.clientContactId)
+    if (actorId) {
+      await confirmPortalEmail(
+        { tenantId: contact.tenantId, actorId },
+        { clientContactId: contact.clientContactId },
+      ).catch((e: unknown) => console.error('[client-auth-supabase] confirmPortalEmail failed', e))
+    }
   }
 
   return mintClientSessionResponse(contact.tenantId, contact.clientContactId, {

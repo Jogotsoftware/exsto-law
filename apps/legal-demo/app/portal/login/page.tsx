@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { safeInternalPath } from '@/lib/safeRedirect'
 import { CheckIcon, ScaleIcon } from '@/components/icons'
+import type { EmailOtpType } from '@supabase/supabase-js'
 import { getSupabaseBrowser, supabaseAuthConfigured } from '@/lib/supabaseBrowser'
 import { bridgeSupabaseSession, signInWithPasswordAndBridge } from '@/components/PortalSignInInline'
 import { callClientMcp } from '@/lib/mcpClient'
@@ -32,11 +33,31 @@ export default function ClientPortalLoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const [continueParam, setContinueParam] = useState('/portal')
   const [firmParam, setFirmParam] = useState<string | null>(null)
+  const [langParam, setLangParam] = useState<'en' | 'es'>('en')
   // A2.2/PT-3 follow-on — the confirmation ?code= exchange can fail because the
   // link expired or was already used. Rather than a dead end, offer to resend
   // (same anti-enumeration posture as forgot-password: always the same message).
   const [resendEmail, setResendEmail] = useState('')
   const [resendStatus, setResendStatus] = useState<'idle' | 'sending' | 'sent'>('idle')
+
+  // N1 — shared resend call (error phase AND check-email phase use this): a
+  // server route that mints a fresh token + sends our own branded email,
+  // never Supabase's default one. Anti-enumeration: always resolves the same
+  // way regardless of what the address actually is.
+  async function resendConfirmation(toEmail: string) {
+    setResendStatus('sending')
+    try {
+      await fetch('/api/client/auth/resend-confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: toEmail.trim(), lang: langParam }),
+      })
+    } catch {
+      // Swallow — the confirmation message is deliberately the same either way.
+    } finally {
+      setResendStatus('sent')
+    }
+  }
 
   // Forward whatever selected the current tenant (the funnel's ?firm= slug,
   // MULTI-TENANT-1) into a link the client is about to follow, so the forgot/
@@ -50,8 +71,12 @@ export default function ClientPortalLoginPage() {
 
   // Exchange a verified Supabase access token for our portal session cookie
   // (shared bridge), then navigate — this page's job, not the shared leg's.
-  async function bridge(accessToken: string, cont: string) {
-    const { path } = await bridgeSupabaseSession(accessToken, cont)
+  // `confirmed` is only true for the two confirmation-return paths below (the
+  // moment this browser proved control of the email); it tells the bridge
+  // route to record the provenanced portal.email_confirmed event — a plain
+  // password sign-in never re-fires it.
+  async function bridge(accessToken: string, cont: string, confirmed = false) {
+    const { path } = await bridgeSupabaseSession(accessToken, cont, confirmed)
     router.replace(safeInternalPath(path, '/portal'))
   }
 
@@ -63,16 +88,45 @@ export default function ClientPortalLoginPage() {
     setContinueParam(cont)
     const firm = params.get('firm')
     if (firm) setFirmParam(firm)
+    if (params.get('lang') === 'es') setLangParam('es')
 
     const code = params.get('code')
+    const tokenHash = params.get('token_hash')
+    const otpType = params.get('type')
     const sb = getSupabaseBrowser()
+
+    // token_hash confirmation: the account that sent this link was created
+    // server-side (intake finalize), so no PKCE code_verifier exists on any
+    // browser — exchangeCodeForSession would always fail for it. verifyOtp
+    // needs only the token_hash from the link itself, so it works regardless
+    // of which device/browser confirms. Requires the Supabase "Confirm
+    // signup" email template to link here with token_hash + type (see
+    // Auth > Email Templates in the Supabase dashboard).
+    if (tokenHash && otpType && sb) {
+      setPhase('working')
+      sb.auth
+        .verifyOtp({ token_hash: tokenHash, type: otpType as EmailOtpType })
+        .then(({ data, error: vErr }) => {
+          if (vErr || !data.session) throw new Error(vErr?.message ?? 'Sign-in failed.')
+          return bridge(data.session.access_token, cont, true)
+        })
+        .catch((e) => {
+          setError(e instanceof Error ? e.message : String(e))
+          setPhase('error')
+        })
+      return
+    }
+
+    // ?code= confirmation return: only reliable when the same browser that
+    // called signUp (the in-page "Create an account" form below) is the one
+    // confirming, since PKCE's code_verifier lives in that browser's storage.
     if (code && sb) {
       setPhase('working')
       sb.auth
         .exchangeCodeForSession(code)
         .then(({ data, error: exErr }) => {
           if (exErr || !data.session) throw new Error(exErr?.message ?? 'Sign-in failed.')
-          return bridge(data.session.access_token, cont)
+          return bridge(data.session.access_token, cont, true)
         })
         .catch((e) => {
           setError(e instanceof Error ? e.message : String(e))
@@ -96,19 +150,19 @@ export default function ClientPortalLoginPage() {
       if (isSignUp) {
         const pwErr = validatePassword(password)
         if (pwErr) throw new Error(pwErr)
-        const { error: upErr } = await sb.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { emailRedirectTo: `${window.location.origin}/portal/login` },
+        // N1 — server-side: admin.generateLink mints the unconfirmed account +
+        // token and we send our own branded email, never Supabase's default
+        // one (was: client-side sb.auth.signUp(), which always triggered
+        // GoTrue's own "Confirm signup" email). No session is ever minted
+        // here — the ?token_hash= confirmation return (handled on mount) is
+        // the only path that bridges a newly-created account.
+        const res = await fetch('/api/client/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), password, lang: langParam }),
         })
-        if (upErr) throw upErr
-        // ALWAYS require the email-confirmation click — never bridge a fresh
-        // sign-up session. If the Supabase project has "Confirm email" turned off
-        // it auto-issues a confirmed session here, which would let anyone sign up
-        // AS another client's email and take over their portal. Drop any such
-        // session; the ?code= confirmation return (handled on mount) is the only
-        // path that bridges a newly-created account.
-        await sb.auth.signOut().catch(() => {})
+        const data = (await res.json().catch(() => null)) as { error?: string } | null
+        if (!res.ok) throw new Error(data?.error ?? 'Could not create your account.')
         setSubmitting(false)
         setPhase('check-email')
       } else {
@@ -163,22 +217,9 @@ export default function ClientPortalLoginPage() {
         ) : (
           <form
             className="li-cp-auth-form"
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault()
-              const sb = getSupabaseBrowser()
-              setResendStatus('sending')
-              try {
-                await sb?.auth.resend({
-                  type: 'signup',
-                  email: resendEmail.trim(),
-                  options: { emailRedirectTo: `${window.location.origin}/portal/login` },
-                })
-              } catch {
-                // Swallow — the confirmation message below is deliberately the
-                // same whether or not the address is a real account.
-              } finally {
-                setResendStatus('sent')
-              }
+              void resendConfirmation(resendEmail)
             }}
           >
             <label className="li-cp-label" htmlFor="resend-email">
@@ -216,12 +257,29 @@ export default function ClientPortalLoginPage() {
           We sent a confirmation link to <strong>{email}</strong>. Click it to activate your
           account, then come back and sign in.
         </p>
+        {resendStatus === 'sent' ? (
+          <div className="alert alert-success" style={{ marginTop: 'var(--space-3)' }}>
+            We&rsquo;ve sent a fresh link to <strong>{email}</strong>. Check your inbox.
+          </div>
+        ) : (
+          <p style={{ marginTop: 'var(--space-3)' }}>
+            <button
+              type="button"
+              className="li-cp-linkbtn"
+              disabled={resendStatus === 'sending'}
+              onClick={() => void resendConfirmation(email)}
+            >
+              {resendStatus === 'sending' ? 'Sending…' : "Didn't get it? Resend the email"}
+            </button>
+          </p>
+        )}
         <p style={{ marginTop: 'var(--space-3)' }}>
           <button
             className="li-cp-linkbtn"
             onClick={() => {
               setPhase('form')
               setIsSignUp(false)
+              setResendStatus('idle')
             }}
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>

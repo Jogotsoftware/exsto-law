@@ -171,6 +171,55 @@ registerActionHandler(
   },
 )
 
+// N1 — portal.email_confirmed: the client proved control of their portal
+// email. Idempotent the same way provision_portal_actor is: look for an
+// existing event on this contact first (queried directly rather than via a
+// dedicated attribute, since there is nothing else this event needs to key
+// off of) and reuse it rather than writing a duplicate.
+interface ConfirmEmailPayload {
+  client_contact_id: string
+}
+
+registerActionHandler(
+  'legal.client.confirm_portal_email',
+  async (ctx, client, payload, actionId) => {
+    const p = payload as unknown as ConfirmEmailPayload
+    if (!p.client_contact_id) throw new Error('client_contact_id is required.')
+
+    const existing = await client.query<{ id: string }>(
+      `SELECT ev.id FROM event ev
+       JOIN event_kind_definition ekd ON ekd.id = ev.event_kind_id
+       WHERE ev.tenant_id = $1 AND ekd.kind_name = 'portal.email_confirmed'
+         AND ev.primary_entity_id = $2
+       ORDER BY ev.occurred_at DESC LIMIT 1`,
+      [ctx.tenantId, p.client_contact_id],
+    )
+    const existingId = existing.rows[0]?.id
+    if (existingId) {
+      return { eventId: existingId, clientContactId: p.client_contact_id }
+    }
+
+    const actorId = await getLatestAttributeValue<string>(
+      client,
+      ctx.tenantId,
+      p.client_contact_id,
+      'portal_actor_id',
+    )
+
+    const eventId = await insertEvent(client, {
+      tenantId: ctx.tenantId,
+      actionId,
+      eventKindName: 'portal.email_confirmed',
+      primaryEntityId: p.client_contact_id,
+      data: { client_contact_id: p.client_contact_id, actor_id: actorId },
+      sourceType: 'human',
+      sourceRef: `client_contact:${p.client_contact_id}`,
+    })
+
+    return { eventId, clientContactId: p.client_contact_id }
+  },
+)
+
 // ── Fee consent ───────────────────────────────────────────────────────────────
 
 export type FeeBasis = 'fixed' | 'hourly-rate' | 'review-fee' | 'consultation'

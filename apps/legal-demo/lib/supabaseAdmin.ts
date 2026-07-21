@@ -10,6 +10,7 @@
 // Two modules are allowed to read the service-role key — lib/documentStorage.ts
 // (Storage) and this one (Auth) — and the invariant guard test enforces that each
 // uses the privileged client only for its own narrow surface.
+import { randomUUID } from 'node:crypto'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL
@@ -85,6 +86,81 @@ export async function upsertConfirmedPasswordAccount(
     return
   }
   throw error
+}
+
+// N1 — mint an unconfirmed signup account + confirmation token WITHOUT
+// Supabase sending its own email. generateLink({type:'signup'}) both creates
+// the user (or, for an existing pending signup, regenerates its token) and
+// returns hashed_token in one call, and — unlike auth.signUp() — never
+// triggers GoTrue's own "Confirm signup" email. The caller sends its own
+// branded email using the returned tokenHash
+// (?token_hash=...&type=signup, verified client-side via verifyOtp).
+//
+// An email already registered and CONFIRMED throws "already registered" —
+// caught and reported as 'exists' so the caller can fall back to "sign in
+// with your existing password" instead of minting a link for it.
+export interface SignupConfirmation {
+  status: 'created' | 'exists'
+  tokenHash?: string
+}
+
+export async function mintSignupConfirmation(
+  email: string,
+  password: string,
+): Promise<SignupConfirmation> {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: 'signup',
+    email,
+    password,
+  })
+  if (error) {
+    if (looksAlreadyRegistered(error.message)) return { status: 'exists' }
+    throw error
+  }
+  return { status: 'created', tokenHash: data.properties.hashed_token }
+}
+
+// N1 — resend: mint a fresh token for an EXISTING, UNCONFIRMED account only.
+// Never creates an account (a resend click for an email with no account, or
+// one already confirmed, is a silent no-op — same anti-enumeration posture as
+// the rest of the auth surface: the caller always shows the same "if that
+// address needs confirming…" message either way). The throwaway password
+// passed to generateLink is never applied — GoTrue only sets the password at
+// creation time; a signup-type link for an existing user is a pure resend
+// (the same assumption the intake finalize path relies on: "the password is
+// NOT touched" for an existing account).
+export async function mintResendConfirmation(email: string): Promise<string | null> {
+  const admin = getSupabaseAdmin()
+  const id = await findUserIdByEmail(admin, email)
+  if (!id) return null
+  const { data: userData, error: userErr } = await admin.auth.admin.getUserById(id)
+  if (userErr) throw userErr
+  if (userData.user?.email_confirmed_at) return null // already confirmed — nothing to resend
+
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: 'signup',
+    email,
+    password: randomUUID(),
+  })
+  if (error) {
+    if (looksAlreadyRegistered(error.message)) return null
+    throw error
+  }
+  return data.properties.hashed_token
+}
+
+// N1 — is this email's account already confirmed? Drives the /book account
+// step's three-way state (create / sign-in / check-your-email) and the
+// resend-confirmation route (refuses to resend for an already-confirmed
+// account — that account signs in, it doesn't need another link).
+export async function isEmailConfirmed(email: string): Promise<boolean | null> {
+  const admin = getSupabaseAdmin()
+  const id = await findUserIdByEmail(admin, email)
+  if (!id) return null
+  const { data, error } = await admin.auth.admin.getUserById(id)
+  if (error) throw error
+  return Boolean(data.user?.email_confirmed_at)
 }
 
 // PT-3 — the forgot/reset-password flow's write. The caller has ALREADY proven

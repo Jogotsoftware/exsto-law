@@ -37,6 +37,27 @@ export async function provisionClientPortalActor(
   return res.effects[0] as ProvisionedPortalActor
 }
 
+// N1 — record that the client proved control of their portal email (followed
+// the confirmation link / completed OTP verification). Idempotent at the
+// handler level: a re-confirm (double resend, reloaded confirm page) returns
+// the existing portal.email_confirmed event rather than duplicating it.
+export interface PortalEmailConfirmation {
+  eventId: string
+  clientContactId: string
+}
+
+export async function confirmPortalEmail(
+  ctx: ActionContext,
+  input: { clientContactId: string },
+): Promise<PortalEmailConfirmation> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.client.confirm_portal_email',
+    intentKind: 'enforcement',
+    payload: { client_contact_id: input.clientContactId },
+  })
+  return res.effects[0] as PortalEmailConfirmation
+}
+
 // Session-mint read: the client's portal actor id, or null if the account was
 // never provisioned. Runs under withSuperuser for the same reason the sibling
 // clientIdentity reads do — it is called from the auth bridge before a request

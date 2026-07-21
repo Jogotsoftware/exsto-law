@@ -16,13 +16,18 @@ import { PasswordField } from '@/components/PasswordField'
 export async function bridgeSupabaseSession(
   accessToken: string,
   continuePath: string,
+  // N1 — true only for the two confirmation-return callers on /portal/login
+  // (verifyOtp / exchangeCodeForSession, right after the user proved control
+  // of their email). Tells the bridge route to record the provenanced
+  // portal.email_confirmed event; a plain password sign-in leaves it false.
+  confirmed = false,
 ): Promise<{ path: string }> {
   const sb = getSupabaseBrowser()
   const res = await fetch('/api/client/auth/supabase', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({ accessToken, continue: continuePath }),
+    body: JSON.stringify({ accessToken, continue: continuePath, confirmed }),
   })
   const data = (await res.json().catch(() => null)) as { error?: string; path?: string } | null
   await sb?.auth.signOut().catch(() => {})
