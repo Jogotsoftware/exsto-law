@@ -27,6 +27,8 @@ import {
   buildMatterEvidence,
   buildBriefSynthesisPrompt,
   BRIEF_JURISDICTION_RULE,
+  FORMATTING_DIRECTIVES,
+  buildRevisionPrompt,
   renderEvidenceBundle,
   type BriefScope,
   type EvidenceBundle,
@@ -72,6 +74,50 @@ describe('buildSystemFactsBlock', () => {
       firmName: '   ',
     })
     expect(blank).not.toContain('Firm name:')
+  })
+
+  // EDITOR-FIX-1 (item 5): the shared formatting/drafting standards ride the
+  // system-facts block, so every path that assembles a draft through the
+  // system-facts seam carries them.
+  it('carries the shared formatting/drafting standards', () => {
+    const block = buildSystemFactsBlock({ jurisdiction: NC, todayIso: '2026-07-20T00:00:00Z' })
+    expect(block).toContain(FORMATTING_DIRECTIVES)
+  })
+})
+
+// ── FORMATTING_DIRECTIVES (item 5) ───────────────────────────────────────────
+describe('FORMATTING_DIRECTIVES — the one formatting block in every generation', () => {
+  it('states the founder-priority standards (snapshot)', () => {
+    // Title Case / correct capitalization, bolding, robust register, and the
+    // hard ban on underscore/dash signature+date lines (canonical markers only).
+    expect(FORMATTING_DIRECTIVES).toContain('Title Case')
+    expect(FORMATTING_DIRECTIVES).toContain('bold')
+    expect(FORMATTING_DIRECTIVES).toContain('NEVER draw signature, date, or execution lines')
+    expect(FORMATTING_DIRECTIVES).toContain('{{sign:key}}')
+    expect(FORMATTING_DIRECTIVES).toContain('{{date:key}}')
+    expect(FORMATTING_DIRECTIVES).toMatchSnapshot()
+  })
+
+  it('lands in the AI draft path (via the system-facts seam)', () => {
+    const prompt = assembleDraftingPrompt({
+      basePrompt: basePrompt(),
+      template: 'TEMPLATE BODY',
+      questionnaireResponses: { company_name: 'Acme LLC' },
+      transcriptText: 'Members agreed on terms.',
+      documentKind: 'operating_agreement',
+      systemFactsText: buildSystemFactsBlock({ jurisdiction: NC, todayIso: '2026-07-20T00:00:00Z' }),
+    })
+    expect(prompt).toContain(FORMATTING_DIRECTIVES)
+  })
+
+  it('lands in the Edit-with-AI revision path', () => {
+    const prompt = buildRevisionPrompt({
+      currentMarkdown: 'The Agreement.',
+      documentKind: 'operating_agreement',
+      instruction: 'Make the tone firmer.',
+      jurisdictionDisplayName: 'North Carolina',
+    })
+    expect(prompt).toContain(FORMATTING_DIRECTIVES)
   })
 })
 
