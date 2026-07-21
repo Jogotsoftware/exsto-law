@@ -99,4 +99,47 @@ run('Clients CRM read API (live DB)', { timeout: 120_000 }, () => {
     expect(detail?.matters.map((m) => m.matterEntityId).sort()).toEqual([m1, m2].sort())
     expect(detail?.matters.every((m) => m.serviceKey === 'nc_llc_single_member')).toBe(true)
   })
+
+  it('listClients and getClient agree on matter count after a matter is archived', async () => {
+    const t = `${tag}-arch`
+    const m1 = await bookMatter(`${t} Cy`, `${t}-cy@read.test`, 4)
+    const m2 = await bookMatter(`${t} Di`, `${t}-di@read.test`, 6)
+    const c1 = await contactFor(m1)
+    const c2 = await contactFor(m2)
+
+    const created = await submitAction(attorneyCtx, {
+      actionKindName: 'legal.client.create',
+      intentKind: 'enforcement',
+      payload: {
+        client_name: `${t} ArchCo`,
+        billable_rate: '300.00',
+        billing_type: 'hourly',
+        main_contact_id: c1,
+        contact_ids: [c1, c2],
+        matter_ids: [m1, m2],
+      },
+    })
+    const clientId = (created.effects[0] as { clientEntityId: string }).clientEntityId
+
+    // Both matters active: list and detail agree at 2.
+    const before = (await listClients(attorneyCtx)).find((c) => c.clientEntityId === clientId)
+    expect(before?.matterCount).toBe(2)
+    expect((await getClient(attorneyCtx, clientId))?.matterCount).toBe(2)
+
+    // Archive one matter through the core action (status → 'archived'; the
+    // matter_of relationship stays open). listClients used to count the open
+    // relationship without checking the matter entity's status, so it kept
+    // reporting 2 while getClient (active-only) reported 1. Assert parity.
+    await submitAction(attorneyCtx, {
+      actionKindName: 'entity.archive',
+      intentKind: 'enforcement',
+      payload: { entity_id: m2 },
+    })
+
+    const listAfter = (await listClients(attorneyCtx)).find((c) => c.clientEntityId === clientId)
+    const detailAfter = await getClient(attorneyCtx, clientId)
+    expect(listAfter?.matterCount).toBe(1)
+    expect(detailAfter?.matterCount).toBe(1)
+    expect(detailAfter?.matters.map((m) => m.matterEntityId)).toEqual([m1])
+  })
 })

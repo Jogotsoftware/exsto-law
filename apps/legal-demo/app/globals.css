@@ -9747,6 +9747,10 @@ input[type='number'] {
   background: var(--li-ok-bg);
   color: var(--li-ok);
 }
+.li-top-search-tag.tag-document {
+  background: var(--li-purple-bg);
+  color: var(--li-purple);
+}
 .li-top-search-primary {
   font-size: 13.5px;
   font-weight: 600;
