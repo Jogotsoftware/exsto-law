@@ -17,6 +17,12 @@ export interface SigningTokenPayload {
   tenantId: string
   /** Epoch ms expiry. */
   exp: number
+  /** ESIGN-UNIFY-1 (ES-1, §9.2): 'view' tokens are minted for `needs_to_view`
+   *  recipients — the signer surface renders read-only (no adopt/sign controls)
+   *  and the public sign/decline endpoints refuse them. Absent on every token
+   *  minted before this field existed; callers MUST treat a missing scope as
+   *  'sign' (the original, only, behavior) — never assume 'view'. */
+  scope?: 'sign' | 'view'
 }
 
 function secret(): string {

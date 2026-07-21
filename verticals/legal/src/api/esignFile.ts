@@ -15,17 +15,21 @@
 //
 // This module never touches Storage (CI vertical-storage-guard): it reads/writes
 // the SUBSTRATE side only; the Next routes own bytes via lib/documentStorage.
-import { randomUUID } from 'node:crypto'
-import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
+import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { assertCanSendOnMatter } from './matterAccess.js'
 import { notifyDelivered, signingCtx } from './esign.js'
+import { buildAndSubmitEnvelope, type RecipientRole } from './esignSend.js'
 import { verifySigningToken } from '../esign/index.js'
+import type { FieldPlacement } from '../esign/placements.js'
 
 export interface FileSigner {
   email: string
   name?: string
   title?: string
   order?: number
+  /** ESIGN-UNIFY-1 (ES-1, §9.2): needs_to_sign (default) | needs_to_view |
+   *  receives_copy. Pre-ES-1 callers omit it — unchanged behavior. */
+  role?: RecipientRole
 }
 
 export interface SendFileForSignatureInput {
@@ -33,6 +37,11 @@ export interface SendFileForSignatureInput {
   documentVersionId: string
   signers: FileSigner[]
   subject?: string
+  /** ESIGN-UNIFY-1 (ES-1, §5.1): the composer's coordinate placement plan for
+   *  this PDF (all source:'placed' — an uploaded file has no markers). */
+  placements?: FieldPlacement[]
+  /** §9.4: the sender's personal note, shown in the branded signing email. */
+  message?: string
 }
 
 export interface SendFileForSignatureResult {
@@ -109,38 +118,30 @@ export async function sendFileForSignature(
       title: s.title?.trim() || null,
       order: s.order ?? i + 1,
       channel: 'link' as const,
+      role: s.role ?? null,
     }))
   if (signers.length === 0) throw new Error('Add at least one signer with an email address.')
 
   const subject =
     input.subject?.trim() || `Signature requested: ${doc.filename ?? 'uploaded document'}`
 
-  const result = await submitAction(ctx, {
-    actionKindName: 'esign.send',
-    intentKind: 'enforcement',
-    payload: {
-      document_entity_id: doc.document_entity_id,
-      document_version_id: input.documentVersionId,
-      matter_entity_id: doc.matter_entity_id,
-      provider: 'native',
-      provider_envelope_ref: null,
-      dispatched: true,
-      correlation_id: randomUUID(),
-      subject,
-      signers,
-      fields: [],
-      save_signers_as_contacts: true,
-    },
+  // ESIGN-UNIFY-1 (ES-1, §5.5) — converge on the ONE builder the draft path
+  // uses; roles/placements/message ride the same esign.send payload.
+  const built = await buildAndSubmitEnvelope(ctx, {
+    documentEntityId: doc.document_entity_id,
+    documentVersionId: input.documentVersionId,
+    matterEntityId: doc.matter_entity_id,
+    provider: 'native',
+    dispatched: true,
+    subject,
+    recipients: signers,
+    fields: [],
+    placements: input.placements,
+    message: input.message ?? null,
   })
-  const eff = (result.effects[0] ?? {}) as {
-    envelopeId?: string
-    requestIds?: string[]
-    deliveredRequestIds?: string[]
-    createdContacts?: Array<{ email: string; contactEntityId: string }>
-  }
-  const envelopeId = eff.envelopeId ?? ''
-  const requestIds = eff.requestIds ?? []
-  const deliveredIds = eff.deliveredRequestIds ?? []
+  const envelopeId = built.envelopeId
+  const requestIds = built.requestIds
+  const deliveredIds = built.deliveredRequestIds
 
   const targets = envelopeId ? await notifyDelivered(ctx, envelopeId, deliveredIds) : []
   const urlByRequest = new Map(targets.map((t) => [t.requestId, t.url]))
@@ -159,7 +160,7 @@ export async function sendFileForSignature(
         url: urlByRequest.get(requestId),
       }
     }),
-    savedContacts: eff.createdContacts ?? [],
+    savedContacts: built.createdContacts,
   }
 }
 

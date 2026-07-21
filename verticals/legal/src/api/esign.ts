@@ -35,6 +35,8 @@ import {
   type EsignField,
   type EsignFieldType,
 } from '../esign/fields.js'
+import type { FieldPlacement } from '../esign/placements.js'
+import { buildAndSubmitEnvelope, type RecipientRole } from './esignSend.js'
 
 const SIGNING_ACTOR = process.env.LEGAL_CLIENT_ACTOR_ID ?? '00000000-0000-0000-0001-000000000005'
 
@@ -67,6 +69,9 @@ export interface PrepareSigner {
   order?: number
   /** Field key the document tags reference ({{type:key}}). Defaults for 1 signer. */
   key?: string
+  /** ESIGN-UNIFY-1 (ES-1, §9.2): needs_to_sign (default) | needs_to_view |
+   *  receives_copy. Callers written before ES-1 omit it — unchanged behavior. */
+  role?: RecipientRole
 }
 
 export interface SendForSignatureInput {
@@ -78,6 +83,12 @@ export interface SendForSignatureInput {
   subject?: string
   /** Override provider; defaults to 'native'. */
   provider?: string
+  /** ESIGN-UNIFY-1 (ES-1, §5.1/§5.5): resolved coordinate placements from the
+   *  composer. Stored on the envelope (envelope_placements); the body is never
+   *  mutated at send time by the placement path. */
+  placements?: FieldPlacement[]
+  /** §9.4: the sender's personal note, shown in the branded signing email. */
+  message?: string
 }
 
 export interface SendForSignatureResult {
@@ -143,15 +154,20 @@ export async function sendForSignature(
     body = input.preparedMarkdown
   }
 
-  // Parse fields and bind signer keys.
+  // Parse fields and bind signer keys. ESIGN-UNIFY-1: only SIGNING recipients
+  // need keys — a needs_to_view / receives_copy recipient fills no fields, so
+  // demanding a marker key for them would block legitimate envelopes.
+  const isSigning = (s: PrepareSigner): boolean => !s.role || s.role === 'needs_to_sign'
   const fields = parseFields(body)
   const distinctKeys = [...new Set(fields.map((f) => f.signerKey))]
+  const signingCount = signers.filter(isSigning).length
   signers = signers.map((s, i) => ({
     ...s,
-    key: s.key ?? (signers.length === 1 ? (distinctKeys[0] ?? 'client') : s.key),
+    key:
+      s.key ?? (isSigning(s) && signingCount === 1 ? (distinctKeys[0] ?? 'client') : s.key),
     order: s.order ?? i + 1,
   }))
-  if (fields.length && signers.some((s) => !s.key)) {
+  if (fields.length && signers.some((s) => isSigning(s) && !s.key)) {
     throw new Error('Each signer needs a key matching the document field tags ({{type:key}}).')
   }
   for (const k of distinctKeys) {
@@ -207,39 +223,34 @@ export async function sendForSignature(
     }
   }
 
-  const result = await submitAction(ctx, {
-    actionKindName: 'esign.send',
-    intentKind: 'enforcement',
-    payload: {
-      document_entity_id: draft.documentEntityId,
-      document_version_id: documentVersionId,
-      matter_entity_id: draft.matterEntityId ?? null,
-      provider,
-      provider_envelope_ref: providerEnvelopeRef,
-      dispatched,
-      correlation_id: randomUUID(),
-      subject,
-      signers: withChannel.map((s) => ({
-        email: s.email,
-        name: s.name ?? null,
-        key: s.key ?? null,
-        title: s.title ?? null,
-        order: s.order ?? null,
-        channel: s.channel,
-      })),
-      fields,
-      save_signers_as_contacts: true,
-    },
+  // ESIGN-UNIFY-1 (ES-1, §5.5) — the ONE internal builder both send surfaces
+  // converge on. Roles/placements/message ride the same esign.send this path
+  // always used; callers written before ES-1 pass none of them and behave
+  // exactly as before.
+  const built = await buildAndSubmitEnvelope(ctx, {
+    documentEntityId: draft.documentEntityId,
+    documentVersionId,
+    matterEntityId: draft.matterEntityId ?? null,
+    provider,
+    providerEnvelopeRef,
+    dispatched,
+    subject,
+    recipients: withChannel.map((s, i) => ({
+      email: s.email,
+      name: s.name ?? null,
+      key: s.key ?? null,
+      title: s.title ?? null,
+      order: s.order ?? i + 1,
+      channel: s.channel,
+      role: s.role ?? null,
+    })),
+    fields,
+    placements: input.placements,
+    message: input.message ?? null,
   })
-  const eff = (result.effects[0] ?? {}) as {
-    envelopeId?: string
-    requestIds?: string[]
-    deliveredRequestIds?: string[]
-    createdContacts?: Array<{ email: string; contactEntityId: string }>
-  }
-  const envelopeId = eff.envelopeId ?? ''
-  const requestIds = eff.requestIds ?? []
-  const deliveredIds = eff.deliveredRequestIds ?? []
+  const envelopeId = built.envelopeId
+  const requestIds = built.requestIds
+  const deliveredIds = built.deliveredRequestIds
 
   const targets =
     provider === 'native' && envelopeId ? await notifyDelivered(ctx, envelopeId, deliveredIds) : []
@@ -264,50 +275,143 @@ export async function sendForSignature(
     }),
     dispatched,
     activation,
-    savedContacts: eff.createdContacts ?? [],
+    savedContacts: built.createdContacts,
   }
 }
 
-// Notify the freshly-delivered signers: portal signers get a "sign in" nudge,
-// link signers get an emailed secure /sign/<token> link. Returns the per-request
-// destination URLs so the caller (attorney) can also surface them.
-// Exported for the file-envelope send path (esignFile.ts).
+// Shared envelope-level notification variables: subject/title, the sender's
+// personal message (0186 envelope_message, §9.4), and the tenant-aware firm
+// identity the branded builders key off of — NEVER the hardcoded FIRM constant
+// (design §9.4: "these builders take firm identity from the notification
+// variables ... NOT from FIRM"). Fetched once per notifyDelivered/
+// notifyCopyDelivered call, not per recipient.
+async function loadEnvelopeMailContext(
+  ctx: ActionContext,
+  envelopeId: string,
+): Promise<{ title: string; envelopeSubject: string | null; message: string | null; attorneyName: string | null; firmName: string | null }> {
+  const [subject, message] = await withActionContext(ctx, (c) =>
+    Promise.all([
+      latestAttr(c, ctx.tenantId, envelopeId, 'envelope_subject'),
+      latestAttr(c, ctx.tenantId, envelopeId, 'envelope_message'),
+    ]),
+  )
+  let attorneyName: string | null = null
+  let firmName: string | null = null
+  try {
+    const settings = await getTenantSettings(ctx)
+    attorneyName = settings.attorneyName
+    firmName = settings.firmName
+  } catch {
+    // Degrade to generic copy in the email builder — never guess an identity.
+  }
+  return {
+    title: subject ?? 'your document',
+    envelopeSubject: subject,
+    message,
+    attorneyName,
+    firmName,
+  }
+}
+
+// Notify the freshly-delivered recipients: portal signers get a "sign in"
+// nudge, link recipients get an emailed secure /sign/<token> link. Returns the
+// per-request destination URLs so the caller (attorney) can also surface them.
+// Exported for the file-envelope send path (esignFile.ts) and esignSend.ts.
+//
+// ESIGN-UNIFY-1 (ES-1, §9.2) — role-aware: a needs_to_view recipient's link
+// token carries scope:'view' (the signer surface renders read-only, and
+// assertSignerTurn/the token-scope guard both refuse a sign attempt on it);
+// needs_to_sign (or a legacy request with no role attribute) is unchanged.
+// receives_copy recipients are never delivered here (see notifyCopyDelivered).
 export async function notifyDelivered(
   ctx: ActionContext,
   envelopeId: string,
   requestIds: string[],
 ): Promise<Array<{ requestId: string; channel: 'portal' | 'link'; url: string }>> {
   if (requestIds.length === 0) return []
-  const title =
-    (await withActionContext(ctx, (c) =>
-      latestAttr(c, ctx.tenantId, envelopeId, 'envelope_subject'),
-    )) ?? 'your document'
+  const mail = await loadEnvelopeMailContext(ctx, envelopeId)
   const out: Array<{ requestId: string; channel: 'portal' | 'link'; url: string }> = []
   for (const requestId of requestIds) {
     const info = await withActionContext(ctx, async (c) => ({
       email: await latestAttr(c, ctx.tenantId, requestId, 'signer_email'),
       name: await latestAttr(c, ctx.tenantId, requestId, 'signer_name'),
       channel: await latestAttr(c, ctx.tenantId, requestId, 'signer_channel'),
+      role: await latestAttr(c, ctx.tenantId, requestId, 'signer_role'),
     }))
     if (!info.email) continue
+    const viewOnly = info.role === 'needs_to_view'
+    const variables = {
+      signer_name: info.name ?? info.email,
+      document_title: mail.title,
+      envelope_subject: mail.envelopeSubject ?? mail.title,
+      envelope_message: mail.message,
+      attorney_name: mail.attorneyName,
+      firm_name: mail.firmName,
+      recipient_role: viewOnly ? 'needs_to_view' : 'needs_to_sign',
+    }
     if (info.channel === 'portal') {
       const url = `${baseUrl()}/portal/sign/${requestId}`
       await queueNotification(ctx, {
         routeKindName: 'esign_sign_request_portal',
         to: info.email,
-        variables: { signer_name: info.name ?? info.email, portal_url: url, document_title: title },
+        variables: { ...variables, portal_url: url },
       })
       out.push({ requestId, channel: 'portal', url })
     } else {
-      const token = signSigningToken({ requestId, envelopeId, tenantId: ctx.tenantId })
+      const token = signSigningToken({
+        requestId,
+        envelopeId,
+        tenantId: ctx.tenantId,
+        scope: viewOnly ? 'view' : 'sign',
+      })
       const url = `${baseUrl()}/sign/${encodeURIComponent(token)}`
       await queueNotification(ctx, {
         routeKindName: 'esign_sign_request',
         to: info.email,
-        variables: { signer_name: info.name ?? info.email, sign_url: url, document_title: title },
+        variables: { ...variables, sign_url: url },
       })
       out.push({ requestId, channel: 'link', url })
     }
+  }
+  return out
+}
+
+// ESIGN-UNIFY-1 (ES-1, §9.2/§9.4) — notify receives_copy recipients once the
+// envelope completes. Always a link-channel view-scoped token (a copy
+// recipient need not be a portal client): the token lets them open the
+// executed document read-only. Called from signRequest below, driven by the
+// esign.sign handler's `copyDeliveredRequestIds` (the esign.copy_delivered
+// event itself is already recorded inside that same action).
+export async function notifyCopyDelivered(
+  ctx: ActionContext,
+  envelopeId: string,
+  requestIds: string[],
+): Promise<Array<{ requestId: string; url: string }>> {
+  if (requestIds.length === 0) return []
+  const mail = await loadEnvelopeMailContext(ctx, envelopeId)
+  const out: Array<{ requestId: string; url: string }> = []
+  for (const requestId of requestIds) {
+    const info = await withActionContext(ctx, async (c) => ({
+      email: await latestAttr(c, ctx.tenantId, requestId, 'signer_email'),
+      name: await latestAttr(c, ctx.tenantId, requestId, 'signer_name'),
+    }))
+    if (!info.email) continue
+    const token = signSigningToken({ requestId, envelopeId, tenantId: ctx.tenantId, scope: 'view' })
+    const url = `${baseUrl()}/sign/${encodeURIComponent(token)}`
+    await queueNotification(ctx, {
+      routeKindName: 'esign_copy_delivered',
+      to: info.email,
+      variables: {
+        signer_name: info.name ?? info.email,
+        document_title: mail.title,
+        envelope_subject: mail.envelopeSubject ?? mail.title,
+        envelope_message: mail.message,
+        attorney_name: mail.attorneyName,
+        firm_name: mail.firmName,
+        copy_url: url,
+      },
+    })
+    out.push({ requestId, url })
   }
   return out
 }
@@ -795,6 +899,13 @@ export interface SignableDocument {
   // signing doors (token link + authed portal), since both call buildSignable.
   // Null when the firm hasn't set one.
   firmName: string | null
+  // ESIGN-UNIFY-1 (ES-1, §9.2) — true for a needs_to_view recipient: the
+  // surface should render read-only (no adopt/sign controls, no consent
+  // capture). `canSign` is already forced false below for this case, so a
+  // caller that only checks `canSign` degrades safely; `viewOnly` lets a
+  // future renderer (ES-2) show "shared to review" copy instead of a blank
+  // "not your turn" state.
+  viewOnly: boolean
 }
 
 async function buildSignable(ctx: ActionContext, requestId: string): Promise<SignableDocument> {
@@ -805,6 +916,8 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
     const signerStatus =
       (await latestAttr(client, ctx.tenantId, requestId, 'signer_status')) ?? 'pending'
     const signerTitle = await latestAttr(client, ctx.tenantId, requestId, 'signer_title')
+    const signerRole = await latestAttr(client, ctx.tenantId, requestId, 'signer_role')
+    const viewOnly = signerRole === 'needs_to_view'
     const envelopeStatus = await latestAttr(client, ctx.tenantId, envelopeId, 'envelope_status')
     const docRes = await client.query<{
       body: string
@@ -856,7 +969,9 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       envelopeStatus,
       fields: myFields,
       canSign:
-        (signerStatus === 'delivered' || signerStatus === 'opened') && envelopeStatus !== 'voided',
+        !viewOnly &&
+        (signerStatus === 'delivered' || signerStatus === 'opened') &&
+        envelopeStatus !== 'voided',
       alreadyResolved:
         signerStatus === 'signed' ||
         signerStatus === 'declined' ||
@@ -864,6 +979,7 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
         envelopeStatus === 'completed' ||
         envelopeStatus === 'declined' ||
         envelopeStatus === 'voided',
+      viewOnly,
     }
   })
 
@@ -904,8 +1020,20 @@ export interface RecordSignatureResult {
   executedDocumentVersionId?: string | null
 }
 
+// ESIGN-UNIFY-1 (ES-1, §9.2) — a view-scoped token was minted for a
+// needs_to_view recipient and must never reach the sign/decline actions, even
+// before assertSignerTurn's DB-backed role check runs (belt-and-braces: the
+// token itself already declares intent). `scope` is absent on every token
+// minted before this field existed — those are 'sign', unchanged.
+function assertSignScope(tok: { scope?: 'sign' | 'view' }): void {
+  if (tok.scope === 'view') {
+    throw new Error('This is a view-only link — it cannot be used to sign or decline.')
+  }
+}
+
 export async function recordSignature(input: RecordSignatureInput): Promise<RecordSignatureResult> {
   const tok = verifySigningToken(input.token)
+  assertSignScope(tok)
   const ctx = signingCtx(tok.tenantId)
   return signRequest(ctx, tok.requestId, tok.envelopeId, {
     signatureName: input.signatureName,
@@ -922,6 +1050,7 @@ export async function declineSignature(input: {
   signerIp?: string | null
 }): Promise<{ ok: boolean; envelopeId: string }> {
   const tok = verifySigningToken(input.token)
+  assertSignScope(tok)
   const ctx = signingCtx(tok.tenantId)
   await declineRequest(ctx, tok.requestId, tok.envelopeId, input.reason, input.signerIp ?? null)
   return { ok: true, envelopeId: tok.envelopeId }
@@ -1185,9 +1314,16 @@ async function signRequest(
     completed?: boolean
     executedDocumentVersionId?: string | null
     deliveredRequestIds?: string[]
+    copyDeliveredRequestIds?: string[]
   }
   // Sequential routing: notify the next group that just became active.
   await notifyDelivered(ctx, envelopeId, eff.deliveredRequestIds ?? [])
+  // ESIGN-UNIFY-1 (ES-1, §9.2) — the envelope just completed: send the
+  // executed-copy email to every receives_copy recipient (the handler already
+  // recorded their esign.copy_delivered events inside the same action).
+  if (eff.completed) {
+    await notifyCopyDelivered(ctx, envelopeId, eff.copyDeliveredRequestIds ?? [])
+  }
   return {
     ok: true,
     completed: Boolean(eff.completed),
@@ -1234,9 +1370,22 @@ async function recordOpen(
 }
 
 async function assertSignerTurn(ctx: ActionContext, requestId: string): Promise<void> {
-  const status = await withActionContext(ctx, (c) =>
-    latestAttr(c, ctx.tenantId, requestId, 'signer_status'),
+  const [status, role] = await withActionContext(ctx, (c) =>
+    Promise.all([
+      latestAttr(c, ctx.tenantId, requestId, 'signer_status'),
+      latestAttr(c, ctx.tenantId, requestId, 'signer_role'),
+    ]),
   )
+  // ESIGN-UNIFY-1 (ES-1, §9.2) — a needs_to_view / receives_copy recipient can
+  // never sign, on EITHER channel (portal or link). Checked here — the one
+  // choke point both signRequest and declineRequest call through — rather than
+  // only on the link-token scope, so a needs_to_view portal signer (a known
+  // client contact who could otherwise call the portal sign endpoint directly)
+  // is refused the same as a view-scoped link. Absent role reads as
+  // needs_to_sign (every request written before this migration).
+  if (role === 'needs_to_view' || role === 'receives_copy') {
+    throw new Error('This document is shared with you to review — it is not yours to sign.')
+  }
   if (status === 'signed' || status === 'declined') {
     throw new Error('This request has already been completed.')
   }
