@@ -25943,3 +25943,68 @@ details.li-brief-research summary:hover {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Item 2 — file-backed (uploaded PDF) rendering in the review reader: real pdfjs
+   pages in a scrolling frame, never the storage-path string through markdown. */
+.li-rev-pdf {
+  margin-top: 16px;
+  max-height: 78vh;
+  overflow-y: auto;
+  background: var(--li-canvas, #eef1f5);
+  border: 1px solid var(--li-border, #d9dee6);
+  border-radius: 10px;
+}
+.li-rev-pdf-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--li-surface, #fff);
+  border-bottom: 1px solid var(--li-border, #d9dee6);
+  border-radius: 10px 10px 0 0;
+}
+.li-rev-pdf-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-ink, #1b2430);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-rev-pdf-dl {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--li-info, #3b6fd4);
+  text-decoration: none;
+}
+.li-rev-pdf-dl:hover {
+  text-decoration: underline;
+}
+.li-rev-pdf-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 16px;
+  color: var(--li-muted, #5b6472);
+  font-size: 13px;
+  text-align: center;
+}
+.li-rev-pdf-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 12px;
+}
+.li-rev-pdf-page {
+  display: block;
+  max-width: 100%;
+  box-shadow: 0 1px 6px rgba(20, 30, 45, 0.14);
+  background: #fff;
+}

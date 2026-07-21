@@ -28,6 +28,7 @@ import { GemCluster } from '@/components/GemSparkle'
 import { ChevronDownIcon, MailIcon, Share2Icon, XIcon } from '@/components/icons'
 import { SendToClientModal, type SendToClientMatter } from '@/components/SendToClientModal'
 import { TrackedChangesEditor } from '@/components/TrackedChangesEditor'
+import { DocumentPdfView } from '@/components/DocumentPdfView'
 import { VersionDiff } from '@/components/VersionDiff'
 import { VersionCompareDrawer } from '@/components/VersionCompareDrawer'
 
@@ -57,6 +58,13 @@ interface DraftDetail {
     reviewedOriginalFilename: string | null
     sourceText: string | null
     redlineText: string | null
+  } | null
+  // EDITOR-FIX-1 (item 2) — non-null for a FILE-BACKED version (uploaded PDF/doc):
+  // the body is a storage path, not markdown, so the reader renders the real PDF
+  // and Edit / AI revision / markdown export are suppressed.
+  file: {
+    contentType: string
+    originalFilename: string
   } | null
 }
 
@@ -410,7 +418,11 @@ export function DocumentReviewer({
 
   const isEmail = draft.channel === 'communication'
   const isMemo = Boolean(draft.aiReview)
-  const canRevise = !isEmail && !isMemo
+  // EDITOR-FIX-1 (item 2) — an uploaded PDF/doc version: no markdown to edit,
+  // export, or diff, so those controls are hidden and the body renders as real
+  // PDF pages (never the storage-path string through the markdown pipeline).
+  const isFileBacked = Boolean(draft.file)
+  const canRevise = !isEmail && !isMemo && !isFileBacked
   const hasTrace = Boolean(
     draft.reasoningTrace ||
     draft.modelIdentity ||
@@ -467,34 +479,43 @@ export function DocumentReviewer({
       {/* action toolbar */}
       <div className="li-rev-toolbar">
         <div className="li-rev-toolbar-group">
-          <button
-            type="button"
-            className="li-rev-tbtn"
-            onClick={() => openEditor('page')}
-            disabled={busy !== null}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M12 20h9"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            Edit
-          </button>
+          {/* EDITOR-FIX-1 (item 2): no Edit for a file-backed PDF — there is no
+              markdown to edit; the reader renders the real pages below. */}
+          {!isFileBacked && (
+            <button
+              type="button"
+              className="li-rev-tbtn"
+              onClick={() => openEditor('page')}
+              disabled={busy !== null}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M12 20h9"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Edit
+            </button>
+          )}
           {!isEmail && (
             <>
-              <ActionsMenu
-                align="left"
+              {/* Markdown export (PDF/Word/Email) reads bodyMarkdown — meaningless
+                  for a file-backed PDF (the body is a storage path), so hide it
+                  there. The DocumentActionBar (eSign) below is version-id based and
+                  stays available for uploaded PDFs (ES-5 owns its wiring). */}
+              {!isFileBacked && (
+                <ActionsMenu
+                  align="left"
                 triggerClassName="li-rev-tbtn"
                 triggerContent={
                   <>
@@ -555,7 +576,8 @@ export function DocumentReviewer({
                     title: sendOpening ? 'Opening…' : undefined,
                   },
                 ]}
-              />
+                />
+              )}
               <DocumentActionBar
                 context={{
                   documentVersionId: draft.documentVersionId,
@@ -595,7 +617,7 @@ export function DocumentReviewer({
               Matter context
             </button>
           )}
-          {!isEmail && !isMemo && draft.versionNumber > 1 && (
+          {!isEmail && !isMemo && !isFileBacked && draft.versionNumber > 1 && (
             <button type="button" className="li-rev-tbtn" onClick={() => setCompareOpen(true)}>
               View Redlines
             </button>
@@ -789,15 +811,24 @@ export function DocumentReviewer({
         </div>
       )}
 
-      {/* the document, as a proportional letter page */}
-      <DocumentCanvas>
-        <DocumentSheet variant="full" watermark={watermark}>
-          <div
-            className="doc-rendered li-rev-doc"
-            dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
-          />
-        </DocumentSheet>
-      </DocumentCanvas>
+      {/* the document — real PDF pages for a file-backed upload (item 2), else the
+          markdown body as a proportional letter page. Never the storage-path
+          string through the markdown pipeline. */}
+      {isFileBacked ? (
+        <DocumentPdfView
+          documentVersionId={draft.documentVersionId}
+          filename={draft.file?.originalFilename ?? 'Document'}
+        />
+      ) : (
+        <DocumentCanvas>
+          <DocumentSheet variant="full" watermark={watermark}>
+            <div
+              className="doc-rendered li-rev-doc"
+              dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
+            />
+          </DocumentSheet>
+        </DocumentCanvas>
+      )}
 
       {/* The tracked-changes editor (li-edtr flagship) — Edit and AI revision are
           one flow; it persists nothing until its own Save (legal.draft.edit). */}
