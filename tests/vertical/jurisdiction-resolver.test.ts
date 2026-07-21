@@ -35,13 +35,13 @@ describe('resolveJurisdictionChain (pure)', () => {
   })
 
   it('parses a full state name at the standard position on the address rung', () => {
-    expect(
-      resolveJurisdictionChain(null, '77 Peachtree Rd, Atlanta, Georgia 30303', null),
-    ).toEqual({
-      code: 'GA',
-      displayName: 'Georgia',
-      source: 'client_address',
-    })
+    expect(resolveJurisdictionChain(null, '77 Peachtree Rd, Atlanta, Georgia 30303', null)).toEqual(
+      {
+        code: 'GA',
+        displayName: 'Georgia',
+        source: 'client_address',
+      },
+    )
   })
 
   it('falls back to the firm fact when neither matter nor address resolve', () => {

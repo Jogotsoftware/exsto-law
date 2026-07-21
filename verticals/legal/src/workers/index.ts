@@ -58,9 +58,8 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
   // stage pins none, templateOverride is undefined and runDraftGeneration falls back
   // to the repo template (last resort).
   const { runDraftGeneration } = await import('../api/generateDraft.js')
-  const { resolveMatterStagePinnedTemplateOverride } = await import(
-    '../api/generateDocumentRuntime.js'
-  )
+  const { resolveMatterStagePinnedTemplateOverride } =
+    await import('../api/generateDocumentRuntime.js')
   const templateOverride = await resolveMatterStagePinnedTemplateOverride(ctx, p.matter_entity_id)
   await runDraftGeneration(ctx, {
     matterEntityId: p.matter_entity_id,
