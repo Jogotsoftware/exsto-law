@@ -25,14 +25,14 @@ const TITLE_FONT_ALLOWLIST = new Set([
 // Allowlist for CHECK 2: tab classes currently defined
 // (extend deliberately when adding a legit tab surface).
 // li-tabs* = the shared controlled Tabs component; li-crm/mat/svc-tabs = NavTabs
-// route variants; li-cp-tab = the client portal's dark-band variant (same
-// underline pattern, portal palette — intentionally kept).
+// route variants.
 // Retired 2026-07-20 (consolidated onto Tabs.tsx): li-mail-tab*, li-bill-tab*,
 // li-mat-billtab*, li-set-window-tab* — do NOT re-add.
+// Retired 2026-07-20 (PT-1, portal side nav): li-cp-tab — the portal's dark
+// tab band was replaced by the shared li-rail-* side nav; do NOT re-add.
 const TAB_CLASS_ALLOWLIST = new Set([
   'li-tabs',
   'li-tabs-tab',
-  'li-cp-tab',
   'li-crm-tabs',
   'li-mat-tabs',
   'li-svc-tabs',

@@ -22175,44 +22175,10 @@ details.li-brief-research summary:hover {
   background: var(--li-rail-gold);
   color: var(--li-navy-deep);
 }
-.li-cp-bell {
-  position: relative;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  /* A2.1c — the 0.06-alpha fill + borderless edge left the resting icon
-     nearly invisible against the navy band; a visible track (matching the
-     lang toggle's) plus a brighter icon reads clearly at rest. */
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #dbe2f0;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.li-cp-bell:hover,
-.li-cp-bell.active {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.24);
-  color: #fff;
-}
-.li-cp-bell-badge {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--li-rail-gold);
-  color: var(--li-navy-deep);
-  font-size: 10px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+/* PT-1: the portal bell now reuses the attorney chrome's .li-top-bell +
+   .li-top-bell-dot treatment (portal-scoped tweaks live in the li-cpnav-*
+   tail family). The old .li-cp-bell / .li-cp-bell-badge rules were deleted —
+   grep-proved unused outside the portal page. */
 .li-cp-who {
   display: inline-flex;
   align-items: center;
@@ -22316,55 +22282,12 @@ details.li-brief-research summary:hover {
   font-weight: 700;
 }
 
-/* --- Nav (navy #1B2A4A tab band) --- */
-.li-cp-nav {
-  background: var(--li-navy);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-.li-cp-nav-inner {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 0 26px;
-  display: flex;
-  gap: 24px;
-  overflow-x: auto;
-}
-.li-cp-tab {
-  background: none;
-  border: none;
-  border-radius: 0;
-  padding: 14px 2px;
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(231, 236, 245, 0.7);
-  border-bottom: 2.5px solid transparent;
-  margin-bottom: -1px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-/* Scoped to .li-cp-nav so this out-specifies the global button:hover reset
-   (globals.css ~216, element+2 pseudo-classes) that otherwise fills these
-   tabs with a boxy background+border on hover (A2.1a). */
-.li-cp-nav .li-cp-tab:hover {
-  background: none;
-  border-color: transparent;
-  border-bottom-color: transparent;
-  color: #fff;
-}
-.li-cp-tab:focus-visible {
-  outline: none;
-  color: #fff;
-  border-bottom-color: var(--li-rail-gold);
-}
-.li-cp-tab.active {
-  color: #fff;
-  font-weight: 700;
-  border-bottom-color: var(--li-rail-gold);
-}
-.li-cp-nav .li-cp-tab.active:hover {
-  border-bottom-color: var(--li-rail-gold);
-}
+/* PT-1 (founder walk 15.11): the horizontal tab band (.li-cp-nav /
+   .li-cp-nav-inner / .li-cp-tab) was replaced by the SIDE navigation — the
+   portal now reuses the attorney rail's li-rail-* chrome via
+   PortalSideNav.tsx, with portal-scoped rules in the append-only li-cpnav-*
+   family at the tail of this file. The tab-band rules were deleted here —
+   grep-proved unused outside the portal page. */
 
 /* --- Content --- */
 .li-cp-main {
@@ -24841,4 +24764,81 @@ details.li-brief-research summary:hover {
   color: var(--li-gold-text, #8c7534);
   border-color: var(--li-gold, #c6a968);
   background: var(--li-gold-bg-soft, #fbf6ea);
+}
+
+/* ==========================================================================
+   PT-1 — CLIENT PORTAL SIDE NAV (li-cpnav-*)  — append-only family.
+   Founder walk 15.11: the portal's horizontal tab band is replaced by the
+   platform's side navigation. PortalSideNav.tsx PORTS AttorneyRail.tsx
+   (same li-rail-* chrome classes, same hover/pin/collapse mechanics); this
+   family only adds (a) the shell flex layout + the rail chrome tokens the
+   portal roots don't inherit (they live outside .li-shell — see the WP-L
+   token-scope pattern), and (b) portal-scoped specificity fixes where the
+   legacy global button:hover reset (~line 216, specificity (0,2,1)) would
+   out-specify the shared rail/bell hover rules on BUTTON nav items (the
+   attorney rail's leaves are Links, so it never hit this).
+   (Never write a star immediately followed by a slash inside this comment —
+   it terminates the comment early and breaks the CSS minifier.)
+   ========================================================================== */
+.li-cpnav-shell {
+  /* Chrome tokens read by the shared li-rail-. and li-top-bell rules. The
+     dot ring (--li-topbar-bg) is set to the PORTAL header navy (#14213D,
+     --li-navy-deep) so the unread dot sits flush on the li-cp-top band. */
+  --li-rail-bg: #14213d;
+  --li-rail-fg: #aeb8cc;
+  --li-rail-fg-dim: #7e89a3;
+  --li-rail-fg-active: #ffffff;
+  --li-rail-tint: rgba(212, 192, 130, 0.12);
+  --li-topbar-bg: #14213d;
+  position: relative;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+.li-cpnav-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.li-cpnav-header {
+  flex: 0 0 auto;
+}
+.li-cpnav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Rail nav items are BUTTONS in the portal (view machine, not routes): re-
+   assert the rail hover treatment above the global button:hover reset. */
+.li-cpnav-shell .li-cpnav-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: transparent;
+}
+.li-cpnav-shell .li-cpnav-item.is-active:hover:not(:disabled) {
+  background: var(--li-rail-tint);
+}
+.li-cpnav-shell .li-rail-pin:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: transparent;
+}
+.li-cpnav-shell .li-rail-pin.is-pinned:hover:not(:disabled) {
+  background: var(--li-rail-tint);
+}
+
+/* Bell — the attorney top-bar treatment (.li-top-bell + .li-top-bell-dot),
+   with the portal's one extra state: the bell is a toggle into the
+   notifications VIEW (the attorney bell opens a popover), so it carries an
+   .active state mirroring its hover. */
+.li-cpnav-shell .li-cpnav-bell:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.li-cpnav-shell .li-cpnav-bell.active,
+.li-cpnav-shell .li-cpnav-bell.active:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.24);
 }
