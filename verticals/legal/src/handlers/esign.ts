@@ -6,8 +6,10 @@
 //
 //   esign.send     → create signature_envelope (+ one signature_request per
 //                    signer: key/title/order/channel), store the field plan,
-//                    deliver the first routing group. esign.sent + esign.delivered.
-//   esign.open     → a signer opened their document (delivered → opened). esign.opened.
+//                    dispatch the first routing group. esign.sent ONLY — no
+//                    optimistic esign.delivered (ES-5b): the first group's status
+//                    is dispatched ("Sent"), never a claimed inbox delivery.
+//   esign.open     → a signer opened their document (dispatched → opened). esign.opened.
 //   esign.sign     → a signer adopts their signature + fills their fields. When
 //                    the current routing group finishes, the next group is
 //                    delivered (esign.delivered); when ALL sign, the envelope
@@ -308,19 +310,16 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
     sourceRef: ctx.actorId,
   })
 
-  // The first routing group was initialized as delivered above (one status write
-  // per request); record the delivery events it used to get from deliverNextGroup.
-  for (const requestId of deliveredAtSend) {
-    await insertEvent(client, {
-      tenantId,
-      actionId,
-      eventKindName: 'esign.delivered',
-      primaryEntityId: envelopeId,
-      secondaryEntityIds: [requestId],
-      sourceType: 'system',
-      sourceRef: ctx.actorId,
-    })
-  }
+  // ES-5b (founder-priority): NO optimistic esign.delivered event at send. We
+  // only dispatched the signing email — we have NOT confirmed it reached the
+  // inbox — so emitting esign.delivered "at the same instant as esign.sent" was
+  // a dishonest claim (a real envelope once went silently to a mistyped address
+  // yet read "Delivered"). The per-recipient status now derives only from real
+  // signals: the dispatch itself ("Sent to <email>"), esign.opened ("Opened"),
+  // and esign.signed/declined. `deliveredAtSend` still drives the actual email
+  // dispatch below; the first group's internal 'delivered' state is surfaced in
+  // the UI as the honest "Sent". esign.delivered has no readers (verified), so
+  // dropping the emission relabels no consumer.
 
   return {
     envelopeId,

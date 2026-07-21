@@ -2,10 +2,10 @@
 
 // ESIGN-UNIFY-1 (ES-1, design §3) — the ONE eSign send wizard.
 //
-// Four steps: Documents → Recipients → Fields → Review & send. This PR ships
-// the composer ALONGSIDE the old flows (PrepareSignature / NewEnvelopeWizard
-// stay live untouched — ES-5 does the cutover); the ES-2 placement canvas
-// mounts inside the Fields step this component reserves.
+// Four steps: Documents → Recipients → Fields → Review & send. This is the ONE
+// eSign flow (ES-5b deleted the old PrepareSignature / NewEnvelopeWizard and
+// retargeted every launcher here); the ES-2 placement canvas mounts inside the
+// Fields step this component reserves.
 //
 // v1 send scope (founder decisions): ONE document per envelope (multi-doc
 // deferred); upload-sourced envelopes send via legal.esign.send_file with
@@ -28,6 +28,7 @@ import {
 import { MatterContactPicker } from './MatterContactPicker'
 import type { ContactOption, MatterOption } from './matterContactFilter'
 import { useEnvelopeDraft, type RecipientRole } from './useEnvelopeDraft'
+import { workflowStepRecipientRows } from '@/lib/esignComposeSource'
 // ES-2 (§4) — the placement surface + the real preview, all client-safe pure
 // imports (the esign subpath ships no server code).
 import {
@@ -165,14 +166,7 @@ export function EsignComposer({
     if (source.kind === 'workflow-step') {
       seedWorkflowStep({
         subject: source.subject,
-        recipients: source.recipients.map((r) => ({
-          name: r.name,
-          email: r.email,
-          title: r.title,
-          role: r.role,
-          order: r.order,
-          key: r.key,
-        })),
+        recipients: workflowStepRecipientRows(source.recipients),
       })
     }
   }, [])
@@ -918,7 +912,10 @@ export function EsignComposer({
                       className={`li-esign2-rolechip ${signerToneClass(draft.recipients.indexOf(r))}`}
                     >
                       <span className="li-esign2-signer-dot" aria-hidden="true" />
-                      {r.name.trim() || r.email.trim()}
+                      {r.name.trim() && `${r.name.trim()} `}
+                      {/* ES-5b (founder-priority): the full email is always shown so
+                          a mistyped address is caught here, before sending. */}
+                      <span className="li-esign2-rolechip-email">{r.email.trim()}</span>
                       <em>{ROLE_LABELS[r.role]}</em>
                     </span>
                   ))}

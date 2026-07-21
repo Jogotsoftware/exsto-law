@@ -506,7 +506,7 @@ async function runAiDocumentReviewCapability(
 // Sends the matter's signable document for signature through the EXISTING
 // provider-agnostic e-sign path (api/esign.sendForSignature) — the same envelope,
 // signature_request, sign-by-link/portal delivery, and esign.* action kinds the
-// attorney's manual "Send for signature" uses. NOT a second adapter, NOT a second
+// attorney's manual "eSign" uses. NOT a second adapter, NOT a second
 // webhook: envelope completion already fires esign.completed (handlers/esign.ts)
 // and dispatchLifecycleEvent already advances any matter whose stage waits ON
 // 'esign.completed' — so this handler only SENDS and PARKS. The stage's gate is
@@ -538,8 +538,8 @@ async function runEsignatureCapability(
   if (!doc) {
     throw new CapabilityInputMissingError(
       wantedKind
-        ? `Cannot send for signature — no APPROVED "${wantedKind}" document version on this matter yet (approve it in the review queue first).`
-        : 'Cannot send for signature — the matter has no approved document version yet (approve the draft in the review queue first).',
+        ? `Cannot eSign — no APPROVED "${wantedKind}" document version on this matter yet (approve it in the review queue first).`
+        : 'Cannot eSign — the matter has no approved document version yet (approve the draft in the review queue first).',
     )
   }
 

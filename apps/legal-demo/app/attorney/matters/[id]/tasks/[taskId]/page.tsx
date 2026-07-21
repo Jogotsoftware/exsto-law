@@ -11,7 +11,7 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { formatDate } from '@/lib/datetime'
 import { BackButton } from '@/components/BackButton'
-import { PrepareSignature, type SendResult } from '@/components/PrepareSignature'
+import { EsignComposer } from '@/components/esign/EsignComposer'
 import { EnvelopeStatusView, type EnvelopeStatus } from '@/components/EnvelopeStatusView'
 
 interface Task {
@@ -89,11 +89,11 @@ export default function TaskWindowPage({
 
   // After sending, record the envelope on the task and advance to tracking.
   const onSent = useCallback(
-    async (result: SendResult) => {
+    async (envelopeId: string) => {
       try {
         await callAttorneyMcp({
           toolName: 'legal.task.link_envelope',
-          input: { taskId, envelopeId: result.envelopeId },
+          input: { taskId, envelopeId },
         })
         setResend(false)
         await loadTask()
@@ -218,7 +218,18 @@ export default function TaskWindowPage({
               Preparing a new envelope. The previous one was declined.
             </div>
           )}
-          <PrepareSignature documentVersionId={task.documentVersionId} onSent={onSent} />
+          {/* ESIGN-UNIFY-1 (ES-5b, §11) — the deleted PrepareSignature is
+              retargeted to the ONE unified composer in document mode; onSent
+              still links the envelope to this task so tracking/review advance. */}
+          <EsignComposer
+            source={{
+              kind: 'document',
+              documentVersionId: task.documentVersionId,
+              matterEntityId: id,
+              title: task.title,
+            }}
+            onSent={onSent}
+          />
         </>
       )}
 

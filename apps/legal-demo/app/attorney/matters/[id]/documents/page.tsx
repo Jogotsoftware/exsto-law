@@ -311,6 +311,23 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
     }
   }
 
+  // ESIGN-UNIFY-1 (ES-5b, design §8) — "eSign" opens the ONE unified composer in
+  // document mode on this matter's generated draft: the exact query-param launch
+  // ES-5a wired from the review toolbar (documentVersionId locks the version, the
+  // matter pre-attaches so the client pre-fills recipient 1, placement happens on
+  // the real rendered PDF). Draft-only by design: document mode sends through the
+  // markdown draft path (legal.esign.send_for_signature); stored file uploads need
+  // the separate send_file path (they use the eSign page's upload flow).
+  function esignDraft(d: DraftPayload) {
+    const params = new URLSearchParams({
+      documentVersionId: d.documentVersionId,
+      matterEntityId: id,
+      title: humanizeKind(d.documentKind),
+    })
+    // Client-side nav keeps the layout (and the floating assistant panel) alive.
+    router.push(`/attorney/esign/compose?${params.toString()}`)
+  }
+
   // Email an upload with the existing compose flow, pre-attached — reuses the
   // SAME attachment resolution (mailAttachments.ts resolveMatterAttachments,
   // {kind:'upload'}) the manual Attach picker already uses in Mail; this just
@@ -457,6 +474,16 @@ export default function MatterDocumentsPage({ params }: { params: Promise<{ id: 
                           }}
                         >
                           Email
+                        </button>
+                        <button
+                          type="button"
+                          className="li-mat-menu-item"
+                          onClick={() => {
+                            setOpenMenuId(null)
+                            esignDraft(draft)
+                          }}
+                        >
+                          eSign
                         </button>
                         {draft.versionNumber > 1 && (
                           <button

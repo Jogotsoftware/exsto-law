@@ -30,7 +30,7 @@ function randomSlot(): { startIso: string; endIso: string } {
   return { startIso: start.toISOString(), endIso: new Date(start.getTime() + 1800e3).toISOString() }
 }
 
-// A matter with an approved operating-agreement draft, ready to send for signature.
+// A matter with an approved operating-agreement draft, ready to eSign.
 async function makeApprovedDraft(): Promise<{
   matterId: string
   documentVersionId: string
@@ -133,7 +133,7 @@ run('signature task flow (live DB)', { timeout: 120_000 }, () => {
     // 2. Review gate — nothing to review before an envelope exists.
     await expect(reviewTask(ATTORNEY_CTX, { taskId: task.taskId })).rejects.toThrow()
 
-    // 3. Send for signature, then link the envelope to the task.
+    // 3. eSign the document, then link the envelope to the task.
     const sent = await sendForSignature(ATTORNEY_CTX, {
       documentVersionId,
       preparedMarkdown: '# Operating Agreement\n\nSig task body.\n\nSignature: {{sign:client}}\n',

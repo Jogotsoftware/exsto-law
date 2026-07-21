@@ -86,7 +86,7 @@ export function buildEsignStage(
 ): LifecycleStage {
   return {
     key: uniqueStageKey(graph, docKind),
-    label: 'eSign — send for signature',
+    label: 'eSign',
     client_label: 'Signature',
     // Blocking: the matter waits here until every signer has signed.
     action: { kind: 'esign', config: { document_kind: docKind } },
