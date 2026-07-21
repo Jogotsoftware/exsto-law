@@ -37,6 +37,7 @@ import {
   getDocumentTemplate,
   listServiceDocumentTemplates,
   listServicesIncludingInactive,
+  resolveDocumentTemplateEsignConfig,
   type DocumentTemplateConfig,
   type DraftingConfig,
   type ServiceField,
@@ -44,7 +45,14 @@ import {
 } from './services.js'
 import { extractRenderedTokens } from '../lib/templates/render.js'
 import { isSystemToken } from './tokenClasses.js'
-import { listStandaloneTemplates, type TemplateSignature } from '../queries/templates.js'
+import {
+  listStandaloneTemplates,
+  parseTemplateEsignConfig,
+  ESIGN_RECIPIENT_ROLES,
+  type TemplateSignature,
+  type TemplateEsignConfig,
+} from '../queries/templates.js'
+import { computeMarkerRoleDrift, MARKER_TYPE_PATTERN } from '../esign/fields.js'
 import { createTemplate, updateTemplate } from './standaloneTemplates.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
@@ -55,6 +63,32 @@ const CLAUDE_AGENT_ACTOR_ID = '00000000-0000-0000-0001-000000000004'
 export interface ExistingTemplateSummary {
   documentKind: string
   tokens: string[]
+  // ESIGN-UNIFY-1 ES-3 (§6.3) — the kind's CURRENT e-sign config, if any, so a
+  // revision proposal doesn't silently regress a previously authored
+  // signable declaration.
+  esignConfig: TemplateEsignConfig
+}
+
+// ESIGN-UNIFY-1 ES-3 (§6.3) — the e-sign vocabulary the build-wizard model
+// needs to mark a document signable, assign roles, and emit role-tagged
+// {{type:key}} blocks in the proposed body: the marker grammar it must use,
+// the recipient-role vocabulary, and the bind kinds a role may resolve
+// through at send/intake time.
+export interface EsignAuthoringVocabulary {
+  markerTypes: string[]
+  recipientRoles: readonly string[]
+  bindKinds: string[]
+}
+
+const ESIGN_VOCABULARY: EsignAuthoringVocabulary = {
+  markerTypes: MARKER_TYPE_PATTERN.split('|'),
+  recipientRoles: ESIGN_RECIPIENT_ROLES,
+  bindKinds: [
+    'matter_primary_contact',
+    'attorney_of_record',
+    'manual',
+    'contact_role:<name> (a named contact relationship — resolves to nothing yet if undeclared elsewhere; prefer the first three)',
+  ],
 }
 
 // One reusable QUESTION the firm already defines somewhere (Phase 7 — reuse-aware
@@ -114,6 +148,9 @@ export interface TemplateAuthoringContext {
   // Distinct document kinds across the FIRM's service templates — the docKind
   // registry a proposed template's kind should come from (or extend deliberately).
   docKinds: string[]
+  // ESIGN-UNIFY-1 ES-3 (§6.3) — the vocabulary the model needs to propose a
+  // signable document (marker grammar, recipient roles, bind kinds).
+  esignVocabulary: EsignAuthoringVocabulary
 }
 
 // How much of a template body to carry into the reuse context. Enough to recognize
@@ -233,9 +270,22 @@ export async function loadTemplateContext(
   const hasQuestionnaire = schema !== null
   const firmFieldLibrary = await loadFirmFieldLibrary(ctx, serviceKey)
   const docs = await listServiceDocumentTemplates(ctx, serviceKey)
+  // The service's raw workflow row, read once, so per-kind esign lookups don't
+  // each re-query — resolveDocumentTemplateEsignConfig is pure over it.
+  const documentTemplatesConfig = await withActionContext(ctx, async (client) => {
+    const res = await client.query<{
+      transitions: { document_templates?: DocumentTemplateConfig }
+    }>(
+      `SELECT transitions FROM workflow_definition
+        WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    return res.rows[0]?.transitions.document_templates
+  })
   const existingTemplates = docs.map((d) => ({
     documentKind: d.documentKind,
     tokens: extractRenderedTokens(d.body),
+    esignConfig: resolveDocumentTemplateEsignConfig(documentTemplatesConfig, d.documentKind),
   }))
   const templateLibrary = await loadFirmTemplateLibrary(ctx)
   // The firm-wide docKind registry: every kind any service has authored a template
@@ -256,6 +306,7 @@ export async function loadTemplateContext(
     existingTemplates,
     templateLibrary,
     docKinds,
+    esignVocabulary: ESIGN_VOCABULARY,
   }
 }
 
@@ -282,6 +333,11 @@ export interface ProposedTemplateValidation {
   // the firm. The build should REUSE those question definitions (don't re-invent, don't
   // call them missing). Subset of orphanTokens.
   reusableFromFirm: string[]
+  // ESIGN-UNIFY-1 ES-3 (§6.3) — set only when an esignConfig was passed to
+  // validate against. Unlike the token-orphan checks above (soft — forward-
+  // looking), a drift failure here is a HARD error (folded into `errors`/`ok`):
+  // a signable proposal that can't actually be signed is not a valid proposal.
+  esign: { markerKeysWithoutRole: string[]; rolesWithoutSignMarker: string[] } | null
 }
 
 // Validate a proposed template body the write path will persist: non-empty text
@@ -296,7 +352,14 @@ export interface ProposedTemplateValidation {
 export function validateProposedTemplate(
   body: unknown,
   fieldIds: readonly string[],
-  opts?: { hasQuestionnaire?: boolean; firmFieldIds?: readonly string[] },
+  opts?: {
+    hasQuestionnaire?: boolean
+    firmFieldIds?: readonly string[]
+    // ESIGN-UNIFY-1 ES-3 (§6.3) — when provided AND signable, the proposal must
+    // actually be signable: every role's marker keys ⊆ the body's marker keys
+    // (no orphan markers), and every needs_to_sign role has ≥1 {{sign:key}}.
+    esignConfig?: TemplateEsignConfig
+  },
 ): ProposedTemplateValidation {
   const hasQuestionnaire = opts?.hasQuestionnaire ?? fieldIds.length > 0
   const firmKnown = new Set((opts?.firmFieldIds ?? []).map((f) => f.toLowerCase()))
@@ -315,6 +378,7 @@ export function validateProposedTemplate(
       orphanTokens: [],
       hasQuestionnaire,
       reusableFromFirm: [],
+      esign: null,
     }
   }
   const tokens = extractRenderedTokens(validated)
@@ -324,6 +388,23 @@ export function validateProposedTemplate(
   // them as orphans would misleadingly pitch them to the attorney as gaps.
   const orphanTokens = tokens.filter((t) => !known.has(t.toLowerCase()) && !isSystemToken(t))
   const reusableFromFirm = orphanTokens.filter((t) => firmKnown.has(t.toLowerCase()))
+
+  let esign: ProposedTemplateValidation['esign'] = null
+  if (opts?.esignConfig?.signable) {
+    const drift = computeMarkerRoleDrift(validated, opts.esignConfig.roles)
+    esign = drift
+    if (drift.markerKeysWithoutRole.length > 0) {
+      errors.push(
+        `Marker key(s) with no matching e-sign role: ${drift.markerKeysWithoutRole.join(', ')} — every {{type:key}} marker's key must have a role row.`,
+      )
+    }
+    if (drift.rolesWithoutSignMarker.length > 0) {
+      errors.push(
+        `Role(s) set to "needs to sign" with no {{sign:key}} marker in the body: ${drift.rolesWithoutSignMarker.join(', ')}.`,
+      )
+    }
+  }
+
   return {
     ok: errors.length === 0,
     errors,
@@ -331,6 +412,7 @@ export function validateProposedTemplate(
     orphanTokens,
     hasQuestionnaire,
     reusableFromFirm,
+    esign,
   }
 }
 
@@ -356,8 +438,15 @@ export interface CreateTemplateAIInput {
   // BUILDER-CERT-1 (WP3) — the template's signability declaration, from the wizard's
   // "does the finished document get signed, and by whom?" ask (author-template Step 3).
   // Omitted/undefined = unsigned. Carried onto the FIRM-LIBRARY twin below, where the
-  // e-sign composition validator reads it.
+  // e-sign composition validator reads it. Superseded by esignConfig below (ES-3);
+  // kept for callers that haven't moved to the new shape.
   signature?: TemplateSignature
+  // ESIGN-UNIFY-1 ES-3 (§6.3) — the full role/bind/order declaration the
+  // build-wizard model may propose alongside role-tagged {{type:key}} blocks in
+  // the body. Validated for marker↔role drift BEFORE any write (below); persisted
+  // onto BOTH the service-bound document_templates.esign[docKind] AND the
+  // firm-library twin, mirroring how `signature` rides both stores today.
+  esignConfig?: TemplateEsignConfig
 }
 
 // Persist a reasoning_trace for an AI template write (mirrors intakeAuthoring's):
@@ -449,6 +538,32 @@ export async function createTemplateAI(
       'signature.required is true but signer_roles is empty — declare who signs (client, attorney, witness, notary).',
     )
   }
+  // ESIGN-UNIFY-1 ES-3 (§6.3) — validate the esign declaration BEFORE any write,
+  // same discipline as the legacy signature check above: shape (via the
+  // defensive parser + the "signable needs a signer" invariant) AND marker↔role
+  // drift against the body the AI actually proposed. A signable proposal that
+  // has nothing for its signer to sign is not a valid proposal.
+  const esignConfig = input.esignConfig ? parseTemplateEsignConfig(input.esignConfig) : null
+  if (esignConfig?.signable) {
+    if (!esignConfig.roles.some((r) => r.recipientRole === 'needs_to_sign')) {
+      throw new Error(
+        'esignConfig.signable is true but no role is set to "needs_to_sign" — declare at least one signer.',
+      )
+    }
+    const drift = computeMarkerRoleDrift(body, esignConfig.roles)
+    if (drift.markerKeysWithoutRole.length > 0 || drift.rolesWithoutSignMarker.length > 0) {
+      const parts: string[] = []
+      if (drift.markerKeysWithoutRole.length > 0) {
+        parts.push(`marker key(s) with no matching role: ${drift.markerKeysWithoutRole.join(', ')}`)
+      }
+      if (drift.rolesWithoutSignMarker.length > 0) {
+        parts.push(
+          `role(s) needing a signature with no {{sign:key}} marker in the body: ${drift.rolesWithoutSignMarker.join(', ')}`,
+        )
+      }
+      throw new Error(`esignConfig doesn't match the body's markers — ${parts.join('; ')}.`)
+    }
+  }
 
   // Read the current row to MERGE into its document_templates (so other kinds'
   // bodies survive), its `documents` list (the doc kinds the service produces — a
@@ -480,6 +595,14 @@ export async function createTemplateAI(
   const merged: DocumentTemplateConfig = {
     template_version: nextVersion,
     templates: { ...(existing.templates ?? {}), [docKind]: body },
+    // Carry the esign map through unchanged when this proposal didn't touch it
+    // (transitions_patch replaces document_templates wholesale — see the same
+    // note in updateDocumentTemplate); write the new declaration when it did.
+    ...(esignConfig
+      ? { esign: { ...(existing.esign ?? {}), [docKind]: esignConfig } }
+      : existing.esign
+        ? { esign: existing.esign }
+        : {}),
   }
   // Register the kind in the service's `documents` list (idempotent) so an auto-route
   // service has a document to draft — without this it fails completeness ("auto-route
@@ -569,6 +692,7 @@ export async function createTemplateAI(
       name: input.name,
       body,
       ...(input.signature != null ? { signature: input.signature } : {}),
+      ...(esignConfig != null ? { esignConfig } : {}),
     })
     templateEntityId = twin.templateEntityId
   } else {
@@ -578,6 +702,7 @@ export async function createTemplateAI(
       body,
       docKind,
       ...(input.signature != null ? { signature: input.signature } : {}),
+      ...(esignConfig != null ? { esignConfig } : {}),
     })
     templateEntityId = created.templateEntityId
   }
