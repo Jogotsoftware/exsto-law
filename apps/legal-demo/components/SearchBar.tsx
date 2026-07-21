@@ -47,17 +47,15 @@ type Result =
   | { type: 'client'; id: string; primary: string; secondary: string }
   | { type: 'document'; id: string; primary: string; secondary: string }
 
-// `default` renders the legacy inline search (still used by the retired
-// AttorneyTopNav); `topbar` renders the Legal Instruments comp's expandable
-// navy search — a 40px icon that grows to a 360px field. Both share the exact
-// same query + routing logic below.
-export function SearchBar({ variant = 'default' }: { variant?: 'default' | 'topbar' }) {
+// The Legal Instruments comp's expandable navy search — a 40px icon that grows
+// to a 360px field, revealing the shared query + routing logic below.
+export function SearchBar() {
   const router = useRouter()
   const wrapRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
-  // topbar only: whether the pill is expanded to reveal the input.
+  // whether the pill is expanded to reveal the input.
   const [expanded, setExpanded] = useState(false)
   const [contacts, setContacts] = useState<ContactRow[]>([])
   const [matters, setMatters] = useState<MatterRow[]>([])
@@ -65,7 +63,6 @@ export function SearchBar({ variant = 'default' }: { variant?: 'default' | 'topb
   const [documents, setDocuments] = useState<DocumentRow[]>([])
   const [loaded, setLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
-  const isTopbar = variant === 'topbar'
 
   async function ensureLoaded() {
     if (loaded || loading) return
@@ -198,119 +195,67 @@ export function SearchBar({ variant = 'default' }: { variant?: 'default' | 'topb
     else router.push(`/attorney/matters/${r.id}`)
   }
 
-  if (isTopbar) {
-    return (
-      <div className="li-top-search-wrap" ref={wrapRef}>
-        <div className={`li-top-search${expanded ? ' li-top-search--open' : ''}`}>
-          <button
-            type="button"
-            className="li-top-search-btn"
-            aria-label="Search"
-            aria-expanded={expanded}
-            onClick={() => {
-              const next = !expanded
-              setExpanded(next)
-              if (next) {
-                ensureLoaded()
-                // Focus after the width transition begins so the caret lands.
-                requestAnimationFrame(() => inputRef.current?.focus())
-              } else {
-                setOpen(false)
-              }
-            }}
-          >
-            <SearchIcon size={19} />
-          </button>
-          <input
-            ref={inputRef}
-            type="search"
-            placeholder="Search matters, clients, documents…"
-            aria-label="Search matters, clients, documents"
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value)
-              setOpen(true)
-              ensureLoaded()
-            }}
-            onFocus={() => {
-              setOpen(true)
-              ensureLoaded()
-            }}
-            className="li-top-search-input"
-          />
-        </div>
-        {expanded && open && q && (
-          <div className="li-top-search-results" aria-live="polite">
-            {loading && !loaded ? (
-              <div className="li-top-search-empty">
-                <span className="spinner" /> Loading…
-              </div>
-            ) : results.length === 0 ? (
-              <div className="li-top-search-empty">No matches.</div>
-            ) : (
-              results.map((r, i) => (
-                <button
-                  key={`${r.type}-${r.id}-${i}`}
-                  type="button"
-                  className="li-top-search-result"
-                  onClick={() => go(r)}
-                >
-                  <span className={`li-top-search-tag tag-${r.type}`}>{r.type}</span>
-                  <span className="li-top-search-primary">{r.primary}</span>
-                  <span className="li-top-search-secondary">{r.secondary}</span>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
-    <div className="search-bar-wrap" ref={wrapRef}>
-      <SearchIcon size={14} className="search-icon" />
-      <input
-        ref={inputRef}
-        type="search"
-        placeholder="Search matters, clients, contacts…"
-        aria-label="Search matters, clients, contacts"
-        autoComplete="off"
-        spellCheck={false}
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value)
-          setOpen(true)
-          ensureLoaded()
-        }}
-        onFocus={() => {
-          setOpen(true)
-          ensureLoaded()
-        }}
-        className="search-input"
-      />
-      <kbd className="search-kbd">/</kbd>
-      {open && q && (
-        <div className="search-results" aria-live="polite">
+    <div className="li-top-search-wrap" ref={wrapRef}>
+      <div className={`li-top-search${expanded ? ' li-top-search--open' : ''}`}>
+        <button
+          type="button"
+          className="li-top-search-btn"
+          aria-label="Search"
+          aria-expanded={expanded}
+          onClick={() => {
+            const next = !expanded
+            setExpanded(next)
+            if (next) {
+              ensureLoaded()
+              // Focus after the width transition begins so the caret lands.
+              requestAnimationFrame(() => inputRef.current?.focus())
+            } else {
+              setOpen(false)
+            }
+          }}
+        >
+          <SearchIcon size={19} />
+        </button>
+        <input
+          ref={inputRef}
+          type="search"
+          placeholder="Search matters, clients, documents…"
+          aria-label="Search matters, clients, documents"
+          autoComplete="off"
+          spellCheck={false}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setOpen(true)
+            ensureLoaded()
+          }}
+          onFocus={() => {
+            setOpen(true)
+            ensureLoaded()
+          }}
+          className="li-top-search-input"
+        />
+      </div>
+      {expanded && open && q && (
+        <div className="li-top-search-results" aria-live="polite">
           {loading && !loaded ? (
-            <div className="search-empty">
+            <div className="li-top-search-empty">
               <span className="spinner" /> Loading…
             </div>
           ) : results.length === 0 ? (
-            <div className="search-empty">No matches.</div>
+            <div className="li-top-search-empty">No matches.</div>
           ) : (
             results.map((r, i) => (
               <button
                 key={`${r.type}-${r.id}-${i}`}
                 type="button"
-                className="search-result"
+                className="li-top-search-result"
                 onClick={() => go(r)}
               >
-                <span className={`search-result-tag tag-${r.type}`}>{r.type}</span>
-                <span className="search-result-primary">{r.primary}</span>
-                <span className="search-result-secondary text-muted">{r.secondary}</span>
+                <span className={`li-top-search-tag tag-${r.type}`}>{r.type}</span>
+                <span className="li-top-search-primary">{r.primary}</span>
+                <span className="li-top-search-secondary">{r.secondary}</span>
               </button>
             ))
           )}

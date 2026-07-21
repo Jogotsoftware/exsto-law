@@ -5,8 +5,8 @@
 //   - 58px collapsed / 256px expanded (tightened per founder walk), pinned state persisted in localStorage.
 //   - An absolutely-positioned overlay sitting over a flow "spacer" so a
 //     hover-expand floats over content instead of shoving it.
-//   - Primary nav ported from the old AttorneyTopNav NAV array, KEEPING the
-//     MODULE_AREAS gating so disabled feature-modules hide their items.
+//   - Primary nav with MODULE_AREAS gating so disabled feature-modules hide
+//     their items.
 //   - A bottom user block whose popover carries the same sign-out logic the old
 //     top nav used.
 import { useEffect, useRef, useState } from 'react'
@@ -51,7 +51,7 @@ type NavNode = NavLeaf | NavGroup
 
 const isGroup = (n: NavNode): n is NavGroup => n.kind === 'group'
 
-// Nav order and routes ported from the old AttorneyTopNav NAV. Dashboard is
+// Nav order and routes for the attorney console. Dashboard is
 // relabelled "Home"; Libraries' "Questionnaires" is relabelled "Intake Forms"
 // (route unchanged); Settings becomes an expandable group of section anchors.
 const NAV: NavNode[] = [
@@ -99,8 +99,8 @@ const NAV: NavNode[] = [
   },
 ]
 
-// Which nav hrefs each feature MODULE gates (mirrors the old AttorneyTopNav map,
-// ADR 0046 §5). Used to hide nav for modules an operator has DISABLED for this
+// Which nav hrefs each feature MODULE gates (ADR 0046 §5). Used to hide nav
+// for modules an operator has DISABLED for this
 // firm. Areas not listed (Home, Mail, Settings) are never module-gated.
 const MODULE_AREAS: Record<string, string[]> = {
   matters: ['/attorney/matters', '/attorney/review'],

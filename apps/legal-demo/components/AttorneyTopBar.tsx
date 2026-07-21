@@ -4,8 +4,8 @@
 // docs/design/legal-instruments). A slim navy bar:
 //   left        — firm wordmark (EB Garamond).
 //   center-right — the expandable global search (reuses SearchBar's logic).
-//   right       — a notifications bell + popover, porting the resolved-feedback
-//                 feed and mark-all-read wiring from the retired AttorneyTopNav.
+//   right       — a notifications bell + popover with the resolved-feedback
+//                 feed and mark-all-read wiring.
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
