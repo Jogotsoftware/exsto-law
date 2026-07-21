@@ -18,7 +18,13 @@ export async function GET(
   const ctx = await resolveAttorneyCtx(request)
   if ('error' in ctx) return NextResponse.json({ error: ctx.error }, { status: ctx.status })
 
-  const ref = await loadEnvelopeFileRef(ctx, envelopeId).catch(() => null)
+  // ES-MULTIDOC-1 — `?doc=N` selects one document in a multi-document envelope
+  // (0-based, in send order). Absent ⇒ the primary (doc 0), unchanged.
+  const docIndex = Math.max(
+    0,
+    Number.parseInt(new URL(request.url).searchParams.get('doc') ?? '0', 10) || 0,
+  )
+  const ref = await loadEnvelopeFileRef(ctx, envelopeId, docIndex).catch(() => null)
   if (!ref) return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
   try {
     // ES-2 (§5.4) — prefer the stamped executed copy once it exists (derived
