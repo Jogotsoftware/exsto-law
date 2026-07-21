@@ -25998,3 +25998,23 @@ details.li-brief-research summary:hover {
 .li-esp-review-title {
   margin-bottom: 8px;
 }
+.li-esp-sign-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.li-esp-sign-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.li-esp-sign-doctitle {
+  font-weight: 600;
+  color: var(--li-text);
+  font-size: 15px;
+}
+.li-esp-detail-previews {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}

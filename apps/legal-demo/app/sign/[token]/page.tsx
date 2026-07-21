@@ -92,6 +92,9 @@ export default function SignPage({ params }: { params: Promise<{ token: string }
     <SignDocument
       doc={doc}
       fileUrl={doc.isFile ? `/api/sign/file?token=${encodeURIComponent(token)}` : null}
+      // ES-MULTIDOC-1 — each document streams through the token file route with
+      // its ?doc=N index; markdown documents ignore the URL and render inline.
+      fileUrlForDoc={(i) => `/api/sign/file?token=${encodeURIComponent(token)}&doc=${i}`}
       savedSignature={saved}
       onSign={async ({ signatureName, signatureData, fieldValues, consent }) => {
         const r = await fetch('/api/sign/submit', {
