@@ -25,6 +25,7 @@ export type WfStepActionKind =
   | 'manual_task'
   | 'complete_matter'
   | 'invoke_capability'
+  | 'esign'
 
 export interface WfEdge {
   to: string
@@ -85,6 +86,48 @@ export interface MatterDetail {
   // WP A1 — resolved governing law: matter override > firm home jurisdiction >
   // null (honest unset). Display + edit control on the Overview facts card.
   governingLaw?: { code: string; displayName: string; source: 'matter' | 'firm' } | null
+}
+
+// ── The runner footer doctrine (#442, pinned by ES-4) ──────────────────────
+// Which advance control a step's pop-up footer gets. A step whose attorney edge
+// fires via its OWN completing action (e.g. review's draft.approve, the e-sign
+// step's Review & send) shows NO bare Continue — its embedded surface is the
+// completion path (legal.matter.advance's GUARD 2 would 409 a bare Continue
+// there anyway). A client gate gets Skip; a system/automatic-only gate gets
+// neither (the matter advances when the awaited event fires). Extracted pure so
+// the no-dead-Continue behavior is unit-tested, not just rendered.
+export interface StepAdvanceControls {
+  attorneyEdge: WfEdge | null
+  clientEdge: WfEdge | null
+  systemEdge: WfEdge | null
+  /** The attorney edge a bare Continue may advance (null ⇒ no Continue). */
+  continueEdge: WfEdge | null
+  /** The client edge a Skip may advance (null ⇒ no Skip). */
+  skipEdge: WfEdge | null
+  /** Current stage holds for a system/automatic event — show the waiting note. */
+  waitsOnSystem: boolean
+}
+
+export function stepAdvanceControls(stage: WfStage, isCurrent: boolean): StepAdvanceControls {
+  const attorneyEdge = isCurrent
+    ? (stage.advances_to.find((e) => e.gate === 'attorney') ?? null)
+    : null
+  const clientEdge = isCurrent ? (stage.advances_to.find((e) => e.gate === 'client') ?? null) : null
+  const systemEdge = isCurrent
+    ? (stage.advances_to.find((e) => e.gate === 'system' || e.gate === 'automatic') ?? null)
+    : null
+  const attorneyEdgeHasOwnAction =
+    !!attorneyEdge?.via && attorneyEdge.via !== 'legal.matter.advance'
+  const continueEdge = attorneyEdge && !attorneyEdgeHasOwnAction ? attorneyEdge : null
+  const skipEdge = !continueEdge && clientEdge ? clientEdge : null
+  return {
+    attorneyEdge,
+    clientEdge,
+    systemEdge,
+    continueEdge,
+    skipEdge,
+    waitsOnSystem: isCurrent && !attorneyEdge && !clientEdge && !!systemEdge,
+  }
 }
 
 // Client-side replica of the server resolver's stepStates idea (resolve.ts): a

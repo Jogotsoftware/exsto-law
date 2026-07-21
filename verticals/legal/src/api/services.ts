@@ -21,9 +21,11 @@ import { recordUploadedDocument } from './documentUpload.js'
 import type { GenerationMode } from './generateDraft.js'
 import {
   deriveLifecycleFromService,
+  ensureEsignStage,
   validateLifecycle,
   type Lifecycle,
 } from '../lifecycle/index.js'
+import { getServiceLifecycle, setServiceLifecycle } from './serviceLifecycle.js'
 
 export interface ServiceField {
   id: string
@@ -1627,6 +1629,29 @@ export async function getDocumentTemplateEsignConfig(
   })
 }
 
+// ESIGN-UNIFY-1 ES-4 — every document kind's e-sign declaration on the service,
+// defensively parsed. The wizard's workflow write path (setServiceLifecycleAI)
+// reads this to auto-add the e-sign step for each signable kind.
+export async function listDocumentTemplateEsignConfigs(
+  ctx: ActionContext,
+  serviceKey: string,
+): Promise<Record<string, TemplateEsignConfig>> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<WorkflowRow>(
+      `SELECT ${WORKFLOW_COLS}
+       FROM workflow_definition
+       WHERE tenant_id = $1 AND kind_name = $2 AND valid_to IS NULL`,
+      [ctx.tenantId, serviceKey],
+    )
+    const raw = res.rows[0]?.transitions.document_templates?.esign ?? {}
+    const out: Record<string, TemplateEsignConfig> = {}
+    for (const [docKind, value] of Object.entries(raw)) {
+      out[docKind] = parseTemplateEsignConfig(value)
+    }
+    return out
+  })
+}
+
 export async function updateDocumentTemplateEsignConfig(
   ctx: ActionContext,
   serviceKey: string,
@@ -1675,6 +1700,22 @@ export async function updateDocumentTemplateEsignConfig(
   const saved = await getDocumentTemplateEsignConfig(ctx, serviceKey, documentKind)
   if (!saved)
     throw new Error(`Document template e-sign config not found after update: ${serviceKey}`)
+
+  // ESIGN-UNIFY-1 ES-4 (design §7) — marking a service's document signable is
+  // the builder-wizard moment the workflow gains its e-sign step: insert it
+  // right after the approve step (system edge on esign.completed) and persist a
+  // new lifecycle version. Idempotent (a graph that already carries an e-sign
+  // step for this kind is untouched) and a no-op for a service with no authored
+  // graph yet — the AI workflow write path (setServiceLifecycleAI) auto-adds
+  // there instead. Unsigning ({ signable: false }) never auto-REMOVES a step:
+  // steps the attorney may have customized are theirs to delete in the editor.
+  if (validated.signable) {
+    const lifecycle = await getServiceLifecycle(ctx, serviceKey)
+    if (lifecycle) {
+      const ensured = ensureEsignStage(lifecycle.graph, documentKind)
+      if (ensured.changed) await setServiceLifecycle(ctx, serviceKey, ensured.graph)
+    }
+  }
   return saved
 }
 

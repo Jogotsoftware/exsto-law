@@ -23,3 +23,6 @@ export * from './capabilityAuthoring.js'
 // WORKFLOW-AUTHORING-1 — the gate-transition vocabulary (the exact via/on advance
 // tokens per gate) so the builder never writes prose in an edge that can't fire.
 export * from './gateTransitions.js'
+// ESIGN-UNIFY-1 ES-4 — auto-add the workflow-embedded e-sign stage after the
+// approve step for signable document kinds (pure graph surgery).
+export * from './esignStage.js'

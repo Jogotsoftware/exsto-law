@@ -45,6 +45,7 @@ export type StepActionKind =
   | 'manual_task' // attorney: a free-form to-do with a done check
   | 'complete_matter' // terminal: close the matter
   | 'invoke_capability' // run a registered, step-invocable platform capability (ADR 0046)
+  | 'esign' // ESIGN-UNIFY-1 ES-4: confirm-and-send the approved doc for e-signature, hold until esign.completed
 
 // The config an `invoke_capability` step carries: WHICH registered capability to run
 // (by its stable registry slug) and the attorney's standing instructions for it, set
@@ -57,6 +58,15 @@ export interface CapabilityStepConfig {
   // Attorney standing instructions (e.g. the review rubric, the materials to request).
   // Shape is capability-specific; validated against the capability's config_schema.
   capability_config?: Record<string, unknown>
+}
+
+// ESIGN-UNIFY-1 ES-4 (design §7) — the config an `esign` step carries: WHICH
+// document kind's approved version it sends. Recipients/roles are NOT stored
+// here — they resolve at open time from the service's template e-sign config
+// (transitions.document_templates.esign[document_kind], the ES-3 store) via
+// esignPrefill, so a template edit never strands a stale copy in the graph.
+export interface EsignStepConfig {
+  document_kind?: string
 }
 
 export interface StepAction {

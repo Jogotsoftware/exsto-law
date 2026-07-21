@@ -31,6 +31,7 @@ import {
   diagnoseCapabilityStepConfig,
   diagnoseMissingCapabilitySlug,
   diagnoseEdgeTransition,
+  ensureEsignStagesForConfigs,
   GATE_TRANSITION_VOCABULARY,
   type GateTransitionOption,
   type StepActionSpec,
@@ -39,7 +40,7 @@ import {
   type StepAction,
 } from '../lifecycle/index.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
-import { getService } from './services.js'
+import { getService, listDocumentTemplateEsignConfigs } from './services.js'
 import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 import { listStandaloneTemplates } from '../queries/templates.js'
 import { listWorkflowStepTemplates } from '../queries/workflowStepLibrary.js'
@@ -621,6 +622,21 @@ export async function setServiceLifecycleAI(
   graph: Lifecycle,
   reasoning: WorkflowReasoning,
 ): Promise<{ workflowDefinitionId: string; serviceKey: string; version: number }> {
+  // ESIGN-UNIFY-1 ES-4 (design §7) — the builder wizard AUTO-ADDS the e-sign
+  // step: for every document kind this service declares signable
+  // (transitions.document_templates.esign, the ES-3 store), insert the e-sign
+  // stage right after the approve step BEFORE validating, so the persisted
+  // graph is exactly the validated graph. Identity for unsignable services
+  // (same graph reference — completely unaffected) and for graphs that already
+  // carry an e-sign step (incl. the ESIGN-BLOCK-1 capability shape).
+  try {
+    const esignConfigs = await listDocumentTemplateEsignConfigs(ctx, serviceKey)
+    graph = ensureEsignStagesForConfigs(graph, esignConfigs).graph
+  } catch {
+    // A config read failure must not block the authoring write — the wizard's
+    // esign.update path (updateDocumentTemplateEsignConfig) auto-adds too.
+  }
+
   // Validate BEFORE any write (incl. the trace) so an invalid proposal leaves no
   // trace row behind. The handler re-validates, but failing fast here is cleaner.
   const validation = await validateProposedLifecycle(ctx, graph, serviceKey)

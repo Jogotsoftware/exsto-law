@@ -83,6 +83,8 @@ import './tools/sendForSignature.js'
 import './tools/esignAttorneyTools.js'
 import './tools/esignFileTools.js'
 import './tools/esignPortalTools.js'
+// ESIGN-UNIFY-1 ES-4: the workflow e-sign step's confirm-and-send context.
+import './tools/esignWorkflowStepTools.js'
 // Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
 // invoices, list/inspect them, and send (activation-gated). Session 4.
 import './tools/billingTools.js'

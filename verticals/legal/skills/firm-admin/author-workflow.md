@@ -35,6 +35,7 @@ Use ONLY these step-action kinds (the closed `STEP_ACTION_KINDS` catalog). Each 
 | `view_consultation` | shows the consultation (Granola) summary; informational | `attorney` | no |
 | `invoke_capability` | runs a registered platform capability as a step — **drafting is authored this way** (the `document_generation` capability), as are AI review (`ai_document_review`), client materials (`request_client_materials`), the portal-account invite (`send_portal_invite` — parks at the client gate until the client creates their account; skipped honestly when one exists), e-signature (`esignature`), and client emails (`email_generation`) | the capability's `default_gate` | yes |
 | `review_send_document` | attorney reviews → approves → sends the document to the client | `attorney` | yes |
+| `esign` | sends the step's APPROVED document for e-signature: the envelope auto-builds from the approved version, the template's e-sign roles, and its pre-placed fields; the attorney reviews & sends in place, then the matter holds until every signer signs | `system` | yes |
 | `approve_send_invoice` | attorney approves the invoice; it auto-sends to the client | `attorney` | yes |
 | `await_payment` | holds the matter until the invoice is marked paid | `system` | yes |
 | `manual_task` | a free-form to-do the attorney checks off (anything outside the above) | `attorney` | yes |
@@ -75,11 +76,12 @@ Either way: never an invented id, never a made-up document. This is why template
 
 ## Step 5a: E-signature — only where a document is signable
 
-An e-signature step is an `invoke_capability` stage running the `esignature` capability, and it composes in exactly ONE place: **right after the step(s) that produce and approve a document whose template declares `signature.required`** — the drafting stage (`invoke_capability` running `document_generation`), optionally followed by its `review_send_document` review stage (the usual shape, since only an APPROVED document is ever sent for signature). The validator rejects anything else — never an e-sign step on an unsigned document, never free-floating.
+The e-sign step is the first-class `esign` kind, and it belongs in exactly ONE place: **right after the step that reviews and approves the signable document** (the `review_send_document` stage whose `draft.approve` advances the matter). Its stage carries `action: { kind: 'esign', config: { document_kind: '<kind>' } }`; opening the step auto-builds the envelope — the latest APPROVED version, recipients resolved from the template's e-sign roles, fields pre-placed from the template's markers — and the attorney reviews & sends in place.
 
-- Gate is `system`; the edge advances `on: esign.completed` (all signers finished). The step sends the latest APPROVED version of the preceding step's document and parks the matter until every signer signs.
-- If the attorney wants a signature on a document whose template does not declare it, fix the TEMPLATE first (`signature: { required: true, signer_roles: ['client', ...] }`), then compose the step.
-- If the matter produces several documents, pin which one with `capability_config.document_kind`.
+- **Usually you never compose it by hand**: when a service's document template is marked signable (its e-sign config declares `signable: true` with roles), the platform AUTO-ADDS the `esign` stage right after the approve step on the next workflow write. An unsignable service never gains one.
+- Gate is `system`; the edge advances `on: esign.completed` (all signers finished). Sending (`esign.sent`) completes the step's own action; the matter parks until every signer signs.
+- If the attorney wants a signature on a document whose e-sign config doesn't declare it, fix the TEMPLATE's e-sign config first (signable + roles), then the step follows.
+- Legacy shape: an `invoke_capability` stage running the `esignature` capability still validates and runs — but only right after a document-producing (+review) chain whose template declares `signature.required`; the validator rejects anything else. Prefer the `esign` kind for new workflows.
 
 ## Step 5a-bis: Email steps — the comms block
 

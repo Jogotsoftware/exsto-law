@@ -97,6 +97,24 @@ export const STEP_ACTION_CATALOG: StepActionSpec[] = [
     defaultGate: 'attorney',
     blocking: true,
   },
+  {
+    // ESIGN-UNIFY-1 ES-4 (design §7) — the workflow-embedded e-sign step. Sits
+    // right after the approve step for a SIGNABLE document kind (the builder
+    // auto-adds it — lifecycle/esignStage.ts): opening the step shows the
+    // auto-built envelope (approved version + template-role-resolved recipients
+    // + pre-placed fields) with ONE primary action, Review & send. The send is
+    // the step's own embedded action (never a bare Continue — the #442
+    // doctrine); the stage then HOLDS the matter until every signer signs: its
+    // system edge fires on esign.completed via the existing lifecycle dispatch
+    // in handlers/esign.ts (the #320 loop). esign.sent marks the step's own
+    // action complete (the card reads "sent — awaiting signatures").
+    kind: 'esign',
+    label: 'eSign — send for signature',
+    description:
+      "Send the step's approved document for e-signature: the envelope is auto-built from the approved version, the template's signer roles, and its pre-placed fields — the attorney reviews and sends in place. The matter then waits until all signers have signed (esign.completed).",
+    defaultGate: 'system',
+    blocking: true,
+  },
 ]
 
 export const STEP_ACTION_KINDS: StepActionKind[] = STEP_ACTION_CATALOG.map((s) => s.kind)
