@@ -8,6 +8,7 @@ import {
 import { enqueueJob } from '@exsto/worker-runtime'
 import { callClaudeDrafter } from '../adapters/claude.js'
 import { loadDraftingPrompt } from '../templates/loader.js'
+import { DOCUMENT_STYLE_INSTRUCTION } from '../templates/documentStyle.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
 import { renderTemplate, buildMergeData, longDate } from './templateMerge.js'
@@ -409,6 +410,9 @@ export async function runDraftGeneration(
     documentKind: input.documentKind,
     guidance: input.guidance,
     systemFactsText,
+    // Document-formatting standard — every AI draft is held to the same
+    // polished, professional legal-document typography and structure.
+    styleText: DOCUMENT_STYLE_INSTRUCTION,
     activeSkillsText,
     serviceDigestText,
   })
@@ -548,6 +552,12 @@ export interface AssembleArgs {
   // model's first read), unlike skills/digest/guidance below which append.
   // Undefined only in tests exercising the pre-existing slot contract alone.
   systemFactsText?: string
+  // Document-formatting standard (documentStyle.ts) — the professional
+  // typography/structure rules the produced document must follow. A platform
+  // rule, not attorney guidance, so it sits with the system facts at the TOP
+  // (after them, before the base prompt), not in the append layers below.
+  // Undefined in tests exercising the pre-existing slot contract alone.
+  styleText?: string
   // Selected-skill bodies (buildActiveSkillsText) injected so a picked playbook is
   // guaranteed to apply. Empty string when none selected.
   activeSkillsText?: string
@@ -579,6 +589,16 @@ export function assembleDraftingPrompt(args: AssembleArgs): string {
       /operating agreement/gi,
       args.documentKind === 'engagement_letter' ? 'engagement letter' : 'operating agreement',
     )
+
+  // The document-formatting standard is a platform rule about HOW to write the
+  // document (not attorney guidance), so it rides at the top with the system
+  // facts. Prepend it FIRST here, then the system facts, so the final order is
+  // [system facts][style standard][base prompt] — facts (jurisdiction/date/firm)
+  // lead, the style standard follows, both ahead of the base prompt and the
+  // append layers below.
+  if (args.styleText?.trim()) {
+    prompt = `${args.styleText.trim()}\n\n${prompt}`
+  }
 
   // System facts (jurisdiction, today, firm name) go FIRST — the model reads
   // them before anything else, and they are platform facts, not attorney

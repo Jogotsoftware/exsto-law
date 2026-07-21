@@ -22,11 +22,13 @@ import {
   loadWorkflowAuthoringContext,
   validateProposedLifecycle,
   isDocumentProducingStage,
+  esignOrderingRedirect,
 } from './workflowAuthoring.js'
 import { computeBillingReadout, formatBillingReadout } from './billingReadout.js'
 import { getServiceLifecycle } from './serviceLifecycle.js'
 import { getService } from './services.js'
 import type { CostProposal } from './costAuthoring.js'
+import type { TemplateProposal } from './intakeTemplateTools.js'
 
 // Key-order-stable stringify so two semantically identical stages never read as
 // "changed" just because the model emitted their keys in a different order.
@@ -278,6 +280,12 @@ export function buildProposeWorkflowTool(
   // tools that only exist when the build wizard is on. Flag-off callers pass false
   // and keep the pre-P4 behavior (the validator speaks for itself).
   wizardToolsAvailable = true,
+  // ESIGN-AUTHORING-BRIDGE — the template proposals captured earlier THIS TURN
+  // (threaded exactly like costProposals). A same-turn propose_template with an
+  // e-sign declaration satisfies the compose-time signability check and the e-sign
+  // ordering pre-gate below, so a build that just proposed a signable template can
+  // compose its e-sign step without dead-ending.
+  templateProposals: TemplateProposal[] = [],
 ): ClientTool {
   // P6 cap — a model that keeps restating billing/steps in its summary must not
   // burn the whole turn on copy rejections: after two, capture with the summary
@@ -324,6 +332,17 @@ export function buildProposeWorkflowTool(
           return `Nothing was captured (this does not count as a failed attempt): this workflow produces documents but "${serviceKey}" has no billing set yet, and the workflow validates against the declared billing. Run the billing step FIRST — ask the attorney when the client is charged, call propose_cost — then call propose_workflow again with this graph.`
         }
       }
+      // ESIGN-AUTHORING-BRIDGE — deterministic e-sign ordering pre-gate (twin of the
+      // billing pre-gate above). An e-sign step only composes over a SIGNABLE
+      // document, and propose_template is capture-only, so the template's e-sign
+      // declaration must have RUN (persisted, or captured earlier this turn) before
+      // composing. A redirect, not a compose failure — it deliberately does NOT
+      // consume MAX_FAILED_PROPOSE_ATTEMPTS, so the ordering nudge can't eat the
+      // model's real correction budget and the dead-end loop never starts.
+      if (wizardToolsAvailable) {
+        const esignRedirect = await esignOrderingRedirect(ctx, graph, serviceKey, templateProposals)
+        if (esignRedirect) return esignRedirect
+      }
       // P6 — the summary is WHY only; a restate of billing or the step list is a
       // copy problem, not a graph problem, so it does NOT consume
       // MAX_FAILED_PROPOSE_ATTEMPTS (that budget exists for graphs that keep
@@ -347,6 +366,9 @@ export function buildProposeWorkflowTool(
               ...(pendingCost.documentFees ? { documentFees: pendingCost.documentFees } : {}),
             }
           : undefined,
+        // Same-turn template signability (ESIGN-AUTHORING-BRIDGE) rides alongside the
+        // same-turn billing override so the e-sign check passes in-turn.
+        templateProposals,
       )
       if (!validation.ok) {
         const errorText = validation.errors.join('; ')

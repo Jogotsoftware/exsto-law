@@ -4,7 +4,12 @@
 // caught at authoring time. These cases avoid serviceKey and invoke_capability
 // stages so the validator runs DB-free.
 import { describe, it, expect } from 'vitest'
-import { validateProposedLifecycle, type Lifecycle } from '@exsto/legal'
+import {
+  validateProposedLifecycle,
+  isProducedDocumentSignable,
+  graphHasEsignStep,
+  type Lifecycle,
+} from '@exsto/legal'
 
 const CTX = { tenantId: '00000000-0000-0000-0000-000000000001', actorId: 'a' }
 
@@ -134,5 +139,113 @@ describe('validateProposedLifecycle warnings (WF-FIX-1 WP7)', () => {
     const res = await validateProposedLifecycle(CTX, graph)
     expect(res.errors).toEqual([])
     expect(res.warnings).toEqual([])
+  })
+})
+
+// ESIGN-AUTHORING-BRIDGE — the same-turn template-signability bridge, tested at the
+// pure decision level (DB-free, like the composition-contract idiom). The full
+// validator/pre-gate walk needs a live firm library (listStandaloneTemplates) and is
+// DB-gated elsewhere; these pin the load-bearing logic: does a produced document read
+// as signable given persisted state + templates proposed earlier THIS turn.
+const SERVICE = 'nc_single_member_llc_formation'
+const DOC_KIND = 'operating_agreement'
+const TEMPLATE_ID = 'tmpl-oa-1'
+
+// A persisted firm template that is NOT signable (the live repro: the model just
+// proposed signability, but the persisted twin still declares required:false).
+const UNSIGNED_LIB = [
+  {
+    templateEntityId: TEMPLATE_ID,
+    docKind: DOC_KIND,
+    signature: { required: false, signer_roles: [] },
+    esignConfig: { signable: false, roles: [] },
+  },
+]
+
+// The same template, persisted as signable (the attorney approved it earlier).
+const SIGNED_LIB = [
+  {
+    templateEntityId: TEMPLATE_ID,
+    docKind: DOC_KIND,
+    signature: { required: true, signer_roles: ['client'] },
+    esignConfig: { signable: false, roles: [] },
+  },
+]
+
+describe('isProducedDocumentSignable — same-turn template bridge', () => {
+  it('(a) an esignature stage + a same-turn signable template proposal → signable', () => {
+    // Persisted is unsigned, but a template proposed THIS turn (signature) marks it
+    // signable — the case that dead-ended before the bridge.
+    const viaSignature = isProducedDocumentSignable([TEMPLATE_ID], UNSIGNED_LIB, SERVICE, [
+      {
+        serviceKey: SERVICE,
+        docKind: DOC_KIND,
+        signature: { required: true, signer_roles: ['client'] },
+      },
+    ])
+    expect(viaSignature).toBe(true)
+    // The esignConfig shape (ES-3, supersedes signature) works the same way.
+    const viaEsignConfig = isProducedDocumentSignable([TEMPLATE_ID], UNSIGNED_LIB, SERVICE, [
+      { serviceKey: SERVICE, docKind: DOC_KIND, esignConfig: { signable: true } },
+    ])
+    expect(viaEsignConfig).toBe(true)
+  })
+
+  it('(b) no signable template anywhere → not signable (the pre-gate/error path)', () => {
+    // Persisted unsigned, and the only same-turn proposal is unsigned / for another
+    // docKind → nothing declares signability.
+    expect(isProducedDocumentSignable([TEMPLATE_ID], UNSIGNED_LIB, SERVICE, [])).toBe(false)
+    expect(
+      isProducedDocumentSignable([TEMPLATE_ID], UNSIGNED_LIB, SERVICE, [
+        {
+          serviceKey: SERVICE,
+          docKind: DOC_KIND,
+          signature: { required: false, signer_roles: [] },
+        },
+      ]),
+    ).toBe(false)
+    // A signable proposal for a DIFFERENT docKind must not count.
+    expect(
+      isProducedDocumentSignable([TEMPLATE_ID], UNSIGNED_LIB, SERVICE, [
+        { serviceKey: SERVICE, docKind: 'engagement_letter', esignConfig: { signable: true } },
+      ]),
+    ).toBe(false)
+  })
+
+  it('(c) a persisted-signable template still passes with no proposals', () => {
+    expect(isProducedDocumentSignable([TEMPLATE_ID], SIGNED_LIB, SERVICE, undefined)).toBe(true)
+    // esignConfig.signable on the persisted twin counts too.
+    const esignPersisted = [
+      {
+        templateEntityId: TEMPLATE_ID,
+        docKind: DOC_KIND,
+        signature: { required: false, signer_roles: [] },
+        esignConfig: { signable: true, roles: [] },
+      },
+    ]
+    expect(isProducedDocumentSignable([TEMPLATE_ID], esignPersisted, SERVICE, undefined)).toBe(true)
+  })
+})
+
+describe('graphHasEsignStep', () => {
+  it('detects both the first-class esign kind and invoke_capability{esignature}', () => {
+    const firstClass: Lifecycle = [
+      { key: 'a', label: 'A', entry: true, action: { kind: 'esign' }, advances_to: [] },
+    ]
+    const capability: Lifecycle = [
+      {
+        key: 'a',
+        label: 'A',
+        entry: true,
+        action: { kind: 'invoke_capability', config: { capability_slug: 'esignature' } },
+        advances_to: [],
+      },
+    ]
+    const neither: Lifecycle = [
+      { key: 'a', label: 'A', entry: true, action: { kind: 'manual_task' }, advances_to: [] },
+    ]
+    expect(graphHasEsignStep(firstClass)).toBe(true)
+    expect(graphHasEsignStep(capability)).toBe(true)
+    expect(graphHasEsignStep(neither)).toBe(false)
   })
 })

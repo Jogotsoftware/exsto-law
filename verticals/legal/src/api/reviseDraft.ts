@@ -4,6 +4,7 @@ import { callClaudeDrafter } from '../adapters/claude.js'
 import { getDraftVersion } from '../queries/drafts.js'
 import { resolveMatterJurisdiction } from './matterJurisdiction.js'
 import { assembleBriefEvidence, renderEvidenceBundle } from './briefEvidence.js'
+import { DOCUMENT_STYLE_INSTRUCTION } from '../templates/documentStyle.js'
 import { FORMATTING_DIRECTIVES } from './formattingDirectives.js'
 
 // The AI agent actor seeded by the core foundation ("Claude", actor_type=agent) —
@@ -163,6 +164,9 @@ ${args.currentMarkdown}
 --- ATTORNEY'S REVISION INSTRUCTION ---
 ${args.instruction}
 --- END INSTRUCTION ---
+
+${DOCUMENT_STYLE_INSTRUCTION}
+Apply this standard to any text you ADD or REWRITE so it matches a polished, professional legal document. Do NOT restructure or reformat passages the instruction does not touch — preserve the existing document's structure, headings, and typography so the redline stays tight.
 
 Return the full revised document markdown FIRST. Then, on a new line, a fenced JSON block:
 \`\`\`json

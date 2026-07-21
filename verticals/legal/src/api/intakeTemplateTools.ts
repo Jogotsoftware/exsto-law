@@ -27,6 +27,7 @@
 // attorney never approves a broken contract.
 import type { ActionContext } from '@exsto/substrate'
 import type { ClientTool } from '../adapters/claude.js'
+import { DOCUMENT_STYLE_BRIEF } from '../templates/documentStyle.js'
 import {
   coerceSystemFieldsInternal,
   loadQuestionnaireContext,
@@ -287,7 +288,8 @@ const PROPOSE_TEMPLATE_TOOL_DEF = {
       body: {
         type: 'string',
         description:
-          'The COMPLETE document body in markdown, with {{tokens}} (flat snake_case) wherever a value is filled per matter. Bind tokens to questionnaire field ids.',
+          'The COMPLETE document body in markdown, with {{tokens}} (flat snake_case) wherever a value is filled per matter. Bind tokens to questionnaire field ids. ' +
+          DOCUMENT_STYLE_BRIEF,
       },
       doc_kind: {
         type: 'string',
