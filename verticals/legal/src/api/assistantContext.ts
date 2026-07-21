@@ -91,8 +91,9 @@ async function resolveMatterJurisdictionLine(
 ): Promise<string> {
   const resolved = await resolveMatterJurisdiction(ctx, matterEntityId)
   if (resolved) return `U.S. ${resolved.displayName} business-law firm`
-  // resolveMatterJurisdiction already falls through matter → firm, so a null
-  // result means the firm rung is null too — no second (redundant) read needed.
+  // resolveMatterJurisdiction already falls through matter → client address →
+  // firm, so a null result means the firm rung is null too — no second
+  // (redundant) read needed.
   return resolveFirmJurisdictionLine(ctx)
 }
 

@@ -1,6 +1,7 @@
-// WP A1 — matter jurisdiction resolver (verticals/legal/src/api/matterJurisdiction.ts).
-//   resolveJurisdictionChain is PURE (matter beats firm beats honest null) so
-//   the chain logic runs with no DB and no fixtures.
+// WP A1 + WF-FIX-2 #3 — matter jurisdiction resolver
+// (verticals/legal/src/api/matterJurisdiction.ts).
+//   resolveJurisdictionChain is PURE (matter beats client address beats firm
+//   beats honest null) so the chain logic runs with no DB and no fixtures.
 //   resolveMatterJurisdictionWithClient is exercised against a minimal fake
 //   DbClient (no live Postgres) to prove the "kind not defined yet / nothing
 //   found" case degrades to null instead of throwing — the exact shape a
@@ -13,25 +14,54 @@ import {
 } from '../../verticals/legal/src/api/matterJurisdiction.js'
 import type { DbClient } from '@exsto/shared'
 
+// A representative client on-file address (state at the standard tail position).
+const NC_ADDRESS = '123 Main St, Raleigh, NC 27601'
+
 describe('resolveJurisdictionChain (pure)', () => {
-  it('the matter fact wins when both are set', () => {
-    expect(resolveJurisdictionChain('NC', 'CA')).toEqual({
+  it('the matter fact wins when all rungs are set (matter beats address beats firm)', () => {
+    expect(resolveJurisdictionChain('NC', '500 King St, Wilmington, DE 19801', 'CA')).toEqual({
       code: 'NC',
       displayName: 'North Carolina',
       source: 'matter',
     })
   })
 
-  it('falls back to the firm fact when the matter has none', () => {
-    expect(resolveJurisdictionChain(null, 'CA')).toEqual({
+  it('the client address wins over firm when the matter has no fact', () => {
+    expect(resolveJurisdictionChain(null, NC_ADDRESS, 'CA')).toEqual({
+      code: 'NC',
+      displayName: 'North Carolina',
+      source: 'client_address',
+    })
+  })
+
+  it('parses a full state name at the standard position on the address rung', () => {
+    expect(
+      resolveJurisdictionChain(null, '77 Peachtree Rd, Atlanta, Georgia 30303', null),
+    ).toEqual({
+      code: 'GA',
+      displayName: 'Georgia',
+      source: 'client_address',
+    })
+  })
+
+  it('falls back to the firm fact when neither matter nor address resolve', () => {
+    expect(resolveJurisdictionChain(null, null, 'CA')).toEqual({
       code: 'CA',
       displayName: 'California',
       source: 'firm',
     })
   })
 
+  it('an UNPARSEABLE client address falls through to the firm rung', () => {
+    expect(resolveJurisdictionChain(null, '123 Main St', 'TX')).toEqual({
+      code: 'TX',
+      displayName: 'Texas',
+      source: 'firm',
+    })
+  })
+
   it('normalizes a legacy display-string matter value (e.g. "North Carolina")', () => {
-    expect(resolveJurisdictionChain('North Carolina', null)).toEqual({
+    expect(resolveJurisdictionChain('North Carolina', null, null)).toEqual({
       code: 'NC',
       displayName: 'North Carolina',
       source: 'matter',
@@ -39,19 +69,19 @@ describe('resolveJurisdictionChain (pure)', () => {
   })
 
   it('falls through to firm when the matter value does not normalize (garbage)', () => {
-    expect(resolveJurisdictionChain('not-a-state', 'TX')).toEqual({
+    expect(resolveJurisdictionChain('not-a-state', null, 'TX')).toEqual({
       code: 'TX',
       displayName: 'Texas',
       source: 'firm',
     })
   })
 
-  it('returns null when neither is set (honest unset, no service rung, no guess)', () => {
-    expect(resolveJurisdictionChain(null, null)).toBeNull()
+  it('returns null when nothing is set (honest unset, no service rung, no guess)', () => {
+    expect(resolveJurisdictionChain(null, null, null)).toBeNull()
   })
 
-  it('returns null when neither normalizes', () => {
-    expect(resolveJurisdictionChain('nowhere', 'also-nowhere')).toBeNull()
+  it('returns null when no rung resolves (garbage matter + unparseable address + garbage firm)', () => {
+    expect(resolveJurisdictionChain('nowhere', '123 Main St', 'also-nowhere')).toBeNull()
   })
 })
 
