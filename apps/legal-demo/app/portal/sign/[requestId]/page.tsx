@@ -42,6 +42,15 @@ export default function PortalSignPage({ params }: { params: Promise<{ requestId
     <div className="page">
       <SignDocument
         doc={doc}
+        fileUrl={
+          doc.isFile ? `/api/client/portal/file?requestId=${encodeURIComponent(requestId)}` : null
+        }
+        // ES-MULTIDOC-1 — each document streams through the portal file route
+        // with its ?doc=N index; markdown documents ignore the URL and render
+        // inline. Mirrors /sign/[token]/page.tsx's fileUrlForDoc.
+        fileUrlForDoc={(i) =>
+          `/api/client/portal/file?requestId=${encodeURIComponent(requestId)}&doc=${i}`
+        }
         onSign={async ({ signatureName, signatureData, fieldValues, consent }) => {
           const r = await callClientPortalMcp<{ completed: boolean }>({
             toolName: 'legal.esign.portal.sign',
