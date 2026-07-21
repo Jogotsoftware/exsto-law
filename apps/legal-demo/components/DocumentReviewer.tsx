@@ -21,6 +21,7 @@ import { downloadAsPdf, downloadAsWord, shareUrlFor, watermarkForStatus } from '
 import { formatDateTimeShort } from '@/lib/datetime'
 import { lineDiff, diffStats } from '@/lib/lineDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
+import { renderMissingChipsHtml } from '@/lib/missingFields'
 import { ActionsMenu } from '@/components/ActionsMenu'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { DocumentSheet, DocumentCanvas } from '@/components/DocumentSheet'
@@ -829,7 +830,9 @@ export function DocumentReviewer({
           <DocumentSheet variant="full" watermark={watermark}>
             <div
               className="doc-rendered li-rev-doc"
-              dangerouslySetInnerHTML={{ __html: renderDocumentHtml(draft.bodyMarkdown) }}
+              dangerouslySetInnerHTML={{
+                __html: renderMissingChipsHtml(renderDocumentHtml(draft.bodyMarkdown)),
+              }}
             />
           </DocumentSheet>
         </DocumentCanvas>

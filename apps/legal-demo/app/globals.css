@@ -26019,3 +26019,26 @@ details.li-brief-research summary:hover {
   border-radius: 6px;
   background: var(--li-warn-bg, #fbefd6);
 }
+
+/* Item 4 — [[MISSING: field]] merge-gap markers render as small warn chips (the
+   #444 unresolved-field warn tone) in both the reader and the editor. The
+   underlying text stays the marker; li-missing-raw hides it in the editor while
+   the chip widget shows in its place. Sized in em so it scales with the doc. */
+.li-missing-chip {
+  display: inline-block;
+  vertical-align: baseline;
+  font-size: 0.8em;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid var(--li-warn, #9a6e1e);
+  background: var(--li-warn-bg, #fbefd6);
+  color: var(--li-warn, #9a6e1e);
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+.li-missing-raw {
+  display: none;
+}

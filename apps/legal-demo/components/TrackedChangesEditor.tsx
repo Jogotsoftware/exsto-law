@@ -47,6 +47,7 @@ import {
   extractDocText,
   setTrackDecorations,
 } from '@/components/trackedChangesDoc'
+import { MissingFieldDecorations } from '@/components/missingFieldDoc'
 import { DocumentSheet } from '@/components/DocumentSheet'
 import { GemSparkle, GemShimmer } from '@/components/GemSparkle'
 import { ConfirmModal } from '@/components/ConfirmModal'
@@ -273,6 +274,9 @@ export function TrackedChangesEditor({
       SignatureLine,
       PageBreak,
       TrackChangesDecorations,
+      // EDITOR-FIX-1 (item 4): render [[MISSING: field]] merge gaps as warn chips
+      // (the raw marker stays in the model — presentation only).
+      MissingFieldDecorations,
     ],
     content: seedHtml,
     immediatelyRender: false,
