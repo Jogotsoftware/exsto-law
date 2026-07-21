@@ -434,10 +434,8 @@ function EngagementAgreementCard(): React.ReactElement {
               <div className="li-set-kv-full">
                 <div className="li-set-kv-value">
                   Clients see and sign this agreement in the portal before messaging or booking.{' '}
-                  <Link href="/attorney/templates">
-                    Review the template
-                  </Link>{' '}
-                  to check the merged fields.
+                  <Link href="/attorney/templates">Review the template</Link> to check the merged
+                  fields.
                 </div>
               </div>
             </div>

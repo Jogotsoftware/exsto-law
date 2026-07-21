@@ -34,8 +34,9 @@ export interface PortalNavUser {
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (!parts.length) return '·'
-  return ((parts[0][0] ?? '') + (parts.length > 1 ? (parts[parts.length - 1][0] ?? '') : ''))
-    .toUpperCase()
+  return (
+    (parts[0][0] ?? '') + (parts.length > 1 ? (parts[parts.length - 1][0] ?? '') : '')
+  ).toUpperCase()
 }
 
 const PIN_STORAGE_KEY = 'exsto.li.cpRailPinned'
@@ -199,11 +200,7 @@ export function PortalSideNav({
             {userMenuOpen && (
               <div className="li-rail-pop" role="menu">
                 <div className="li-rail-pop-email">{user.email}</div>
-                <a
-                  href="/api/client/auth/logout"
-                  className="li-rail-pop-signout"
-                  role="menuitem"
-                >
+                <a href="/api/client/auth/logout" className="li-rail-pop-signout" role="menuitem">
                   {t('portal.signout', undefined, 'Sign out')}
                 </a>
               </div>

@@ -151,6 +151,7 @@ export type { AvailabilitySlot, CreatedEvent, BusyInterval } from '../adapters/g
 export type { GenerationMode } from './generateDraft.js'
 export * from './engagement.js'
 export * from './engagementAgreement.js'
+export { extractPdfText } from './pdfText.js'
 export * from './permissionScope.js'
 export * from './briefEngine.js'
 export * from './briefResearchGuard.js'

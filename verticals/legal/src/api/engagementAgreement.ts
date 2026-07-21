@@ -19,15 +19,11 @@ import { getStandaloneTemplate } from '../queries/templates.js'
 import { getContact } from '../queries/contacts.js'
 import { getTenantSettings } from './tenantSettings.js'
 import { renderTemplate, longDate } from './templateMerge.js'
-
-export interface EngagementAgreementDetails {
-  hourly_rate?: string
-  litigation_rate?: string
-  retainer?: string
-  attorney_name?: string
-  /** The client signature block's label from the letter ("Managing Member", …). */
-  signer_label?: string
-}
+import {
+  DETAILS_DELIM,
+  parseImportOutput,
+  type EngagementAgreementDetails,
+} from './engagementImportParse.js'
 
 export interface EngagementAgreementImportResult {
   templateId: string
@@ -37,26 +33,28 @@ export interface EngagementAgreementImportResult {
   version: number
 }
 
-const DETAILS_DELIM = '===DETAILS==='
+export { parseImportOutput, type EngagementAgreementDetails }
 
 // Unfenced JSON after ===DETAILS=== on purpose: callClaudeDrafter's
 // splitDocumentAndTrace claims a TRAILING fenced ```json block as the reasoning
 // trace — a fenced details block would be eaten before we ever saw it.
 function buildImportPrompt(letterMarkdown: string): string {
   return [
-    'You are converting a law firm\'s existing engagement letter into a reusable merge template.',
+    "You are converting a law firm's existing engagement letter into a reusable merge template.",
     'Rules — follow exactly:',
-    '1. PRESERVE the letter\'s full text, structure, and ordering. Do not rewrite, summarize, or improve the language. Output GitHub-flavored markdown.',
+    "1. PRESERVE the letter's full text, structure, and ordering. Do not rewrite, summarize, or improve the language. Output GitHub-flavored markdown.",
     '2. Replace ONLY the client-specific values with these merge tokens (use them verbatim, do not invent new field names):',
-    '   {{company_name}} — the client entity/company name; {{client_name}} — the individual signer\'s full name; {{client_email}} — the client\'s email; {{client_address}} — the client\'s street address block; {{letter_date}} — the letter\'s date line.',
+    "   {{company_name}} — the client entity/company name; {{client_name}} — the individual signer's full name; {{client_email}} — the client's email; {{client_address}} — the client's street address block; {{letter_date}} — the letter's date line.",
     '3. Keep every firm-side constant LITERAL: firm name/address, attorney name/email/phone, hourly rates, retainer amounts, all Terms of Engagement text.',
-    '4. The firm\'s own signature block stays literal text (it is pre-signed): keep the attorney name; render the signature line as the attorney\'s name in italics.',
+    "4. The firm's own signature block stays literal text (it is pre-signed): keep the attorney name; render the signature line as the attorney's name in italics.",
     '5. Rebuild the CLIENT acceptance block at the end as:',
     '   a "By:" line containing exactly {{sign:client}}',
     '   a line with {{client_name}}',
     '   a line with the signer title from the letter (literal text)',
     '   a "Dated:" line containing exactly {{date:client}}',
-    '6. After the document, output a line containing exactly ' + DETAILS_DELIM + ' followed by ONE line of raw JSON (no code fence):',
+    '6. After the document, output a line containing exactly ' +
+      DETAILS_DELIM +
+      ' followed by ONE line of raw JSON (no code fence):',
     '   {"hourly_rate":"…","litigation_rate":"…","retainer":"…","attorney_name":"…","signer_label":"…"}',
     '   Use decimal strings for money (e.g. "350.00"); omit keys the letter does not state. signer_label = the client signer\'s title ("Managing Member", …).',
     '',
@@ -64,35 +62,6 @@ function buildImportPrompt(letterMarkdown: string): string {
     '',
     letterMarkdown,
   ].join('\n')
-}
-
-export function parseImportOutput(raw: string): {
-  body: string
-  details: EngagementAgreementDetails
-} {
-  const at = raw.lastIndexOf(DETAILS_DELIM)
-  if (at === -1) return { body: raw.trim(), details: {} }
-  const body = raw.slice(0, at).trim()
-  const tail = raw.slice(at + DETAILS_DELIM.length).trim()
-  let details: EngagementAgreementDetails = {}
-  try {
-    const parsed = JSON.parse(tail.split('\n')[0] || tail) as Record<string, unknown>
-    const s = (k: string): string | undefined =>
-      typeof parsed[k] === 'string' && (parsed[k] as string).trim()
-        ? (parsed[k] as string).trim()
-        : undefined
-    details = {
-      hourly_rate: s('hourly_rate'),
-      litigation_rate: s('litigation_rate'),
-      retainer: s('retainer'),
-      attorney_name: s('attorney_name'),
-      signer_label: s('signer_label'),
-    }
-  } catch {
-    // Details are a convenience summary — a malformed tail never fails the import.
-  }
-  if (!body) throw new Error('The letter converted to an empty template body.')
-  return { body, details }
 }
 
 export async function importEngagementAgreement(
