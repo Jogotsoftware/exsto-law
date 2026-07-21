@@ -18536,12 +18536,48 @@ a.li-cal-agenda-card:hover {
   margin-bottom: 2cqw;
   letter-spacing: 0.04em;
 }
-.li-uac-prop-docline {
+/* The formatted preview body — the real merged/highlighted document HTML from
+   buildPreview() (same pipeline as the template editor's preview pane), scaled
+   with container-query units so it reads correctly at thumb size inside chat. */
+.li-uac-prop-body {
   font-size: 2.2cqw;
   line-height: 1.55;
   color: #2c3852;
-  margin-bottom: 1.2cqw;
   overflow-wrap: anywhere;
+}
+.li-uac-prop-body > * + * {
+  margin-top: 0.9em;
+}
+.li-uac-prop-body h1 {
+  font-size: 1.35em;
+  font-weight: 700;
+  text-align: center;
+  margin: 0 0 0.5em;
+  letter-spacing: 0.02em;
+  color: var(--li-navy);
+}
+.li-uac-prop-body h2 {
+  font-size: 1.15em;
+  font-weight: 700;
+  margin-top: 1em;
+}
+.li-uac-prop-body h3 {
+  font-size: 1.05em;
+  font-weight: 700;
+  margin-top: 0.85em;
+}
+.li-uac-prop-body p {
+  margin: 0;
+}
+.li-uac-prop-body ul,
+.li-uac-prop-body ol {
+  padding-left: 1.4em;
+}
+.li-uac-prop-body blockquote {
+  border-left: 3px solid #d7deea;
+  padding-left: 0.8em;
+  color: #6b7690;
+  font-style: italic;
 }
 .li-uac-steps {
   display: flex;
