@@ -182,6 +182,9 @@ registerActionHandler('legal.firm.set_engagement_terms', async (ctx, client, pay
 
 interface EngagementDecisionPayload {
   client_contact_id: string
+  // ENGAGEMENT-DOC-1 — the client's typed signature on the merged agreement.
+  // Required iff the firm has an engagement-agreement template configured.
+  signed_name?: string
 }
 
 async function assertActiveClientContact(
@@ -213,9 +216,17 @@ function engagementDecisionHandler(
     // to consent to, and a rate-less acceptance would be an empty receipt.
     const rate = await readFirmDefaultRate(client, ctx.tenantId)
     const terms = await readEngagementTerms(client, ctx.tenantId)
+    const agreement = await readEngagementTemplate(client, ctx.tenantId)
+    const signedName = typeof p.signed_name === 'string' ? p.signed_name.trim() : ''
     if (eventKindName === 'engagement.accepted') {
       if (!rate) throw new Error('The firm has no standard hourly rate configured yet.')
       if (!terms) throw new Error('The firm has not published engagement terms yet.')
+      // When the firm's real agreement is configured, acceptance IS a signing:
+      // the typed name is the client's electronic signature on the merged
+      // document (founder decision 2026-07-21: document + text terms, both).
+      if (agreement && !signedName) {
+        throw new Error('Type your full name to sign the engagement agreement.')
+      }
     }
 
     const consentEventId = await insertEvent(client, {
@@ -228,6 +239,9 @@ function engagementDecisionHandler(
         rate: rate ?? null,
         currency: 'USD',
         terms_version: terms?.version ?? null,
+        agreement_template_id: agreement?.template_id ?? null,
+        agreement_template_version: agreement?.version ?? null,
+        signed_name: signedName || null,
       },
       sourceType: 'human',
       sourceRef: `client_contact:${p.client_contact_id}`,

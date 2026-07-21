@@ -14,7 +14,11 @@
 import type { ActionContext } from '@exsto/substrate'
 import { callClaudeDrafter } from '../adapters/claude.js'
 import { createTemplate } from './standaloneTemplates.js'
-import { setEngagementTemplate } from './engagement.js'
+import { setEngagementTemplate, getEngagementTemplate } from './engagement.js'
+import { getStandaloneTemplate } from '../queries/templates.js'
+import { getContact } from '../queries/contacts.js'
+import { getTenantSettings } from './tenantSettings.js'
+import { renderTemplate, longDate } from './templateMerge.js'
 
 export interface EngagementAgreementDetails {
   hourly_rate?: string
@@ -143,5 +147,68 @@ export async function importEngagementAgreement(
     body,
     details,
     version: set.version ?? 1,
+  }
+}
+
+// ── P4 — the client-facing merged agreement ──────────────────────────────────
+// The gate renders the FULL agreement, merged for THIS client, before acceptance.
+// {{sign:client}} / {{date:client}} markers survive the merge (SLOT_RE has no
+// colon) — the portal UI swaps them for the live signature line and date.
+export interface ClientEngagementAgreement {
+  markdown: string
+  templateId: string
+  templateVersion: number
+  /** Merge slots that stayed unfilled — the UI shows an honest heads-up. */
+  missingFields: string[]
+  signerLabel: string | null
+}
+
+export async function getClientEngagementAgreement(
+  ctx: ActionContext,
+  clientContactId: string,
+): Promise<ClientEngagementAgreement | null> {
+  const pointer = await getEngagementTemplate(ctx)
+  if (!pointer) return null
+  const [template, contact, settings] = await Promise.all([
+    getStandaloneTemplate(ctx, pointer.template_id),
+    getContact(ctx, clientContactId),
+    getTenantSettings(ctx),
+  ])
+  if (!template || !contact) return null
+
+  const now = new Date().toISOString()
+  const clientName = contact.fullName?.trim() || undefined
+  const data: Record<string, string | undefined> = {
+    // An individual client without a company signs in their own name — the
+    // letter then addresses the person, which is the correct reading, so
+    // {{company_name}} deliberately falls back to the client's name.
+    company_name: contact.companyName?.trim() || clientName,
+    client_name: clientName,
+    primary_client_name: clientName,
+    client_email: contact.email?.trim() || undefined,
+    letter_date: longDate(now),
+    today: longDate(now),
+    effective_date: longDate(now),
+    firm_name: settings.firmName ?? undefined,
+    attorney_name: settings.attorneyName ?? undefined,
+    firm_email: settings.firmEmail ?? undefined,
+    firm_phone: settings.firmPhone ?? undefined,
+    firm_address: settings.firmAddress ?? undefined,
+  }
+  const rendered = renderTemplate(template.body, data)
+  // The contact has no stored street address — an address block that cannot
+  // fill is dropped rather than shown as a broken marker to the client.
+  const markdown = rendered.markdown
+    .split('\n')
+    .filter((line) => line.trim() !== '[[MISSING: client_address]]')
+    .join('\n')
+
+  const details = pointer.details as { signer_label?: unknown }
+  return {
+    markdown,
+    templateId: pointer.template_id,
+    templateVersion: pointer.version,
+    missingFields: rendered.missingFields.filter((f) => f !== 'client_address'),
+    signerLabel: typeof details.signer_label === 'string' ? details.signer_label : null,
   }
 }

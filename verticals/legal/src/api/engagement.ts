@@ -109,11 +109,14 @@ export async function assertEngagementAccepted(
 export async function acceptEngagement(
   ctx: ActionContext,
   clientContactId: string,
+  // ENGAGEMENT-DOC-1 — the typed signature; the handler requires it iff the
+  // firm has an engagement-agreement template configured.
+  signedName?: string,
 ): Promise<{ consentEventId: string; rate: string | null; termsVersion: number | null }> {
   const res = await submitAction(ctx, {
     actionKindName: 'legal.engagement.accept',
     intentKind: 'enforcement',
-    payload: { client_contact_id: clientContactId },
+    payload: { client_contact_id: clientContactId, signed_name: signedName },
   })
   return res.effects[0] as {
     consentEventId: string
