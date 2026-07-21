@@ -174,6 +174,22 @@ export const ChevronLeftIcon = (p: IconProps) => (
   </Svg>
 )
 
+export const ChevronUpIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <polyline points="18 15 12 9 6 15" />
+  </Svg>
+)
+
+// lucide `table` (DOC-TABLES-1 — the editor toolbar's table menu).
+export const TableIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3v18" />
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M3 9h18" />
+    <path d="M3 15h18" />
+  </Svg>
+)
+
 export const MessageCircleIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />

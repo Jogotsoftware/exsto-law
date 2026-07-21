@@ -8,6 +8,7 @@ Produce a professionally formatted, execution-ready legal document:
 - DEFINED TERMS & SECTION LEADS: bold each defined term where it is first defined, and bold the lead-in phrase of each section (e.g. "**Governing Law.** This Agreement is governed by …").
 - REGISTER: use a formal, precise, robust legal register — complete sentences, defined terms used consistently, no casual phrasing, filler, or hedging.
 - SIGNATURE, DATE & EXECUTION LINES: NEVER draw signature, date, or execution lines with underscores or dashes ("______", "Date: ____", "-----", "—"). Emit the canonical execution markers instead — {{sign:key}} for a signature line, {{date:key}} for a date line, and {{name:key}} / {{title:key}} where a printed name or capacity is needed — each on its own line, carrying the signer's key (e.g. client, member). The platform renders these as clean ruled lines and anchors the e-signature to them.
+- TABLES: present genuinely tabular content — member/ownership schedules, capital contributions, fee schedules, distribution waterfalls — as a GFM pipe table (a \`| Header |\` row, a \`| --- |\` separator row, then data rows). The platform renders these as proper ruled tables. Use tables ONLY for tabular data, never for layout or ordinary prose.
 --- End formatting and drafting standards ---"
 `;
 
@@ -24,6 +25,7 @@ Produce a professionally formatted, execution-ready legal document:
 - DEFINED TERMS & SECTION LEADS: bold each defined term where it is first defined, and bold the lead-in phrase of each section (e.g. "**Governing Law.** This Agreement is governed by …").
 - REGISTER: use a formal, precise, robust legal register — complete sentences, defined terms used consistently, no casual phrasing, filler, or hedging.
 - SIGNATURE, DATE & EXECUTION LINES: NEVER draw signature, date, or execution lines with underscores or dashes ("______", "Date: ____", "-----", "—"). Emit the canonical execution markers instead — {{sign:key}} for a signature line, {{date:key}} for a date line, and {{name:key}} / {{title:key}} where a printed name or capacity is needed — each on its own line, carrying the signer's key (e.g. client, member). The platform renders these as clean ruled lines and anchors the e-signature to them.
+- TABLES: present genuinely tabular content — member/ownership schedules, capital contributions, fee schedules, distribution waterfalls — as a GFM pipe table (a \`| Header |\` row, a \`| --- |\` separator row, then data rows). The platform renders these as proper ruled tables. Use tables ONLY for tabular data, never for layout or ordinary prose.
 --- End formatting and drafting standards ---
 
 Draft an LLC operating agreement.
@@ -49,6 +51,7 @@ Produce a professionally formatted, execution-ready legal document:
 - DEFINED TERMS & SECTION LEADS: bold each defined term where it is first defined, and bold the lead-in phrase of each section (e.g. "**Governing Law.** This Agreement is governed by …").
 - REGISTER: use a formal, precise, robust legal register — complete sentences, defined terms used consistently, no casual phrasing, filler, or hedging.
 - SIGNATURE, DATE & EXECUTION LINES: NEVER draw signature, date, or execution lines with underscores or dashes ("______", "Date: ____", "-----", "—"). Emit the canonical execution markers instead — {{sign:key}} for a signature line, {{date:key}} for a date line, and {{name:key}} / {{title:key}} where a printed name or capacity is needed — each on its own line, carrying the signer's key (e.g. client, member). The platform renders these as clean ruled lines and anchors the e-signature to them.
+- TABLES: present genuinely tabular content — member/ownership schedules, capital contributions, fee schedules, distribution waterfalls — as a GFM pipe table (a \`| Header |\` row, a \`| --- |\` separator row, then data rows). The platform renders these as proper ruled tables. Use tables ONLY for tabular data, never for layout or ordinary prose.
 --- End formatting and drafting standards ---
 
 Draft an LLC operating agreement.

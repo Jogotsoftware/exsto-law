@@ -128,3 +128,26 @@ describe('renderDocumentHtml — dangerous content is stripped', () => {
     expect(html).toContain('font-size:12pt')
   })
 })
+
+describe('renderDocumentHtml — tables (DOC-TABLES-1)', () => {
+  const TABLE_MD = ['| Member | Units |', '| :---: | ---: |', '| Alice | 60 |'].join('\n')
+
+  it('renders a GFM pipe table with structure intact', () => {
+    const html = renderDocumentHtml(TABLE_MD)
+    expect(html).toContain('<table>')
+    expect(html).toContain('<th')
+    expect(html).toContain('Alice')
+  })
+
+  it('keeps GFM column alignment (align attribute)', () => {
+    const html = renderDocumentHtml(TABLE_MD)
+    expect(html).toMatch(/align="center"/)
+    expect(html).toMatch(/align="right"/)
+  })
+
+  it('strips colspan/rowspan (pipe tables cannot express them)', () => {
+    const html = renderDocumentHtml('A table:\n\n<table><tr><td colspan="2">x</td></tr></table>')
+    expect(html).toContain('<td>x</td>')
+    expect(html).not.toContain('colspan')
+  })
+})

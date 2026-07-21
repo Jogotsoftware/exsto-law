@@ -5,7 +5,8 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { TextStyle, FontFamily, FontSize } from '@tiptap/extension-text-style'
 import TextAlign from '@tiptap/extension-text-align'
-import { useEffect, useRef, type MutableRefObject, type ReactNode } from 'react'
+import { TableKit } from '@tiptap/extension-table'
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { TemplateVariable, type VariableStatus } from './TemplateVariableNode'
 import { SignatureLine } from './SignatureLineNode'
 import { PageBreak } from './PageBreakNode'
@@ -29,6 +30,7 @@ import {
   PageBreakIcon,
   RedoIcon,
   UndoIcon,
+  TableIcon,
 } from '@/components/icons'
 
 export interface TemplateEditorHandle {
@@ -123,6 +125,10 @@ export function TemplateEditor({
       FontFamily,
       FontSize,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      // DOC-TABLES-1: tables author as TipTap tables and store as GFM pipe
+      // tables (templateBody serialization) — same support as the document
+      // editor, so a template with a fee/member schedule survives the round trip.
+      TableKit,
       TemplateVariable.configure({
         resolve: (name: string) => resolveRef.current?.(name) ?? 'matched',
       }),
@@ -243,6 +249,78 @@ function Toolbar({ editor, variant = 'legacy' }: { editor: Editor; variant?: 'le
   const toolbarClass = isLi ? 'li-tpl-toolbar' : 'tpl-toolbar'
   const selectClass = isLi ? 'li-tpl-tb-select' : 'tpl-tb-select'
   const sepClass = isLi ? 'li-tpl-tb-sep' : 'tpl-tb-sep'
+
+  // DOC-TABLES-1: the table menu (insert + in-table row/column controls),
+  // shared design with the tracked-changes editor's menu (li-edtr-tbmenu).
+  const [tableMenuOpen, setTableMenuOpen] = useState(false)
+  const tableMenuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!tableMenuOpen) return
+    const onDown = (e: MouseEvent): void => {
+      if (tableMenuRef.current && !tableMenuRef.current.contains(e.target as Node)) {
+        setTableMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [tableMenuOpen])
+  const inTable = editor.isActive('table')
+  const tableItems: Array<{
+    label: string
+    run: () => void
+    needsTable: boolean
+    danger?: boolean
+  }> = [
+    {
+      label: 'Insert table',
+      run: () =>
+        editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+      needsTable: false,
+    },
+    {
+      label: 'Add row above',
+      run: () => editor.chain().focus().addRowBefore().run(),
+      needsTable: true,
+    },
+    {
+      label: 'Add row below',
+      run: () => editor.chain().focus().addRowAfter().run(),
+      needsTable: true,
+    },
+    {
+      label: 'Add column left',
+      run: () => editor.chain().focus().addColumnBefore().run(),
+      needsTable: true,
+    },
+    {
+      label: 'Add column right',
+      run: () => editor.chain().focus().addColumnAfter().run(),
+      needsTable: true,
+    },
+    {
+      label: 'Toggle header row',
+      run: () => editor.chain().focus().toggleHeaderRow().run(),
+      needsTable: true,
+    },
+    {
+      label: 'Delete row',
+      run: () => editor.chain().focus().deleteRow().run(),
+      needsTable: true,
+      danger: true,
+    },
+    {
+      label: 'Delete column',
+      run: () => editor.chain().focus().deleteColumn().run(),
+      needsTable: true,
+      danger: true,
+    },
+    {
+      label: 'Delete table',
+      run: () => editor.chain().focus().deleteTable().run(),
+      needsTable: true,
+      danger: true,
+    },
+  ]
 
   // `aria` is the accessible name; the visible label is an icon (Word-style) or a
   // short text style name (H1/H2/H3). Toggle buttons expose aria-pressed; one-shot
@@ -404,6 +482,31 @@ function Toolbar({ editor, variant = 'legacy' }: { editor: Editor; variant?: 'le
         () => editor.chain().focus().insertPageBreak().run(),
         { toggle: false, title: 'Insert page break' },
       )}
+      <div className="li-edtr-tbmenu" ref={tableMenuRef}>
+        {btn(inTable, <TableIcon size={15} />, 'Table', () => setTableMenuOpen((v) => !v), {
+          toggle: false,
+          title: 'Table',
+        })}
+        {tableMenuOpen && (
+          <div className="li-edtr-tbmenu-pop" role="menu" aria-label="Table">
+            {tableItems.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                role="menuitem"
+                className={`li-edtr-tbmenu-item${item.danger ? ' li-edtr-tbmenu-item--danger' : ''}`}
+                disabled={item.needsTable && !inTable}
+                onClick={() => {
+                  item.run()
+                  setTableMenuOpen(false)
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className={sepClass} aria-hidden="true" />
       {btn(false, <UndoIcon size={15} />, 'Undo', () => editor.chain().focus().undo().run(), {

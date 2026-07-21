@@ -26018,3 +26018,164 @@ details.li-brief-research summary:hover {
   flex-direction: column;
   gap: 16px;
 }
+/* ── DOC-TABLES-1 + EDITOR-FIND-1 — document tables, the toolbar table menu,
+   and the editor find & replace bar. Tables style identically on every
+   document surface: the reader/share/e-sign pages (.doc-rendered), the
+   tracked-changes editor page (also .doc-rendered), and both template editor
+   variants. ── */
+.doc-rendered table,
+.li-tpl-page-body table,
+.tpl-editor-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 14px 0;
+  table-layout: fixed;
+}
+.doc-rendered th,
+.doc-rendered td,
+.li-tpl-page-body th,
+.li-tpl-page-body td,
+.tpl-editor-content th,
+.tpl-editor-content td {
+  border: 1px solid #bfc7d6;
+  padding: 6px 10px;
+  vertical-align: top;
+  text-align: left;
+  position: relative;
+}
+.doc-rendered th,
+.li-tpl-page-body th,
+.tpl-editor-content th {
+  background: #f4f6fa;
+  font-weight: 600;
+}
+.doc-rendered th p,
+.doc-rendered td p,
+.li-tpl-page-body th p,
+.li-tpl-page-body td p,
+.tpl-editor-content th p,
+.tpl-editor-content td p {
+  margin: 0;
+}
+/* GFM column alignment from marked (align attribute) on rendered surfaces. */
+.doc-rendered th[align='center'],
+.doc-rendered td[align='center'] {
+  text-align: center;
+}
+.doc-rendered th[align='right'],
+.doc-rendered td[align='right'] {
+  text-align: right;
+}
+/* TipTap cell-selection highlight while editing. */
+.li-edtr-body td.selectedCell,
+.li-edtr-body th.selectedCell,
+.li-tpl-page-body td.selectedCell,
+.li-tpl-page-body th.selectedCell,
+.tpl-editor-content td.selectedCell,
+.tpl-editor-content th.selectedCell {
+  background: rgba(198, 169, 104, 0.14);
+}
+
+/* The toolbar table menu (shared by the tracked-changes + template editors). */
+.li-edtr-tbmenu {
+  position: relative;
+  display: inline-flex;
+}
+.li-edtr-tbmenu-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  background: #fff;
+  border: 1px solid #dce2ee;
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, 0.14);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 172px;
+}
+.li-edtr-tbmenu-item {
+  display: block;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: #3c4a63;
+  cursor: pointer;
+}
+.li-edtr-tbmenu-item:hover:not(:disabled) {
+  background: #f2f5fb;
+}
+.li-edtr-tbmenu-item:disabled {
+  color: #a8b1c4;
+  cursor: default;
+}
+.li-edtr-tbmenu-item--danger:not(:disabled) {
+  color: #b3261e;
+}
+.li-edtr-tbmenu-item--danger:hover:not(:disabled) {
+  background: #fdf0ef;
+}
+
+/* The find & replace bar — a second toolbar row under the word toolbar. */
+.li-edtr-findbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  background: #fbfcfe;
+  border-bottom: 1px solid #e3e8f2;
+  color: #7583a0;
+}
+.li-edtr-find-input {
+  height: 30px;
+  border: 1px solid #dce2ee;
+  border-radius: 7px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: #243043;
+  min-width: 200px;
+  background: #fff;
+}
+.li-edtr-find-input:focus-visible {
+  outline: 2px solid var(--li-gold, #c6a968);
+  outline-offset: 1px;
+}
+.li-edtr-find-count {
+  font-size: 12px;
+  color: #7583a0;
+  min-width: 72px;
+  text-align: center;
+}
+.li-edtr-find-btn {
+  height: 30px;
+  border: 1px solid #dce2ee;
+  background: #fff;
+  border-radius: 7px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: #3c4a63;
+  cursor: pointer;
+}
+.li-edtr-find-btn:hover:not(:disabled) {
+  background: #f2f5fb;
+}
+.li-edtr-find-btn:disabled {
+  color: #a8b1c4;
+  cursor: default;
+}
+.li-edtr-find-close {
+  margin-left: auto;
+}
+/* Match highlights (decoration classes from searchDoc.ts). */
+.li-edtr-findhit {
+  background: rgba(198, 169, 104, 0.3);
+  border-radius: 2px;
+}
+.li-edtr-findhit--active {
+  background: rgba(198, 169, 104, 0.55);
+  box-shadow: 0 0 0 1.5px #c6a968;
+}

@@ -139,3 +139,67 @@ describe('template body round-trip', () => {
     expect(md).toContain('form_1099') // no spurious escaping
   })
 })
+
+describe('template body round-trip — tables (DOC-TABLES-1)', () => {
+  const TABLE_MD = [
+    '| Member | Ownership |',
+    '| --- | --- |',
+    '| Alice Smith | 60% |',
+    '| Bob Jones | 40% |',
+  ].join('\n')
+
+  it('parses a GFM pipe table to a real <table>', () => {
+    const html = markdownToHtml(TABLE_MD)
+    expect(html).toContain('<table>')
+    expect(html).toContain('Member')
+    expect(html).toContain('<td>Alice Smith</td>')
+  })
+
+  it('round-trips a pipe table losslessly (structure survives save)', () => {
+    const md = roundTrip(TABLE_MD)
+    expect(md).toContain('| Member | Ownership |')
+    expect(md).toContain('| --- | --- |')
+    expect(md).toContain('| Alice Smith | 60% |')
+    expect(md).toContain('| Bob Jones | 40% |')
+    // …and the saved markdown still parses back to a table.
+    expect(markdownToHtml(md)).toContain('<table>')
+  })
+
+  it('serializes TipTap cell paragraphs and escapes literal pipes in cells', () => {
+    const md = htmlToMarkdown(
+      '<table><tbody><tr><th><p>Fee</p></th></tr><tr><td><p>Flat | fixed</p></td></tr></tbody></table>',
+    )
+    expect(md).toContain('| Fee |')
+    expect(md).toContain('| --- |')
+    expect(md).toContain('Flat \\| fixed')
+  })
+
+  it('emits the separator after the first row even without a header row', () => {
+    const md = htmlToMarkdown(
+      '<table><tbody><tr><td><p>a</p></td><td><p>b</p></td></tr><tr><td><p>c</p></td><td><p>d</p></td></tr></tbody></table>',
+    )
+    expect(md).toContain('| a | b |')
+    expect(md).toContain('| --- | --- |')
+    expect(md).toContain('| c | d |')
+  })
+
+  it('keeps inline marks and merge tokens inside cells', () => {
+    const md = roundTrip('| Term | Amount |\n| --- | --- |\n| **Retainer** | {{fee_amount}} |')
+    expect(md).toContain('**Retainer**')
+    expect(md).toContain('{{fee_amount}}')
+  })
+
+  it('keeps empty cells so column counts survive', () => {
+    const md = htmlToMarkdown(
+      '<table><tbody><tr><td><p>a</p></td><td><p></p></td><td><p>c</p></td></tr></tbody></table>',
+    )
+    expect(md).toContain('| a |  | c |')
+  })
+
+  it('collapses multi-line cell content to <br> (round-trips via breaks mode)', () => {
+    const md = htmlToMarkdown(
+      '<table><tbody><tr><td><p>line one</p><p>line two</p></td></tr></tbody></table>',
+    )
+    expect(md).toContain('line one<br>line two')
+  })
+})
