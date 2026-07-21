@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import {
+  closeOpenAttribute,
   getLatestAttributeValue,
   insertAttribute,
   insertContentBlob,
@@ -281,6 +282,7 @@ async function persistDraftDocument(
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, p.matterEntityId, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
@@ -661,6 +663,7 @@ async function advanceInstanceOnApprove(
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, matterEntityId, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
@@ -710,6 +713,7 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, matterEntityId, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,

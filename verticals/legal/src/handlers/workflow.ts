@@ -21,7 +21,7 @@
 // adapter follows: system/automatic gate → 'automatic_sync', attorney/client →
 // 'adjustment'. The action kind's default_autonomy_tier is 'notify'.
 import { registerActionHandler } from '@exsto/substrate'
-import { insertAttribute, insertEvent, lookupKindId } from './common.js'
+import { closeOpenAttribute, insertAttribute, insertEvent, lookupKindId } from './common.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
 import { allowedTransitions, stageByKey } from '../lifecycle/resolve.js'
@@ -168,6 +168,7 @@ registerActionHandler('legal.matter.advance', async (ctx, client, payload, actio
     ctx.tenantId,
     'matter_status',
   )
+  await closeOpenAttribute(client, ctx.tenantId, p.matter_entity_id, statusKindId)
   await insertAttribute(client, {
     tenantId: ctx.tenantId,
     actionId,

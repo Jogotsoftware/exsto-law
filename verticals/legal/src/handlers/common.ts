@@ -81,6 +81,26 @@ export async function insertAttribute(
   return attributeId
 }
 
+// Close the open value of a single-valued attribute kind on an entity (valid_to is
+// the only mutable column on an open fact row — append-only invariant) so a
+// freshly-inserted row is the SOLE open value of that kind. This is the canonical
+// "supersede then append" close half: callers do `closeOpenAttribute(...)` then
+// `insertAttribute(...)` in the same transaction. matter_status writers MUST do this
+// — otherwise every transition stacks another open row and reads pick an arbitrary
+// one (WF-FIX-2 item 1; prod matter M-MRUT7CVK had four simultaneously-open rows).
+export async function closeOpenAttribute(
+  client: DbClient,
+  tenantId: string,
+  entityId: string,
+  attributeKindId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE attribute SET valid_to = now()
+      WHERE tenant_id = $1 AND entity_id = $2 AND attribute_kind_id = $3 AND valid_to IS NULL`,
+    [tenantId, entityId, attributeKindId],
+  )
+}
+
 export async function insertRelationship(
   client: DbClient,
   args: {
