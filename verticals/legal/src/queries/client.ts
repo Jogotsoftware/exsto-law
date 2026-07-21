@@ -84,7 +84,7 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
                 max(me.created_at) AS last_at
          FROM relationship mo
          JOIN relationship_kind_definition mok ON mok.id = mo.relationship_kind_id AND mok.kind_name = 'matter_of'
-         JOIN entity me ON me.id = mo.source_entity_id AND me.tenant_id = $1
+         JOIN entity me ON me.id = mo.source_entity_id AND me.tenant_id = $1 AND me.status = 'active'
          LEFT JOIN LATERAL (
            SELECT a.value
            FROM attribute a
@@ -118,6 +118,7 @@ export async function listClients(ctx: ActionContext): Promise<ClientSummary[]> 
               AND (r.valid_to IS NULL OR r.valid_to > now()))::text AS contact_count,
          (SELECT count(*) FROM relationship r
             JOIN relationship_kind_definition rkd ON rkd.id = r.relationship_kind_id
+            JOIN entity me ON me.id = r.source_entity_id AND me.tenant_id = $1 AND me.status = 'active'
             WHERE r.tenant_id = $1 AND r.target_entity_id = e.id AND rkd.kind_name = 'matter_of'
               AND (r.valid_to IS NULL OR r.valid_to > now()))::text AS matter_count,
          mr.statuses AS matter_statuses,
