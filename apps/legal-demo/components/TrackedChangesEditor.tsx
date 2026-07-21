@@ -63,6 +63,18 @@ import {
   BoldIcon,
   ItalicIcon,
   UnderlineIcon,
+  StrikethroughIcon,
+  ListIcon,
+  ListOrderedIcon,
+  QuoteIcon,
+  AlignLeftIcon,
+  AlignCenterIcon,
+  AlignRightIcon,
+  AlignJustifyIcon,
+  SignatureIcon,
+  PageBreakIcon,
+  UndoIcon,
+  RedoIcon,
   XIcon,
   EditIcon,
   FileTextIcon,
@@ -284,9 +296,9 @@ export function TrackedChangesEditor({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
-      // No font/size toolbar controls here (open founder decision — see PR), but
-      // the marks must still PARSE so documents styled in the template editor
-      // round-trip losslessly through this editor.
+      // Inline font/size MARKS (template-editor styling) must parse so styled
+      // documents round-trip losslessly; the toolbar's font selects control the
+      // per-document BASE font instead (EDITOR-FIX-1 item 7).
       TextStyle,
       FontFamily,
       FontSize,
@@ -321,6 +333,17 @@ export function TrackedChangesEditor({
       bold: ctx.editor?.isActive('bold') ?? false,
       italic: ctx.editor?.isActive('italic') ?? false,
       underline: ctx.editor?.isActive('underline') ?? false,
+      strike: ctx.editor?.isActive('strike') ?? false,
+      h1: ctx.editor?.isActive('heading', { level: 1 }) ?? false,
+      h2: ctx.editor?.isActive('heading', { level: 2 }) ?? false,
+      h3: ctx.editor?.isActive('heading', { level: 3 }) ?? false,
+      alignLeft: ctx.editor?.isActive({ textAlign: 'left' }) ?? false,
+      alignCenter: ctx.editor?.isActive({ textAlign: 'center' }) ?? false,
+      alignRight: ctx.editor?.isActive({ textAlign: 'right' }) ?? false,
+      alignJustify: ctx.editor?.isActive({ textAlign: 'justify' }) ?? false,
+      bulletList: ctx.editor?.isActive('bulletList') ?? false,
+      orderedList: ctx.editor?.isActive('orderedList') ?? false,
+      blockquote: ctx.editor?.isActive('blockquote') ?? false,
     }),
   })
 
@@ -660,15 +683,16 @@ export function TrackedChangesEditor({
     label: ReactNode,
     aria: string,
     onClick: () => void,
+    opts: { toggle?: boolean; text?: boolean } = {},
   ): ReactNode => (
     <button
       type="button"
-      className={`li-edtr-tb-btn${active ? ' is-active' : ''}`}
+      className={`li-edtr-tb-btn${opts.text ? ' li-edtr-tb-btn--txt' : ''}${active ? ' is-active' : ''}`}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       title={aria}
       aria-label={aria}
-      aria-pressed={active}
+      aria-pressed={opts.toggle === false ? undefined : active}
     >
       {label}
     </button>
@@ -726,6 +750,9 @@ export function TrackedChangesEditor({
         {markBtn(marks?.underline ?? false, <UnderlineIcon size={15} />, 'Underline', () =>
           editor?.chain().focus().toggleUnderline().run(),
         )}
+        {markBtn(marks?.strike ?? false, <StrikethroughIcon size={15} />, 'Strikethrough', () =>
+          editor?.chain().focus().toggleStrike().run(),
+        )}
         <div className="li-edtr-tb-sep" aria-hidden />
         {/* EDITOR-FIX-1 (item 7): the per-document base font — a real persisted
             setting (family + size), applied to the page and flowed into export. */}
@@ -756,6 +783,90 @@ export function TrackedChangesEditor({
             </option>
           ))}
         </select>
+        <div className="li-edtr-tb-sep" aria-hidden />
+        {/* WF-EDITOR-TOOLS-1: the rest of the template editor's word tools, so the
+            workflow runner's Edit flow matches it. Block-level formatting changes
+            no text, so it never creates a tracked-changes hunk (the hunk model
+            tracks language, not furniture) — but it does mark the doc dirty via
+            the HTML compare, exactly like bold/italic always have. */}
+        {markBtn(
+          marks?.h1 ?? false,
+          'H1',
+          'Heading 1',
+          () => editor?.chain().focus().toggleHeading({ level: 1 }).run(),
+          { text: true },
+        )}
+        {markBtn(
+          marks?.h2 ?? false,
+          'H2',
+          'Heading 2',
+          () => editor?.chain().focus().toggleHeading({ level: 2 }).run(),
+          { text: true },
+        )}
+        {markBtn(
+          marks?.h3 ?? false,
+          'H3',
+          'Heading 3',
+          () => editor?.chain().focus().toggleHeading({ level: 3 }).run(),
+          { text: true },
+        )}
+        <div className="li-edtr-tb-sep" aria-hidden />
+        {markBtn(marks?.alignLeft ?? false, <AlignLeftIcon size={15} />, 'Align left', () =>
+          editor?.chain().focus().setTextAlign('left').run(),
+        )}
+        {markBtn(marks?.alignCenter ?? false, <AlignCenterIcon size={15} />, 'Align center', () =>
+          editor?.chain().focus().setTextAlign('center').run(),
+        )}
+        {markBtn(marks?.alignRight ?? false, <AlignRightIcon size={15} />, 'Align right', () =>
+          editor?.chain().focus().setTextAlign('right').run(),
+        )}
+        {markBtn(marks?.alignJustify ?? false, <AlignJustifyIcon size={15} />, 'Justify', () =>
+          editor?.chain().focus().setTextAlign('justify').run(),
+        )}
+        <div className="li-edtr-tb-sep" aria-hidden />
+        {markBtn(marks?.bulletList ?? false, <ListIcon size={15} />, 'Bulleted list', () =>
+          editor?.chain().focus().toggleBulletList().run(),
+        )}
+        {markBtn(marks?.orderedList ?? false, <ListOrderedIcon size={15} />, 'Numbered list', () =>
+          editor?.chain().focus().toggleOrderedList().run(),
+        )}
+        <div className="li-edtr-tb-sep" aria-hidden />
+        {markBtn(marks?.blockquote ?? false, <QuoteIcon size={15} />, 'Block quote', () =>
+          editor?.chain().focus().toggleBlockquote().run(),
+        )}
+        {markBtn(
+          false,
+          <SignatureIcon size={15} />,
+          'Insert signature line',
+          () => editor?.chain().focus().insertSignatureLine('Signature').run(),
+          { toggle: false },
+        )}
+        {markBtn(
+          false,
+          <PageBreakIcon size={15} />,
+          'Insert page break',
+          () => editor?.chain().focus().insertPageBreak().run(),
+          { toggle: false },
+        )}
+        <div className="li-edtr-tb-sep" aria-hidden />
+        {markBtn(
+          false,
+          <UndoIcon size={15} />,
+          'Undo',
+          () => editor?.chain().focus().undo().run(),
+          {
+            toggle: false,
+          },
+        )}
+        {markBtn(
+          false,
+          <RedoIcon size={15} />,
+          'Redo',
+          () => editor?.chain().focus().redo().run(),
+          {
+            toggle: false,
+          },
+        )}
         <div className="li-edtr-tb-sep" aria-hidden />
         <button
           type="button"
