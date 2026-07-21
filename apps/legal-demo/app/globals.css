@@ -25365,6 +25365,7 @@ details.li-brief-research summary:hover {
 .li-esign2-step-status-sub a {
   color: var(--li-navy);
   text-decoration: underline;
+}
 
 /* ══ li-esp — ESIGN-UNIFY-1 ES-2: the visual field-placement surface (§4).
    Three-pane placement canvas (palette / real PDF pages / thumbnails), signer-

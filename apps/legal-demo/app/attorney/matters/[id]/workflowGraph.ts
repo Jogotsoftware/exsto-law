@@ -30,6 +30,7 @@ export type WfStepActionKind =
   | 'manual_task'
   | 'complete_matter'
   | 'invoke_capability'
+  | 'esign'
 
 export interface WfEdge {
   to: string
@@ -62,6 +63,8 @@ export interface CatalogGate {
 function defaultOnEvent(kind: WfStepActionKind | undefined): string {
   if (kind === 'generate_document') return 'document.generated'
   if (kind === 'await_payment' || kind === 'approve_send_invoice') return 'invoice.paid'
+  // ESIGN-UNIFY-1 ES-4: an e-sign step holds until every signer has signed.
+  if (kind === 'esign') return 'esign.completed'
   // WF-FIX-1 (WP2): intake steps wait on the client finishing the questionnaire.
   if (kind === 'view_intake') return 'intake.completed'
   // The old fallback was the literal string 'condition' — a token nothing ever
