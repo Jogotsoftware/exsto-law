@@ -62,7 +62,9 @@ const MATTER_DOT: Array<{ matches: (s: string) => boolean; color: string }> = [
   },
 ]
 function matterDotColor(status: string): string {
-  return MATTER_DOT.find((g) => g.matches(status))?.color ?? 'var(--li-purple)'
+  // Default bucket is "New inquiry" (matches attorney/matters/page.tsx STATUS_GROUPS),
+  // which reads as a neutral gray, not the purple reserved for in-review statuses.
+  return MATTER_DOT.find((g) => g.matches(status))?.color ?? 'var(--li-neutral)'
 }
 
 export default function ContactDetailPage() {
