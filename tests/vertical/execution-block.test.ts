@@ -12,6 +12,7 @@ import {
   buildExecutionBlock,
   renderSigMarkersForPreview,
   classifyExecutionLine,
+  canonicalizeExecutionLines,
 } from '../../verticals/legal/src/esign/executionBlock.js'
 import { parseFields } from '../../verticals/legal/src/esign/fields.js'
 import { renderDraftPdf } from '../../verticals/legal/src/render/draftPdf.js'
@@ -85,6 +86,47 @@ describe('classifyExecutionLine', () => {
     expect(classifyExecutionLine('a___b')).toBeNull()
     expect(classifyExecutionLine('please sign {{sign:client}} below')).toBeNull()
     expect(classifyExecutionLine('Name: **{{primary_client_name}}**')).toBeNull()
+  })
+
+  // EDITOR-FIX-1 (item 6): a LABELED underscore/dash rule line renders as a ruled
+  // line even for short runs or dashes ("its awful … all dashed"). A BARE dash
+  // run stays a markdown thematic break so section separators are never eaten.
+  it('classifies labeled dash / short rule lines by their label', () => {
+    expect(classifyExecutionLine('Date: ____')).toEqual({ label: 'Date' })
+    expect(classifyExecutionLine('Date: ------')).toEqual({ label: 'Date' })
+    expect(classifyExecutionLine('Signature: —————')).toEqual({ label: 'Signature' })
+    expect(classifyExecutionLine('Print Name: ___')).toEqual({ label: 'Print Name' })
+  })
+
+  it('never swallows a bare dash rule (markdown thematic break / section separator)', () => {
+    expect(classifyExecutionLine('---')).toBeNull()
+    expect(classifyExecutionLine('------')).toBeNull()
+    expect(classifyExecutionLine('| --- | --- |')).toBeNull()
+    expect(classifyExecutionLine('| :--- | ---: |')).toBeNull()
+  })
+})
+
+describe('canonicalizeExecutionLines (item 6a)', () => {
+  it('splits a compound name/role + inline date rule onto its own line', () => {
+    expect(canonicalizeExecutionLines('Jane Roe, Sole Member / Date: ____')).toBe(
+      'Jane Roe, Sole Member\n\nDate: ____',
+    )
+    // The split date line then classifies as a ruled line.
+    expect(classifyExecutionLine('Date: ____')).toEqual({ label: 'Date' })
+  })
+
+  it('splits a compound signature rule too', () => {
+    expect(canonicalizeExecutionLines('By: John Q. Member / Signature: ______')).toBe(
+      'By: John Q. Member\n\nSignature: ______',
+    )
+  })
+
+  it('leaves a body with no compound execution line untouched (referential no-op)', () => {
+    const src = '# Operating Agreement\n\n{{sign:member}}\n\n{{date:member}}\n'
+    expect(canonicalizeExecutionLines(src)).toBe(src)
+    expect(canonicalizeExecutionLines('This Agreement is governed by NC / GA law.')).toBe(
+      'This Agreement is governed by NC / GA law.',
+    )
   })
 })
 

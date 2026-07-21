@@ -23,9 +23,9 @@ export const DOCUMENT_STYLE_INSTRUCTION = `--- Document formatting and drafting 
 STRUCTURE
 - Open with a centered title in full capitals, using this exact form (the only supported way to center text): \`<p style="text-align:center"><strong>TITLE OF THE DOCUMENT</strong></p>\`.
 - Where the document type calls for it, follow the title with a preamble/recitals paragraph that names the parties (each party name in **bold** at first mention) and the effective date.
-- Number the main sections as Title Case markdown H2 headings — \`## 1. Definitions\`, \`## 2. Formation\`, \`## 3. Capital Contributions\`, and so on — and use H3 (\`###\`) for sub-sections.
+- Number articles/sections per the formatting and drafting standards (Article/Section numbering), rendering each article heading as a Title Case markdown H2 (\`## Article I — Definitions\`) and sections as H3 (\`### Section 1.1 Defined Terms\`).
 - Break long provisions into numbered sub-clauses instead of dense paragraphs. Use numbered lists for enumerated obligations, conditions, or representations; use bulleted lists only for genuinely parallel, non-sequential items.
-- End any document that gets signed with a proper signature/execution block.
+- End any document that gets signed with an execution block built ONLY from the canonical markers ({{sign:key}}, {{date:key}}, {{name:key}}, {{title:key}}) — never underscore/dash-drawn lines.
 
 TYPOGRAPHY
 - Put a defined term in **bold** (\`**Term**\`) at its first (defining) use, and bold party names in the preamble.
@@ -48,10 +48,12 @@ RENDERER LIMITS (anything outside this set renders as literal text — do not us
 // as literal garbage.
 export const DOCUMENT_STYLE_BRIEF =
   'Make the document polished and professional: a centered ALL-CAPS title as ' +
-  '`<p style="text-align:center"><strong>TITLE</strong></p>`, Title Case numbered ' +
-  'section headings (`## 1. Heading`), a recitals/preamble naming the parties in ' +
-  '**bold** where the type calls for it, numbered sub-clauses for enumerated ' +
-  'obligations, complete operative wording (not one-line sketches), and a proper ' +
-  'signature block. Bold defined terms at first use; ALL CAPS only for the title, ' +
-  'party identification, and notice provisions. Underline renders ONLY via `<u>…</u>`; ' +
-  'centering ONLY via `style="text-align:center"`; no emojis, no code fences.'
+  '`<p style="text-align:center"><strong>TITLE</strong></p>`, Article/Section ' +
+  'numbering as Title Case headings (`## Article I — Heading`), a recitals/preamble ' +
+  'naming the parties in **bold** where the type calls for it, numbered sub-clauses ' +
+  'for enumerated obligations, complete operative wording (not one-line sketches), ' +
+  'and an execution block built from the canonical markers ({{sign:key}}, ' +
+  '{{date:key}}) — never underscore-drawn lines. Bold defined terms at first use; ' +
+  'ALL CAPS only for the title, party identification, and notice provisions. ' +
+  'Underline renders ONLY via `<u>…</u>`; centering ONLY via ' +
+  '`style="text-align:center"`; no emojis, no code fences.'

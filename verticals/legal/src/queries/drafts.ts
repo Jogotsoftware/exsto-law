@@ -49,6 +49,26 @@ export interface DraftDetail extends PendingDraftSummary {
     sourceText: string | null
     redlineText: string | null
   } | null
+  // EDITOR-FIX-1 (item 2) — a FILE-BACKED version (an uploaded PDF/doc, e.g. an
+  // e-sign envelope's source document, #286/#400): the bytes live in Storage and
+  // this version's content_blob body is the STORAGE PATH string, NOT markdown.
+  // Non-null when dv.metadata->>'object_key' is set — the reader then renders the
+  // real PDF (via the ES-2 render route) instead of feeding a storage path into
+  // the markdown/TipTap pipeline (which shows a black/garbage screen), and Edit /
+  // AI revision are hidden (there is no markdown to edit). Null for ordinary
+  // markdown drafts. objectKey is never exposed to the client (bytes are
+  // server-only); only the display metadata rides here.
+  file: {
+    contentType: string
+    originalFilename: string
+  } | null
+  // EDITOR-FIX-1 (item 7) — the per-document base font, a real persisted setting
+  // (founder decision 2026-07-19 #1). Stored on the version metadata by the edit
+  // action; null on versions saved before the setting existed (the editor/reader
+  // then fall back to their defaults). Reloads with the document and flows into
+  // the PDF export.
+  fontFamily: string | null
+  fontSize: number | null
 }
 
 export async function listPendingDraftVersions(ctx: ActionContext): Promise<PendingDraftSummary[]> {
@@ -378,6 +398,11 @@ export async function getDraftVersion(
       email_subject: string | null
       email_to_role: string | null
       voice_violations: VoiceViolation[] | null
+      object_key: string | null
+      file_content_type: string | null
+      file_original_filename: string | null
+      font_family: string | null
+      font_size: string | null
     }>(
       `SELECT
          dv.id AS version_id,
@@ -414,7 +439,12 @@ export async function getDraftVersion(
          dv.metadata->>'review_redline_blob_id' AS review_redline_blob_id,
          rkd.kind_name AS rel_kind,
          e_doc.metadata->>'email_subject' AS email_subject,
-         e_doc.metadata->>'email_to_role' AS email_to_role
+         e_doc.metadata->>'email_to_role' AS email_to_role,
+         dv.metadata->>'object_key' AS object_key,
+         COALESCE(dv.metadata->>'content_type', cb.content_type) AS file_content_type,
+         dv.metadata->>'original_filename' AS file_original_filename,
+         dv.metadata->>'font_family' AS font_family,
+         dv.metadata->>'font_size' AS font_size
        FROM document_version dv
        JOIN content_blob cb ON cb.id = dv.content_blob_id
        JOIN entity e_doc ON e_doc.id = dv.document_entity_id
@@ -517,6 +547,17 @@ export async function getDraftVersion(
       confidence,
       reviewNotes: notesRes.rows[0]?.value ?? null,
       aiReview,
+      // File-backed (uploaded PDF/doc) when an object_key is stamped on the
+      // version metadata (document.upload / e-sign "any PDF"). The body column is
+      // then a storage path, not markdown — the reader renders the real PDF.
+      file: row.object_key
+        ? {
+            contentType: row.file_content_type ?? 'application/pdf',
+            originalFilename: row.file_original_filename ?? 'document',
+          }
+        : null,
+      fontFamily: row.font_family,
+      fontSize: row.font_size != null ? Number(row.font_size) : null,
     }
   })
 }

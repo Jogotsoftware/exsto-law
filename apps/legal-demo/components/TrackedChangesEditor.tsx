@@ -47,7 +47,15 @@ import {
   extractDocText,
   setTrackDecorations,
 } from '@/components/trackedChangesDoc'
+import { MissingFieldDecorations } from '@/components/missingFieldDoc'
 import { DocumentSheet } from '@/components/DocumentSheet'
+import {
+  DOC_FONT_OPTIONS,
+  DOC_FONT_SIZES,
+  docFontCss,
+  normalizeDocFontFamily,
+  normalizeDocFontSize,
+} from '@/lib/docFonts'
 import { GemSparkle, GemShimmer } from '@/components/GemSparkle'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { useDialogEscapeStack } from '@/components/Modal'
@@ -68,6 +76,10 @@ export interface TrackedEditorDraft {
   clientName: string
   versionNumber: number
   status: string
+  // EDITOR-FIX-1 (item 7) — the per-document base font (persisted setting); null
+  // on documents saved before the setting existed → the editor uses its defaults.
+  fontFamily?: string | null
+  fontSize?: number | null
 }
 
 // The four preset suggestion chips (comp-exact, same set as WP-C). Each runs
@@ -84,6 +96,15 @@ const HUNK_LABEL: Record<PendingHunk['kind'], string> = {
   insertion: 'Insertion',
   deletion: 'Deletion',
 }
+
+// EDITOR-FIX-1 (item 1) — Edit-with-AI is now ASYNC (the synchronous
+// legal.draft.revise ran the Claude call in-request and 504'd the gateway when
+// the model was slow). runAi enqueues legal.draft.revise.request and polls
+// legal.draft.revise.result on this budget (the BriefButton / RunnerReview poll
+// pattern — the real read, never fake progress). ~2 min covers a full-document
+// redraft; on timeout the rail shows an honest "still working" error + Retry.
+const AI_POLL_MS = 2500
+const AI_POLL_TRIES = 48
 
 // One rail card — a pending hunk or an accepted change, ordered by position.
 interface ChangeCard {
@@ -150,6 +171,12 @@ export function TrackedChangesEditor({
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiWorking, setAiWorking] = useState(false)
   const [aiNoChange, setAiNoChange] = useState(false)
+  // EDITOR-FIX-1 (item 1) — the async revise's rail error + the instruction that
+  // produced it, so a failed/timed-out job offers a Retry that reruns it. A
+  // cancellation token stops the poll if the editor closes mid-flight.
+  const [aiError, setAiError] = useState<string | null>(null)
+  const lastAiInstructionRef = useRef<string | null>(null)
+  const aiPollRef = useRef<{ cancelled: boolean } | null>(null)
   const aiPromptsRef = useRef<string[]>([])
   // B2.3 — the reasoning_trace_id each AI revision call produced, same index
   // order as aiPromptsRef. Saved links the LAST one to the accepting edit's
@@ -170,6 +197,16 @@ export function TrackedChangesEditor({
   const [regenNotes, setRegenNotes] = useState('')
   const [regenBusy, setRegenBusy] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
+
+  // EDITOR-FIX-1 (item 7) — the per-document base font (family + size), a real
+  // persisted setting. Seeded from the loaded version, applied to the page below,
+  // saved onto version n+1, and threaded into the PDF export. Changing it marks
+  // the document dirty (a font change alone is a saveable edit).
+  const initialFontFamily = normalizeDocFontFamily(draft.fontFamily)
+  const initialFontSize = normalizeDocFontSize(draft.fontSize)
+  const [fontFamily, setFontFamily] = useState(initialFontFamily)
+  const [fontSize, setFontSize] = useState(initialFontSize)
+  const fontChanged = fontFamily !== initialFontFamily || fontSize !== initialFontSize
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -258,6 +295,9 @@ export function TrackedChangesEditor({
       SignatureLine,
       PageBreak,
       TrackChangesDecorations,
+      // EDITOR-FIX-1 (item 4): render [[MISSING: field]] merge gaps as warn chips
+      // (the raw marker stays in the model — presentation only).
+      MissingFieldDecorations,
     ],
     content: seedHtml,
     immediatelyRender: false,
@@ -411,44 +451,97 @@ export function TrackedChangesEditor({
     [recompute],
   )
 
-  // ── Edit with AI (legal.draft.revise — proposal only, persists no version) ──
+  // ── Edit with AI (ASYNC — enqueue legal.draft.revise.request, poll the result) ──
+  // EDITOR-FIX-1 (item 1): the model redraft runs OFF the request on the worker,
+  // so a slow model no longer 504s the gateway. We enqueue, then poll the real
+  // read (never fake progress); aiWorking stays true — the "Generating…" button +
+  // shimmer ARE the honest working state — and the input is disabled throughout.
+  // The proposal is applied EXACTLY as the synchronous path did (setContent →
+  // tracked-changes diff); a failure or timeout renders in the rail with a Retry.
   const runAi = useCallback(
     async (instructionRaw: string): Promise<void> => {
       const ed = editorRef.current
       const instruction = instructionRaw.trim()
       if (!ed || !instruction || aiWorking || pendingRef.current.length > 0) return
+      lastAiInstructionRef.current = instruction
       setAiWorking(true)
       setAiNoChange(false)
+      setAiError(null)
       setError(null)
+      // Cancel any prior poll before starting a fresh one.
+      if (aiPollRef.current) aiPollRef.current.cancelled = true
+      const token = { cancelled: false }
+      aiPollRef.current = token
       try {
         // Revise the attorney's CURRENT accepted working text (not the stored
         // version) so a revision composes with unsaved accepted changes.
         const baseMarkdown = htmlToMarkdown(ed.getHTML())
-        const res = await callAttorneyMcp<{
-          revisedMarkdown: string
-          reasoningTraceId: string
-          instruction: string
-        }>({
-          toolName: 'legal.draft.revise',
+        const { requestId } = await callAttorneyMcp<{ requestId: string; jobId: string }>({
+          toolName: 'legal.draft.revise.request',
           input: { documentVersionId: draft.documentVersionId, instruction, baseMarkdown },
         })
-        // AI output is always tracked, whatever the toggle said.
-        setTrackOn(true)
-        ed.commands.setContent(markdownToHtml(res.revisedMarkdown), { emitUpdate: false })
-        aiPromptsRef.current = [...aiPromptsRef.current, res.instruction]
-        aiTraceIdsRef.current = [...aiTraceIdsRef.current, res.reasoningTraceId]
-        setAiPromptCount(aiPromptsRef.current.length)
-        setAiPrompt('')
-        recompute({ prompt: res.instruction })
-        if (pendingRef.current.length === 0) setAiNoChange(true)
+        for (let i = 0; i < AI_POLL_TRIES; i++) {
+          await new Promise((r) => setTimeout(r, AI_POLL_MS))
+          if (token.cancelled) return
+          const { result } = await callAttorneyMcp<{
+            result: {
+              status: 'completed' | 'failed'
+              revisedMarkdown?: string
+              reasoningTraceId?: string
+              instruction?: string
+              error?: string
+            } | null
+          }>({
+            toolName: 'legal.draft.revise.result',
+            input: { requestId },
+          }).catch(() => ({ result: null }))
+          if (token.cancelled) return
+          if (!result) continue
+          if (result.status === 'failed') {
+            setAiError(result.error || 'The revision could not be generated. Try again.')
+            setAiWorking(false)
+            return
+          }
+          // Completed — apply the proposal exactly as the synchronous path did.
+          const editor = editorRef.current
+          if (!editor || editor.isDestroyed) return
+          setTrackOn(true) // AI output is always tracked, whatever the toggle said.
+          editor.commands.setContent(markdownToHtml(result.revisedMarkdown ?? ''), {
+            emitUpdate: false,
+          })
+          const usedInstruction = result.instruction ?? instruction
+          aiPromptsRef.current = [...aiPromptsRef.current, usedInstruction]
+          aiTraceIdsRef.current = [...aiTraceIdsRef.current, result.reasoningTraceId ?? '']
+          setAiPromptCount(aiPromptsRef.current.length)
+          setAiPrompt('')
+          recompute({ prompt: usedInstruction })
+          if (pendingRef.current.length === 0) setAiNoChange(true)
+          setAiWorking(false)
+          return
+        }
+        // Poll budget exhausted without a result.
+        if (!token.cancelled) {
+          setAiError(
+            'The AI is still working on this revision — it can take a moment for a large document. Try again shortly.',
+          )
+          setAiWorking(false)
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setAiWorking(false)
+        if (!token.cancelled) {
+          setAiError(err instanceof Error ? err.message : String(err))
+          setAiWorking(false)
+        }
       }
     },
     [aiWorking, draft.documentVersionId, recompute],
   )
+
+  // Stop the async revise poll if the editor unmounts mid-flight.
+  useEffect(() => {
+    return () => {
+      if (aiPollRef.current) aiPollRef.current.cancelled = true
+    }
+  }, [])
 
   // ── Regenerate from scratch (worker full redraft with change notes) ────────
   // Distinct from runAi above: this supersedes the version entirely, off-request
@@ -472,7 +565,7 @@ export function TrackedChangesEditor({
   }, [onRegenerateFromScratch, regenNotes, regenBusy, onClose])
 
   // ── Save: ONE new version through the append-only legal.draft.edit ──────────
-  const canSave = changed && pending.length === 0 && !busy && !aiWorking
+  const canSave = (changed || fontChanged) && pending.length === 0 && !busy && !aiWorking
   const handleSave = useCallback(async (): Promise<void> => {
     const ed = editorRef.current
     if (!ed || busy) return
@@ -512,6 +605,10 @@ export function TrackedChangesEditor({
           instructionText,
           reasoningTraceId,
           counts,
+          // EDITOR-FIX-1 (item 7): persist the per-document base font on the new
+          // version so it reloads with the document and flows into the PDF export.
+          fontFamily,
+          fontSize,
         },
       })
       const newId = result.effects?.find((e) => e.documentVersionId)?.documentVersionId ?? null
@@ -522,7 +619,7 @@ export function TrackedChangesEditor({
     }
   }, [busy, draft.documentVersionId, onSaved])
 
-  const dirty = changed || pending.length > 0
+  const dirty = changed || fontChanged || pending.length > 0
   const requestClose = useCallback((): void => {
     if (busy) return
     if (dirty) setConfirmDiscard(true)
@@ -630,6 +727,36 @@ export function TrackedChangesEditor({
           editor?.chain().focus().toggleUnderline().run(),
         )}
         <div className="li-edtr-tb-sep" aria-hidden />
+        {/* EDITOR-FIX-1 (item 7): the per-document base font — a real persisted
+            setting (family + size), applied to the page and flowed into export. */}
+        <select
+          className="li-edtr-tb-select"
+          value={fontFamily}
+          onChange={(e) => setFontFamily(e.target.value)}
+          title="Font"
+          aria-label="Font"
+          style={{ fontFamily: docFontCss(fontFamily) }}
+        >
+          {DOC_FONT_OPTIONS.map((f) => (
+            <option key={f.name} value={f.name} style={{ fontFamily: f.css }}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="li-edtr-tb-select li-edtr-tb-select--size"
+          value={fontSize}
+          onChange={(e) => setFontSize(Number(e.target.value))}
+          title="Font size"
+          aria-label="Font size"
+        >
+          {DOC_FONT_SIZES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <div className="li-edtr-tb-sep" aria-hidden />
         <button
           type="button"
           className={`li-edtr-track${trackOn ? ' is-on' : ''}`}
@@ -675,7 +802,9 @@ export function TrackedChangesEditor({
         <div className="li-edtr-canvas" ref={fitRef}>
           <DocumentSheet variant="full" watermark={watermark}>
             {editor ? (
-              <EditorContent editor={editor} />
+              <div style={{ fontFamily: docFontCss(fontFamily), fontSize: `${fontSize}pt` }}>
+                <EditorContent editor={editor} />
+              </div>
             ) : (
               <div className="li-edtr-loading">Loading editor…</div>
             )}
@@ -778,6 +907,25 @@ export function TrackedChangesEditor({
                   {aiNoChange && (
                     <div className="li-edtr-ai-note">
                       The AI returned the document unchanged — try a more specific instruction.
+                    </div>
+                  )}
+                  {aiError && (
+                    <div className="li-edtr-ai-error" role="alert">
+                      <span className="li-edtr-ai-error-msg">{aiError}</span>
+                      {lastAiInstructionRef.current && (
+                        <button
+                          type="button"
+                          className="li-edtr-ai-retry"
+                          onClick={() => {
+                            const instr = lastAiInstructionRef.current
+                            setAiError(null)
+                            if (instr) void runAi(instr)
+                          }}
+                          disabled={aiWorking || toggleBlocked}
+                        >
+                          Retry
+                        </button>
+                      )}
                     </div>
                   )}
                   {onRegenerateFromScratch && (

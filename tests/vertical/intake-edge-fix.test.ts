@@ -104,6 +104,9 @@ function fakeClient(graph: Lifecycle, startState: string) {
         return { rows: [{ id: 'ak-matter-status' }], rowCount: 1 }
       }
       if (sql.includes('INSERT INTO event')) return { rows: [], rowCount: 1 }
+      // WF-FIX-2 #1: matter_status writers close the prior open row (valid_to)
+      // before inserting the new one — acknowledge the close.
+      if (sql.includes('UPDATE attribute SET valid_to')) return { rows: [], rowCount: 0 }
       if (sql.includes('INSERT INTO attribute')) return { rows: [], rowCount: 1 }
       throw new Error(`fakeClient: unscripted SQL: ${sql.slice(0, 80)}`)
     },

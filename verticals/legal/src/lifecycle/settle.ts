@@ -31,7 +31,12 @@
 // lifecycle imports — no cycle); loadInstanceForMatter lives in executor.ts which
 // imports THIS file, so the instance/graph are resolved here via binding.js directly.
 import type { DbClient } from '@exsto/shared'
-import { insertAttribute, insertEvent, lookupKindId } from '../handlers/common.js'
+import {
+  closeOpenAttribute,
+  insertAttribute,
+  insertEvent,
+  lookupKindId,
+} from '../handlers/common.js'
 import { getWorkflowInstanceForMatter } from './binding.js'
 import { advanceWorkflowInstance } from './instance.js'
 import { hasProducingRunner, scheduleProducingAutoRun, type AutoRunCtx } from './autoRun.js'
@@ -137,6 +142,7 @@ export async function settleStage(
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, matterEntityId, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,

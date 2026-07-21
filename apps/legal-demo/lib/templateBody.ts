@@ -1,6 +1,11 @@
 import TurndownService from 'turndown'
 import { Marked } from 'marked'
-import { parseMarkerLine, labelFor, type EsignFieldType } from '@exsto/legal/esign'
+import {
+  parseMarkerLine,
+  classifyExecutionLine,
+  labelFor,
+  type EsignFieldType,
+} from '@exsto/legal/esign'
 
 // Client-side markdown ⇆ HTML conversion for the rich template editor.
 //
@@ -146,14 +151,27 @@ function escapeAttr(s: string): string {
 }
 
 function hydrateMarkerLines(body: string): string {
-  if (!body || !body.includes('{{')) return body
+  if (!body) return body
   const lines = body.split('\n')
   let changed = false
   const out = lines.map((line) => {
     const m = parseMarkerLine(line)
-    if (!m) return line
-    changed = true
-    return `\n<div class="sig-line" data-sig-type="${escapeAttr(m.type)}" data-sig-key="${escapeAttr(m.signerKey)}"><span class="sig-line-label">${escapeAttr(m.label)}</span></div>\n`
+    if (m) {
+      changed = true
+      return `\n<div class="sig-line" data-sig-type="${escapeAttr(m.type)}" data-sig-key="${escapeAttr(m.signerKey)}"><span class="sig-line-label">${escapeAttr(m.label)}</span></div>\n`
+    }
+    // EDITOR-FIX-1 (item 6b): a LEGACY execution line (a bare or labeled
+    // underscore/dash rule the merge post-processor didn't canonicalize) also
+    // hydrates as a ruled sig-line node, so the editor shows a clean ruled line
+    // instead of literal underscores/dashes — matching the reader and PDF. No
+    // data-sig-* attrs (there is no marker to round-trip to), so the save-bridge
+    // keeps it as the allowlisted sig-line div, canonicalizing it on save.
+    const ex = classifyExecutionLine(line)
+    if (ex) {
+      changed = true
+      return `\n<div class="sig-line"><span class="sig-line-label">${escapeAttr(ex.label)}</span></div>\n`
+    }
+    return line
   })
   if (!changed) return body
   return out.join('\n').replace(/\n{3,}/g, '\n\n')

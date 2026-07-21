@@ -135,6 +135,10 @@ export async function resolveMatterAttachments(
         pdf = await renderDraftPdf(draft.bodyMarkdown, {
           title: humanizeKind(draft.documentKind),
           watermark: draftWatermarkText(draft.status),
+          // EDITOR-FIX-1 (item 7): the per-document base font flows into the
+          // emailed PDF, matching what the attorney set in the editor.
+          fontFamily: draft.fontFamily ?? undefined,
+          fontSize: draft.fontSize ?? undefined,
         })
       } catch (e) {
         throw new Error(

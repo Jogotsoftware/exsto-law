@@ -1,5 +1,6 @@
 import { registerActionHandler } from '@exsto/substrate'
 import {
+  closeOpenAttribute,
   getLatestAttributeValue,
   insertAttribute,
   insertEntity,
@@ -109,6 +110,7 @@ registerActionHandler('legal.questionnaire.submit', async (ctx, client, payload,
     'matter_status',
   )
   if (current !== 'questionnaire_submitted') {
+    await closeOpenAttribute(client, ctx.tenantId, parsed.matter_entity_id, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,

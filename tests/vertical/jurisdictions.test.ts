@@ -9,6 +9,7 @@ import {
   US_STATE_NAMES_ES,
   normalizeJurisdiction,
   jurisdictionDisplayName,
+  parseUsStateFromAddress,
 } from '../../verticals/legal/src/api/jurisdictions.js'
 import {
   GOVERNING_JURISDICTION_FIELD,
@@ -78,6 +79,40 @@ describe('jurisdictionDisplayName', () => {
     expect(jurisdictionDisplayName('ZZ')).toBeNull()
     expect(jurisdictionDisplayName('')).toBeNull()
     expect(jurisdictionDisplayName(null)).toBeNull()
+  })
+})
+
+// WF-FIX-2 #3 — parse the US state from an on-file client address, deterministic
+// and tail-anchored (no model, no fuzzy match). Feeds the resolver's new
+// client-address rung.
+describe('parseUsStateFromAddress', () => {
+  it('parses a 2-letter code before a ZIP at the standard position', () => {
+    expect(parseUsStateFromAddress('123 Main St, Raleigh, NC 27601')).toBe('NC')
+    expect(parseUsStateFromAddress('500 King St, Wilmington, DE 19801-1234')).toBe('DE')
+  })
+
+  it('parses a full state name at the standard position', () => {
+    expect(parseUsStateFromAddress('77 Peachtree Rd, Atlanta, Georgia 30303')).toBe('GA')
+    expect(parseUsStateFromAddress('1 Elm, Concord, New Hampshire 03301')).toBe('NH')
+  })
+
+  it('tolerates a trailing country and trailing punctuation', () => {
+    expect(parseUsStateFromAddress('123 Main St, Raleigh, NC 27601, USA')).toBe('NC')
+    expect(parseUsStateFromAddress('123 Main St, Raleigh, NC 27601.')).toBe('NC')
+    expect(parseUsStateFromAddress('9 Bay, Miami, FL')).toBe('FL')
+  })
+
+  it('is anchored to the tail — a state-named STREET never false-matches', () => {
+    // "Virginia Ave" is the street; the real state (NV) is at the tail.
+    expect(parseUsStateFromAddress('1 Virginia Ave, Reno, NV 89501')).toBe('NV')
+  })
+
+  it('returns null for an address with no parseable state (falls through)', () => {
+    expect(parseUsStateFromAddress('123 Main St')).toBeNull()
+    expect(parseUsStateFromAddress('Ontario, Canada')).toBeNull()
+    expect(parseUsStateFromAddress('')).toBeNull()
+    expect(parseUsStateFromAddress(null)).toBeNull()
+    expect(parseUsStateFromAddress(undefined)).toBeNull()
   })
 })
 

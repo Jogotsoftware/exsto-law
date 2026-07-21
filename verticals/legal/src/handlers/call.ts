@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { registerActionHandler, withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import {
+  closeOpenAttribute,
   getRelatedEntityIds,
   insertAttribute,
   insertEntity,
@@ -300,6 +301,7 @@ registerActionHandler('call.ingest', async (ctx, client, payload, actionId) => {
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, p.matter_entity_id, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,

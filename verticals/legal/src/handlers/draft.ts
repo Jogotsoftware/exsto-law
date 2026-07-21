@@ -1,6 +1,7 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import {
+  closeOpenAttribute,
   getLatestAttributeValue,
   insertAttribute,
   insertContentBlob,
@@ -281,6 +282,7 @@ async function persistDraftDocument(
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, p.matterEntityId, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
@@ -661,6 +663,7 @@ async function advanceInstanceOnApprove(
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, matterEntityId, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
@@ -710,6 +713,7 @@ registerActionHandler('draft.approve', async (ctx, client, payload, actionId) =>
       ctx.tenantId,
       'matter_status',
     )
+    await closeOpenAttribute(client, ctx.tenantId, matterEntityId, statusKindId)
     await insertAttribute(client, {
       tenantId: ctx.tenantId,
       actionId,
@@ -928,6 +932,10 @@ interface DocumentEditPayload {
   instruction_text?: string
   reasoning_trace_id?: string
   counts?: { accepted: number; rejected: number; ai: number; manual: number }
+  // EDITOR-FIX-1 (item 7) — the per-document base font, persisted on the new
+  // version metadata (JSONB — no migration). Absent on a bare programmatic edit.
+  font_family?: string
+  font_size?: number
 }
 
 registerActionHandler('document.edit', async (ctx, client, payload, actionId) => {
@@ -974,6 +982,10 @@ registerActionHandler('document.edit', async (ctx, client, payload, actionId) =>
       edited_from_version_id: p.document_version_id,
       editor_actor_id: ctx.actorId,
       note: p.note ?? null,
+      // EDITOR-FIX-1 (item 7): the per-document base font, when the edit carried
+      // it (the tracked-changes editor always does). Omitted keys stay absent.
+      ...(p.font_family ? { font_family: p.font_family } : {}),
+      ...(typeof p.font_size === 'number' ? { font_size: p.font_size } : {}),
     },
   })
 
