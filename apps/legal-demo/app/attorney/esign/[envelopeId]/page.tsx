@@ -6,10 +6,12 @@
 // (completed). Reuses the EnvelopeStatusView data path (`legal.esign.status`).
 import { use, useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import type { FieldPlacement } from '@exsto/legal/esign'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { readDevSession } from '@/lib/auth'
-import { DocumentSheet } from '@/components/DocumentSheet'
 import { downloadAsPdf } from '@/lib/draftExport'
+import { PdfCanvas } from '@/components/esign/PdfCanvas'
+import { usePdfDocument } from '@/components/esign/usePdfDocument'
 import {
   ChevronLeftIcon,
   RefreshIcon,
@@ -49,6 +51,9 @@ interface EnvelopeStatus {
   contactEntityId: string | null
   contactName: string | null
   executedCertificateMarkdown: string | null
+  /** ES-2 — the envelope's placement plan + the original version (real preview). */
+  placements: FieldPlacement[]
+  originalDocumentVersionId: string | null
 }
 
 const BUCKET_META: Record<EnvelopeBucket, { label: string; fg: string; bg: string }> = {
@@ -117,6 +122,55 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
   useEffect(() => {
     load()
   }, [load])
+
+  // ES-2 — the REAL preview: the envelope's actual document bytes (file stream
+  // for uploads — the executed stamped copy once completed; the §5.2 render
+  // route for drafts), with the placement plan overlaid at true positions.
+  const [previewBytes, setPreviewBytes] = useState<ArrayBuffer | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!env) return
+    let cancelled = false
+    const headers: Record<string, string> = {}
+    if (process.env.NODE_ENV !== 'production') {
+      const dev = readDevSession()
+      if (dev) {
+        headers['x-actor-id'] = dev.actorId
+        headers['x-tenant-id'] = dev.tenantId
+      }
+    }
+    const fetchBytes = env.isFile
+      ? fetch(`/api/attorney/esign/${envelopeId}/file`, { headers })
+      : env.originalDocumentVersionId
+        ? fetch('/api/attorney/esign/render', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...headers },
+            body: JSON.stringify({ documentVersionId: env.originalDocumentVersionId }),
+          })
+        : null
+    if (!fetchBytes) return
+    fetchBytes
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Could not load the document (${r.status}).`)
+        if (env.isFile) return r.arrayBuffer()
+        const data = (await r.json()) as { pdf?: string; error?: string }
+        if (!data.pdf) throw new Error(data.error || 'Could not render the document.')
+        const bin = atob(data.pdf)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+        return bytes.buffer
+      })
+      .then((buf) => {
+        if (!cancelled) setPreviewBytes(buf)
+      })
+      .catch((e) => {
+        if (!cancelled) setPreviewError(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [env?.isFile, env?.originalDocumentVersionId, envelopeId])
+  const previewPdf = usePdfDocument(previewBytes)
 
   async function onResend(): Promise<void> {
     setBusy('resend')
@@ -351,27 +405,28 @@ export default function EsignDetailPage({ params }: { params: Promise<{ envelope
         </div>
 
         <div className="li-esign-detail-side">
-          <div className="li-esign-preview-desk">
-            <DocumentSheet variant="thumb" className="li-esign-preview-sheet">
-              <div className="li-esign-preview-title">
-                <FileTextIcon size={15} />
-                {cleanEnvelopeSubject(env.subject) || docLabel}
+          <div className="li-esp-detail-preview">
+            {previewPdf.doc ? (
+              <PdfCanvas
+                doc={previewPdf.doc}
+                pages={previewPdf.pages}
+                zoom="fit"
+                // Once completed, a file envelope streams the STAMPED executed
+                // copy — values are in the pixels, so the overlay would double-
+                // draw them. Active envelopes show the plan.
+                placements={env.bucket === 'completed' && env.isFile ? [] : env.placements}
+                toneBySigner={Object.fromEntries(
+                  env.signers.filter((s) => s.key).map((s, i) => [s.key as string, (i % 8) + 1]),
+                )}
+                readOnly
+              />
+            ) : previewError ? (
+              <div className="alert">{previewError}</div>
+            ) : (
+              <div className="loading-block" role="status">
+                <span className="spinner" /> Loading preview…
               </div>
-              <div className="li-esign-preview-body">
-                This is the document sent for signature. Signature and date fields are placed at the
-                signing blocks below.
-              </div>
-              <div className="li-esign-preview-blocks">
-                {env.signers.map((s) => (
-                  <div key={s.requestId} className="li-esign-signhere">
-                    <span className="li-esign-signhere-tag">SIGN HERE</span>
-                    <div className="li-esign-signhere-name">
-                      {(s.name || s.email || 'Signer') + (s.title ? ' — ' + s.title : '')}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </DocumentSheet>
+            )}
           </div>
           <div className="li-esign-consent">
             <ShieldCheckIcon size={17} />

@@ -24,6 +24,7 @@ import {
   DEFAULT_ESIGN_PROVIDER,
   EsignNotConfiguredError,
   getEsignDriver,
+  parseEnvelopePlacements,
   signSigningToken,
   verifySigningToken,
   type EsignCallbackEvent,
@@ -461,6 +462,12 @@ export interface EnvelopeStatus {
   /** File envelopes only, once completed: the executed signature-certificate
    *  markdown (the executed version's body). Drafts keep using legal.draft.get. */
   executedCertificateMarkdown: string | null
+  /** ES-2 (§5.1) — the envelope's coordinate placement plan (empty for legacy
+   *  envelopes; the detail preview falls back to the whole-line view). */
+  placements: FieldPlacement[]
+  /** ES-2 — the ORIGINAL (non-executed) document_version this envelope sent;
+   *  the render route's input for the real draft preview. */
+  originalDocumentVersionId: string | null
 }
 
 export async function getEnvelopeStatus(
@@ -486,6 +493,7 @@ export async function getEnvelopeStatus(
       contact_entity_id: string | null
       contact_name: string | null
       executed_body: string | null
+      original_version_id: string | null
     }>(
       `SELECT r.target_entity_id AS document_entity_id,
               coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind,
@@ -505,6 +513,10 @@ export async function getEnvelopeStatus(
                  WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
                    AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
                  ORDER BY dv.version_number DESC LIMIT 1) AS file_name,
+              (SELECT dv.id FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS original_version_id,
               (SELECT cb2.body FROM document_version dv2
                  JOIN content_blob cb2 ON cb2.id = dv2.content_blob_id
                  WHERE dv2.document_entity_id = r.target_entity_id AND dv2.tenant_id = $1
@@ -596,6 +608,10 @@ export async function getEnvelopeStatus(
       executedCertificateMarkdown: doc.rows[0]?.object_key
         ? (doc.rows[0]?.executed_body ?? null)
         : null,
+      placements: parsePlacementsJson(
+        await latestAttrRaw(client, ctx.tenantId, envelopeId, 'envelope_placements'),
+      ),
+      originalDocumentVersionId: doc.rows[0]?.original_version_id ?? null,
       signers,
     }
   })
@@ -897,6 +913,10 @@ export interface SignableDocument {
   envelopeStatus: string | null
   /** Fillable fields for this signer (sign/initial/title/text/check). */
   fields: Array<{ id: string; type: EsignFieldType; label: string; prefill?: string }>
+  /** ES-2 (§9.3) — THIS signer's coordinate placements (empty for legacy
+   *  envelopes → the surface keeps the whole-line flow). Rects are normalized
+   *  page coords; `value` carries the send-time resolved auto-fill. */
+  placements: FieldPlacement[]
   /** True when this signer can act now (their turn, not yet resolved). */
   canSign: boolean
   alreadyResolved: boolean
@@ -950,14 +970,34 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
     const isFile = Boolean(docRes.rows[0]?.object_key)
     const fieldsJson = await latestAttrRaw(client, ctx.tenantId, envelopeId, 'envelope_fields')
     const allFields: EsignField[] = fieldsJson ? (JSON.parse(fieldsJson) as EsignField[]) : []
-    const myFields = allFields
-      .filter((f) => f.signerKey === signerKey && FILLABLE_FIELD_TYPES.includes(f.type))
-      .map((f) => ({
-        id: f.id,
-        type: f.type,
-        label: labelFor(f.type),
-        prefill: f.type === 'title' ? (signerTitle ?? undefined) : undefined,
-      }))
+    // ES-2 (§9.3) — placement envelopes: this signer's boxes drive both the
+    // overlay AND the fillable-inputs list (ids are PLACEMENT ids, so the
+    // signer's field_values key by placement id). Sign/initial ride the adopted
+    // signature; date auto-fills at the signing moment (the signer never types
+    // a date); a data-bound field with a resolved `value` is display-only.
+    const allPlacements = parsePlacementsJson(
+      await latestAttrRaw(client, ctx.tenantId, envelopeId, 'envelope_placements'),
+    )
+    const myPlacements = allPlacements.filter((p) => p.signerKey === signerKey)
+    const myFields = myPlacements.length
+      ? myPlacements
+          .filter(
+            (p) => !['sign', 'initial', 'name', 'date'].includes(p.type) && !(p.value ?? '').trim(),
+          )
+          .map((p) => ({
+            id: p.id,
+            type: p.type as EsignFieldType,
+            label: p.label ?? labelFor(p.type as EsignFieldType),
+            prefill: p.type === 'title' ? (signerTitle ?? undefined) : undefined,
+          }))
+      : allFields
+          .filter((f) => f.signerKey === signerKey && FILLABLE_FIELD_TYPES.includes(f.type))
+          .map((f) => ({
+            id: f.id,
+            type: f.type,
+            label: labelFor(f.type),
+            prefill: f.type === 'title' ? (signerTitle ?? undefined) : undefined,
+          }))
     return {
       requestId,
       envelopeId,
@@ -973,6 +1013,7 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
       signerStatus,
       envelopeStatus,
       fields: myFields,
+      placements: myPlacements,
       canSign:
         !viewOnly &&
         (signerStatus === 'delivered' || signerStatus === 'opened') &&
@@ -1399,6 +1440,17 @@ async function assertSignerTurn(ctx: ActionContext, requestId: string): Promise<
   }
   if (status === 'pending') {
     throw new Error('It is not your turn to sign yet — a prior signer must sign first.')
+  }
+}
+
+// ES-2 — defensive parse of a raw envelope_placements attribute value (JSON
+// text or null). Bad JSON degrades to [] — same doctrine as parseEnvelopePlacements.
+function parsePlacementsJson(raw: string | null): FieldPlacement[] {
+  if (!raw) return []
+  try {
+    return parseEnvelopePlacements(JSON.parse(raw))
+  } catch {
+    return []
   }
 }
 

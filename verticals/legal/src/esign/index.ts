@@ -23,3 +23,31 @@ export {
   type RoutingRequestState,
   type NextDeliveryPlan,
 } from './routing.js'
+// ESIGN-UNIFY-1 (ES-2) — placement geometry helpers (§4/§5.2).
+export {
+  DEFAULT_FIELD_POINTS,
+  LETTER_POINTS,
+  clamp01,
+  clampRect,
+  normalizeRect,
+  denormalizeRect,
+  defaultRectForType,
+} from './placements.js'
+// ES-2 (§5.2) — the anchor→rect bridge for drafts (marker map).
+export { deriveMarkerMap, markerMapToPlacements, type MarkerMapEntry } from './markerMap.js'
+// ES-2 (§5.3) — send-time data auto-fill for placements.
+export {
+  resolvePlacementData,
+  ALLOWED_MATTER_KEYS,
+  type PlacementRecipient,
+  type PlacementContactFacts,
+  type ResolvePlacementDataInput,
+} from './placementData.js'
+// ES-2 (§5.4) — executed-copy stamping (pdf-lib) for file envelopes.
+export {
+  stampExecutedPdf,
+  placementsToStampFields,
+  type StampField,
+  type StampInput,
+} from './stampPdf.js'
+export { buildCertificateTextLines } from './fileCertificate.js'

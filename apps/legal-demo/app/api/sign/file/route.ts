@@ -3,7 +3,7 @@
 // signed Storage URL is ever issued — the bytes proxy through here with the
 // token as the only door (same doctrine as the attorney/portal download routes).
 import { NextResponse } from 'next/server'
-import { loadEnvelopeFileRefByToken } from '@exsto/legal'
+import { loadEnvelopeFileRefByToken, executedPdfObjectKey } from '@exsto/legal'
 import { downloadObject } from '@/lib/documentStorage'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 
@@ -22,7 +22,13 @@ export async function GET(request: Request) {
   try {
     const ref = await loadEnvelopeFileRefByToken(token)
     if (!ref) return NextResponse.json({ error: 'Document not found.' }, { status: 404 })
-    const bytes = await downloadObject(ref.objectKey)
+    // ES-2 (§5.4) — once the envelope completes, a stamped executed copy exists
+    // beside the original (derived key); prefer it so a signer returning to
+    // their link sees the executed document. Mid-flow it doesn't exist yet and
+    // the original streams (the fallback).
+    const bytes = await downloadObject(executedPdfObjectKey(ref.objectKey)).catch(() =>
+      downloadObject(ref.objectKey),
+    )
     return new NextResponse(new Uint8Array(bytes), {
       headers: {
         'Content-Type': ref.contentType,

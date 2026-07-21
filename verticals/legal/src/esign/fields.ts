@@ -7,7 +7,25 @@
 // Tags fit the markdown model (no PDF coordinate system). A document with NO
 // tags falls back to whole-document sign + appended certificate (the prior flow).
 
-export type EsignFieldType = 'sign' | 'initial' | 'name' | 'date' | 'title' | 'text' | 'check'
+// ESIGN-UNIFY-1 ES-2 (§5.1) — the marker grammar gains four DATA-BOUND kinds
+// (email/company/phone/address). They resolve at SEND time from the bound
+// contact/matter (esign/placementData.ts), degrading to signer-fillable when
+// unresolvable — never an invented value, never a FIRM_DEFAULTS value. Single-
+// sourced here so the parser, LABELS, the execution-block builder/preview and the
+// react-pdf renderer share ONE grammar and can never drift (fields.ts is the one
+// place a marker kind is added — see MARKER_TYPE_PATTERN below).
+export type EsignFieldType =
+  | 'sign'
+  | 'initial'
+  | 'name'
+  | 'date'
+  | 'title'
+  | 'text'
+  | 'check'
+  | 'email'
+  | 'company'
+  | 'phone'
+  | 'address'
 
 export interface EsignField {
   /** Stable id by appearance order: f0, f1, … (the body is fixed once sent). */
@@ -22,7 +40,8 @@ export interface EsignField {
 // so the parser (below) and the execution-block builder/preview transform
 // (executionBlock.ts) share ONE grammar and can never drift. Adding a new marker
 // kind is a change to EsignFieldType + LABELS + this pattern, nowhere else.
-export const MARKER_TYPE_PATTERN = 'sign|initial|name|date|title|text|check'
+export const MARKER_TYPE_PATTERN =
+  'sign|initial|name|date|title|text|check|email|company|phone|address'
 
 // {{ type : signerKey }} — whitespace tolerant; keys are [A-Za-z0-9_-].
 const TAG_RE = new RegExp(
@@ -38,12 +57,29 @@ const LABELS: Record<EsignFieldType, string> = {
   title: 'Title',
   text: 'Text',
   check: 'Checkbox',
+  email: 'Email',
+  company: 'Company',
+  phone: 'Phone',
+  address: 'Address',
 }
 
 // Auto fields are filled by the system (signer name / signing date); fillable
-// fields are completed by the signer.
+// fields are completed by the signer. The data-bound kinds (email/company/phone/
+// address) resolve at send time from the bound contact/matter (§5.3) but fall
+// back to signer-fillable, so they sit in FILLABLE for the whole-line markdown
+// path — the placement path (placementData.ts) does the auto-resolution.
 export const AUTO_FIELD_TYPES: EsignFieldType[] = ['name', 'date']
-export const FILLABLE_FIELD_TYPES: EsignFieldType[] = ['sign', 'initial', 'title', 'text', 'check']
+export const FILLABLE_FIELD_TYPES: EsignFieldType[] = [
+  'sign',
+  'initial',
+  'title',
+  'text',
+  'check',
+  'email',
+  'company',
+  'phone',
+  'address',
+]
 
 export function isAutoField(type: EsignFieldType): boolean {
   return AUTO_FIELD_TYPES.includes(type)

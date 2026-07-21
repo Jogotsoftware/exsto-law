@@ -68,10 +68,112 @@ export interface FieldPlacement {
   anchor?: PlacementAnchor
   /** ALWAYS present: normalized page coords (0..1 of page width/height), y from top. */
   rect: PlacementRect
+  /** ES-2 (§5.3): the send-time resolved auto-fill value for a data-bound
+   *  placement (name/email/title/phone/address/company). Written by the send
+   *  path via resolvePlacementData; null/absent = signer-fillable. NEVER a
+   *  guessed or FIRM_DEFAULTS value. */
+  value?: string | null
 }
 
 export function isPlacementFieldType(value: unknown): value is PlacementFieldType {
   return typeof value === 'string' && (PLACEMENT_FIELD_TYPES as string[]).includes(value)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ES-2 (§4/§5.2) — default box sizes + the normalized-coordinate contract.
+//
+// Every rect is stored NORMALIZED: x/y/w/h are fractions of the page's
+// width/height (0..1), y measured from the TOP of the page. That makes a
+// placement resolution-independent — the canvas renders at any zoom, the
+// signer overlay at any device width, and the pdf-lib stamper at true PDF
+// points, all from the SAME record. The two conversions below are exact
+// inverses (round-trip tested) so a box the attorney drops on a 900px-wide
+// canvas stamps at the identical spot on the 612pt PDF page.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Default box size per field type, in PDF POINTS (72pt = 1in), per §5.2. */
+export const DEFAULT_FIELD_POINTS: Record<PlacementFieldType, { w: number; h: number }> = {
+  sign: { w: 200, h: 48 },
+  initial: { w: 96, h: 40 },
+  date: { w: 128, h: 32 },
+  name: { w: 200, h: 28 },
+  title: { w: 200, h: 28 },
+  text: { w: 200, h: 28 },
+  check: { w: 24, h: 24 },
+  email: { w: 200, h: 28 },
+  company: { w: 200, h: 28 },
+  phone: { w: 160, h: 28 },
+  address: { w: 220, h: 44 },
+}
+
+/** US Letter, the platform's one render size (draftPdf renders LETTER). */
+export const LETTER_POINTS = { w: 612, h: 792 } as const
+
+export function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0
+  return n < 0 ? 0 : n > 1 ? 1 : n
+}
+
+/** Clamp a normalized rect so it always sits within the page box (w/h never
+ *  push x/y past the right/bottom edge). Idempotent. */
+export function clampRect(rect: PlacementRect): PlacementRect {
+  const w = clamp01(rect.w)
+  const h = clamp01(rect.h)
+  const x = Math.min(clamp01(rect.x), 1 - w)
+  const y = Math.min(clamp01(rect.y), 1 - h)
+  return { page: rect.page, x: clamp01(x), y: clamp01(y), w, h }
+}
+
+/** A pixel/point rect (origin top-left) → normalized rect, given the page's
+ *  rendered pixel/point size. Clamped to the page. */
+export function normalizeRect(
+  px: { x: number; y: number; w: number; h: number },
+  page: number,
+  pageWidth: number,
+  pageHeight: number,
+): PlacementRect {
+  if (!(pageWidth > 0) || !(pageHeight > 0)) return { page, x: 0, y: 0, w: 0, h: 0 }
+  return clampRect({
+    page,
+    x: px.x / pageWidth,
+    y: px.y / pageHeight,
+    w: px.w / pageWidth,
+    h: px.h / pageHeight,
+  })
+}
+
+/** Normalized rect → a pixel/point rect (origin top-left) at the given rendered
+ *  page size. The exact inverse of normalizeRect (pre-clamp). */
+export function denormalizeRect(
+  rect: PlacementRect,
+  pageWidth: number,
+  pageHeight: number,
+): { x: number; y: number; w: number; h: number } {
+  return {
+    x: rect.x * pageWidth,
+    y: rect.y * pageHeight,
+    w: rect.w * pageWidth,
+    h: rect.h * pageHeight,
+  }
+}
+
+/** The default normalized box for a type dropped at a point, given the page's
+ *  point size (defaults to LETTER). Used both by drag-drop placement and by
+ *  the marker→rect bridge (§5.2). */
+export function defaultRectForType(
+  type: PlacementFieldType,
+  page: number,
+  topLeft: { x: number; y: number },
+  pagePoints: { w: number; h: number } = LETTER_POINTS,
+): PlacementRect {
+  const pts = DEFAULT_FIELD_POINTS[type]
+  return clampRect({
+    page,
+    x: topLeft.x,
+    y: topLeft.y,
+    w: pts.w / pagePoints.w,
+    h: pts.h / pagePoints.h,
+  })
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -119,6 +221,7 @@ function parsePlacement(value: unknown): FieldPlacement | null {
     rect,
   }
   if (typeof o.label === 'string' && o.label) placement.label = o.label
+  if (typeof o.value === 'string' && o.value) placement.value = o.value
   const anchor = parseAnchor(o.anchor)
   if (anchor) placement.anchor = anchor
   return placement

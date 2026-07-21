@@ -25220,3 +25220,533 @@ details.li-brief-research summary:hover {
   padding: 9px 10px;
   resize: vertical;
 }
+
+/* ══ li-esp — ESIGN-UNIFY-1 ES-2: the visual field-placement surface (§4).
+   Three-pane placement canvas (palette / real PDF pages / thumbnails), signer-
+   colored field boxes with move+resize, properties panel, preview mode, the
+   composer/detail real previews, and the signer overlay. Rides the li-esign2
+   signer tone tokens (--li-esign2-s1..s8). Append-only family at the tail. ══ */
+
+.li-esp {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+.li-esp-state {
+  margin: 18px 0;
+}
+.li-esp-step {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.li-esp-step-hint {
+  margin: 0 0 10px;
+}
+.li-esp-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.li-esp-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--li-border);
+  border-left: 3px solid var(--li-esign2-tone, var(--li-navy));
+  border-radius: 8px;
+  background: var(--li-card);
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--li-text);
+}
+.li-esp-switcher-label {
+  color: var(--li-muted);
+  font-size: 12.5px;
+}
+.li-esp-switcher select {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--li-text);
+  font-family: inherit;
+  appearance: none;
+  padding-right: 2px;
+  cursor: pointer;
+}
+.li-esp-switcher select:focus {
+  outline: none;
+}
+.li-esp-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.li-esp-zoom {
+  display: inline-flex;
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.li-esp-zoom .li-esp-tool {
+  border: none;
+  border-radius: 0;
+}
+.li-esp-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  background: var(--li-card);
+  color: var(--li-text);
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.li-esp-tool:hover:not(:disabled) {
+  background: var(--li-hover, rgba(27, 42, 74, 0.05));
+}
+.li-esp-tool:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.li-esp-tool.is-active {
+  background: var(--li-navy);
+  color: #fff;
+  border-color: var(--li-navy);
+}
+.li-esp-body {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  min-height: 420px;
+  max-height: 62vh;
+}
+.li-esp-left {
+  width: 200px;
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+.li-esp-palette {
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  background: var(--li-card);
+  padding: 10px;
+}
+.li-esp-palette-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  color: var(--li-muted);
+  margin-bottom: 8px;
+}
+.li-esp-palette-search input {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--li-text);
+  width: 100%;
+}
+.li-esp-palette-search input:focus {
+  outline: none;
+}
+.li-esp-palette-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.li-esp-palette-empty {
+  color: var(--li-muted);
+  font-size: 12.5px;
+  padding: 4px 2px;
+}
+.li-esp-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--li-border);
+  border-radius: 8px;
+  background: var(--li-bg, #fff);
+  color: var(--li-text);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 7px 9px;
+  cursor: grab;
+  text-align: left;
+}
+.li-esp-chip:hover:not(:disabled) {
+  border-color: var(--li-navy);
+  background: var(--li-hover, rgba(27, 42, 74, 0.04));
+}
+.li-esp-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.li-esp-chip:active {
+  cursor: grabbing;
+}
+.li-esp-chip-ico {
+  display: inline-flex;
+  color: var(--li-navy);
+}
+/* The marquee Signature chip: gold accent + script-leaning label (§4). */
+.li-esp-chip--sig {
+  border-color: var(--li-gold, #c6a968);
+  background: var(--li-warn-bg, rgba(198, 169, 104, 0.12));
+}
+.li-esp-chip--sig .li-esp-chip-ico {
+  color: var(--li-gold-deep, #b45309);
+}
+.li-esp-chip--sig .li-esp-chip-label {
+  font-style: italic;
+  font-weight: 600;
+}
+.li-esp-scroll {
+  flex: 1 1 auto;
+  overflow: auto;
+  background: var(--li-well, #eceff3);
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  padding: 18px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+.li-esp-page {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 1px 8px rgba(15, 23, 42, 0.16);
+  flex: 0 0 auto;
+}
+.li-esp-page-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.li-esp-overlay {
+  position: absolute;
+  inset: 0;
+}
+.li-esp-box {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1.5px solid var(--li-esign2-tone, var(--li-navy));
+  background: color-mix(in srgb, var(--li-esign2-tone, var(--li-navy)) 12%, transparent);
+  border-radius: 4px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.li-esp-box:focus-visible {
+  outline: 2px solid var(--li-esign2-tone, var(--li-navy));
+  outline-offset: 1px;
+}
+.li-esp-box.is-dimmed {
+  opacity: 0.45;
+}
+.li-esp-box.is-selected {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--li-esign2-tone, var(--li-navy)) 35%, transparent);
+  z-index: 2;
+}
+.li-esp-box.is-readonly {
+  cursor: default;
+}
+.li-esp-box-body {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.li-esp-box-ico {
+  display: inline-flex;
+  color: var(--li-esign2-tone, var(--li-navy));
+  flex: 0 0 auto;
+}
+.li-esp-box-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--li-esign2-tone, var(--li-navy));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li-esp-box-req {
+  font-style: normal;
+  margin-left: 2px;
+}
+.li-esp-box-value {
+  font-size: 12px;
+  color: var(--li-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Signature boxes read signature-like: script value + baseline rule (§4). */
+.li-esp-box--sig .li-esp-box-label {
+  font-style: italic;
+}
+.li-esp-box-value--sig {
+  font-family: 'Snell Roundhand', 'Apple Chancery', 'Brush Script MT', cursive;
+  font-size: 16px;
+  color: var(--li-navy);
+}
+.li-esp-box-rule {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 4px;
+  border-bottom: 1px solid var(--li-esign2-tone, var(--li-navy));
+  opacity: 0.75;
+  pointer-events: none;
+}
+.li-esp-box-del {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--li-border);
+  background: var(--li-card);
+  color: var(--li-danger, #b91c1c);
+  cursor: pointer;
+  z-index: 3;
+  padding: 0;
+}
+.li-esp-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--li-esign2-tone, var(--li-navy));
+  background: #fff;
+  border-radius: 2px;
+  z-index: 3;
+}
+.li-esp-handle--nw {
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+.li-esp-handle--n {
+  top: -5px;
+  left: calc(50% - 4px);
+  cursor: ns-resize;
+}
+.li-esp-handle--ne {
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
+}
+.li-esp-handle--e {
+  top: calc(50% - 4px);
+  right: -5px;
+  cursor: ew-resize;
+}
+.li-esp-handle--se {
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
+}
+.li-esp-handle--s {
+  bottom: -5px;
+  left: calc(50% - 4px);
+  cursor: ns-resize;
+}
+.li-esp-handle--sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
+}
+.li-esp-handle--w {
+  top: calc(50% - 4px);
+  left: -5px;
+  cursor: ew-resize;
+}
+.li-esp-thumbs {
+  width: 116px;
+  flex: 0 0 116px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px;
+}
+.li-esp-thumb {
+  position: relative;
+  border: 2px solid var(--li-border);
+  border-radius: 6px;
+  background: var(--li-card);
+  padding: 3px;
+  cursor: pointer;
+}
+.li-esp-thumb.is-current {
+  border-color: var(--li-gold, #c6a968);
+}
+.li-esp-thumb-canvas {
+  display: block;
+  width: 100%;
+  border-radius: 3px;
+}
+.li-esp-thumb-num {
+  display: block;
+  text-align: center;
+  font-size: 11px;
+  color: var(--li-muted);
+  padding-top: 2px;
+}
+.li-esp-thumb-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 9px;
+  background: var(--li-navy);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+.li-esp-props {
+  border: 1px solid var(--li-border);
+  border-radius: 10px;
+  background: var(--li-card);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.li-esp-props-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--li-text);
+}
+.li-esp-props-ico {
+  display: inline-flex;
+  color: var(--li-navy);
+}
+.li-esp-props-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+  color: var(--li-text);
+}
+.li-esp-props-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+}
+.li-esp-props-k {
+  font-size: 11.5px;
+  color: var(--li-muted);
+}
+.li-esp-props-in {
+  border: 1px solid var(--li-border);
+  border-radius: 7px;
+  background: var(--li-bg, #fff);
+  color: var(--li-text);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 6px 8px;
+  width: 100%;
+}
+.li-esp-props-hint {
+  font-size: 11.5px;
+  color: var(--li-muted);
+  margin: 0;
+}
+.li-esp-props-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--li-danger-bg, rgba(185, 28, 28, 0.25));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--li-danger, #b91c1c);
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 6px 9px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+.li-esp-props-delete:hover {
+  background: var(--li-danger-bg, rgba(185, 28, 28, 0.08));
+}
+.li-esp-review {
+  margin-bottom: 14px;
+}
+.li-esp-review .li-esp-scroll {
+  max-height: 320px;
+  padding: 12px 0;
+}
+.li-esp-review-sub {
+  text-align: center;
+  padding-top: 6px;
+}
+.li-esp-detail-preview .li-esp-scroll {
+  max-height: 460px;
+  padding: 10px 0;
+}
+.li-esp-sign-overlay {
+  margin: 12px 0;
+}
+.li-esp-sign-overlay .li-esp-scroll {
+  max-height: 68vh;
+}
+.li-esp-sign-overlay .li-esp-box {
+  cursor: pointer;
+}
+.li-esp-adopt-autonote {
+  font-size: 12.5px;
+  color: var(--li-muted);
+  margin: 4px 0 0;
+}
+/* Preview mode strips editing chrome — boxes stay, handles/delete hidden. */
+.li-esp.is-preview .li-esp-box {
+  cursor: default;
+}
+@media (max-width: 900px) {
+  .li-esp-body {
+    flex-direction: column;
+    max-height: none;
+  }
+  .li-esp-left {
+    width: 100%;
+    flex: 1 1 auto;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .li-esp-thumbs {
+    width: 100%;
+    flex: 1 1 auto;
+    flex-direction: row;
+  }
+}
