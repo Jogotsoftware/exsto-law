@@ -108,39 +108,44 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
   // title). deliverNotification takes its SUBJECT from here (the branded HTML
   // part rides alongside), so this is where §9.4's subject rule lands.
   'esign-sign-request': (v) => ({
-    subject: s(v.envelope_subject, `Please sign: ${s(v.document_title, 'your document')}`),
+    subject: s(
+      v.envelope_subject,
+      `Ready for your signature — ${s(v.document_title, 'your document')}`,
+    ),
     bodyText: [
       `Hi ${s(v.signer_name, 'there')},`,
       ``,
-      `${s(v.firm_name, 'Your attorney')} has prepared a document for your electronic`,
-      `signature. Use the secure link below to review it and sign. The link expires in 14 days.`,
-      ``,
-      `${s(v.sign_url, '(signing link unavailable)')}`,
+      `${s(v.attorney_name, s(v.firm_name, 'Your attorney'))} has a document ready for your signature: ${s(v.document_title, 'your document')}.`,
       ...(v.envelope_message
         ? [
             ``,
-            `Message from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
+            `Note from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
           ]
         : []),
+      ``,
+      `Open your document: ${s(v.sign_url, '(link unavailable)')}`,
+      `This link is unique to you and stays open for 14 days.`,
       ``,
       `If you weren't expecting this, you can safely ignore this email.`,
     ].join('\n'),
   }),
   'esign-sign-request-portal': (v) => ({
-    subject: s(v.envelope_subject, `Action needed: sign ${s(v.document_title, 'a document')}`),
+    subject: s(
+      v.envelope_subject,
+      `Ready for your signature — ${s(v.document_title, 'a document')}`,
+    ),
     bodyText: [
       `Hi ${s(v.signer_name, 'there')},`,
       ``,
-      `${s(v.firm_name, 'Your attorney')} has prepared a document that needs your`,
-      `signature. Sign in to your secure client portal to review and sign it.`,
-      ``,
-      `${s(v.portal_url, '(portal link unavailable)')}`,
+      `${s(v.attorney_name, s(v.firm_name, 'Your attorney'))} has a document ready for your signature: ${s(v.document_title, 'a document')}.`,
       ...(v.envelope_message
         ? [
             ``,
-            `Message from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
+            `Note from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
           ]
         : []),
+      ``,
+      `Open your client portal: ${s(v.portal_url, '(link unavailable)')}`,
     ].join('\n'),
   }),
   // ESIGN-UNIFY-1 (ES-1, §9.2, 0186): the receives_copy recipient's executed-
@@ -150,16 +155,15 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
     bodyText: [
       `Hi ${s(v.signer_name, 'there')},`,
       ``,
-      `All parties have signed ${s(v.document_title, 'the document')}. Use the secure`,
-      `link below to view the executed copy.`,
-      ``,
-      `${s(v.copy_url, '(link unavailable)')}`,
+      `All parties have signed ${s(v.document_title, 'the document')}. Your executed copy is ready.`,
       ...(v.envelope_message
         ? [
             ``,
-            `Message from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
+            `Note from ${s(v.attorney_name, s(v.firm_name, 'your attorney'))}: ${s(v.envelope_message)}`,
           ]
         : []),
+      ``,
+      `Open your copy: ${s(v.copy_url, '(link unavailable)')}`,
     ].join('\n'),
   }),
   'attorney-portal-message': (v) => ({

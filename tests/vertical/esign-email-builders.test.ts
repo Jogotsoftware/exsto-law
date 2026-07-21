@@ -2,8 +2,10 @@
 // esign builders are TENANT-branded: identity comes exclusively from the
 // notification variables (attorney_name/firm_name threaded from
 // getTenantSettings) — never from the hardcoded FIRM constant. These tests pin
-// the §9.4 shape (sender line, gold CTA "Review document", personal message)
-// and the anti-hardcoding rule (no Pacheco when the variables don't say so).
+// the §9.4 shape (sender line, gold CTA "Open your document", personal
+// message) and the anti-hardcoding rule (no Pacheco when the variables don't
+// say so). Copy assertions also pin the deliverability de-fingerprint: no
+// "review and sign electronically" / "secure link" phrasing.
 import { describe, expect, it } from 'vitest'
 import { buildEmail, listTemplateRefs } from '../../verticals/legal/src/email/templates.js'
 import { renderNotificationTemplate } from '../../verticals/legal/src/api/notificationTemplates.js'
@@ -30,16 +32,19 @@ describe('esign builders are registered', () => {
 })
 
 describe('esign-sign-request (§9.4 shape)', () => {
-  it('sender identity "<Attorney> via <Firm>", gold CTA "Review document", message included', () => {
+  it('sender identity "<Attorney> via <Firm>", gold CTA "Open your document", message included', () => {
     const built = buildEmail('esign-sign-request', BASE_VARS)!
     expect(built.subject).toBe('Commercial Lease Agreement')
     expect(built.html).toContain('Juan Carlos Pacheco via Pacheco Law Firm, PLLC')
-    expect(built.html).toContain('sent you a document to review and sign')
-    expect(built.html).toMatch(/Review document\s*<\/a>/) // the ONE CTA label
+    expect(built.html).toContain('has a document ready for your signature')
+    expect(built.html).toMatch(/Open your document\s*<\/a>/) // the ONE CTA label
     expect(built.html).toContain('https://firm.example/sign/tok123')
     expect(built.html).toContain('Please review section 4 before signing.')
+    // De-fingerprint: no phishing-classic phrasing in the rendered copy.
+    expect(built.html).not.toContain('review and sign electronically')
+    expect(built.html).not.toContain('secure link')
     // Plaintext part always ships (multipart/alternative house rule).
-    expect(built.text).toContain('Review document: https://firm.example/sign/tok123')
+    expect(built.text).toContain('Open your document: https://firm.example/sign/tok123')
     expect(built.text).toContain('Please review section 4 before signing.')
   })
 
@@ -48,7 +53,7 @@ describe('esign-sign-request (§9.4 shape)', () => {
     const built = buildEmail('esign-sign-request', anon)!
     expect(built.html).not.toContain('Pacheco')
     expect(built.text).not.toContain('Pacheco')
-    expect(built.html).toContain('Your attorney sent you a document to review and sign')
+    expect(built.html).toContain('Your attorney has a document ready for your signature')
   })
 
   it('omits the message block when no personal message was written', () => {
@@ -63,7 +68,7 @@ describe('esign-sign-request-portal', () => {
     const built = buildEmail('esign-sign-request-portal', BASE_VARS)!
     expect(built.html).toContain('https://firm.example/portal/sign/req123')
     expect(built.html).toContain('client portal')
-    expect(built.html).toMatch(/Review document\s*<\/a>/)
+    expect(built.html).toMatch(/Open your document\s*<\/a>/)
   })
 })
 
@@ -72,7 +77,7 @@ describe('esign-copy-delivered', () => {
     const built = buildEmail('esign-copy-delivered', BASE_VARS)!
     expect(built.subject).toBe('Executed copy: Commercial Lease Agreement')
     expect(built.html).toContain('executed copy of a signed document')
-    expect(built.html).toMatch(/View executed document\s*<\/a>/)
+    expect(built.html).toMatch(/View your copy\s*<\/a>/)
     expect(built.html).toContain('https://firm.example/sign/tok456')
   })
 })
@@ -81,7 +86,11 @@ describe('plaintext notification templates (subject source for deliverNotificati
   it('esign-sign-request subject = envelope subject; body identity from variables', () => {
     const r = renderNotificationTemplate('esign-sign-request', BASE_VARS)
     expect(r.subject).toBe('Commercial Lease Agreement')
-    expect(r.bodyText).toContain('Pacheco Law Firm, PLLC has prepared a document')
+    expect(r.bodyText).toContain('Juan Carlos Pacheco has a document ready for your signature')
+    expect(r.bodyText).toContain('Open your document: https://firm.example/sign/tok123')
+    // De-fingerprint: no phishing-classic phrasing in the plaintext part either.
+    expect(r.bodyText).not.toContain('secure link')
+    expect(r.bodyText).not.toContain('electronic')
   })
 
   it('degrades to neutral copy — no hardcoded firm — when identity vars are absent', () => {
