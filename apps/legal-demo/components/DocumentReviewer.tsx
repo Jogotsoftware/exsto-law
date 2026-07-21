@@ -22,6 +22,7 @@ import { formatDateTimeShort } from '@/lib/datetime'
 import { lineDiff, diffStats } from '@/lib/lineDiff'
 import { renderDocumentHtml } from '@/lib/documentHtml'
 import { renderMissingChipsHtml } from '@/lib/missingFields'
+import { docFontCss, normalizeDocFontFamily, normalizeDocFontSize } from '@/lib/docFonts'
 import { ActionsMenu } from '@/components/ActionsMenu'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { DocumentSheet, DocumentCanvas } from '@/components/DocumentSheet'
@@ -67,6 +68,10 @@ interface DraftDetail {
     contentType: string
     originalFilename: string
   } | null
+  // EDITOR-FIX-1 (item 7) — the per-document base font (persisted setting); null
+  // pre-setting → reader/editor/export use their defaults.
+  fontFamily: string | null
+  fontSize: number | null
 }
 
 interface ReasoningTrace {
@@ -522,66 +527,78 @@ export function DocumentReviewer({
               {!isFileBacked && (
                 <ActionsMenu
                   align="left"
-                triggerClassName="li-rev-tbtn"
-                triggerContent={
-                  <>
-                    <Share2Icon size={15} />
-                    Share
-                    <ChevronDownIcon size={13} />
-                  </>
-                }
-                triggerTitle="Download or send this document"
-                items={[
-                  {
-                    label: 'Download PDF',
-                    icon: (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path
-                          d="M4 4h9l5 5v11H4z"
-                          stroke="#c4443b"
-                          strokeWidth="1.7"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M13 4v5h5"
-                          stroke="#c4443b"
-                          strokeWidth="1.7"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    ),
-                    onClick: () =>
-                      downloadAsPdf(draft.bodyMarkdown, docFileBase, { status: draft.status }),
-                  },
-                  {
-                    label: 'Download Word',
-                    icon: (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path
-                          d="M4 4h9l5 5v11H4z"
-                          stroke="#2b579a"
-                          strokeWidth="1.7"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M13 4v5h5"
-                          stroke="#2b579a"
-                          strokeWidth="1.7"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    ),
-                    onClick: () =>
-                      downloadAsWord(draft.bodyMarkdown, docFileBase, { status: draft.status }),
-                  },
-                  {
-                    label: 'Email to client',
-                    icon: <MailIcon size={15} />,
-                    onClick: () => void openSendToClient(),
-                    disabled: busy !== null || sendOpening,
-                    title: sendOpening ? 'Opening…' : undefined,
-                  },
-                ]}
+                  triggerClassName="li-rev-tbtn"
+                  triggerContent={
+                    <>
+                      <Share2Icon size={15} />
+                      Share
+                      <ChevronDownIcon size={13} />
+                    </>
+                  }
+                  triggerTitle="Download or send this document"
+                  items={[
+                    {
+                      label: 'Download PDF',
+                      icon: (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M4 4h9l5 5v11H4z"
+                            stroke="#c4443b"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M13 4v5h5"
+                            stroke="#c4443b"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      ),
+                      onClick: () =>
+                        downloadAsPdf(draft.bodyMarkdown, docFileBase, {
+                          status: draft.status,
+                          font: {
+                            family: docFontCss(normalizeDocFontFamily(draft.fontFamily)),
+                            size: normalizeDocFontSize(draft.fontSize),
+                          },
+                        }),
+                    },
+                    {
+                      label: 'Download Word',
+                      icon: (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M4 4h9l5 5v11H4z"
+                            stroke="#2b579a"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M13 4v5h5"
+                            stroke="#2b579a"
+                            strokeWidth="1.7"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      ),
+                      onClick: () =>
+                        downloadAsWord(draft.bodyMarkdown, docFileBase, {
+                          status: draft.status,
+                          font: {
+                            family: docFontCss(normalizeDocFontFamily(draft.fontFamily)),
+                            size: normalizeDocFontSize(draft.fontSize),
+                          },
+                        }),
+                    },
+                    {
+                      label: 'Email to client',
+                      icon: <MailIcon size={15} />,
+                      onClick: () => void openSendToClient(),
+                      disabled: busy !== null || sendOpening,
+                      title: sendOpening ? 'Opening…' : undefined,
+                    },
+                  ]}
                 />
               )}
               <DocumentActionBar
@@ -830,6 +847,12 @@ export function DocumentReviewer({
           <DocumentSheet variant="full" watermark={watermark}>
             <div
               className="doc-rendered li-rev-doc"
+              // EDITOR-FIX-1 (item 7): the persisted per-document base font, so the
+              // reader shows the document exactly as the editor set it.
+              style={{
+                fontFamily: docFontCss(normalizeDocFontFamily(draft.fontFamily)),
+                fontSize: `${normalizeDocFontSize(draft.fontSize)}pt`,
+              }}
               dangerouslySetInnerHTML={{
                 __html: renderMissingChipsHtml(renderDocumentHtml(draft.bodyMarkdown)),
               }}
@@ -850,6 +873,8 @@ export function DocumentReviewer({
             clientName: draft.clientName,
             versionNumber: draft.versionNumber,
             status: draft.status,
+            fontFamily: draft.fontFamily,
+            fontSize: draft.fontSize,
           }}
           title={title}
           statusLine={

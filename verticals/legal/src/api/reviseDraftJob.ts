@@ -154,7 +154,8 @@ export async function getDraftRevisionResult(
         status: 'completed',
         requestId,
         revisedMarkdown: d.revised_markdown,
-        reasoningTraceId: typeof d.reasoning_trace_id === 'string' ? d.reasoning_trace_id : undefined,
+        reasoningTraceId:
+          typeof d.reasoning_trace_id === 'string' ? d.reasoning_trace_id : undefined,
         modelIdentity: typeof d.model_identity === 'string' ? d.model_identity : undefined,
         instruction: typeof d.instruction === 'string' ? d.instruction : undefined,
       }

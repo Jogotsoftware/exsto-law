@@ -26042,3 +26042,27 @@ details.li-brief-research summary:hover {
 .li-missing-raw {
   display: none;
 }
+
+/* Item 7 — the editor toolbar's font family + size selects, in the li-edtr
+   toolbar's design language (matches the tb-btn height and the navy ink). */
+.li-edtr-tb-select {
+  height: 30px;
+  border: 1px solid #dce2ee;
+  border-radius: 7px;
+  background: #fff;
+  color: #3c4a63;
+  font-size: 13px;
+  padding: 0 6px;
+  cursor: pointer;
+  max-width: 148px;
+}
+.li-edtr-tb-select:hover {
+  border-color: #b9c3da;
+}
+.li-edtr-tb-select:focus-visible {
+  outline: 2px solid var(--li-gold, #c6a968);
+  outline-offset: 1px;
+}
+.li-edtr-tb-select--size {
+  width: 58px;
+}

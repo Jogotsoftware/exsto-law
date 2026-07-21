@@ -105,7 +105,10 @@ describe('FORMATTING_DIRECTIVES — the one formatting block in every generation
       questionnaireResponses: { company_name: 'Acme LLC' },
       transcriptText: 'Members agreed on terms.',
       documentKind: 'operating_agreement',
-      systemFactsText: buildSystemFactsBlock({ jurisdiction: NC, todayIso: '2026-07-20T00:00:00Z' }),
+      systemFactsText: buildSystemFactsBlock({
+        jurisdiction: NC,
+        todayIso: '2026-07-20T00:00:00Z',
+      }),
     })
     expect(prompt).toContain(FORMATTING_DIRECTIVES)
   })

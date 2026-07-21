@@ -62,6 +62,13 @@ export interface DraftDetail extends PendingDraftSummary {
     contentType: string
     originalFilename: string
   } | null
+  // EDITOR-FIX-1 (item 7) — the per-document base font, a real persisted setting
+  // (founder decision 2026-07-19 #1). Stored on the version metadata by the edit
+  // action; null on versions saved before the setting existed (the editor/reader
+  // then fall back to their defaults). Reloads with the document and flows into
+  // the PDF export.
+  fontFamily: string | null
+  fontSize: number | null
 }
 
 export async function listPendingDraftVersions(ctx: ActionContext): Promise<PendingDraftSummary[]> {
@@ -394,6 +401,8 @@ export async function getDraftVersion(
       object_key: string | null
       file_content_type: string | null
       file_original_filename: string | null
+      font_family: string | null
+      font_size: string | null
     }>(
       `SELECT
          dv.id AS version_id,
@@ -433,7 +442,9 @@ export async function getDraftVersion(
          e_doc.metadata->>'email_to_role' AS email_to_role,
          dv.metadata->>'object_key' AS object_key,
          COALESCE(dv.metadata->>'content_type', cb.content_type) AS file_content_type,
-         dv.metadata->>'original_filename' AS file_original_filename
+         dv.metadata->>'original_filename' AS file_original_filename,
+         dv.metadata->>'font_family' AS font_family,
+         dv.metadata->>'font_size' AS font_size
        FROM document_version dv
        JOIN content_blob cb ON cb.id = dv.content_blob_id
        JOIN entity e_doc ON e_doc.id = dv.document_entity_id
@@ -545,6 +556,8 @@ export async function getDraftVersion(
             originalFilename: row.file_original_filename ?? 'document',
           }
         : null,
+      fontFamily: row.font_family,
+      fontSize: row.font_size != null ? Number(row.font_size) : null,
     }
   })
 }

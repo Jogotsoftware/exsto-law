@@ -12,7 +12,7 @@
 // plainly with a download fallback.
 import { useEffect, useRef, useState } from 'react'
 import { readDevSession } from '@/lib/auth'
-import { usePdfDocument, renderPageToCanvas, type PdfPageInfo } from '@/components/esign/usePdfDocument'
+import { usePdfDocument, renderPageToCanvas } from '@/components/esign/usePdfDocument'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 
 function devAuthHeaders(): Record<string, string> {
@@ -93,7 +93,7 @@ export function DocumentPdfView({
   const { doc, pages, loading, error } = usePdfDocument(bytes)
   const renderError = fetchError ?? error
 
-  const cssWidthFor = (page: PdfPageInfo): number => Math.max(containerWidth - 24, 320)
+  const pageCssWidth = Math.max(containerWidth - 24, 320)
 
   return (
     <div className="li-rev-pdf" ref={scrollRef}>
@@ -121,7 +121,7 @@ export function DocumentPdfView({
       ) : doc && pages.length > 0 ? (
         <div className="li-rev-pdf-pages">
           {pages.map((page) => (
-            <PageCanvas key={page.index} doc={doc} pageIndex={page.index} cssWidth={cssWidthFor(page)} />
+            <PageCanvas key={page.index} doc={doc} pageIndex={page.index} cssWidth={pageCssWidth} />
           ))}
         </div>
       ) : (

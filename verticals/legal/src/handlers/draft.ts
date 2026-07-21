@@ -928,6 +928,10 @@ interface DocumentEditPayload {
   instruction_text?: string
   reasoning_trace_id?: string
   counts?: { accepted: number; rejected: number; ai: number; manual: number }
+  // EDITOR-FIX-1 (item 7) — the per-document base font, persisted on the new
+  // version metadata (JSONB — no migration). Absent on a bare programmatic edit.
+  font_family?: string
+  font_size?: number
 }
 
 registerActionHandler('document.edit', async (ctx, client, payload, actionId) => {
@@ -974,6 +978,10 @@ registerActionHandler('document.edit', async (ctx, client, payload, actionId) =>
       edited_from_version_id: p.document_version_id,
       editor_actor_id: ctx.actorId,
       note: p.note ?? null,
+      // EDITOR-FIX-1 (item 7): the per-document base font, when the edit carried
+      // it (the tracked-changes editor always does). Omitted keys stay absent.
+      ...(p.font_family ? { font_family: p.font_family } : {}),
+      ...(typeof p.font_size === 'number' ? { font_size: p.font_size } : {}),
     },
   })
 

@@ -89,8 +89,7 @@ const UNDERSCORE_LINE_RE = /^\s*(?:([^_{}<>\n:][^_{}<>\n]*?)\s*:\s*)?_{6,}\s*$/
 // markdown `---` thematic break / section separator is never swallowed). The
 // caption cannot start with a rule char and forbids `{ } < > :` so it can't eat a
 // marker's braces, an HTML tag, or its own label colon.
-const LABELED_RULE_LINE_RE =
-  /^\s*([^_\-{}<>\n:–—][^{}<>\n:]*?)\s*:\s*[_\-–—]{3,}\s*$/
+const LABELED_RULE_LINE_RE = /^\s*([^_\-{}<>\n:–—][^{}<>\n:]*?)\s*:\s*[_\-–—]{3,}\s*$/
 
 export interface ExecutionLine {
   /** The caption shown beneath the ruled line ("Signature", "Date", …). */

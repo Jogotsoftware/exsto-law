@@ -49,6 +49,13 @@ import {
 } from '@/components/trackedChangesDoc'
 import { MissingFieldDecorations } from '@/components/missingFieldDoc'
 import { DocumentSheet } from '@/components/DocumentSheet'
+import {
+  DOC_FONT_OPTIONS,
+  DOC_FONT_SIZES,
+  docFontCss,
+  normalizeDocFontFamily,
+  normalizeDocFontSize,
+} from '@/lib/docFonts'
 import { GemSparkle, GemShimmer } from '@/components/GemSparkle'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { useDialogEscapeStack } from '@/components/Modal'
@@ -69,6 +76,10 @@ export interface TrackedEditorDraft {
   clientName: string
   versionNumber: number
   status: string
+  // EDITOR-FIX-1 (item 7) — the per-document base font (persisted setting); null
+  // on documents saved before the setting existed → the editor uses its defaults.
+  fontFamily?: string | null
+  fontSize?: number | null
 }
 
 // The four preset suggestion chips (comp-exact, same set as WP-C). Each runs
@@ -186,6 +197,16 @@ export function TrackedChangesEditor({
   const [regenNotes, setRegenNotes] = useState('')
   const [regenBusy, setRegenBusy] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
+
+  // EDITOR-FIX-1 (item 7) — the per-document base font (family + size), a real
+  // persisted setting. Seeded from the loaded version, applied to the page below,
+  // saved onto version n+1, and threaded into the PDF export. Changing it marks
+  // the document dirty (a font change alone is a saveable edit).
+  const initialFontFamily = normalizeDocFontFamily(draft.fontFamily)
+  const initialFontSize = normalizeDocFontSize(draft.fontSize)
+  const [fontFamily, setFontFamily] = useState(initialFontFamily)
+  const [fontSize, setFontSize] = useState(initialFontSize)
+  const fontChanged = fontFamily !== initialFontFamily || fontSize !== initialFontSize
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -544,7 +565,7 @@ export function TrackedChangesEditor({
   }, [onRegenerateFromScratch, regenNotes, regenBusy, onClose])
 
   // ── Save: ONE new version through the append-only legal.draft.edit ──────────
-  const canSave = changed && pending.length === 0 && !busy && !aiWorking
+  const canSave = (changed || fontChanged) && pending.length === 0 && !busy && !aiWorking
   const handleSave = useCallback(async (): Promise<void> => {
     const ed = editorRef.current
     if (!ed || busy) return
@@ -584,6 +605,10 @@ export function TrackedChangesEditor({
           instructionText,
           reasoningTraceId,
           counts,
+          // EDITOR-FIX-1 (item 7): persist the per-document base font on the new
+          // version so it reloads with the document and flows into the PDF export.
+          fontFamily,
+          fontSize,
         },
       })
       const newId = result.effects?.find((e) => e.documentVersionId)?.documentVersionId ?? null
@@ -594,7 +619,7 @@ export function TrackedChangesEditor({
     }
   }, [busy, draft.documentVersionId, onSaved])
 
-  const dirty = changed || pending.length > 0
+  const dirty = changed || fontChanged || pending.length > 0
   const requestClose = useCallback((): void => {
     if (busy) return
     if (dirty) setConfirmDiscard(true)
@@ -702,6 +727,36 @@ export function TrackedChangesEditor({
           editor?.chain().focus().toggleUnderline().run(),
         )}
         <div className="li-edtr-tb-sep" aria-hidden />
+        {/* EDITOR-FIX-1 (item 7): the per-document base font — a real persisted
+            setting (family + size), applied to the page and flowed into export. */}
+        <select
+          className="li-edtr-tb-select"
+          value={fontFamily}
+          onChange={(e) => setFontFamily(e.target.value)}
+          title="Font"
+          aria-label="Font"
+          style={{ fontFamily: docFontCss(fontFamily) }}
+        >
+          {DOC_FONT_OPTIONS.map((f) => (
+            <option key={f.name} value={f.name} style={{ fontFamily: f.css }}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="li-edtr-tb-select li-edtr-tb-select--size"
+          value={fontSize}
+          onChange={(e) => setFontSize(Number(e.target.value))}
+          title="Font size"
+          aria-label="Font size"
+        >
+          {DOC_FONT_SIZES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        <div className="li-edtr-tb-sep" aria-hidden />
         <button
           type="button"
           className={`li-edtr-track${trackOn ? ' is-on' : ''}`}
@@ -747,7 +802,9 @@ export function TrackedChangesEditor({
         <div className="li-edtr-canvas" ref={fitRef}>
           <DocumentSheet variant="full" watermark={watermark}>
             {editor ? (
-              <EditorContent editor={editor} />
+              <div style={{ fontFamily: docFontCss(fontFamily), fontSize: `${fontSize}pt` }}>
+                <EditorContent editor={editor} />
+              </div>
             ) : (
               <div className="li-edtr-loading">Loading editor…</div>
             )}
