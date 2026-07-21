@@ -844,11 +844,16 @@ export function EsignComposer({
             <div className="li-esign-wiz-h">Review &amp; send</div>
             {reviewPdf.doc && (
               <div className="li-esp-review">
+                {/* Item 7 — the review preview mirrors the Fields step: ALL pages
+                    stacked and fit to the container width, with EVERY placed
+                    field drawn read-only at its position (previously only page 0
+                    and its fields showed, so fields on later pages vanished).
+                    Presentation only — the send payload is untouched. */}
                 <PdfCanvas
                   doc={reviewPdf.doc}
-                  pages={reviewPdf.pages.slice(0, 1)}
+                  pages={reviewPdf.pages}
                   zoom="fit"
-                  placements={draft.placements.filter((p) => p.rect.page === 0)}
+                  placements={draft.placements}
                   toneBySigner={Object.fromEntries(
                     placerSigners.map((s) => [s.signerKey, s.toneIndex]),
                   )}

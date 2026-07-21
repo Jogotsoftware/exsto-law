@@ -25699,7 +25699,8 @@ details.li-brief-research summary:hover {
   margin-bottom: 14px;
 }
 .li-esp-review .li-esp-scroll {
-  max-height: 320px;
+  width: 100%;
+  max-height: 60vh;
   padding: 12px 0;
 }
 .li-esp-review-sub {
