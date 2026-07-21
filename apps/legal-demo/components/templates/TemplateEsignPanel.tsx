@@ -16,7 +16,12 @@
 // (computeMarkerRoleDrift, the SAME function the AI-proposal validator uses).
 import { useMemo } from 'react'
 import { computeMarkerRoleDrift, labelFor } from '@exsto/legal/esign'
-import type { TemplateEsignConfig, TemplateEsignRole, EsignRecipientRole } from '@exsto/legal'
+import type {
+  TemplateEsignConfig,
+  TemplateEsignRole,
+  EsignRecipientRole,
+  EsignRoleBindKind,
+} from '@exsto/legal'
 import { PlusIcon, SignatureIcon, XIcon } from '@/components/icons'
 
 const RECIPIENT_ROLE_OPTIONS: { value: EsignRecipientRole; label: string }[] = [
@@ -202,7 +207,7 @@ export function TemplateEsignPanel({
                   <select
                     value={role.bind}
                     aria-label={`Role ${i + 1} recipient binding`}
-                    onChange={(e) => patchRole(i, { bind: e.target.value })}
+                    onChange={(e) => patchRole(i, { bind: e.target.value as EsignRoleBindKind })}
                   >
                     {BIND_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
