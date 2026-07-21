@@ -14,6 +14,13 @@ import { BookingChooser } from '@/components/BookingChooser'
 import { PortalSignInInline } from '@/components/PortalSignInInline'
 import { FeeConsentCard } from '@/components/FeeConsentCard'
 import { Turnstile } from '@/components/Turnstile'
+import { PasswordField } from '@/components/PasswordField'
+import {
+  validatePassword,
+  passwordsMatch,
+  passwordStrength,
+  PASSWORD_STRENGTH_LABEL,
+} from '@/lib/passwordPolicy'
 import { useI18n } from '@/lib/i18n'
 import {
   ArrowRightIcon,
@@ -804,13 +811,13 @@ export default function BookPage() {
   // creation + booking are atomic on success; the staged lead survives a balk.
   async function submitWithAccount() {
     if (!selectedService) return
-    if (password.length < 8) {
+    if (validatePassword(password)) {
       setError(
         t('account.password_short', undefined, 'Choose a password of at least 8 characters.'),
       )
       return
     }
-    if (password !== password2) {
+    if (passwordsMatch(password, password2)) {
       setError(t('account.password_mismatch', undefined, 'The passwords do not match.'))
       return
     }
@@ -1478,25 +1485,43 @@ export default function BookPage() {
                     onChange={() => undefined}
                     disabled
                   />
-                  <ContactField
-                    label={t('account.password', undefined, 'Choose a password')}
-                    icon={<LockIcon size={18} />}
-                    type="password"
-                    value={password}
-                    onChange={(v) => {
-                      accountTouchedRef.current = true
-                      setPassword(v)
-                    }}
-                    autoComplete="new-password"
-                  />
-                  <ContactField
-                    label={t('account.password2', undefined, 'Confirm password')}
-                    icon={<LockIcon size={18} />}
-                    type="password"
-                    value={password2}
-                    onChange={setPassword2}
-                    autoComplete="new-password"
-                  />
+                  <div className="bk-field">
+                    <label className="bk-label" htmlFor="bk-account-password">
+                      {t('account.password', undefined, 'Choose a password')}
+                    </label>
+                    <PasswordField
+                      id="bk-account-password"
+                      value={password}
+                      onChange={(v) => {
+                        accountTouchedRef.current = true
+                        setPassword(v)
+                      }}
+                      wrapClassName="bk-input-wrap"
+                      inputClassName="bk-input"
+                      leadingIcon={<LockIcon size={18} />}
+                      autoComplete="new-password"
+                    />
+                    {password.length > 0 && (
+                      <p className="li-pw-hint" data-strength={passwordStrength(password)}>
+                        {t('account.password_strength', undefined, 'Strength')}:{' '}
+                        {PASSWORD_STRENGTH_LABEL[passwordStrength(password)]}
+                      </p>
+                    )}
+                  </div>
+                  <div className="bk-field">
+                    <label className="bk-label" htmlFor="bk-account-password2">
+                      {t('account.password2', undefined, 'Confirm password')}
+                    </label>
+                    <PasswordField
+                      id="bk-account-password2"
+                      value={password2}
+                      onChange={setPassword2}
+                      wrapClassName="bk-input-wrap"
+                      inputClassName="bk-input"
+                      leadingIcon={<LockIcon size={18} />}
+                      autoComplete="new-password"
+                    />
+                  </div>
                 </div>
                 {feeQuote && (
                   <FeeConsentCard

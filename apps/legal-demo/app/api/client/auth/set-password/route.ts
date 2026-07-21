@@ -24,6 +24,7 @@ import { safeInternalPath } from '@/lib/safeRedirect'
 import { mintClientSessionResponse } from '@/lib/clientSessionMint'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
 import { upsertConfirmedPasswordAccount, supabaseAdminConfigured } from '@/lib/supabaseAdmin'
+import { validatePassword } from '@/lib/passwordPolicy'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -33,8 +34,6 @@ const BASE_URL = (
   process.env.URL ??
   'https://exsto-law.netlify.app'
 ).replace(/\/$/, '')
-
-const MIN_PASSWORD_LENGTH = 8
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`client-auth-set-password:${clientIpFrom(request)}`)
@@ -63,11 +62,9 @@ export async function POST(request: Request) {
     '/portal',
   )
 
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return NextResponse.json(
-      { error: `Choose a password of at least ${MIN_PASSWORD_LENGTH} characters.` },
-      { status: 400 },
-    )
+  const pwErr = validatePassword(password)
+  if (pwErr) {
+    return NextResponse.json({ error: pwErr }, { status: 400 })
   }
 
   // Verify the invite token (throws on a bad/expired/tampered link).

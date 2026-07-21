@@ -6,14 +6,20 @@ import { safeInternalPath } from '@/lib/safeRedirect'
 import { ScaleIcon } from '@/components/icons'
 import { callClientMcp } from '@/lib/mcpClient'
 import { PRODUCT_TAGLINE } from '@/lib/brand'
+import { PasswordField } from '@/components/PasswordField'
+import {
+  MIN_PASSWORD_LENGTH,
+  validatePassword,
+  passwordsMatch,
+  passwordStrength,
+  PASSWORD_STRENGTH_LABEL,
+} from '@/lib/passwordPolicy'
 
 // Invite landing: the client arrives here from the "set up your portal access"
 // email (/portal/set-password?token=…). They choose a password; we POST it with
 // the token to /api/client/auth/set-password, which verifies the token, sets a
 // confirmed Supabase Auth password, and signs them straight in. On every later
 // visit they use email + password at /portal/login.
-
-const MIN_PASSWORD_LENGTH = 8
 
 export default function SetPasswordPage() {
   const router = useRouter()
@@ -57,12 +63,14 @@ export default function SetPasswordPage() {
       setError('This invite link is missing its token. Ask the firm to send a new one.')
       return
     }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Choose a password of at least ${MIN_PASSWORD_LENGTH} characters.`)
+    const pwErr = validatePassword(password)
+    if (pwErr) {
+      setError(pwErr)
       return
     }
-    if (password !== confirm) {
-      setError('The two passwords do not match.')
+    const matchErr = passwordsMatch(password, confirm)
+    if (matchErr) {
+      setError(matchErr)
       return
     }
     setSubmitting(true)
@@ -96,33 +104,34 @@ export default function SetPasswordPage() {
       )}
 
       <form onSubmit={submit} className="li-cp-auth-form">
-        <label className="li-cp-label" htmlFor="cauth-pass">
-          New password
-        </label>
-        <input
+        <PasswordField
           id="cauth-pass"
-          type="password"
-          required
-          minLength={MIN_PASSWORD_LENGTH}
-          autoComplete="new-password"
+          label="New password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="At least 8 characters"
-          className="li-cp-input"
-        />
-        <label className="li-cp-label" htmlFor="cauth-confirm">
-          Confirm password
-        </label>
-        <input
-          id="cauth-confirm"
-          type="password"
+          onChange={setPassword}
+          wrapClassName="li-pw-wrap"
+          inputClassName="li-cp-input"
           required
           minLength={MIN_PASSWORD_LENGTH}
           autoComplete="new-password"
+          placeholder="At least 8 characters"
+        />
+        {password.length > 0 && (
+          <p className="li-pw-hint" data-strength={passwordStrength(password)}>
+            Strength: {PASSWORD_STRENGTH_LABEL[passwordStrength(password)]}
+          </p>
+        )}
+        <PasswordField
+          id="cauth-confirm"
+          label="Confirm password"
           value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
+          onChange={setConfirm}
+          wrapClassName="li-pw-wrap"
+          inputClassName="li-cp-input"
+          required
+          minLength={MIN_PASSWORD_LENGTH}
+          autoComplete="new-password"
           placeholder="Re-enter your password"
-          className="li-cp-input"
         />
         <button
           type="submit"

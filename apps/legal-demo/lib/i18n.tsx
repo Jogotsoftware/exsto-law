@@ -381,6 +381,8 @@ const en: Record<string, string> = {
   'chooser.firm_login': 'Firm login',
 
   // Inline sign-in panel
+  'pw.show': 'Show password',
+  'pw.hide': 'Hide password',
   'signin.email': 'Email',
   'signin.password': 'Password',
   'signin.submit': 'Sign in',
@@ -397,6 +399,7 @@ const en: Record<string, string> = {
     'One last step: create your secure client portal account. You will use it to track your matter, read and sign documents, message the firm, and pay invoices.',
   'account.password': 'Choose a password',
   'account.password2': 'Confirm password',
+  'account.password_strength': 'Strength',
   'account.submit': 'Create account & submit',
   'account.password_short': 'Choose a password of at least 8 characters.',
   'account.password_mismatch': 'The passwords do not match.',
@@ -803,6 +806,8 @@ const es: Record<string, string> = {
   'chooser.firm_login': 'Acceso del despacho',
 
   // Panel de inicio de sesión integrado
+  'pw.show': 'Mostrar contraseña',
+  'pw.hide': 'Ocultar contraseña',
   'signin.email': 'Correo electrónico',
   'signin.password': 'Contraseña',
   'signin.submit': 'Iniciar sesión',
@@ -820,6 +825,7 @@ const es: Record<string, string> = {
     'Un último paso: crea tu cuenta segura del portal de cliente. La usarás para seguir tu asunto, leer y firmar documentos, escribir al despacho y pagar facturas.',
   'account.password': 'Elige una contraseña',
   'account.password2': 'Confirma la contraseña',
+  'account.password_strength': 'Seguridad',
   'account.submit': 'Crear cuenta y enviar',
   'account.password_short': 'Elige una contraseña de al menos 8 caracteres.',
   'account.password_mismatch': 'Las contraseñas no coinciden.',
