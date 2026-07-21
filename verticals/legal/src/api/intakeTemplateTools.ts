@@ -43,6 +43,7 @@ import {
   getQuestionnaire,
   isPromptArtifactDocKind,
 } from './services.js'
+import { parseTemplateEsignConfig, type TemplateEsignConfig } from '../queries/templates.js'
 
 // A questionnaire proposal captured this turn — the proposed schema plus the model's
 // reasoning and the token-symmetry coverage. The chat surfaces it as an inline card;
@@ -71,8 +72,12 @@ export interface TemplateProposal {
   // BUILDER-CERT-1 (WP3) — the signability declaration from the attorney's answer to
   // "does the finished document get signed, and by whom?" (author-template Step 3).
   // Undefined = unsigned. Approving the card writes it onto the firm-library twin,
-  // where the e-sign composition validator reads it.
+  // where the e-sign composition validator reads it. Superseded by esignConfig.
   signature?: { required: boolean; signer_roles: string[] }
+  // ESIGN-UNIFY-1 ES-3 (§6.3) — the full role/bind/order declaration (0187 shape).
+  // When present it supersedes `signature`; drift-validated at capture (marker
+  // keys ⊆ role keys; every needs_to_sign role has a {{sign:key}} marker).
+  esignConfig?: TemplateEsignConfig
   // The {{tokens}} the body references, and the orphans (no matching question on THIS
   // service). With the documents→variables→questionnaire flow, orphans before the
   // questionnaire exists are NOT broken — they're the fields the questionnaire will
@@ -313,6 +318,34 @@ const PROPOSE_TEMPLATE_TOOL_DEF = {
         required: ['required', 'signer_roles'],
         additionalProperties: false,
       },
+      esign_config: {
+        type: 'object',
+        description:
+          "PREFERRED over `signature` — the full e-sign declaration (ESIGN-UNIFY-1): { signable, roles: [{ key, label, recipientRole: 'needs_to_sign'|'needs_to_view'|'receives_copy', bind: 'matter_primary_contact'|'attorney_of_record'|'manual', order }] }. Each role's `key` must be the signer key of the {{sign:<key>}} / {{name:<key>}} / {{date:<key>}} markers you emit in the body (put them in an execution section at the end — '**Accepted and Agreed:**' then per signer a {{sign:key}}, {{name:key}}, {{date:key}} line each on its own line). `bind` is how the platform resolves the role to a real recipient after intake: matter_primary_contact (the client), attorney_of_record, or manual (attorney fills at send). Equal `order` values sign in parallel. Omit entirely when the document is not signed.",
+        properties: {
+          signable: { type: 'boolean' },
+          roles: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                key: { type: 'string' },
+                label: { type: 'string' },
+                recipientRole: {
+                  type: 'string',
+                  enum: ['needs_to_sign', 'needs_to_view', 'receives_copy'],
+                },
+                bind: { type: 'string' },
+                order: { type: 'number' },
+              },
+              required: ['key', 'label'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['signable', 'roles'],
+        additionalProperties: false,
+      },
     },
     required: ['service_key', 'name', 'body', 'doc_kind'],
     additionalProperties: false,
@@ -340,6 +373,7 @@ export function buildProposeTemplateTool(
         summary?: string
         confidence?: number
         signature?: { required?: unknown; signer_roles?: unknown }
+        esign_config?: unknown
       }
       const serviceKey = (args.service_key ?? '').trim()
       const docKind = (args.doc_kind ?? '').trim()
@@ -370,9 +404,15 @@ export function buildProposeTemplateTool(
       ])
       const hasQuestionnaire = schema !== null
       const firmFieldIds = firmFields.map((f) => f.fieldId)
+      // ES-3: a proposed esign_config is parsed defensively (same reader every
+      // surface uses) and validated for marker↔role drift as a HARD gate — a
+      // signable proposal whose roles and markers disagree is not capturable.
+      const esignConfig =
+        args.esign_config != null ? parseTemplateEsignConfig(args.esign_config) : undefined
       const validation = validateProposedTemplate(args.body, fieldIds, {
         hasQuestionnaire,
         firmFieldIds,
+        ...(esignConfig ? { esignConfig } : {}),
       })
       if (!validation.ok) {
         return `The proposed template is not valid and was NOT captured. Fix these and call propose_template AGAIN — NEVER paste the artifact into your prose reply (prose has no Approve button): ${validation.errors.join('; ')}`
@@ -407,6 +447,7 @@ export function buildProposeTemplateTool(
           (args.summary ?? '').trim() || `Proposed a "${docKind}" template for ${serviceKey}.`,
         confidence,
         ...(signature ? { signature } : {}),
+        ...(esignConfig ? { esignConfig } : {}),
         tokens: validation.tokens,
         orphanTokens: validation.orphanTokens,
         hasQuestionnaire,

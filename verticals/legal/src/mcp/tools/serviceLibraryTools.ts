@@ -9,6 +9,8 @@ import {
   cloneService,
   createService,
   getDocumentTemplate,
+  getDocumentTemplateEsignConfig,
+  updateDocumentTemplateEsignConfig,
   getDraftingPrompt,
   getQuestionnaire,
   listServicesIncludingInactive,
@@ -31,6 +33,7 @@ import {
   type QuestionnaireDoc,
   type ServiceCompleteness,
   type ServiceDefinition,
+  type TemplateEsignConfig,
   type UpdateServiceMetadataInput,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
@@ -277,6 +280,42 @@ const templateUpdateTool: Tool<
   }),
 }
 
+// ESIGN-UNIFY-1 ES-3 (0187 planned, §6.1) — the service-bound twin of
+// legal.template's esignConfig, for a document kind this SERVICE authors
+// directly (transitions.document_templates.esign[docKind]). Same versioned
+// upsert path + defensive read as the body template above. NEITHER is
+// client-portal-callable — e-sign configuration is attorney-only.
+const templateEsignGetTool: Tool<
+  { serviceKey: string; documentKind: string },
+  { esignConfig: TemplateEsignConfig | null }
+> = {
+  name: 'legal.service.template.esign.get',
+  description:
+    "Get a service offering's e-sign config for one document kind: { signable, roles: [{ key, label, recipientRole, bind, order }] }. Null only when the service itself doesn't exist; an unauthored kind reads as { signable: false, roles: [] }.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => ({
+    esignConfig: await getDocumentTemplateEsignConfig(ctx, input.serviceKey, input.documentKind),
+  }),
+}
+
+const templateEsignUpdateTool: Tool<
+  { serviceKey: string; documentKind: string; esignConfig: TemplateEsignConfig },
+  { esignConfig: TemplateEsignConfig }
+> = {
+  name: 'legal.service.template.esign.update',
+  description:
+    "Save a service offering's e-sign config for one document kind — supersedes the prior declaration; { signable: false } unsigns. Each role's `key` must match a {{sign:<key>}} marker the document body actually carries, or the composer will have nothing to resolve that signer to at send time (the template editor's e-sign panel warns on this drift; this tool does not re-check the body).",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => ({
+    esignConfig: await updateDocumentTemplateEsignConfig(
+      ctx,
+      input.serviceKey,
+      input.documentKind,
+      input.esignConfig,
+    ),
+  }),
+}
+
 registerTool(listAllTool)
 registerTool(createTool)
 registerTool(updateTool)
@@ -293,3 +332,5 @@ registerTool(reviewGetTool)
 registerTool(reviewUpdateTool)
 registerTool(templateGetTool)
 registerTool(templateUpdateTool)
+registerTool(templateEsignGetTool)
+registerTool(templateEsignUpdateTool)
