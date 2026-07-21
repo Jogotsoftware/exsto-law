@@ -4,6 +4,7 @@
 // (ADR 0013) and unit-testable without a database.
 import {
   GATE_KINDS,
+  type CapabilityStepConfig,
   type GateKind,
   type Lifecycle,
   type LifecycleEdge,
@@ -42,6 +43,29 @@ export function allowedTransitions(
 // `route === 'auto'` check becomes in PR3 — the single behavioral hinge of ADR 0045.
 export function hasAutomaticTransition(lc: Lifecycle, stageKey: string): boolean {
   return edgesFrom(lc, stageKey).some((e) => e.gate === 'automatic')
+}
+
+// Does this stage PRODUCE a document — the single shared notion of a
+// document-producing stage (WF-FIX-2 #4). Three producing shapes, matching the
+// settle/producing-autorun runners (lifecycle/autoRun.ts) and the runtime:
+//   • generate_document — the document IS the whole task;
+//   • invoke_capability whose capability is document_generation;
+//   • review_send_document (or any step) that CARRIES a document ref resolving to
+//     a template or a doc kind (stage.documents[] — the step-editor "[N doc]"
+//     annotation the settle producer drafts).
+// Used by regenerateStage (which re-drafts what a producing stage makes) and by
+// the review-doc autorun so "produces a document" is defined in ONE place.
+export function stageProducesDocument(stage: LifecycleStage): boolean {
+  const kind = stage.action?.kind
+  if (kind === 'generate_document') return true
+  if (kind === 'invoke_capability') {
+    const cfg = (stage.action?.config ?? {}) as unknown as CapabilityStepConfig
+    return (cfg.capability_slug ?? '').trim() === 'document_generation'
+  }
+  if (kind === 'review_send_document') {
+    return Boolean(stage.documents?.some((d) => d.templateEntityId?.trim() || d.docKind?.trim()))
+  }
+  return false
 }
 
 // Every (from, to) edge with gate === 'automatic'. The equality invariant compares

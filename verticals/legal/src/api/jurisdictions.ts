@@ -94,6 +94,33 @@ export function normalizeJurisdiction(input: string | null | undefined): string 
   return byName ?? null
 }
 
+// Parse the US state from a free-form on-file postal address, returning the
+// canonical state CODE (or null). DETERMINISTIC and position-anchored — no model
+// call, no fuzzy match (WF-FIX-2 #3): a US address places "<state> <ZIP>" (or a
+// bare "<state>") in its TAIL, after the city, so strip a trailing country then a
+// trailing ZIP, and match the last comma segment — else that segment's last
+// whitespace token — against the state code/name set via normalizeJurisdiction.
+// Only the anchored tail is examined, so a street like "1 Virginia Ave, Reno, NV"
+// resolves to NV, never VA. An address that doesn't yield an exact state
+// code/name match returns null and the resolver falls through to the next rung.
+export function parseUsStateFromAddress(input: string | null | undefined): string | null {
+  if (typeof input !== 'string') return null
+  let s = input.trim().replace(/[\s.]+$/, '')
+  if (!s) return null
+  // Drop a trailing country token so the ZIP/state land at the very end.
+  s = s.replace(/[,\s]+(?:USA|U\.S\.A|United States(?: of America)?)$/i, '').trim()
+  // Drop a trailing US ZIP (5 or ZIP+4), leaving the state at the tail.
+  s = s.replace(/[,\s]+\d{5}(?:-\d{4})?$/, '').trim()
+  if (!s) return null
+  // Standard position: the last comma segment holds the state (code or full name).
+  const lastSegment = s.includes(',') ? s.slice(s.lastIndexOf(',') + 1).trim() : s.trim()
+  const bySegment = normalizeJurisdiction(lastSegment)
+  if (bySegment) return bySegment
+  // Fallback for "City ST" with no comma before a 2-letter code: the final token.
+  const tokens = lastSegment.split(/\s+/)
+  return normalizeJurisdiction(tokens[tokens.length - 1] ?? '')
+}
+
 // The full display name for a canonical code (case-insensitive on input), or
 // null when the code is not recognized.
 export function jurisdictionDisplayName(code: string | null | undefined): string | null {

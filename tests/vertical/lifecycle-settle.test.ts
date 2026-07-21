@@ -67,6 +67,12 @@ function fakeClient(instanceState: string | null): { client: SettleClient; captu
         })
         return { rows: [], rowCount: 1 }
       }
+      // WF-FIX-2 #1: matter_status writers close the prior open row before the
+      // new insert (closeOpenAttribute). The fake acknowledges the close — the
+      // assertions track the INSERTs (statusMirrors), which are what mirror the stage.
+      if (sql.includes('UPDATE attribute SET valid_to')) {
+        return { rows: [], rowCount: 0 }
+      }
       if (sql.includes('INSERT INTO attribute')) {
         captured.statusMirrors.push(JSON.parse(params?.[5] as string))
         return { rows: [], rowCount: 1 }

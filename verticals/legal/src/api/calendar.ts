@@ -103,6 +103,7 @@ export async function listUpcomingBookings(
             FROM attribute sa
             JOIN attribute_kind_definition sakd ON sakd.id = sa.attribute_kind_id
            WHERE sa.tenant_id = $1 AND sa.entity_id = e.id AND sakd.kind_name = 'matter_status'
+             AND (sa.valid_to IS NULL OR sa.valid_to > now())
            ORDER BY sa.valid_from DESC
            LIMIT 1) AS status,
          (SELECT a2.value #>> '{}' FROM attribute a2
@@ -185,6 +186,7 @@ export async function listMatterConsultations(
             FROM attribute sa
             JOIN attribute_kind_definition sakd ON sakd.id = sa.attribute_kind_id
            WHERE sa.tenant_id = $1 AND sa.entity_id = e.id AND sakd.kind_name = 'matter_status'
+             AND (sa.valid_to IS NULL OR sa.valid_to > now())
            ORDER BY sa.valid_from DESC
            LIMIT 1) AS status,
          (SELECT a2.value #>> '{}' FROM attribute a2
@@ -265,6 +267,7 @@ export async function listRecentBookings(ctx: ActionContext, limit = 10): Promis
             FROM attribute sa
             JOIN attribute_kind_definition sakd ON sakd.id = sa.attribute_kind_id
            WHERE sa.tenant_id = $1 AND sa.entity_id = e.id AND sakd.kind_name = 'matter_status'
+             AND (sa.valid_to IS NULL OR sa.valid_to > now())
            ORDER BY sa.valid_from DESC
            LIMIT 1) AS status,
          e.created_at AS booked_at

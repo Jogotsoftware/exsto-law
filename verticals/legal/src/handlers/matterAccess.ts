@@ -9,7 +9,12 @@
 // unauthorized set/grant records nothing.
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
-import { insertAttribute, lookupKindId, getLatestAttributeValue } from './common.js'
+import {
+  closeOpenAttribute,
+  insertAttribute,
+  lookupKindId,
+  getLatestAttributeValue,
+} from './common.js'
 
 const ADMIN_SCOPES = ['firm.admin', 'firm.super_admin']
 
@@ -40,22 +45,6 @@ async function currentOwner(
   return getLatestAttributeValue<string>(client, tenantId, matterEntityId, 'matter_owner')
 }
 
-// Close the open value of a matter attribute (valid_to is the only mutable column
-// on an open fact row — append-only invariant), so the freshly-inserted row is the
-// sole open value.
-async function closeOpen(
-  client: DbClient,
-  tenantId: string,
-  matterEntityId: string,
-  attrKindId: string,
-): Promise<void> {
-  await client.query(
-    `UPDATE attribute SET valid_to = now()
-      WHERE tenant_id = $1 AND entity_id = $2 AND attribute_kind_id = $3 AND valid_to IS NULL`,
-    [tenantId, matterEntityId, attrKindId],
-  )
-}
-
 registerActionHandler('legal.matter.set_owner', async (ctx, client, payload, actionId) => {
   const p = payload as { matter_entity_id?: string; owner_actor_id?: string }
   if (!p.matter_entity_id) throw new Error('matter_entity_id is required')
@@ -75,7 +64,7 @@ registerActionHandler('legal.matter.set_owner', async (ctx, client, payload, act
     ctx.tenantId,
     'matter_owner',
   )
-  await closeOpen(client, ctx.tenantId, p.matter_entity_id, attrKindId)
+  await closeOpenAttribute(client, ctx.tenantId, p.matter_entity_id, attrKindId)
   await insertAttribute(client, {
     tenantId: ctx.tenantId,
     actionId,
@@ -110,7 +99,7 @@ registerActionHandler('legal.matter.grant_access', async (ctx, client, payload, 
     ctx.tenantId,
     'matter_access_actor_ids',
   )
-  await closeOpen(client, ctx.tenantId, p.matter_entity_id, attrKindId)
+  await closeOpenAttribute(client, ctx.tenantId, p.matter_entity_id, attrKindId)
   await insertAttribute(client, {
     tenantId: ctx.tenantId,
     actionId,

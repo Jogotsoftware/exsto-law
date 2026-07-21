@@ -50,12 +50,23 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
     await generateDocumentForMatter(ctx, p.matter_entity_id)
     return
   }
+  // WF-FIX-2 #5: the manual draft path must draft from the stage/capability-PINNED
+  // template ENTITY, not the (serviceKey, docKind) repo/convention default (the prod
+  // repro: a stale North Carolina draft while the stage's pinned entity — the store
+  // the autorun uses — was already fixed). Resolve the matter's current stage's
+  // pinned template with the SAME resolver generateDocumentRuntime uses; when the
+  // stage pins none, templateOverride is undefined and runDraftGeneration falls back
+  // to the repo template (last resort).
   const { runDraftGeneration } = await import('../api/generateDraft.js')
+  const { resolveMatterStagePinnedTemplateOverride } =
+    await import('../api/generateDocumentRuntime.js')
+  const templateOverride = await resolveMatterStagePinnedTemplateOverride(ctx, p.matter_entity_id)
   await runDraftGeneration(ctx, {
     matterEntityId: p.matter_entity_id,
     documentKind: p.document_kind,
     guidance: p.guidance,
     skillSlugs: p.skill_slugs,
+    ...(templateOverride ? { templateOverride } : {}),
   })
 })
 

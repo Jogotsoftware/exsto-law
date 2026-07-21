@@ -13,7 +13,7 @@
 // no-op; a no-op too when the matter has no instance or no matching client edge (so a
 // handler can call it unconditionally without knowing whether THIS matter runs one).
 import type { DbClient } from '@exsto/shared'
-import { insertAttribute, insertEvent, lookupKindId } from './common.js'
+import { closeOpenAttribute, insertAttribute, insertEvent, lookupKindId } from './common.js'
 import { workflowEngineEnabled } from '../lifecycle/flags.js'
 import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
 import { advanceWorkflowInstance } from '../lifecycle/instance.js'
@@ -81,6 +81,7 @@ export async function dispatchClientDelivery(
     ctx.tenantId,
     'matter_status',
   )
+  await closeOpenAttribute(client, ctx.tenantId, matterEntityId, statusKindId)
   await insertAttribute(client, {
     tenantId: ctx.tenantId,
     actionId,
