@@ -516,7 +516,11 @@ export interface SystemFacts {
 export function buildSystemFactsBlock(facts: SystemFacts): string {
   const jurisdictionLine = facts.jurisdiction
     ? `Governing jurisdiction: ${facts.jurisdiction.displayName} (source: ${
-        facts.jurisdiction.source === 'matter' ? 'matter fact' : 'firm default'
+        facts.jurisdiction.source === 'matter'
+          ? 'matter fact'
+          : facts.jurisdiction.source === 'client_address'
+            ? 'client address'
+            : 'firm default'
       })`
     : 'Governing jurisdiction: NOT SET — do not assume any state; write "Governing law to be confirmed"'
   const lines = [jurisdictionLine, `Today's date: ${longDate(facts.todayIso)}`]

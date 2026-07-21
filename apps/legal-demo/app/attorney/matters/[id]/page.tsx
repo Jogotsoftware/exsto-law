@@ -469,7 +469,11 @@ function GoverningLawFact({
           {resolved ? resolved.displayName : 'Not set'}
           {resolved && (
             <span className="li-mat-govlaw-src">
-              {resolved.source === 'matter' ? 'this matter' : 'firm default'}
+              {resolved.source === 'matter'
+                ? 'this matter'
+                : resolved.source === 'client_address'
+                  ? 'client address'
+                  : 'firm default'}
             </span>
           )}
           <button

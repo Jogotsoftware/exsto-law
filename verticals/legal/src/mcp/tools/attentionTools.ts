@@ -9,7 +9,7 @@ import type { ActionContext } from '@exsto/substrate'
 const tool: Tool<{ limit?: number }, { items: AttentionItem[] }> = {
   name: 'legal.attention.feed',
   description:
-    "The firm's ranked attention feed — the attorney's most pressing items (overdue tasks, inbox replies, drafts to review, unsigned envelopes, unpaid invoices, stale matters, parked workflows), each with a plain reason and an in-app link. Read-only.",
+    "The firm's attention feed — INBOUND client events that need the attorney (client messages awaiting a reply, portal + email inbox), each with a plain reason and an in-app link. Read-only.",
   mode: 'read',
   inputSchema: {
     type: 'object',

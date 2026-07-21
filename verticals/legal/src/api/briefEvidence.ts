@@ -416,7 +416,11 @@ export function buildMatterEvidence(
     // buildBriefSynthesisPrompt (briefEngine.ts).
     jurisdiction
       ? `Governing jurisdiction: ${jurisdiction.displayName} (source: ${
-          jurisdiction.source === 'matter' ? 'matter fact' : 'firm default'
+          jurisdiction.source === 'matter'
+            ? 'matter fact'
+            : jurisdiction.source === 'client_address'
+              ? 'client address'
+              : 'firm default'
         }).`
       : 'Governing jurisdiction: not set — never asked at intake.',
   ]

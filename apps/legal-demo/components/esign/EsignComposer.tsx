@@ -57,11 +57,16 @@ export interface WorkflowStepRecipientSeed {
 export type ComposerSource =
   | { kind: 'blank' }
   | { kind: 'upload'; file?: File }
+  // ES-5 (design §8): launched on an existing document version — review
+  // toolbar, matter documents tab, chat. The document is locked to that
+  // version; a matter context pre-attaches so the client pre-fills row 1.
   | {
       kind: 'document'
-      documentEntityId: string
       documentVersionId: string
+      documentEntityId?: string
       matterEntityId?: string
+      /** Seeds the subject + step-1 document card name (humanized doc kind). */
+      title?: string
     }
   // ESIGN-UNIFY-1 ES-4 (design §7): launched from the matter workflow's e-sign
   // step — the document is LOCKED to the approved version, recipients arrive
@@ -147,9 +152,16 @@ export function EsignComposer({
   const isWorkflowStep = source.kind === 'workflow-step'
 
   // Seed from the launch source: a pre-picked file arrives pre-attached; a
-  // workflow step arrives with the document locked and recipients resolved.
+  // document launch (ES-5: review toolbar / matter docs / chat) pre-attaches
+  // its matter (which pre-fills the client as recipient 1) and seeds the
+  // subject from the document title; a workflow step arrives with the
+  // document locked and recipients resolved.
   useEffect(() => {
     if (source.kind === 'upload' && source.file) setFile(source.file)
+    if (source.kind === 'document') {
+      if (source.title?.trim()) setSubject(source.title.trim())
+      if (source.matterEntityId) setAttach({ matterId: source.matterEntityId, contactId: null })
+    }
     if (source.kind === 'workflow-step') {
       seedWorkflowStep({
         subject: source.subject,
@@ -879,7 +891,9 @@ export function EsignComposer({
                     ? `${source.documentTitle}${
                         source.versionNumber != null ? ` (v${source.versionNumber}, approved)` : ''
                       }`
-                    : (draft.file?.name ?? '—')}
+                    : source.kind === 'document'
+                      ? source.title || draft.subject.trim() || 'Document'
+                      : (draft.file?.name ?? '—')}
                 </span>
               </div>
               <div className="li-esign-wiz-reviewrow">

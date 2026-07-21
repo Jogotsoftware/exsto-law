@@ -1,6 +1,6 @@
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
-import { insertAttribute, insertEvent, lookupKindId } from './common.js'
+import { closeOpenAttribute, insertAttribute, insertEvent, lookupKindId } from './common.js'
 import { dispatchClientDelivery } from './clientDelivery.js'
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -71,6 +71,11 @@ async function writeScheduleAttrs(
 
   for (const a of attrs) {
     const akId = await lookupKindId(client, 'attribute_kind_definition', args.tenantId, a.kind)
+    // matter_status is single-valued lifecycle state: supersede the prior open row
+    // so the read path (latest open) resolves one value, not a stack (WF-FIX-2 #1).
+    if (a.kind === 'matter_status') {
+      await closeOpenAttribute(client, args.tenantId, args.matterEntityId, akId)
+    }
     await insertAttribute(client, {
       tenantId: args.tenantId,
       actionId: args.actionId,
@@ -229,6 +234,7 @@ registerActionHandler('booking.cancel', async (ctx, client, payload, actionId) =
     ctx.tenantId,
     'matter_status',
   )
+  await closeOpenAttribute(client, ctx.tenantId, p.matter_entity_id, statusKindId)
   await insertAttribute(client, {
     tenantId: ctx.tenantId,
     actionId,
