@@ -1999,6 +1999,12 @@ export async function submitBooking(
       // Name the auto-created client-parent account after the company (when given)
       // else the person, so it reads sensibly in the CRM (intake linking salvage).
       client_display_name: input.clientCompanyName ?? input.clientFullName,
+      // WF-FIX-2 #6 — this is the client's OWN funnel intake (submitBooking is
+      // reached only from the /book funnel + portal finalize, as the client's
+      // actor). Their submission IS acceptance, so the entry intake stage's
+      // client-accept edge auto-advances (no attorney "Record client acceptance"
+      // click). openMatter (attorney) deliberately omits this and parks at intake.
+      client_intake: true,
     },
   })
 
