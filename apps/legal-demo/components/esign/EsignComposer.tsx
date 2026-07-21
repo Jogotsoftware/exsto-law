@@ -240,7 +240,9 @@ export function EsignComposer({
         doc.file
           .arrayBuffer()
           .then((buf) => setRender(doc.id, { bytes: buf, markers: [], error: null }))
-          .catch(() => setRender(doc.id, { bytes: null, markers: [], error: 'Could not read this file.' }))
+          .catch(() =>
+            setRender(doc.id, { bytes: null, markers: [], error: 'Could not read this file.' }),
+          )
       } else if (doc.documentVersionId) {
         fetch('/api/attorney/esign/render', {
           method: 'POST',

@@ -168,7 +168,10 @@ interface PlanSigner extends PlanSignerRow {
 
 /** Resolve one document's placement subset to StampFields (§5.4). Pure over the
  *  loaded signers — shared by every document in a multi-document envelope. */
-function buildStampFields(placements: FieldPlacement[], byKey: Map<string, PlanSigner>): StampField[] {
+function buildStampFields(
+  placements: FieldPlacement[],
+  byKey: Map<string, PlanSigner>,
+): StampField[] {
   return placements.map((p) => {
     const signer = byKey.get(p.signerKey)
     const filled = signer?.field_values?.[p.id]
@@ -354,9 +357,7 @@ export async function loadExecutedStampPlan(
  *  submit completes the envelope, then the route (which owns Storage bytes)
  *  stamps the executed copy of every placement-carrying document. Throws on a
  *  bad token, empty array when nothing to stamp. */
-export async function loadExecutedStampPlanByToken(
-  token: string,
-): Promise<ExecutedStampPlan[]> {
+export async function loadExecutedStampPlanByToken(token: string): Promise<ExecutedStampPlan[]> {
   const tok = verifySigningToken(token)
   return loadExecutedStampPlan(signingCtx(tok.tenantId), tok.envelopeId)
 }

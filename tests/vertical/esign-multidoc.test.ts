@@ -55,7 +55,9 @@ describe('placement-to-document binding (docIndex)', () => {
     // Document 1 placement: docIndex preserved.
     expect(parseEnvelopePlacements([DOC1])).toEqual([DOC1])
     // A fractional index floors to an integer.
-    expect(parseEnvelopePlacements([{ ...DOC1, docIndex: 2.9 }])).toEqual([{ ...DOC1, docIndex: 2 }])
+    expect(parseEnvelopePlacements([{ ...DOC1, docIndex: 2.9 }])).toEqual([
+      { ...DOC1, docIndex: 2 },
+    ])
   })
 
   it('placementsForDoc / groupPlacementsByDoc / maxPlacementDocIndex split a flat plan', () => {
@@ -120,12 +122,20 @@ describe('executed-copy stamping over 2 documents', () => {
 
     const stamped0 = await stampExecutedPdf({
       pdfBytes: doc0,
-      fields: placementsForDoc(plan, 0).map((p) => ({ type: p.type, rect: p.rect, value: p.value })),
+      fields: placementsForDoc(plan, 0).map((p) => ({
+        type: p.type,
+        rect: p.rect,
+        value: p.value,
+      })),
       certificate: null,
     })
     const stamped1 = await stampExecutedPdf({
       pdfBytes: doc1,
-      fields: placementsForDoc(plan, 1).map((p) => ({ type: p.type, rect: p.rect, value: p.value })),
+      fields: placementsForDoc(plan, 1).map((p) => ({
+        type: p.type,
+        rect: p.rect,
+        value: p.value,
+      })),
       certificate: null,
     })
 

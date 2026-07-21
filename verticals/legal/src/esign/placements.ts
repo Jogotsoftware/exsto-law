@@ -284,10 +284,7 @@ export function placementDocIndex(p: FieldPlacement): number {
 }
 
 /** The placements that land on one document, in input order. */
-export function placementsForDoc(
-  placements: FieldPlacement[],
-  docIndex: number,
-): FieldPlacement[] {
+export function placementsForDoc(placements: FieldPlacement[], docIndex: number): FieldPlacement[] {
   return placements.filter((p) => placementDocIndex(p) === docIndex)
 }
 
@@ -295,9 +292,7 @@ export function placementsForDoc(
  *  document that owns at least one placement appears; a document with none does
  *  not (callers iterate the envelope's document set, not this map, so a
  *  field-less document is still stamped/rendered — it just has no fields). */
-export function groupPlacementsByDoc(
-  placements: FieldPlacement[],
-): Map<number, FieldPlacement[]> {
+export function groupPlacementsByDoc(placements: FieldPlacement[]): Map<number, FieldPlacement[]> {
   const byDoc = new Map<number, FieldPlacement[]>()
   for (const p of placements) {
     const d = placementDocIndex(p)

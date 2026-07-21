@@ -146,7 +146,12 @@ export function SignDocument({
     consent: false,
   })
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(docs.flatMap((d) => d.fields).filter((f) => f.prefill).map((f) => [f.id, f.prefill!])),
+    Object.fromEntries(
+      docs
+        .flatMap((d) => d.fields)
+        .filter((f) => f.prefill)
+        .map((f) => [f.id, f.prefill!]),
+    ),
   )
   const [busy, setBusy] = useState<null | 'sign' | 'decline'>(null)
   const { confirm, confirmElement } = useConfirm()
@@ -369,7 +374,7 @@ export function SignDocument({
           onState={setAdopt}
         />
 
-        {overlayMode && (
+        {allPlacements.some((p) => p.type === 'date') && (
           <p className="li-esp-adopt-autonote">
             Date fields fill automatically with the date you sign — nothing to type.
           </p>
@@ -457,9 +462,7 @@ function SignerDoc({
   }, [overlayMode, fileUrl, onError])
   const pdf = usePdfDocument(overlayMode ? pdfBytes : null)
 
-  const title = showTitle ? (
-    <div className="li-esp-sign-doctitle">{view.documentTitle}</div>
-  ) : null
+  const title = showTitle ? <div className="li-esp-sign-doctitle">{view.documentTitle}</div> : null
 
   if (overlayMode) {
     return (
