@@ -58,7 +58,7 @@ const NAV: NavNode[] = [
   { kind: 'leaf', href: '/attorney', label: 'Home', exact: true, Icon: LayoutGridIcon },
   { kind: 'leaf', href: '/attorney/matters', label: 'Matters', Icon: BriefcaseIcon },
   { kind: 'leaf', href: '/attorney/crm', label: 'CRM', Icon: Building2Icon },
-  { kind: 'leaf', href: '/attorney/review', label: 'Review', Icon: CheckCircleIcon },
+  { kind: 'leaf', href: '/attorney/review', label: 'Tasks', Icon: CheckCircleIcon },
   { kind: 'leaf', href: '/attorney/esign', label: 'eSign', Icon: SignatureIcon },
   { kind: 'leaf', href: '/attorney/requests', label: 'Requests', Icon: HelpCircleIcon },
   { kind: 'leaf', href: '/attorney/calendar', label: 'Calendar', Icon: CalendarIcon },
@@ -84,6 +84,11 @@ const NAV: NavNode[] = [
     children: [
       { href: '/attorney/settings/integrations', label: 'Integrations', Icon: Share2Icon },
       { href: '/attorney/settings/firm', label: 'Firm Details', Icon: Building2Icon },
+      {
+        href: '/attorney/settings/engagement',
+        label: 'Engagement Letters',
+        Icon: SignatureIcon,
+      },
       {
         href: '/attorney/settings/invoice-template',
         label: 'Invoice Template',

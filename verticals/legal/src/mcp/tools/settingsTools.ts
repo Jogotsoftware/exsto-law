@@ -14,6 +14,9 @@ import {
   setEngagementTemplate,
   enqueueEngagementImport,
   getEngagementImportResult,
+  listEngagementLetters,
+  setDefaultEngagementLetter,
+  removeEngagementLetter,
   getEmailDraftingConfig,
   updateEmailDraftingConfig,
   getFirmProfile,
@@ -41,6 +44,7 @@ import {
   type UpdateTenantSettingsInput,
   type EnqueueEngagementImportResult,
   type EngagementImportJobResult,
+  type EngagementLetterSummary,
   type EngagementTemplateValue,
 } from '../../index.js'
 import { FIRM_SENDER_DISPLAY_NAME } from '../../adapters/gmail.js'
@@ -309,3 +313,32 @@ registerTool({
   mode: 'write',
   handler: async (ctx: ActionContext) => await setEngagementTemplate(ctx, { templateId: null }),
 } satisfies Tool<Record<string, never>, { templateId: string | null; version?: number }>)
+
+// ── ENGAGEMENT-TEMPLATES-1 — the engagement-letter LIBRARY ───────────────────
+// A firm can keep several engagement letters (each a fully-editable standalone
+// template); one is the default the portal gate uses. These manage the library;
+// editing a letter's content happens in the template editor (/attorney/templates).
+registerTool({
+  name: 'legal.firm.engagement_letters.list',
+  description:
+    "List the firm's engagement letters: [{ templateId, name, isDefault, updatedAt }], default first. Each is an ordinary template editable in the template editor; the one marked isDefault is what the portal gate shows clients.",
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ letters: await listEngagementLetters(ctx) }),
+} satisfies Tool<Record<string, never>, { letters: EngagementLetterSummary[] }>)
+
+registerTool({
+  name: 'legal.firm.engagement_letters.set_default',
+  description:
+    'Make one of the firm engagement letters the default the portal gate shows clients. The template must be an active firm template.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) =>
+    await setDefaultEngagementLetter(ctx, input.templateId),
+} satisfies Tool<{ templateId: string }, { templateId: string | null }>)
+
+registerTool({
+  name: 'legal.firm.engagement_letters.remove',
+  description:
+    'Retire an engagement letter. If it was the firm default, the default pointer is cleared (the gate falls back to text-terms-only until another is set default).',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => await removeEngagementLetter(ctx, input.templateId),
+} satisfies Tool<{ templateId: string }, { removed: string; clearedDefault: boolean }>)

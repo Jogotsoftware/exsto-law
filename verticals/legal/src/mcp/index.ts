@@ -90,6 +90,9 @@ import './tools/esignWorkflowStepTools.js'
 // Beta sprint Obj 4 (billing): roll unbilled time/expense ledger events up into
 // invoices, list/inspect them, and send (activation-gated). Session 4.
 import './tools/billingTools.js'
+// TASK-QUEUE-1: the unified attorney Task Queue aggregator (document review +
+// e-sign + billing + client requests in one read).
+import './tools/attorneyTaskQueueTools.js'
 // Online invoice payments (Stripe Connect): firm payment-connection status /
 // refresh / disconnect. The client-portal checkout tool lives in
 // clientPortalTools.js; connect itself is the /api/billing/connect/init redirect.
