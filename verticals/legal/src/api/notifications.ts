@@ -11,7 +11,9 @@
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
 import { enqueueJob } from '@exsto/worker-runtime'
 import { sendEmail } from '../adapters/gmail.js'
+import { resendConfigured, sendViaResend } from '../adapters/resendEmail.js'
 import { getConnectionInfo, resolveFirmPrimaryActor } from '../adapters/connectionStore.js'
+import { getTenantSettings } from './tenantSettings.js'
 import { renderNotificationTemplate } from './notificationTemplates.js'
 import { renderEmailHtml } from '../email/index.js'
 import { withSignature } from './mailWorkspace.js'
@@ -70,6 +72,27 @@ type ChannelDriver = (
 
 const DRIVERS: Record<string, ChannelDriver> = {
   email: async (ctx, args) => {
+    // Prefer Resend (one verified firm domain, noreply@…) so client-facing mail
+    // — e-sign signing links especially — is actually delivered even when no
+    // attorney has connected Gmail, which is the common production case. Reply-To
+    // is set to a human (attorney's connected address, else the firm's email) so
+    // clients can still reply. Falls back to the attorney's Gmail only when
+    // Resend is unconfigured, preserving the prior behaviour.
+    if (resendConfigured()) {
+      const [replyTo, settings] = await Promise.all([
+        attorneyEmail(ctx.tenantId),
+        getTenantSettings(ctx).catch(() => null),
+      ])
+      const { messageId } = await sendViaResend({
+        to: args.to,
+        subject: args.subject,
+        text: args.bodyText,
+        html: args.bodyHtml,
+        replyTo: replyTo ?? settings?.firmEmail ?? null,
+        fromName: settings?.firmName ?? null,
+      })
+      return { providerMessageId: messageId }
+    }
     // Automated mail goes out through the firm's primary connected Google
     // attorney (per-link sender attribution lands in track B).
     const actorId = await resolveFirmPrimaryActor(ctx.tenantId, 'google')
