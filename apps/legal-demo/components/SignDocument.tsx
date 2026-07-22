@@ -103,6 +103,8 @@ export function SignDocument({
   savedSignature,
   onSign,
   onDecline,
+  onSigned,
+  onDeclined,
 }: {
   doc: SignableDoc
   /** 0170: token/session-gated streaming URL for a file (PDF) envelope. The
@@ -120,6 +122,13 @@ export function SignDocument({
     consent: string
   }) => Promise<{ completed: boolean }>
   onDecline: () => Promise<void>
+  /** TASK-QUEUE-3 — mirrors DocumentReviewer's onCompleted: fired right after a
+   *  successful sign, before the local "Signed" screen renders. Returning true
+   *  (e.g. a queue session advancing to the next task) tells this component the
+   *  caller is handling the aftermath itself, so it skips its own done screen. */
+  onSigned?: (result: { completed: boolean }) => boolean | void
+  /** Same contract as onSigned, for a successful decline. */
+  onDeclined?: () => boolean | void
 }) {
   // ES-MULTIDOC-1 — the ordered documents the signer sees. The flat fields
   // describe the primary (document 0), so a one-document envelope synthesizes a
@@ -402,7 +411,8 @@ export function SignDocument({
         fieldValues,
         consent: CONSENT_TEXT,
       })
-      setDone(r.completed ? 'completed' : 'signed')
+      const handled = onSigned?.(r)
+      if (!handled) setDone(r.completed ? 'completed' : 'signed')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -421,7 +431,8 @@ export function SignDocument({
     setError(null)
     try {
       await onDecline()
-      setDone('declined')
+      const handled = onDeclined?.()
+      if (!handled) setDone('declined')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

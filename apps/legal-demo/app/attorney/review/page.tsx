@@ -23,12 +23,12 @@ import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
 import { BriefButton } from '@/components/BriefButton'
 import { EmailComposeModal } from '@/components/EmailComposeModal'
-
-// Shared with the detail page: a step-through review session (document_review
-// rows only) is the ordered list of selected document-version ids + where we
-// are in it, kept in sessionStorage (per tab) and flagged on the URL with
-// ?review=session.
-export const REVIEW_SESSION_KEY = 'reviewSession'
+import {
+  hrefFor,
+  writeTaskSession,
+  type TaskSessionItem,
+  type WalkableTaskType,
+} from '@/lib/taskSession'
 
 type AttorneyTaskType =
   | 'document_review'
@@ -37,6 +37,13 @@ type AttorneyTaskType =
   | 'client_request'
   | 'workflow_step'
   | 'todo'
+
+// The task types a queue-started session can walk one after another — see
+// lib/taskSession.ts. Any other type only ever opens via its own row action.
+// Typed against the wider AttorneyTaskType (not WalkableTaskType) so `.includes`
+// accepts every row's type; callers narrow with an explicit cast when building
+// session items.
+const WALKABLE_TYPES: readonly AttorneyTaskType[] = ['document_review', 'esign']
 
 // Mirrors verticals/legal/src/queries/attorneyTasks.ts's AttorneyTask — a
 // client component can't import the server-side vertical package directly, so
@@ -108,8 +115,8 @@ export default function TaskQueue() {
   // The row whose "Email" modal is open — one at a time.
   const [emailFor, setEmailFor] = useState<AttorneyTask | null>(null)
 
-  // Batch-review selection is document_review-only (the only type "Begin
-  // Review" walks); tracked by task id.
+  // Batch-session selection covers the walkable types (document_review +
+  // esign — see WALKABLE_TYPES); tracked by task id.
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
@@ -168,19 +175,19 @@ export default function TaskQueue() {
     return sorted
   }, [tasks, typeFilter, query, sortKey, sortAsc])
 
-  // Selection (and "select all") is scoped to the document_review rows
-  // currently visible — the checkbox only ever appears on that type, and a
-  // review must never open a hidden row.
-  const visibleReviewIds = useMemo(
-    () => new Set(visible.filter((t) => t.type === 'document_review').map((t) => t.id)),
+  // Selection (and "select all") is scoped to the walkable rows currently
+  // visible (document_review + esign) — the checkbox only ever appears on
+  // those types, and a session must never open a hidden row.
+  const visibleWalkableIds = useMemo(
+    () => new Set(visible.filter((t) => WALKABLE_TYPES.includes(t.type)).map((t) => t.id)),
     [visible],
   )
   const selectedVisible = useMemo(
-    () => [...selected].filter((id) => visibleReviewIds.has(id)),
-    [selected, visibleReviewIds],
+    () => [...selected].filter((id) => visibleWalkableIds.has(id)),
+    [selected, visibleWalkableIds],
   )
   const allVisibleSelected =
-    visibleReviewIds.size > 0 && selectedVisible.length === visibleReviewIds.size
+    visibleWalkableIds.size > 0 && selectedVisible.length === visibleWalkableIds.size
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -194,8 +201,8 @@ export default function TaskQueue() {
   function toggleAll() {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (allVisibleSelected) visibleReviewIds.forEach((id) => next.delete(id))
-      else visibleReviewIds.forEach((id) => next.add(id))
+      if (allVisibleSelected) visibleWalkableIds.forEach((id) => next.delete(id))
+      else visibleWalkableIds.forEach((id) => next.add(id))
       return next
     })
   }
@@ -211,15 +218,16 @@ export default function TaskQueue() {
     }
   }
 
-  // Begin review: walk the selected document_review rows in order; the reader
-  // auto-advances after each disposition. Ordered ids in sessionStorage.
-  function beginReview() {
-    const ids = visible
-      .filter((t) => t.type === 'document_review' && selected.has(t.id))
-      .map((t) => t.id)
-    if (ids.length === 0) return
-    sessionStorage.setItem(REVIEW_SESSION_KEY, JSON.stringify({ ids, index: 0 }))
-    router.push(`/attorney/review/${ids[0]}?review=session`)
+  // Start Tasks: walk the selected document_review + esign rows in order —
+  // each surface auto-advances to the next task in the session after its own
+  // disposition (approve/reject, or sign/decline).
+  function startTasks() {
+    const items: TaskSessionItem[] = visible
+      .filter((t) => WALKABLE_TYPES.includes(t.type) && selected.has(t.id))
+      .map((t) => ({ id: t.id, type: t.type as WalkableTaskType }))
+    if (items.length === 0) return
+    writeTaskSession({ items, index: 0 })
+    router.push(hrefFor(items[0]!))
   }
 
   return (
@@ -287,15 +295,15 @@ export default function TaskQueue() {
             </span>
           </div>
 
-          {/* Selection bar — Begin review only (document_review rows). */}
+          {/* Selection bar — Start Tasks walks the selected walkable rows. */}
           {selectedVisible.length > 0 && (
             <div className="li-rev-selbar">
               <span className="li-rev-selcount">{selectedVisible.length} selected</span>
               <button type="button" className="li-rev-clear" onClick={() => setSelected(new Set())}>
                 Clear
               </button>
-              <button type="button" className="li-rev-begin" onClick={beginReview}>
-                Begin Review
+              <button type="button" className="li-rev-begin" onClick={startTasks}>
+                Start Tasks
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <line
                     x1="5"
@@ -326,7 +334,7 @@ export default function TaskQueue() {
                   type="checkbox"
                   checked={allVisibleSelected}
                   onChange={toggleAll}
-                  aria-label="Select all document review tasks"
+                  aria-label="Select all reviewable and signable tasks"
                 />
               </label>
               <button type="button" className="li-rev-th" onClick={() => sortBy('type')}>
@@ -347,7 +355,7 @@ export default function TaskQueue() {
 
             {visible.map((t) => (
               <div key={`${t.type}:${t.id}`} className="li-rev-row">
-                {t.type === 'document_review' ? (
+                {WALKABLE_TYPES.includes(t.type) ? (
                   <label className="li-rev-check">
                     <input
                       type="checkbox"
