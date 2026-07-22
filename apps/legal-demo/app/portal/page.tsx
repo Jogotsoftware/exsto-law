@@ -906,9 +906,16 @@ function EngagementGateModal({
   // fee-consent checkbox stay alongside (founder decision: both).
   const [agreement, setAgreement] = useState<{ markdown: string } | null>(null)
   const [signedName, setSignedName] = useState('')
+  // Two consents in ONE modal (combined per founder request): `accepted` is the
+  // hourly-rate/fee acceptance (the FeeConsentCard, shown in both flows);
+  // `agreeChecked` is the "I have read and agree + adopt my signature" adoption of
+  // the uploaded agreement document (only when there is one).
   const [accepted, setAccepted] = useState(false)
+  const [agreeChecked, setAgreeChecked] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const canConfirm = agreement ? Boolean(signedName.trim()) && agreeChecked && accepted : accepted
 
   useEffect(() => {
     callClientPortalMcp<{
@@ -924,13 +931,7 @@ function EngagementGateModal({
   }, [])
 
   async function confirm() {
-    if (!accepted || busy) return
-    if (agreement && !signedName.trim()) {
-      setError(
-        t('portal.gate.sign_required', undefined, 'Type your full name to sign the agreement.'),
-      )
-      return
-    }
+    if (!canConfirm || busy) return
     setBusy(true)
     setError(null)
     try {
@@ -973,62 +974,62 @@ function EngagementGateModal({
             <p className="li-cp-muted">{t('portal.gate.unavailable')}</p>
           ) : (
             <>
-              {agreement && (
-                <div
-                  className="li-cp-agreement-doc"
-                  dangerouslySetInnerHTML={{ __html: renderDocumentHtml(agreement.markdown) }}
-                />
-              )}
-              {agreement && (
-                <label className="li-cp-sign-row">
-                  <span>
-                    {t('portal.gate.sign_label', undefined, 'Sign by typing your full name')}
-                  </span>
-                  <input
-                    className="li-cp-sign-input"
-                    value={signedName}
-                    onChange={(e) => setSignedName(e.target.value)}
-                    placeholder={t('portal.gate.sign_placeholder', undefined, 'Your full name')}
-                    autoComplete="name"
-                  />
-                </label>
-              )}
-              {/* The uploaded agreement IS the terms — don't also show a
-                  separate text-terms block or the hourly fee card (whose rate can
-                  differ from the document's own rate schedule). A single "I have
-                  read and agree" adoption drives acceptance. */}
+              {/* One modal (fee + agreement combined). When the firm uploaded its
+                  engagement letter, the client reviews the real rendered document,
+                  types their signature, and gives both consents here: adopting the
+                  agreement AND accepting the hourly rate. */}
               {agreement ? (
-                <label className="bk-checkbox bk-fee-accept">
-                  <input
-                    type="checkbox"
-                    checked={accepted}
-                    onChange={(e) => setAccepted(e.target.checked)}
-                  />
-                  <span>
-                    {t(
-                      'portal.gate.agree_agreement',
-                      undefined,
-                      'I have read and agree to this engagement agreement, and adopt the signature above.',
-                    )}
-                  </span>
-                </label>
-              ) : (
                 <>
-                  {terms && <div className="li-cp-terms">{terms}</div>}
-                  <FeeConsentCard
-                    quote={{
-                      basis: 'hourly-rate',
-                      amount: null,
-                      rate,
-                      currency: 'USD',
-                      description: t('portal.gate.desc'),
-                    }}
-                    accepted={accepted}
-                    onAccept={setAccepted}
-                    t={t}
-                  />
+                  <div className="li-cp-agreement-frame">
+                    <article
+                      className="doc-rendered doc-paper li-cp-agreement-paper"
+                      dangerouslySetInnerHTML={{ __html: renderDocumentHtml(agreement.markdown) }}
+                    />
+                  </div>
+                  <label className="li-cp-sign-row">
+                    <span>
+                      {t('portal.gate.sign_label', undefined, 'Sign by typing your full name')}
+                    </span>
+                    <input
+                      className="li-cp-sign-input"
+                      value={signedName}
+                      onChange={(e) => setSignedName(e.target.value)}
+                      placeholder={t('portal.gate.sign_placeholder', undefined, 'Your full name')}
+                      autoComplete="name"
+                    />
+                  </label>
+                  <label className="bk-checkbox bk-fee-accept">
+                    <input
+                      type="checkbox"
+                      checked={agreeChecked}
+                      onChange={(e) => setAgreeChecked(e.target.checked)}
+                    />
+                    <span>
+                      {t(
+                        'portal.gate.agree_agreement',
+                        undefined,
+                        'I have read and agree to this engagement agreement, and adopt the signature above.',
+                      )}
+                    </span>
+                  </label>
                 </>
+              ) : (
+                terms && <div className="li-cp-terms">{terms}</div>
               )}
+              {/* The hourly-rate acceptance — an additional checkbox in the same
+                  modal (was a separate fee dialog before). */}
+              <FeeConsentCard
+                quote={{
+                  basis: 'hourly-rate',
+                  amount: null,
+                  rate,
+                  currency: 'USD',
+                  description: t('portal.gate.desc'),
+                }}
+                accepted={accepted}
+                onAccept={setAccepted}
+                t={t}
+              />
             </>
           )}
           {error && (
@@ -1050,7 +1051,7 @@ function EngagementGateModal({
             <button
               type="button"
               className="li-cp-btn"
-              disabled={!accepted || busy}
+              disabled={!canConfirm || busy}
               onClick={confirm}
             >
               {busy ? '…' : t('portal.gate.confirm')}
