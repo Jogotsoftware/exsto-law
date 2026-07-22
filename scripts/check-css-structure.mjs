@@ -34,6 +34,7 @@ const TAB_CLASS_ALLOWLIST = new Set([
   'li-tabs',
   'li-tabs-tab',
   'li-crm-tabs',
+  'li-crm-detail-tabs', // NavTabs variant: client/contact detail Overview·Documents·Activity
   'li-mat-tabs',
   'li-svc-tabs',
 ])

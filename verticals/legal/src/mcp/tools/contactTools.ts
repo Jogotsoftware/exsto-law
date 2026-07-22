@@ -4,9 +4,14 @@ import {
   getContact,
   inviteClientToPortal,
   revokeClientPortalAccess,
+  resolveContactMatterEntityIds,
+  listDocumentsForMatters,
+  getHistoryForMatters,
   type ContactSummary,
   type ContactDetail,
   type RevokePortalAccessResult,
+  type PersonDocumentItem,
+  type MatterHistory,
 } from '../../index.js'
 import type { ActionContext } from '@exsto/substrate'
 
@@ -74,7 +79,36 @@ const revokeTool: Tool<RevokeInput, RevokePortalAccessResult> = {
   },
 }
 
+// Contact detail — Documents tab: every document across all this contact's
+// matters (generated + uploaded), each tagged with its matter.
+const documentsTool: Tool<{ contactEntityId: string }, { documents: PersonDocumentItem[] }> = {
+  name: 'legal.contact.documents',
+  description:
+    "Every document across all of a contact's matters (generated drafts + uploaded files), newest first, tagged by matter.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => {
+    const matterIds = await resolveContactMatterEntityIds(ctx, input.contactEntityId)
+    const documents = await listDocumentsForMatters(ctx, matterIds)
+    return { documents }
+  },
+}
+
+// Contact detail — Activity tab: the audit/timeline aggregated across all this
+// contact's matters.
+const activityTool: Tool<{ contactEntityId: string }, { history: MatterHistory }> = {
+  name: 'legal.contact.activity',
+  description: "All activity (actions + events) across a contact's matters, for the Activity tab.",
+  mode: 'read',
+  handler: async (ctx: ActionContext, input) => {
+    const matterIds = await resolveContactMatterEntityIds(ctx, input.contactEntityId)
+    const history = await getHistoryForMatters(ctx, matterIds)
+    return { history }
+  },
+}
+
 registerTool(listTool)
 registerTool(getTool)
 registerTool(inviteTool)
 registerTool(revokeTool)
+registerTool(documentsTool)
+registerTool(activityTool)
