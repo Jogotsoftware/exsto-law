@@ -10,18 +10,29 @@
 // attributes — the attorney NEVER sees raw {{sign:…}} text, 15.16b; the
 // save-bridge converts them back to markers, which stay the storage).
 //
+// ESIGN-FIELDS-1 — each role also carries merge-field IDENTITY bindings: drag a
+// {{token}} from the Merge-fields tab onto a role's Name / Email / Title slot
+// and that signer's identity is pulled from the document's collected field at
+// send time (esignPrefill.ts), OVERRIDING the coarse bind. This is what makes an
+// extra signer (a second LLC member, an NDA counterparty) — whose email lives in
+// an intake answer, not the CRM — send-ready. A signable role that can't be
+// reached (a `manual` bind with no email field) is flagged with a one-click
+// "capture it on intake" fix.
+//
 // Drift warnings (same orphan-report pattern as validateProposedTemplate):
 // marker keys in the body with no role row, and needs_to_sign roles with no
 // {{sign:key}} marker — computed live via the shared pure helper
 // (computeMarkerRoleDrift, the SAME function the AI-proposal validator uses).
-import { useMemo } from 'react'
-import { computeMarkerRoleDrift, labelFor } from '@exsto/legal/esign'
+import { useMemo, useState } from 'react'
+import { computeMarkerRoleDrift, computeSignerEmailGaps, labelFor } from '@exsto/legal/esign'
 import type {
   TemplateEsignConfig,
   TemplateEsignRole,
+  TemplateEsignRoleFields,
   EsignRecipientRole,
   EsignRoleBindKind,
 } from '@exsto/legal'
+import { readDroppedToken, dragHasToken } from '@/lib/mergeFieldDnd'
 import { PlusIcon, SignatureIcon, XIcon } from '@/components/icons'
 
 const RECIPIENT_ROLE_OPTIONS: { value: EsignRecipientRole; label: string }[] = [
@@ -65,11 +76,63 @@ export function roleBlockHtml(role: TemplateEsignRole, withHeading: boolean): st
   return `${heading}${line('sign')}${line('name')}${line('date')}`
 }
 
+// One identity slot (Name / Email / Title) that binds by drag-and-drop. A bound
+// slot shows the token chip with a clear button; an empty slot is a dropzone
+// that highlights when a merge-field token is dragged over it.
+function FieldSlot({
+  label,
+  token,
+  onBind,
+  onClear,
+}: {
+  label: string
+  token: string | undefined
+  onBind: (token: string) => void
+  onClear: () => void
+}) {
+  const [over, setOver] = useState(false)
+  return (
+    <div
+      className={`li-tplsign-slot${over ? ' is-over' : ''}${token ? ' is-bound' : ''}`}
+      onDragOver={(e) => {
+        if (dragHasToken(e)) {
+          e.preventDefault()
+          setOver(true)
+        }
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault()
+        setOver(false)
+        const t = readDroppedToken(e)
+        if (t) onBind(t)
+      }}
+    >
+      <span className="li-tplsign-slot-label">{label}</span>
+      {token ? (
+        <span className="li-tplsign-slot-chip">
+          {`{{${token}}}`}
+          <button
+            type="button"
+            aria-label={`Clear the ${label.toLowerCase()} field`}
+            onClick={onClear}
+          >
+            <XIcon size={11} />
+          </button>
+        </span>
+      ) : (
+        <span className="li-tplsign-slot-empty">Drop a field</span>
+      )}
+    </div>
+  )
+}
+
 export function TemplateEsignPanel({
   body,
   config,
   onChange,
   onInsertBlock,
+  onCaptureEmailOnIntake,
 }: {
   // The current template body MARKDOWN (for live marker↔role drift).
   body: string
@@ -78,15 +141,39 @@ export function TemplateEsignPanel({
   // Insert the role's execution block at the editor cursor (host wires this to
   // TemplateEditorHandle.insertHtml with roleBlockHtml above).
   onInsertBlock: (role: TemplateEsignRole) => void
+  // ESIGN-FIELDS-1 one-click fix: create a merge field for this role's email,
+  // add it to the document (so intake collects it), and return the token so the
+  // panel binds the role's email slot to it. Host-level (touches the variables
+  // map + the editor).
+  onCaptureEmailOnIntake?: (role: TemplateEsignRole) => string | void
 }) {
   const drift = useMemo(
     () => (config.signable ? computeMarkerRoleDrift(body, config.roles) : null),
     [body, config],
   )
+  // Signable roles that have no way to reach the signer (manual bind, no email
+  // field). The shared helper is the same one a server-side validator can use.
+  const emailGaps = useMemo(
+    () => (config.signable ? computeSignerEmailGaps(config.roles) : []),
+    [config],
+  )
+  const gapKeys = useMemo(() => new Set(emailGaps.map((g) => g.key)), [emailGaps])
 
   function patchRole(i: number, patch: Partial<TemplateEsignRole>) {
     const roles = config.roles.map((r, idx) => (idx === i ? { ...r, ...patch } : r))
     onChange({ ...config, roles })
+  }
+
+  // Merge one identity-field binding, stripping empties so an all-clear role
+  // stores `fields: undefined` (a bind-only role, unchanged from before).
+  function patchRoleFields(i: number, patch: Partial<TemplateEsignRoleFields>) {
+    const current = config.roles[i]?.fields ?? {}
+    const merged = { ...current, ...patch }
+    const clean: TemplateEsignRoleFields = {}
+    if (merged.name) clean.name = merged.name
+    if (merged.email) clean.email = merged.email
+    if (merged.title) clean.title = merged.title
+    patchRole(i, { fields: Object.keys(clean).length ? clean : undefined })
   }
 
   function addRole(key?: string) {
@@ -111,7 +198,7 @@ export function TemplateEsignPanel({
     <section className="li-tplsign">
       <div className="li-tplsign-head">
         <SignatureIcon size={15} />
-        <span className="li-tplsign-title">eSign</span>
+        <span className="li-tplsign-title">Signers</span>
         <label className="li-tplsign-toggle">
           <input
             type="checkbox"
@@ -126,8 +213,10 @@ export function TemplateEsignPanel({
       {config.signable && (
         <>
           <p className="li-tplsign-hint">
-            Who signs the finished document, and how each signer is resolved when it goes out.
-            Insert a role’s signature block where it belongs in the document.
+            Who signs the finished document, in what order, and where each signer’s name and email
+            come from. Drag a field from <strong>Merge fields</strong> onto a signer to pull their
+            identity from the document — e.g. the client’s info onto the client, your info onto the
+            countersigner, an extra member’s onto a second signer.
           </p>
 
           {config.roles.map((role, i) => (
@@ -221,6 +310,51 @@ export function TemplateEsignPanel({
                   </select>
                 </label>
               </div>
+
+              {/* ESIGN-FIELDS-1 — identity from merge fields (drag targets). */}
+              <div className="li-tplsign-slots" aria-label={`Signer ${i + 1} identity fields`}>
+                <FieldSlot
+                  label="Name"
+                  token={role.fields?.name}
+                  onBind={(t) => patchRoleFields(i, { name: t })}
+                  onClear={() => patchRoleFields(i, { name: undefined })}
+                />
+                <FieldSlot
+                  label="Email"
+                  token={role.fields?.email}
+                  onBind={(t) => patchRoleFields(i, { email: t })}
+                  onClear={() => patchRoleFields(i, { email: undefined })}
+                />
+                <FieldSlot
+                  label="Title"
+                  token={role.fields?.title}
+                  onBind={(t) => patchRoleFields(i, { title: t })}
+                  onClear={() => patchRoleFields(i, { title: undefined })}
+                />
+              </div>
+
+              {gapKeys.has(role.key) && (
+                <div className="li-tplsign-role-gap" role="alert">
+                  No email source — this signer can’t be reached.
+                  {onCaptureEmailOnIntake ? (
+                    <button
+                      type="button"
+                      className="li-tplsign-role-gap-fix"
+                      onClick={() => {
+                        const token = onCaptureEmailOnIntake(role)
+                        if (typeof token === 'string' && token) {
+                          patchRoleFields(i, { email: token })
+                        }
+                      }}
+                    >
+                      Capture it on intake
+                    </button>
+                  ) : (
+                    <span> Drop an email field above, or bind to a contact.</span>
+                  )}
+                </div>
+              )}
+
               <button
                 type="button"
                 className="li-tplsign-insert"

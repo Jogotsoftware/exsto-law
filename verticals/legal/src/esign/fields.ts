@@ -177,6 +177,39 @@ export function computeMarkerRoleDrift(
   return { markerKeysWithoutRole, rolesWithoutSignMarker }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// ESIGN-FIELDS-1 — signable-document email coverage (§ warn + one-click). Every
+// recipient role is DELIVERED an email (to sign, to view, or to receive the
+// executed copy), so each signable role needs a deliverable email source. A CRM
+// bind (matter_primary_contact / attorney_of_record / contact_role:*) supplies
+// one; a `manual` role only gets an email when the attorney types it at send
+// time — fine as a fallback, but a signable TEMPLATE should declare the SOURCE
+// (an intake merge field) so generation never produces an unreachable signer.
+// This flags `manual` roles with no email field bound. Pure/config-only (no
+// body, no DB) and defined in this client-safe module so the editor panel and
+// any server-side validator share ONE helper. The input is the structural shape
+// of a TemplateEsignRole (kept local so this module has no queries dependency).
+// ─────────────────────────────────────────────────────────────────────────
+export interface EsignRoleEmailCoverageLike {
+  key: string
+  label?: string
+  bind: string
+  fields?: { email?: string }
+}
+
+export interface EsignRoleEmailGap {
+  key: string
+  label: string
+}
+
+export function computeSignerEmailGaps(
+  roles: readonly EsignRoleEmailCoverageLike[],
+): EsignRoleEmailGap[] {
+  return roles
+    .filter((r) => r.bind === 'manual' && !r.fields?.email)
+    .map((r) => ({ key: r.key, label: r.label || r.key }))
+}
+
 // Replace each tag, in appearance order, with its resolved value (keyed by the
 // positional field id). A missing value renders blank.
 export function resolveExecutedMarkdown(

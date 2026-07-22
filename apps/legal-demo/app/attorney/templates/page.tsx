@@ -28,8 +28,10 @@ import type { VariableStatus } from '@/components/templates/TemplateVariableNode
 import { TemplateFieldsPanel } from '@/components/templates/TemplateFieldsPanel'
 import { TemplateEsignPanel, roleBlockHtml } from '@/components/templates/TemplateEsignPanel'
 import { DocumentSheet, TokenChip } from '@/components/DocumentSheet'
+import { Tabs } from '@/components/Tabs'
 import { GemCluster } from '@/components/GemSparkle'
 import { markdownToHtml, htmlToMarkdown } from '@/lib/templateBody'
+import { mergeFieldDragProps, readDroppedToken, dragHasToken } from '@/lib/mergeFieldDnd'
 import { buildPreview } from '@/lib/templatePreview'
 import { streamTemplateAi } from '@/lib/templateAiStream'
 import type {
@@ -311,6 +313,10 @@ export default function TemplatesPage() {
   const [saving, setSaving] = useState(false)
   const [importing, setImporting] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  // ESIGN-FIELDS-1 — the right rail is now tabbed: Merge fields | Signers. The
+  // eSign config used to sit stacked under the fields; a tab gives it room for
+  // the per-signer identity slots and keeps both one click away.
+  const [railTab, setRailTab] = useState<'fields' | 'esign'>('fields')
   // "New template" start-options chooser: scratch / clone existing / from a
   // questionnaire. Questionnaires load lazily the first time the chooser opens.
   const [showNew, setShowNew] = useState(false)
@@ -600,6 +606,39 @@ export default function TemplatesPage() {
   function insertEsignBlock(role: TemplateEsignRole) {
     const hasExecution = /\{\{\s*sign\s*:/.test(draftBodyRef.current)
     editorRef.current?.insertHtml(roleBlockHtml(role, !hasExecution))
+  }
+
+  // ESIGN-FIELDS-1 — the eSign tab's "capture it on intake" one-click: for a
+  // signable signer with no email source, mint a required {{<key>_email}} merge
+  // field, drop it into the document (so generation/intake actually collects it),
+  // and hand the token back so the panel binds the role's email slot to it.
+  function captureSignerEmailOnIntake(role: TemplateEsignRole): string {
+    const base = (role.key || 'signer')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+    const token = `${base || 'signer'}_email`
+    setDraft((d) =>
+      d ? { ...d, variables: { ...d.variables, [token]: { type: 'text', required: true } } } : d,
+    )
+    editorRef.current?.insertVariable(token)
+    return token
+  }
+
+  // ESIGN-FIELDS-1 — drop a merge-field chip anywhere on the editor canvas to
+  // insert it at the cursor. Handled in the CAPTURE phase so it runs before the
+  // ProseMirror editor's own drop listener (which would otherwise paste the raw
+  // {{token}} text at the drop point); stopPropagation keeps PM from double-
+  // inserting. dragHasToken guards so ordinary text/file drops pass through to PM.
+  function onCanvasDragOver(e: React.DragEvent) {
+    if (dragHasToken(e)) e.preventDefault()
+  }
+  function onCanvasDrop(e: React.DragEvent) {
+    if (!dragHasToken(e)) return
+    e.preventDefault()
+    e.stopPropagation()
+    const token = readDroppedToken(e)
+    if (token) editorRef.current?.insertVariable(token)
   }
 
   // Parse an uploaded file (PDF / Word / text) to plain text via the shared server
@@ -1247,7 +1286,11 @@ export default function TemplatesPage() {
           {aiError && <div className="alert alert-error li-tpl-alert">{aiError}</div>}
 
           <div className="li-tpl-workspace">
-            <div className="li-tpl-canvas-main">
+            <div
+              className="li-tpl-canvas-main"
+              onDragOverCapture={onCanvasDragOver}
+              onDropCapture={onCanvasDrop}
+            >
               <TemplateEditor
                 variant="li"
                 aiRunning={aiRunning}
@@ -1268,38 +1311,69 @@ export default function TemplatesPage() {
               </TemplateEditor>
             </div>
             <aside className="li-tpl-rail">
-              <div className="li-tpl-rail-title">Merge fields</div>
-              <p className="li-tpl-rail-hint">
-                Each <code className="li-token-chip">{'{{token}}'}</code> in the document is filled
-                from these fields at generation time.
-              </p>
-              <TemplateFieldsPanel
-                tokens={bodyTokens}
-                variables={draft.variables}
-                onChange={onVariablesChange}
-                onInsert={insertToken}
-              />
-              {draft.category === 'document' && (
+              {/* ESIGN-FIELDS-1 — tabbed rail (shared Tabs component). Signers
+                  only applies to documents; an email template shows Merge fields
+                  alone (no tab strip). */}
+              {draft.category === 'document' ? (
+                <Tabs
+                  ariaLabel="Editor panels"
+                  active={railTab}
+                  onSelect={(k) => setRailTab(k as 'fields' | 'esign')}
+                  tabs={[
+                    { key: 'fields', label: 'Merge fields' },
+                    {
+                      key: 'esign',
+                      label: 'Signers',
+                      badge: draft.esignConfig.signable
+                        ? draft.esignConfig.roles.length
+                        : undefined,
+                    },
+                  ]}
+                />
+              ) : (
+                <div className="li-tpl-rail-title">Merge fields</div>
+              )}
+
+              {(railTab === 'fields' || draft.category === 'email') && (
+                <>
+                  <p className="li-tpl-rail-hint">
+                    Each <code className="li-token-chip">{'{{token}}'}</code> in the document is
+                    filled from these fields at generation time. Drag a field onto the document — or
+                    onto a signer in the Signers tab — to place it.
+                  </p>
+                  <TemplateFieldsPanel
+                    tokens={bodyTokens}
+                    variables={draft.variables}
+                    onChange={onVariablesChange}
+                    onInsert={insertToken}
+                  />
+                  <div className="li-tpl-rail-subtitle">Standard Fields</div>
+                  <div className="li-tpl-standard-chips">
+                    {STANDARD_TOKENS.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className="li-tpl-standard-chip"
+                        onClick={() => insertToken(t.id)}
+                        title={`Click to insert {{${t.id}}}, or drag it onto the document or a signer`}
+                        {...mergeFieldDragProps(t.id)}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {railTab === 'esign' && draft.category === 'document' && (
                 <TemplateEsignPanel
                   body={draft.body}
                   config={draft.esignConfig}
                   onChange={(esignConfig) => setDraft((d) => (d ? { ...d, esignConfig } : d))}
                   onInsertBlock={insertEsignBlock}
+                  onCaptureEmailOnIntake={captureSignerEmailOnIntake}
                 />
               )}
-              <div className="li-tpl-rail-subtitle">Standard Fields</div>
-              <div className="li-tpl-standard-chips">
-                {STANDARD_TOKENS.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className="li-tpl-standard-chip"
-                    onClick={() => insertToken(t.id)}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
             </aside>
           </div>
         </section>

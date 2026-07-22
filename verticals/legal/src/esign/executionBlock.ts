@@ -29,12 +29,15 @@ export {
   parseFields,
   parseMarkerLine,
   computeMarkerRoleDrift,
+  computeSignerEmailGaps,
   labelFor,
   type EsignField,
   type EsignFieldType,
   type MarkerLine,
   type EsignRoleKeyLike,
   type EsignMarkerRoleDrift,
+  type EsignRoleEmailCoverageLike,
+  type EsignRoleEmailGap,
 } from './fields.js'
 
 // ESIGN-UNIFY-1 ES-2 — the placement canvas's client-safe surface: the storage

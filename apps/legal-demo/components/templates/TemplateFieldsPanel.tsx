@@ -10,6 +10,7 @@
 // app/attorney/templates/page.tsx).
 
 import type { TemplateVariables, TemplateVariableSpec, TemplateVariableType } from '@exsto/legal'
+import { mergeFieldDragProps } from '@/lib/mergeFieldDnd'
 
 const TYPE_OPTIONS: { value: TemplateVariableType; label: string }[] = [
   { value: 'text', label: 'Text' },
@@ -63,7 +64,8 @@ export function TemplateFieldsPanel({
                 type="button"
                 className="li-tpl-field-chip"
                 onClick={() => onInsert?.(t)}
-                title={`Insert {{${t}}} at the cursor`}
+                title={`Click to insert {{${t}}} at the cursor, or drag it onto the document or a signer`}
+                {...mergeFieldDragProps(t)}
               >
                 {`{{${t}}}`}
               </button>

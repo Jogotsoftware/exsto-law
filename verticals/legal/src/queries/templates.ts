@@ -97,6 +97,24 @@ export function isEsignRoleBindKind(v: unknown): v is EsignRoleBindKind {
   return v.startsWith('contact_role:') && v.length > 'contact_role:'.length
 }
 
+// ESIGN-FIELDS-1 — per-role merge-field bindings. A signer's identity (printed
+// name / delivery email / title) can be pulled from named {{merge fields}} the
+// document already collects — e.g. a second LLC member or an NDA counterparty
+// whose email lives in an intake answer ({{member_2_email}}), not in the CRM.
+// Each value is a merge-field TOKEN name (the {{token}} without braces); the
+// send-time resolver reads its merged VALUE for the matter (esignPrefill.ts).
+// A bound field OVERRIDES the coarse `bind`-resolved value for that slot; an
+// empty/unresolvable field falls back to the bind. Absent → bind-only (the
+// pre-ESIGN-FIELDS-1 behavior), so old configs read unchanged.
+export interface TemplateEsignRoleFields {
+  /** Token whose merged value supplies this signer's printed name. */
+  name?: string
+  /** Token whose merged value supplies this signer's delivery email. */
+  email?: string
+  /** Token whose merged value supplies this signer's title. */
+  title?: string
+}
+
 export interface TemplateEsignRole {
   /** The marker signer key this role owns ({{sign:<key>}}, {{name:<key>}}, …). */
   key: string
@@ -106,6 +124,29 @@ export interface TemplateEsignRole {
   bind: EsignRoleBindKind
   /** Signing-order default; equal orders route in parallel. */
   order: number
+  /** ESIGN-FIELDS-1 — merge-field-sourced identity slots (override `bind`). */
+  fields?: TemplateEsignRoleFields
+}
+
+// A merge-field token reference on a role, normalized to the token grammar
+// tokens use everywhere else ([a-z0-9_], lower-cased). Empty → undefined.
+function parseRoleFieldToken(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined
+  const t = v
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '')
+  return t || undefined
+}
+
+export function parseTemplateEsignRoleFields(raw: unknown): TemplateEsignRoleFields | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const o = raw as Record<string, unknown>
+  const name = parseRoleFieldToken(o.name)
+  const email = parseRoleFieldToken(o.email)
+  const title = parseRoleFieldToken(o.title)
+  if (!name && !email && !title) return undefined
+  return { ...(name ? { name } : {}), ...(email ? { email } : {}), ...(title ? { title } : {}) }
 }
 
 export interface TemplateEsignConfig {
@@ -130,8 +171,15 @@ export function parseTemplateEsignRole(raw: unknown): TemplateEsignRole | null {
   const bind: EsignRoleBindKind = isEsignRoleBindKind(o.bind) ? o.bind : 'manual'
   const order = typeof o.order === 'number' && Number.isFinite(o.order) ? o.order : 1
   const label = typeof o.label === 'string' && o.label.trim() ? o.label.trim() : key
-  return { key, label, recipientRole, bind, order }
+  const fields = parseTemplateEsignRoleFields(o.fields)
+  return { key, label, recipientRole, bind, order, ...(fields ? { fields } : {}) }
 }
+
+// ESIGN-FIELDS-1 — signable-document email coverage (§ warn+one-click) lives in
+// the CLIENT-SAFE esign module (esign/fields.ts, re-exported from
+// '@exsto/legal/esign') so the template-editor panel can import it without
+// pulling this server-adjacent queries barrel (which imports @exsto/substrate)
+// into the browser bundle. See computeSignerEmailGaps there.
 
 // Defensive parser (UNSIGNED-style, mirrors parseTemplateSignature above):
 // anything malformed or absent reads as the empty/unsignable config — a bad
