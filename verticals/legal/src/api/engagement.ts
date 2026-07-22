@@ -1,5 +1,10 @@
 import { submitAction, withActionContext, type ActionContext } from '@exsto/substrate'
-import { readEngagementTerms, type EngagementTermsValue } from '../handlers/engagement.js'
+import {
+  readEngagementTerms,
+  readEngagementTemplate,
+  type EngagementTermsValue,
+  type EngagementTemplateValue,
+} from '../handlers/engagement.js'
 import { getFirmDefaultRate } from './rates.js'
 
 // CLIENT-PORTAL-UI-1 (WP-6) — the firm-level engagement agreement, API surface.
@@ -104,11 +109,14 @@ export async function assertEngagementAccepted(
 export async function acceptEngagement(
   ctx: ActionContext,
   clientContactId: string,
+  // ENGAGEMENT-DOC-1 — the typed signature; the handler requires it iff the
+  // firm has an engagement-agreement template configured.
+  signedName?: string,
 ): Promise<{ consentEventId: string; rate: string | null; termsVersion: number | null }> {
   const res = await submitAction(ctx, {
     actionKindName: 'legal.engagement.accept',
     intentKind: 'enforcement',
-    payload: { client_contact_id: clientContactId },
+    payload: { client_contact_id: clientContactId, signed_name: signedName },
   })
   return res.effects[0] as {
     consentEventId: string
@@ -142,4 +150,33 @@ export async function setEngagementTerms(
   return res.effects[0] as { version: number }
 }
 
-export type { EngagementTermsValue }
+// ENGAGEMENT-DOC-1 — attorney points the firm at (or clears) the engagement
+// agreement template produced by the settings upload/parse pipeline.
+export async function setEngagementTemplate(
+  ctx: ActionContext,
+  input: {
+    templateId: string | null
+    sourceFilename?: string
+    details?: Record<string, unknown>
+  },
+): Promise<{ templateId: string | null; version?: number }> {
+  const res = await submitAction(ctx, {
+    actionKindName: 'legal.firm.set_engagement_template',
+    intentKind: 'adjustment',
+    payload: {
+      template_id: input.templateId,
+      source_filename: input.sourceFilename,
+      details: input.details,
+    },
+  })
+  const eff = res.effects[0] as { template_id: string | null; version?: number }
+  return { templateId: eff.template_id, version: eff.version }
+}
+
+export async function getEngagementTemplate(
+  ctx: ActionContext,
+): Promise<EngagementTemplateValue | null> {
+  return withActionContext(ctx, (client) => readEngagementTemplate(client, ctx.tenantId))
+}
+
+export type { EngagementTermsValue, EngagementTemplateValue }
