@@ -8,78 +8,63 @@ import {
   type DocumentReviewerDisposeResult,
   type DocumentReviewerLoadedInfo,
 } from '@/components/DocumentReviewer'
-
-// Step-through review session (started from the queue's "Begin review"): the ordered
-// draft ids to walk, in sessionStorage, flagged on the URL with ?review=session.
-const REVIEW_SESSION_KEY = 'reviewSession'
+import {
+  clearTaskSession,
+  hrefFor,
+  readTaskSession,
+  writeTaskSession,
+  type TaskSession,
+} from '@/lib/taskSession'
+import { BriefButton } from '@/components/BriefButton'
 
 export default function DraftReviewPage({ params }: { params: Promise<{ versionId: string }> }) {
   const { versionId } = use(params)
   const router = useRouter()
 
-  const [sessionIds, setSessionIds] = useState<string[] | null>(null)
+  const [session, setSession] = useState<TaskSession | null>(null)
   // Re-derive from the URL + sessionStorage on every version shown — covers
-  // both the initial load and a fresh ?review=session link opened while
+  // both the initial load and a fresh ?queue=session link opened while
   // already on a review page (a client-side nav that swaps `versionId` without
   // remounting this component).
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const inSession = new URLSearchParams(window.location.search).get('review') === 'session'
-    if (!inSession) {
-      setSessionIds(null)
-      return
-    }
-    try {
-      const raw = window.sessionStorage.getItem(REVIEW_SESSION_KEY)
-      const parsed = raw ? (JSON.parse(raw) as { ids?: unknown }) : null
-      setSessionIds(Array.isArray(parsed?.ids) ? (parsed.ids as string[]) : null)
-    } catch {
-      setSessionIds(null)
-    }
+    const inSession = new URLSearchParams(window.location.search).get('queue') === 'session'
+    setSession(inSession ? readTaskSession() : null)
   }, [versionId])
   // Matter/document identity for the top bar's "Matter <number>" pill — reported
   // by DocumentReviewer once it loads (this wrapper no longer fetches the draft
   // itself; the extracted component owns that read).
   const [loaded, setLoaded] = useState<DocumentReviewerLoadedInfo | null>(null)
 
-  const sessionPos = sessionIds ? sessionIds.indexOf(versionId) : -1
+  const sessionPos = session ? session.items.findIndex((it) => it.id === versionId) : -1
 
   function exitSession() {
-    try {
-      window.sessionStorage.removeItem(REVIEW_SESSION_KEY)
-    } catch {
-      /* ignore */
-    }
+    clearTaskSession()
     router.push('/attorney/review')
   }
 
   function goSession(delta: number) {
-    if (!sessionIds || sessionPos < 0) return
+    if (!session || sessionPos < 0) return
     const next = sessionPos + delta
-    if (next < 0 || next >= sessionIds.length) return
-    window.sessionStorage.setItem(
-      REVIEW_SESSION_KEY,
-      JSON.stringify({ ids: sessionIds, index: next }),
-    )
-    router.push(`/attorney/review/${sessionIds[next]}?review=session`)
+    if (next < 0 || next >= session.items.length) return
+    writeTaskSession({ items: session.items, index: next })
+    router.push(hrefFor(session.items[next]!))
   }
 
   // A disposition (approve/reject) landed. In a step-through session, auto-advance
-  // to the next selected draft (or exit back to the queue when done) — and tell
-  // DocumentReviewer we've handled the aftermath ourselves (`true`) so it doesn't
-  // also try to swap/refresh a surface that's about to navigate away. Outside a
-  // session, let DocumentReviewer refresh/swap itself in place.
+  // to the next task (which may be an esign row — hrefFor routes accordingly), or
+  // exit back to the queue when done — and tell DocumentReviewer we've handled the
+  // aftermath ourselves (`true`) so it doesn't also try to swap/refresh a surface
+  // that's about to navigate away. Outside a session, let DocumentReviewer
+  // refresh/swap itself in place.
   function handleCompleted(_result: DocumentReviewerDisposeResult): boolean {
-    if (sessionIds && sessionPos >= 0) {
+    if (session && sessionPos >= 0) {
       const next = sessionPos + 1
-      if (next < sessionIds.length) {
-        window.sessionStorage.setItem(
-          REVIEW_SESSION_KEY,
-          JSON.stringify({ ids: sessionIds, index: next }),
-        )
-        router.push(`/attorney/review/${sessionIds[next]}?review=session`)
+      if (next < session.items.length) {
+        writeTaskSession({ items: session.items, index: next })
+        router.push(hrefFor(session.items[next]!))
       } else {
-        window.sessionStorage.removeItem(REVIEW_SESSION_KEY)
+        clearTaskSession()
         router.push('/attorney/review')
       }
       return true
@@ -94,15 +79,15 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
     router.replace(`/attorney/review/${newVersionId}`)
   }
 
-  const prevDisabled = !sessionIds || sessionPos <= 0
-  const nextDisabled = !sessionIds || sessionPos < 0 || sessionPos >= sessionIds.length - 1
+  const prevDisabled = !session || sessionPos <= 0
+  const nextDisabled = !session || sessionPos < 0 || sessionPos >= session.items.length - 1
 
   return (
     <main className="li-rev">
       {/* top toolbar: exit / matter pills + prev / next */}
       <div className="li-rev-top">
         <div className="li-rev-top-left">
-          {sessionPos >= 0 && sessionIds ? (
+          {sessionPos >= 0 && session ? (
             <button type="button" className="li-rev-pill" onClick={exitSession}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <polyline
@@ -113,10 +98,10 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
                   strokeLinejoin="round"
                 />
               </svg>
-              Exit review ({sessionPos + 1} of {sessionIds.length})
+              Exit review ({sessionPos + 1} of {session.items.length})
             </button>
           ) : (
-            // Direct-open (row click / deep link, no Begin-review session): no
+            // Direct-open (row click / deep link, no Start-Tasks session): no
             // honest n/m is available here without fetching the whole pending
             // queue just to guess a position the attorney never walked — so the
             // pill reads plain "Exit review" rather than fabricate a count.
@@ -154,6 +139,14 @@ export default function DraftReviewPage({ params }: { params: Promise<{ versionI
               </svg>
               Matter&nbsp;<span className="li-rev-mono">{loaded.matterNumber}</span>
             </Link>
+          )}
+          {loaded && (
+            <BriefButton
+              lazy
+              scope={{ kind: 'matter', matterEntityId: loaded.matterEntityId }}
+              className="li-rev-pill"
+              label="Brief"
+            />
           )}
         </div>
         <div className="li-rev-top-right">

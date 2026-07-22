@@ -1358,6 +1358,11 @@ export interface SignableDocument {
   // future renderer (ES-2) show "shared to review" copy instead of a blank
   // "not your turn" state.
   viewOnly: boolean
+  // TASK-QUEUE-3 — the matter this envelope belongs to (null for a
+  // contact-scoped standalone envelope). Lets the attorney signing surface
+  // show the same Matter pill / Brief button the document-review surface has.
+  matterEntityId: string | null
+  matterNumber: string | null
 }
 
 async function buildSignable(ctx: ActionContext, requestId: string): Promise<SignableDocument> {
@@ -1506,7 +1511,21 @@ async function buildSignable(ctx: ActionContext, requestId: string): Promise<Sig
   } catch {
     firmName = null // degrade to the caller's generic fallback, never guess a name
   }
-  return { ...doc, firmName }
+
+  // TASK-QUEUE-3 — reuse listEnvelopes' existing matter resolution (same
+  // pattern as listSignaturesAwaitingAttorney) rather than duplicating its join.
+  let matterEntityId: string | null = null
+  let matterNumber: string | null = null
+  try {
+    const envelopes = await listEnvelopes(ctx)
+    const env = envelopes.find((e) => e.envelopeId === doc.envelopeId)
+    matterEntityId = env?.matterEntityId ?? null
+    matterNumber = env?.matterNumber ?? null
+  } catch {
+    // degrade gracefully — the signing surface just won't show a Matter pill
+  }
+
+  return { ...doc, firmName, matterEntityId, matterNumber }
 }
 
 // ── Token (link) surface ──────────────────────────────────────────────────────
