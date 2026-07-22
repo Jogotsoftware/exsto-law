@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { registerActionHandler } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { canManage } from '../api/users.js'
+import { insertEvent } from './common.js'
 
 interface InvitePayload {
   email: string
@@ -253,4 +254,45 @@ registerActionHandler('legal.user.deactivate', async (ctx, client, payload) => {
   if (r.rowCount === 0) throw new Error(`User not found: ${p.actor_id}`)
   await closeActiveScopes(client, ctx.tenantId, p.actor_id)
   return { actorId: p.actor_id, status: 'inactive' }
+})
+
+// Delete a user from the Users & Roles list. Actors are identity rows in an
+// append-only system — there is no hard delete (actor.status CHECK allows only
+// active/inactive) — so "delete" = the deactivate mechanics plus a user.deleted
+// event marker that listUsers excludes. Re-inviting the same email reactivates
+// the actor (legal.user.invite flips status back), which is the intended undo.
+registerActionHandler('legal.user.delete', async (ctx, client, payload, actionId) => {
+  const p = payload as unknown as DeactivatePayload
+  if (!p.actor_id) throw new Error('actor_id is required')
+
+  // Same authorization floor as deactivate: admin only, never self, and only a
+  // user ranking strictly below the caller.
+  const callerR = await requireUserAdmin(client, ctx)
+  if (p.actor_id === ctx.actorId) {
+    throw new Error('You cannot delete your own account.')
+  }
+  if ((await actorRank(client, ctx.tenantId, p.actor_id)) >= callerR) {
+    throw new Error('You cannot delete a user at or above your own rank.')
+  }
+
+  const r = await client.query<{ external_id: string | null; display_name: string }>(
+    `UPDATE actor SET status = 'inactive'
+      WHERE tenant_id = $1 AND id = $2 AND actor_type = 'human'
+      RETURNING external_id, display_name`,
+    [ctx.tenantId, p.actor_id],
+  )
+  const row = r.rows[0]
+  if (!row) throw new Error(`User not found: ${p.actor_id}`)
+  await closeActiveScopes(client, ctx.tenantId, p.actor_id)
+
+  await insertEvent(client, {
+    tenantId: ctx.tenantId,
+    actionId,
+    eventKindName: 'user.deleted',
+    primaryEntityId: null,
+    data: { actor_id: p.actor_id, email: row.external_id, display_name: row.display_name },
+    sourceType: 'human',
+    sourceRef: ctx.actorId,
+  })
+  return { actorId: p.actor_id, status: 'inactive', deleted: true }
 })
