@@ -1,7 +1,19 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
-import { getWorkflowInstanceForMatter, resolveBoundWorkflowById } from '../lifecycle/binding.js'
+import {
+  getWorkflowInstanceForMatter,
+  resolveBoundWorkflowById,
+  parseStatesToGraph,
+} from '../lifecycle/binding.js'
 import type { Lifecycle } from '../lifecycle/types.js'
+import {
+  deriveStageFromWorkflow,
+  deriveStageFromLegacyStatus,
+  type StageDisplay,
+} from '../lifecycle/statusDisplay.js'
+// Re-export the stage vocabulary so `@exsto/legal` consumers (the attorney app,
+// the MCP tool) can type against it alongside MatterSummary/MatterDetail.
+export type { StageDisplay, StageCategory } from '../lifecycle/statusDisplay.js'
 import {
   resolveMatterJurisdictionWithClient,
   type ResolvedJurisdiction,
@@ -18,7 +30,13 @@ export interface MatterSummary {
   clientName: string
   serviceKey: string
   workflowRoute: string
+  // Raw `matter_status` mirror. Kept for compat, but it drifts from the live
+  // workflow and must NOT drive the status chip — use `stage` for display.
   status: string
+  // The attorney-facing STATUS chip, derived from the matter's running workflow
+  // (its true position), with the legacy status as a fallback. This is what the
+  // matters list, the home dashboard, and the matter header render.
+  stage: StageDisplay
   scheduledAt: string | null
   createdAt: string
   // Compat fields consumed by the existing attorney screens (WP8 retires them).
@@ -119,6 +137,15 @@ export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> 
        ORDER BY e.created_at DESC`,
       [ctx.tenantId],
     )
+    // Resolve every matter's display stage from its running workflow in TWO batched
+    // queries (not per-row), so the list stays inside the perf budget however many
+    // matters a firm has.
+    const stages = await loadMatterStages(
+      client,
+      ctx.tenantId,
+      rows.rows.map((r) => r.matter_entity_id),
+    )
+
     return rows.rows.map((r) => ({
       matterEntityId: r.matter_entity_id,
       matterNumber: r.matter_number,
@@ -126,12 +153,64 @@ export async function listMatters(ctx: ActionContext): Promise<MatterSummary[]> 
       serviceKey: r.service_key ?? '',
       workflowRoute: r.workflow_route ?? 'manual',
       status: r.status ?? 'intake_submitted',
+      stage:
+        stages.get(r.matter_entity_id) ??
+        deriveStageFromLegacyStatus(r.status ?? 'intake_submitted'),
       scheduledAt: r.scheduled_at,
       createdAt: r.created_at,
       practiceArea: r.service_key ?? '',
       summary: '',
     }))
   })
+}
+
+// Batched stage resolution for the matters list: one query for the latest workflow
+// instance per matter, one for the bound definitions those instances point at, then
+// derive each stage in memory. A per-instance states_override supersedes the bound
+// version (invariant 17: run the version the matter was opened against). Matters
+// with no instance are simply absent from the map — the caller falls back to the
+// legacy status.
+async function loadMatterStages(
+  client: DbClient,
+  tenantId: string,
+  matterIds: string[],
+): Promise<Map<string, StageDisplay>> {
+  const out = new Map<string, StageDisplay>()
+  if (matterIds.length === 0) return out
+
+  const instances = await client.query<{
+    subject_entity_id: string
+    workflow_definition_id: string
+    current_state: string
+    status: string
+    states_override: unknown
+  }>(
+    `SELECT DISTINCT ON (subject_entity_id)
+            subject_entity_id, workflow_definition_id, current_state, status, states_override
+       FROM workflow_instance
+      WHERE tenant_id = $1 AND subject_entity_id = ANY($2)
+      ORDER BY subject_entity_id, started_at DESC`,
+    [tenantId, matterIds],
+  )
+  if (instances.rows.length === 0) return out
+
+  const defIds = Array.from(new Set(instances.rows.map((r) => r.workflow_definition_id)))
+  const defs = await client.query<{ id: string; states: unknown }>(
+    `SELECT id, states FROM workflow_definition WHERE tenant_id = $1 AND id = ANY($2)`,
+    [tenantId, defIds],
+  )
+  const graphByDef = new Map<string, Lifecycle>(
+    defs.rows.map((d) => [d.id, parseStatesToGraph(d.states)]),
+  )
+
+  for (const inst of instances.rows) {
+    const override = Array.isArray(inst.states_override)
+      ? (inst.states_override as Lifecycle)
+      : null
+    const graph = override ?? graphByDef.get(inst.workflow_definition_id) ?? []
+    out.set(inst.subject_entity_id, deriveStageFromWorkflow(graph, inst.current_state, inst.status))
+  }
+  return out
 }
 
 export async function getMatter(
@@ -235,6 +314,11 @@ export async function getMatter(
       serviceKey: (attributes.service_key as string | undefined) ?? '',
       workflowRoute: (attributes.workflow_route as string | undefined) ?? 'manual',
       status: (attributes.matter_status as string | undefined) ?? 'intake_submitted',
+      stage: workflow
+        ? deriveStageFromWorkflow(workflow.graph, workflow.currentState, workflow.status)
+        : deriveStageFromLegacyStatus(
+            (attributes.matter_status as string | undefined) ?? 'intake_submitted',
+          ),
       scheduledAt: base.scheduled_at,
       createdAt: base.created_at,
       practiceArea: (attributes.service_key as string | undefined) ?? '',

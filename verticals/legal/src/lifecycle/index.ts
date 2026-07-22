@@ -3,6 +3,9 @@
 export * from './types.js'
 export * from './resolve.js'
 export * from './derive.js'
+// Matter STATUS chip derivation — the attorney-facing stage a matter is at, read
+// from its live workflow (the matters list, home dashboard, and matter header).
+export * from './statusDisplay.js'
 // PR3 — the step-action catalog (builder/AI guardrail) + authored product workflows.
 export * from './catalog.js'
 export * from './authored.js'

@@ -18,6 +18,7 @@ import {
 } from '@/components/icons'
 import { GemCluster } from '@/components/GemSparkle'
 import { downloadAsPdf, downloadAsWord } from '@/lib/draftExport'
+import { stageStyle } from '@/lib/matterStage'
 import { SendToClientModal, type SendToClientDoc } from '@/components/SendToClientModal'
 import {
   humanizeService,
@@ -198,6 +199,24 @@ export default function MatterOverviewPage({ params }: { params: Promise<{ id: s
           <div>
             <div className="li-mat-facts-label">Practice area</div>
             <div className="li-mat-facts-value">{humanizeService(matter.practiceArea)}</div>
+          </div>
+          <div>
+            <div className="li-mat-facts-label">Status</div>
+            <div className="li-mat-facts-value">
+              <span
+                className="li-mat-status"
+                style={{
+                  background: stageStyle(matter.stage.category).bg,
+                  color: stageStyle(matter.stage.category).fg,
+                }}
+              >
+                <span
+                  className="li-mat-status-dot"
+                  style={{ background: stageStyle(matter.stage.category).fg }}
+                />
+                {matter.stage.label}
+              </span>
+            </div>
           </div>
           <div>
             <div className="li-mat-facts-label">Opened</div>

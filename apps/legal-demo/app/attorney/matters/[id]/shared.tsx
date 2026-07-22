@@ -5,6 +5,7 @@
 // tab pages and the layout, so humanizers + the questionnaire/transcript renderers
 // live in exactly one place.
 import { serviceLabel, getCachedServiceDisplayNames } from '@/lib/serviceLabel'
+import type { Stage } from '@/lib/matterStage'
 
 // ── Workflow shape (ADR 0045 PR3) ───────────────────────────────────────────
 // The app cannot import the server lifecycle types (no server-package imports in
@@ -67,6 +68,8 @@ export interface MatterDetail {
   clientEmail: string | null
   practiceArea: string
   status: string
+  // The display STATUS — derived from the matter's live workflow, server-side.
+  stage: Stage
   summary: string
   createdAt: string
   attributes: Record<string, unknown>
