@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import {
   isClientContactActive,
+  isPortalAccessRevoked,
   resolveClientMatterIds,
   resolvePortalActorId,
   resolvePublicIntakeActor,
@@ -74,6 +75,13 @@ export async function mintClientSession(
   }
   const active = await isClientContactActive(tenantId, clientContactId)
   if (!active) {
+    return { ok: false, error: 'This account is no longer active. Contact the firm.' }
+  }
+  // Login-only portal delete (Users & Roles portal tab): the contact stays
+  // active in the CRM but their mapped portal actor is inactive. Refuse HERE —
+  // provision_portal_actor's idempotency would otherwise hand the inactive
+  // actor back into a fresh session. A re-invite restores the actor first.
+  if (await isPortalAccessRevoked(tenantId, clientContactId)) {
     return { ok: false, error: 'This account is no longer active. Contact the firm.' }
   }
   const display = await loadContactDisplay(tenantId, clientContactId)

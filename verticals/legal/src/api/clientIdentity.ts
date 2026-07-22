@@ -182,6 +182,29 @@ export async function isClientContactActive(
   })
 }
 
+// The contact's portal tier (Users & Roles portal tab): 'standard' loses the AI
+// assistant, 'self_serve' has full access. ABSENT means self_serve — the
+// pre-existing behavior — so the gate can deploy with zero backfill. Read
+// per-request at the enforcement points (assistant stream route, portal home),
+// never stamped into the session cookie, so a downgrade applies immediately.
+export async function resolvePortalUserType(
+  tenantId: string,
+  clientContactId: string,
+): Promise<'standard' | 'self_serve'> {
+  return withSuperuser(async (client) => {
+    const res = await client.query<{ value: string }>(
+      `SELECT a.value #>> '{}' AS value
+       FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+       WHERE a.tenant_id = $1 AND a.entity_id = $2 AND akd.kind_name = 'portal_user_type'
+         AND (a.valid_to IS NULL OR a.valid_to > now())
+       ORDER BY a.valid_from DESC LIMIT 1`,
+      [tenantId, clientContactId],
+    )
+    return res.rows[0]?.value === 'standard' ? 'standard' : 'self_serve'
+  })
+}
+
 // The client_contact's current email (latest attribute). Tenant-scoped; used to
 // build the signing ClientPrincipal in the portal e-sign tools.
 export async function loadClientContactEmail(

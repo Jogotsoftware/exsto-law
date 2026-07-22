@@ -24,6 +24,7 @@ import { renderDocumentHtml } from '@/lib/documentHtml'
 import { renderMissingChipsHtml } from '@/lib/missingFields'
 import { docFontCss, normalizeDocFontFamily, normalizeDocFontSize } from '@/lib/docFonts'
 import { ActionsMenu } from '@/components/ActionsMenu'
+import { BriefButton } from '@/components/BriefButton'
 import { DocumentActionBar } from '@/components/DocumentActionBar'
 import { DocumentSheet, DocumentCanvas } from '@/components/DocumentSheet'
 import { GemCluster } from '@/components/GemSparkle'
@@ -473,6 +474,11 @@ export function DocumentReviewer({
               {unresolvedTokens.length} unresolved field{unresolvedTokens.length === 1 ? '' : 's'}
             </span>
           )}
+          {/* Matter Brief from every document-review place (Joe 2026-07-21) —
+              this one spot covers both the standalone reviewer page and the
+              workflow-step review modal, where the matter header's own Brief
+              button is hidden behind the overlay. */}
+          <BriefButton scope={{ kind: 'matter', matterEntityId: draft.matterEntityId }} />
         </div>
       </div>
       <div className="li-rev-subline">

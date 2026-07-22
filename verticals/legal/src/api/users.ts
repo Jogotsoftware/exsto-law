@@ -188,6 +188,17 @@ export async function listUsers(
        LEFT JOIN permission_scope_definition psd
          ON psd.id = asa.permission_scope_definition_id AND (psd.valid_to IS NULL OR psd.valid_to > now())
       WHERE a.tenant_id = $1 AND a.actor_type = 'human'
+        -- Portal client actors (external_id 'client:<contactId>') are managed on
+        -- the Portal users tab via listPortalUsers, never here.
+        AND (a.external_id IS NULL OR a.external_id NOT LIKE 'client:%')
+        -- A deleted user (legal.user.delete) stays inactive with a user.deleted
+        -- marker; re-inviting flips status back to active, which un-hides them.
+        AND NOT (a.status = 'inactive' AND EXISTS (
+          SELECT 1 FROM event ev
+          JOIN event_kind_definition ekd ON ekd.id = ev.event_kind_id
+          WHERE ev.tenant_id = $1 AND ekd.kind_name = 'user.deleted'
+            AND ev.payload ->> 'actor_id' = a.id::text
+        ))
       GROUP BY a.id, a.external_id, a.display_name, a.status
       ORDER BY a.display_name`,
     [ctx.tenantId],
@@ -308,6 +319,28 @@ export async function deactivateUser(
   }
   return submitAction(ctx, {
     actionKindName: 'legal.user.deactivate',
+    intentKind: 'enforcement',
+    payload: { actor_id: input.actorId },
+  })
+}
+
+// Delete = deactivate + a user.deleted marker that hides the row from listUsers
+// (no hard delete in an append-only system). Same guards as deactivate.
+export async function deleteUser(
+  ctx: ActionContext,
+  input: { actorId: string },
+): Promise<ActionResult> {
+  await requireAdmin(ctx)
+  if (input.actorId === ctx.actorId) {
+    throw new Error('You cannot delete your own account.')
+  }
+  const mine = await callerRank(ctx)
+  const target = await actorRank(ctx, input.actorId)
+  if (target >= mine) {
+    throw new Error('You cannot delete a user at or above your own rank.')
+  }
+  return submitAction(ctx, {
+    actionKindName: 'legal.user.delete',
     intentKind: 'enforcement',
     payload: { actor_id: input.actorId },
   })

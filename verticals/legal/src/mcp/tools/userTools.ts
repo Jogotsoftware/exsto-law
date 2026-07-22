@@ -6,13 +6,17 @@ import type { ActionContext } from '@exsto/substrate'
 import {
   assignUserRole,
   deactivateUser,
+  deleteUser,
   inviteUser,
   listUsers,
+  setPortalUserType,
   whoAmI,
   type FirmRole,
   type FirmUser,
+  type PortalUserType,
   type WhoAmI,
 } from '../../index.js'
+import { listPortalUsers, type PortalUserRow } from '../../queries/portalUsers.js'
 
 registerTool({
   name: 'legal.user.me',
@@ -58,3 +62,33 @@ registerTool({
     return { ok: true }
   },
 } satisfies Tool<{ actorId: string }, { ok: true }>)
+
+registerTool({
+  name: 'legal.user.delete',
+  description:
+    'Remove a firm user from the Users & Roles list (deactivate + hide; history preserved, re-invite restores). Admin only.',
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => {
+    await deleteUser(ctx, input)
+    return { ok: true }
+  },
+} satisfies Tool<{ actorId: string }, { ok: true }>)
+
+registerTool({
+  name: 'legal.user.portal_list',
+  description:
+    "List the firm's portal users (client contacts with a portal account): name, email, client company, portal tier, status. Admin only.",
+  mode: 'read',
+  handler: async (ctx: ActionContext) => ({ users: await listPortalUsers(ctx) }),
+} satisfies Tool<Record<string, never>, { users: PortalUserRow[] }>)
+
+registerTool({
+  name: 'legal.user.set_portal_user_type',
+  description:
+    "Set a portal user's tier: 'standard' (everything except the AI assistant) or 'self_serve' (full access). Admin only.",
+  mode: 'write',
+  handler: async (ctx: ActionContext, input) => {
+    await setPortalUserType(ctx, input.contactEntityId, input.portalUserType)
+    return { ok: true }
+  },
+} satisfies Tool<{ contactEntityId: string; portalUserType: PortalUserType }, { ok: true }>)

@@ -88,3 +88,29 @@ export async function resolvePortalActorId(
     return actor.rows[0]?.id ?? null
   })
 }
+
+// Login-only portal delete check: the contact HAS a portal_actor_id mapping but
+// the mapped actor is inactive — access was revoked without archiving the
+// contact (Users & Roles portal-tab delete). mintClientSession refuses on this,
+// because provision_portal_actor's idempotency would otherwise hand the
+// inactive actor straight back into a fresh session. Distinct from
+// resolvePortalActorId, whose null means "provision one" to callers.
+export async function isPortalAccessRevoked(
+  tenantId: string,
+  clientContactId: string,
+): Promise<boolean> {
+  return withSuperuser(async (client) => {
+    const res = await client.query<{ status: string }>(
+      `SELECT act.status
+       FROM attribute a
+       JOIN attribute_kind_definition akd ON akd.id = a.attribute_kind_id
+       JOIN actor act ON act.id = (a.value #>> '{}')::uuid AND act.tenant_id = a.tenant_id
+       WHERE a.tenant_id = $1 AND a.entity_id = $2
+         AND akd.kind_name = 'portal_actor_id'
+         AND (a.valid_to IS NULL OR a.valid_to > now())
+       ORDER BY a.valid_from DESC LIMIT 1`,
+      [tenantId, clientContactId],
+    )
+    return res.rows[0]?.status === 'inactive'
+  })
+}
