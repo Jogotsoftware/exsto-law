@@ -3,8 +3,9 @@ import { findTool } from '@exsto/mcp-tools'
 // Register the legal vertical's MCP tools into the shared registry (side effect).
 // @exsto/mcp-tools is now vertical-agnostic; the legal surface opts its tools in.
 import '@exsto/legal/mcp'
-import { WorkflowAdvanceGuardError } from '@exsto/legal'
+import { WorkflowAdvanceGuardError, type RecordSignatureResult } from '@exsto/legal'
 import { resolveAttorneyCtx } from '@/lib/attorneySession'
+import { finalizeEnvelopeIfCompleted } from '@/lib/esignStamping'
 
 export const runtime = 'nodejs'
 // RUNTIME-AUTORUN-2: an attorney advance/approve here may land a matter on a producing
@@ -35,6 +36,16 @@ export async function POST(request: Request) {
 
   try {
     const result = await tool.handler(ctxOrError, input)
+    // ESIGN-ATTORNEY-REVIEW-1 — when the attorney signs their OWN
+    // countersignature request and that completes the envelope, run the same
+    // stamp-executed-copy + email-everyone step the client-portal MCP route
+    // runs on legal.esign.portal.sign (apps/legal-demo/lib/esignStamping.ts's
+    // finalizeEnvelopeIfCompleted — the one completion step, not duplicated).
+    // Best-effort: the signature is already recorded, so a stamping/notify
+    // failure must never turn a successful signing into an error.
+    if (body.toolName === 'legal.esign.sign_submit') {
+      await finalizeEnvelopeIfCompleted(ctxOrError, result as RecordSignatureResult)
+    }
     return NextResponse.json({ result })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
