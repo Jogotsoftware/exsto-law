@@ -1,9 +1,13 @@
 // Public sign submission (native e-sign). Verifies the signing token and records
 // the signature through the operation core (esign.sign). Token-gated, rate-limited.
 import { NextResponse } from 'next/server'
-import { recordSignature, loadExecutedStampPlanByToken, stampExecutedPdf } from '@exsto/legal'
+import {
+  recordSignature,
+  loadExecutedStampPlanByToken,
+  sendEnvelopeCompletionCopiesByToken,
+} from '@exsto/legal'
 import { checkPublicRateLimit, clientIpFrom } from '@/lib/rateLimit'
-import { downloadObject, uploadObject } from '@/lib/documentStorage'
+import { stampExecutedCopies, stampedBytesByDocIndex } from '@/lib/esignStamping'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -50,25 +54,26 @@ export async function POST(request: Request) {
     // transaction); a stamping failure must never turn a successful signing into
     // an error. This route owns Storage bytes — the vertical never touches
     // Storage (CI storage-guard). Each document is stamped independently so one
-    // bad document never blocks the rest.
+    // bad document never blocks the rest. The stamping loop itself is shared
+    // with the client-portal sign route (lib/esignStamping.ts) — this used to
+    // be the ONLY completion path that stamped, which is why a portal-signed
+    // envelope never got an executed copy (esign-executed-copy-complete).
     if (result.completed) {
       const plans = await loadExecutedStampPlanByToken(token).catch((planErr) => {
         console.error('esign executed-copy plan load failed:', planErr)
         return []
       })
-      for (const plan of plans) {
-        try {
-          const original = await downloadObject(plan.objectKey)
-          const stamped = await stampExecutedPdf({
-            pdfBytes: original,
-            fields: plan.fields,
-            certificate: plan.certificate,
-          })
-          await uploadObject(plan.executedObjectKey, Buffer.from(stamped), 'application/pdf')
-        } catch (stampErr) {
-          console.error('esign executed-copy stamping failed:', stampErr)
-        }
-      }
+      const stamped = await stampExecutedCopies(plans)
+      // esign-executed-copy-complete — email every signer + copy recipient
+      // the executed document now that the stamped bytes exist. Fire AFTER
+      // stamping (never before — see sendEnvelopeCompletionCopiesByToken's
+      // doc comment for the race this avoids) and best-effort: a notify
+      // failure must never turn a successful signing into an error.
+      await sendEnvelopeCompletionCopiesByToken(token, stampedBytesByDocIndex(stamped)).catch(
+        (notifyErr) => {
+          console.error('esign completion-copy notify failed:', notifyErr)
+        },
+      )
     }
     return NextResponse.json(result)
   } catch (err) {
