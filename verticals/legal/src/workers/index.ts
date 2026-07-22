@@ -83,6 +83,19 @@ registerWorkerHandler('legal.draft.revise.run', async (ctx, payload) => {
   await runDraftRevisionJob(ctx, payload)
 })
 
+// ENGAGEMENT-DOC-1 fix — runs one engagement-letter import OFF the request (the
+// drafting-model pass on a multi-page letter ≈ 80s, which 504'd the settings
+// upload). Enqueued by legal.firm.import_engagement_agreement; runs the SAME
+// importEngagementAgreement pipeline the synchronous tool used (create template +
+// set firm pointer) and records the outcome as an observation the settings card
+// polls via legal.firm.import_engagement_agreement.result. Catches its own errors
+// and records a failure observation rather than rethrowing — a slow/bad import is
+// a visible retry on the card, not five silent worker retries.
+registerWorkerHandler('legal.firm.import_engagement_agreement.run', async (ctx, payload) => {
+  const { runEngagementImportJob } = await import('../api/engagementImportJob.js')
+  await runEngagementImportJob(ctx, payload)
+})
+
 // B2.2 (MATTER-BRIEF-BACKGROUND-1) — runs one Matter Brief (re)generation OFF the
 // request. Enqueued by legal.matter.brief.request (BriefButton's Generate/Refresh
 // click, enqueueBriefJob in api/briefEngine.ts); calls the SAME getOrRefreshMatter-

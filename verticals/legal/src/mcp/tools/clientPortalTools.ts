@@ -62,6 +62,10 @@ import {
   type EngagementConfig,
   type EngagementStatus,
 } from '../../api/engagement.js'
+import {
+  getClientEngagementAgreement,
+  type ClientEngagementAgreement,
+} from '../../api/engagementAgreement.js'
 
 // AUTHENTICATED client-portal tools. These are reachable ONLY through the authed
 // route (/api/client/portal/mcp) — they are in CLIENT_PORTAL_AUTHED_TOOLS, NOT
@@ -548,27 +552,33 @@ const notificationsReadTool: Tool<ContactOnlyInput, { readAt: string }> = {
 
 const engagementTool: Tool<
   ContactOnlyInput,
-  { status: EngagementStatus; config: EngagementConfig }
+  {
+    status: EngagementStatus
+    config: EngagementConfig
+    agreement: ClientEngagementAgreement | null
+  }
 > = {
   name: 'legal.client.engagement',
   description:
-    'The signed-in client’s engagement-agreement state (accepted?) plus the current firm rate and terms for the gate card.',
+    'The signed-in client’s engagement-agreement state (accepted?) plus the current firm rate and terms for the gate card — and, when the firm has uploaded its engagement letter, the FULL agreement merged for this client (ENGAGEMENT-DOC-1).',
   mode: 'read',
   handler: async (ctx: ActionContext, input) => ({
     status: await getEngagementStatus(ctx, input.clientContactId),
     config: await getEngagementConfig(ctx),
+    agreement: await getClientEngagementAgreement(ctx, input.clientContactId),
   }),
 }
 
 const engagementAcceptTool: Tool<
-  ContactOnlyInput,
+  ContactOnlyInput & { signedName?: string },
   { consentEventId: string; rate: string | null; termsVersion: number | null }
 > = {
   name: 'legal.client.engagement_accept',
   description:
-    'The client’s own actor accepts the firm-level engagement agreement (rate + terms version bound server-side). One-time: messaging and booking unlock.',
+    'The client’s own actor accepts the firm-level engagement agreement (rate + terms version bound server-side). When the firm has an uploaded agreement, signedName (the client’s typed full name) is the electronic signature and is required. One-time: messaging and booking unlock.',
   mode: 'write',
-  handler: async (ctx: ActionContext, input) => acceptEngagement(ctx, input.clientContactId),
+  handler: async (ctx: ActionContext, input) =>
+    acceptEngagement(ctx, input.clientContactId, input.signedName),
 }
 
 const engagementDeclineTool: Tool<ContactOnlyInput, { consentEventId: string }> = {

@@ -1,5 +1,5 @@
 -- =============================================================================
--- Vertical migration 0189: Users & Roles split — portal user type +
+-- Vertical migration 0190: Users & Roles split — portal user type +
 -- firm-user delete + portal-access restore
 --
 -- PLANNED — NOT APPLIED to any environment (dev or prod) by this PR.
@@ -22,8 +22,8 @@
 --     reactivate (idempotency returns the mapping as-is) or any sign-in
 --     would silently undo a revoke.
 --
--- Ids: fresh …3200 sub-block in the 1011 (attribute_kind) / 1013 (action_kind)
--- / 1014 (event_kind) bands — 0184 took …3000, 0188 took …3100; verified free
+-- Ids: fresh …3300 sub-block in the 1011 (attribute_kind) / 1013 (action_kind)
+-- / 1014 (event_kind) bands — 0184 took …3000, 0188 took …3100, the parallel 0189 took …3200; verified free
 -- against every migrations_vertical file on main at authoring time.
 -- =============================================================================
 
@@ -32,7 +32,7 @@ SELECT set_config('app.tenant_id', '00000000-0000-0000-0000-000000000001', false
 -- ── attribute kind (tenant-zero, fixed id) ───────────────────────────────────
 INSERT INTO attribute_kind_definition
   (id, tenant_id, kind_name, display_name, description, on_entity_kind_id, value_type, is_pii)
-SELECT '00000000-0000-0000-1011-000000003200', '00000000-0000-0000-0000-000000000001',
+SELECT '00000000-0000-0000-1011-000000003300', '00000000-0000-0000-0000-000000000001',
        'portal_user_type', 'Portal user type',
        'How much of the portal this client contact may use: ''standard'' (everything except the AI assistant) or ''self_serve'' (full access). ABSENT means self_serve — the pre-existing behavior — so deploying the gate never strips a live account. Set via legal.client.set_portal_user_type from the Users & Roles page.',
        ekd.id, 'text', false
@@ -44,11 +44,11 @@ ON CONFLICT (id) DO NOTHING;
 -- ── event kinds (tenant-zero, fixed ids) ─────────────────────────────────────
 INSERT INTO event_kind_definition
   (id, tenant_id, kind_name, display_name, description, is_state_change) VALUES
-  ('00000000-0000-0000-1014-000000003200', '00000000-0000-0000-0000-000000000001',
+  ('00000000-0000-0000-1014-000000003300', '00000000-0000-0000-0000-000000000001',
    'user.deleted', 'Firm user deleted',
    'A firm user was removed from the Users & Roles list by an admin. The actor row remains (provenance is forever) with status inactive; this marker is what hides the row from legal.user.list. Payload: actor_id, email, display_name. No primary entity — actors are identity rows, not entities.',
    false),
-  ('00000000-0000-0000-1014-000000003201', '00000000-0000-0000-0000-000000000001',
+  ('00000000-0000-0000-1014-000000003301', '00000000-0000-0000-0000-000000000001',
    'portal.access_restored', 'Portal access restored',
    'A previously revoked portal actor was reactivated (re-invite after a login-only portal delete). Payload: client_contact_id, actor_id. Primary = the client_contact.',
    false)
@@ -57,15 +57,15 @@ ON CONFLICT (id) DO NOTHING;
 -- ── action kinds (tenant-zero, fixed ids) ────────────────────────────────────
 INSERT INTO action_kind_definition
   (id, tenant_id, kind_name, display_name, description, default_autonomy_tier, reversibility, reverse_action_kind_name, requires_reasoning_trace) VALUES
-  ('00000000-0000-0000-1013-000000003200', '00000000-0000-0000-0000-000000000001',
+  ('00000000-0000-0000-1013-000000003300', '00000000-0000-0000-0000-000000000001',
    'legal.client.set_portal_user_type', 'Set portal user type',
    'Set a client contact''s portal tier: ''standard'' (no AI assistant) or ''self_serve'' (full access). Writes the portal_user_type attribute on the client_contact with the acting attorney as source. Enforced server-side at the assistant stream route and reflected in the portal home payload.',
    'notify', 'fully_reversible', NULL, false),
-  ('00000000-0000-0000-1013-000000003201', '00000000-0000-0000-0000-000000000001',
+  ('00000000-0000-0000-1013-000000003301', '00000000-0000-0000-0000-000000000001',
    'legal.user.delete', 'Delete firm user',
    'Remove a firm user from the Users & Roles list: deactivate the actor, close their scope assignments, and emit user.deleted (the list read excludes marked rows). Admin only; caller must strictly out-rank the target; never self. Re-inviting the same email reactivates the account.',
    'notify', 'reversible_with_state_decay', NULL, false),
-  ('00000000-0000-0000-1013-000000003202', '00000000-0000-0000-0000-000000000001',
+  ('00000000-0000-0000-1013-000000003302', '00000000-0000-0000-0000-000000000001',
    'legal.client.restore_portal_access', 'Restore client portal access',
    'Reactivate the portal actor a prior legal.client.revoke_portal_access deactivated (the login-only portal delete keeps the client_contact active, so this is the re-invite''s way back in). No-ops when no mapping exists or the actor is already active. Emits portal.access_restored when it flips.',
    'notify', 'fully_reversible', NULL, false)

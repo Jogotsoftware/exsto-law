@@ -428,11 +428,16 @@ function buildEsignMail(v: Vars, variant: 'sign' | 'portal' | 'copy', ctaUrl: st
         'gold',
       )
     : ''
+  // esign-executed-copy-complete — when sendEnvelopeCompletionCopies resolved
+  // a PDF to attach, say so; otherwise this degrades to the original
+  // link-only copy (the fallback whenever an attachment can't be resolved).
   const bodyIntro =
     variant === 'portal'
       ? 'Sign in to your client portal to review it and add your signature.'
       : variant === 'copy'
-        ? 'Your executed copy is ready below.'
+        ? v.attachment_included
+          ? 'It&rsquo;s attached to this email as a PDF — you can also view it online below.'
+          : 'Your executed copy is ready below.'
         : 'Review it and add your signature below.'
   const fine =
     variant === 'copy'
