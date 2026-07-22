@@ -7,9 +7,13 @@
 //   • No field tags: a file has no inline {{type:key}} anchors, so every file
 //     envelope is a whole-document sign + appended signature certificate (the
 //     model's existing no-tags fallback).
-//   • Every signer routes via the LINK channel. The portal signing surfaces
-//     resolve a client's documents through draft_of → matter, which uploads are
-//     not part of — an emailed secure /sign/<token> link works for everyone.
+//   • Every signer routes via the LINK channel by default. A client-portal
+//     signer can ALSO complete the same envelope through their authenticated
+//     session — assertClientOwnsRequest (esign.ts) recognizes document_of and
+//     document_of_contact, not just draft_of, so an upload attached to a matter
+//     (or directly to the client's contact, for a standalone upload) is
+//     portal-visible too; the emailed /sign/<token> link is the fallback for
+//     everyone, portal client or not.
 //   • Recipients become contacts: esign.send (save_signers_as_contacts) creates
 //     a client_contact for any signer email not already in contacts.
 //
@@ -17,7 +21,12 @@
 // the SUBSTRATE side only; the Next routes own bytes via lib/documentStorage.
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { assertCanSendOnMatter } from './matterAccess.js'
-import { notifyDelivered, signingCtx } from './esign.js'
+import {
+  notifyDelivered,
+  resolveClientEnvelopeId,
+  signingCtx,
+  type ClientPrincipal,
+} from './esign.js'
 import { buildAndSubmitEnvelope, type RecipientRole } from './esignSend.js'
 import { loadPlacementContactFacts } from './esignRender.js'
 import { verifySigningToken } from '../esign/index.js'
@@ -326,4 +335,19 @@ export async function loadEnvelopeFileRefByToken(
 export async function loadEnvelopeFileRefsByToken(token: string): Promise<EnvelopeFileRef[]> {
   const tok = verifySigningToken(token)
   return loadEnvelopeFileRefs(signingCtx(tok.tenantId), tok.envelopeId)
+}
+
+/** Portal-session door for the authenticated client's file view: authorize the
+ *  signed-in client against the request (resolveClientEnvelopeId — same
+ *  ownership check the load/sign/decline tools use), then resolve the file the
+ *  same way the token door does. The by-requestId sibling of
+ *  loadEnvelopeFileRefByToken above; requestId (not envelopeId) because that's
+ *  what the portal sign page addresses and what carries the signer binding. */
+export async function loadEnvelopeFileRefForClient(
+  p: ClientPrincipal,
+  requestId: string,
+  docIndex = 0,
+): Promise<EnvelopeFileRef | null> {
+  const envelopeId = await resolveClientEnvelopeId(p, requestId)
+  return loadEnvelopeFileRef(signingCtx(p.tenantId), envelopeId, docIndex)
 }
