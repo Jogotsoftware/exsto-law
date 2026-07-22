@@ -16,7 +16,13 @@ import { getDraftVersion } from '../queries/drafts.js'
 import { getMatter } from '../queries/matters.js'
 import { loadConnection } from '../adapters/connectionStore.js'
 import { ingestionContext } from './granolaIngestion.js'
-import { queueNotification } from './notifications.js'
+import { queueNotification, deliverNotification } from './notifications.js'
+import { renderDraftPdf } from '../render/draftPdf.js'
+import { completionRecipients, normalizeRole } from '../esign/routing.js'
+import {
+  decideCompletionAttachment,
+  type CompletionAttachmentCandidate,
+} from '../esign/completionAttachment.js'
 import { findClientContactByEmailInTenant } from './clientIdentity.js'
 import { assertCanSendOnMatter } from './matterAccess.js'
 import { getTenantSettings } from './tenantSettings.js'
@@ -285,7 +291,7 @@ export async function sendForSignature(
 // identity the branded builders key off of — NEVER the hardcoded FIRM constant
 // (design §9.4: "these builders take firm identity from the notification
 // variables ... NOT from FIRM"). Fetched once per notifyDelivered/
-// notifyCopyDelivered call, not per recipient.
+// sendEnvelopeCompletionCopies call, not per recipient.
 async function loadEnvelopeMailContext(
   ctx: ActionContext,
   envelopeId: string,
@@ -329,7 +335,8 @@ async function loadEnvelopeMailContext(
 // token carries scope:'view' (the signer surface renders read-only, and
 // assertSignerTurn/the token-scope guard both refuse a sign attempt on it);
 // needs_to_sign (or a legacy request with no role attribute) is unchanged.
-// receives_copy recipients are never delivered here (see notifyCopyDelivered).
+// receives_copy recipients are never delivered here (see
+// sendEnvelopeCompletionCopies, called once the envelope completes).
 export async function notifyDelivered(
   ctx: ActionContext,
   envelopeId: string,
@@ -383,44 +390,265 @@ export async function notifyDelivered(
   return out
 }
 
-// ESIGN-UNIFY-1 (ES-1, §9.2/§9.4) — notify receives_copy recipients once the
-// envelope completes. Always a link-channel view-scoped token (a copy
-// recipient need not be a portal client): the token lets them open the
-// executed document read-only. Called from signRequest below, driven by the
-// esign.sign handler's `copyDeliveredRequestIds` (the esign.copy_delivered
-// event itself is already recorded inside that same action).
-export async function notifyCopyDelivered(
+// esign-executed-copy-complete — everyone gets the executed document once the
+// envelope completes: every signer (needs_to_sign — they already signed) AND
+// every receives_copy recipient (needs_to_view is excluded — see
+// completionRecipients, esign/routing.ts). Supersedes the old
+// notifyCopyDelivered (which only reached receives_copy recipients, and only
+// ever sent a view link, never the document itself).
+//
+// Two document lanes resolve the PDF to attach, because only the app layer
+// may touch Storage (hard rule 9 / CI vertical-storage-guard):
+//   • uploaded-file documents — the STAMPED executed bytes live in Storage.
+//     The caller (the app-layer route that just ran Item 1's stamping,
+//     apps/legal-demo/lib/esignStamping.ts) resolves them and passes them in
+//     via `fileBytesByDocIndex`, keyed by ExecutedStampPlan.docIndex.
+//   • markdown-draft documents — the executed body is already a substrate
+//     document_version; THIS function renders it to PDF itself (the same
+//     server-side renderer mailAttachments.ts uses to attach a draft to
+//     outgoing mail — render/draftPdf.ts), no Storage needed.
+//
+// Deliberately called by the app layer AFTER stamping completes (never from
+// signRequest, unlike notifyDelivered) — signRequest runs synchronously
+// inside the SAME request as the esign.sign action, before the app-layer
+// route has stamped/uploaded the executed PDF; calling this from there would
+// race the attachment against bytes that don't exist yet. And deliberately
+// NOT enqueued (see notifications.ts's deliverNotification comment): the
+// bytes are already resolved in memory by the time this runs, so sending
+// directly (same driver/audit seam, just not queued) is the least
+// contortion. Per-recipient best-effort — see the loop below.
+export interface EnvelopeCompletionRecipient {
+  requestId: string
+  email: string
+  name: string | null
+}
+
+async function loadEnvelopeCompletionRecipients(
   ctx: ActionContext,
   envelopeId: string,
-  requestIds: string[],
-): Promise<Array<{ requestId: string; url: string }>> {
-  if (requestIds.length === 0) return []
-  const mail = await loadEnvelopeMailContext(ctx, envelopeId)
-  const out: Array<{ requestId: string; url: string }> = []
-  for (const requestId of requestIds) {
-    const info = await withActionContext(ctx, async (c) => ({
-      email: await latestAttr(c, ctx.tenantId, requestId, 'signer_email'),
-      name: await latestAttr(c, ctx.tenantId, requestId, 'signer_name'),
-    }))
-    if (!info.email) continue
-    const token = signSigningToken({ requestId, envelopeId, tenantId: ctx.tenantId, scope: 'view' })
-    const url = `${baseUrl()}/sign/${encodeURIComponent(token)}`
-    await queueNotification(ctx, {
-      routeKindName: 'esign_copy_delivered',
-      to: info.email,
-      variables: {
-        signer_name: info.name ?? info.email,
-        document_title: mail.title,
-        envelope_subject: mail.envelopeSubject ?? mail.title,
-        envelope_message: mail.message,
-        attorney_name: mail.attorneyName,
-        firm_name: mail.firmName,
-        copy_url: url,
-      },
+): Promise<EnvelopeCompletionRecipient[]> {
+  return withActionContext(ctx, async (client) => {
+    const a = (k: string) =>
+      `(SELECT a.value #>> '{}' FROM attribute a JOIN attribute_kind_definition akd
+          ON akd.id = a.attribute_kind_id AND akd.kind_name = '${k}'
+          WHERE a.entity_id = r.source_entity_id AND a.tenant_id = $1
+          ORDER BY a.valid_from DESC LIMIT 1)`
+    const res = await client.query<{
+      request_id: string
+      email: string | null
+      name: string | null
+      role: string | null
+    }>(
+      `SELECT r.source_entity_id AS request_id, ${a('signer_email')} AS email,
+              ${a('signer_name')} AS name, ${a('signer_role')} AS role
+         FROM relationship r
+         JOIN relationship_kind_definition rkd
+           ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'request_of'
+        WHERE r.tenant_id = $1 AND r.target_entity_id = $2
+          AND (r.valid_to IS NULL OR r.valid_to > now())
+        ORDER BY r.recorded_at`,
+      [ctx.tenantId, envelopeId],
+    )
+    const eligible = new Set(
+      completionRecipients(
+        res.rows.map((row) => ({
+          requestId: row.request_id,
+          role: normalizeRole(row.role),
+          order: 0,
+          status: '',
+        })),
+      ),
+    )
+    return res.rows
+      .filter((row) => row.email && eligible.has(row.request_id))
+      .map((row) => ({ requestId: row.request_id, email: row.email!, name: row.name }))
+  })
+}
+
+interface CompletionDocRow {
+  object_key: string | null
+  content_type: string | null
+  filename: string | null
+  executed_body: string | null
+  document_kind: string | null
+}
+
+interface EnvelopeCompletionDocument {
+  docIndex: number
+  isFile: boolean
+  filename: string | null
+  /** Markdown-draft docs only — the executed body (fields resolved + the
+   *  certificate already appended by writeExecutedVersion), ready to render. */
+  executedMarkdownBody: string | null
+  documentKind: string | null
+}
+
+async function loadEnvelopeCompletionDocuments(
+  ctx: ActionContext,
+  envelopeId: string,
+): Promise<EnvelopeCompletionDocument[]> {
+  return withActionContext(ctx, async (client) => {
+    const res = await client.query<CompletionDocRow>(
+      `SELECT (SELECT dv.metadata->>'object_key' FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS object_key,
+              (SELECT COALESCE(dv.metadata->>'content_type', cb.content_type) FROM document_version dv
+                 JOIN content_blob cb ON cb.id = dv.content_blob_id
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS content_type,
+              (SELECT dv.metadata->>'original_filename' FROM document_version dv
+                 WHERE dv.document_entity_id = r.target_entity_id AND dv.tenant_id = $1
+                   AND (dv.metadata->>'executed') IS DISTINCT FROM 'true'
+                 ORDER BY dv.version_number DESC LIMIT 1) AS filename,
+              (SELECT cb2.body FROM document_version dv2
+                 JOIN content_blob cb2 ON cb2.id = dv2.content_blob_id
+                 WHERE dv2.document_entity_id = r.target_entity_id AND dv2.tenant_id = $1
+                   AND (dv2.metadata->>'executed') = 'true'
+                   AND cb2.content_type = 'text/markdown'
+                 ORDER BY dv2.version_number DESC LIMIT 1) AS executed_body,
+              coalesce(e_doc.metadata->>'document_kind', 'operating_agreement') AS document_kind
+         FROM relationship r
+         JOIN relationship_kind_definition rkd
+           ON rkd.id = r.relationship_kind_id AND rkd.kind_name = 'envelope_of'
+         LEFT JOIN entity e_doc ON e_doc.id = r.target_entity_id
+        WHERE r.tenant_id = $1 AND r.source_entity_id = $2
+          AND (r.valid_to IS NULL OR r.valid_to > now())
+        ORDER BY COALESCE((r.properties->>'order')::int, 0), r.recorded_at`,
+      [ctx.tenantId, envelopeId],
+    )
+    return res.rows.map((row, i) => {
+      // ANY file upload (not just PDF — the esign upload route only accepts
+      // PDF today, but this stays correct if that ever loosens): its
+      // executed_body is a signature-CERTIFICATE (not the document itself),
+      // so it must never be rendered as "the document" below. A non-PDF file
+      // doc's docIndex simply won't have a fileBytesByDocIndex entry (the
+      // stamping plan only ever covers application/pdf docs), so it's
+      // correctly skipped rather than mis-attached.
+      const isFile = Boolean(row.object_key)
+      return {
+        docIndex: i,
+        isFile,
+        filename: row.filename,
+        // A FILE document's executed_body is its signature-certificate
+        // markdown (not renderable as "the document") — only expose the
+        // executed body for the markdown-draft lane.
+        executedMarkdownBody: isFile ? null : (row.executed_body ?? null),
+        documentKind: row.document_kind,
+      }
     })
-    out.push({ requestId, url })
+  })
+}
+
+function humanizeDocKind(kind: string | null): string {
+  return (kind || 'document').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+function slugDocFilename(kind: string | null): string {
+  const base = (kind || 'document')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `${base || 'document'}.pdf`
+}
+
+export async function sendEnvelopeCompletionCopies(
+  ctx: ActionContext,
+  envelopeId: string,
+  /** FILE documents' resolved bytes — see the module comment above. Keyed by
+   *  ExecutedStampPlan.docIndex; a docIndex with no entry (stamping produced
+   *  no plan for it, or the caller's Storage read failed) just drops that one
+   *  document from the attachment set — never blocks the rest. */
+  fileBytesByDocIndex?: Map<number, Buffer>,
+): Promise<{ notified: number; attached: boolean }> {
+  const [recipients, docs] = await Promise.all([
+    loadEnvelopeCompletionRecipients(ctx, envelopeId),
+    loadEnvelopeCompletionDocuments(ctx, envelopeId),
+  ])
+  if (recipients.length === 0) return { notified: 0, attached: false }
+
+  const candidates: CompletionAttachmentCandidate[] = []
+  for (const d of docs) {
+    if (d.isFile) {
+      const bytes = fileBytesByDocIndex?.get(d.docIndex)
+      if (bytes) {
+        candidates.push({
+          filename: d.filename ?? 'document.pdf',
+          contentType: 'application/pdf',
+          bytes,
+        })
+      }
+    } else if (d.executedMarkdownBody) {
+      try {
+        const pdf = await renderDraftPdf(d.executedMarkdownBody, {
+          title: humanizeDocKind(d.documentKind),
+        })
+        candidates.push({
+          filename: slugDocFilename(d.documentKind),
+          contentType: 'application/pdf',
+          bytes: pdf,
+        })
+      } catch (e) {
+        // Best-effort — one bad draft never blocks the notification (it falls
+        // back to the link-only email for every recipient instead).
+        console.error('esign completion-copy: draft PDF render failed:', e)
+      }
+    }
   }
-  return out
+  const decision = decideCompletionAttachment(candidates)
+
+  const mail = await loadEnvelopeMailContext(ctx, envelopeId)
+  let notified = 0
+  for (const r of recipients) {
+    const token = signSigningToken({
+      requestId: r.requestId,
+      envelopeId,
+      tenantId: ctx.tenantId,
+      scope: 'view',
+    })
+    const url = `${baseUrl()}/sign/${encodeURIComponent(token)}`
+    try {
+      await deliverNotification(ctx, {
+        routeKindName: 'esign_copy_delivered',
+        to: r.email,
+        variables: {
+          signer_name: r.name ?? r.email,
+          document_title: mail.title,
+          envelope_subject: mail.envelopeSubject ?? mail.title,
+          envelope_message: mail.message,
+          attorney_name: mail.attorneyName,
+          firm_name: mail.firmName,
+          copy_url: url,
+          attachment_included: decision.attach || undefined,
+        },
+        attachments: decision.attach
+          ? decision.attachments.map((a) => ({
+              filename: a.filename,
+              contentType: a.contentType,
+              contentBase64: a.contentBase64,
+            }))
+          : undefined,
+      })
+      notified++
+    } catch (e) {
+      // Best-effort per recipient — one failed send (e.g. a transient Gmail
+      // error) must never block the rest, and must never turn a successful
+      // signing into a request-level error.
+      console.error('esign completion-copy: send failed for', r.requestId, e)
+    }
+  }
+  return { notified, attached: decision.attach }
+}
+
+/** Token door for the completion-copy step in /api/sign/submit — mirrors
+ *  loadExecutedStampPlanByToken (esignRender.ts): verify the token, resolve
+ *  ctx, delegate. */
+export async function sendEnvelopeCompletionCopiesByToken(
+  token: string,
+  fileBytesByDocIndex?: Map<number, Buffer>,
+): Promise<{ notified: number; attached: boolean }> {
+  const tok = verifySigningToken(token)
+  return sendEnvelopeCompletionCopies(signingCtx(tok.tenantId), tok.envelopeId, fileBytesByDocIndex)
 }
 
 // ── Status (attorney view) ────────────────────────────────────────────────────
@@ -1549,16 +1777,17 @@ async function signRequest(
     completed?: boolean
     executedDocumentVersionId?: string | null
     deliveredRequestIds?: string[]
-    copyDeliveredRequestIds?: string[]
   }
   // Sequential routing: notify the next group that just became active.
   await notifyDelivered(ctx, envelopeId, eff.deliveredRequestIds ?? [])
-  // ESIGN-UNIFY-1 (ES-1, §9.2) — the envelope just completed: send the
-  // executed-copy email to every receives_copy recipient (the handler already
-  // recorded their esign.copy_delivered events inside the same action).
-  if (eff.completed) {
-    await notifyCopyDelivered(ctx, envelopeId, eff.copyDeliveredRequestIds ?? [])
-  }
+  // esign-executed-copy-complete — the completion-copy email (every signer +
+  // receives_copy recipient, with the executed PDF attached when one can be
+  // resolved) is sent by the APP-LAYER caller (sendEnvelopeCompletionCopies /
+  // sendEnvelopeCompletionCopiesByToken), AFTER it stamps the executed PDF —
+  // never from here. signRequest runs synchronously inside the esign.sign
+  // action's own request, before Storage has the stamped bytes; calling the
+  // completion notify here would race the attachment against bytes that
+  // don't exist yet (see the sendEnvelopeCompletionCopies doc comment).
   return {
     ok: true,
     completed: Boolean(eff.completed),

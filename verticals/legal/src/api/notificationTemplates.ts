@@ -148,14 +148,20 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
       `Open your client portal: ${s(v.portal_url, '(link unavailable)')}`,
     ].join('\n'),
   }),
-  // ESIGN-UNIFY-1 (ES-1, §9.2, 0186): the receives_copy recipient's executed-
-  // copy email, sent once the envelope completes.
+  // ESIGN-UNIFY-1 (ES-1, §9.2, 0186) / esign-executed-copy-complete: sent to
+  // every signer AND every receives_copy recipient once the envelope
+  // completes. `attachment_included` (set by sendEnvelopeCompletionCopies,
+  // esign.ts, when it resolved a PDF to attach) switches the copy to name the
+  // attachment; absent, the message degrades to the original link-only copy
+  // (the fallback whenever an attachment can't be resolved or is oversized).
   'esign-copy-delivered': (v) => ({
     subject: `Executed copy: ${s(v.envelope_subject, s(v.document_title, 'your document'))}`,
     bodyText: [
       `Hi ${s(v.signer_name, 'there')},`,
       ``,
-      `All parties have signed ${s(v.document_title, 'the document')}. Your executed copy is ready.`,
+      v.attachment_included
+        ? `Everyone has signed ${s(v.document_title, 'the document')}. Your copy is attached.`
+        : `All parties have signed ${s(v.document_title, 'the document')}. Your executed copy is ready.`,
       ...(v.envelope_message
         ? [
             ``,
@@ -163,7 +169,9 @@ const TEMPLATES: Record<string, (v: Vars) => RenderedNotification> = {
           ]
         : []),
       ``,
-      `Open your copy: ${s(v.copy_url, '(link unavailable)')}`,
+      v.attachment_included
+        ? `You can also view it online: ${s(v.copy_url, '(link unavailable)')}`
+        : `Open your copy: ${s(v.copy_url, '(link unavailable)')}`,
     ].join('\n'),
   }),
   'attorney-portal-message': (v) => ({

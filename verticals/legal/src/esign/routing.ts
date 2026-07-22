@@ -85,3 +85,15 @@ export function planNextDelivery(requests: RoutingRequestState[]): NextDeliveryP
 export function copyRecipients(requests: RoutingRequestState[]): string[] {
   return requests.filter((r) => r.role === 'receives_copy').map((r) => r.requestId)
 }
+
+// esign-executed-copy-complete — once the envelope completes, EVERY signer
+// (needs_to_sign — they already signed, since completion only fires once
+// every needs_to_sign request is resolved) and every receives_copy recipient
+// gets the executed document (sendEnvelopeCompletionCopies, api/esign.ts).
+// needs_to_view is excluded: they never sign, and already got their view link
+// at send (delivered with the first routing group, §9.2).
+export function completionRecipients(requests: RoutingRequestState[]): string[] {
+  return requests
+    .filter((r) => r.role === 'needs_to_sign' || r.role === 'receives_copy')
+    .map((r) => r.requestId)
+}
