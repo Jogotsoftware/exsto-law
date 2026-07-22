@@ -8,7 +8,17 @@
 // "Tasks" in AttorneyRail.tsx.
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { FileSearch, PenLine, Eye, Receipt, HelpCircle, Mail } from 'lucide-react'
+import {
+  FileSearch,
+  PenLine,
+  Eye,
+  Receipt,
+  HelpCircle,
+  Mail,
+  Workflow,
+  ListTodo,
+  ArrowRight,
+} from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
 import { BriefButton } from '@/components/BriefButton'
@@ -20,7 +30,13 @@ import { EmailComposeModal } from '@/components/EmailComposeModal'
 // ?review=session.
 export const REVIEW_SESSION_KEY = 'reviewSession'
 
-type AttorneyTaskType = 'document_review' | 'esign' | 'billing' | 'client_request'
+type AttorneyTaskType =
+  | 'document_review'
+  | 'esign'
+  | 'billing'
+  | 'client_request'
+  | 'workflow_step'
+  | 'todo'
 
 // Mirrors verticals/legal/src/queries/attorneyTasks.ts's AttorneyTask — a
 // client component can't import the server-side vertical package directly, so
@@ -52,6 +68,19 @@ const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
   { value: 'esign', label: 'E-Sign' },
   { value: 'billing', label: 'Billing' },
   { value: 'client_request', label: 'Client Request' },
+  { value: 'workflow_step', label: 'Workflow Step' },
+  { value: 'todo', label: 'To-Do' },
+]
+
+// Types that render their own primary row action below; any type NOT here falls
+// back to a generic "Open" so a new/unknown server type never renders actionless.
+const PRIMARY_ACTION_TYPES: AttorneyTaskType[] = [
+  'document_review',
+  'esign',
+  'billing',
+  'client_request',
+  'workflow_step',
+  'todo',
 ]
 
 // Comp caret indicators: ⇅ idle, ▴ asc, ▾ desc — colored gold when active.
@@ -108,6 +137,8 @@ export default function TaskQueue() {
       esign: 0,
       billing: 0,
       client_request: 0,
+      workflow_step: 0,
+      todo: 0,
     }
     for (const t of tasks ?? []) c[t.type]++
     return c
@@ -405,6 +436,38 @@ export default function TaskQueue() {
                       onClick={() => router.push(t.workHref)}
                     >
                       <HelpCircle size={15} aria-hidden />
+                      Open
+                    </button>
+                  )}
+                  {t.type === 'workflow_step' && (
+                    <button
+                      type="button"
+                      className="li-rev-await-sign"
+                      onClick={() => router.push(t.workHref)}
+                      title="Open the matter workspace"
+                    >
+                      <Workflow size={15} aria-hidden />
+                      Open
+                    </button>
+                  )}
+                  {t.type === 'todo' && (
+                    <button
+                      type="button"
+                      className="li-rev-await-sign"
+                      onClick={() => router.push(t.workHref)}
+                      title="Open the to-do"
+                    >
+                      <ListTodo size={15} aria-hidden />
+                      Open
+                    </button>
+                  )}
+                  {!PRIMARY_ACTION_TYPES.includes(t.type) && (
+                    <button
+                      type="button"
+                      className="li-rev-await-sign"
+                      onClick={() => router.push(t.workHref)}
+                    >
+                      <ArrowRight size={15} aria-hidden />
                       Open
                     </button>
                   )}

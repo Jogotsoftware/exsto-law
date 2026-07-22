@@ -11328,6 +11328,16 @@ input[type='number'] {
   background: var(--li-warn-bg);
   color: var(--li-warn);
 }
+/* TASK-QUEUE-2: two more sources — a workflow step blocked on the attorney and an
+   ad-hoc to-do. Muted navy/gold family, distinct from the four above. */
+.li-rev-badge--workflow_step {
+  background: #eaf1ee;
+  color: #2f5d4c;
+}
+.li-rev-badge--todo {
+  background: #f3eddd;
+  color: #7a5c1e;
+}
 /* TASK-QUEUE-1: TASK column (the row's title) — replaces the old
    document-kind-only cell now that a row can be any of four task types. */
 .li-rev-task {

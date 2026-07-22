@@ -13,11 +13,15 @@ import {
   isOpenPaymentReport,
   normalizePaymentReportTask,
   normalizeClientRequestTask,
+  normalizeWorkflowStepTask,
+  normalizeTodoTask,
   type PendingDraftSummary,
   type AwaitingAttorneySignature,
   type InvoiceSummary,
   type PaymentReport,
   type AttorneyRequestItem,
+  type WorkflowStepAwaitingAttorney,
+  type AttorneyTodoTask,
 } from '@exsto/legal'
 
 function draft(overrides: Partial<PendingDraftSummary> = {}): PendingDraftSummary {
@@ -101,6 +105,33 @@ function clientRequest(overrides: Partial<AttorneyRequestItem> = {}): AttorneyRe
     matterEntityId: 'matter-3',
     matterNumber: 'M-0003',
     clientName: 'Carla Client',
+    ...overrides,
+  }
+}
+
+function workflowStep(
+  overrides: Partial<WorkflowStepAwaitingAttorney> = {},
+): WorkflowStepAwaitingAttorney {
+  return {
+    matterEntityId: 'matter-4',
+    matterNumber: 'M-0004',
+    clientName: 'Dana Client',
+    title: 'Review draft',
+    since: '2026-07-15T11:00:00+00:00',
+    ...overrides,
+  }
+}
+
+function todoTask(overrides: Partial<AttorneyTodoTask> = {}): AttorneyTodoTask {
+  return {
+    taskId: 'task-1',
+    matterEntityId: 'matter-5',
+    matterNumber: 'M-0005',
+    clientName: 'Evan Client',
+    title: 'Call the county recorder',
+    status: 'open',
+    dueDate: '2026-07-25',
+    createdAt: '2026-07-14T09:30:00.000Z',
     ...overrides,
   }
 }
@@ -286,5 +317,65 @@ describe('normalizeClientRequestTask', () => {
     )
     expect(task.matterEntityId).toBeNull()
     expect(task.matterNumber).toBeNull()
+  })
+})
+
+describe('normalizeWorkflowStepTask', () => {
+  it('maps type/label/title/matter/client and the "Waiting since" date', () => {
+    const task = normalizeWorkflowStepTask(workflowStep())
+    expect(task.type).toBe('workflow_step')
+    expect(task.typeLabel).toBe('Workflow Step')
+    expect(task.title).toBe('Review draft')
+    expect(task.matterEntityId).toBe('matter-4')
+    expect(task.matterNumber).toBe('M-0004')
+    expect(task.clientName).toBe('Dana Client')
+    expect(task.dateLabel).toBe('Waiting since')
+    expect(task.date).toBe('2026-07-15T11:00:00+00:00')
+  })
+
+  it('links its id and Open action to the matter workspace (no per-step deep link)', () => {
+    const task = normalizeWorkflowStepTask(workflowStep({ matterEntityId: 'matter-9' }))
+    expect(task.id).toBe('matter-9')
+    expect(task.workHref).toBe('/attorney/matters/matter-9')
+    expect(task.viewHref).toBeNull()
+    expect(task.contactEntityId).toBeNull()
+    expect(task.status).toBeNull()
+  })
+
+  it('nulls an empty matter number and a missing client name', () => {
+    const task = normalizeWorkflowStepTask(workflowStep({ matterNumber: '', clientName: null }))
+    expect(task.matterNumber).toBeNull()
+    expect(task.clientName).toBeNull()
+  })
+})
+
+describe('normalizeTodoTask', () => {
+  it('dates off the due date with the "Due" label when a due date is set', () => {
+    const task = normalizeTodoTask(todoTask({ dueDate: '2026-07-25' }))
+    expect(task.type).toBe('todo')
+    expect(task.typeLabel).toBe('To-Do')
+    expect(task.dateLabel).toBe('Due')
+    expect(task.date).toBe('2026-07-25')
+  })
+
+  it('falls back to the created date with the "Added" label when there is no due date', () => {
+    const task = normalizeTodoTask(todoTask({ dueDate: null }))
+    expect(task.dateLabel).toBe('Added')
+    expect(task.date).toBe('2026-07-14T09:30:00.000Z')
+  })
+
+  it('maps id/title/status/matter/client and the per-task Open href', () => {
+    const task = normalizeTodoTask(
+      todoTask({ taskId: 'task-42', matterEntityId: 'matter-7', status: 'in_progress' }),
+    )
+    expect(task.id).toBe('task-42')
+    expect(task.title).toBe('Call the county recorder')
+    expect(task.status).toBe('in_progress')
+    expect(task.matterEntityId).toBe('matter-7')
+    expect(task.matterNumber).toBe('M-0005')
+    expect(task.clientName).toBe('Evan Client')
+    expect(task.workHref).toBe('/attorney/matters/matter-7/tasks/task-42')
+    expect(task.viewHref).toBeNull()
+    expect(task.contactEntityId).toBeNull()
   })
 })
