@@ -26629,3 +26629,110 @@ details.li-brief-research summary:hover {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ══ ESIGN-FIELDS-1 — draggable merge-field chips and per-signer identity drop
+   slots for the tabbed template-editor rail (the tab strip itself uses the
+   shared .li-tabs component). Append-only tail; reuses li-tpl / li-tplsign
+   navy+gold tokens. ══ */
+
+/* Draggable merge-field chips — grab cursor signals they can be dragged. */
+.li-tpl-field-chip[draggable='true'],
+.li-tpl-standard-chip[draggable='true'] {
+  cursor: grab;
+}
+.li-tpl-field-chip[draggable='true']:active,
+.li-tpl-standard-chip[draggable='true']:active {
+  cursor: grabbing;
+}
+
+/* Per-signer identity slots (drop a {{token}} to bind name / email / title). */
+.li-tplsign-slots {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.li-tplsign-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 7px;
+  border: 1px dashed var(--li-border);
+  border-radius: 7px;
+  background: var(--li-card);
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+.li-tplsign-slot.is-bound {
+  border-style: solid;
+  background: color-mix(in srgb, var(--li-gold) 8%, transparent);
+}
+.li-tplsign-slot.is-over {
+  border-style: solid;
+  border-color: var(--li-gold-deep, var(--li-gold));
+  background: color-mix(in srgb, var(--li-gold) 18%, transparent);
+}
+.li-tplsign-slot-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--li-text-muted);
+}
+.li-tplsign-slot-empty {
+  font-size: 11.5px;
+  color: var(--li-muted-2, var(--li-text-muted));
+  font-style: italic;
+}
+.li-tplsign-slot-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-family: var(--font-mono, monospace);
+  color: var(--li-navy);
+  word-break: break-all;
+}
+.li-tplsign-slot-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--li-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.li-tplsign-slot-chip button:hover {
+  color: var(--li-danger, #b91c1c);
+}
+
+/* Signable-signer email-coverage gap (§ warn + one-click "capture on intake"). */
+.li-tplsign-role-gap {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--li-text);
+  border: 1px solid var(--li-warn, #b45309);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--li-warn, #b45309) 8%, transparent);
+  padding: 6px 8px;
+}
+.li-tplsign-role-gap-fix {
+  display: inline;
+  margin-left: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--li-navy);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid currentColor;
+  padding: 0;
+  cursor: pointer;
+}
+.li-tplsign-role-gap-fix:hover {
+  color: var(--li-gold-deep, var(--li-gold));
+}

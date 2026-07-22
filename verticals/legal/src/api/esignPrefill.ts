@@ -25,6 +25,7 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
 import type { DbClient } from '@exsto/shared'
 import { getMatterAccess, resolveDefaultMatterOwner } from './matterAccess.js'
+import { getMatter, type MatterDetail } from '../queries/matters.js'
 import type { TemplateEsignConfig, EsignRecipientRole } from '../queries/templates.js'
 
 // One resolved recipient row for the composer. `signerKey` ties the row back to
@@ -167,18 +168,45 @@ async function attorneyIdentity(
 // injecting it keeps the per-rule assembly PURE and unit-testable without a DB.
 export type EsignBindResolver = (bind: string) => Promise<ResolvedIdentity>
 
+// ESIGN-FIELDS-1 — a merge-field VALUE lookup for the matter (token → merged
+// value, or null/undefined when the matter has no value for it). Injected so the
+// per-role assembly stays pure/DB-free; resolveTemplateRecipients builds the
+// real one from the matter's answers below. A role's `fields` bindings read
+// through this and OVERRIDE the bind-resolved slot when they carry a value.
+export type EsignFieldValueLookup = (token: string) => string | null | undefined
+
 // The pure assembly core: role rows → recipient rows via the injected resolver,
 // then a STABLE ascending-order sort (ties keep config order — parallel groups
-// stay adjacent). 'manual' never consults the resolver; a bind that resolves
-// nothing degrades to an unresolved (attorney-fillable) row — never invented.
+// stay adjacent). 'manual' never consults the bind resolver; a bind that
+// resolves nothing degrades to an unresolved (attorney-fillable) row — never
+// invented. Per-role field bindings (name/email/title tokens) take precedence:
+// a bound token with a value fills that slot even for a `manual` role, which is
+// how an extra signer (LLC member, NDA counterparty) resolved from an intake
+// answer becomes send-ready without CRM data.
 export async function assembleRecipientRows(
   roles: TemplateEsignConfig['roles'],
   resolveBind: EsignBindResolver,
+  fieldValue?: EsignFieldValueLookup,
 ): Promise<ResolvedEsignRecipient[]> {
   const out: ResolvedEsignRecipient[] = []
   for (const role of roles) {
-    const identity: ResolvedIdentity =
+    const bound: ResolvedIdentity =
       role.bind === 'manual' ? { ...EMPTY_IDENTITY } : await resolveBind(role.bind)
+    // Field bindings win over the bind-resolved slot, per slot. Only a non-empty
+    // resolved value overrides — an unresolvable field falls back to the bind.
+    const pick = (token: string | undefined, fallback: string | null): string | null => {
+      if (!token || !fieldValue) return fallback
+      const v = fieldValue(token)
+      const t = typeof v === 'string' ? v.trim() : ''
+      return t || fallback
+    }
+    const name = pick(role.fields?.name, bound.name)
+    const email = pick(role.fields?.email, bound.email)
+    const title = pick(role.fields?.title, bound.title)
+    // Once a field binding supplies the email, the recipient is no longer the
+    // CRM contact the bind found — drop the contact link so the composer doesn't
+    // mis-attach the envelope. Keep it only when the email came from the bind.
+    const contactEntityId = email === bound.email ? bound.contactEntityId : null
     out.push({
       signerKey: role.key,
       label: role.label,
@@ -187,11 +215,11 @@ export async function assembleRecipientRows(
       bind: role.bind,
       // An email is what delivery needs; a name alone isn't a deliverable
       // recipient, so `resolved` demands the email.
-      resolved: !!identity.email,
-      name: identity.name,
-      email: identity.email,
-      title: identity.title,
-      contactEntityId: identity.contactEntityId,
+      resolved: !!email,
+      name,
+      email,
+      title,
+      contactEntityId,
     })
   }
   // Stable sort: ascending order, ties keep config order.
@@ -206,15 +234,48 @@ export interface ResolveTemplateRecipientsInput {
   config: TemplateEsignConfig
 }
 
+// ESIGN-FIELDS-1 — the matter's merge-field VALUE map for signer field bindings:
+// its intake answers flattened to token→string, plus the curated client
+// identity slots buildMergeData exposes (so {{client_name}}/{{client_email}}
+// bindings resolve even when the intake didn't re-ask them). Scalar answers
+// only — an object/array answer is not a deliverable identity value. Keyed
+// lower-case to match the token grammar. Answer wins; curated is the fallback.
+function matterFieldValues(matter: MatterDetail): Record<string, string> {
+  const out: Record<string, string> = {}
+  const answers = matter.questionnaireResponses ?? {}
+  for (const [key, v] of Object.entries(answers)) {
+    if (v == null || typeof v === 'object') continue
+    const s = String(v).trim()
+    if (s && s !== '__unknown__') out[key.toLowerCase()] = s
+  }
+  const clientName = matter.clientName?.trim()
+  if (clientName) {
+    out.client_name ??= clientName
+    out.primary_client_name ??= clientName
+  }
+  const clientEmail = matter.clientEmail?.trim()
+  if (clientEmail) out.client_email ??= clientEmail
+  return out
+}
+
 // §6.4 — the envelope-assembly resolver. Per role, resolve `bind` against the
-// matter. An unsignable config resolves to [] — the caller (composer /
-// workflow e-sign step) treats that as "nothing to pre-fill".
+// matter, then apply any per-role field bindings (ESIGN-FIELDS-1). An unsignable
+// config resolves to [] — the caller (composer / workflow e-sign step) treats
+// that as "nothing to pre-fill".
 export async function resolveTemplateRecipients(
   ctx: ActionContext,
   input: ResolveTemplateRecipientsInput,
 ): Promise<ResolvedEsignRecipient[]> {
   const { matterEntityId, config } = input
   if (!config.signable || config.roles.length === 0) return []
+  // Field values are only fetched when a role actually binds one — the common
+  // bind-only config never pays for the matter-detail read.
+  let fieldValue: EsignFieldValueLookup | undefined
+  if (config.roles.some((r) => r.fields)) {
+    const matter = await getMatter(ctx, matterEntityId)
+    const values = matter ? matterFieldValues(matter) : {}
+    fieldValue = (token) => values[token.toLowerCase()]
+  }
   return withActionContext(ctx, async (client) => {
     // The primary contact resolves once and serves every role bound to it.
     let primaryContact: ResolvedIdentity | null = null
@@ -236,6 +297,6 @@ export async function resolveTemplateRecipients(
       }
       return { ...EMPTY_IDENTITY }
     }
-    return assembleRecipientRows(config.roles, resolveBind)
+    return assembleRecipientRows(config.roles, resolveBind, fieldValue)
   })
 }

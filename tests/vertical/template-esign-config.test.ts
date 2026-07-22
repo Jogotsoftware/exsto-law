@@ -15,7 +15,7 @@ import {
   type TemplateEsignConfig,
   type ResolvedIdentity,
 } from '@exsto/legal'
-import { computeMarkerRoleDrift, parseMarkerLine } from '@exsto/legal/esign'
+import { computeMarkerRoleDrift, computeSignerEmailGaps, parseMarkerLine } from '@exsto/legal/esign'
 
 describe('parseTemplateEsignConfig — defensive read', () => {
   it('reads a well-formed config through unchanged', () => {
@@ -360,5 +360,178 @@ describe('bind resolution per rule (assembleRecipientRows, injected resolver)', 
 
   it('an unsignable config short-circuits in the DB wrapper contract (empty roles → empty rows)', async () => {
     expect(await assembleRecipientRows([], resolver)).toEqual([])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// ESIGN-FIELDS-1 — per-role merge-field identity bindings.
+// ─────────────────────────────────────────────────────────────────────────
+describe('per-role field bindings (parse + normalize)', () => {
+  it('preserves and lower-cases token bindings, drops all-empty fields', () => {
+    const parsed = parseTemplateEsignConfig({
+      signable: true,
+      roles: [
+        {
+          key: 'member2',
+          label: 'Second Member',
+          recipientRole: 'needs_to_sign',
+          bind: 'manual',
+          order: 2,
+          fields: { name: 'Member_2_Name', email: ' member_2_email ', title: '' },
+        },
+        {
+          key: 'client',
+          label: 'Client',
+          recipientRole: 'needs_to_sign',
+          bind: 'matter_primary_contact',
+          order: 1,
+          fields: { name: '', email: '', title: '' },
+        },
+      ],
+    })
+    // Token grammar: lower-cased, [a-z0-9_] only, whitespace trimmed.
+    expect(parsed.roles[0]!.fields).toEqual({ name: 'member_2_name', email: 'member_2_email' })
+    // An all-empty fields object is dropped entirely (bind-only role reads unchanged).
+    expect(parsed.roles[1]!.fields).toBeUndefined()
+  })
+
+  it('survives the JSON wire round trip', () => {
+    const cfg: TemplateEsignConfig = {
+      signable: true,
+      roles: [
+        {
+          key: 'client',
+          label: 'Client',
+          recipientRole: 'needs_to_sign',
+          bind: 'manual',
+          order: 1,
+          fields: { email: 'client_email' },
+        },
+      ],
+    }
+    const wire = JSON.parse(JSON.stringify(cfg)) as unknown
+    expect(parseTemplateEsignConfig(wire)).toEqual(cfg)
+  })
+})
+
+describe('computeSignerEmailGaps — signable email coverage', () => {
+  it('flags manual roles with no bound email, exempts CRM binds and field-bound emails', () => {
+    const gaps = computeSignerEmailGaps([
+      {
+        key: 'client',
+        label: 'Client',
+        recipientRole: 'needs_to_sign',
+        bind: 'matter_primary_contact',
+        order: 1,
+      },
+      {
+        key: 'attorney',
+        label: 'Attorney',
+        recipientRole: 'needs_to_sign',
+        bind: 'attorney_of_record',
+        order: 2,
+      },
+      {
+        key: 'member2',
+        label: 'Second Member',
+        recipientRole: 'needs_to_sign',
+        bind: 'manual',
+        order: 3,
+        fields: { email: 'member_2_email' },
+      },
+      {
+        key: 'witness',
+        label: 'Witness',
+        recipientRole: 'needs_to_view',
+        bind: 'manual',
+        order: 4,
+      },
+    ])
+    // Only the manual role with no email SOURCE is a gap.
+    expect(gaps).toEqual([{ key: 'witness', label: 'Witness' }])
+  })
+})
+
+describe('field bindings override bind resolution (assembleRecipientRows)', () => {
+  const bind = async (b: string): Promise<ResolvedIdentity> =>
+    b === 'matter_primary_contact'
+      ? { name: 'Ana Client', email: 'ana@crm.example', title: 'CEO', contactEntityId: 'contact-1' }
+      : { name: null, email: null, title: null, contactEntityId: null }
+  const values: Record<string, string> = {
+    member_2_email: 'member2@example.com',
+    member_2_name: 'Bea Member',
+    client_email: '',
+  }
+  const fieldValue = (t: string): string | undefined => values[t.toLowerCase()]
+
+  it('resolves a manual extra signer entirely from intake fields', async () => {
+    const rows = await assembleRecipientRows(
+      [
+        {
+          key: 'member2',
+          label: 'Second Member',
+          recipientRole: 'needs_to_sign',
+          bind: 'manual',
+          order: 1,
+          fields: { name: 'member_2_name', email: 'member_2_email' },
+        },
+      ],
+      bind,
+      fieldValue,
+    )
+    expect(rows[0]).toMatchObject({
+      email: 'member2@example.com',
+      name: 'Bea Member',
+      resolved: true,
+      contactEntityId: null,
+    })
+  })
+
+  it('an unresolvable/empty field falls back to the CRM bind, keeping its contact link', async () => {
+    const rows = await assembleRecipientRows(
+      [
+        {
+          key: 'client',
+          label: 'Client',
+          recipientRole: 'needs_to_sign',
+          bind: 'matter_primary_contact',
+          order: 1,
+          // client_email resolves to '' (unanswered) → falls back to the CRM email.
+          fields: { email: 'client_email' },
+        },
+      ],
+      bind,
+      fieldValue,
+    )
+    expect(rows[0]).toMatchObject({
+      email: 'ana@crm.example',
+      name: 'Ana Client',
+      contactEntityId: 'contact-1',
+      resolved: true,
+    })
+  })
+
+  it('a field email overriding the CRM email drops the stale contact link', async () => {
+    const rows = await assembleRecipientRows(
+      [
+        {
+          key: 'client',
+          label: 'Client',
+          recipientRole: 'needs_to_sign',
+          bind: 'matter_primary_contact',
+          order: 1,
+          fields: { email: 'member_2_email' },
+        },
+      ],
+      bind,
+      fieldValue,
+    )
+    // Email came from a field, not the bound contact — link is dropped so the
+    // composer can't mis-attach the envelope to contact-1.
+    expect(rows[0]).toMatchObject({
+      email: 'member2@example.com',
+      name: 'Ana Client', // name still from the bind (no name field bound)
+      contactEntityId: null,
+    })
   })
 })
