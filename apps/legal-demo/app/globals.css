@@ -26403,3 +26403,33 @@ details.li-brief-research summary:hover {
   font-family: 'Snell Roundhand', 'Segoe Script', cursive;
   font-size: 1.05rem;
 }
+
+/* --- CRM detail tabs (client/contact Overview·Documents·Activity, 2026-07-22) --- */
+.li-crm-detail-tabs {
+  margin: 4px 0 20px;
+}
+/* Overview action row (below the layout header + tabs): website line left,
+   action buttons right. */
+.li-crm-overview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.li-crm-overview-actions .li-crm-actions {
+  margin-left: auto;
+}
+/* The matter tag on an aggregated document row (docs span matters here). */
+.li-crm-doc-matter {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--li-surface-2, #eef1f7);
+  color: var(--li-muted, #63708a);
+  font-size: 11.5px;
+  font-weight: 600;
+  vertical-align: middle;
+}

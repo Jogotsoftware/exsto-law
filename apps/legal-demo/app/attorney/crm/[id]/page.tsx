@@ -27,12 +27,11 @@
 import { use, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { BackButton } from '@/components/BackButton'
 import { NotesSection } from '@/components/NotesSection'
 import { BriefButton } from '@/components/BriefButton'
 import { launchCompose, launchScheduler } from '@/lib/contractD'
 import { MailIcon, CalendarIcon, EditIcon, GlobeIcon } from '@/components/icons'
-import { CRM_STATUS_META, crmInitials, formatCrmDate, type CrmBucket } from '@/lib/crmStatus'
+import { crmInitials, formatCrmDate, type CrmBucket } from '@/lib/crmStatus'
 
 type BillingType = '' | 'hourly' | 'fixed'
 const MONEY_RE = /^\d+(\.\d{1,2})?$/
@@ -196,17 +195,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   }
 
   if (notFound) {
-    return (
-      <>
-        <BackButton
-          fallback="/attorney/crm"
-          className="li-crm-back"
-          label="Clients"
-          style={{ gap: 6, paddingLeft: 10, marginBottom: 18 }}
-        />
-        <p className="text-muted">Client not found.</p>
-      </>
-    )
+    return <p className="text-muted">Client not found.</p>
   }
 
   if (!client) {
@@ -217,44 +206,24 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     )
   }
 
-  const statusMeta = CRM_STATUS_META[client.crmBucket]
-
   return (
     <>
-      <BackButton
-        fallback="/attorney/crm"
-        className="li-crm-back"
-        label="Clients"
-        style={{ gap: 6, paddingLeft: 10, marginBottom: 18 }}
-      />
-
       {error && <div className="alert alert-error">{error}</div>}
 
-      <div className="li-crm-detail-head">
-        <span className="li-crm-avatar-tile">{crmInitials(client.name || '?')}</span>
-        <div className="li-crm-detail-titles">
-          <div className="li-crm-detail-name-row">
-            <h1>{client.name || 'Client'}</h1>
-            <span
-              className="li-crm-detail-status"
-              style={{ background: statusMeta.bg, color: statusMeta.fg }}
-            >
-              <span className="li-crm-status-dot" style={{ background: statusMeta.fg }} />
-              {statusMeta.label}
-            </span>
-          </div>
-          {client.website && (
-            <a
-              className="li-crm-detail-website"
-              href={websiteHref(client.website)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <GlobeIcon size={13} />
-              {client.website}
-            </a>
-          )}
-        </div>
+      {/* The identity header (avatar/name/status) + tabs live in the detail
+          layout; Overview keeps the client-level actions + website line. */}
+      <div className="li-crm-overview-actions">
+        {client.website && (
+          <a
+            className="li-crm-detail-website"
+            href={websiteHref(client.website)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <GlobeIcon size={13} />
+            {client.website}
+          </a>
+        )}
         <div className="li-crm-actions">
           {/* Brief engine WP3: the Client Brief door — same shared modal WP2
               uses on the matter header, get-on-open + explicit generate/refresh

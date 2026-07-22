@@ -16,10 +16,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
-import { BackButton } from '@/components/BackButton'
 import { launchCompose } from '@/lib/contractD'
 import { MailIcon } from '@/components/icons'
-import { CRM_STATUS_META, crmInitials, type CrmBucket } from '@/lib/crmStatus'
+import { type CrmBucket } from '@/lib/crmStatus'
 import { serviceLabel, useServiceDisplayNames } from '@/lib/serviceLabel'
 import { useConfirm } from '@/components/ConfirmModal'
 
@@ -163,17 +162,7 @@ export default function ContactDetailPage() {
   }, [id, contact, confirm])
 
   if (error && !contact) {
-    return (
-      <>
-        <BackButton
-          fallback="/attorney/crm/contacts"
-          className="li-crm-back"
-          label="Contacts"
-          style={{ gap: 6, paddingLeft: 10, marginBottom: 18 }}
-        />
-        <div className="alert alert-error">{error}</div>
-      </>
-    )
+    return <div className="alert alert-error">{error}</div>
   }
 
   if (!contact) {
@@ -184,30 +173,13 @@ export default function ContactDetailPage() {
     )
   }
 
-  const statusMeta = CRM_STATUS_META[contact.crmBucket]
-
   return (
     <>
-      <BackButton fallback="/attorney/crm/contacts" className="li-crm-back" label="Contacts" />
-
       {error && <div className="alert alert-error">{error}</div>}
 
-      <div className="li-crm-detail-head">
-        <span className="li-crm-avatar li-crm-avatar-lg">
-          {crmInitials(contact.fullName || contact.email || '?')}
-        </span>
-        <div className="li-crm-detail-titles">
-          <div className="li-crm-detail-name-row">
-            <h1>{contact.fullName || contact.email || 'Contact'}</h1>
-            <span
-              className="li-crm-detail-status"
-              style={{ background: statusMeta.bg, color: statusMeta.fg }}
-            >
-              <span className="li-crm-status-dot" style={{ background: statusMeta.fg }} />
-              {statusMeta.label}
-            </span>
-          </div>
-        </div>
+      {/* Identity header + tabs live in the detail layout; Overview keeps the
+          contact-level actions. */}
+      <div className="li-crm-overview-actions">
         <div className="li-crm-actions">
           <button
             type="button"

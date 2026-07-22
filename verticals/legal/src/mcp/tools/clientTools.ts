@@ -1,6 +1,16 @@
 import { registerTool, type Tool } from '@exsto/mcp-tools'
 import { submitAction, type ActionContext, type ActionResult } from '@exsto/substrate'
-import { listClients, getClient, type ClientSummary, type ClientDetail } from '../../index.js'
+import {
+  listClients,
+  getClient,
+  resolveClientMatterEntityIds,
+  listDocumentsForMatters,
+  getHistoryForMatters,
+  type ClientSummary,
+  type ClientDetail,
+  type PersonDocumentItem,
+  type MatterHistory,
+} from '../../index.js'
 
 // Clients CRM (beta sprint Obj 2/3). Client is the parent grouping its contacts
 // and matters; reads list/get, writes go through the legal.client.* handlers.
@@ -28,6 +38,43 @@ registerTool({
     client: await getClient(ctx, input.clientEntityId),
   }),
 } satisfies Tool<{ clientEntityId: string }, { client: ClientDetail | null }>)
+
+// Client detail — Documents tab: every document across all the client's matters
+// (generated + uploaded). Named documents_all so it never shadows the portal
+// client-facing legal.client.documents; attorney-only (not in the client allowlist).
+registerTool({
+  name: 'legal.client.documents_all',
+  description:
+    "Every document across all of a client's matters (generated drafts + uploaded files), newest first, tagged by matter.",
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { clientEntityId: { type: 'string' } },
+    required: ['clientEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => {
+    const matterIds = await resolveClientMatterEntityIds(ctx, input.clientEntityId)
+    return { documents: await listDocumentsForMatters(ctx, matterIds) }
+  },
+} satisfies Tool<{ clientEntityId: string }, { documents: PersonDocumentItem[] }>)
+
+// Client detail — Activity tab: audit/timeline aggregated across the client's matters.
+registerTool({
+  name: 'legal.client.activity',
+  description: "All activity (actions + events) across a client's matters, for the Activity tab.",
+  mode: 'read',
+  inputSchema: {
+    type: 'object',
+    properties: { clientEntityId: { type: 'string' } },
+    required: ['clientEntityId'],
+    additionalProperties: false,
+  },
+  handler: async (ctx: ActionContext, input) => {
+    const matterIds = await resolveClientMatterEntityIds(ctx, input.clientEntityId)
+    return { history: await getHistoryForMatters(ctx, matterIds) }
+  },
+} satisfies Tool<{ clientEntityId: string }, { history: MatterHistory }>)
 
 registerTool({
   name: 'legal.client.create',
