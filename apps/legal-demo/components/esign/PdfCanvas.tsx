@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { FieldPlacement, PlacementFieldType } from '@exsto/legal/esign'
-import { FieldBox, type ResizeHandle } from './FieldBox'
+import { FieldBox, type GuidedFieldState, type ResizeHandle } from './FieldBox'
 import { FIELD_DRAG_MIME } from './fieldMeta'
 import { renderPageToCanvas, type PdfPageInfo } from './usePdfDocument'
 
@@ -45,6 +45,15 @@ export interface PdfCanvasProps {
   readOnly?: boolean
   /** Resolved display values by placement id (§5.3 canvas preview). */
   valuesById?: Record<string, string | null>
+  /** ESIGN-GUIDED-1 — the adopted signature/initials image, by placement id,
+   *  for sign/initial fields the signer has applied. */
+  imagesById?: Record<string, string | null>
+  /** ESIGN-GUIDED-1 — the guided walk's per-field state (signer surface only). */
+  guidedStates?: Record<string, GuidedFieldState>
+  /** ESIGN-GUIDED-1 — the live value of whichever field is currently editing. */
+  editingValue?: string
+  onEditingChange?: (id: string, value: string) => void
+  onEditingCommit?: (id: string) => void
   onSelect?: (id: string | null) => void
   onDropField?: (
     type: PlacementFieldType,
@@ -78,6 +87,11 @@ export function PdfCanvas({
   selectedId,
   readOnly,
   valuesById,
+  imagesById,
+  guidedStates,
+  editingValue,
+  onEditingChange,
+  onEditingCommit,
   onSelect,
   onDropField,
   onMoveBy,
@@ -201,6 +215,11 @@ export function PdfCanvas({
                   dimmed={Boolean(activeSignerKey) && p.signerKey !== activeSignerKey}
                   readOnly={Boolean(readOnly)}
                   displayValue={valuesById?.[p.id]}
+                  image={imagesById?.[p.id]}
+                  guided={guidedStates?.[p.id]}
+                  editingValue={guidedStates?.[p.id]?.editing ? editingValue : undefined}
+                  onEditingChange={onEditingChange}
+                  onEditingCommit={onEditingCommit}
                   pageCssSize={{ width: cssWidth, height: cssHeight }}
                   onSelect={(id) => onSelect?.(id)}
                   onDragMove={(id, dx, dy) => onMoveBy?.(id, dx, dy, false)}

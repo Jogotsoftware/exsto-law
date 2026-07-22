@@ -25753,6 +25753,170 @@ details.li-brief-research summary:hover {
 }
 
 /* ============================================================================
+   ESIGN-GUIDED-1 — the DocuSign-style guided click-to-sign walk (signer
+   surface only): sticky top action bar (li-esp-guidebar-*), the up-front
+   adopt-your-signature intro (li-esp-guided-intro), and the extra li-esp-box
+   field states click-to-sign adds (auto/complete/optional/editing + the
+   floating "Sign here"-style tag). Flat family, appended at the tail per the
+   css:check structural guard.
+   ============================================================================ */
+.li-esp-guidebar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: -0.5rem 0 1.5rem;
+  padding: 14px 18px;
+  background: var(--li-card, #fff);
+  border: 1px solid var(--li-border);
+  border-radius: var(--li-radius-card, 14px);
+  box-shadow: var(--li-shadow-pop, 0 14px 40px rgba(15, 23, 42, 0.18));
+}
+.li-esp-guidebar-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.li-esp-guidebar-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--li-navy);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.li-esp-guidebar-step {
+  font-size: 12.5px;
+  color: var(--li-muted-2, var(--li-muted));
+}
+.li-esp-guidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.li-esp-guidebar-edit {
+  gap: 6px;
+}
+.li-esp-guidebar-cta {
+  min-width: 96px;
+  justify-content: center;
+}
+.li-esp-guided-adopt {
+  padding-bottom: 8px;
+}
+.li-esp-guided-intro {
+  margin: 4px 0 18px;
+  padding: 14px 16px;
+  background: var(--li-info-bg, #eaf0fb);
+  border: 1px solid color-mix(in srgb, var(--li-info, #3b6fd4) 25%, transparent);
+  border-radius: 10px;
+}
+.li-esp-guided-intro p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--li-body, var(--li-text));
+}
+.li-esp-box--auto {
+  cursor: default;
+  border-style: dashed;
+  opacity: 0.75;
+}
+.li-esp-box.is-optional {
+  opacity: 0.72;
+}
+.li-esp-box.is-complete {
+  background: color-mix(in srgb, var(--li-ok, #2f9e6b) 14%, transparent);
+  border-color: var(--li-ok, #2f9e6b);
+  border-style: solid;
+  opacity: 1;
+}
+.li-esp-box.is-editing {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--li-gold, #c6a968) 55%, transparent);
+  z-index: 3;
+}
+.li-esp-box-check {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--li-ok, #2f9e6b);
+  color: #fff;
+  z-index: 2;
+}
+.li-esp-box-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--li-text, var(--li-navy));
+  padding: 2px 6px;
+  outline: none;
+}
+.li-esp-box-value--img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+/* The floating edge tab pointing at the guided walk's current field — the
+   classic DocuSign "SIGN HERE" tag, in this app's gold/navy palette. */
+.li-esp-box-tag {
+  position: absolute;
+  top: 50%;
+  left: -8px;
+  transform: translate(-100%, -50%);
+  background: var(--li-gold, #c6a968);
+  color: var(--li-navy-deep, #14213d);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  padding: 4px 9px;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
+  pointer-events: none;
+  z-index: 3;
+}
+.li-esp-box-tag::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -5px;
+  transform: translateY(-50%);
+  border-width: 5px 0 5px 5px;
+  border-style: solid;
+  border-color: transparent transparent transparent var(--li-gold, #c6a968);
+}
+@media (max-width: 900px) {
+  .li-esp-guidebar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .li-esp-guidebar-actions {
+    justify-content: space-between;
+  }
+  .li-esp-guidebar-cta {
+    flex: 1 1 auto;
+  }
+  .li-esp-box-tag {
+    display: none;
+  }
+}
+
+/* ============================================================================
    EDITOR-FIX-1 — founder-priority document review/editor fixes (append-only).
    Flat family blocks at the tail per the css:check structural guard.
    ============================================================================ */

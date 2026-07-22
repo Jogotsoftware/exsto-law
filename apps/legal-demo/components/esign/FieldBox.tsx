@@ -7,11 +7,20 @@
 // pills. Pure presentational + pointer geometry; all state lives in the parent.
 import { useRef } from 'react'
 import type { FieldPlacement } from '@exsto/legal/esign'
-import { XIcon } from '@/components/icons'
-import { placementGlyph } from './fieldMeta'
+import { CheckIcon, XIcon } from '@/components/icons'
+import { guidedActionLabel, placementGlyph } from './fieldMeta'
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const
 export type ResizeHandle = (typeof HANDLES)[number]
+
+/** ESIGN-GUIDED-1 — the guided signer walk's per-field state (SignDocument
+ *  computes this; FieldBox only renders it). `auto` = date/name/already-
+ *  resolved — never clickable, always reads as filled-automatically. */
+export interface GuidedFieldState {
+  complete: boolean
+  auto: boolean
+  editing: boolean
+}
 
 export interface FieldBoxProps {
   placement: FieldPlacement
@@ -24,6 +33,16 @@ export interface FieldBoxProps {
   readOnly: boolean
   /** The resolved auto-fill value to display, if any (§5.3). */
   displayValue?: string | null
+  /** ESIGN-GUIDED-1 — the adopted signature/initials image to stamp in place
+   *  once this sign/initial field has been applied. Takes priority over
+   *  displayValue's text rendering when present. */
+  image?: string | null
+  /** ESIGN-GUIDED-1 — guided-walk state (undefined outside the signer surface). */
+  guided?: GuidedFieldState
+  /** ESIGN-GUIDED-1 — live value while `guided.editing` is true. */
+  editingValue?: string
+  onEditingChange?: (id: string, value: string) => void
+  onEditingCommit?: (id: string) => void
   onSelect?: (id: string) => void
   /** Pointer drag: dx/dy in NORMALIZED page units (parent converts px). */
   onDragStart?: (id: string) => void
@@ -45,6 +64,11 @@ export function FieldBox({
   dimmed,
   readOnly,
   displayValue,
+  image,
+  guided,
+  editingValue,
+  onEditingChange,
+  onEditingCommit,
   onSelect,
   onDragStart,
   onDragMove,
@@ -91,10 +115,19 @@ export function FieldBox({
   const glyph = placementGlyph(p.type)
   const isSig = p.type === 'sign' || p.type === 'initial'
   const caption = p.label || glyph.label
-  const shown = (displayValue ?? p.value ?? '').trim()
+  // A checkbox's "value" is the literal string 'true'/'' — never text to show;
+  // its checked state reads through guided.complete's checkmark instead.
+  const shown = p.type === 'check' ? '' : (displayValue ?? p.value ?? '').trim()
+  // Interactivity preserves the pre-existing editor/preview rule (button
+  // whenever NOT readOnly, or readOnly with an onActivate handler) and adds
+  // ONE new gate: a guided auto field (date/name/already-resolved) never
+  // activates — the signer watches it fill on its own, never clicks into it.
+  const interactive = !readOnly || (Boolean(onActivate) && !guided?.auto)
+  const editing = Boolean(guided?.editing)
 
   return (
     <div
+      id={`esp-field-${p.id}`}
       className={[
         'li-esp-box',
         `li-esign2-tone-${toneIndex}`,
@@ -102,6 +135,10 @@ export function FieldBox({
         selected ? 'is-selected' : '',
         dimmed ? 'is-dimmed' : '',
         readOnly ? 'is-readonly' : '',
+        guided?.auto ? 'li-esp-box--auto' : '',
+        guided?.complete && !guided.auto ? 'is-complete' : '',
+        guided && !guided.complete && !guided.auto && !p.required ? 'is-optional' : '',
+        editing ? 'is-editing' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -111,8 +148,8 @@ export function FieldBox({
         width: `${p.rect.w * 100}%`,
         height: `${p.rect.h * 100}%`,
       }}
-      role={readOnly && !onActivate ? undefined : 'button'}
-      tabIndex={readOnly && !onActivate ? -1 : 0}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : -1}
       aria-label={`${caption} field`}
       onPointerDown={(e) => beginGesture(e, 'move')}
       onPointerMove={moveGesture}
@@ -120,34 +157,64 @@ export function FieldBox({
       onPointerCancel={endGesture}
       onClick={(e) => {
         e.stopPropagation()
-        onActivate?.(p.id)
+        if (interactive) onActivate?.(p.id)
       }}
       onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && onActivate) {
+        if ((e.key === 'Enter' || e.key === ' ') && interactive) {
           e.preventDefault()
-          onActivate(p.id)
+          onActivate?.(p.id)
         }
       }}
     >
-      <span className="li-esp-box-body">
-        {shown ? (
-          <span className={`li-esp-box-value${isSig ? ' li-esp-box-value--sig' : ''}`}>
-            {shown}
-          </span>
-        ) : (
-          <>
-            <span className="li-esp-box-ico" aria-hidden="true">
-              {glyph.icon}
+      {editing ? (
+        <input
+          className="li-esp-box-input"
+          type="text"
+          autoFocus
+          value={editingValue ?? ''}
+          placeholder={caption}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onChange={(e) => onEditingChange?.(p.id, e.target.value)}
+          onBlur={() => onEditingCommit?.(p.id)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Escape') {
+              e.preventDefault()
+              onEditingCommit?.(p.id)
+            }
+          }}
+        />
+      ) : (
+        <span className="li-esp-box-body">
+          {image ? (
+            <img src={image} alt={`${caption}, applied`} className="li-esp-box-value--img" />
+          ) : shown ? (
+            <span className={`li-esp-box-value${isSig ? ' li-esp-box-value--sig' : ''}`}>
+              {shown}
             </span>
-            <span className="li-esp-box-label">
-              {caption}
-              {p.type === 'date' ? ' (auto)' : ''}
-              {p.required ? <em className="li-esp-box-req">*</em> : null}
-            </span>
-          </>
-        )}
-      </span>
-      {isSig && <span className="li-esp-box-rule" aria-hidden="true" />}
+          ) : (
+            <>
+              <span className="li-esp-box-ico" aria-hidden="true">
+                {glyph.icon}
+              </span>
+              <span className="li-esp-box-label">
+                {caption}
+                {p.type === 'date' ? ' (auto)' : ''}
+                {p.required ? <em className="li-esp-box-req">*</em> : null}
+              </span>
+            </>
+          )}
+        </span>
+      )}
+      {isSig && !image && <span className="li-esp-box-rule" aria-hidden="true" />}
+      {guided?.complete && !guided.auto && (
+        <span className="li-esp-box-check" aria-hidden="true">
+          <CheckIcon size={10} />
+        </span>
+      )}
+      {readOnly && selected && interactive && !guided?.complete && (
+        <span className="li-esp-box-tag">{guidedActionLabel(p.type)}</span>
+      )}
       {!readOnly && selected && (
         <>
           <button
