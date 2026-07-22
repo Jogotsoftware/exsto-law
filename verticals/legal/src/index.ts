@@ -6,6 +6,7 @@ import './handlers/index.js'
 // legal.matter.advance's GUARD 2 rejection — exported so an HTTP adapter can map
 // it to a 4xx instead of the generic 500 every other thrown handler error gets.
 export { WorkflowAdvanceGuardError } from './handlers/workflow.js'
+export { buildClientContactAttrs } from './handlers/intake.js'
 
 export * from './api/index.js'
 // ESIGN-UNIFY-1 ES-2 — executed-copy stamping (server-only: pdf-lib) plus the

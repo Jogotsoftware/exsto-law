@@ -16,6 +16,11 @@ export interface StageIntakeLeadInput {
   clientEmail: string
   clientPhone?: string | null
   clientCompanyName?: string | null
+  // Sign-up "details" step (PORTAL signup part 2) — client-level facts written
+  // onto the client_contact. Optional; omitted → nothing extra is written.
+  clientMailingAddress?: unknown | null
+  clientBusinessAddress?: unknown | null
+  clientPreferredContactMethod?: string | null
   serviceKey: string
   intakeResponses: Record<string, unknown>
 }
@@ -40,6 +45,9 @@ export async function stageIntakeLead(
       client_email: input.clientEmail.trim(),
       client_phone: input.clientPhone ?? null,
       client_company_name: input.clientCompanyName ?? null,
+      client_mailing_address: input.clientMailingAddress ?? null,
+      client_business_address: input.clientBusinessAddress ?? null,
+      client_preferred_contact_method: input.clientPreferredContactMethod ?? null,
       service_key: input.serviceKey,
       intake_form_id: null,
       intake_responses: input.intakeResponses ?? {},

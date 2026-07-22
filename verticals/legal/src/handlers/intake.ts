@@ -36,6 +36,65 @@ interface IntakeSubmitPayload {
   service_key: string
   intake_form_id: string | null
   intake_responses: Record<string, unknown>
+  // Sign-up "details" step (PORTAL signup part 2): client-level facts captured
+  // by the /book funnel, written onto the client_contact so they're reusable
+  // across every matter. Absent on legacy callers → nothing extra is written.
+  // Addresses are the questionnaire's structured-address JSON shape; the
+  // business NAME is the existing company_name attribute above.
+  client_mailing_address?: unknown | null
+  client_business_address?: unknown | null
+  client_preferred_contact_method?: string | null
+}
+
+// A structured address is a non-empty object carrying a formatted_address (the
+// AddressAutocomplete/StructuredAddress shape). Anything else — null, {}, a bare
+// string — counts as "not provided" and is never written.
+function isStructuredAddress(v: unknown): v is Record<string, unknown> {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as { formatted_address?: unknown }).formatted_address === 'string' &&
+    (v as { formatted_address: string }).formatted_address.trim().length > 0
+  )
+}
+
+// The client_contact attribute rows an intake writes. Pure + exported so the
+// sign-up-details contract — which fields persist, and how the optional ones are
+// gated — is unit-testable without a database. full_name + email always write;
+// phone, company_name (= business name), the two structured addresses, and the
+// preferred contact method write ONLY when the funnel supplied a usable value.
+// A blank/whitespace value is treated as absent, so an omitted optional field
+// never clears a prior value with emptiness (append-only history is preserved).
+export function buildClientContactAttrs(
+  p: Pick<
+    IntakeSubmitPayload,
+    | 'client_full_name'
+    | 'client_email'
+    | 'client_phone'
+    | 'client_company_name'
+    | 'client_mailing_address'
+    | 'client_business_address'
+    | 'client_preferred_contact_method'
+  >,
+): Array<{ kind: string; value: unknown }> {
+  const attrs: Array<{ kind: string; value: unknown }> = [
+    { kind: 'full_name', value: p.client_full_name },
+    { kind: 'email', value: p.client_email },
+  ]
+  const nonBlank = (v: unknown): string | null =>
+    typeof v === 'string' && v.trim() ? v.trim() : null
+  const phone = nonBlank(p.client_phone)
+  if (phone) attrs.push({ kind: 'phone', value: phone })
+  const company = nonBlank(p.client_company_name)
+  if (company) attrs.push({ kind: 'company_name', value: company })
+  if (isStructuredAddress(p.client_mailing_address))
+    attrs.push({ kind: 'mailing_address', value: p.client_mailing_address })
+  if (isStructuredAddress(p.client_business_address))
+    attrs.push({ kind: 'business_address', value: p.client_business_address })
+  const method = nonBlank(p.client_preferred_contact_method)
+  if (method && (method === 'email' || method === 'phone' || method === 'text'))
+    attrs.push({ kind: 'preferred_contact_method', value: method })
+  return attrs
 }
 
 // Implicit accounts are indexed by email (+ phone history). Find an existing
@@ -84,13 +143,7 @@ registerActionHandler('intake.submit', async (ctx, client, payload, actionId) =>
     existingContactId ??
     (await insertEntity(client, ctx.tenantId, actionId, contactKindId, p.client_full_name))
 
-  const contactAttrs: Array<{ kind: string; value: unknown }> = [
-    { kind: 'full_name', value: p.client_full_name },
-    { kind: 'email', value: p.client_email },
-  ]
-  if (p.client_phone) contactAttrs.push({ kind: 'phone', value: p.client_phone })
-  if (p.client_company_name)
-    contactAttrs.push({ kind: 'company_name', value: p.client_company_name })
+  const contactAttrs = buildClientContactAttrs(p)
 
   for (const a of contactAttrs) {
     const akId = await lookupKindId(client, 'attribute_kind_definition', ctx.tenantId, a.kind)

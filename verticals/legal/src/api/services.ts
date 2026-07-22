@@ -1771,6 +1771,12 @@ export interface SubmitBookingInput {
   clientEmail: string
   clientPhone?: string
   clientCompanyName?: string
+  // Sign-up "details" step (PORTAL signup part 2) — client-level facts written
+  // onto the client_contact via intake.submit. Optional (signed-in repeat
+  // bookings and legacy callers omit them → nothing extra is written).
+  clientMailingAddress?: unknown | null
+  clientBusinessAddress?: unknown | null
+  clientPreferredContactMethod?: string | null
   attributionSource: string
   serviceKey: string
   intakeResponses: Record<string, unknown>
@@ -1990,6 +1996,9 @@ export async function submitBooking(
       client_email: input.clientEmail,
       client_phone: input.clientPhone ?? null,
       client_company_name: input.clientCompanyName ?? null,
+      client_mailing_address: input.clientMailingAddress ?? null,
+      client_business_address: input.clientBusinessAddress ?? null,
+      client_preferred_contact_method: input.clientPreferredContactMethod ?? null,
       service_key: input.serviceKey,
       intake_form_id: service?.intakeFormId ?? null,
       intake_responses: input.intakeResponses,

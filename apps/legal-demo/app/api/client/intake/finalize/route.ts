@@ -59,6 +59,9 @@ interface FinalizeBody {
   clientEmail?: unknown
   clientPhone?: unknown
   clientCompanyName?: unknown
+  clientMailingAddress?: unknown
+  clientBusinessAddress?: unknown
+  clientPreferredContactMethod?: unknown
   attributionSource?: unknown
   serviceKey?: unknown
   intakeResponses?: unknown
@@ -72,6 +75,9 @@ interface FinalizeBody {
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+// A structured-address object rides through as-is; anything non-object is dropped
+// to null so the handler's isStructuredAddress guard treats it as "not provided".
+const addr = (v: unknown): unknown => (v && typeof v === 'object' ? v : null)
 
 export async function POST(request: Request) {
   const rl = checkPublicRateLimit(`intake-finalize:${clientIpFrom(request)}`)
@@ -131,6 +137,9 @@ export async function POST(request: Request) {
         clientEmail: email,
         clientPhone: str(body.clientPhone) || null,
         clientCompanyName: str(body.clientCompanyName) || null,
+        clientMailingAddress: addr(body.clientMailingAddress),
+        clientBusinessAddress: addr(body.clientBusinessAddress),
+        clientPreferredContactMethod: str(body.clientPreferredContactMethod) || null,
         serviceKey,
         intakeResponses,
       })
@@ -193,6 +202,9 @@ export async function POST(request: Request) {
       clientEmail: email,
       clientPhone: str(body.clientPhone) || undefined,
       clientCompanyName: str(body.clientCompanyName) || undefined,
+      clientMailingAddress: addr(body.clientMailingAddress),
+      clientBusinessAddress: addr(body.clientBusinessAddress),
+      clientPreferredContactMethod: str(body.clientPreferredContactMethod) || null,
       attributionSource: str(body.attributionSource) || 'client_portal_intake_gate',
       serviceKey,
       intakeResponses,
