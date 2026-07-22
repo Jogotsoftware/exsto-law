@@ -10,7 +10,7 @@
 // pdf.worker.min.mjs into the build and the URL resolves same-origin. NO CDN
 // (CSP + offline discipline, §5.4).
 import { useEffect, useState } from 'react'
-import type { PDFDocumentProxy } from 'pdfjs-dist'
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 
 export interface PdfPageInfo {
   /** 0-based page index (placement rects use the same base). */
@@ -110,6 +110,16 @@ export function usePdfDocument(data: ArrayBuffer | Uint8Array | null): PdfDocSta
   return state
 }
 
+// One in-flight pdfjs render per canvas. Starting a second render() while a
+// canvas is busy makes pdfjs THROW on the new task (swallowed below as a
+// cancel), so the OLD task survives and paints at its stale viewport into the
+// freshly-resized backing store — the document lands small in the top-left of
+// an otherwise white page. Fit-width guarantees this race: the first paint at
+// the pre-measure width is immediately superseded by the ResizeObserver's
+// remeasure. Serializing per canvas (cancel, await settle, then size + render)
+// makes the last requested width always win.
+const inflightRender = new WeakMap<HTMLCanvasElement, ReturnType<PDFPageProxy['render']>>()
+
 /** Render one page into a canvas at `cssWidth` CSS pixels wide (device-pixel
  *  sharp). Returns a cancel function. Shared by PdfCanvas and PageThumbs. */
 export function renderPageToCanvas(
@@ -119,8 +129,15 @@ export function renderPageToCanvas(
   cssWidth: number,
 ): () => void {
   let cancelled = false
+  let myTask: ReturnType<PDFPageProxy['render']> | null = null
   ;(async () => {
     const page = await doc.getPage(pageIndex + 1)
+    const prev = inflightRender.get(canvas)
+    if (prev) {
+      prev.cancel()
+      // RenderingCancelledException — expected; wait for the canvas to free up.
+      await prev.promise.catch(() => {})
+    }
     if (cancelled) return
     // Both viewports default rotation to page.rotate, so the raster is drawn in
     // the page's /Rotate-corrected orientation and the canvas dims match the
@@ -135,11 +152,16 @@ export function renderPageToCanvas(
     canvas.style.height = `${Math.floor(viewport.height / dpr)}px`
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    await page.render({ canvasContext: ctx, viewport }).promise.catch(() => {
+    myTask = page.render({ canvasContext: ctx, viewport })
+    inflightRender.set(canvas, myTask)
+    await myTask.promise.catch(() => {
       // A superseded render (zoom changed mid-flight) throws a cancel — ignore.
     })
+    if (inflightRender.get(canvas) === myTask) inflightRender.delete(canvas)
   })().catch(() => {})
   return () => {
     cancelled = true
+    // Free the canvas for the successor render immediately on unmount/supersede.
+    if (myTask) myTask.cancel()
   }
 }
