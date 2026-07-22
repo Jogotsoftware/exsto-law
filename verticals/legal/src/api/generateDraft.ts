@@ -11,6 +11,7 @@ import { loadDraftingPrompt } from '../templates/loader.js'
 import { DOCUMENT_STYLE_INSTRUCTION } from '../templates/documentStyle.js'
 import { getDraftingPrompt, getDocumentTemplate, resolveDocumentTemplateDoc } from './services.js'
 import { getMatter } from '../queries/matters.js'
+import { getFirmDefaultRate, getClientRate, formatRateUsd } from './rates.js'
 import { getDraftVersion } from '../queries/drafts.js'
 import { isSpanishDocumentKind, spanishDocumentKind, baseDocumentKind } from './documentLanguage.js'
 import { renderTemplate, buildMergeData, longDate } from './templateMerge.js'
@@ -274,6 +275,10 @@ export async function runDraftGeneration(
     // WP A2b — the matter's own governing-law fact (client intake answer, with
     // the firm's home jurisdiction as fallback), never a hardcoded state.
     const jurisdiction = await resolveMatterJurisdiction(agentCtx, input.matterEntityId)
+    // Rate slots (Contract K): firm default + this matter's client effective rate,
+    // so a formation/engagement letter shows the LIVE rate instead of a literal.
+    const firmRate = await getFirmDefaultRate(agentCtx)
+    const clientRate = m.clientEntityId ? await getClientRate(agentCtx, m.clientEntityId) : firmRate
     const { markdown, missingFields } = renderTemplate(
       template,
       buildMergeData(m, {
@@ -289,6 +294,8 @@ export async function runDraftGeneration(
         firmEmail: settings.firmEmail ?? undefined,
         firmPhone: settings.firmPhone ?? undefined,
         firmAddress: settings.firmAddress ?? undefined,
+        firmHourlyRate: formatRateUsd(firmRate),
+        clientHourlyRate: formatRateUsd(clientRate),
       }),
     )
 
