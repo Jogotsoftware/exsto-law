@@ -60,7 +60,7 @@ INSERT INTO action_kind_definition
   ('00000000-0000-0000-1013-000000003200', '00000000-0000-0000-0000-000000000001',
    'legal.client.set_portal_user_type', 'Set portal user type',
    'Set a client contact''s portal tier: ''standard'' (no AI assistant) or ''self_serve'' (full access). Writes the portal_user_type attribute on the client_contact with the acting attorney as source. Enforced server-side at the assistant stream route and reflected in the portal home payload.',
-   'notify', 'reversible', NULL, false),
+   'notify', 'fully_reversible', NULL, false),
   ('00000000-0000-0000-1013-000000003201', '00000000-0000-0000-0000-000000000001',
    'legal.user.delete', 'Delete firm user',
    'Remove a firm user from the Users & Roles list: deactivate the actor, close their scope assignments, and emit user.deleted (the list read excludes marked rows). Admin only; caller must strictly out-rank the target; never self. Re-inviting the same email reactivates the account.',
@@ -68,7 +68,7 @@ INSERT INTO action_kind_definition
   ('00000000-0000-0000-1013-000000003202', '00000000-0000-0000-0000-000000000001',
    'legal.client.restore_portal_access', 'Restore client portal access',
    'Reactivate the portal actor a prior legal.client.revoke_portal_access deactivated (the login-only portal delete keeps the client_contact active, so this is the re-invite''s way back in). No-ops when no mapping exists or the actor is already active. Emits portal.access_restored when it flips.',
-   'notify', 'reversible', NULL, false)
+   'notify', 'fully_reversible', NULL, false)
 ON CONFLICT (id) DO NOTHING;
 
 -- ── Same kinds for EVERY OTHER existing tenant (0188 idiom) ──────────────────
@@ -112,13 +112,13 @@ FROM (SELECT DISTINCT tenant_id FROM entity_kind_definition
 CROSS JOIN (VALUES
   ('legal.client.set_portal_user_type', 'Set portal user type',
    'Set a client contact''s portal tier: ''standard'' (no AI assistant) or ''self_serve'' (full access).',
-   'reversible'),
+   'fully_reversible'),
   ('legal.user.delete', 'Delete firm user',
    'Remove a firm user from the Users & Roles list: deactivate, close scopes, emit user.deleted. Re-invite restores.',
    'reversible_with_state_decay'),
   ('legal.client.restore_portal_access', 'Restore client portal access',
    'Reactivate the portal actor a prior revoke deactivated. No-ops when already active or never provisioned.',
-   'reversible')
+   'fully_reversible')
 ) AS v(kind_name, display_name, description, reversibility)
 WHERE NOT EXISTS (
   SELECT 1 FROM action_kind_definition a
