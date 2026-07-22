@@ -26,6 +26,11 @@ export interface StampField {
   signatureDataUrl?: string | null
   /** For `check` fields. */
   checked?: boolean
+  /** Auth micro-stamp (sign/initial only): who signed + when, drawn as a tiny
+   *  caption inside the box so the visible ink is tied to the signer on the face
+   *  of the page (the certificate page carries the full audit + SHA). */
+  signerName?: string | null
+  signedAt?: string | null
 }
 
 export interface StampInput {
@@ -37,6 +42,7 @@ export interface StampInput {
 
 const TEXT_COLOR = rgb(0.106, 0.165, 0.29) // LI navy #1b2a4a
 const RULE_COLOR = rgb(0.7, 0.7, 0.7)
+const CAPTION_COLOR = rgb(0.45, 0.5, 0.56) // muted gray — the auth micro-stamp
 
 // data:[mime];base64,<payload> → Uint8Array (browser-free; the vertical has no atob).
 function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; mime: string } | null {
@@ -169,6 +175,15 @@ function fitFontSize(font: PDFFont, text: string, maxWidth: number, maxSize: num
   return size
 }
 
+// Truncate `text` with an ellipsis so it fits `maxWidth` at a FIXED size — used
+// by the auth micro-stamp, which never shrinks below its (already tiny) size.
+function ellipsize(font: PDFFont, text: string, size: number, maxWidth: number): string {
+  if (maxWidth <= 0 || font.widthOfTextAtSize(text, size) <= maxWidth) return text
+  let s = text
+  while (s.length > 1 && font.widthOfTextAtSize(s + '…', size) > maxWidth) s = s.slice(0, -1)
+  return s + '…'
+}
+
 async function stampOne(
   pdf: PDFDocument,
   page: PDFPage,
@@ -206,6 +221,29 @@ async function stampOne(
   // pages emit byte-identical draw calls.
   const rotateOpt = rot === 0 ? {} : { rotate: degrees(rot) }
 
+  // AUTH MICRO-STAMP (founder ask): for a signature/initials field, reserve a
+  // thin band at the BOTTOM of the box for a tiny "name · date" caption. The
+  // caption stays strictly inside the placement rect (never overflows the page
+  // or covers document text) and the signature is drawn into the remaining top
+  // region. Skip entirely on boxes too short to fit both — those stamp exactly
+  // as before (regression bar for tiny/legacy fields and every non-sign field).
+  const isSig = field.type === 'sign' || field.type === 'initial'
+  const captionText =
+    isSig && field.signerName?.trim()
+      ? `${field.signerName.trim()}${field.signedAt ? `  ·  ${field.signedAt.slice(0, 10)}` : ''}`
+      : ''
+  const captionBand = captionText && vh >= 16 ? Math.min(7, vh * 0.28) : 0
+  // The signature occupies the box above the reserved band.
+  const sigVh = vh - captionBand
+  const drawAuthCaption = (): void => {
+    if (!captionBand) return
+    const size = Math.min(5.5, captionBand - 1)
+    const text = ellipsize(font, captionText, size, vw - 4)
+    // Baseline sits ~1pt up from the visual box bottom, inside the band.
+    const c = toMedia(vx + 2, vy + vh - 1)
+    page.drawText(text, { x: c.x, y: c.y, size, font, color: CAPTION_COLOR, ...rotateOpt })
+  }
+
   if (field.type === 'check') {
     if (field.checked) {
       const s = Math.min(vw, vh)
@@ -223,14 +261,16 @@ async function stampOne(
         decoded.mime === 'image/png'
           ? await pdf.embedPng(decoded.bytes)
           : await pdf.embedJpg(decoded.bytes)
-      const scale = Math.min(vw / img.width, vh / img.height)
+      // Fit into the region ABOVE the caption band (sigVh == vh when no band).
+      const scale = Math.min(vw / img.width, sigVh / img.height)
       const w = img.width * scale
       const h = img.height * scale
       // Image anchor = its VISUAL bottom-left corner (left of box, vertically
-      // centered); pdf-lib's drawImage origin + rotate then fills up-and-right
-      // in the visual frame.
-      const m = toMedia(vx, vy + (vh + h) / 2)
+      // centered within the signature region); pdf-lib's drawImage origin +
+      // rotate then fills up-and-right in the visual frame.
+      const m = toMedia(vx, vy + (sigVh + h) / 2)
       page.drawImage(img, { x: m.x, y: m.y, width: w, height: h, ...rotateOpt })
+      drawAuthCaption()
       return
     }
   }
@@ -239,20 +279,23 @@ async function stampOne(
   // baseline under signatures reads as a signature line, not a plain string.
   const text = (field.value ?? '').trim()
   if (!text) return
-  const isSig = field.type === 'sign' || field.type === 'initial'
   const usedFont = isSig ? sigFont : font
   const size = fitFontSize(usedFont, text, vw - 4, isSig ? 20 : 11)
-  const pad = Math.max(3, (vh - size) / 2)
+  // Signatures lay out within the region above the caption band; other fields
+  // use the full box height (sigVh == vh for them).
+  const pad = Math.max(3, (sigVh - size) / 2)
   // Baseline-left anchor in the visual box (2pt in from the left, `pad` up from
-  // the visual bottom edge), mapped to MediaBox with the content pre-rotated.
-  const t = toMedia(vx + 2, vy + vh - pad)
+  // the signature-region bottom edge), mapped to MediaBox with the content
+  // pre-rotated.
+  const t = toMedia(vx + 2, vy + sigVh - pad)
   page.drawText(text, { x: t.x, y: t.y, size, font: usedFont, color: TEXT_COLOR, ...rotateOpt })
   if (isSig) {
-    // The signature baseline rule runs along the visual box bottom edge — two
-    // endpoints mapped to MediaBox (a line needs no per-glyph rotation).
-    const start = toMedia(vx, vy + vh)
-    const end = toMedia(vx + vw, vy + vh)
+    // The signature baseline rule runs along the signature-region bottom edge —
+    // two endpoints mapped to MediaBox (a line needs no per-glyph rotation).
+    const start = toMedia(vx, vy + sigVh)
+    const end = toMedia(vx + vw, vy + sigVh)
     page.drawLine({ start, end, thickness: 0.75, color: RULE_COLOR })
+    drawAuthCaption()
   }
 }
 
