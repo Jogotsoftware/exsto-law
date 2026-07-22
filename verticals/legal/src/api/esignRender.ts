@@ -184,9 +184,12 @@ function buildStampFields(
     switch (p.type) {
       case 'sign':
       case 'initial': {
+        // Auth micro-stamp facts: who signed + when (drawn as a tiny in-box
+        // caption by stampPdf; the certificate page still carries the full audit).
+        const auth = { signerName: signer?.name ?? null, signedAt: signer?.signed_at ?? null }
         const sig = signer?.signature_data ?? null
         if (sig && isSignatureImageDataUrl(sig)) {
-          return { type: p.type, rect: p.rect, signatureDataUrl: sig }
+          return { type: p.type, rect: p.rect, signatureDataUrl: sig, ...auth }
         }
         // Typed adoption: the stamper draws the name in the oblique sig font.
         const name = signer?.name ?? sig ?? ''
@@ -194,6 +197,7 @@ function buildStampFields(
           type: p.type,
           rect: p.rect,
           value: p.type === 'initial' ? initialsOf(name) : name,
+          ...auth,
         }
       }
       case 'name':
