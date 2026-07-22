@@ -4,10 +4,16 @@ import { findTool } from '@exsto/mcp-tools'
 // and import the AUTHED client-portal allowlist that gates this route.
 import '@exsto/legal/mcp'
 import { isClientPortalAuthedTool } from '@exsto/legal/mcp'
-import { isClientContactActive } from '@exsto/legal'
+import {
+  isClientContactActive,
+  loadExecutedStampPlan,
+  sendEnvelopeCompletionCopies,
+  type RecordSignatureResult,
+} from '@exsto/legal'
 import type { ActionContext } from '@exsto/substrate'
 import { readClientSessionFromCookieHeader } from '@/lib/clientSession'
 import { clientIpFrom } from '@/lib/rateLimit'
+import { stampExecutedCopies, stampedBytesByDocIndex } from '@/lib/esignStamping'
 
 export const runtime = 'nodejs'
 // RUNTIME-AUTORUN-2: a client delivery here (an upload/message that advances a gate) may
@@ -101,6 +107,34 @@ export async function POST(request: Request) {
 
   try {
     const result = await tool.handler(ctx, input)
+    // esign-executed-copy-complete — the token sign route
+    // (/api/sign/submit) has always stamped the executed PDF on completion;
+    // this portal route (legal.esign.portal.sign, dispatched generically
+    // above) never did, so a portal-completed envelope never got its
+    // `.executed.pdf` and every byte route that "prefers the executed copy"
+    // silently fell back to the unsigned original. Run the SAME stamping
+    // loop here (apps/legal-demo/lib/esignStamping.ts — the app layer owns
+    // Storage bytes; the vertical never touches Storage, CI storage-guard),
+    // then email everyone the executed document. Both best-effort: the
+    // signature is already recorded, so a stamping/notify failure must never
+    // turn a successful signing into an error.
+    if (body.toolName === 'legal.esign.portal.sign') {
+      const signed = result as RecordSignatureResult
+      if (signed.completed) {
+        const plans = await loadExecutedStampPlan(ctx, signed.envelopeId).catch((planErr) => {
+          console.error('esign executed-copy plan load failed:', planErr)
+          return []
+        })
+        const stamped = await stampExecutedCopies(plans)
+        await sendEnvelopeCompletionCopies(
+          ctx,
+          signed.envelopeId,
+          stampedBytesByDocIndex(stamped),
+        ).catch((notifyErr) => {
+          console.error('esign completion-copy notify failed:', notifyErr)
+        })
+      }
+    }
     return NextResponse.json({ result })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

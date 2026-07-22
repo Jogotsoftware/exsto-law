@@ -4,6 +4,7 @@
 // delegate every decision here.
 import { describe, expect, it } from 'vitest'
 import {
+  completionRecipients,
   copyRecipients,
   normalizeRole,
   planInitialDispatch,
@@ -147,5 +148,42 @@ describe('copyRecipients', () => {
         req('d', 'receives_copy', 3, 'pending'),
       ]),
     ).toEqual(['b', 'd'])
+  })
+})
+
+// esign-executed-copy-complete — every signer AND copy recipient gets the
+// executed document once the envelope completes; needs_to_view is excluded
+// (they never sign and already got a view link at send).
+describe('completionRecipients', () => {
+  it('includes needs_to_sign and receives_copy, excludes needs_to_view', () => {
+    expect(
+      completionRecipients([
+        req('a', 'needs_to_sign', 1, 'signed'),
+        req('b', 'receives_copy', 1, 'pending'),
+        req('c', 'needs_to_view', 1, 'delivered'),
+      ]),
+    ).toEqual(['a', 'b'])
+  })
+
+  it('returns every signer when there are no copy recipients', () => {
+    expect(
+      completionRecipients([
+        req('a', 'needs_to_sign', 1, 'signed'),
+        req('b', 'needs_to_sign', 2, 'signed'),
+      ]),
+    ).toEqual(['a', 'b'])
+  })
+
+  it('returns empty for an envelope with only viewers', () => {
+    expect(completionRecipients([req('a', 'needs_to_view', 1, 'delivered')])).toEqual([])
+  })
+
+  it('preserves input order (not send order — the caller does not re-sort)', () => {
+    expect(
+      completionRecipients([
+        req('b', 'receives_copy', 3, 'pending'),
+        req('a', 'needs_to_sign', 1, 'signed'),
+      ]),
+    ).toEqual(['b', 'a'])
   })
 })

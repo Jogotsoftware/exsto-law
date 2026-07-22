@@ -144,6 +144,12 @@ export function executedPdfObjectKey(objectKey: string): string {
 
 export interface ExecutedStampPlan {
   envelopeId: string
+  /** esign-executed-copy-complete — this document's position in the envelope's
+   *  send order (same 0-based index the file byte routes use as `?doc=N`).
+   *  Lets a caller that stamps multiple plans (ES-MULTIDOC-1) match each
+   *  stamped result back to its document (e.g. to attach it to the
+   *  completion email — sendEnvelopeCompletionCopies). */
+  docIndex: number
   objectKey: string
   executedObjectKey: string
   filename: string
@@ -335,6 +341,7 @@ export async function loadExecutedStampPlan(
       if (docPlacements.length === 0) continue
       plans.push({
         envelopeId,
+        docIndex: d,
         objectKey: docRow.object_key,
         executedObjectKey: executedPdfObjectKey(docRow.object_key),
         filename: docRow.filename ?? 'document.pdf',

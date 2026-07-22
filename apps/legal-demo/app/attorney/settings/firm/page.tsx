@@ -311,6 +311,205 @@ export default function FirmDetailsPage(): React.ReactElement {
           )}
         </div>
       )}
+
+      <EngagementAgreementCard />
     </>
+  )
+}
+
+// ── ENGAGEMENT-DOC-1 P3 — the firm's engagement agreement ────────────────────
+// Upload the firm's real engagement letter (PDF/DOCX): the letter is parsed via
+// the same stateless import route the Templates builder uses, then converted
+// server-side into the firm's engagement-agreement merge template (client name/
+// company become merge fields; the client acceptance block becomes the live
+// signing area). The portal gate shows the merged document to every client.
+interface EngagementAgreementPointer {
+  template_id: string
+  version: number
+  uploaded_at: string
+  source_filename: string | null
+  details: {
+    hourly_rate?: string
+    litigation_rate?: string
+    retainer?: string
+    attorney_name?: string
+    signer_label?: string
+  }
+}
+
+function EngagementAgreementCard(): React.ReactElement {
+  const [agreement, setAgreement] = useState<EngagementAgreementPointer | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState<'upload' | 'remove' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await callAttorneyMcp<{ agreement: EngagementAgreementPointer | null }>({
+        toolName: 'legal.firm.get_engagement_agreement',
+      })
+      setAgreement(r.agreement)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoaded(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  async function onUpload(file: File): Promise<void> {
+    setBusy('upload')
+    setError(null)
+    setDone(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const parsed = await fetch('/api/attorney/templates/import', { method: 'POST', body: form })
+      const parsedJson = (await parsed.json()) as { text?: string; error?: string }
+      if (!parsed.ok || !parsedJson.text) {
+        throw new Error(parsedJson.error ?? 'Could not read the file.')
+      }
+      // The conversion is a full drafting-model pass (~80s on a multi-page
+      // letter), so it runs OFF the request on the worker — we enqueue and poll
+      // for the outcome instead of holding the request open (which 504'd).
+      const { requestId } = await callAttorneyMcp<{ requestId: string }>({
+        toolName: 'legal.firm.import_engagement_agreement',
+        input: { markdown: parsedJson.text, sourceFilename: file.name },
+      })
+      const outcome = await pollImportResult(requestId)
+      if (outcome.status === 'failed') {
+        throw new Error(outcome.error ?? 'The engagement agreement could not be imported.')
+      }
+      await refresh()
+      setDone('Engagement agreement is live — clients now sign it in the portal.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Poll the worker outcome. The model pass can take 1–2 min; poll every 3s up to
+  // 4 min, then surface a timeout the attorney can retry.
+  async function pollImportResult(
+    requestId: string,
+  ): Promise<{ status: 'completed' | 'failed'; error?: string }> {
+    const deadline = Date.now() + 4 * 60 * 1000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000))
+      const { result } = await callAttorneyMcp<{
+        result: { status: 'completed' | 'failed'; error?: string } | null
+      }>({
+        toolName: 'legal.firm.import_engagement_agreement.result',
+        input: { requestId },
+      })
+      if (result) return result
+    }
+    return { status: 'failed', error: 'Timed out converting the letter — please try again.' }
+  }
+
+  async function onRemove(): Promise<void> {
+    setBusy('remove')
+    setError(null)
+    setDone(null)
+    try {
+      await callAttorneyMcp({ toolName: 'legal.firm.clear_engagement_agreement' })
+      await refresh()
+      setDone('Removed. The portal gate shows your text terms only.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const details = agreement?.details ?? {}
+  const detailBits = [
+    details.hourly_rate ? `$${details.hourly_rate}/hr` : null,
+    details.litigation_rate ? `$${details.litigation_rate}/hr litigation` : null,
+    details.retainer ? `$${details.retainer} retainer` : null,
+  ].filter(Boolean)
+
+  return (
+    <div className="li-set-card" style={{ marginTop: 16 }}>
+      <SettingsHeader title="Engagement agreement" />
+      {error && <SettingsAlert tone="error">{error}</SettingsAlert>}
+      {done && <SettingsAlert tone="success">{done}</SettingsAlert>}
+      {!loaded ? (
+        <SettingsLoading />
+      ) : (
+        <>
+          {agreement ? (
+            <div className="li-set-kv-grid">
+              <div>
+                <div className="li-set-kv-label">Source</div>
+                <div className="li-set-kv-value">
+                  {agreement.source_filename ?? 'Uploaded letter'} · v{agreement.version}
+                </div>
+              </div>
+              <div>
+                <div className="li-set-kv-label">Parsed terms</div>
+                <div className="li-set-kv-value">
+                  {detailBits.length ? detailBits.join(' · ') : '—'}
+                </div>
+              </div>
+              <div className="li-set-kv-full">
+                <div className="li-set-kv-value">
+                  Clients see and sign this agreement in the portal before messaging or booking.{' '}
+                  <Link href="/attorney/templates">Review the template</Link> to check the merged
+                  fields.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p style={{ margin: '4px 0 12px' }}>
+              Upload your firm&apos;s engagement letter (PDF or Word). Client-specific details
+              become merge fields, and every portal client signs the merged agreement before
+              messaging or booking unlocks.
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <label className="li-set-btn li-set-btn-primary" style={{ cursor: 'pointer' }}>
+              {busy === 'upload'
+                ? 'Converting…'
+                : agreement
+                  ? 'Replace agreement'
+                  : 'Upload agreement'}
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.txt,.md"
+                style={{ display: 'none' }}
+                disabled={busy !== null}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) onUpload(f)
+                }}
+              />
+            </label>
+            {agreement && (
+              <button
+                type="button"
+                className="li-set-btn"
+                disabled={busy !== null}
+                onClick={onRemove}
+              >
+                {busy === 'remove' ? 'Removing…' : 'Remove'}
+              </button>
+            )}
+          </div>
+          {busy === 'upload' && (
+            <p className="li-set-hint" style={{ marginTop: 10 }}>
+              Reading your letter and building the merge template — this can take a minute or two.
+              You can leave this page; it keeps working.
+            </p>
+          )}
+        </>
+      )}
+    </div>
   )
 }
