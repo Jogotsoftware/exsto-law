@@ -535,3 +535,48 @@ describe('field bindings override bind resolution (assembleRecipientRows)', () =
     })
   })
 })
+
+describe('PRESIGN-1 — pre-signed attorney role', () => {
+  it('parse honors `presigned` only on the attorney_of_record bind', () => {
+    const cfg = parseTemplateEsignConfig({
+      signable: true,
+      roles: [
+        { key: 'attorney', bind: 'attorney_of_record', order: 1, presigned: true },
+        // presigned on a client row is nonsensical/unsafe → dropped.
+        { key: 'client', bind: 'matter_primary_contact', order: 2, presigned: true },
+      ],
+    })
+    expect(cfg.roles.find((r) => r.key === 'attorney')?.presigned).toBe(true)
+    expect(cfg.roles.find((r) => r.key === 'client')?.presigned).toBeUndefined()
+  })
+
+  it('assembleRecipientRows propagates presigned only for the attorney bind', async () => {
+    const resolve = async (bind: string): Promise<ResolvedIdentity> =>
+      bind === 'attorney_of_record'
+        ? { name: 'Atty', email: 'atty@firm.test', title: null, contactEntityId: null }
+        : { name: 'Client', email: 'client@example.com', title: null, contactEntityId: null }
+    const rows = await assembleRecipientRows(
+      [
+        {
+          key: 'attorney',
+          label: 'Attorney',
+          recipientRole: 'needs_to_sign',
+          bind: 'attorney_of_record',
+          order: 1,
+          presigned: true,
+        },
+        {
+          key: 'client',
+          label: 'Client',
+          recipientRole: 'needs_to_sign',
+          bind: 'matter_primary_contact',
+          order: 2,
+          presigned: true,
+        },
+      ] as TemplateEsignConfig['roles'],
+      resolve,
+    )
+    expect(rows.find((r) => r.signerKey === 'attorney')?.presigned).toBe(true)
+    expect(rows.find((r) => r.signerKey === 'client')?.presigned).toBe(false)
+  })
+})

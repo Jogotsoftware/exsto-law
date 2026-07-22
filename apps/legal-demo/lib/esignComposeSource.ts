@@ -34,6 +34,7 @@ export function workflowStepRecipientRows(seeds: WorkflowStepRecipientSeed[]): D
     role: r.role,
     order: r.order,
     key: r.key,
+    ...(r.presigned ? { presigned: true } : {}),
   }))
 }
 

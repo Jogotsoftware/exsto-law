@@ -25,22 +25,31 @@ export function normalizeRole(role: string | null | undefined): SignerRole {
 export interface DispatchRecipient {
   role?: SignerRole | string | null
   order?: number | null
+  // PRESIGN-1 — an attorney whose standing signature is applied automatically at
+  // send (template role marked pre-signed). Such a recipient starts 'signed', is
+  // never delivered/emailed, and is excluded from the first-signing-group
+  // computation so the FIRST HUMAN signer (the client) is delivered instead.
+  presigned?: boolean | null
 }
 
 // The initial signer_status for each recipient at send time. Index-aligned
 // with the input. Orders default 1-based by position (the handler's existing
 // rule); Math.min over no signing recipients yields Infinity → no signing
 // group is delivered (the builder refuses signer-less envelopes upstream).
+// A pre-signed recipient (PRESIGN-1) starts 'signed' and never counts toward the
+// first deliverable group — so a pre-signed attorney at order 1 still lets the
+// client at order 2 be the first delivered signer.
 export function planInitialDispatch(
   recipients: DispatchRecipient[],
-): Array<'delivered' | 'pending'> {
+): Array<'delivered' | 'pending' | 'signed'> {
   const orders = recipients.map((r, i) => Number(r.order ?? i + 1) || 1)
   const firstSigningOrder = Math.min(
     ...recipients.flatMap((r, i) =>
-      normalizeRole(r.role as string) === 'needs_to_sign' ? [orders[i]!] : [],
+      normalizeRole(r.role as string) === 'needs_to_sign' && !r.presigned ? [orders[i]!] : [],
     ),
   )
   return recipients.map((r, i) => {
+    if (r.presigned) return 'signed'
     const role = normalizeRole(r.role as string)
     if (role === 'needs_to_view') return 'delivered'
     if (role === 'receives_copy') return 'pending'

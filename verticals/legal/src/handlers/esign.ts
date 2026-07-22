@@ -64,6 +64,14 @@ interface SendSigner {
   /** ESIGN-UNIFY-1 (ES-1): defaults to 'needs_to_sign' when absent — every
    *  caller written before this migration keeps its exact prior behavior. */
   role?: SignerRole | null
+  /** PRESIGN-1 — this signer's request is completed at SEND with the attorney's
+   *  standing signature (resolved server-side by the send builder). Its request
+   *  starts 'signed', is never delivered, and the client becomes the first turn.
+   *  presigned_signature_data is a PNG/JPEG data URL (drawn/uploaded) or absent
+   *  (typed → the printed name is the signature). */
+  presigned?: boolean | null
+  presigned_signature_data?: string | null
+  presigned_signature_name?: string | null
 }
 
 /** One document in an envelope's ordered set (ES-MULTIDOC-1). */
@@ -307,6 +315,53 @@ registerActionHandler('esign.send', async (ctx, client, payload, actionId) => {
       sourceRef: ctx.actorId,
     })
     if (initialStatus === 'delivered') deliveredAtSend.push(requestId)
+    // PRESIGN-1 — a pre-signed attorney signer is COMPLETED at send with their
+    // standing signature (resolved server-side by the send builder, never the
+    // caller). Same request writes an interactive esign.sign would make, minus a
+    // delivery/turn: the signature, a timestamp, a system consent line, and the
+    // esign.signed event the routing + executed-copy machinery reads. planNext-
+    // Delivery already treats status==='signed' as resolved, so the client (next
+    // order) is the first real turn and the envelope completes when they sign.
+    if (initialStatus === 'signed' && s.presigned) {
+      const presignedAt = new Date().toISOString()
+      const sourceRefReq = `signature_request:${requestId}`
+      await setAttr(client, tenantId, actionId, requestId, 'signed_at', presignedAt, {
+        sourceRef: sourceRefReq,
+      })
+      await setAttr(
+        client,
+        tenantId,
+        actionId,
+        requestId,
+        'signer_consent',
+        'Applied automatically from the attorney’s saved signature (pre-signed).',
+        { sourceRef: sourceRefReq },
+      )
+      await setAttr(
+        client,
+        tenantId,
+        actionId,
+        requestId,
+        'signature_data',
+        s.presigned_signature_data ?? s.presigned_signature_name ?? s.name ?? s.email,
+        { sourceRef: sourceRefReq },
+      )
+      await insertEvent(client, {
+        tenantId,
+        actionId,
+        eventKindName: 'esign.signed',
+        primaryEntityId: envelopeId,
+        secondaryEntityIds: [requestId],
+        data: {
+          signature_name: s.presigned_signature_name ?? s.name ?? '',
+          signed_at: presignedAt,
+          signer_ip: null,
+          presigned: true,
+        },
+        sourceType: 'system',
+        sourceRef: sourceRefReq,
+      })
+    }
     await insertRelationship(client, {
       tenantId,
       actionId,

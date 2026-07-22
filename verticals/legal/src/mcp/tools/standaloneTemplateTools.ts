@@ -31,7 +31,7 @@ import type { ActionContext } from '@exsto/substrate'
 const ESIGN_CONFIG_SCHEMA = {
   type: 'object',
   description:
-    "Template-embedded e-sign config (supersedes `signature`): { signable: boolean, roles: [{ key, label, recipientRole: 'needs_to_sign'|'needs_to_view'|'receives_copy', bind: 'matter_primary_contact'|'attorney_of_record'|'manual'|'contact_role:<name>', order: number }] }. `key` must match the marker signer key ({{sign:<key>}}) the role owns in the body. A provided config supersedes the prior; { signable: false } unsigns.",
+    "Template-embedded e-sign config (supersedes `signature`): { signable: boolean, roles: [{ key, label, recipientRole: 'needs_to_sign'|'needs_to_view'|'receives_copy', bind: 'matter_primary_contact'|'attorney_of_record'|'manual'|'contact_role:<name>', order: number, presigned?: boolean }] }. `key` must match the marker signer key ({{sign:<key>}}) the role owns in the body. `presigned: true` (attorney_of_record only) applies the attorney's saved signature automatically at send so only the client signs — ignored on any other bind. A provided config supersedes the prior; { signable: false } unsigns.",
   properties: {
     signable: { type: 'boolean' },
     roles: {
@@ -47,6 +47,7 @@ const ESIGN_CONFIG_SCHEMA = {
           },
           bind: { type: 'string' },
           order: { type: 'number' },
+          presigned: { type: 'boolean' },
         },
         required: ['key'],
         additionalProperties: false,

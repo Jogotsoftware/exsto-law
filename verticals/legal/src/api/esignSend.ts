@@ -16,6 +16,7 @@ import { submitAction, type ActionContext } from '@exsto/substrate'
 import type { EsignField } from '../esign/fields.js'
 import type { FieldPlacement } from '../esign/placements.js'
 import type { SignerRole } from '../esign/routing.js'
+import { getAttorneySignature } from './attorneySignature.js'
 
 /** A recipient's role in the envelope (§9.2). Absent/legacy = needs_to_sign.
  *  One source of truth: esign/routing.ts (the pure dispatch planner). */
@@ -44,6 +45,11 @@ export interface EnvelopeRecipient {
   order?: number | null
   channel: 'portal' | 'link'
   role?: RecipientRole | null
+  /** PRESIGN-1 — this recipient (the attorney) is completed at send with their
+   *  saved standing signature; the builder resolves that signature server-side
+   *  (never trusts a client-supplied one) and blocks the send if none is on
+   *  file. Only honored on a needs_to_sign recipient. */
+  presigned?: boolean | null
 }
 
 /** One document in an envelope's ordered set (ES-MULTIDOC-1). */
@@ -112,6 +118,29 @@ export async function buildAndSubmitEnvelope(
     }
   }
 
+  // PRESIGN-1 — resolve the attorney's standing signature ONCE, server-side, for
+  // any pre-signed recipient. Never trust a caller-supplied signature: the value
+  // written into the executed document comes only from what the attorney saved.
+  // Blocks (Joe's decision) when pre-signing is on but no signature is on file,
+  // and refuses a pre-signed-only envelope (nothing left for a human to do).
+  const isSigning = (r: EnvelopeRecipient): boolean => !r.role || r.role === 'needs_to_sign'
+  const hasPresigned = recipients.some((r) => r.presigned && isSigning(r))
+  let presignedSig: { data: string | null; name: string } | null = null
+  if (hasPresigned) {
+    if (!recipients.some((r) => isSigning(r) && !r.presigned)) {
+      throw new Error(
+        'This document is set to pre-sign your signature, but there’s no one else left to sign it — add at least one other signer.',
+      )
+    }
+    const saved = await getAttorneySignature(ctx)
+    if (!saved) {
+      throw new Error(
+        'Your signature is set to apply automatically, but you haven’t saved one yet. Save your signature in Settings, then send.',
+      )
+    }
+    presignedSig = { data: saved.data, name: saved.name }
+  }
+
   // ES-MULTIDOC-1: the ordered document set. documents[0] is the primary the
   // envelope entity + every single-doc reader keys on; the handler writes one
   // envelope_of per entry with its order. An empty/absent list ⇒ the single
@@ -142,15 +171,25 @@ export async function buildAndSubmitEnvelope(
       dispatched: input.dispatched,
       correlation_id: randomUUID(),
       subject: input.subject,
-      signers: recipients.map((r, i) => ({
-        email: r.email.trim(),
-        name: r.name ?? null,
-        key: r.key ?? null,
-        title: r.title ?? null,
-        order: r.order ?? i + 1,
-        channel: r.channel,
-        role: r.role ?? 'needs_to_sign',
-      })),
+      signers: recipients.map((r, i) => {
+        const presigned = Boolean(r.presigned && isSigning(r) && presignedSig)
+        return {
+          email: r.email.trim(),
+          name: r.name ?? null,
+          key: r.key ?? null,
+          title: r.title ?? null,
+          order: r.order ?? i + 1,
+          channel: r.channel,
+          role: r.role ?? 'needs_to_sign',
+          ...(presigned
+            ? {
+                presigned: true,
+                presigned_signature_data: presignedSig!.data,
+                presigned_signature_name: presignedSig!.name || r.name || null,
+              }
+            : {}),
+        }
+      }),
       fields: input.fields ?? [],
       placements: input.placements ?? [],
       message: input.message ?? null,

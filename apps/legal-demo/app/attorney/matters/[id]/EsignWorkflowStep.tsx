@@ -30,6 +30,8 @@ interface StepRecipient {
   email: string | null
   title: string | null
   contactEntityId: string | null
+  // PRESIGN-1 — attorney role marked pre-signed; signs automatically at send.
+  presigned?: boolean
 }
 
 interface StepContext {
@@ -113,6 +115,7 @@ export function EsignWorkflowStep({
       order: r.order,
       key: r.signerKey,
       label: r.label,
+      ...(r.presigned ? { presigned: true } : {}),
     }))
     return (
       <Modal title={stage.label} onClose={() => setComposing(false)} size="wide">

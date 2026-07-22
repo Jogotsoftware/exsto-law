@@ -296,7 +296,15 @@ export function TemplateEsignPanel({
                   <select
                     value={role.bind}
                     aria-label={`Role ${i + 1} recipient binding`}
-                    onChange={(e) => patchRole(i, { bind: e.target.value as EsignRoleBindKind })}
+                    onChange={(e) => {
+                      const bind = e.target.value as EsignRoleBindKind
+                      // Pre-signing is attorney-only — drop it if this row is no
+                      // longer the attorney (parse enforces this on save too).
+                      patchRole(i, {
+                        bind,
+                        ...(bind !== 'attorney_of_record' ? { presigned: false } : {}),
+                      })
+                    }}
                   >
                     {BIND_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -310,6 +318,24 @@ export function TemplateEsignPanel({
                   </select>
                 </label>
               </div>
+
+              {/* PRESIGN-1 — the attorney can apply their saved signature
+                  automatically, so only the client(s) ever have to sign. Only
+                  offered on the attorney row; the send blocks if no signature is
+                  saved yet (Settings → signature). */}
+              {role.bind === 'attorney_of_record' && (
+                <label className="li-tplsign-presign">
+                  <input
+                    type="checkbox"
+                    checked={role.presigned === true}
+                    onChange={(e) => patchRole(i, { presigned: e.target.checked })}
+                  />
+                  <span>
+                    Pre-sign automatically — apply my saved signature at send, so only the client
+                    needs to sign.
+                  </span>
+                </label>
+              )}
 
               {/* ESIGN-FIELDS-1 — identity from merge fields (drag targets). */}
               <div className="li-tplsign-slots" aria-label={`Signer ${i + 1} identity fields`}>
