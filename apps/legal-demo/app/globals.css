@@ -26370,23 +26370,32 @@ details.li-brief-research summary:hover {
   border-color: #c6a968;
   color: #8a6d2f;
 }
-/* ── ENGAGEMENT-DOC-1 — the merged agreement inside the engagement gate ────── */
-.li-cp-agreement-doc {
-  max-height: 46vh;
+/* ── ENGAGEMENT-DOC-1 — the merged agreement, rendered as a real document sheet
+   inside the engagement gate. The frame is the scroll surround (like .doc-canvas);
+   the paper reuses the public document view's .doc-rendered.doc-paper look
+   (serif, letter margins, drop shadow) scaled down to fit the modal. */
+.li-cp-agreement-frame {
+  max-height: 52vh;
   overflow-y: auto;
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(15, 23, 42, 0.05), transparent),
+    var(--surface-2, #eef1f5);
   border: 1px solid var(--li-line, #e3e6ee);
-  border-radius: 10px;
-  padding: 18px 20px;
-  margin-bottom: 12px;
-  background: #fff;
-  font-size: 0.86rem;
-  line-height: 1.55;
+  border-radius: 12px;
+  padding: 18px 16px;
+  margin-bottom: 14px;
 }
-.li-cp-agreement-doc h1,
-.li-cp-agreement-doc h2,
-.li-cp-agreement-doc h3 {
-  font-size: 1em;
-  margin: 0.9em 0 0.4em;
+.doc-paper.li-cp-agreement-paper {
+  max-width: 100%;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  padding: clamp(1.4rem, 6%, 2.4rem) clamp(1.2rem, 7%, 2.6rem);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 8px 24px rgba(15, 23, 42, 0.12);
+}
+.doc-paper.li-cp-agreement-paper h1 {
+  font-size: 1.15rem;
 }
 .li-cp-sign-row {
   display: flex;
