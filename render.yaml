@@ -23,3 +23,13 @@ services:
       # Idle poll interval (ms) when the job queue is empty.
       - key: WORKER_IDLE_POLL_MS
         value: "2000"
+      # Resend transactional email. The notification engine (deliverNotification)
+      # runs HERE in the worker, so it needs its own Resend creds — the Netlify
+      # env does not reach this process. Without these, client-facing mail
+      # (e-sign signing links, booking notices) falls back to the attorney's
+      # Gmail, which is usually not connected → silent non-delivery.
+      # Must match the Netlify values (same key, same verified from-domain).
+      - key: CLIENT_EMAIL_API_KEY
+        sync: false
+      - key: CLIENT_EMAIL_FROM
+        value: noreply@revenueinstruments.com
