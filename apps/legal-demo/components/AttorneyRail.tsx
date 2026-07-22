@@ -85,6 +85,11 @@ const NAV: NavNode[] = [
       { href: '/attorney/settings/integrations', label: 'Integrations', Icon: Share2Icon },
       { href: '/attorney/settings/firm', label: 'Firm Details', Icon: Building2Icon },
       {
+        href: '/attorney/settings/engagement',
+        label: 'Engagement Letters',
+        Icon: SignatureIcon,
+      },
+      {
         href: '/attorney/settings/invoice-template',
         label: 'Invoice Template',
         Icon: FileTextIcon,
