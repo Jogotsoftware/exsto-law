@@ -11056,48 +11056,10 @@ input[type='number'] {
   margin-top: 14px;
 }
 
-/* --- ESIGN-ATTORNEY-REVIEW-1: "Awaiting your signature" section ---------- */
-.li-rev-awaiting {
-  margin-bottom: 24px;
-}
-.li-rev-awaiting-title {
-  margin: 0 0 10px;
-  font-size: 12.5px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--li-gold-deep);
-}
-.li-rev-await-list {
-  background: var(--li-card);
-  border: 1px solid var(--li-border);
-  border-radius: var(--li-radius-card);
-  box-shadow: var(--li-shadow-card);
-  overflow: hidden;
-}
-.li-rev-await-row {
-  display: grid;
-  grid-template-columns: 1.1fr 1.7fr 1fr auto;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 22px;
-  border-bottom: 1px solid var(--li-border-soft);
-}
-.li-rev-await-row:last-child {
-  border-bottom: none;
-}
-.li-rev-await-matter {
-  font-size: 16px;
-  color: var(--li-fg);
-}
-.li-rev-await-doc {
-  font-size: 14.5px;
-  color: var(--li-fg);
-}
-.li-rev-await-when {
-  font-size: 13px;
-  color: var(--li-muted);
-}
+/* --- TASK-QUEUE-1: per-row action cluster (Brief · Email · primary action) —
+   originally the ESIGN-ATTORNEY-REVIEW-1 "Awaiting your signature" section's
+   button styles; reused as-is for every row's action cluster in the unified
+   Task Queue table (li-rev-await-actions / -act / -sign below). ------------ */
 .li-rev-await-sign {
   justify-self: end;
   display: inline-flex;
@@ -11248,20 +11210,34 @@ input[type='number'] {
 }
 
 /* --- Queue: table -------------------------------------------------------- */
+/* TASK-QUEUE-1: overflow-x scrolls horizontally on narrow viewports instead of
+   crushing columns unreadable (usable down to ~600px); overflow-y stays hidden
+   so the card's rounded corners still clip the header/last row. */
 .li-rev-table {
   background: var(--li-card);
   border: 1px solid var(--li-border);
   border-radius: var(--li-radius-card);
   box-shadow: var(--li-shadow-card);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 .li-rev-thead,
 .li-rev-row {
   display: grid;
-  grid-template-columns: 44px 1.15fr 1.25fr 1.5fr 64px 1.15fr 168px;
+  grid-template-columns:
+    36px 126px minmax(90px, 1fr) minmax(70px, 0.85fr) minmax(180px, 1.9fr) minmax(130px, 1.1fr)
+    minmax(200px, auto);
   align-items: center;
   gap: 16px;
   padding: 14px 22px;
+  min-width: 760px;
+}
+@media (max-width: 900px) {
+  .li-rev-thead,
+  .li-rev-row {
+    gap: 12px;
+    padding: 12px 16px;
+  }
 }
 .li-rev-thead {
   background: #f6f8fc;
@@ -11323,6 +11299,39 @@ input[type='number'] {
 .li-rev-client {
   font-size: 14px;
   font-weight: 600;
+  color: var(--li-fg);
+}
+/* TASK-QUEUE-1: TYPE column badge — one muted pill per source, navy/gold family. */
+.li-rev-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.li-rev-badge--document_review {
+  background: #eef2fb;
+  color: var(--li-navy);
+}
+.li-rev-badge--esign {
+  background: var(--li-info-bg);
+  color: var(--li-info);
+}
+.li-rev-badge--billing {
+  background: var(--li-gold-bg);
+  color: var(--li-gold-text);
+}
+.li-rev-badge--client_request {
+  background: var(--li-warn-bg);
+  color: var(--li-warn);
+}
+/* TASK-QUEUE-1: TASK column (the row's title) — replaces the old
+   document-kind-only cell now that a row can be any of four task types. */
+.li-rev-task {
+  font-size: 14.5px;
   color: var(--li-fg);
 }
 .li-rev-kindcell {

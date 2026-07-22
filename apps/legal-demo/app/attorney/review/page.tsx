@@ -1,54 +1,58 @@
 'use client'
 
+// TASK-QUEUE-1 — the attorney Task Queue: one sortable/filterable table
+// aggregating every task on the attorney across four sources (document review,
+// e-sign, billing, client requests) — legal.attorney.task_queue
+// (verticals/legal/src/queries/attorneyTasks.ts). Route stays /attorney/review
+// (deep links from the old Review Queue rely on it); the nav label moved to
+// "Tasks" in AttorneyRail.tsx.
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { PenLine, Eye, Mail } from 'lucide-react'
+import { FileSearch, PenLine, Eye, Receipt, HelpCircle, Mail } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
 import { BriefButton } from '@/components/BriefButton'
 import { EmailComposeModal } from '@/components/EmailComposeModal'
 
-// Shared with the detail page: a step-through review session is the ordered list of
-// selected draft ids + where we are in it, kept in sessionStorage (per tab) and
-// flagged on the URL with ?review=session.
+// Shared with the detail page: a step-through review session (document_review
+// rows only) is the ordered list of selected document-version ids + where we
+// are in it, kept in sessionStorage (per tab) and flagged on the URL with
+// ?review=session.
 export const REVIEW_SESSION_KEY = 'reviewSession'
 
-interface PendingDraft {
-  documentVersionId: string
-  documentEntityId: string
-  matterEntityId: string
-  matterNumber: string
-  clientName: string
-  documentKind: string
-  versionNumber: number
-  status: string
-  recordedAt: string
-  channel: 'document' | 'communication'
-  emailSubject: string | null
-  emailToRole: string | null
-  voiceViolations: { rule: string; where: string; offending: string }[] | null
-}
+type AttorneyTaskType = 'document_review' | 'esign' | 'billing' | 'client_request'
 
-// ESIGN-ATTORNEY-REVIEW-1 — envelopes where it's currently the attorney's own
-// turn to sign (they were added as a countersigner, #476). Mirrors
-// AwaitingAttorneySignature (verticals/legal/src/api/esign.ts).
-interface AwaitingSignature {
-  requestId: string
-  envelopeId: string
-  subject: string | null
+// Mirrors verticals/legal/src/queries/attorneyTasks.ts's AttorneyTask — a
+// client component can't import the server-side vertical package directly, so
+// the shape rides over MCP (legal.attorney.task_queue) like every other
+// client-facing read.
+interface AttorneyTask {
+  id: string
+  type: AttorneyTaskType
+  typeLabel: string
+  subtype?: string
+  title: string
+  clientName: string | null
   matterNumber: string | null
   matterEntityId: string | null
   contactEntityId: string | null
-  documentKind: string | null
-  sentAt: string | null
+  date: string | null
+  dateLabel: string
+  status: string | null
+  workHref: string
+  viewHref?: string | null
 }
 
-// Sortable columns. WP-C adds `clientName` (the built CLIENT column).
-type SortKey = 'recordedAt' | 'matterNumber' | 'clientName' | 'documentKind'
+type SortKey = 'date' | 'type' | 'client' | 'matter'
+type TypeFilter = 'all' | AttorneyTaskType
 
-function humanizeKind(kind: string): string {
-  return kind.replace(/_/g, ' ')
-}
+const TYPE_FILTERS: { value: TypeFilter; label: string }[] = [
+  { value: 'all', label: 'All Tasks' },
+  { value: 'document_review', label: 'Document Review' },
+  { value: 'esign', label: 'E-Sign' },
+  { value: 'billing', label: 'Billing' },
+  { value: 'client_request', label: 'Client Request' },
+]
 
 // Comp caret indicators: ⇅ idle, ▴ asc, ▾ desc — colored gold when active.
 function SortCaret({
@@ -68,85 +72,84 @@ function SortCaret({
   )
 }
 
-export default function ReviewQueue() {
+export default function TaskQueue() {
   const router = useRouter()
-  const [drafts, setDrafts] = useState<PendingDraft[] | null>(null)
+  const [tasks, setTasks] = useState<AttorneyTask[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [awaiting, setAwaiting] = useState<AwaitingSignature[]>([])
-  // The awaiting-signature row whose "Send email" modal is open (by requestId).
-  const [emailFor, setEmailFor] = useState<AwaitingSignature | null>(null)
+  // The row whose "Email" modal is open — one at a time.
+  const [emailFor, setEmailFor] = useState<AttorneyTask | null>(null)
 
+  // Batch-review selection is document_review-only (the only type "Begin
+  // Review" walks); tracked by task id.
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
-  const [kindFilter, setKindFilter] = useState('all')
-  const [sortKey, setSortKey] = useState<SortKey>('recordedAt')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortAsc, setSortAsc] = useState(false)
 
   async function load() {
     try {
-      const res = await callAttorneyMcp<{ drafts: PendingDraft[] }>({
-        toolName: 'legal.draft.list_pending',
+      const res = await callAttorneyMcp<{ tasks: AttorneyTask[] }>({
+        toolName: 'legal.attorney.task_queue',
       })
-      setDrafts(res.drafts)
+      setTasks(res.tasks)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  // Separate load/failure path from the drafts table: a hiccup fetching
-  // "awaiting your signature" should never blank out the drafts queue below it.
-  async function loadAwaiting() {
-    try {
-      const res = await callAttorneyMcp<{ signatures: AwaitingSignature[] }>({
-        toolName: 'legal.esign.awaiting_me',
-      })
-      setAwaiting(res.signatures)
-    } catch {
-      setAwaiting([])
-    }
-  }
-
   useEffect(() => {
     load()
-    loadAwaiting()
   }, [])
 
-  const kinds = useMemo(
-    () => Array.from(new Set((drafts ?? []).map((d) => d.documentKind))).sort(),
-    [drafts],
-  )
+  const counts = useMemo(() => {
+    const c: Record<AttorneyTaskType, number> = {
+      document_review: 0,
+      esign: 0,
+      billing: 0,
+      client_request: 0,
+    }
+    for (const t of tasks ?? []) c[t.type]++
+    return c
+  }, [tasks])
 
   const visible = useMemo(() => {
-    let list = drafts ?? []
-    if (kindFilter !== 'all') list = list.filter((d) => d.documentKind === kindFilter)
+    let list = tasks ?? []
+    if (typeFilter !== 'all') list = list.filter((t) => t.type === typeFilter)
     const q = query.trim().toLowerCase()
     if (q) {
       list = list.filter(
-        (d) =>
-          d.matterNumber.toLowerCase().includes(q) ||
-          d.clientName.toLowerCase().includes(q) ||
-          humanizeKind(d.documentKind).toLowerCase().includes(q) ||
-          (d.emailSubject ?? '').toLowerCase().includes(q),
+        (t) =>
+          (t.clientName ?? '').toLowerCase().includes(q) ||
+          (t.matterNumber ?? '').toLowerCase().includes(q) ||
+          t.title.toLowerCase().includes(q) ||
+          t.typeLabel.toLowerCase().includes(q),
       )
     }
     const sorted = [...list].sort((a, b) => {
       let cmp = 0
-      if (sortKey === 'recordedAt') cmp = a.recordedAt.localeCompare(b.recordedAt)
-      else if (sortKey === 'matterNumber') cmp = a.matterNumber.localeCompare(b.matterNumber)
-      else if (sortKey === 'clientName') cmp = a.clientName.localeCompare(b.clientName)
-      else cmp = a.documentKind.localeCompare(b.documentKind)
+      if (sortKey === 'date') cmp = (a.date ?? '').localeCompare(b.date ?? '')
+      else if (sortKey === 'type') cmp = a.typeLabel.localeCompare(b.typeLabel)
+      else if (sortKey === 'client') cmp = (a.clientName ?? '').localeCompare(b.clientName ?? '')
+      else cmp = (a.matterNumber ?? '').localeCompare(b.matterNumber ?? '')
       return sortAsc ? cmp : -cmp
     })
     return sorted
-  }, [drafts, kindFilter, query, sortKey, sortAsc])
+  }, [tasks, typeFilter, query, sortKey, sortAsc])
 
-  // Selection is scoped to what's visible so a review never opens a hidden row.
-  const visibleIds = useMemo(() => new Set(visible.map((d) => d.documentVersionId)), [visible])
-  const selectedVisible = useMemo(
-    () => [...selected].filter((id) => visibleIds.has(id)),
-    [selected, visibleIds],
+  // Selection (and "select all") is scoped to the document_review rows
+  // currently visible — the checkbox only ever appears on that type, and a
+  // review must never open a hidden row.
+  const visibleReviewIds = useMemo(
+    () => new Set(visible.filter((t) => t.type === 'document_review').map((t) => t.id)),
+    [visible],
   )
-  const allVisibleSelected = visible.length > 0 && selectedVisible.length === visible.length
+  const selectedVisible = useMemo(
+    () => [...selected].filter((id) => visibleReviewIds.has(id)),
+    [selected, visibleReviewIds],
+  )
+  const allVisibleSelected =
+    visibleReviewIds.size > 0 && selectedVisible.length === visibleReviewIds.size
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -160,8 +163,8 @@ export default function ReviewQueue() {
   function toggleAll() {
     setSelected((prev) => {
       const next = new Set(prev)
-      if (allVisibleSelected) visible.forEach((d) => next.delete(d.documentVersionId))
-      else visible.forEach((d) => next.add(d.documentVersionId))
+      if (allVisibleSelected) visibleReviewIds.forEach((id) => next.delete(id))
+      else visibleReviewIds.forEach((id) => next.add(id))
       return next
     })
   }
@@ -173,135 +176,46 @@ export default function ReviewQueue() {
       setSortAsc((v) => !v)
     } else {
       setSortKey(key)
-      setSortAsc(key !== 'recordedAt')
+      setSortAsc(key !== 'date')
     }
   }
 
-  // Begin review (the ONLY thing selection feeds — the batch disposition bar was
-  // cut, FOUNDER DECISION 2026-07-17): walk the selected drafts in order; the
-  // reader auto-advances after each disposition. Ordered ids in sessionStorage.
+  // Begin review: walk the selected document_review rows in order; the reader
+  // auto-advances after each disposition. Ordered ids in sessionStorage.
   function beginReview() {
-    const ids = visible.map((d) => d.documentVersionId).filter((id) => selected.has(id))
+    const ids = visible
+      .filter((t) => t.type === 'document_review' && selected.has(t.id))
+      .map((t) => t.id)
     if (ids.length === 0) return
     sessionStorage.setItem(REVIEW_SESSION_KEY, JSON.stringify({ ids, index: 0 }))
     router.push(`/attorney/review/${ids[0]}?review=session`)
   }
 
-  function openReview(id: string) {
-    router.push(`/attorney/review/${id}`)
-  }
-
-  function openSign(requestId: string) {
-    router.push(`/attorney/sign/${requestId}`)
-  }
-
   return (
     <main className="li-rev">
-      <h1 className="li-rev-title">Review Queue</h1>
+      <h1 className="li-rev-title">Task Queue</h1>
       <p className="li-rev-sub">
-        Drafts the AI produced, and your own signature requests, waiting on you.
+        Everything waiting on you — drafts to review, documents to sign, invoices, and client
+        requests.
       </p>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <div className="alert alert-error li-rev-alert">{error}</div>}
 
-      {/* ESIGN-ATTORNEY-REVIEW-1 — envelopes where the attorney is the current
-          signer (added as a countersigner, #476). Only rendered when non-empty. */}
-      {awaiting.length > 0 && (
-        <section className="li-rev-awaiting">
-          <h2 className="li-rev-awaiting-title">Awaiting your signature</h2>
-          <div className="li-rev-await-list">
-            {awaiting.map((a) => (
-              <div key={a.requestId} className="li-rev-await-row">
-                <span className="li-rev-await-matter">{a.matterNumber || '—'}</span>
-                <span className="li-rev-await-doc">
-                  {a.subject || humanizeKind(a.documentKind ?? 'document')}
-                </span>
-                <span className="li-rev-await-when">
-                  {a.sentAt ? `Sent ${formatDateTime(a.sentAt)}` : ''}
-                </span>
-                <div className="li-rev-await-actions">
-                  <button
-                    type="button"
-                    className="li-rev-await-act"
-                    onClick={() => router.push(`/attorney/esign/${a.envelopeId}`)}
-                    title="View the document"
-                  >
-                    <Eye size={15} aria-hidden />
-                    View
-                  </button>
-                  {a.matterEntityId && (
-                    <BriefButton
-                      lazy
-                      scope={{ kind: 'matter', matterEntityId: a.matterEntityId }}
-                      className="li-rev-await-act"
-                      label="Brief"
-                    />
-                  )}
-                  <button
-                    type="button"
-                    className="li-rev-await-act"
-                    onClick={() => setEmailFor(a)}
-                    title="Send an email on this matter"
-                  >
-                    <Mail size={15} aria-hidden />
-                    Email
-                  </button>
-                  <button
-                    type="button"
-                    className="li-rev-await-sign"
-                    onClick={() => openSign(a.requestId)}
-                  >
-                    <PenLine size={15} aria-hidden />
-                    Sign
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* A second heading only makes sense once there's something above it to
-          distinguish this section from. */}
-      {awaiting.length > 0 && <h2 className="li-rev-awaiting-title">Drafts</h2>}
-
-      {drafts === null && !error && (
+      {tasks === null && !error && (
         <div className="loading-block" role="status">
           <span className="spinner" /> Loading…
         </div>
       )}
 
-      {drafts && drafts.length === 0 && (
+      {tasks && tasks.length === 0 && (
         <div className="li-rev-table">
-          <div className="li-rev-thead">
-            <label className="li-rev-check">
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                onChange={toggleAll}
-                aria-label="Select all"
-              />
-            </label>
-            <button type="button" className="li-rev-th" onClick={() => sortBy('matterNumber')}>
-              MATTER <SortCaret columnKey="matterNumber" activeKey={sortKey} asc={sortAsc} />
-            </button>
-            <button type="button" className="li-rev-th" onClick={() => sortBy('clientName')}>
-              CLIENT <SortCaret columnKey="clientName" activeKey={sortKey} asc={sortAsc} />
-            </button>
-            <button type="button" className="li-rev-th" onClick={() => sortBy('documentKind')}>
-              DOCUMENT KIND <SortCaret columnKey="documentKind" activeKey={sortKey} asc={sortAsc} />
-            </button>
-            <span className="li-rev-th li-rev-th--static">VERSION</span>
-            <button type="button" className="li-rev-th" onClick={() => sortBy('recordedAt')}>
-              GENERATED <SortCaret columnKey="recordedAt" activeKey={sortKey} asc={sortAsc} />
-            </button>
-            <span className="li-rev-th li-rev-th--static li-rev-th--result">RESULT</span>
+          <div className="li-rev-empty">
+            You&rsquo;re all caught up — nothing needs you right now.
           </div>
-          <div className="li-rev-empty">You are all up to date, nothing to review.</div>
         </div>
       )}
 
-      {drafts && drafts.length > 0 && (
+      {tasks && tasks.length > 0 && (
         <>
           <div className="li-rev-filters">
             <div className="li-rev-search">
@@ -319,31 +233,30 @@ export default function ReviewQueue() {
               </svg>
               <input
                 type="text"
-                placeholder="Search matter, client, or document kind…"
+                placeholder="Search client, matter, or task…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search the review queue"
+                aria-label="Search the task queue"
               />
             </div>
             <select
               className="li-rev-kind"
-              value={kindFilter}
-              onChange={(e) => setKindFilter(e.target.value)}
-              aria-label="Filter by document kind"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
+              aria-label="Filter by task type"
             >
-              <option value="all">All document kinds</option>
-              {kinds.map((k) => (
-                <option key={k} value={k}>
-                  {humanizeKind(k)}
+              {TYPE_FILTERS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label} ({f.value === 'all' ? tasks.length : counts[f.value]})
                 </option>
               ))}
             </select>
             <span className="li-rev-count">
-              {visible.length} of {drafts.length} shown
+              {visible.length} of {tasks.length} shown
             </span>
           </div>
 
-          {/* Selection bar — Begin review only (batch disposition cut to comp). */}
+          {/* Selection bar — Begin review only (document_review rows). */}
           {selectedVisible.length > 0 && (
             <div className="li-rev-selbar">
               <span className="li-rev-selcount">{selectedVisible.length} selected</span>
@@ -382,78 +295,119 @@ export default function ReviewQueue() {
                   type="checkbox"
                   checked={allVisibleSelected}
                   onChange={toggleAll}
-                  aria-label="Select all"
+                  aria-label="Select all document review tasks"
                 />
               </label>
-              <button type="button" className="li-rev-th" onClick={() => sortBy('matterNumber')}>
-                MATTER <SortCaret columnKey="matterNumber" activeKey={sortKey} asc={sortAsc} />
+              <button type="button" className="li-rev-th" onClick={() => sortBy('type')}>
+                TYPE <SortCaret columnKey="type" activeKey={sortKey} asc={sortAsc} />
               </button>
-              <button type="button" className="li-rev-th" onClick={() => sortBy('clientName')}>
-                CLIENT <SortCaret columnKey="clientName" activeKey={sortKey} asc={sortAsc} />
+              <button type="button" className="li-rev-th" onClick={() => sortBy('client')}>
+                CLIENT <SortCaret columnKey="client" activeKey={sortKey} asc={sortAsc} />
               </button>
-              <button type="button" className="li-rev-th" onClick={() => sortBy('documentKind')}>
-                DOCUMENT KIND{' '}
-                <SortCaret columnKey="documentKind" activeKey={sortKey} asc={sortAsc} />
+              <button type="button" className="li-rev-th" onClick={() => sortBy('matter')}>
+                MATTER <SortCaret columnKey="matter" activeKey={sortKey} asc={sortAsc} />
               </button>
-              <span className="li-rev-th li-rev-th--static">VERSION</span>
-              <button type="button" className="li-rev-th" onClick={() => sortBy('recordedAt')}>
-                GENERATED <SortCaret columnKey="recordedAt" activeKey={sortKey} asc={sortAsc} />
+              <span className="li-rev-th li-rev-th--static">TASK</span>
+              <button type="button" className="li-rev-th" onClick={() => sortBy('date')}>
+                DATE <SortCaret columnKey="date" activeKey={sortKey} asc={sortAsc} />
               </button>
-              <span className="li-rev-th li-rev-th--static li-rev-th--result">RESULT</span>
+              <span className="li-rev-th li-rev-th--static li-rev-th--result">ACTIONS</span>
             </div>
 
-            {visible.map((d) => (
-              <div key={d.documentVersionId} className="li-rev-row">
-                <label className="li-rev-check">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(d.documentVersionId)}
-                    onChange={() => toggle(d.documentVersionId)}
-                    aria-label={`Select ${d.matterNumber}`}
-                  />
-                </label>
-                <span className="li-rev-matter">{d.matterNumber}</span>
-                <span className="li-rev-client">{d.clientName || '—'}</span>
-                <span className="li-rev-kindcell">
-                  {d.channel === 'communication' ? (
-                    <>
-                      <span
-                        className="li-rev-emailtag"
-                        title="An email draft — approving sends it."
-                      >
-                        Email
-                      </span>
-                      {d.emailSubject || humanizeKind(d.documentKind)}
-                      {(d.voiceViolations?.length ?? 0) > 0 && (
-                        <span
-                          className="li-rev-voicetag"
-                          title={d.voiceViolations!.map((v) => v.offending).join('\n')}
-                        >
-                          Voice check: {d.voiceViolations!.length}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    humanizeKind(d.documentKind)
-                  )}
+            {visible.map((t) => (
+              <div key={`${t.type}:${t.id}`} className="li-rev-row">
+                {t.type === 'document_review' ? (
+                  <label className="li-rev-check">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(t.id)}
+                      onChange={() => toggle(t.id)}
+                      aria-label={`Select ${t.title}`}
+                    />
+                  </label>
+                ) : (
+                  <span className="li-rev-check" aria-hidden />
+                )}
+                <span className="li-rev-type">
+                  <span className={`li-rev-badge li-rev-badge--${t.type}`}>{t.typeLabel}</span>
                 </span>
-                <span className="li-rev-ver">v{d.versionNumber}</span>
-                <span className="li-rev-when">{formatDateTime(d.recordedAt)}</span>
-                <span className="li-rev-rowactions">
-                  {/* lazy: one button per row must not fire N brief reads on load */}
-                  <BriefButton
-                    lazy
-                    scope={{ kind: 'matter', matterEntityId: d.matterEntityId }}
-                    className="li-rev-rowbrief"
-                    label="Brief"
-                  />
-                  <button
-                    type="button"
-                    className="li-rev-result"
-                    onClick={() => openReview(d.documentVersionId)}
-                  >
-                    Review
-                  </button>
+                <span className="li-rev-client">{t.clientName || '—'}</span>
+                <span className="li-rev-matter">{t.matterNumber || '—'}</span>
+                <span className="li-rev-task">{t.title}</span>
+                <span className="li-rev-when">
+                  {t.dateLabel} {formatDateTime(t.date)}
+                </span>
+                <span className="li-rev-await-actions">
+                  {t.type === 'esign' && t.viewHref && (
+                    <button
+                      type="button"
+                      className="li-rev-await-act"
+                      onClick={() => router.push(t.viewHref!)}
+                      title="View the document"
+                    >
+                      <Eye size={15} aria-hidden />
+                      View
+                    </button>
+                  )}
+                  {t.matterEntityId && (
+                    <BriefButton
+                      lazy
+                      scope={{ kind: 'matter', matterEntityId: t.matterEntityId }}
+                      className="li-rev-await-act"
+                      label="Brief"
+                    />
+                  )}
+                  {t.matterEntityId && (
+                    <button
+                      type="button"
+                      className="li-rev-await-act"
+                      onClick={() => setEmailFor(t)}
+                      title="Send an email on this matter"
+                    >
+                      <Mail size={15} aria-hidden />
+                      Email
+                    </button>
+                  )}
+                  {t.type === 'document_review' && (
+                    <button
+                      type="button"
+                      className="li-rev-await-sign"
+                      onClick={() => router.push(t.workHref)}
+                    >
+                      <FileSearch size={15} aria-hidden />
+                      Review
+                    </button>
+                  )}
+                  {t.type === 'esign' && (
+                    <button
+                      type="button"
+                      className="li-rev-await-sign"
+                      onClick={() => router.push(t.workHref)}
+                    >
+                      <PenLine size={15} aria-hidden />
+                      Sign
+                    </button>
+                  )}
+                  {t.type === 'billing' && (
+                    <button
+                      type="button"
+                      className="li-rev-await-sign"
+                      onClick={() => router.push(t.workHref)}
+                    >
+                      <Receipt size={15} aria-hidden />
+                      Open
+                    </button>
+                  )}
+                  {t.type === 'client_request' && (
+                    <button
+                      type="button"
+                      className="li-rev-await-sign"
+                      onClick={() => router.push(t.workHref)}
+                    >
+                      <HelpCircle size={15} aria-hidden />
+                      Open
+                    </button>
+                  )}
                 </span>
               </div>
             ))}
