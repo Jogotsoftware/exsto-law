@@ -1,4 +1,5 @@
 import { withActionContext, type ActionContext } from '@exsto/substrate'
+import { isSpanishDocumentKind, baseDocumentKind } from '../api/documentLanguage.js'
 
 // Attorney-facing document aggregation across a SET of matters — the
 // client/contact Documents tab (every document on every matter that person is
@@ -138,10 +139,13 @@ export async function listDocumentsForMatters(
   })
 }
 
-// Turn a snake_case document_kind into a title ("operating_agreement" → "Operating Agreement").
+// Turn a snake_case document_kind into a title ("operating_agreement" → "Operating
+// Agreement"); a '_es' Spanish copy renders as "… (Spanish)".
 function humanizeKind(kind: string): string {
-  return kind
+  const es = isSpanishDocumentKind(kind)
+  const title = baseDocumentKind(kind)
     .replace(/[_-]+/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim()
+  return es ? `${title} (Spanish)` : title
 }

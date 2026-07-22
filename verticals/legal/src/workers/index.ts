@@ -44,6 +44,19 @@ registerWorkerHandler('legal.draft.run', async (ctx, payload) => {
     guidance?: string
     skill_slugs?: string[]
     producing_autorun?: boolean
+    translate_to_es?: boolean
+    source_document_version_id?: string
+  }
+  // BILINGUAL-DOCS-1: a Spanish translation of an approved English document (a
+  // separate pending-review draft). Enqueued by approveDraft when the client
+  // chose "English + Spanish" at intake.
+  if (p.translate_to_es && p.source_document_version_id) {
+    const { runSpanishTranslation } = await import('../api/generateDraft.js')
+    await runSpanishTranslation(ctx, {
+      matterEntityId: p.matter_entity_id,
+      sourceDocumentVersionId: p.source_document_version_id,
+    })
+    return
   }
   if (p.producing_autorun) {
     const { generateDocumentForMatter } = await import('../api/generateDocumentRuntime.js')

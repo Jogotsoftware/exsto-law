@@ -6,6 +6,7 @@ import { PenLine, Eye, Mail } from 'lucide-react'
 import { callAttorneyMcp } from '@/lib/mcpAttorney'
 import { formatDateTime } from '@/lib/datetime'
 import { BriefButton } from '@/components/BriefButton'
+import { documentKindLabel } from '@/lib/documentKind'
 import { EmailComposeModal } from '@/components/EmailComposeModal'
 
 // Shared with the detail page: a step-through review session is the ordered list of
@@ -47,7 +48,7 @@ interface AwaitingSignature {
 type SortKey = 'recordedAt' | 'matterNumber' | 'clientName' | 'documentKind'
 
 function humanizeKind(kind: string): string {
-  return kind.replace(/_/g, ' ')
+  return documentKindLabel(kind)
 }
 
 // Comp caret indicators: ⇅ idle, ▴ asc, ▾ desc — colored gold when active.

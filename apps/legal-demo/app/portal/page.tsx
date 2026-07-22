@@ -236,7 +236,11 @@ const NAV_META: Record<
 }
 
 function humanizeKind(kind: string): string {
-  return kind.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  // BILINGUAL-DOCS-1: a '_es' copy shows as "… (Spanish)".
+  const es = kind.endsWith('_es')
+  const base = es ? kind.slice(0, -'_es'.length) : kind
+  const h = base.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return es ? `${h} (Spanish)` : h
 }
 
 function formatBytes(n: number): string {
