@@ -2,6 +2,7 @@ import { withActionContext, type ActionContext } from '@exsto/substrate'
 import { signBookingManageToken } from '../api/bookingManageToken.js'
 import { resolveClientMatterIds } from '../api/clientIdentity.js'
 import { getEngagementConfig, getEngagementStatus } from '../api/engagement.js'
+import { getEngagementExecutedCopyRef } from '../api/engagementExecutedCopy.js'
 import { getLatestAttributeValue } from '../handlers/common.js'
 import { readPortalAssistantEnabled } from '../handlers/engagement.js'
 import { listClientDocuments } from '../api/esign.js'
@@ -53,6 +54,8 @@ export interface PortalHomeSummary {
     rate: string | null
     termsVersion: number | null
     configured: boolean
+    /** True once the client's executed (signed) agreement PDF exists to download. */
+    hasSignedAgreement: boolean
   }
   assistantEnabled: boolean
 }
@@ -190,6 +193,12 @@ export async function getPortalHomeSummary(
       matterNumber: d.matterNumber,
     }))
 
+  // Only look for the executed copy once accepted — before acceptance there is
+  // nothing to download, and the lookup is a wasted query.
+  const executedAgreementRef = engagementStatus.accepted
+    ? await getEngagementExecutedCopyRef(ctx, clientContactId).catch(() => null)
+    : null
+
   const due = invoices.filter((inv) => inv.status === 'due')
   const dueTotal = money(due.reduce((sum, inv) => sum + (Number(inv.total) || 0), 0))
   const nextDueDate =
@@ -229,6 +238,7 @@ export async function getPortalHomeSummary(
       rate: engagementStatus.accepted ? engagementStatus.rate : config.rate,
       termsVersion: engagementStatus.accepted ? engagementStatus.termsVersion : config.termsVersion,
       configured: config.configured,
+      hasSignedAgreement: Boolean(executedAgreementRef),
     },
     assistantEnabled,
   }
